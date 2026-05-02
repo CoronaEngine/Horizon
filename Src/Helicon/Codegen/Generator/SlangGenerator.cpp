@@ -401,7 +401,9 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 			result += ", " + node->argTypes[i];
 		}
 	}
-	result += ");";
+	result += ") {\n\t" "__intrinsic_asm \"";
+    result += node->funcName;
+    result += "\";\n}";
 	return result;
 }
 

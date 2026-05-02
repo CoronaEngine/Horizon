@@ -611,12 +611,6 @@ namespace EmbeddedShader
 	    Slang::ComPtr<slang::IGlobalSession> globalSession;
 	    createGlobalSession(globalSession.writeRef());
 
-	    SlangSession* session;
-	    session = spCreateSession();
-	    SlangCompileRequest* compileRequest = spCreateCompileRequest(session);
-	    spDestroyCompileRequest(compileRequest);
-	    spDestroySession(session);
-
 	    slang::SessionDesc sessionDesc = {};
 
 	    std::vector<slang::TargetDesc> targets(targetLanguage.size() + targetBinary.size());
