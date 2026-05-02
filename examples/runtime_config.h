@@ -16,9 +16,9 @@ enum class BackendMode : uint8_t
 struct RuntimeConfig
 {
     // 场景注册名。
-    //std::string scenario = "default";      
+    std::string scenario = "default";
     //std::string scenario = "triangle";
-    std::string scenario = "texture";
+    //std::string scenario = "texture";
 
     std::size_t queue_depth = 10;                         // 有界队列的容量。
     uint32_t window_width = 800;                          // EDSL/GLSL 输出窗口宽度。
