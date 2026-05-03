@@ -19,6 +19,7 @@
 #include GLSL(default_vert.glsl)
 #include GLSL(default_frag.glsl)
 #include GLSL(default_compute.glsl)
+#include GLSL(compute_header.glsl)
 
 struct VertexAttributeProxy
 {
@@ -114,7 +115,7 @@ struct DefaultScenario::Impl
         auto compute_shader = [&] 
         {
             Float4 color = edsl_output[dispatchThreadID()->xy()];
-            edsl_output[dispatchThreadID()->xy()] = Float4(default_compute_glsl::acesFilmicToneMapCurve(color->xyz()), 1.0f);
+            edsl_output[dispatchThreadID()->xy()] = Float4(compute_header_glsl::acesFilmicToneMapCurve(color->xyz()), 1.0f);
         };
 
         edsl_rasterizer = std::make_unique<RasterizerPipeline<>>(vertex_shader, fragment_shader);
