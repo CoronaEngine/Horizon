@@ -392,18 +392,19 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::FunctionDeclaration* node)
 {
-	std::string result = node->returnType + " " + node->funcName + "(";
-	if (!node->argTypes.empty())
+	std::string result = "extern " + node->returnType + " " + node->funcName + "(";
+	if (!node->args.empty())
 	{
-		result += node->argTypes[0];
-		for (size_t i = 1; i < node->argTypes.size(); ++i)
+		result += node->args[0].first + " " + node->args[0].second;
+		for (size_t i = 1; i < node->args.size(); ++i)
 		{
-			result += ", " + node->argTypes[i];
+			result += ", " + node->args[i].first + " " + node->args[i].second;
 		}
 	}
-	result += ") {\n\t" "__intrinsic_asm \"";
-    result += node->funcName;
-    result += "\";\n}";
+    result += ");";
+	// result += ") {\n\t" "__intrinsic_asm \"";
+ //    result += node->funcName;
+ //    result += "\";\n}";
 	return result;
 }
 

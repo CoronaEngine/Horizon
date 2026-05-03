@@ -290,7 +290,7 @@ namespace EmbeddedShader::Ast
 	{
 		std::string funcName;
 		std::string returnType;
-		std::vector<std::string> argTypes;
+	        std::vector<std::pair<std::string,std::string>> args;
 		std::string parse() override;
 	};
 }

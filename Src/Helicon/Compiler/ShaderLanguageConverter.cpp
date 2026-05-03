@@ -623,6 +623,7 @@ namespace EmbeddedShader
 	        {
 	        case ShaderLanguage::SpirV:
 	            target.format = SLANG_SPIRV;
+	            target.profile = globalSession->findProfile("spirv_1_6");
 	            target.flags = SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY;
 	            break;
 	        case ShaderLanguage::DXIL:
@@ -1266,8 +1267,34 @@ namespace EmbeddedShader
 
     std::vector<uint32_t> ShaderLanguageConverter::spirvLinker(const std::vector<std::vector<uint32_t>> &binaries)
     {
+	    spvToolContext.SetMessageConsumer(
+        [](spv_message_level_t level, const char* source,
+           const spv_position_t& position, const char* message) {
+            switch (level) {
+                case SPV_MSG_FATAL:
+            case SPV_MSG_INTERNAL_ERROR:
+            case SPV_MSG_ERROR:
+                std::cerr << "error: " << position.index << ": "
+                          << message << std::endl;
+                break;
+            case SPV_MSG_WARNING:
+                std::cout << "warning: " << position.index << ": "
+                          << message << std::endl;
+                break;
+            case SPV_MSG_INFO:
+                std::cout << "info: " << position.index << ": "
+                          << message << std::endl;
+                break;
+            default:
+                break;
+        }
+    });
 	    std::vector<uint32_t> result;
-	    spvtools::Link(spvToolContext,binaries, &result);
+	    auto spv_result = spvtools::Link(spvToolContext,binaries, &result);
+	    // if (SPV_SUCCESS != spv_result)
+     //    {
+     //        throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
+     //    }
 	    return result;
     }
 

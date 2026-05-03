@@ -227,12 +227,12 @@ void EmbeddedShader::Ast::AST::callFunc(std::string funcName, std::vector<std::s
 
 std::shared_ptr<EmbeddedShader::Ast::FunctionDeclaration> EmbeddedShader::Ast::AST::functionDeclaration(
 	std::string funcName, std::string returnType,
-	std::vector<std::string> argTypes)
+	std::vector<std::pair<std::string,std::string>> args)
 {
 	auto funcDecl = std::make_shared<FunctionDeclaration>();
 	funcDecl->funcName = std::move(funcName);
 	funcDecl->returnType = std::move(returnType);
-	funcDecl->argTypes = std::move(argTypes);
+	funcDecl->args = std::move(args);
 	return funcDecl;
 }
 
