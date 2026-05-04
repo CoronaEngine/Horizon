@@ -102,20 +102,19 @@ struct DefaultScenario::Impl
             return interpolated_color;
         };
 
-        // auto aces_filmic_tone_map_curve = [&](Float3 x)
-        // {
-        //     Float a = 2.51f;
-        //     Float b = 0.03f;
-        //     Float c = 2.43f;
-        //     Float d = 0.59f;
-        //     Float e = 0.14f;
-        //     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), ktm::fvec3(0.0f), ktm::fvec3(1.0f));
-        // };
+        auto aces_filmic_tone_map_curve = [&](Float3 x) {
+            Float a = 2.51f;
+            Float b = 0.03f;
+            Float c = 2.43f;
+            Float d = 0.59f;
+            Float e = 0.14f;
+            return clamp((x * (a * x + b)) / (x * (c * x + d) + e), ktm::fvec3(0.0f), ktm::fvec3(1.0f));
+        };
 
-        auto compute_shader = [&] 
-        {
+        auto compute_shader = [&] {
             Float4 color = edsl_output[dispatchThreadID()->xy()];
-            edsl_output[dispatchThreadID()->xy()] = Float4(compute_header_glsl::acesFilmicToneMapCurve(color->xyz()), 1.0f);
+            // edsl_output[dispatchThreadID()->xy()] = Float4(compute_header_glsl::acesFilmicToneMapCurve(color->xyz()), 1.0f);
+            edsl_output[dispatchThreadID()->xy()] = Float4(aces_filmic_tone_map_curve(color->xyz()), 1.0f);
         };
 
         edsl_rasterizer = std::make_unique<RasterizerPipeline<>>(vertex_shader, fragment_shader);
