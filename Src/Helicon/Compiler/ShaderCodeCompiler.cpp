@@ -118,34 +118,40 @@ namespace EmbeddedShader
                 std::vector<ShaderLanguage> languages;
                 if (option.compileSpirV)
                     binaryLanguages.push_back(ShaderLanguage::SpirV);
+                if (!isNeedLinkLib)
+                {
 #ifdef WIN32
-                if (option.compileDXIL)
-                    binaryLanguages.push_back(ShaderLanguage::DXIL);
-                if (option.compileDXBC)
-                    binaryLanguages.push_back(ShaderLanguage::DXBC);
+                    if (option.compileDXIL)
+                        binaryLanguages.push_back(ShaderLanguage::DXIL);
+                    if (option.compileDXBC)
+                        binaryLanguages.push_back(ShaderLanguage::DXBC);
 #endif
-                if (option.compileGLSL)
-                    languages.push_back(ShaderLanguage::GLSL);
-                if (option.compileHLSL)
-                    languages.push_back(ShaderLanguage::HLSL);
+                    if (option.compileGLSL)
+                        languages.push_back(ShaderLanguage::GLSL);
+                    if (option.compileHLSL)
+                        languages.push_back(ShaderLanguage::HLSL);
+                }
 
 
                 reflections = ShaderLanguageConverter::slangCompiler(codeSlang, binaryLanguages, languages, binaryOutputs, outputs, true,!isNeedLinkLib);
                 size_t index = 0;
                 if (option.compileSpirV)
                     codeSpirV = binaryOutputs[index++];
+                if (!isNeedLinkLib)
+                {
 #ifdef WIN32
-                if (option.compileDXIL)
-                    codeDXIL = binaryOutputs[index++];
-                if (option.compileDXBC)
-                    codeDXBC = binaryOutputs[index++];
+                    if (option.compileDXIL)
+                        codeDXIL = binaryOutputs[index++];
+                    if (option.compileDXBC)
+                        codeDXBC = binaryOutputs[index++];
 #endif
 
-                index = 0;
-                if (option.compileGLSL)
-                    codeGLSL = outputs[index++];
-                if (option.compileHLSL)
-                    codeHLSL = outputs[index++];
+                    index = 0;
+                    if (option.compileGLSL)
+                        codeGLSL = outputs[index++];
+                    if (option.compileHLSL)
+                        codeHLSL = outputs[index++];
+                }
                 break;
             }
             case ShaderLanguage::GLSL:
@@ -191,6 +197,20 @@ namespace EmbeddedShader
             std::vector<std::vector<uint32_t>> src = *option.spvLinkBinary;
             src.push_back(codeSpirV);
             codeSpirV = ShaderLanguageConverter::spirvLinker(src);
+        }
+
+        if (isNeedLinkLib && !codeSpirV.empty())
+        {
+#ifdef WIN32
+            if (option.compileDXIL)
+                codeDXIL = ShaderLanguageConverter::dxilCompiler(codeHLSL, inputStage);
+            if (option.compileDXBC)
+                codeDXBC = ShaderLanguageConverter::dxbcCompiler(codeHLSL, inputStage);
+#endif
+            if (option.compileGLSL)
+                codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
+            if (option.compileHLSL)
+                codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
         }
         
         //auto functionSignatures = ShaderLanguageConverter::spirvCrossGetFunctionSignatures(codeSpirV);

@@ -60,7 +60,7 @@ void buildFunctionSignature(FunctionSignature &signature, std::stringstream &out
 	out << "\""<< signature.name << "\",\""<< typeNameToSlang(signature.returnTypeName) << "\",{";
 	for (auto element: signature.parameters)
 	{
-		out << "\"" << typeNameToSlang(element.typeName) << "\",";
+	    out << "{\"" << typeNameToSlang(element.typeName) << "\",\"" << element.name << "\"},";
 	}
 	out<< "},&" << sourceSpv << "};";
 }

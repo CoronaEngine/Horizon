@@ -155,9 +155,12 @@ std::unordered_map<std::string, std::variant<EmbeddedShader::ShaderCodeModule::S
 	{
 		if (!isClearOldHardcodeFiles)
 		{
-			for (auto& entry : std::filesystem::directory_iterator(hardcodePath))
-				if (entry.is_regular_file())
+			for (auto& entry : std::filesystem::directory_iterator(hardcodePath)) {
+				if (entry.is_regular_file() && (entry.path().extension() == ".cpp" || entry.path().extension() == ".h") && entry.path().filename().string().find("HardcodeShaders") == 0) {
+
 					std::filesystem::remove(entry.path());
+                }
+			}
 			isClearOldHardcodeFiles = true;
 		}
 	}
