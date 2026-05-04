@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 4.0)
 
 project(
-    CabbageHardware
+    Horizon
     VERSION 0.5.0
-    HOMEPAGE_URL "https://github.com/CoronaEngine/CabbageHardware"
+    HOMEPAGE_URL "https://github.com/CoronaEngine/Horizon"
     LANGUAGES C CXX
 )
 
