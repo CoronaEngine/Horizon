@@ -1,4 +1,4 @@
-﻿#include "CabbageHardware.h"
+﻿#include "Horizon.h"
 #include "HardwareCommands.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"

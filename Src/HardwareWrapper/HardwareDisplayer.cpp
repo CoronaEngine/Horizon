@@ -1,4 +1,4 @@
-﻿#include "CabbageHardware.h"
+﻿#include "Horizon.h"
 #include "HardwareWrapperVulkan/DisplayVulkan/DisplayManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/ResourcePool.h"

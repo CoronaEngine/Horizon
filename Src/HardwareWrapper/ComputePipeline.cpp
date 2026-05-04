@@ -1,6 +1,6 @@
 ﻿#include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
 
-#include "CabbageHardware.h"
+#include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/ResourcePool.h"
 #include "corona/kernel/utils/storage.h"

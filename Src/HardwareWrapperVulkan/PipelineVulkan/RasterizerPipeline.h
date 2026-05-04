@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "CabbageHardware.h"
+#include "Horizon.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"

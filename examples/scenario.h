@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-#include "CabbageHardware.h"
+#include "Horizon.h"
 #include "runtime_config.h"
 
 // 全局统一时钟类型，线程间通过它计算延迟/FPS。

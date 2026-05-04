@@ -59,13 +59,13 @@
 //     std::string resultPath = "";
 //     std::string runtimePath = std::filesystem::current_path().string();
 //     // std::replace(runtimePath.begin(), runtimePath.end(), '\\', '/');
-//     std::regex pattern(R"((.*)CabbageHardware\b)");
+//     std::regex pattern(R"((.*)Horizon\b)");
 //     std::smatch matches;
 //     if (std::regex_search(runtimePath, matches, pattern))
 //     {
 //         if (matches.size() > 1)
 //         {
-//             resultPath = matches[1].str() + "CabbageHardware";
+//             resultPath = matches[1].str() + "Horizon";
 //         }
 //         else
 //         {
