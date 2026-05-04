@@ -188,13 +188,9 @@ if(CABBAGE_HARDWARE_BUILD_EXAMPLES)
 endif()
 
 if (MSVC)
-    add_compile_options(/fsanitize=address)
+    add_compile_options(/Zi)
     add_link_options(/INCREMENTAL:NO)
-    add_compile_options(/Zi) 
 endif()
-
-
-
 
 find_package(Python)
 
