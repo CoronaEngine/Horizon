@@ -192,3 +192,25 @@ if (MSVC)
     add_link_options(/INCREMENTAL:NO)
     add_compile_options(/Zi) 
 endif()
+
+
+
+
+find_package(Python)
+
+if(Python_FOUND)
+    set(PYTHON_PATH ${Python_EXECUTABLE})
+else()
+    message(FATAL_ERROR "Python not found. Please install Python or set the Python_ROOT_DIR to proceed.")
+endif()
+
+include_directories(ocarina)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/")
+
+set(CMAKE_FIND_PACKAGE_SORT_ORDER NATURAL)
+set(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
+
+add_subdirectory(ocarina)
