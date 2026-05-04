@@ -13,6 +13,3 @@
 [submodule "ocarina/ext/SPIRV-Cross"]
 	path = ocarina/ext/SPIRV-Cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git
-[submodule "ocarina/ext/SDL"]
-	path = ocarina/ext/SDL
-	url = https://github.com/libsdl-org/SDL.git

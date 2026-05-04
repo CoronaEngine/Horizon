@@ -39,11 +39,6 @@ target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
 target_link_libraries(ocarina-ext PUBLIC spdlog)
 add_subdirectory(stblib)
 
-add_subdirectory(SDL)
-set_property(TARGET SDL_uclibc PROPERTY FOLDER "ocarina/ext/SDL3")
-set_property(TARGET SDL3_test PROPERTY FOLDER "ocarina/ext/SDL3")
-set_property(TARGET SDL3-shared PROPERTY FOLDER "ocarina/ext/SDL3")
-
 cmake_policy(SET CMP0148 NEW)
 
 if (${OCARINA_PY})
@@ -79,5 +74,4 @@ target_link_libraries(ocarina-ext
         ${PYTHON_LIBRARIES}
         xxhash
         spdlog
-        ocarina-ext-tinyexr
-        SDL3::SDL3)
+        ocarina-ext-tinyexr)
