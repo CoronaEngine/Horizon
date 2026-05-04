@@ -8,7 +8,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getShaderOutput(const Ast
 
 	if (Ast::Parser::getBindless())
 	{
-		output += // Vulkan Bindless Process - sets 0-2 match CabbageHardware bindless descriptors, set 3 reserved for UBO
+		output += // Vulkan Bindless Process - sets 0-2 match Horizon bindless descriptors, set 3 reserved for UBO
 		R"([vk::binding(0, 0)]
 __DynamicResource<__DynamicResourceKind.General> combinedTextureSamplerHandles[];
 

@@ -16,7 +16,7 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#include "CabbageHardware.h"
+#include "Horizon.h"
 #include "drop_oldest_queue.h"
 #include "runtime_config.h"
 #include "scenario.h"
@@ -135,13 +135,13 @@ int main(int argc, char **argv)
     catch (const std::exception &e)
     {
         std::cerr << "Failed to parse runtime config: " << e.what() << '\n';
-        std::cerr << runtime_config_usage(argc > 0 ? argv[0] : "CabbageHardwareExamples");
+        std::cerr << runtime_config_usage(argc > 0 ? argv[0] : "HorizonExamples");
         return -1;
     }
 
     if (config.show_help)
     {
-        std::cout << runtime_config_usage(argc > 0 ? argv[0] : "CabbageHardwareExamples");
+        std::cout << runtime_config_usage(argc > 0 ? argv[0] : "HorizonExamples");
         return 0;
     }
 

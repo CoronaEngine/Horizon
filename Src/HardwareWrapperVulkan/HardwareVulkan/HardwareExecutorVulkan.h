@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "CabbageHardware.h"
+#include "Horizon.h"
 
 struct HardwareExecutorVulkan;
 struct CommandRecordVulkan;

@@ -33,7 +33,7 @@ std::filesystem::path project_root_path()
         cursor = parent;
     }
 
-    throw std::runtime_error("Failed to resolve CabbageHardware project root path.");
+    throw std::runtime_error("Failed to resolve Horizon project root path.");
 #endif
 }
 

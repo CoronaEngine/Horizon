@@ -9,13 +9,13 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
 )
 
-set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/CabbageHardware.h")
+set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/Horizon.h")
 
 add_subdirectory(Helicon)
 
-add_library(CabbageHardware STATIC ${SOURCE_FILES} ${PUBLIC_HEADERS})
+add_library(Horizon STATIC ${SOURCE_FILES} ${PUBLIC_HEADERS})
 
-target_include_directories(CabbageHardware
+target_include_directories(Horizon
     PUBLIC
     "${PROJECT_SOURCE_DIR}/include"
     PRIVATE
@@ -25,7 +25,7 @@ target_include_directories(CabbageHardware
 # 链接库依赖
 target_link_libraries(volk PUBLIC Vulkan-Headers)
 
-target_link_libraries(CabbageHardware PUBLIC
+target_link_libraries(Horizon PUBLIC
     Helicon
     corona::kernel
     volk
@@ -35,7 +35,7 @@ target_link_libraries(CabbageHardware PUBLIC
 
 # 忽略第三方库（VulkanMemoryAllocator）的 nullability 警告
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(CabbageHardware PRIVATE
+    target_compile_options(Horizon PRIVATE
         -Wno-nullability-completeness
     )
 endif()

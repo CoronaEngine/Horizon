@@ -4,7 +4,7 @@
 #include <numeric>
 #include <unordered_map>
 
-#include "CabbageHardware.h"
+#include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 

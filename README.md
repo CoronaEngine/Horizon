@@ -1,10 +1,10 @@
-﻿# CabbageHardware
+﻿# Horizon
 
 一个基于 Vulkan 的图形硬件抽象层，提供面向资源与管线的 C++ API，并集成 Helicon Shader DSL（AST + 代码生成 + 编译反射）。
 
 ## 当前状态
 
-- 核心 API：`include/CabbageHardware.h`、`include/HardwareCommands.h`
+- 核心 API：`include/Horizon.h`、`include/HardwareCommands.h`
 - 后端实现：`Src/HardwareWrapperVulkan`
 - 着色器工具链：`Src/Helicon` + `Scripts/ShaderCompileScripts`
 - 构建系统：CMake + CMake Presets + FetchContent
@@ -51,14 +51,14 @@
 
 ```powershell
 cmake --preset ninja-msvc
-cmake --build --preset msvc-debug --target CabbageHardwareExamples
+cmake --build --preset msvc-debug --target HorizonExamples
 ```
 
 ### Visual Studio 2022 Generator
 
 ```powershell
 cmake --preset vs2022
-cmake --build --preset vs2022-debug --target CabbageHardwareExamples
+cmake --build --preset vs2022-debug --target HorizonExamples
 ```
 
 ### 重要注意
@@ -68,7 +68,7 @@ cmake --build --preset vs2022-debug --target CabbageHardwareExamples
 
 ## 示例程序
 
-- 当前主示例入口为 `Examples/main.cpp`（目标：`CabbageHardwareExamples`）。
+- 当前主示例入口为 `Examples/main.cpp`（目标：`HorizonExamples`）。
 
 ## 最小 API 示例（与当前代码一致）
 

@@ -8,7 +8,7 @@ project(
 )
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
-option(CABBAGE_HARDWARE_BUILD_EXAMPLES "Build CabbageHardware examples" ${PROJECT_IS_TOP_LEVEL})
+option(CABBAGE_HARDWARE_BUILD_EXAMPLES "Build Horizon examples" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
