@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <functional>
 #include <stack>
 #include <Codegen/AST/Node.hpp>
