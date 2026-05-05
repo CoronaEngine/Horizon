@@ -4,21 +4,19 @@
 #include <cstdint>
 #include <vector>
 
-namespace default_test_data
+// 定义一个结构体来表示单个顶点的所有属性
+// 内存布局将遵循您的着色器布局: vec3 (Position), vec3 (Normal), vec2 (TexCoord), vec3 (Color)
+struct Vertex
 {
-    // 定义一个结构体来表示单个顶点的所有属性
-    // 内存布局将遵循您的着色器布局: vec3 (Position), vec3 (Normal), vec2 (TexCoord), vec3 (Color)
-    struct Vertex
-    {
-        std::array<float, 3> position; // layout(location = 0) in vec3 inPosition;
-        std::array<float, 3> normal;   // layout(location = 1) in vec3 inNormal;
-        std::array<float, 2> texCoord; // layout(location = 2) in vec2 inTexCoord;
-        std::array<float, 3> color;    // layout(location = 3) in vec3 inColor;
-    };
+    std::array<float, 3> position; // layout(location = 0) in vec3 inPosition;
+    std::array<float, 3> normal;   // layout(location = 1) in vec3 inNormal;
+    std::array<float, 2> texCoord; // layout(location = 2) in vec2 inTexCoord;
+    std::array<float, 3> color;    // layout(location = 3) in vec3 inColor;
+};
 
-    // 立方体的顶点数据（36个顶点，12个三角形）
-    // 注意：数组的顺序必须与您的着色器布局顺序一致
-    inline const std::vector<Vertex> kCubeVertices =
+// 立方体的顶点数据（36个顶点，12个三角形）
+// 注意：数组的顺序必须与您的着色器布局顺序一致
+inline const std::vector<Vertex> vertices =
     {
         // Face 1: -Z (Red)
         {{-0.5f, -0.5f, -0.5f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}, // 0
@@ -67,12 +65,10 @@ namespace default_test_data
         {{0.5f, 0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 1.0f}},   // 33 (Same as 32)
         {{-0.5f, 0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 1.0f}},  // 34
         {{-0.5f, 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 0.0f, 1.0f}}  // 35 (Same as 30)
-    };
+};
 
-    // 索引数据保持不变，因为您仍然使用 36 个顶点（每 3 个顶点定义一个三角形）
-    inline const std::vector<uint16_t> kCubeIndices =
+// 索引数据保持不变，因为您仍然使用 36 个顶点（每 3 个顶点定义一个三角形）
+inline const std::vector<uint16_t> indices =
     {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-        18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-    };
-} // namespace default_test_data
+        18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35};
