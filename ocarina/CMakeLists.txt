@@ -27,13 +27,10 @@ add_library(ocarina SHARED main.cpp)
 target_link_libraries(ocarina ocarina-native)
 
 
-option(OCARINA_BUILD_TESTS "Build tests" ${PROJECT_IS_TOP_LEVEL})
-
-add_subdirectory(tests)
-
-# if (${OCARINA_BUILD_TESTS})
-#     add_subdirectory(tests)
-# endif ()
+# ocarina 自身的测试由根项目的 HORIZON_BUILD_EXAMPLES 统一控制
+if(HORIZON_BUILD_EXAMPLES)
+    add_subdirectory(tests)
+endif()
 
 set_target_properties(ocarina PROPERTIES
         PUBLIC_HEADER "${HEADER_FILES}"

@@ -8,7 +8,7 @@ project(
 )
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
-option(CABBAGE_HARDWARE_BUILD_EXAMPLES "Build Horizon examples" ${PROJECT_IS_TOP_LEVEL})
+option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -213,7 +213,7 @@ FetchContent_MakeAvailable(VulkanMemoryAllocator)
 add_subdirectory(Src)
 add_subdirectory(Scripts)
 
-if(CABBAGE_HARDWARE_BUILD_EXAMPLES)
+if(HORIZON_BUILD_EXAMPLES)
     FetchContent_Declare(
         stb
         GIT_REPOSITORY https://github.com/nothings/stb.git
