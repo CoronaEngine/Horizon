@@ -1,4 +1,6 @@
 
+include(FetchContent)
+
 add_library(ocarina-ext SHARED empty.cpp)
 set_target_properties(ocarina-ext PROPERTIES
         PUBLIC_HEADER "${HEADER_FILES}"
@@ -7,19 +9,35 @@ set_target_properties(ocarina-ext PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         FOLDER "ocarina")
 
+# ---- xxHash (header-only, 不使用其顶层 CMakeLists) ----
+FetchContent_Declare(
+    xxhash
+    GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
+    GIT_TAG dev
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(xxhash)
+
 add_library(xxhash INTERFACE)
-target_include_directories(xxhash INTERFACE xxHash)
+target_include_directories(xxhash INTERFACE ${xxhash_SOURCE_DIR})
 target_compile_definitions(xxhash INTERFACE XXH_INLINE_ALL)
 set_target_properties(xxhash PROPERTIES
         UNITY_BUILD OFF)
 
+# ---- fmt (header-only) ----
 set(FMT_OS OFF CACHE BOOL "" FORCE)
-add_subdirectory(fmt)
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG main
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(fmt)
 target_compile_definitions(fmt-header-only INTERFACE
         FMT_EXCEPTIONS=0
         FMT_HEADER_ONLY=1
         FMT_USE_NOEXCEPT=1)
-target_include_directories(fmt-header-only INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/fmt/include)
+target_include_directories(fmt-header-only INTERFACE ${fmt_SOURCE_DIR}/include)
 
 target_link_libraries(ocarina-ext PUBLIC fmt::fmt-header-only)
 
@@ -30,9 +48,15 @@ target_link_libraries(ocarina-ext PUBLIC EASTL)
 
 add_subdirectory(tinyexr)
 
-if(NOT TARGET spdlog)
-    add_subdirectory(spdlog)
-endif()
+# ---- spdlog (强制使用外部 fmt) ----
+set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.x
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(spdlog)
 set_target_properties(spdlog PROPERTIES
         UNITY_BUILD FALSE)
 target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
@@ -41,21 +65,8 @@ add_subdirectory(stblib)
 
 cmake_policy(SET CMP0148 NEW)
 
-if (${OCARINA_PY})
-    add_subdirectory(pybind11)
-    find_package(Python REQUIRED COMPONENTS Interpreter Development)
-    include_directories(${PYTHON_INCLUDE_DIRS})
-    link_directories(${PYTHON_LIBRARIES})
-    target_include_directories(ocarina-ext INTERFACE
-            ${CMAKE_CURRENT_SOURCE_DIR}/pybind11/include/pybind11
-            ${CMAKE_CURRENT_SOURCE_DIR}/pybind11/include
-            ${PYTHON_INCLUDE_DIRS})
-endif ()
-
+# ---- SPIRV-Cross 由根 Horizon CMakeLists.txt 通过 FetchContent 提供 ----
 if(VISION_BUILD_VULKAN)
-    if(NOT TARGET spirv-cross-core)
-        add_subdirectory(SPIRV-Cross)
-    endif()
     set_property(TARGET spirv-cross PROPERTY FOLDER "ocarina/ext/spirv")
     set_property(TARGET spirv-cross-c PROPERTY FOLDER "ocarina/ext/spirv")
     set_property(TARGET spirv-cross-core PROPERTY FOLDER "ocarina/ext/spirv")
@@ -71,7 +82,6 @@ endif()
 target_link_libraries(ocarina-ext
         PUBLIC
         ocarina-ext-stb
-        ${PYTHON_LIBRARIES}
         xxhash
         spdlog
         ocarina-ext-tinyexr)
