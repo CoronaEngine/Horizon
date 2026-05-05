@@ -104,6 +104,52 @@ if(MSVC)
     target_compile_options(SPIRV-Tools-opt PRIVATE /wd4717 /wd5232)
 endif()
 
+# ======================== ocarina 共享依赖（在线拉取，集中管理） ========================
+# 这些库当前仅 ocarina 子项目使用；在根级声明以统一 FetchContent 入口。
+# EXCLUDE_FROM_ALL 保证未启用 ocarina 时不参与构建。
+
+# ---- fmt (header-only) ----
+set(FMT_OS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG main
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(fmt)
+target_compile_definitions(fmt-header-only INTERFACE
+        FMT_EXCEPTIONS=0
+        FMT_HEADER_ONLY=1
+        FMT_USE_NOEXCEPT=1)
+target_include_directories(fmt-header-only INTERFACE ${fmt_SOURCE_DIR}/include)
+
+# ---- spdlog (强制使用外部 fmt) ----
+set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.x
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(spdlog)
+set_target_properties(spdlog PROPERTIES
+        UNITY_BUILD FALSE)
+target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
+
+# ---- xxHash (header-only, 不使用其顶层 CMakeLists) ----
+FetchContent_Declare(
+    xxhash
+    GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
+    GIT_TAG dev
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(xxhash)
+add_library(xxhash INTERFACE)
+target_include_directories(xxhash INTERFACE ${xxhash_SOURCE_DIR})
+target_compile_definitions(xxhash INTERFACE XXH_INLINE_ALL)
+set_target_properties(xxhash PROPERTIES
+        UNITY_BUILD OFF)
+
 # ======================== Helicon 运行时 DLL 部署函数 ========================
 function(helicon_install_runtime_deps target_name)
     get_target_property(HELICON_DEPS Helicon INTERFACE_HELICON_RUNTIME_DEPS)
@@ -212,4 +258,12 @@ if(DEFINED ENV{CUDA_PATH})
     set(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
 
     add_subdirectory(ocarina)
+
+    # 由根级负责把共享依赖装配到 ocarina-ext 上，子目录不再引用这些库的目标名
+    if(TARGET ocarina-ext)
+        target_link_libraries(ocarina-ext PUBLIC
+            fmt::fmt-header-only
+            spdlog
+            xxhash)
+    endif()
 endif()
