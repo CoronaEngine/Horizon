@@ -1,4 +1,4 @@
-﻿// #define GLFW_EXPOSE_NATIVE_WIN32
+// #define GLFW_EXPOSE_NATIVE_WIN32
 // #include <GLFW/glfw3.h>
 // #include <GLFW/glfw3native.h>
 //
@@ -59,13 +59,13 @@
 //     std::string resultPath = "";
 //     std::string runtimePath = std::filesystem::current_path().string();
 //     // std::replace(runtimePath.begin(), runtimePath.end(), '\\', '/');
-//     std::regex pattern(R"((.*)Horizon\b)");
+//     std::regex pattern(R"((.*)CabbageHardware\b)");
 //     std::smatch matches;
 //     if (std::regex_search(runtimePath, matches, pattern))
 //     {
 //         if (matches.size() > 1)
 //         {
-//             resultPath = matches[1].str() + "Horizon";
+//             resultPath = matches[1].str() + "CabbageHardware";
 //         }
 //         else
 //         {
