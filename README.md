@@ -47,6 +47,8 @@
 
 ## 推荐构建方式（Windows）
 
+更完整的 CMake 使用说明见 [docs/cmake-usage.md](docs/cmake-usage.md)。
+
 ### Ninja Multi-Config + MSVC（默认推荐）
 
 ```powershell
@@ -83,7 +85,7 @@ executor << compute
 
 ## 文档索引
 
-待补充。
+- [docs/cmake-usage.md](docs/cmake-usage.md)：本项目 CMake 结构、preset、构建目标与常见问题说明
 
 ## 许可证
 
