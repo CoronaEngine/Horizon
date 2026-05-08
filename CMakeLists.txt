@@ -205,8 +205,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
 
-add_subdirectory(Src)
-add_subdirectory(Scripts)
+add_subdirectory(src)
+add_subdirectory(tools)
 
 if(HORIZON_BUILD_EXAMPLES)
     FetchContent_Declare(
@@ -243,7 +243,7 @@ endif()
 
 
 if(DEFINED ENV{CUDA_PATH})
-    include_directories(ocarina)
+    include_directories(modules/ocarina)
 
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/")
@@ -252,7 +252,7 @@ if(DEFINED ENV{CUDA_PATH})
     set(CMAKE_FIND_PACKAGE_SORT_ORDER NATURAL)
     set(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
 
-    add_subdirectory(ocarina)
+    add_subdirectory(modules/ocarina)
 
     # 由根级负责把共享依赖装配到 ocarina-ext 上，子目录不再引用这些库的目标名
     if(TARGET ocarina-ext)
