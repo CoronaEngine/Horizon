@@ -7,7 +7,6 @@
 #include "dsl/dsl.h"
 #include "rhi/common.h"
 #include "math/base.h"
-#include "base/scattering/interaction.h"
 #include "core/runtime/platform.h"
 #include "rhi/context.h"
 
