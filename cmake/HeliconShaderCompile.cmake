@@ -89,7 +89,7 @@ function(helicon_compile_shaders TARGET_NAME)
     cmake_parse_arguments(ARG "" "OUTPUT_DIR" "" ${ARGN})
     
     if(NOT ARG_OUTPUT_DIR)
-        set(ARG_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/Src/Helicon/Compiler/HardcodeShaders")
+        set(ARG_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/src/Helicon/Compiler/HardcodeShaders")
     endif()
     
     # 确保输出目录存在
