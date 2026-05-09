@@ -48,6 +48,10 @@ target_include_directories(corona_pal PUBLIC
 
 target_compile_features(corona_pal PUBLIC cxx_std_20)
 
+if(MSVC)
+    target_compile_options(corona_pal PUBLIC /source-charset:utf-8 /execution-charset:utf-8)
+endif()
+
 # 安装规则
 install(TARGETS corona_pal
     EXPORT CoronaFrameworkTargets

@@ -47,6 +47,8 @@ endif()
 if (MSVC)
     add_compile_options(/Zi)
     add_link_options(/INCREMENTAL:NO)
+
+    target_compile_options(Helicon PUBLIC /source-charset:utf-8 /execution-charset:utf-8)
 endif()
 
 find_package(Python)
