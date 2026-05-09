@@ -1,0 +1,12 @@
+include_guard(GLOBAL)
+
+set(HORIZON_CORONA_ROOT "${PROJECT_SOURCE_DIR}/modules/corona")
+
+if(NOT EXISTS "${HORIZON_CORONA_ROOT}/CMakeLists.txt")
+    message(FATAL_ERROR "Corona framework not found at ${HORIZON_CORONA_ROOT}")
+endif()
+
+set(CORONA_FRAMEWORK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CORONA_FRAMEWORK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(${HORIZON_CORONA_ROOT})

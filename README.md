@@ -5,9 +5,9 @@
 ## 当前状态
 
 - 核心 API：`include/Horizon.h`、`include/HardwareCommands.h`
-- 后端实现：`Src/HardwareWrapperVulkan`
-- 着色器工具链：`Src/Helicon` + `Scripts/ShaderCompileScripts`
-- 构建系统：CMake + CMake Presets + FetchContent
+- 后端实现：`src/HardwareWrapperVulkan`
+- 着色器工具链：`src/Helicon` + `tools/ShaderCompileScripts`
+- 构建系统：CMake + CMake Presets + 内嵌模块/第三方依赖混合管理
 - 现状：可开发，但仍处于稳定性迭代期
 
 ## 待办事项
@@ -29,14 +29,14 @@
 ## 目录速览
 
 - `include/`：对外 API
-- `Src/HardwareWrapper/`：对外对象包装层（RAII、引用计数与存储池）
-- `Src/HardwareWrapperVulkan/`：Vulkan 设备、资源、执行与显示
-- `Src/Helicon/`：DSL、AST、代码生成、编译与反射
-- `Examples/`：示例程序与 shader 资源
-- `Scripts/`：`ShaderCompileScripts`（shader -> C++ 头文件）
+- `src/HardwareWrapper/`：对外对象包装层（RAII、引用计数与存储池）
+- `src/HardwareWrapperVulkan/`：Vulkan 设备、资源、执行与显示
+- `src/Helicon/`：DSL、AST、代码生成、编译与反射
+- `examples/`：示例程序与 shader 资源
+- `tools/`：`ShaderCompileScripts`、格式化脚本与统计工具
+- `modules/corona/`：已内嵌的 Corona Framework（当前 Horizon 的基础依赖之一）
 - `third-party/`：预置 `slang`、`dxc` 二进制与头库
 - `docs/`：项目文档
-- `tests/`：测试脚手架（已接入 CMake）
 
 ## 构建要求
 
@@ -48,6 +48,8 @@
 ## 推荐构建方式（Windows）
 
 更完整的 CMake 使用说明见 [docs/cmake-usage.md](docs/cmake-usage.md)。
+
+当前仓库中的 Corona Framework 已直接纳入 `modules/corona/`，不再通过远程 `FetchContent` 拉取；其余第三方依赖仍可能在 configure 阶段由 CMake 自动获取。
 
 ### Ninja Multi-Config + MSVC（默认推荐）
 
@@ -70,7 +72,7 @@ cmake --build --preset vs2022-debug --target HorizonExamples
 
 ## 示例程序
 
-- 当前主示例入口为 `Examples/main.cpp`（目标：`HorizonExamples`）。
+- 当前主示例入口为 `examples/main.cpp`（目标：`HorizonExamples`）。
 
 ## 最小 API 示例（与当前代码一致）
 

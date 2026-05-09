@@ -16,7 +16,7 @@
 根目录 [CMakeLists.txt](CMakeLists.txt) 负责以下事情：
 
 - 定义项目与全局编译选项
-- 通过 FetchContent 拉取第三方依赖
+- 接入内嵌基础模块，并拉取其余第三方依赖
 - 引入核心源码、工具和示例子目录
 - 在检测到 CUDA_PATH 时附加构建 modules/ocarina
 
@@ -24,9 +24,16 @@
 
 - [cmake/HorizonCoreDependencies.cmake](../cmake/HorizonCoreDependencies.cmake)：核心依赖和第三方库拉取
 - [cmake/HorizonRuntimeDeps.cmake](../cmake/HorizonRuntimeDeps.cmake)：运行时依赖复制函数
+- [cmake/HorizonCorona.cmake](../cmake/HorizonCorona.cmake)：内嵌 `modules/corona` 的接入桥接
 - [cmake/HorizonExampleDependencies.cmake](../cmake/HorizonExampleDependencies.cmake)：示例依赖
 - [cmake/HorizonOcarina.cmake](../cmake/HorizonOcarina.cmake)：可选的 ocarina 模块接入
 - [cmake/HeliconShaderCompile.cmake](../cmake/HeliconShaderCompile.cmake)：shader 自动编译支持
+
+当前约束：
+
+- `modules/corona` 已作为仓库内一等源码接入，不再由 Horizon 在 configure 时远程下载
+- Corona 的 examples/tests 由 [cmake/HorizonCorona.cmake](../cmake/HorizonCorona.cmake) 在顶层集成时显式关闭
+- 其余第三方依赖仍可能通过 FetchContent 在首次 configure 时获取
 
 ## 3. 主要构建目标
 
@@ -209,7 +216,7 @@ cmake --preset ninja-msvc
 
 ### 第一次 configure 很慢
 
-原因通常是 FetchContent 正在下载第三方依赖，这是预期行为。
+原因通常是 CMake 正在获取剩余第三方依赖，这是预期行为。当前 `modules/corona` 已在仓库内，不属于这类远程拉取。
 
 ### 找不到 Python
 

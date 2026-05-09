@@ -1,0 +1,6 @@
+---
+BasedOnStyle: Google
+# 列字符数限制
+ColumnLimit: 0
+IndentWidth: 4
+UseTab: Never

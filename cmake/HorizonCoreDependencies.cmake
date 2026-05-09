@@ -118,14 +118,6 @@ set_target_properties(xxhash PROPERTIES
         UNITY_BUILD OFF)
 
 # ======================== 其他依赖 ========================
-FetchContent_Declare(CoronaFramework
-    GIT_REPOSITORY https://github.com/CoronaEngine/CoronaFramework.git
-    GIT_TAG main
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL
-)
-FetchContent_MakeAvailable(CoronaFramework)
-
 set(VOLK_PULL_IN_VULKAN OFF) # We will provide Vulkan-Headers ourselves
 FetchContent_Declare(
     volk

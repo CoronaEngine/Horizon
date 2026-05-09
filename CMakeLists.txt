@@ -31,6 +31,7 @@ add_compile_definitions(
 include(FetchContent)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCoreDependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonRuntimeDeps.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCorona.cmake)
 
 # ======================== Shader 自动编译模块 ========================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
