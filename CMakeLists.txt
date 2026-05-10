@@ -18,6 +18,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 add_compile_definitions(
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
     NOMINMAX
@@ -41,7 +45,9 @@ add_subdirectory(tools)
 
 if(HORIZON_BUILD_EXAMPLES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonExampleDependencies.cmake)
-    add_subdirectory(examples)
+    add_subdirectory(examples/default)
+    # add_subdirectory(examples/triangle)
+    # add_subdirectory(examples/texture)
 endif()
 
 if (MSVC)
