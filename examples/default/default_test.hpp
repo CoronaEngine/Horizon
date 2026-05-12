@@ -1,4 +1,6 @@
-﻿#include <ktm/ktm.h>
+﻿#pragma once
+
+#include <ktm/ktm.h>
 
 #include <chrono>
 #include <string>
@@ -10,9 +12,9 @@
 #include <GLFW/glfw3native.h>
 
 #include "Horizon.h"
-#include "Config.h"
-#include "CubeData.h"
-#include "TextureTest.h"
+#include "common/config.hpp"
+#include "common/cube_data.hpp"
+#include "common/texture_utils.hpp"
 #include "corona/kernel/core/i_logger.h"
 
 #include "Codegen/BuiltinVariate.h"
@@ -22,9 +24,9 @@
 
 // 通过 CMake helicon_compile_shaders 自动编译生成的 shader 反射头文件
 // eDSL 路径不再依赖 GLSL 反射头文件，render target 通过 bindRenderTarget 自动绑定
-#include GLSL(shaders/vert.glsl)
-#include GLSL(shaders/frag.glsl)
-#include GLSL(shaders/compute.glsl)
+#include GLSL(../assets/shaders/vert.glsl)
+#include GLSL(../assets/shaders/frag.glsl)
+#include GLSL(../assets/shaders/compute.glsl)
 
 // storage buffer (used by mesh thread, retained for compatibility)
 struct RasterizerStorageBufferObject
@@ -52,7 +54,7 @@ struct VertexAttributeProxy
     EmbeddedShader::Float3 color;
 };
 
-int main()
+void default_test()
 {
     // Corona::Kernel::CoronaLogger::get_logger()->set_log_level(quill::LogLevel::TraceL3);
     //  setupSignalHandlers();
@@ -64,7 +66,7 @@ int main()
 
     if (glfwInit() < 0)
     {
-        return -1;
+        return;
     }
 
     //CFW_LOG_INFO("Main thread started...");
@@ -102,13 +104,13 @@ int main()
 
         // 纹理加载 - 选择以下任一方式
         // 方式1: 加载普通纹理
-        auto textureResult = loadTexture(shaderPath + "/awesomeface.png");
+        auto textureResult = loadTexture(defaultTexturePath);
 
         // 方式2: 加载BC1压缩纹理
-        // auto textureResult = loadCompressedTexture(shaderPath + "/awesomeface.png", true);
+        // auto textureResult = loadCompressedTexture(defaultTexturePath, true);
 
         // 方式3: 加载带有 mipmap 和 array layers 的纹理
-        // auto textureResult = loadTextureWithMipmapAndLayers(shaderPath + "/awesomeface.png", 2, 5, 1, 0);
+        // auto textureResult = loadTextureWithMipmapAndLayers(defaultTexturePath, 2, 5, 1, 0);
 
         if (!textureResult.success)
         {
@@ -118,7 +120,7 @@ int main()
                 glfwDestroyWindow(windows[i]);
             }
             glfwTerminate();
-            return -1;
+            return;
         }
 
         uint32_t textureID = textureResult.descriptorID;
@@ -407,5 +409,4 @@ int main()
 
     glfwTerminate();
 
-    return 0;
 }

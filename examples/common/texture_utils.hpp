@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "Horizon.h"
-#include "Config.h"
+#include "common/config.hpp"
 #include "corona/kernel/core/i_logger.h"
 
 // 纹理加载结果
@@ -73,7 +73,7 @@ inline void testCompressedTextures()
     CFW_LOG_DEBUG("=== Start testing texture compression formats ===");
 
     int width, height, channels;
-    unsigned char *data = stbi_load(std::string(shaderPath + "/awesomeface.png").c_str(), &width, &height, &channels, 4);
+    unsigned char *data = stbi_load(defaultTexturePath.c_str(), &width, &height, &channels, 4);
     if (!data)
     {
         CFW_LOG_ERROR("Failed to load texture: {}", stbi_failure_reason());

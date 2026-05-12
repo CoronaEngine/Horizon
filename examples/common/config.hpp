@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -26,6 +27,8 @@ inline std::string resolveShaderPath()
 }
 
 inline const std::string shaderPath = resolveShaderPath();
+inline const std::string textureAssetPath = shaderPath + "/assets/textures";
+inline const std::string defaultTexturePath = textureAssetPath + "/awesomeface.png";
 
 // 文件读取工具
 inline std::string readStringFile(const std::string_view file_path)
