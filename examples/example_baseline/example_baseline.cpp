@@ -1973,24 +1973,15 @@ bool checkModelAssets()
 
 } // namespace
 
-int run_vulkan_model_baseline()
+void run_example_baseline()
 {
     if (!checkModelAssets())
     {
-        return EXIT_FAILURE;
+        return;
     }
 
     VulkanModelBaseline app;
 
-    try
-    {
-        app.run();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << e.what() << '\n';
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
+    app.run();
+    return;
 }
