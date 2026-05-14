@@ -6,9 +6,9 @@
 #include <Compiler/ShaderHardcodeManager.h>
 #include <Compiler/ShaderUtils.h>
 
-#ifndef CABBAGE_ENGINE_DEBUG
-#include <Compiler/HardcodeShaders/HardcodeShaders.h>
-#endif
+//#ifndef CABBAGE_ENGINE_DEBUG
+//#include <Compiler/HardcodeShaders/HardcodeShaders.h>
+//#endif
 
 namespace EmbeddedShader
 {
@@ -71,7 +71,9 @@ namespace EmbeddedShader
 
 	std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>> ShaderHardcodeManager::getHardcodeShader(const std::string& targetName, const std::string& itemName)
 	{
-#ifndef CABBAGE_ENGINE_DEBUG
+#if defined(CABBAGE_ENGINE_DEBUG)
+		throw std::runtime_error("getHardcodeShader should not be called in debug mode - use ShaderCodeCompiler's per-instance storage");
+#elif HELICON_HAS_HARDCODE_SHADERS
 		auto target = HardcodeShaders::hardcodeShaders.find(targetName);
 		if (target == HardcodeShaders::hardcodeShaders.end())
 		{
@@ -86,7 +88,8 @@ namespace EmbeddedShader
 
 		return item->second;
 #else
-		throw std::runtime_error("getHardcodeShader should not be called in debug mode - use ShaderCodeCompiler's per-instance storage");
+		throw std::runtime_error("Hardcoded shaders are not generated. Build a debug configuration first to generate "
+			                     "src/Helicon/Compiler/HardcodeShaders, or run this path in a debug configuration.");
 #endif
 	}
 
@@ -155,6 +158,7 @@ std::unordered_map<std::string, std::variant<EmbeddedShader::ShaderCodeModule::S
 	{
 		if (!isClearOldHardcodeFiles)
 		{
+			std::filesystem::create_directories(hardcodePath);
 			for (auto& entry : std::filesystem::directory_iterator(hardcodePath)) {
 				if (entry.is_regular_file() && (entry.path().extension() == ".cpp" || entry.path().extension() == ".h") && entry.path().filename().string().find("HardcodeShaders") == 0) {
 
