@@ -52,7 +52,7 @@ struct VertexAttributeProxy
     EmbeddedShader::Float3 color;
 };
 
-void default_test()
+void run_example_default()
 {
     // Corona::Kernel::CoronaLogger::get_logger()->set_log_level(quill::LogLevel::TraceL3);
     //  setupSignalHandlers();
