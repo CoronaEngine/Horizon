@@ -12,9 +12,7 @@
 #include <GLFW/glfw3native.h>
 
 #include "Horizon.h"
-#include "common/config.hpp"
-#include "common/cube_data.hpp"
-#include "common/texture_utils.hpp"
+#include "common.h"
 #include "corona/kernel/core/i_logger.h"
 
 #include "Codegen/BuiltinVariate.h"
