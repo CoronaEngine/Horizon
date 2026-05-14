@@ -31,7 +31,7 @@ namespace EmbeddedShader
 		};
 
 		static inline std::unordered_map<std::string, TargetInfo> targetInfos;
-        static inline std::filesystem::path hardcodePath = std::string(HELICON_ROOT_PATH) + "/Src/Helicon/Compiler/HardcodeShaders/";
+        static inline std::filesystem::path hardcodePath = std::string(HELICON_ROOT_PATH) + "/src/Helicon/Compiler/HardcodeShaders/";
 		static inline bool isClearOldHardcodeFiles = false;
 	};
 }
