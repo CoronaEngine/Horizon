@@ -2,6 +2,17 @@
 
 #include "ShaderCodeCompiler.h"
 #include <filesystem>
+
+// 非 Debug 模式下，且编译器支持 __has_include，
+// 并且能找到生成的 HardcodeShaders.h 时，才启用 hardcode shader
+#if !defined(CABBAGE_ENGINE_DEBUG) && defined(__has_include) && __has_include(<Compiler/HardcodeShaders/HardcodeShaders.h>)
+#include <Compiler/HardcodeShaders/HardcodeShaders.h>
+#define HELICON_HAS_HARDCODE_SHADERS 1
+#else
+// 其他情况都不启用
+#define HELICON_HAS_HARDCODE_SHADERS 0
+#endif
+
 namespace EmbeddedShader
 {
 	struct ShaderHardcodeManager
