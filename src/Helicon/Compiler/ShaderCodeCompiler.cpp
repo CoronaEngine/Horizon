@@ -11,7 +11,6 @@
 #include "ShaderLanguageConverter.h"
 #include <shared_mutex>
 
-
 namespace EmbeddedShader
 {
     std::shared_mutex threadMutex;
@@ -66,23 +65,35 @@ namespace EmbeddedShader
         auto codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
         auto reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
 
-#if CABBAGE_ENGINE_DEBUG
-        // Read from per-instance compiled outputs
+#if HELICON_HAS_HARDCODE_SHADERS
+        try
+        {
+            result.shaderCode = std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey));
+            result.shaderResources = std::get<0>(ShaderHardcodeManager::getHardcodeShader(stage, reflKey));
+            return result;
+        }
+        catch (const std::runtime_error&)
+        {
+            // Fall through to per-instance outputs when hardcoded shaders are stale or incomplete.
+        }
+#endif
+
         if (auto it = compiledOutputs_.find(codeKey); it != compiledOutputs_.end())
             result.shaderCode = std::get<1>(it->second);
+        else
+            throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
+
         if (auto it = compiledOutputs_.find(reflKey); it != compiledOutputs_.end())
             result.shaderResources = std::get<0>(it->second);
-#else
-        result.shaderCode = std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey));
-        result.shaderResources = std::get<0>(ShaderHardcodeManager::getHardcodeShader(stage, reflKey));
-#endif
+        else
+            throw std::runtime_error("Compiled shader reflection not found for key: " + reflKey);
+
         return result;
     }
 
     void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language,
         CompilerOption option) const
     {
-#if CABBAGE_ENGINE_DEBUG
         std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
         bool isNeedLinkLib = option.spvLinkBinary && !option.spvLinkBinary->empty();
         std::vector<uint32_t> codeSpirV = {};
@@ -225,14 +236,18 @@ namespace EmbeddedShader
         if (!codeSpirV.empty())
             spirvCrossReflection = ShaderLanguageConverter::spirvCrossReflectedBindInfo(codeSpirV, ShaderLanguage::HLSL);
 
-        // Helper lambdas: store locally AND write to file for release pre-generation
+        // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
             compiledOutputs_[itemName] = code;
+#ifdef CABBAGE_ENGINE_DEBUG
             ShaderHardcodeManager::addTarget(code, stage, itemName);
+#endif
         };
         auto storeReflection = [&](const ShaderCodeModule::ShaderResources& res, const std::string& itemName) {
             compiledOutputs_[itemName] = res;
+#ifdef CABBAGE_ENGINE_DEBUG
             ShaderHardcodeManager::addTarget(res, stage, itemName);
+#endif
         };
 
         size_t index = 0;
@@ -277,6 +292,5 @@ namespace EmbeddedShader
         }
 #endif
         }
-#endif
     }
 }
