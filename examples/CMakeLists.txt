@@ -4,6 +4,7 @@ set(HORIZON_EXAMPLE_SOURCES
     common.cpp
     example_default/example_default.cpp
     example_baseline/example_baseline_tutorial.cpp
+    example_baseline/example_baseline_glsl.cpp
 )
 
 set(HORIZON_EXAMPLE_HEADERS

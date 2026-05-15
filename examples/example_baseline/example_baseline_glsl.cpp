@@ -7,8 +7,10 @@
 #include <Compiler/HardcodeShaders/shaders/baseline_model.frag.hpp>
 #include <Compiler/HardcodeShaders/shaders/baseline_model.vert.hpp>
 #include <Horizon.h>
-#include <HardwareWrapperVulkan/HardwareContext.h>
-#include <HardwareWrapperVulkan/ResourcePool.h>
+// Old private Vulkan descriptor path kept for reference. The baseline now uses
+// the public RasterizerPipeline binding API from Horizon.h.
+// #include <HardwareWrapperVulkan/HardwareContext.h>
+// #include <HardwareWrapperVulkan/ResourcePool.h>
 
 #include <array>
 #include <chrono>
@@ -35,6 +37,56 @@ const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
 const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
+
+constexpr char baseline_model_vertex_shader[] = R"GLSL(
+#version 460
+
+layout(set = 3, binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+} ubo;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inColor;
+layout(location = 2) in vec2 inTexCoord;
+
+layout(location = 0) out vec3 fragColor;
+layout(location = 1) out vec2 fragTexCoord;
+
+void main()
+{
+    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
+    fragColor = inColor;
+    fragTexCoord = inTexCoord;
+}
+)GLSL";
+
+constexpr char baseline_model_fragment_shader[] = R"GLSL(
+#version 460
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(set = 0, binding = 0) uniform sampler2D texSamplers[];
+layout(location = 0) in vec3 fragColor;
+layout(location = 1) in vec2 fragTexCoord;
+layout(location = 0) out vec4 outColor;
+
+layout(push_constant) uniform TexturePushConstant {
+    uint texSampler;
+} texturePushConstant;
+
+void main()
+{
+    outColor = texture(texSamplers[nonuniformEXT(texturePushConstant.texSampler)], fragTexCoord) *
+               vec4(fragColor, 1.0);
+}
+)GLSL";
+
+constexpr EmbeddedShader::BindingKey model_binding{0, 64, 10, 0};
+constexpr EmbeddedShader::BindingKey view_binding{64, 64, 10, 0};
+constexpr EmbeddedShader::BindingKey proj_binding{128, 64, 10, 0};
+constexpr EmbeddedShader::BindingKey texture_binding{0, 4, 0, 0};
+constexpr EmbeddedShader::BindingKey output_binding{0, 16, 2, 0};
 
 struct vec3
 {
@@ -306,17 +358,20 @@ HardwareImage create_render_target(uint32_t width, uint32_t height)
     return image;
 }
 
-void bind_texture_to_reflected_slot(const HardwareImage &image, const EmbeddedShader::BindingKey &binding_key)
-{
-    auto main_device = globalHardwareContext.getMainDevice();
-    if (!main_device)
-    {
-        return;
-    }
-
-    auto image_handle = globalImageStorages.acquire_write(image.getImageID());
-    main_device->resourceManager.storeDescriptorAt(image_handle, binding_key.location);
-}
+// Old private Vulkan descriptor binding path kept for reference. Directly
+// assigning the reflected binding through RasterizerPipeline uses the same
+// descriptor path without requiring private backend headers here.
+// void bind_texture_to_reflected_slot(const HardwareImage &image, const EmbeddedShader::BindingKey &binding_key)
+// {
+//     auto main_device = globalHardwareContext.getMainDevice();
+//     if (!main_device)
+//     {
+//         return;
+//     }
+//
+//     auto image_handle = globalImageStorages.acquire_write(image.getImageID());
+//     main_device->resourceManager.storeDescriptorAt(image_handle, binding_key.location);
+// }
 
 uniform_buffer_object make_ubo(float time_seconds)
 {
@@ -362,9 +417,21 @@ void run_example_baseline_glsl()
         HardwareExecutor render_executor;
         HardwareDisplayer displayer(glfwGetWin32Window(window));
 
-        RasterizerPipeline<> rasterizer(baseline_model_vert::spirv, baseline_model_frag::spirv);
-        rasterizer[baseline_model_frag::outColor] = render_target;
-        bind_texture_to_reflected_slot(texture_image, baseline_model_frag::texSampler);
+        // Old tutorial-style SPIR-V path kept for reference. It uses set 0 for
+        // the UBO/texture descriptors, while Horizon's Vulkan backend reserves
+        // sets 0-2 for bindless resources and set 3 for the per-pipeline UBO.
+        // RasterizerPipeline<> rasterizer(baseline_model_vert::spirv, baseline_model_frag::spirv);
+        RasterizerPipeline<> rasterizer(
+            baseline_model_vertex_shader,
+            baseline_model_fragment_shader,
+            1,
+            EmbeddedShader::ShaderLanguage::GLSL,
+            EmbeddedShader::ShaderLanguage::GLSL);
+        // rasterizer[baseline_model_frag::outColor] = render_target;
+        rasterizer[output_binding] = render_target;
+        // bind_texture_to_reflected_slot(texture_image, baseline_model_frag::texSampler);
+        // rasterizer[baseline_model_frag::texSampler] = texture_image;
+        rasterizer[texture_binding] = texture_image;
 
         auto start_time = std::chrono::high_resolution_clock::now();
         while (!glfwWindowShouldClose(window))
@@ -375,9 +442,15 @@ void run_example_baseline_glsl()
                                      std::chrono::high_resolution_clock::now() - start_time)
                                      .count();
             uniform_buffer_object ubo = make_ubo(time_seconds);
-            rasterizer[baseline_model_vert::UniformBufferObject::model] = ubo.model;
-            rasterizer[baseline_model_vert::UniformBufferObject::view] = ubo.view;
-            rasterizer[baseline_model_vert::UniformBufferObject::proj] = ubo.proj;
+            // rasterizer[baseline_model_vert::UniformBufferObject::model] = ubo.model;
+            // rasterizer[baseline_model_vert::UniformBufferObject::view] = ubo.view;
+            // rasterizer[baseline_model_vert::UniformBufferObject::proj] = ubo.proj;
+            rasterizer[model_binding] = ubo.model;
+            rasterizer[view_binding] = ubo.view;
+            rasterizer[proj_binding] = ubo.proj;
+            // Texture handle is stored in push constants; record() consumes and
+            // resets that temporary block, so it must be refreshed per draw.
+            rasterizer[texture_binding] = texture_image;
 
             DrawIndexedParams draw_params;
             draw_params.indexType = IndexType::UInt32;
