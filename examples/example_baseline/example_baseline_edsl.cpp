@@ -22,12 +22,16 @@
 
 #include <stb_image.h>
 
-namespace
+namespace example_baseline_edsl_detail
 {
 
 constexpr uint32_t baseline_width = 800;
 constexpr uint32_t baseline_height = 600;
 constexpr float pi = 3.14159265358979323846f;
+
+constexpr EmbeddedShader::BindingKey model_binding{0, 64, 10, 0};
+constexpr EmbeddedShader::BindingKey view_binding{64, 64, 10, 0};
+constexpr EmbeddedShader::BindingKey proj_binding{128, 64, 10, 0};
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
@@ -109,6 +113,13 @@ struct baseline_mesh
 {
     std::vector<baseline_vertex> vertices;
     std::vector<uint32_t> indices;
+};
+
+struct uniform_buffer_object
+{
+    alignas(16) mat4 model;
+    alignas(16) mat4 view;
+    alignas(16) mat4 proj;
 };
 
 mat4 identity()
@@ -350,19 +361,33 @@ mat4 make_mvp(float time_seconds)
     return multiply(proj, multiply(view, model));
 }
 
+uniform_buffer_object make_ubo(float time_seconds)
+{
+    uniform_buffer_object ubo{};
+    ubo.model = rotate_z(time_seconds * pi * 0.5f);
+    ubo.view = look_at_rh({2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
+    ubo.proj = perspective_rh(pi * 0.25f,
+                              baseline_width / static_cast<float>(baseline_height),
+                              0.1f,
+                              10.0f);
+    return ubo;
+}
+
 std::vector<baseline_vertex> transform_vertices(const std::vector<baseline_vertex> &vertices, const mat4 &mvp)
 {
     std::vector<baseline_vertex> transformed = vertices;
     for (auto &vertex : transformed)
     {
-        std::array<float, 4> clip = multiply(mvp, {vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.0f});
+        std::array<float, 4> clip = multiply(mvp, std::array<float, 4>{vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.0f});
         const float inv_w = 1.0f / clip[3];
         vertex.pos = {clip[0] * inv_w, clip[1] * inv_w, clip[2] * inv_w};
     }
     return transformed;
 }
 
-} // namespace
+} // namespace example_baseline_edsl_detail
+
+using namespace example_baseline_edsl_detail;
 
 void run_example_baseline_edsl()
 {
@@ -387,6 +412,7 @@ void run_example_baseline_edsl()
     try
     {
         baseline_mesh mesh = load_mesh();
+        HardwareBuffer vertex_buffer(mesh.vertices, BufferUsage::VertexBuffer);
         HardwareBuffer index_buffer(mesh.indices, BufferUsage::IndexBuffer);
         HardwareImage texture_image = load_texture_image();
         HardwareImage render_target = create_render_target(baseline_width, baseline_height);
@@ -395,20 +421,31 @@ void run_example_baseline_edsl()
 
         using namespace EmbeddedShader;
 
+        Float4x4 model;
+        Float4x4 view;
+        Float4x4 proj;
         Texture2D<ktm::fvec4> texture_proxy = texture_image;
 
-        auto vertex_shader = [](Aggregate<baseline_vertex_proxy> vertex) -> Aggregate<fragment_input_proxy>
+        auto vertex_shader = [&](Aggregate<baseline_vertex_proxy> vertex) -> Float4
         {
-            position() = Float4(vertex->pos, 1.0f);
-            Aggregate<fragment_input_proxy> output;
-            output.color = vertex->color;
-            output.tex_coord = vertex->tex_coord;
-            return output;
+            // The aggregate varying version is kept for reference. The current
+            // backend path renders black with aggregate VS->FS payloads, so this
+            // baseline packs uv + a white color weight into one Float4 varying.
+            // Aggregate<fragment_input_proxy> output;
+            // output->color = vertex->color;
+            // output->tex_coord = vertex->tex_coord;
+            // return output;
+            position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
+            Float color_weight = (vertex->color->x + vertex->color->y + vertex->color->z) * (1.0f / 3.0f);
+            return Float4(vertex->tex_coord, color_weight, 1.0f);
         };
 
-        auto fragment_shader = [&](Aggregate<fragment_input_proxy> input) -> Float4
+        auto fragment_shader = [&](Float4 input) -> Float4
         {
-            return texture(texture_proxy, input->tex_coord) * Float4(input->color, 1.0f);
+            // Aggregate varying version kept for reference:
+            // return texture(texture_proxy, input->tex_coord) * Float4(input->color, 1.0f);
+            Float4 color = texture(texture_proxy, input->xy());
+            return color * Float4(input->z, input->z, input->z, 1.0f);
         };
 
         RasterizerPipeline rasterizer(vertex_shader, fragment_shader);
@@ -426,15 +463,25 @@ void run_example_baseline_edsl()
             float time_seconds = std::chrono::duration<float, std::chrono::seconds::period>(
                                      std::chrono::high_resolution_clock::now() - start_time)
                                      .count();
-            std::vector<baseline_vertex> transformed_vertices = transform_vertices(mesh.vertices, make_mvp(time_seconds));
-            HardwareBuffer vertex_buffer(transformed_vertices, BufferUsage::VertexBuffer);
+            uniform_buffer_object ubo = make_ubo(time_seconds);
+            rasterizer[model_binding] = ubo.model;
+            rasterizer[view_binding] = ubo.view;
+            rasterizer[proj_binding] = ubo.proj;
+            // CPU pre-transform path kept for reference, but disabled so the
+            // EDSL baseline remains comparable with GLSL/tutorial GPU MVP work.
+            // std::vector<baseline_vertex> transformed_vertices = transform_vertices(mesh.vertices, make_mvp(time_seconds));
+            // HardwareBuffer vertex_buffer(transformed_vertices, BufferUsage::VertexBuffer);
 
             DrawIndexedParams draw_params;
             draw_params.indexType = IndexType::UInt32;
             draw_params.indexCount = static_cast<uint32_t>(mesh.indices.size());
 
+            // EDSL texture auto-binding writes the sampled image descriptor into
+            // the rasterizer push constant block. record() snapshots that block
+            // per draw, so bind before record just like the GLSL baseline does.
+            rasterizer(baseline_width, baseline_height);
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
-            render_executor << rasterizer(baseline_width, baseline_height)
+            render_executor << rasterizer
                             << render_executor.commit();
             displayer.wait(render_executor) << render_target;
         }

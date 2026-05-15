@@ -9,9 +9,9 @@ int main()
 {
     try
     {
-        //run_example_env();
+        run_example_env();
         //run_example_default();
-        run_example_baseline_tutorial();
+        //run_example_baseline_tutorial();
         //run_example_baseline_glsl();
         //run_example_baseline_edsl();
     }
