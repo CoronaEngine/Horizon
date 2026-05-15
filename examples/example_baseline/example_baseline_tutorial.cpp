@@ -1,7 +1,8 @@
 #define VK_NO_PROTOTYPES
 #include <volk.h>
 
-#define GLFW_INCLUDE_NONE
+// #define GLFW_INCLUDE_NONE
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -528,8 +529,8 @@ class VulkanModelBaseline
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
         if (enableValidationLayers)
         {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validation_layers.size());
+            createInfo.ppEnabledLayerNames = validation_layers.data();
             populateDebugMessengerCreateInfo(debugCreateInfo);
             createInfo.pNext = &debugCreateInfo;
         }
@@ -636,13 +637,13 @@ class VulkanModelBaseline
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
         createInfo.pEnabledFeatures = &deviceFeatures;
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
-        createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(device_extensions.size());
+        createInfo.ppEnabledExtensionNames = device_extensions.data();
 
         if (enableValidationLayers)
         {
-            createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-            createInfo.ppEnabledLayerNames = validationLayers.data();
+            createInfo.enabledLayerCount = static_cast<uint32_t>(validation_layers.size());
+            createInfo.ppEnabledLayerNames = validation_layers.data();
         }
 
         if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
@@ -1825,7 +1826,7 @@ class VulkanModelBaseline
         std::vector<VkExtensionProperties> availableExtensions(extensionCount);
         vkEnumerateDeviceExtensionProperties(deviceCandidate, nullptr, &extensionCount, availableExtensions.data());
 
-        std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+        std::set<std::string> requiredExtensions(device_extensions.begin(), device_extensions.end());
         for (const auto &extension : availableExtensions)
         {
             requiredExtensions.erase(extension.extensionName);
@@ -1968,7 +1969,7 @@ class VulkanModelBaseline
         std::vector<VkLayerProperties> availableLayers(layerCount);
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
-        for (const char *layerName : validationLayers)
+        for (const char *layerName : validation_layers)
         {
             bool layerFound = false;
             for (const auto &layerProperties : availableLayers)
@@ -2015,8 +2016,6 @@ bool checkModelAssets()
 
 } // namespace
 
-// Legacy entry kept as a note for older callers:
-// void run_example_baseline();
 void run_example_baseline_tutorial()
 {
     if (!checkModelAssets())
