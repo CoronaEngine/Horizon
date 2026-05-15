@@ -1,21 +1,19 @@
 set(HORIZON_EXAMPLE_SOURCES
     main.cpp
+    example_env/example_env.cpp
 )
 
 set(HORIZON_EXAMPLE_HEADERS
-    common/config.hpp
-    common/cube_data.hpp
-    common/signal_handler.hpp
-    common/texture_utils.hpp
-    default/default_test.hpp
 )
 
-add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})
+add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES})
 
 target_include_directories(HorizonExamples PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${glfw_SOURCE_DIR}/include"
-    "${stb_SOURCE_DIR}")
+    "${stb_SOURCE_DIR}"
+    "${tinyobjloader_SOURCE_DIR}"
+)
 
 target_link_libraries(HorizonExamples PRIVATE
     glfw
