@@ -11,7 +11,8 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
-#include "vulkan_model_baseline/vulkan_model_baseline.hpp"
+#include <Compiler/HardcodeShaders/shaders/baseline_model.frag.hpp>
+#include <Compiler/HardcodeShaders/shaders/baseline_model.vert.hpp>
 
 #include <algorithm>
 #include <array>
@@ -30,23 +31,23 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Codegen/ControlFlows.h"
-#include "common/config.hpp"
-
-#include GLSL(shaders/model.vert)
-#include GLSL(shaders/model.frag)
-
-namespace {
+namespace
+{
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
-const std::vector<const char *> validationLayers = {
+const std::filesystem::path viking_room_model_path =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
+const std::filesystem::path viking_room_texture_path =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
+
+const std::vector<const char*> validation_layers = {
     "VK_LAYER_KHRONOS_validation",
 };
 
-const std::vector<const char *> deviceExtensions = {
+const std::vector<const char*> device_extensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 };
 
@@ -422,6 +423,15 @@ class VulkanModelBaseline
         vkDestroySwapchainKHR(device, swapChain, nullptr);
     }
 
+    void cleanupRenderFinishedSemaphores()
+    {
+        for (auto semaphore : renderFinishedSemaphores)
+        {
+            vkDestroySemaphore(device, semaphore, nullptr);
+        }
+        renderFinishedSemaphores.clear();
+    }
+
     void cleanup()
     {
         cleanupSwapChain();
@@ -451,10 +461,10 @@ class VulkanModelBaseline
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
             vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
         }
+        cleanupRenderFinishedSemaphores();
 
         vkDestroyCommandPool(device, commandPool, nullptr);
         vkDestroyDevice(device, nullptr);
@@ -483,11 +493,13 @@ class VulkanModelBaseline
 
         vkDeviceWaitIdle(device);
         cleanupSwapChain();
+        cleanupRenderFinishedSemaphores();
 
         createSwapChain();
         createImageViews();
         createDepthResources();
         createFramebuffers();
+        createRenderFinishedSemaphores();
     }
 
     void createInstance()
@@ -503,7 +515,7 @@ class VulkanModelBaseline
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        appInfo.apiVersion = VK_API_VERSION_1_3;
 
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -614,8 +626,13 @@ class VulkanModelBaseline
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
 
+        VkPhysicalDeviceVulkan12Features vulkan12Features{};
+        vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.pNext = &vulkan12Features;
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
         createInfo.pEnabledFeatures = &deviceFeatures;
@@ -795,8 +812,8 @@ class VulkanModelBaseline
 
     void createGraphicsPipeline()
     {
-        VkShaderModule vertShaderModule = createShaderModule(model_vert::spirv);
-        VkShaderModule fragShaderModule = createShaderModule(model_frag::spirv);
+        VkShaderModule vertShaderModule = createShaderModule(baseline_model_vert::spirv);
+        VkShaderModule fragShaderModule = createShaderModule(baseline_model_frag::spirv);
 
         VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
         vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -969,10 +986,11 @@ class VulkanModelBaseline
         int texWidth = 0;
         int texHeight = 0;
         int texChannels = 0;
-        stbi_uc *pixels = stbi_load(vikingRoomTexturePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        const std::string texturePath = viking_room_texture_path.string();
+        stbi_uc *pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         if (!pixels)
         {
-            throw std::runtime_error("failed to load texture image: " + vikingRoomTexturePath);
+            throw std::runtime_error("failed to load texture image: " + texturePath);
         }
 
         VkDeviceSize imageSize = static_cast<VkDeviceSize>(texWidth) * static_cast<VkDeviceSize>(texHeight) * 4;
@@ -1056,7 +1074,9 @@ class VulkanModelBaseline
         std::string warn;
         std::string err;
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, vikingRoomModelPath.c_str()))
+        const std::string modelPath = viking_room_model_path.string();
+        const std::string materialBasePath = (viking_room_model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator));
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, modelPath.c_str(), materialBasePath.c_str()))
         {
             throw std::runtime_error(warn + err);
         }
@@ -1269,7 +1289,6 @@ class VulkanModelBaseline
     void createSyncObjects()
     {
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
         VkSemaphoreCreateInfo semaphoreInfo{};
@@ -1282,10 +1301,27 @@ class VulkanModelBaseline
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
             if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
-                vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS)
             {
                 throw std::runtime_error("failed to create synchronization objects");
+            }
+        }
+
+        createRenderFinishedSemaphores();
+    }
+
+    void createRenderFinishedSemaphores()
+    {
+        renderFinishedSemaphores.resize(swapChainImages.size());
+
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        for (auto &semaphore : renderFinishedSemaphores)
+        {
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore) != VK_SUCCESS)
+            {
+                throw std::runtime_error("failed to create render-finished semaphore");
             }
         }
     }
@@ -1347,7 +1383,7 @@ class VulkanModelBaseline
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 
-        VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
+        VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[imageIndex]};
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -1766,13 +1802,19 @@ class VulkanModelBaseline
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
 
-        VkPhysicalDeviceFeatures supportedFeatures;
-        vkGetPhysicalDeviceFeatures(deviceCandidate, &supportedFeatures);
+        VkPhysicalDeviceVulkan12Features supportedVulkan12Features{};
+        supportedVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+        VkPhysicalDeviceFeatures2 supportedFeatures{};
+        supportedFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        supportedFeatures.pNext = &supportedVulkan12Features;
+        vkGetPhysicalDeviceFeatures2(deviceCandidate, &supportedFeatures);
 
         return indices.isComplete() &&
                extensionsSupported &&
                swapChainAdequate &&
-               supportedFeatures.samplerAnisotropy;
+               supportedFeatures.features.samplerAnisotropy &&
+               supportedVulkan12Features.runtimeDescriptorArray;
     }
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice deviceCandidate)
@@ -1950,8 +1992,8 @@ class VulkanModelBaseline
 
 bool checkModelAssets()
 {
-    bool modelExists = std::filesystem::exists(vikingRoomModelPath);
-    bool textureExists = std::filesystem::exists(vikingRoomTexturePath);
+    bool modelExists = std::filesystem::exists(viking_room_model_path);
+    bool textureExists = std::filesystem::exists(viking_room_texture_path);
     if (modelExists && textureExists)
     {
         return true;
@@ -1960,11 +2002,11 @@ bool checkModelAssets()
     std::cerr << "Raw Vulkan model baseline assets are missing.\n";
     if (!modelExists)
     {
-        std::cerr << "  Missing model: " << vikingRoomModelPath << '\n';
+        std::cerr << "  Missing model: " << viking_room_model_path << '\n';
     }
     if (!textureExists)
     {
-        std::cerr << "  Missing texture: " << vikingRoomTexturePath << '\n';
+        std::cerr << "  Missing texture: " << viking_room_texture_path << '\n';
     }
     std::cerr << "Download the Vulkan Tutorial viking_room.obj and viking_room.png assets, then place them at the paths above.\n";
     std::cerr << "Reference: https://vulkan-tutorial.com/Loading_models\n";
@@ -1973,7 +2015,9 @@ bool checkModelAssets()
 
 } // namespace
 
-void run_example_baseline()
+// Legacy entry kept as a note for older callers:
+// void run_example_baseline();
+void run_example_baseline_tutorial()
 {
     if (!checkModelAssets())
     {
