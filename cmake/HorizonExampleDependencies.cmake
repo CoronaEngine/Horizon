@@ -15,3 +15,11 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(glfw)
+
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG release
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(tinyobjloader)
