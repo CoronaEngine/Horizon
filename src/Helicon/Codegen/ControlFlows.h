@@ -94,7 +94,8 @@ GPU_PUSH_VARIATE(GPU_ELSEIF_BRANCH gpuElseIfBranchJ6hF4rT9mK2zV8cX5bN1pQ3{condit
 		static std::stack<GPU_WHILE_INFO> gpuWhileStack;
 	};
 
-	std::stack<GPU_WHILE_INFO> GPU_WHILE_INFO::gpuWhileStack{};
+	// TODO: 链接错误，防止会被多个 .cpp include
+	inline std::stack<GPU_WHILE_INFO> GPU_WHILE_INFO::gpuWhileStack{};
 
 	struct GPU_WHILE
 	{
