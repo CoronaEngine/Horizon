@@ -12,8 +12,9 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
-#include <Compiler/HardcodeShaders/shaders/baseline_model.frag.hpp>
-#include <Compiler/HardcodeShaders/shaders/baseline_model.vert.hpp>
+#include "Codegen/ControlFlows.h"
+#include GLSL(shaders/baseline_model.frag)
+#include GLSL(shaders/baseline_model.vert)
 
 #include <algorithm>
 #include <array>

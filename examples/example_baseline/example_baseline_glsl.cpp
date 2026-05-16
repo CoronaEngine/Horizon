@@ -4,13 +4,11 @@
 
 #include <tiny_obj_loader.h>
 
-#include <Compiler/HardcodeShaders/shaders/baseline_model.frag.hpp>
-#include <Compiler/HardcodeShaders/shaders/baseline_model.vert.hpp>
+#include "Codegen/ControlFlows.h"
+#include GLSL(shaders/baseline_model.frag)
+#include GLSL(shaders/baseline_model.vert)
+
 #include <Horizon.h>
-// Old private Vulkan descriptor path kept for reference. The baseline now uses
-// the public RasterizerPipeline binding API from Horizon.h.
-// #include <HardwareWrapperVulkan/HardwareContext.h>
-// #include <HardwareWrapperVulkan/ResourcePool.h>
 
 #include <array>
 #include <chrono>
