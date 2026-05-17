@@ -2017,7 +2017,7 @@ bool checkModelAssets()
 
 } // namespace
 
-void run_example_baseline_tutorial()
+void run_example_baseline()
 {
     if (!checkModelAssets())
     {

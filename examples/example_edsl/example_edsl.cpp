@@ -389,7 +389,7 @@ std::vector<baseline_vertex> transform_vertices(const std::vector<baseline_verte
 
 using namespace example_baseline_edsl_detail;
 
-void run_example_baseline_edsl()
+void run_example_edsl()
 {
     if (!check_assets())
     {

@@ -385,7 +385,7 @@ uniform_buffer_object make_ubo(float time_seconds)
 
 } // namespace
 
-void run_example_baseline_glsl()
+void run_example_glsl()
 {
     if (!check_assets())
     {
