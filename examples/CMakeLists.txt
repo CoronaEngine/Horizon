@@ -1,6 +1,5 @@
 set(HORIZON_EXAMPLE_SOURCES
     main.cpp
-    example_env/example_env.cpp
     common.cpp
     example_default/example_default.cpp
     example_baseline/example_baseline_tutorial.cpp
