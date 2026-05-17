@@ -14,7 +14,7 @@ namespace EmbeddedShader::Generator
 {
 	class SlangGenerator final
 	{
-		friend class ComputePipelineObject;
+		friend class EmbeddedShader::ComputePipelineObject;
 		template<typename T>
 		static constexpr std::string_view variateBasicTypeNameMap = "unknown";
 	public:

@@ -33,6 +33,11 @@ _deps/
 *.ilk
 *.exp
 
+!third-party/slang/lib/*.dylib
+!third-party/slang/bin/slangc
+!third-party/slang/bin/slangd
+!third-party/slang/bin/slangi
+
 # Visual Studio 生成的文件
 *.vcxproj.user
 *.vcxproj.filters

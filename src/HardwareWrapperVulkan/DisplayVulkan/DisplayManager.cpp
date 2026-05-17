@@ -244,7 +244,7 @@ void DisplayManager::createVkSurface(void *surface)
     coronaHardwareCheck(vkCreateMacOSSurfaceMVK(globalHardwareContext.getVulkanInstance(),
                                                 &createInfo,
                                                 nullptr,
-                                                &vkSurface););
+                                                &vkSurface));
 #elif __linux__
     // TODO: Linux surface creation
     throw std::runtime_error("Linux surface creation not implemented");

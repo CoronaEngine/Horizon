@@ -5,5 +5,13 @@
     ],
     "files.associations": {
         "memory": "cpp"
-    }
+    },
+    "cmake.configureArgs": [
+        "-DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++",
+        "-DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang",
+        "-DTBB_DIR=/opt/homebrew/Cellar/tbb/2023.0.0/lib/cmake/tbb",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0",
+        "-DCMAKE_CXX_FLAGS=-stdlib=libc++",
+        "-DCMAKE_C_FLAGS=-stdlib=libc++"
+    ]
 }

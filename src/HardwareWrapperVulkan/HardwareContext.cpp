@@ -104,7 +104,6 @@ void HardwareContext::prepareFeaturesChain()
 #if _WIN32 || _WIN64
         extensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif __APPLE__
-        extensions.insert(VK_MVK_MOLTENVK_EXTENSION_NAME);
         extensions.insert(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
 #elif __linux__
         extensions.insert(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
@@ -237,6 +236,13 @@ void HardwareContext::createVkInstance(const CreateCallback &initInfo)
     createInfo.enabledLayerCount = static_cast<uint32_t>(requiredLayers.size());
     createInfo.ppEnabledLayerNames = requiredLayers.data();
     createInfo.pNext = nullptr;
+    if (std::any_of(requiredExtensions.begin(), requiredExtensions.end(),
+                    [](const char *ext) {
+                        return strcmp(ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0;
+                    }))
+    {
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    }
 
 #ifdef CABBAGE_ENGINE_DEBUG
     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};

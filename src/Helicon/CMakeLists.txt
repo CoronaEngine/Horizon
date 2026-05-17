@@ -51,10 +51,26 @@ endif()
 
 message(STATUS "Target Arch: ${TARGET_ARCH}")
 
-target_link_directories(Helicon PUBLIC
-    ${PROJECT_SOURCE_DIR}/third-party/slang/lib
-    ${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}
-)
+find_package(slang CONFIG QUIET)
+
+if(TARGET slang::slang)
+    set(HELICON_SLANG_TARGET slang::slang)
+else()
+    find_library(SLANG_LIBRARY
+        NAMES slang
+        HINTS "${PROJECT_SOURCE_DIR}/third-party/slang/lib"
+    )
+
+    if(NOT SLANG_LIBRARY)
+        message(FATAL_ERROR
+            "Slang library not found for this platform. "
+            "Install shader-slang with vcpkg/CMake package support, or copy a native Slang library into third-party/slang/lib. "
+            "Current bundled Slang binaries appear to be Windows-only."
+        )
+    endif()
+
+    set(HELICON_SLANG_TARGET ${SLANG_LIBRARY})
+endif()
 
 target_link_libraries(Helicon PUBLIC
     glslang
@@ -63,20 +79,61 @@ target_link_libraries(Helicon PUBLIC
     spirv-cross-c
     spirv-cross-cpp
     spirv-cross-util
-    slang
-    slang-rt
-    gfx
-    dxcompiler
-    dxil
+    ${HELICON_SLANG_TARGET}
     SPIRV-Tools-link
 )
 
-file(GLOB SLANG_DLLS "${PROJECT_SOURCE_DIR}/third-party/slang/bin/*.dll")
-file(GLOB DXC_DLLS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")
+if(WIN32)
+    find_library(SLANG_RT_LIBRARY
+        NAMES slang-rt
+        PATHS "${PROJECT_SOURCE_DIR}/third-party/slang/lib"
+        NO_DEFAULT_PATH
+        REQUIRED
+    )
+    find_library(GFX_LIBRARY
+        NAMES gfx
+        PATHS "${PROJECT_SOURCE_DIR}/third-party/slang/lib"
+        NO_DEFAULT_PATH
+        REQUIRED
+    )
+    find_library(DXCOMPILER_LIBRARY
+        NAMES dxcompiler
+        PATHS "${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}"
+        NO_DEFAULT_PATH
+        REQUIRED
+    )
+    find_library(DXIL_LIBRARY
+        NAMES dxil
+        PATHS "${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}"
+        NO_DEFAULT_PATH
+        REQUIRED
+    )
 
-if(SLANG_DLLS AND DXC_DLLS)
-    message(STATUS "Found Slang and DXC DLLs")
+    target_link_libraries(Helicon PUBLIC
+        ${SLANG_RT_LIBRARY}
+        ${GFX_LIBRARY}
+        ${DXCOMPILER_LIBRARY}
+        ${DXIL_LIBRARY}
+    )
+endif()
+
+file(GLOB SLANG_RUNTIME_DEPS
+    "${PROJECT_SOURCE_DIR}/third-party/slang/bin/*.dll"
+    "${PROJECT_SOURCE_DIR}/third-party/slang/bin/*.dylib"
+    "${PROJECT_SOURCE_DIR}/third-party/slang/lib/*.dylib"
+)
+
+if(WIN32)
+    file(GLOB DXC_RUNTIME_DEPS
+        "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll"
+    )
+else()
+    set(DXC_RUNTIME_DEPS)
+endif()
+
+if(SLANG_RUNTIME_DEPS)
+    message(STATUS "Found Helicon runtime dependencies")
     set_target_properties(Helicon PROPERTIES
-        INTERFACE_HELICON_RUNTIME_DEPS "${SLANG_DLLS};${DXC_DLLS}"
+        INTERFACE_HELICON_RUNTIME_DEPS "${SLANG_RUNTIME_DEPS};${DXC_RUNTIME_DEPS}"
     )
 endif()

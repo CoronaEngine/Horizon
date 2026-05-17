@@ -2,6 +2,15 @@
 
 #include <corona/kernel/utils/work_stealing_queue.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <stop_token>
+#include <thread>
+#include <vector>
+
 namespace Corona::Kernal::Utils {
 
 /**

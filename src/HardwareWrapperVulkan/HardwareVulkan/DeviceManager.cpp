@@ -490,7 +490,11 @@ void DeviceManager::importForeignSemaphores(const std::vector<DeviceManager *> &
 
             VkSemaphore foreignSem = foreignQueue.timelineSemaphore;
             ExternalSemaphoreHandle handle = foreignDevice->exportSemaphore(foreignSem);
-            if(handle.handle == nullptr)
+#if _WIN32 || _WIN64
+            if (handle.handle == nullptr)
+#else
+            if (handle.fd < 0)
+#endif
             {
                 CFW_LOG_ERROR("[DeviceManager] Failed to export timeline semaphore from foreign device {}. Skipping import.",
                               reinterpret_cast<uintptr_t>(foreignDevice->logicalDevice));
@@ -549,6 +553,10 @@ void DeviceManager::importForeignSemaphores(const std::vector<DeviceManager *> &
                 CFW_LOG_ERROR("[DeviceManager] Failed to import foreign timeline semaphore fd");
                 continue;
             }
+#else
+            vkDestroySemaphore(logicalDevice, localSemaphore, nullptr);
+            CFW_LOG_ERROR("[DeviceManager] Timeline semaphore import is not implemented for this platform");
+            return;
 #endif
 
             importedTimelineSemaphores[foreignQueue.timelineSemaphore] = localSemaphore;

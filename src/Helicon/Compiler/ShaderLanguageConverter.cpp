@@ -1055,6 +1055,18 @@ namespace EmbeddedShader
 	}
 #endif
 
+#ifndef WIN32
+	std::vector<uint32_t> ShaderLanguageConverter::dxilCompiler(const std::string&, ShaderStage)
+	{
+		throw std::runtime_error("DXIL compilation is only implemented on Windows.");
+	}
+
+	std::vector<uint32_t> ShaderLanguageConverter::dxbcCompiler(const std::string&, ShaderStage)
+	{
+		throw std::runtime_error("DXBC compilation is only implemented on Windows.");
+	}
+#endif
+
 	// get Reflected Bind Info
 	ShaderCodeModule::ShaderResources ShaderLanguageConverter::spirvCrossReflectedBindInfo(
 		std::vector<uint32_t> spirv_file, ShaderLanguage targetLanguage, int32_t targetVersion)
