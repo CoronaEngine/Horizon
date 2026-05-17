@@ -25,6 +25,7 @@ target_include_directories(HorizonExamples PRIVATE
 )
 
 target_link_libraries(HorizonExamples PRIVATE
+    glm
     glfw
     Horizon)
 
