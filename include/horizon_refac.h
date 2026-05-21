@@ -1,5 +1,24 @@
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <mutex>
+#include <ranges>
+#include <shared_mutex>
+#include <source_location>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include <ktm/ktm.h>
+
 #include "format.h"
 
 namespace Corona::Horizon
@@ -7,8 +26,6 @@ namespace Corona::Horizon
     // ================================================================
     // Forward Declarations
     // ================================================================
-
-    struct ExternalHandle;
 
     struct HardwareBuffer;
     struct HardwareImage;
@@ -243,9 +260,8 @@ namespace Corona::Horizon
         [[nodiscard]] BufferCopyCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
         [[nodiscard]] BufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-
-        static HardwareBuffer import_external(const ExternalHandle &handle, const HardwareBufferDesc &desc, uint64_t allocation_size = 0);
-        ExternalHandle export_external() const;
+        static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
+        [[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
         explicit HardwareBuffer(std::uintptr_t id) noexcept : buffer_id(id) {}
@@ -257,9 +273,9 @@ namespace Corona::Horizon
 
 
 
-    //////////////////////////////////////////////////////////////////////////
+    // ================================================================
     // HardwareImage
-    //////////////////////////////////////////////////////////////////////////
+    // ================================================================
 
     template <typename T>
     concept HardwareImageElement = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
@@ -2546,7 +2562,6 @@ struct HardwareDisplayer
     mutable std::mutex displayerMutex;
 };
 }
-
 
 
 
