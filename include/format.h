@@ -174,6 +174,56 @@ namespace Corona::Horizon
 
 
     // ================================================================
+    // Native Interop
+    // ================================================================
+
+    enum class ExternalMemoryHandleType : uint8_t
+    {
+        None,
+        OpaqueFd,
+        OpaqueWin32,
+    };
+
+    struct ExternalMemoryHandle
+    {
+#if defined(_WIN32) || defined(_WIN64)
+        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueWin32;
+#else
+        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueFd;
+#endif
+
+        ExternalMemoryHandleType type = ExternalMemoryHandleType::None;
+
+        void* handle = nullptr;
+        int fd = -1;
+
+        uint64_t allocation_size = 0;
+        BufferRange memory_range = BufferRange::entire();
+
+        [[nodiscard]] static constexpr ExternalMemoryHandle win32(void *value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept
+        {
+            return {ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range};
+        }
+
+        [[nodiscard]] static constexpr ExternalMemoryHandle opaque_fd(int value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept
+        {
+            return {ExternalMemoryHandleType::OpaqueFd, nullptr, value, size, range};
+        }
+
+        [[nodiscard]] constexpr bool valid() const noexcept
+        {
+            return type == ExternalMemoryHandleType::OpaqueWin32 ? handle != nullptr : type == ExternalMemoryHandleType::OpaqueFd ? fd >= 0 : false;
+        }
+
+        [[nodiscard]] explicit constexpr operator bool() const noexcept
+        {
+            return valid();
+        }
+    };
+
+
+
+    // ================================================================
     // Image
     // ================================================================
 
