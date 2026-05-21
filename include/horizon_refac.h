@@ -1,10 +1,55 @@
 #pragma once
 
+#include "format.h"
+
 namespace Corona::Horizon
 {
-    //////////////////////////////////////////////////////////////////////////
-    // HardwareBuffer
-    //////////////////////////////////////////////////////////////////////////
+    // ================================================================
+    // Forward Declarations
+    // ================================================================
+
+    struct ExternalHandle;
+
+    struct HardwareBuffer;
+    struct HardwareImage;
+    struct HardwareImageLayerSelector;
+    struct HardwarePushConstant;
+
+    struct BottomLevelAccelerationStructure;
+    struct TopLevelAccelerationStructure;
+
+    struct PipelineState;
+    struct PipelineBindingScope;
+    struct ResourceProxy;
+
+    struct ComputePipelineBase;
+    struct RasterizerPipelineBase;
+    struct RayTracingPipelineBase;
+
+    struct HardwareExecutor;
+    struct HardwareDisplayer;
+
+    struct BindingSlot;
+
+
+
+    // ================================================================
+    // Validation
+    // ================================================================
+
+    struct HardwareValidationConfig
+    {
+        bool enabled = true;
+        bool throw_on_error = false;
+    };
+
+    void set_hardware_validation_config(const HardwareValidationConfig &config);
+
+
+
+    // ================================================================
+    // Buffers
+    // ================================================================
 
     // TODO: 后面增加 HardwareBuffer 测试和验证功能，目前先保证接口正确，后续再完善实现细节和错误处理
 
@@ -14,28 +59,6 @@ namespace Corona::Horizon
     // index 限制 uint16_t/uint32_t。
     template <typename T>
     concept HardwareIndexElement = std::same_as<std::remove_cvref_t<T>, uint16_t> || std::same_as<std::remove_cvref_t<T>, uint32_t>;
-
-    struct HardwareBufferOptions
-    {
-        CpuAccessMode cpu_access = CpuAccessMode::Write;
-        bool dedicated = false;
-        bool exportable = false;
-    };
-
-    struct BufferRange
-    {
-        static constexpr uint64_t whole_size = ~uint64_t { 0 };
-        uint64_t byte_offset = 0;
-        uint64_t byte_size = whole_size;
-        static constexpr BufferRange entire() noexcept { return {}; }
-
-        [[nodiscard]] constexpr BufferRange resolve(uint64_t total_size) const noexcept
-        {
-            BufferRange result = *this;
-            if (result.byte_size == whole_size) result.byte_size = result.byte_offset <= total_size ? total_size - result.byte_offset : 0;
-            return result;
-        }
-    };
 
     struct HardwareBufferDesc
     {
@@ -103,13 +126,7 @@ namespace Corona::Horizon
         }
     };
 
-    struct HardwareValidationConfig
-    {
-        bool enabled = true;
-        bool throw_on_error = false;
-    };
-
-    void set_hardware_validation_config(const HardwareValidationConfig& config);
+    
 
     struct HardwareBuffer
     {
@@ -906,125 +923,7 @@ namespace Corona::Horizon
 // Pipeline Descriptors
 // ================================================================
 
-enum class PipelineShaderStage : uint16_t
-{
-    Compute = 0,
-    Vertex = 1,
-    Fragment = 2,
-    RayGeneration = 3,
-    Miss = 4,
-    ClosestHit = 5,
-    AnyHit = 6,
-    Intersection = 7,
-    Callable = 8,
-};
 
-enum class PrimitiveTopology : uint16_t
-{
-    TriangleList = 0,
-    TriangleStrip,
-    LineList,
-    LineStrip,
-    PointList,
-};
-
-enum class PolygonFillMode : uint16_t
-{
-    Fill = 0,
-    Line,
-    Point,
-};
-
-enum class CullMode : uint16_t
-{
-    None = 0,
-    Front,
-    Back,
-    FrontAndBack,
-};
-
-enum class FrontFace : uint16_t
-{
-    CounterClockwise = 0,
-    Clockwise,
-};
-
-enum class CompareOp : uint16_t
-{
-    Never = 0,
-    Less,
-    Equal,
-    LessOrEqual,
-    Greater,
-    NotEqual,
-    GreaterOrEqual,
-    Always,
-};
-
-enum class StencilOp : uint16_t
-{
-    Keep = 0,
-    Zero,
-    Replace,
-    IncrementAndClamp,
-    DecrementAndClamp,
-    Invert,
-    IncrementAndWrap,
-    DecrementAndWrap,
-};
-
-enum class BlendFactor : uint16_t
-{
-    Zero = 0,
-    One,
-    SrcColor,
-    OneMinusSrcColor,
-    DstColor,
-    OneMinusDstColor,
-    SrcAlpha,
-    OneMinusSrcAlpha,
-    DstAlpha,
-    OneMinusDstAlpha,
-};
-
-enum class BlendOp : uint16_t
-{
-    Add = 0,
-    Subtract,
-    ReverseSubtract,
-    Min,
-    Max,
-};
-
-enum class ColorWriteMask : uint8_t
-{
-    None = 0,
-    R = 1 << 0,
-    G = 1 << 1,
-    B = 1 << 2,
-    A = 1 << 3,
-    RGB = R | G | B,
-    RGBA = R | G | B | A,
-};
-
-constexpr ColorWriteMask operator|(ColorWriteMask a, ColorWriteMask b) noexcept
-{
-    return ColorWriteMask(uint8_t(a) | uint8_t(b));
-}
-
-constexpr ColorWriteMask operator&(ColorWriteMask a, ColorWriteMask b) noexcept
-{
-    return ColorWriteMask(uint8_t(a) & uint8_t(b));
-}
-
-enum class SampleCount : uint16_t
-{
-    Count1 = 1,
-    Count2 = 2,
-    Count4 = 4,
-    Count8 = 8,
-    Count16 = 16,
-};
 
 struct PipelineShaderDesc
 {
@@ -1078,12 +977,7 @@ struct PipelineShaderDesc
     }
 };
 
-struct PipelineReflectionDesc
-{
-    bool enabled = true;
-    bool autoBindEnabled = true;
-    bool directFieldBindingEnabled = true;
-};
+
 
 struct ComputePipelineDesc
 {
@@ -1128,136 +1022,11 @@ struct ComputePipelineDesc
     }
 };
 
-struct RasterizerStateDesc
-{
-    PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-    PolygonFillMode fillMode = PolygonFillMode::Fill;
-    CullMode cullMode = CullMode::Back;
-    FrontFace frontFace = FrontFace::CounterClockwise;
-    bool depthClampEnabled = false;
-    bool rasterizerDiscardEnabled = false;
-    float lineWidth = 1.0f;
 
-    RasterizerStateDesc& set_topology(PrimitiveTopology value) noexcept
-    {
-        topology = value;
-        return *this;
-    }
 
-    RasterizerStateDesc& set_fill_mode(PolygonFillMode value) noexcept
-    {
-        fillMode = value;
-        return *this;
-    }
 
-    RasterizerStateDesc& set_cull_mode(CullMode value) noexcept
-    {
-        cullMode = value;
-        return *this;
-    }
 
-    RasterizerStateDesc& set_front_face(FrontFace value) noexcept
-    {
-        frontFace = value;
-        return *this;
-    }
 
-    RasterizerStateDesc& set_line_width(float value) noexcept
-    {
-        lineWidth = value;
-        return *this;
-    }
-};
-
-struct DepthStencilOpDesc
-{
-    StencilOp failOp = StencilOp::Keep;
-    StencilOp passOp = StencilOp::Keep;
-    StencilOp depthFailOp = StencilOp::Keep;
-    CompareOp compareOp = CompareOp::Always;
-};
-
-struct DepthStencilStateDesc
-{
-    bool depthTestEnabled = true;
-    bool depthWriteEnabled = true;
-    CompareOp depthCompareOp = CompareOp::LessOrEqual;
-
-    bool stencilTestEnabled = false;
-    DepthStencilOpDesc front;
-    DepthStencilOpDesc back;
-    uint32_t stencilReadMask = 0xff;
-    uint32_t stencilWriteMask = 0xff;
-    uint32_t stencilReference = 0;
-
-    DepthStencilStateDesc& set_depth_enabled(bool value = true) noexcept
-    {
-        depthTestEnabled = value;
-        depthWriteEnabled = value;
-        return *this;
-    }
-
-    DepthStencilStateDesc& set_depth_test(bool value = true) noexcept
-    {
-        depthTestEnabled = value;
-        return *this;
-    }
-
-    DepthStencilStateDesc& set_depth_write(bool value = true) noexcept
-    {
-        depthWriteEnabled = value;
-        return *this;
-    }
-
-    DepthStencilStateDesc& set_depth_compare(CompareOp value) noexcept
-    {
-        depthCompareOp = value;
-        return *this;
-    }
-};
-
-struct BlendAttachmentDesc
-{
-    bool blendEnabled = true;
-
-    BlendFactor srcColorBlendFactor = BlendFactor::SrcAlpha;
-    BlendFactor dstColorBlendFactor = BlendFactor::OneMinusSrcAlpha;
-    BlendOp colorBlendOp = BlendOp::Add;
-
-    BlendFactor srcAlphaBlendFactor = BlendFactor::One;
-    BlendFactor dstAlphaBlendFactor = BlendFactor::OneMinusSrcAlpha;
-    BlendOp alphaBlendOp = BlendOp::Add;
-
-    ColorWriteMask colorWriteMask = ColorWriteMask::RGBA;
-
-    static BlendAttachmentDesc opaque()
-    {
-        BlendAttachmentDesc desc;
-        desc.blendEnabled = false;
-        desc.srcColorBlendFactor = BlendFactor::One;
-        desc.dstColorBlendFactor = BlendFactor::Zero;
-        desc.srcAlphaBlendFactor = BlendFactor::One;
-        desc.dstAlphaBlendFactor = BlendFactor::Zero;
-        return desc;
-    }
-
-    static BlendAttachmentDesc alpha_blend()
-    {
-        return {};
-    }
-
-    BlendAttachmentDesc& set_blend_enabled(bool value = true) noexcept
-    {
-        blendEnabled = value;
-        return *this;
-    }
-
-    BlendAttachmentDesc& set_color_write_mask(ColorWriteMask value) noexcept
-    {
-        colorWriteMask = value;
-        return *this;
-    }
-};
 
 struct BlendStateDesc
 {
@@ -1302,25 +1071,7 @@ struct BlendStateDesc
     }
 };
 
-struct MultisampleStateDesc
-{
-    SampleCount sampleCount = SampleCount::Count1;
-    bool sampleShadingEnabled = false;
-    float minSampleShading = 1.0f;
 
-    MultisampleStateDesc& set_sample_count(SampleCount value) noexcept
-    {
-        sampleCount = value;
-        return *this;
-    }
-
-    MultisampleStateDesc& set_sample_shading(bool enabled = true, float minSamples = 1.0f) noexcept
-    {
-        sampleShadingEnabled = enabled;
-        minSampleShading = minSamples;
-        return *this;
-    }
-};
 
 struct RenderTargetLayoutDesc
 {
@@ -1661,20 +1412,7 @@ struct RayTracingPipelineDesc
     }
 };
 
-struct RayDispatchDesc
-{
-    uint32_t width = 1;
-    uint32_t height = 1;
-    uint32_t depth = 1;
 
-    RayDispatchDesc& set_extent(uint32_t w, uint32_t h = 1, uint32_t d = 1) noexcept
-    {
-        width = w;
-        height = h;
-        depth = d;
-        return *this;
-    }
-};
 
 // ================================================================
 // Acceleration Structures
