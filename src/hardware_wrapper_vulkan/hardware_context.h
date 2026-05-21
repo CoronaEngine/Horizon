@@ -32,9 +32,9 @@ namespace Corona::Horizon::Vulkan
         void setup_debug_messenger();
         void cleanup_debug_messenger();
 
-        VkInstance instance_ { VK_NULL_HANDLE };
-        VkDebugUtilsMessengerEXT debug_messenger_ { VK_NULL_HANDLE };
-        CreateCallback create_info_ { };
+        VkInstance instance_{VK_NULL_HANDLE};
+        VkDebugUtilsMessengerEXT debug_messenger_{VK_NULL_HANDLE};
+        CreateCallback create_info_{};
 
         std::vector<std::shared_ptr<DeviceContext>> devices_;
         std::shared_ptr<DeviceContext> main_device_;

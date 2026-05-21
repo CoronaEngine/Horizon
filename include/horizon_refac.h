@@ -37,6 +37,8 @@ namespace Corona::Horizon
     // Validation
     // ================================================================
 
+    // 开启校验层，后面可以修改或者删除
+
     struct HardwareValidationConfig
     {
         bool enabled = true;
@@ -48,35 +50,25 @@ namespace Corona::Horizon
 
 
     // ================================================================
-    // Buffers
+    // HardwareBuffer
     // ================================================================
 
-    // TODO: 后面增加 HardwareBuffer 测试和验证功能，目前先保证接口正确，后续再完善实现细节和错误处理
-
     template <typename T>
-    concept HardwareBufferElement = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
+    concept HardwareTransferable = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     // index 限制 uint16_t/uint32_t。
     template <typename T>
-    concept HardwareIndexElement = std::same_as<std::remove_cvref_t<T>, uint16_t> || std::same_as<std::remove_cvref_t<T>, uint32_t>;
+    concept HardwareIndexType = std::same_as<std::remove_cvref_t<T>, uint16_t> || std::same_as<std::remove_cvref_t<T>, uint32_t>;
 
     struct HardwareBufferDesc
     {
-        uint64_t byte_size = 0;
-        uint32_t element_stride = 0;
+        uint64_t element_count = 0;
+        uint32_t element_size = 0;
         BufferUsageFlags usage = BufferUsageFlags::None;
         CpuAccessMode cpu_access = CpuAccessMode::None;
         bool dedicated = false;
         bool exportable = false;
         std::string debug_name;
-
-        HardwareBufferDesc& set_byte_size(uint64_t value)       noexcept { byte_size = value; return *this; }
-        HardwareBufferDesc& set_element_stride(uint32_t value)  noexcept { element_stride = value; return *this; }
-        HardwareBufferDesc& set_usage(BufferUsageFlags value)   noexcept { usage = value; return *this; }
-        HardwareBufferDesc& set_cpu_access(CpuAccessMode value) noexcept { cpu_access = value; return *this; }
-        HardwareBufferDesc& set_dedicated(bool value = true)    noexcept { dedicated = value; return *this; }
-        HardwareBufferDesc& set_exportable(bool value = true)   noexcept { exportable = value; return *this; }
-        HardwareBufferDesc& set_debug_name(std::string value)            { debug_name = std::move(value); return *this; }
 
         HardwareBufferDesc& apply(const HardwareBufferOptions& options) noexcept
         {
@@ -86,47 +78,45 @@ namespace Corona::Horizon
             return *this;
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
         {
             // 如果 count 很大，乘法先溢出了，validation 后面也看不出来。
             if (count > std::numeric_limits<uint64_t>::max() / sizeof(T))
-                throw std::overflow_error("HardwareBufferDesc byte_size overflow.");
+                throw std::overflow_error("HardwareBufferDesc total byte size overflow.");
 
             HardwareBufferDesc desc;
-            desc.byte_size = uint64_t(sizeof(T)) * count;
-            desc.element_stride = uint32_t(sizeof(T));
+            desc.element_count = count;
+            desc.element_size = uint32_t(sizeof(T));
             desc.usage = usage;
             desc.debug_name = std::move(name);
             return desc.apply(options);
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBufferDesc vertex(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Vertex, std::move(name), options);
         }
 
-        template <HardwareIndexElement T>
+        template <HardwareIndexType T>
         static HardwareBufferDesc index(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name), options);
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBufferDesc uniform(std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(1, BufferUsageFlags::TransferDst | BufferUsageFlags::Uniform, std::move(name), options);
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBufferDesc storage(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(count, BufferUsageFlags::TransferSrc | BufferUsageFlags::TransferDst | BufferUsageFlags::Storage, std::move(name), options);
         }
     };
-
-    
 
     struct HardwareBuffer
     {
@@ -142,95 +132,108 @@ namespace Corona::Horizon
         HardwareBuffer& operator=(const HardwareBuffer& other);
         HardwareBuffer& operator=(HardwareBuffer&& other) noexcept;
 
+        // 释放当前 buffer 持有的资源，并把对象恢复成空状态。
         void reset() noexcept;
+        // 和另一个 HardwareBuffer 交换内部资源句柄。
         void swap(HardwareBuffer& other) noexcept;
-
+        // 判断当前对象是否持有有效 GPU buffer。
         [[nodiscard]] bool valid() const noexcept;
         explicit operator bool() const noexcept { return valid(); }
 
         [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return buffer_id; }
         [[nodiscard]] uint64_t get_byte_size() const;
-        [[nodiscard]] uint64_t get_element_stride() const;
+        [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
         [[nodiscard]] void* get_mapped_data() const;
 
-        // TODO: 需要写测试案例
+        // 把 CPU 内存里的字节写进这个 HardwareBuffer。
         bool write_bytes(std::span<const std::byte> data, uint64_t offset = 0) const;
+        // 把 HardwareBuffer 里的字节读回 CPU 内存。
         bool read_bytes(std::span<std::byte> output, uint64_t offset = 0) const;
 
-        template <HardwareBufferElement T>
+        // 把一段 T 数组写进 buffer。
+        template <HardwareTransferable T>
         bool write(std::span<const T> data, uint64_t offset = 0) const
         {
             return write_bytes(std::as_bytes(data), offset);
         }
 
-        template <HardwareBufferElement T>
+        // 只写入一个对象。
+        template <HardwareTransferable T>
         bool write_value(const T& value, uint64_t offset = 0) const
         {
             return write(std::span<const T>(&value, 1), offset);
         }
 
+        // 从 buffer 里读出一段 T 数组。
         // read 禁止 const 输出。
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         requires (!std::is_const_v<T>)
         bool read(std::span<T> output, uint64_t offset = 0) const
         {
             return read_bytes(std::as_writable_bytes(output), offset);
         }
 
-        static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_stride, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
+        // 从一段原始字节创建 buffer。
+        static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
         {
+            if (element_size == 0)
+                throw std::invalid_argument("element_size must not be zero.");
+
+            if (data.size_bytes() % element_size != 0)
+                throw std::invalid_argument("data size must be divisible by element_size.");
+
             HardwareBufferDesc desc;
-            desc.byte_size = uint64_t(data.size_bytes());
-            desc.element_stride = element_stride;
+            desc.element_count = uint64_t(data.size_bytes() / element_size);
+            desc.element_size = element_size;
             desc.usage = usage;
             desc.debug_name = std::move(name);
             desc.apply(options);
             return HardwareBuffer(desc, data);
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBuffer vertex(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name), options), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
-        requires std::ranges::sized_range<Range> && HardwareBufferElement<std::ranges::range_value_t<Range>>
+        requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         static HardwareBuffer vertex(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             using T = std::ranges::range_value_t<Range>;
             return vertex<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
         }
 
-        template <HardwareIndexElement T>
+        template <HardwareIndexType T>
         static HardwareBuffer index(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name), options), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
-        requires std::ranges::sized_range<Range> && HardwareIndexElement<std::ranges::range_value_t<Range>>
+        requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
         static HardwareBuffer index(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             using T = std::ranges::range_value_t<Range>;
             return index<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBuffer uniform(const T& value, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::uniform<T>(std::move(name), options), std::as_bytes(std::span<const T>(&value, 1)));
         }
 
-        template <HardwareBufferElement T>
+        template <HardwareTransferable T>
         static HardwareBuffer storage(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::storage<T>(data.size(), std::move(name), options), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
-        requires std::ranges::sized_range<Range> && HardwareBufferElement<std::ranges::range_value_t<Range>>
+        requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         static HardwareBuffer storage(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             using T = std::ranges::range_value_t<Range>;
@@ -241,12 +244,13 @@ namespace Corona::Horizon
         [[nodiscard]] BufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
 
-        static HardwareBuffer import_external_memory(const ExternalHandle& handle, const HardwareBufferDesc& desc, uint64_t allocation_size = 0);
-        ExternalHandle export_memory() const;
+        static HardwareBuffer import_external(const ExternalHandle &handle, const HardwareBufferDesc &desc, uint64_t allocation_size = 0);
+        ExternalHandle export_external() const;
 
     private:
         explicit HardwareBuffer(std::uintptr_t id) noexcept : buffer_id(id) {}
-        std::uintptr_t buffer_id = 0;
+        std::atomic<std::uintptr_t> buffer_id{0};
+        mutable std::mutex buffer_mutex;
 
         friend class HardwareImage;
     };
@@ -279,18 +283,6 @@ namespace Corona::Horizon
 
         std::string debug_name;
 
-        HardwareImageDesc& set_dimension(ImageDimension value) noexcept { dimension = value; return *this; }
-        HardwareImageDesc& set_extent(ImageExtent value) noexcept { extent = value; return *this; }
-        HardwareImageDesc& set_format(Format value) noexcept { format = value; return *this; }
-        HardwareImageDesc& set_usage(ImageUsageFlags value) noexcept { usage = value; return *this; }
-        HardwareImageDesc& add_usage(ImageUsageFlags value) noexcept { usage |= value; return *this; }
-    HardwareImageDesc& set_cpu_access(CpuAccessMode value) noexcept { cpu_access = value; return *this; }
-    HardwareImageDesc& set_array_layers(uint32_t value) noexcept { array_layers = value; return *this; }
-    HardwareImageDesc& set_mip_levels(uint32_t value) noexcept { mip_levels = value; return *this; }
-    HardwareImageDesc& set_sample_count(uint32_t value) noexcept { sample_count = value; return *this; }
-    HardwareImageDesc& set_dedicated(bool value = true) noexcept { dedicated = value; return *this; }
-    HardwareImageDesc& set_exportable(bool value = true) noexcept { exportable = value; return *this; }
-    HardwareImageDesc& set_debug_name(std::string value) { debug_name = std::move(value); return *this; }
 
         
         HardwareImageDesc& apply(const HardwareImageOptions& options) noexcept
