@@ -9,7 +9,7 @@
 
 namespace Corona::Horizon
 {
-    struct Context
+    /*struct Context
     {
         bool enabled = true;
         bool throw_on_error = false;
@@ -19,7 +19,7 @@ namespace Corona::Horizon
     [[nodiscard]] Context get_context();
 
     bool error(std::string_view message);
-    void warning(std::string_view message);
+    void warning(std::string_view message);*/
 
     bool validate_buffer_desc(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data = {});
     bool validate_buffer_copy(const HardwareBuffer& src, const HardwareBuffer& dst, BufferRange src_range, uint64_t dst_offset = 0);
