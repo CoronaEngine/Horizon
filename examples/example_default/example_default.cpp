@@ -22,9 +22,9 @@
 
 // 通过 CMake helicon_compile_shaders 自动编译生成的 shader 反射头文件
 // eDSL 路径不再依赖 GLSL 反射头文件，render target 通过 bindRenderTarget 自动绑定
-#include GLSL(shaders/vert.glsl)
-#include GLSL(shaders/frag.glsl)
-#include GLSL(shaders/compute.glsl)
+#include GLSL(shaders/default_vert.glsl)
+#include GLSL(shaders/default_frag.glsl)
+#include GLSL(shaders/default_compute.glsl)
 
 // storage buffer (used by mesh thread, retained for compatibility)
 struct RasterizerStorageBufferObject
@@ -301,13 +301,13 @@ void run_example_default()
         // =====================================================================
         auto renderThreadGLSL = [&](uint32_t threadIndex) {
             // 简化后的 shader 无需 push constant / UBO，仅做 pass-through
-            RasterizerPipeline<vert_glsl, frag_glsl> rasterizer;
+            RasterizerPipeline<default_vert_glsl, default_frag_glsl> rasterizer;
 
             // 绑定 render target
             rasterizer.outColor = finalOutputImages[threadIndex];
 
             // compute 管线保持不变
-            ComputePipeline<compute_glsl> computer;
+            ComputePipeline<default_compute_glsl> computer;
             uint32_t computeImageDescriptorID = finalOutputImages[threadIndex].storeDescriptor();
             computer.GlobalUniformParam.imageID = computeImageDescriptorID;
 
