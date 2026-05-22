@@ -115,7 +115,7 @@ namespace EmbeddedShader
 		shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_4);
 		shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
 
-		if (isLink) shader.setEntryPoint("main");
+		shader.setSourceEntryPoint("__no_entrypoint");
 
 		Includer includer;
 		includer.includePaths = includePaths;
