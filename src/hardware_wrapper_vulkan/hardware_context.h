@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Corona::Horizon::Vulkan
+namespace Corona::Horizon
 {
     struct HardwareContext
     {
