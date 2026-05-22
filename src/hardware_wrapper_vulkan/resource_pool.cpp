@@ -1,0 +1,14 @@
+#include "resource_pool.h"
+
+#include "hardware_wrapper_vulkan/DisplayVulkan/DisplayManager.h"
+#include "hardware_wrapper_vulkan/HardwareVulkan/HardwareExecutorVulkan.h"
+#include "hardware_wrapper_vulkan/PipelineVulkan/ComputePipeline.h"
+#include "hardware_wrapper_vulkan/PipelineVulkan/RasterizerPipeline.h"
+
+BufferHardwareStorage globalBufferStorages;
+ImageHardwareStorage globalImageStorages;
+RasterizerPipelineStorage gRasterizerPipelineStorage;
+ComputePipelineStorage gComputePipelineStorage;
+DisplayerHardwareStorage globalDisplayerStorages;
+ExecutorStorage gExecutorStorage;
+PushConstantStorage globalPushConstantStorages;
