@@ -138,9 +138,8 @@ namespace Corona::Horizon
     struct HardwareBuffer
     {
     public:
-        HardwareBuffer() noexcept = default;
-        explicit HardwareBuffer(const HardwareBufferDesc& desc);
-        HardwareBuffer(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data);
+        HardwareBuffer();
+        HardwareBuffer(const HardwareBufferDesc &desc, std::span<const std::byte> upload_data = {});
 
         HardwareBuffer(const HardwareBuffer& other);
         HardwareBuffer(HardwareBuffer&& other) noexcept;
@@ -149,41 +148,27 @@ namespace Corona::Horizon
         HardwareBuffer& operator=(const HardwareBuffer& other);
         HardwareBuffer& operator=(HardwareBuffer&& other) noexcept;
 
-        // 释放当前 buffer 持有的资源，并把对象恢复成空状态。
-        void reset() noexcept;
-        // 和另一个 HardwareBuffer 交换内部资源句柄。
-        void swap(HardwareBuffer& other) noexcept;
-        // 判断当前对象是否持有有效 GPU buffer。
-        [[nodiscard]] bool valid() const noexcept;
-        explicit operator bool() const noexcept { return valid(); }
-
         [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return buffer_id; }
         [[nodiscard]] uint64_t get_byte_size() const;
         [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
         [[nodiscard]] void* get_mapped_data() const;
 
-        // 把 CPU 内存里的字节写进这个 HardwareBuffer。
         bool write_bytes(std::span<const std::byte> data, uint64_t offset = 0) const;
-        // 把 HardwareBuffer 里的字节读回 CPU 内存。
         bool read_bytes(std::span<std::byte> output, uint64_t offset = 0) const;
 
-        // 把一段 T 数组写进 buffer。
         template <HardwareTransferable T>
         bool write(std::span<const T> data, uint64_t offset = 0) const
         {
             return write_bytes(std::as_bytes(data), offset);
         }
 
-        // 只写入一个对象。
         template <HardwareTransferable T>
         bool write_value(const T& value, uint64_t offset = 0) const
         {
             return write(std::span<const T>(&value, 1), offset);
         }
 
-        // 从 buffer 里读出一段 T 数组。
-        // read 禁止 const 输出。
         template <HardwareTransferable T>
         requires (!std::is_const_v<T>)
         bool read(std::span<T> output, uint64_t offset = 0) const
@@ -191,7 +176,6 @@ namespace Corona::Horizon
             return read_bytes(std::as_writable_bytes(output), offset);
         }
 
-        // 从一段原始字节创建 buffer。
         static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
         {
             if (element_size == 0)
@@ -264,8 +248,7 @@ namespace Corona::Horizon
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
-        explicit HardwareBuffer(std::uintptr_t id) noexcept : buffer_id(id) {}
-        std::atomic<std::uintptr_t> buffer_id{0};
+        std::atomic<std::uintptr_t> buffer_id;
         mutable std::mutex buffer_mutex;
 
         friend class HardwareImage;
