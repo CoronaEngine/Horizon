@@ -1,4 +1,5 @@
-#define GLFW_INCLUDE_VULKAN
+#define GLFW_INCLUDE_NONE
+#include <volk.h>
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
@@ -12,6 +13,7 @@
 #include <stb_image.h>
 
 #define TINYOBJLOADER_IMPLEMENTATION
+#define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #include <tiny_obj_loader.h>
 
 #include <algorithm>
@@ -20,6 +22,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -32,8 +35,8 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-const std::string MODEL_PATH = "models/viking_room.obj";
-const std::string TEXTURE_PATH = "textures/viking_room.png";
+const std::filesystem::path MODEL_PATH = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
+const std::filesystem::path TEXTURE_PATH = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -228,7 +231,7 @@ class HelloTriangleApplication
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "example_baseline", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
@@ -241,11 +244,18 @@ class HelloTriangleApplication
 
     void initVulkan()
     {
+        if (volkInitialize() != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to initialize Volk!");
+        }
+
         createInstance();
+        volkLoadInstance(instance);
         setupDebugMessenger();
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
+        volkLoadDevice(device);
         createSwapChain();
         createImageViews();
         createRenderPass();
@@ -380,7 +390,7 @@ class HelloTriangleApplication
 
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "Hello Triangle";
+        appInfo.pApplicationName = "ExampleBaseline";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -683,8 +693,8 @@ class HelloTriangleApplication
 
     void createGraphicsPipeline()
     {
-        auto vertShaderCode = readFile("shaders/vert.spv");
-        auto fragShaderCode = readFile("shaders/frag.spv");
+        auto vertShaderCode = readFile("shaders/baseline_vert.spv");
+        auto fragShaderCode = readFile("shaders/baseline_frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -891,7 +901,8 @@ class HelloTriangleApplication
     void createTextureImage()
     {
         int texWidth, texHeight, texChannels;
-        stbi_uc *pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        const std::string texturePath = TEXTURE_PATH.string();
+        stbi_uc *pixels = stbi_load(texturePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels)
@@ -1092,8 +1103,10 @@ class HelloTriangleApplication
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
         std::string err;
+        std::string warn;
+        const std::string modelPath = MODEL_PATH.string();
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &err, MODEL_PATH.c_str()))
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, modelPath.c_str()))
         {
             throw std::runtime_error(err);
         }
@@ -1773,19 +1786,8 @@ class HelloTriangleApplication
     }
 };
 
-int main()
+void run_example_baseline()
 {
     HelloTriangleApplication app;
-
-    try
-    {
-        app.run();
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << e.what() << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
+    app.run();
 }
