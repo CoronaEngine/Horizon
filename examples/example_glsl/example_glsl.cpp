@@ -5,8 +5,8 @@
 #include <tiny_obj_loader.h>
 
 #include "Codegen/ControlFlows.h"
-#include GLSL(shaders/baseline_model.frag)
-#include GLSL(shaders/baseline_model.vert)
+#include GLSL(shaders/baseline_vert.glsl)
+#include GLSL(shaders/baseline_frag.glsl)
 
 #include <Horizon.h>
 
