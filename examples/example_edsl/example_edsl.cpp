@@ -21,6 +21,8 @@
 #include <vector>
 
 #include <stb_image.h>
+#include <Codegen/ControlFlows.h>
+#include GLSL(shaders/edsl_header.glsl)
 
 namespace example_baseline_edsl_detail
 {
@@ -436,7 +438,7 @@ void run_example_edsl()
             // output->tex_coord = vertex->tex_coord;
             // return output;
             position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-            Float color_weight = (vertex->color->x + vertex->color->y + vertex->color->z) * (1.0f / 3.0f);
+            Float color_weight = edsl_header_glsl::get_color_weight(vertex->color);
             return Float4(vertex->tex_coord, color_weight, 1.0f);
         };
 
