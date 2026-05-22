@@ -55,8 +55,9 @@ function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PA
             
             # 处理相对路径 -> 绝对路径（用于编译）
             if(NOT IS_ABSOLUTE "${RAW_SHADER_PATH}")
-                get_filename_component(FILE_DIR "${SOURCE_FILE}" DIRECTORY)
-                get_filename_component(SHADER_PATH "${FILE_DIR}/${RAW_SHADER_PATH}" ABSOLUTE)
+                #get_filename_component(FILE_DIR "${SOURCE_FILE}" DIRECTORY)
+                #get_filename_component(SHADER_PATH "${FILE_DIR}/${RAW_SHADER_PATH}" ABSOLUTE)
+                get_filename_component(SHADER_PATH "${SOURCE_DIR}/${RAW_SHADER_PATH}" ABSOLUTE)
             else()
                 set(SHADER_PATH "${RAW_SHADER_PATH}")
             endif()
