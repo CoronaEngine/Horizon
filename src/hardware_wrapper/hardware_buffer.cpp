@@ -20,6 +20,11 @@ namespace Corona::Horizon
 
 	}
 
+	HardwareBuffer::~HardwareBuffer()
+	{
+
+	}
+
 
 	HardwareBuffer& HardwareBuffer::operator=(const HardwareBuffer& other)
 	{
@@ -47,21 +52,38 @@ namespace Corona::Horizon
         
     }
 
-	bool HardwareBuffer::write_bytes(std::span<const std::byte> data, uint64_t offset = 0) const
+	bool HardwareBuffer::write_bytes(std::span<const std::byte> data, uint64_t offset) const
 	{
 
 	}
 
-	bool HardwareBuffer::read_bytes(std::span<std::byte> output, uint64_t offset = 0) const
+	bool HardwareBuffer::read_bytes(std::span<std::byte> output, uint64_t offset) const
 	{
 
 	}
 
-	BufferCopyCommand copy_to(const HardwareBuffer &dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
-    BufferToImageCommand copy_to(const HardwareImage &dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
-    uint32_t store_descriptor() const;
-    static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
-    [[nodiscard]] ExternalMemoryHandle export_external() const;
+	BufferCopyCommand HardwareBuffer::copy_to(const HardwareBuffer& dst, BufferRange src, uint64_t dst_offset) const
+	{
+		
+	}
 
+	BufferToImageCommand HardwareBuffer::copy_to(const HardwareImage& dst, uint64_t buffer_offset, uint32_t image_layer, uint32_t image_mip) const
+	{
 
+	}
+
+    uint32_t HardwareBuffer::store_descriptor() const
+	{
+
+	}
+
+	HardwareBuffer HardwareBuffer::import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc)
+	{
+
+	}
+
+	ExternalMemoryHandle HardwareBuffer::export_external() const
+	{
+
+	}
 }
