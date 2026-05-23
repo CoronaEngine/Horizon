@@ -260,9 +260,6 @@ namespace Corona::Horizon
     // HardwareImage
     // ================================================================
 
-    template <typename T>
-    concept HardwareImageElement = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
-
     struct HardwareImageDesc
     {
         ImageDimension dimension = ImageDimension::Image2D;
@@ -426,26 +423,26 @@ namespace Corona::Horizon
         bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool read_bytes(std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         
-        template <HardwareImageElement T>
+        template <HardwareTransferable T>
         bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return write_subresource_bytes(layer_index, mip_index, std::as_bytes(data), row_pitch, slice_pitch);
         }
 
-        template <HardwareImageElement T>
+        template <HardwareTransferable T>
         requires (!std::is_const_v<T>)
         bool read_subresource(uint32_t layer_index,uint32_t mip_index,std::span<T> output,uint64_t row_pitch = 0,uint64_t slice_pitch = 0) const
         {
             return read_subresource_bytes(layer_index, mip_index, std::as_writable_bytes(output), row_pitch, slice_pitch);
         }
 
-        template <HardwareImageElement T>
+        template <HardwareTransferable T>
         bool write(std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return write_bytes(std::as_bytes(data), row_pitch, slice_pitch);
         }
 
-        template <HardwareImageElement T>
+        template <HardwareTransferable T>
         requires (!std::is_const_v<T>)
         bool read(std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
