@@ -980,149 +980,132 @@ namespace Corona::Horizon
 
 
 
-// ================================================================
-// Pipeline Binding Core
-// ================================================================
-
-namespace detail
-{
-template<typename T>
-concept ReflectedBindingKey = requires(const T& t)
-{
-    t.byteOffset;
-    t.typeSize;
-    t.bindType;
-    t.location;
-};
-
-struct BindingSlot
-{
-    uint64_t byteOffset = 0;
-    uint32_t typeSize = 0;
-    int32_t bindType = -1;
-    uint32_t location = 0;
-
-    template<ReflectedBindingKey T>
-    static constexpr BindingSlot from(const T& key) noexcept
-    {
-        return {
-            key.byteOffset,
-            key.typeSize,
-            key.bindType,
-            key.location
-        };
-    }
-};
-}
-
-struct ResourceProxy;
-
-struct PipelineBindingScope
-{
-protected:
-    virtual ~PipelineBindingScope() = default;
-
-private:
-    friend struct ResourceProxy;
-
-    virtual void bindPushConstant(
-        const detail::BindingSlot& slot,
-        const void* data,
-        size_t size) = 0;
-
-    virtual void bindResource(
-        const detail::BindingSlot& slot,
-        const HardwareBuffer& buffer) = 0;
-
-    virtual void bindResource(
-        const detail::BindingSlot& slot,
-        const HardwareImage& image) = 0;
-
-    virtual void bindResource(
-        const detail::BindingSlot&,
-        const TopLevelAccelerationStructure&)
-    {
-        throw std::runtime_error("This pipeline does not support acceleration structure binding.");
-    }
-};
-
-template<typename Derived>
-struct ReflectedPipelineBindings
-{
-    template<detail::ReflectedBindingKey ProxyType>
-    ResourceProxy operator[](const ProxyType& proxy)
-    {
-        return ResourceProxy(
-            static_cast<PipelineBindingScope*>(static_cast<Derived*>(this)),
-            detail::BindingSlot::from(proxy)
-        );
-    }
-};
-
-struct ResourceProxy
-{
-public:
-    ResourceProxy(PipelineBindingScope* pipeline, detail::BindingSlot slot)
-        : pipeline_(pipeline)
-        , slot_(slot)
-    {
-    }
+    // ================================================================
+    // Pipeline Binding
+    // ================================================================
 
     template<typename T>
-    ResourceProxy& operator=(const T& value)
+    concept ReflectedBindingKey = requires(const T& t)
     {
-        using Value = std::remove_cvref_t<T>;
+        t.byte_offset;
+        t.type_size;
+        t.bind_type;
+        t.location;
+    };
 
-        if constexpr (std::same_as<Value, HardwareBuffer>)
-        {
-            pipeline_->bindResource(slot_, value);
-        }
-        else if constexpr (std::same_as<Value, HardwareImage>)
-        {
-            pipeline_->bindResource(slot_, value);
-        }
-        else if constexpr (std::same_as<Value, TopLevelAccelerationStructure>)
-        {
-            pipeline_->bindResource(slot_, value);
-        }
-        else if constexpr (!std::same_as<Value, ResourceProxy>)
-        {
-            pipeline_->bindPushConstant(slot_, &value, sizeof(T));
-        }
-
-        return *this;
-    }
-
-private:
-    PipelineBindingScope* pipeline_ = nullptr;
-    detail::BindingSlot slot_{};
-};
-
-struct PipelineState
-{
-public:
-    [[nodiscard]] uintptr_t getPipelineID() const noexcept
+    struct BindingSlot
     {
-        return pipelineID_.load(std::memory_order_acquire);
-    }
+        uint64_t byte_offset = 0;
+        uint32_t type_size = 0;
+        int32_t bind_type = -1;
+        uint32_t location = 0;
 
-protected:
-    mutable std::mutex pipelineMutex_;
-    std::atomic<std::uintptr_t> pipelineID_{0};
-    std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
-};
+        template<ReflectedBindingKey T>
+        static constexpr BindingSlot from(const T& key) noexcept
+        {
+            return 
+            {
+                key.byte_offset,
+                key.type_size,
+                key.bind_type,
+                key.location
+            };
+        }
+    };
 
-// ================================================================
-// Compute Pipeline Base
-// ================================================================
+    struct PipelineBindingScope
+    {
+    protected:
+        virtual ~PipelineBindingScope() = default;
 
-struct ComputePipelineBase
-    : PipelineState
-    , PipelineBindingScope
-    , ReflectedPipelineBindings<ComputePipelineBase>
-{
-public:
-    ComputePipelineBase();
+    private:
+        friend struct ResourceProxy;
+
+        virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
+        virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
+        virtual void bind_image(const BindingSlot &slot, const HardwareImage &image) = 0;
+        /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
+        {
+            throw std::runtime_error("This pipeline does not support acceleration structure binding.");
+        }*/
+    };
+
+    struct ResourceProxy
+    {
+    public:
+        ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
+
+        ResourceProxy& operator=(const ResourceProxy&) = delete;
+        ResourceProxy& operator=(ResourceProxy&&) = delete;
+
+        template <typename T>
+        requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
+        ResourceProxy& operator=(const T& value)
+        {
+            using Value = std::remove_cvref_t<T>;
+
+            if constexpr (std::same_as<Value, HardwareBuffer>)
+            {
+                pipeline_.bind_buffer(slot_, value);
+            }
+            else if constexpr (std::same_as<Value, HardwareImage>)
+            {
+                pipeline_.bind_image(slot_, value);
+            }
+            /*else if constexpr (std::same_as<Value, TopLevelAccelerationStructure>)
+            {
+                pipeline_.bindResource(slot_, value);
+            }*/
+            else
+            {
+                static_assert(HardwareTransferable<Value>, "Pipeline push constants must be trivially copyable non-pointer values.");
+                pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
+            }
+
+            return *this;
+        }
+
+    private:
+        PipelineBindingScope& pipeline_;
+        BindingSlot slot_;
+    };
+
+    template<typename Derived>
+    struct ReflectedPipelineBindings
+    {
+        template<ReflectedBindingKey ProxyType>
+        ResourceProxy operator[](const ProxyType& proxy)
+        {
+            template <ReflectedBindingKey ProxyType>
+            [[nodiscard]] ResourceProxy operator[](const ProxyType& proxy)
+            {
+                return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
+            }
+        }
+    };
+
+    struct PipelineState
+    {
+      public:
+        [[nodiscard]] uintptr_t getPipelineID() const noexcept
+        {
+            return pipelineID_.load(std::memory_order_acquire);
+        }
+
+      protected:
+        mutable std::mutex pipelineMutex_;
+        std::atomic<std::uintptr_t> pipelineID_{0};
+        std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
+    };
+
+    // ================================================================
+    // Pipeline Runtime
+    // ================================================================
+
+    struct ComputePipelineBase : PipelineBindingScope, ReflectedPipelineBindings<ComputePipelineBase>
+    {
+    public:
+        ComputePipelineBase();
 
     ComputePipelineBase(
         const std::string& shaderCode,
