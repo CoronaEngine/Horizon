@@ -458,8 +458,8 @@ namespace Corona::Horizon
         [[nodiscard]] ImageToBufferCommand copy_to(const HardwareBuffer &dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
         [[nodiscard]] BufferToImageCommand copy_from(const HardwareBuffer &src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-        static HardwareImage import_external_memory(const ExternalHandle& handle,const HardwareImageDesc& desc,uint64_t allocation_size = 0);
-        ExternalHandle export_memory() const;
+        static HardwareImage import_external(const ExternalMemoryHandle &handle, const HardwareImageDesc &desc, uint64_t allocation_size = 0);
+        [[nodiscard]] ExternalMemoryHandle export_external() const;
         
     private:
         std::atomic<std::uintptr_t> image_id;
