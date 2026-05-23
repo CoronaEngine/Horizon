@@ -473,29 +473,8 @@ namespace Corona::Horizon
     struct HardwareImageLayerSelector
     {
     public:
-        HardwareImageLayerSelector(const HardwareImage& image, uint32_t layer_index)
-            : image_(image)
-            , layer_(layer_index)
-        {
-            image_.validate_layer(layer_);
-        }
-
-        // Required access style: image[layer][mip].
-        [[nodiscard]] HardwareImage operator[](uint32_t mip_index) const
-        {
-            return image_.subresource(layer_, mip_index);
-        }
-
-        [[nodiscard]] HardwareImage mip(uint32_t mip_index) const
-        {
-            return image_.subresource(layer_, mip_index);
-        }
-
-        [[nodiscard]] HardwareImage all_mips() const
-        {
-            return image_.layer(layer_);
-        }
-
+        HardwareImageLayerSelector(const HardwareImage &image, uint32_t layer_index) : image_(image), layer_(layer_index) {}
+        [[nodiscard]] HardwareImage operator[](uint32_t mip_index) const;
     private:
         HardwareImage image_;
         uint32_t layer_ = 0;
@@ -506,9 +485,11 @@ namespace Corona::Horizon
         return HardwareImageLayerSelector(*this, layer_index);
     }
 
-    //////////////////////////////////////////////////////////////////////////
+    
+    
+    // ================================================================
     // HardwarePushConstant
-    //////////////////////////////////////////////////////////////////////////
+    // ================================================================
 
     inline constexpr uint32_t kPortablePushConstantByteSize = 128;
 
