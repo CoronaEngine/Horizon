@@ -571,471 +571,412 @@ namespace Corona::Horizon
         std::vector<uint32_t> spirv;
         std::string source;
         EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
-        std::string entryPoint = "main";
-        std::string debugName;
+        std::string entry_point = "main";
+        std::string debug_name;
 
         static PipelineShaderDesc from_spirv(PipelineShaderStage stage,
                                              std::vector<uint32_t> code,
-                                             std::string entryPoint = "main")
+                                             std::string entry_point = "main")
         {
             PipelineShaderDesc desc;
             desc.stage = stage;
             desc.spirv = std::move(code);
-            desc.entryPoint = std::move(entryPoint);
+            desc.language = EmbeddedShader::ShaderLanguage::SpirV;
+            desc.entry_point = std::move(entry_point);
             return desc;
         }
 
-    static PipelineShaderDesc from_source(
-        PipelineShaderStage stage,
-        std::string code,
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-        std::string entryPoint = "main")
+        static PipelineShaderDesc from_source(PipelineShaderStage stage,
+                                              std::string code,
+                                              EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                                              std::string entry_point = "main")
+        {
+            PipelineShaderDesc desc;
+            desc.stage = stage;
+            desc.source = std::move(code);
+            desc.language = language;
+            desc.entry_point = std::move(entry_point);
+            return desc;
+        }
+    };
+
+    struct ComputePipelineDesc
     {
-        PipelineShaderDesc desc;
-        desc.stage = stage;
-        desc.source = std::move(code);
-        desc.language = language;
-        desc.entryPoint = std::move(entryPoint);
-        return desc;
-    }
+        PipelineShaderDesc compute_shader;
+        PipelineReflectionDesc reflection;
+        std::string debug_name;
 
-    
-};
+        ComputePipelineDesc& set_shader(PipelineShaderDesc shader)
+        {
+            compute_shader = std::move(shader);
+            compute_shader.stage = PipelineShaderStage::Compute;
+            return *this;
+        }
 
+        ComputePipelineDesc& set_spirv(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        {
+            return set_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
+        ComputePipelineDesc& set_source(std::string source,
+                                        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                                        std::string entry_point = "main")
+        {
+            return set_shader(PipelineShaderDesc::from_source(PipelineShaderStage::Compute,
+                                                              std::move(source),
+                                                              language,
+                                                              std::move(entry_point)));
+        }
 
-struct ComputePipelineDesc
-{
-    PipelineShaderDesc computeShader;
-    PipelineReflectionDesc reflection;
-    std::string debugName;
+        ComputePipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
+        {
+            reflection = value;
+            return *this;
+        }
+    };
 
-    ComputePipelineDesc& set_shader(PipelineShaderDesc shader)
+    struct BlendStateDesc
     {
-        computeShader = std::move(shader);
-        computeShader.stage = PipelineShaderStage::Compute;
-        return *this;
-    }
+        bool logic_op_enabled = false;
+        std::vector<BlendAttachmentDesc> attachments = {BlendAttachmentDesc::alpha_blend()};
 
-    ComputePipelineDesc& set_spirv(std::vector<uint32_t> spirv)
+        BlendStateDesc& set_attachment(uint32_t index, BlendAttachmentDesc desc)
+        {
+            if (attachments.size() <= index)
+                attachments.resize(size_t(index) + 1, BlendAttachmentDesc::alpha_blend());
+
+            attachments[index] = std::move(desc);
+            return *this;
+        }
+
+        BlendStateDesc& set_attachment_count(uint32_t count)
+        {
+            attachments.resize(count, BlendAttachmentDesc::alpha_blend());
+            return *this;
+        }
+
+        BlendStateDesc& set_opaque()
+        {
+            for (auto& attachment : attachments)
+                attachment = BlendAttachmentDesc::opaque();
+
+            return *this;
+        }
+
+        BlendStateDesc& set_alpha_blend()
+        {
+            for (auto& attachment : attachments)
+                attachment = BlendAttachmentDesc::alpha_blend();
+
+            return *this;
+        }
+    };
+
+    struct RenderTargetLayoutDesc
     {
-        return set_shader(PipelineShaderDesc::from_spirv(
-            PipelineShaderStage::Compute,
-            std::move(spirv)));
-    }
+        std::vector<Format> color_formats;
+        Format depth_stencil_format = Format::UNKNOWN;
+        uint32_t multiview_count = 1;
 
-    ComputePipelineDesc& set_source(
-        std::string source,
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL)
+        RenderTargetLayoutDesc& add_color_format(Format format)
+        {
+            color_formats.push_back(format);
+            return *this;
+        }
+
+        RenderTargetLayoutDesc& set_color_format(uint32_t index, Format format)
+        {
+            if (color_formats.size() <= index)
+                color_formats.resize(size_t(index) + 1, Format::UNKNOWN);
+
+            color_formats[index] = format;
+            return *this;
+        }
+
+        RenderTargetLayoutDesc& set_depth_stencil_format(Format format) noexcept
+        {
+            depth_stencil_format = format;
+            return *this;
+        }
+
+        RenderTargetLayoutDesc& set_multiview_count(uint32_t value) noexcept
+        {
+            multiview_count = value;
+            return *this;
+        }
+    };
+
+    struct RasterizerPipelineDesc
     {
-        return set_shader(PipelineShaderDesc::from_source(
-            PipelineShaderStage::Compute,
-            std::move(source),
-            language));
-    }
+        PipelineShaderDesc vertex_shader;
+        PipelineShaderDesc fragment_shader;
 
-    ComputePipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
+        RasterizerStateDesc rasterizer;
+        DepthStencilStateDesc depth_stencil;
+        BlendStateDesc blend;
+        MultisampleStateDesc multisample;
+        RenderTargetLayoutDesc render_target_layout;
+        PipelineReflectionDesc reflection;
+
+        std::string debug_name;
+
+        RasterizerPipelineDesc& set_vertex_shader(PipelineShaderDesc shader)
+        {
+            vertex_shader = std::move(shader);
+            vertex_shader.stage = PipelineShaderStage::Vertex;
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_fragment_shader(PipelineShaderDesc shader)
+        {
+            fragment_shader = std::move(shader);
+            fragment_shader.stage = PipelineShaderStage::Fragment;
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_vertex_spirv(std::vector<uint32_t> spirv,
+                                                 std::string entry_point = "main")
+        {
+            return set_vertex_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Vertex,
+                                                                    std::move(spirv),
+                                                                    std::move(entry_point)));
+        }
+
+        RasterizerPipelineDesc& set_fragment_spirv(std::vector<uint32_t> spirv,
+                                                   std::string entry_point = "main")
+        {
+            return set_fragment_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment,
+                                                                      std::move(spirv),
+                                                                      std::move(entry_point)));
+        }
+
+        RasterizerPipelineDesc& set_vertex_source(std::string source,
+                                                  EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                                                  std::string entry_point = "main")
+        {
+            return set_vertex_shader(PipelineShaderDesc::from_source(PipelineShaderStage::Vertex,
+                                                                     std::move(source),
+                                                                     language,
+                                                                     std::move(entry_point)));
+        }
+
+        RasterizerPipelineDesc& set_fragment_source(std::string source,
+                                                    EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                                                    std::string entry_point = "main")
+        {
+            return set_fragment_shader(PipelineShaderDesc::from_source(PipelineShaderStage::Fragment,
+                                                                       std::move(source),
+                                                                       language,
+                                                                       std::move(entry_point)));
+        }
+
+        RasterizerPipelineDesc& set_rasterizer(RasterizerStateDesc value) noexcept
+        {
+            rasterizer = value;
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_depth_stencil(DepthStencilStateDesc value) noexcept
+        {
+            depth_stencil = value;
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_blend(BlendStateDesc value)
+        {
+            blend = std::move(value);
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_multisample(MultisampleStateDesc value) noexcept
+        {
+            multisample = value;
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_render_target_layout(RenderTargetLayoutDesc value)
+        {
+            render_target_layout = std::move(value);
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_multiview_count(uint32_t value) noexcept
+        {
+            render_target_layout.set_multiview_count(value);
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
+        {
+            reflection = value;
+            return *this;
+        }
+
+        RasterizerPipelineDesc& set_debug_name(std::string value)
+        {
+            debug_name = std::move(value);
+            return *this;
+        }
+    };
+
+    struct RayTracingShaderDesc
     {
-        reflection = value;
-        return *this;
-    }
+        RayTracingShaderStage stage = RayTracingShaderStage::RayGeneration;
+        std::vector<uint32_t> spirv;
+        std::string source;
+        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
+        std::string entry_point = "main";
+        std::string debug_name;
 
-    ComputePipelineDesc& set_debug_name(std::string value)
+        static RayTracingShaderDesc from_spirv(RayTracingShaderStage stage,
+                                               std::vector<uint32_t> code,
+                                               std::string entry_point = "main")
+        {
+            RayTracingShaderDesc desc;
+            desc.stage = stage;
+            desc.spirv = std::move(code);
+            desc.language = EmbeddedShader::ShaderLanguage::SpirV;
+            desc.entry_point = std::move(entry_point);
+            return desc;
+        }
+
+        static RayTracingShaderDesc from_source(RayTracingShaderStage stage,
+                                                std::string code,
+                                                EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                                                std::string entry_point = "main")
+        {
+            RayTracingShaderDesc desc;
+            desc.stage = stage;
+            desc.source = std::move(code);
+            desc.language = language;
+            desc.entry_point = std::move(entry_point);
+            return desc;
+        }
+    };
+
+    struct RayTracingHitGroupDesc
     {
-        debugName = std::move(value);
-        return *this;
-    }
-};
+        RayTracingHitGroupKind kind = RayTracingHitGroupKind::Triangles;
+        int32_t closest_hit_shader = -1;
+        int32_t any_hit_shader = -1;
+        int32_t intersection_shader = -1;
+        std::string debug_name;
 
+        static RayTracingHitGroupDesc triangles(int32_t closest_hit_shader,
+                                                int32_t any_hit_shader = -1)
+        {
+            RayTracingHitGroupDesc desc;
+            desc.kind = RayTracingHitGroupKind::Triangles;
+            desc.closest_hit_shader = closest_hit_shader;
+            desc.any_hit_shader = any_hit_shader;
+            return desc;
+        }
 
+        static RayTracingHitGroupDesc procedural(int32_t intersection_shader,
+                                                 int32_t closest_hit_shader = -1,
+                                                 int32_t any_hit_shader = -1)
+        {
+            RayTracingHitGroupDesc desc;
+            desc.kind = RayTracingHitGroupKind::Procedural;
+            desc.intersection_shader = intersection_shader;
+            desc.closest_hit_shader = closest_hit_shader;
+            desc.any_hit_shader = any_hit_shader;
+            return desc;
+        }
+    };
 
-
-
-
-
-struct BlendStateDesc
-{
-    bool logicOpEnabled = false;
-    std::vector<BlendAttachmentDesc> attachments = { BlendAttachmentDesc::alpha_blend() };
-
-    BlendStateDesc& set_logic_op_enabled(bool value = true) noexcept
+    struct RayTracingPipelineDesc
     {
-        logicOpEnabled = value;
-        return *this;
-    }
+        std::vector<RayTracingShaderDesc> shaders;
+        std::vector<RayTracingHitGroupDesc> hit_groups;
 
-    BlendStateDesc& set_attachment(uint32_t index, BlendAttachmentDesc desc)
-    {
-        if (attachments.size() <= index)
-            attachments.resize(size_t(index) + 1, BlendAttachmentDesc::alpha_blend());
+        uint32_t max_recursion_depth = 1;
+        uint32_t max_payload_size = 0;
+        uint32_t max_attribute_size = 8;
 
-        attachments[index] = desc;
-        return *this;
-    }
+        PipelineReflectionDesc reflection;
+        std::string debug_name;
 
-    BlendStateDesc& set_attachment_count(uint32_t count)
-    {
-        attachments.resize(count, BlendAttachmentDesc::alpha_blend());
-        return *this;
-    }
+        uint32_t add_shader(RayTracingShaderDesc shader)
+        {
+            shaders.push_back(std::move(shader));
+            return static_cast<uint32_t>(shaders.size() - 1);
+        }
 
-    BlendStateDesc& set_opaque()
-    {
-        for (auto& attachment : attachments)
-            attachment = BlendAttachmentDesc::opaque();
+        uint32_t add_ray_generation_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        {
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::RayGeneration,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
-        return *this;
-    }
+        uint32_t add_miss_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        {
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Miss,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
-    BlendStateDesc& set_alpha_blend()
-    {
-        for (auto& attachment : attachments)
-            attachment = BlendAttachmentDesc::alpha_blend();
+        uint32_t add_closest_hit_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        {
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::ClosestHit,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
-        return *this;
-    }
-};
+        uint32_t add_any_hit_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        {
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::AnyHit,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
+        uint32_t add_intersection_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        {
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Intersection,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
+        uint32_t add_callable_shader(std::vector<uint32_t> spirv,std::string entry_point = "main")
+        {
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Callable,
+                                                             std::move(spirv),
+                                                             std::move(entry_point)));
+        }
 
-struct RenderTargetLayoutDesc
-{
-    std::vector<Format> colorFormats;
-    Format depthStencilFormat = Format::UNKNOWN;
-    uint32_t multiviewCount = 1;
+        RayTracingPipelineDesc& add_hit_group(RayTracingHitGroupDesc hit_group)
+        {
+            hit_groups.push_back(std::move(hit_group));
+            return *this;
+        }
 
-    RenderTargetLayoutDesc& add_color_format(Format format)
-    {
-        colorFormats.push_back(format);
-        return *this;
-    }
+        RayTracingPipelineDesc& set_max_recursion_depth(uint32_t value) noexcept
+        {
+            max_recursion_depth = value == 0 ? 1 : value;
+            return *this;
+        }
 
-    RenderTargetLayoutDesc& set_color_format(uint32_t index, Format format)
-    {
-        if (colorFormats.size() <= index)
-            colorFormats.resize(size_t(index) + 1, Format::UNKNOWN);
+        RayTracingPipelineDesc& set_max_payload_size(uint32_t value) noexcept
+        {
+            max_payload_size = value;
+            return *this;
+        }
 
-        colorFormats[index] = format;
-        return *this;
-    }
+        RayTracingPipelineDesc& set_max_attribute_size(uint32_t value) noexcept
+        {
+            max_attribute_size = value;
+            return *this;
+        }
 
-    RenderTargetLayoutDesc& set_depth_stencil_format(Format format) noexcept
-    {
-        depthStencilFormat = format;
-        return *this;
-    }
-
-    RenderTargetLayoutDesc& set_multiview_count(uint32_t value) noexcept
-    {
-        multiviewCount = value;
-        return *this;
-    }
-};
-
-struct RasterizerPipelineDesc
-{
-    PipelineShaderDesc vertexShader;
-    PipelineShaderDesc fragmentShader;
-
-    RasterizerStateDesc rasterizer;
-    DepthStencilStateDesc depthStencil;
-    BlendStateDesc blend;
-    MultisampleStateDesc multisample;
-    RenderTargetLayoutDesc renderTargetLayout;
-    PipelineReflectionDesc reflection;
-
-    std::string debugName;
-
-    RasterizerPipelineDesc& set_vertex_shader(PipelineShaderDesc shader)
-    {
-        vertexShader = std::move(shader);
-        vertexShader.stage = PipelineShaderStage::Vertex;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_fragment_shader(PipelineShaderDesc shader)
-    {
-        fragmentShader = std::move(shader);
-        fragmentShader.stage = PipelineShaderStage::Fragment;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_vertex_spirv(std::vector<uint32_t> spirv)
-    {
-        return set_vertex_shader(PipelineShaderDesc::from_spirv(
-            PipelineShaderStage::Vertex,
-            std::move(spirv)));
-    }
-
-    RasterizerPipelineDesc& set_fragment_spirv(std::vector<uint32_t> spirv)
-    {
-        return set_fragment_shader(PipelineShaderDesc::from_spirv(
-            PipelineShaderStage::Fragment,
-            std::move(spirv)));
-    }
-
-    RasterizerPipelineDesc& set_vertex_source(
-        std::string source,
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL)
-    {
-        return set_vertex_shader(PipelineShaderDesc::from_source(
-            PipelineShaderStage::Vertex,
-            std::move(source),
-            language));
-    }
-
-    RasterizerPipelineDesc& set_fragment_source(
-        std::string source,
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL)
-    {
-        return set_fragment_shader(PipelineShaderDesc::from_source(
-            PipelineShaderStage::Fragment,
-            std::move(source),
-            language));
-    }
-
-    RasterizerPipelineDesc& set_rasterizer(RasterizerStateDesc value) noexcept
-    {
-        rasterizer = value;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_depth_stencil(DepthStencilStateDesc value) noexcept
-    {
-        depthStencil = value;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_blend(BlendStateDesc value)
-    {
-        blend = std::move(value);
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_multisample(MultisampleStateDesc value) noexcept
-    {
-        multisample = value;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_render_target_layout(RenderTargetLayoutDesc value)
-    {
-        renderTargetLayout = std::move(value);
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_multiview_count(uint32_t value) noexcept
-    {
-        renderTargetLayout.multiviewCount = value;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
-    {
-        reflection = value;
-        return *this;
-    }
-
-    RasterizerPipelineDesc& set_debug_name(std::string value)
-    {
-        debugName = std::move(value);
-        return *this;
-    }
-};
-
-struct RayTracingShaderDesc
-{
-    RayTracingShaderStage stage = RayTracingShaderStage::RayGeneration;
-    std::vector<uint32_t> spirv;
-    std::string source;
-    EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
-    std::string entryPoint = "main";
-    std::string debugName;
-
-    static RayTracingShaderDesc from_spirv(
-        RayTracingShaderStage stage,
-        std::vector<uint32_t> code,
-        std::string entryPoint = "main")
-    {
-        RayTracingShaderDesc desc;
-        desc.stage = stage;
-        desc.spirv = std::move(code);
-        desc.entryPoint = std::move(entryPoint);
-        return desc;
-    }
-
-    static RayTracingShaderDesc from_source(
-        RayTracingShaderStage stage,
-        std::string code,
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-        std::string entryPoint = "main")
-    {
-        RayTracingShaderDesc desc;
-        desc.stage = stage;
-        desc.source = std::move(code);
-        desc.language = language;
-        desc.entryPoint = std::move(entryPoint);
-        return desc;
-    }
-
-    [[nodiscard]] bool has_spirv() const noexcept
-    {
-        return !spirv.empty();
-    }
-
-    [[nodiscard]] bool has_source() const noexcept
-    {
-        return !source.empty();
-    }
-
-    RayTracingShaderDesc& set_debug_name(std::string value)
-    {
-        debugName = std::move(value);
-        return *this;
-    }
-};
-
-struct RayTracingHitGroupDesc
-{
-    RayTracingHitGroupKind kind = RayTracingHitGroupKind::Triangles;
-    int32_t closestHitShader = -1;
-    int32_t anyHitShader = -1;
-    int32_t intersectionShader = -1;
-    std::string debugName;
-
-    static RayTracingHitGroupDesc triangles(
-        int32_t closestHitShader,
-        int32_t anyHitShader = -1)
-    {
-        RayTracingHitGroupDesc desc;
-        desc.kind = RayTracingHitGroupKind::Triangles;
-        desc.closestHitShader = closestHitShader;
-        desc.anyHitShader = anyHitShader;
-        return desc;
-    }
-
-    static RayTracingHitGroupDesc procedural(
-        int32_t intersectionShader,
-        int32_t closestHitShader = -1,
-        int32_t anyHitShader = -1)
-    {
-        RayTracingHitGroupDesc desc;
-        desc.kind = RayTracingHitGroupKind::Procedural;
-        desc.intersectionShader = intersectionShader;
-        desc.closestHitShader = closestHitShader;
-        desc.anyHitShader = anyHitShader;
-        return desc;
-    }
-
-    RayTracingHitGroupDesc& set_debug_name(std::string value)
-    {
-        debugName = std::move(value);
-        return *this;
-    }
-};
-
-struct RayTracingPipelineDesc
-{
-    std::vector<RayTracingShaderDesc> shaders;
-    std::vector<RayTracingHitGroupDesc> hitGroups;
-
-    uint32_t maxRecursionDepth = 1;
-    uint32_t maxPayloadSize = 0;
-    uint32_t maxAttributeSize = 8;
-
-    PipelineReflectionDesc reflection;
-    std::string debugName;
-
-    uint32_t add_shader(RayTracingShaderDesc shader)
-    {
-        shaders.push_back(std::move(shader));
-        return static_cast<uint32_t>(shaders.size() - 1);
-    }
-
-    uint32_t add_ray_generation_shader(std::vector<uint32_t> spirv, std::string entryPoint = "main")
-    {
-        return add_shader(RayTracingShaderDesc::from_spirv(
-            RayTracingShaderStage::RayGeneration,
-            std::move(spirv),
-            std::move(entryPoint)));
-    }
-
-    uint32_t add_miss_shader(std::vector<uint32_t> spirv, std::string entryPoint = "main")
-    {
-        return add_shader(RayTracingShaderDesc::from_spirv(
-            RayTracingShaderStage::Miss,
-            std::move(spirv),
-            std::move(entryPoint)));
-    }
-
-    uint32_t add_closest_hit_shader(std::vector<uint32_t> spirv, std::string entryPoint = "main")
-    {
-        return add_shader(RayTracingShaderDesc::from_spirv(
-            RayTracingShaderStage::ClosestHit,
-            std::move(spirv),
-            std::move(entryPoint)));
-    }
-
-    uint32_t add_any_hit_shader(std::vector<uint32_t> spirv, std::string entryPoint = "main")
-    {
-        return add_shader(RayTracingShaderDesc::from_spirv(
-            RayTracingShaderStage::AnyHit,
-            std::move(spirv),
-            std::move(entryPoint)));
-    }
-
-    uint32_t add_intersection_shader(std::vector<uint32_t> spirv, std::string entryPoint = "main")
-    {
-        return add_shader(RayTracingShaderDesc::from_spirv(
-            RayTracingShaderStage::Intersection,
-            std::move(spirv),
-            std::move(entryPoint)));
-    }
-
-    uint32_t add_callable_shader(std::vector<uint32_t> spirv, std::string entryPoint = "main")
-    {
-        return add_shader(RayTracingShaderDesc::from_spirv(
-            RayTracingShaderStage::Callable,
-            std::move(spirv),
-            std::move(entryPoint)));
-    }
-
-    RayTracingPipelineDesc& add_hit_group(RayTracingHitGroupDesc hitGroup)
-    {
-        hitGroups.push_back(std::move(hitGroup));
-        return *this;
-    }
-
-    RayTracingPipelineDesc& set_max_recursion_depth(uint32_t value) noexcept
-    {
-        maxRecursionDepth = value;
-        return *this;
-    }
-
-    RayTracingPipelineDesc& set_max_payload_size(uint32_t value) noexcept
-    {
-        maxPayloadSize = value;
-        return *this;
-    }
-
-    RayTracingPipelineDesc& set_max_attribute_size(uint32_t value) noexcept
-    {
-        maxAttributeSize = value;
-        return *this;
-    }
-
-    RayTracingPipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
-    {
-        reflection = value;
-        return *this;
-    }
-
-    RayTracingPipelineDesc& set_debug_name(std::string value)
-    {
-        debugName = std::move(value);
-        return *this;
-    }
-};
+        RayTracingPipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
+        {
+            reflection = value;
+            return *this;
+        }
+    };
 
 
 
