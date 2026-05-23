@@ -461,6 +461,15 @@ namespace Corona::Horizon
         Max,
     };
 
+    enum class SampleCount : uint16_t
+    {
+        Count1 = 1,
+        Count2 = 2,
+        Count4 = 4,
+        Count8 = 8,
+        Count16 = 16,
+    };
+
     enum class ColorWriteMask : uint8_t
     {
         None = 0,
@@ -488,15 +497,6 @@ namespace Corona::Horizon
         return a;
     }
 
-    enum class SampleCount : uint16_t
-    {
-        Count1 = 1,
-        Count2 = 2,
-        Count4 = 4,
-        Count8 = 8,
-        Count16 = 16,
-    };
-
 
 
     // ================================================================
@@ -509,8 +509,10 @@ namespace Corona::Horizon
         PolygonFillMode fill_mode = PolygonFillMode::Fill;
         CullMode cull_mode = CullMode::Back;
         FrontFace front_face = FrontFace::CounterClockwise;
+
         bool depth_clamp_enabled = false;
         bool rasterizer_discard_enabled = false;
+
         float line_width = 1.0f;
     };
 
@@ -558,13 +560,6 @@ namespace Corona::Horizon
         float min_sample_shading = 1.0f;
     };
 
-    struct PipelineReflectionDesc
-    {
-        bool enabled = true;
-        bool auto_bind_enabled = true;
-        bool direct_field_binding_enabled = true;
-    };
-
 
 
     // ================================================================
@@ -605,4 +600,5 @@ namespace Corona::Horizon
         uint32_t height = 1;
         uint32_t depth = 1;
     };
-}
+
+} // namespace Corona::Horizon
