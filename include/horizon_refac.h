@@ -491,47 +491,26 @@ namespace Corona::Horizon
     inline constexpr uint32_t kPortablePushConstantByteSize = 128;
 
     template <typename T>
-    concept HardwarePushConstantValue =
-        std::is_trivially_copyable_v<std::remove_cvref_t<T>> &&
-        !std::is_pointer_v<std::remove_cvref_t<T>>;
+    concept HardwarePushConstantValue = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && 
+                                        !std::is_pointer_v<std::remove_cvref_t<T>> &&
+                                        !std::is_same_v<std::remove_cvref_t<T>, HardwarePushConstant>;
 
     struct HardwarePushConstantDesc
     {
         uint64_t byte_size = 0;
         std::string debug_name;
-
-        HardwarePushConstantDesc& set_byte_size(uint64_t value) noexcept
-        {
-            byte_size = value;
-            return *this;
-        }
-
-        HardwarePushConstantDesc& set_debug_name(std::string value)
-        {
-            debug_name = std::move(value);
-            return *this;
-        }
     };
 
     struct HardwarePushConstant
     {
-      public:
-        using Size = uint64_t;
-        static constexpr Size whole_size = std::numeric_limits<Size>::max();
+    public:
+        static constexpr uint64_t max_byte_size = kPortablePushConstantByteSize;
+        static constexpr uint64_t whole_size = std::numeric_limits<uint64_t>::max();
 
         HardwarePushConstant() = default;
         explicit HardwarePushConstant(HardwarePushConstantDesc desc);
-        explicit HardwarePushConstant(Size byte_size);
-
-        // Compatibility constructor. If whole is provided, this deep-copies that range.
-        HardwarePushConstant(Size byte_size, Size offset, const HardwarePushConstant* whole = nullptr);
-
-        HardwarePushConstant(const HardwarePushConstant& other);
-        HardwarePushConstant(HardwarePushConstant&& other) noexcept;
-        ~HardwarePushConstant() = default;
-
-        HardwarePushConstant& operator=(const HardwarePushConstant& other);
-        HardwarePushConstant& operator=(HardwarePushConstant&& other) noexcept;
+        explicit HardwarePushConstant(uint64_t byte_size);
+        ~HardwarePushConstant();
 
         template <HardwarePushConstantValue T>
         explicit HardwarePushConstant(const T& value)
@@ -546,35 +525,13 @@ namespace Corona::Horizon
             return *this;
         }
 
-        [[nodiscard]] bool valid() const noexcept;
-        [[nodiscard]] bool empty() const noexcept;
-        [[nodiscard]] Size byte_size() const noexcept;
-        [[nodiscard]] HardwarePushConstantDesc desc() const;
+        bool write_bytes(std::span<const std::byte> data, uint64_t offset = 0) noexcept;
+        bool read_bytes(std::span<std::byte> output, uint64_t offset = 0) const noexcept;
 
-        bool reset(HardwarePushConstantDesc desc);
-        bool reset(Size byte_size);
-        void clear(std::byte value = std::byte{0});
-
-        bool write_bytes(const void* data, Size byte_size, Size offset = 0);
-        bool write_bytes(std::span<const std::byte> data, Size offset = 0);
-
-        bool read_bytes(void* output, Size byte_size, Size offset = 0) const;
-        bool read_bytes(std::span<std::byte> output, Size offset = 0) const;
-
-        [[nodiscard]] std::vector<std::byte> snapshot_bytes(
-            Size offset = 0,
-            Size byte_size = whole_size) const;
-
-        template <typename F>
-        decltype(auto) with_bytes(F&& callback) const
-        {
-            std::shared_lock lock(mutex_);
-            return std::forward<F>(callback)(
-                std::span<const std::byte>(bytes_.data(), bytes_.size()));
-        }
+        [[nodiscard]] std::vector<std::byte> snapshot_bytes(uint64_t offset = 0, uint64_t byte_size = whole_size) const;
 
         template <HardwarePushConstantValue T>
-        bool write_value(Size offset, const T& value)
+        bool write_value(uint64_t offset, const T &value) noexcept
         {
             return write_bytes(&value, sizeof(T), offset);
         }
@@ -588,38 +545,45 @@ namespace Corona::Horizon
             return write_value(0, value);
         }
 
-      private:
-        mutable std::shared_mutex mutex_;
+        template <HardwarePushConstantValue T>
+        bool assign(const T &value) noexcept
+        {
+            if (!reset(sizeof(T)))
+                return false;
+
+            return write_value(0, value);
+        }
+
+    private:
         HardwarePushConstantDesc desc_;
-        std::vector<std::byte> bytes_;
+        std::array<std::byte, max_byte_size> storage_{};
     };
 
-// ================================================================
-// Pipeline Descriptors
-// ================================================================
 
 
+    // ================================================================
+    // Pipeline Descriptors
+    // ================================================================
 
-struct PipelineShaderDesc
-{
-    PipelineShaderStage stage = PipelineShaderStage::Compute;
-    std::vector<uint32_t> spirv;
-    std::string source;
-    EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
-    std::string entryPoint = "main";
-    std::string debugName;
-
-    static PipelineShaderDesc from_spirv(
-        PipelineShaderStage stage,
-        std::vector<uint32_t> code,
-        std::string entryPoint = "main")
+    struct PipelineShaderDesc
     {
-        PipelineShaderDesc desc;
-        desc.stage = stage;
-        desc.spirv = std::move(code);
-        desc.entryPoint = std::move(entryPoint);
-        return desc;
-    }
+        PipelineShaderStage stage = PipelineShaderStage::Compute;
+        std::vector<uint32_t> spirv;
+        std::string source;
+        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
+        std::string entryPoint = "main";
+        std::string debugName;
+
+        static PipelineShaderDesc from_spirv(PipelineShaderStage stage,
+                                             std::vector<uint32_t> code,
+                                             std::string entryPoint = "main")
+        {
+            PipelineShaderDesc desc;
+            desc.stage = stage;
+            desc.spirv = std::move(code);
+            desc.entryPoint = std::move(entryPoint);
+            return desc;
+        }
 
     static PipelineShaderDesc from_source(
         PipelineShaderStage stage,
@@ -635,21 +599,7 @@ struct PipelineShaderDesc
         return desc;
     }
 
-    [[nodiscard]] bool has_spirv() const noexcept
-    {
-        return !spirv.empty();
-    }
-
-    [[nodiscard]] bool has_source() const noexcept
-    {
-        return !source.empty();
-    }
-
-    PipelineShaderDesc& set_debug_name(std::string value)
-    {
-        debugName = std::move(value);
-        return *this;
-    }
+    
 };
 
 
@@ -1523,6 +1473,7 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType);
 };
+
 
 // ================================================================
 // Rasterizer Pipeline Base
