@@ -401,8 +401,8 @@ namespace Corona::Horizon
     struct HardwareImage
     {
     public:
-        HardwareImage() noexcept = default;
-        HardwareImage(const HardwareImageDesc& desc, std::span<const std::byte> upload_data);
+        HardwareImage();
+        HardwareImage(const HardwareImageDesc& desc, std::span<const std::byte> upload_data = {});
 
         HardwareImage(const HardwareImage& other);
         HardwareImage(HardwareImage&& other) noexcept;
