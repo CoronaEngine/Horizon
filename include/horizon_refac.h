@@ -147,6 +147,7 @@ namespace Corona::Horizon
 
         HardwareBuffer& operator=(const HardwareBuffer& other);
         HardwareBuffer& operator=(HardwareBuffer&& other) noexcept;
+        explicit operator bool() const;
 
         [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return buffer_id; }
         [[nodiscard]] uint64_t get_element_size() const;
