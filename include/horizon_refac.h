@@ -269,21 +269,14 @@ namespace Corona::Horizon
         ImageExtent extent {};
         Format format = Format::UNKNOWN;
         ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst;
-
         CpuAccessMode cpu_access = CpuAccessMode::None;
-
         uint32_t array_layers = 1;
-
         uint32_t mip_levels = 1;
         uint32_t sample_count = 1;
-
         bool dedicated = false;
         bool exportable = false;
-
         std::string debug_name;
 
-
-        
         HardwareImageDesc& apply(const HardwareImageOptions& options) noexcept
         {
             cpu_access = options.cpu_access;
@@ -292,35 +285,33 @@ namespace Corona::Horizon
             return *this;
         }
 
-        static HardwareImageDesc texture_2d(
-            uint32_t width,
-            uint32_t height,
-            Format format,
-            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-            std::string name = {},
-            HardwareImageOptions options = {})
+        static HardwareImageDesc texture_2d(uint32_t width, 
+                                            uint32_t height,
+                                            Format format,
+                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                            std::string name = {},
+                                            HardwareImageOptions options = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image2D;
-            desc.extent = { width, height, 1 };
+            desc.extent = {width, height, 1};
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
             return desc.apply(options);
         }
 
-        static HardwareImageDesc texture_2d_array(
-            uint32_t width,
-            uint32_t height,
-            uint32_t layers,
-            Format format,
-            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-            std::string name = {},
-            HardwareImageOptions options = {})
+        static HardwareImageDesc texture_2d_array(uint32_t width,
+                                                  uint32_t height,
+                                                  uint32_t layers,
+                                                  Format format,
+                                                  ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                                  std::string name = {},
+                                                  HardwareImageOptions options = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image2DArray;
-            desc.extent = { width, height, 1 };
+            desc.extent = {width, height, 1};
             desc.array_layers = layers;
             desc.format = format;
             desc.usage = usage;
@@ -328,34 +319,32 @@ namespace Corona::Horizon
             return desc.apply(options);
         }
 
-        static HardwareImageDesc texture_3d(
-        uint32_t width,
-        uint32_t height,
-        uint32_t depth,
-        Format format,
-        ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-        std::string name = {},
-        HardwareImageOptions options = {})
-    {
-        HardwareImageDesc desc;
-        desc.dimension = ImageDimension::Image3D;
-        desc.extent = { width, height, depth };
-        desc.format = format;
-        desc.usage = usage;
-        desc.debug_name = std::move(name);
-        return desc.apply(options);
-    }
+        static HardwareImageDesc texture_3d(uint32_t width,
+                                            uint32_t height,
+                                            uint32_t depth,
+                                            Format format,
+                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                            std::string name = {},
+                                            HardwareImageOptions options = {})
+        {
+            HardwareImageDesc desc;
+            desc.dimension = ImageDimension::Image3D;
+            desc.extent = {width, height, depth};
+            desc.format = format;
+            desc.usage = usage;
+            desc.debug_name = std::move(name);
+            return desc.apply(options);
+        }
 
-        static HardwareImageDesc cube(
-            uint32_t size,
-            Format format,
-            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-            std::string name = {},
-            HardwareImageOptions options = {})
+        static HardwareImageDesc cube(uint32_t size,
+                                      Format format,
+                                      ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                      std::string name = {},
+                                      HardwareImageOptions options = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Cube;
-            desc.extent = { size, size, 1 };
+            desc.extent = {size, size, 1};
             desc.array_layers = 6;
             desc.format = format;
             desc.usage = usage;
@@ -363,68 +352,56 @@ namespace Corona::Horizon
             return desc.apply(options);
         }
 
-        static HardwareImageDesc cube_array(
-        uint32_t size,
-        uint32_t cube_count,
-        Format format,
-        ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-        std::string name = {},
-        HardwareImageOptions options = {})
-    {
-        HardwareImageDesc desc;
-        desc.dimension = ImageDimension::CubeArray;
-        desc.extent = { size, size, 1 };
-        desc.array_layers = cube_count * 6;
-        desc.format = format;
-        desc.usage = usage;
-        desc.debug_name = std::move(name);
-        return desc.apply(options);
-    }
+        static HardwareImageDesc cube_array(uint32_t size,
+                                            uint32_t cube_count,
+                                            Format format,
+                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                            std::string name = {},
+                                            HardwareImageOptions options = {})
+        {
+            HardwareImageDesc desc;
+            desc.dimension = ImageDimension::CubeArray;
+            desc.extent = {size, size, 1};
+            desc.array_layers = cube_count * 6;
+            desc.format = format;
+            desc.usage = usage;
+            desc.debug_name = std::move(name);
+            return desc.apply(options);
+        }
 
-    static HardwareImageDesc color_attachment(
-        uint32_t width,
-        uint32_t height,
-        Format format,
-        std::string name = {},
-        HardwareImageOptions options = {})
-    {
-        return texture_2d(
-            width,
-            height,
-            format,
-            ImageUsageFlags::ColorAttachment |
-                ImageUsageFlags::Sampled |
-                ImageUsageFlags::TransferSrc |
-                ImageUsageFlags::TransferDst,
-            std::move(name),
-            options);
-    }
+        static HardwareImageDesc color_attachment(uint32_t width,
+                                                  uint32_t height,
+                                                  Format format,
+                                                  std::string name = {},
+                                                  HardwareImageOptions options = {})
+        {
+            return texture_2d(width,
+                              height,
+                              format,
+                              ImageUsageFlags::ColorAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
+                              std::move(name),
+                              options);
+        }
 
-    static HardwareImageDesc depth_attachment(
-        uint32_t width,
-        uint32_t height,
-        Format format,
-        std::string name = {},
-        HardwareImageOptions options = {})
-    {
-        return texture_2d(
-            width,
-            height,
-            format,
-            ImageUsageFlags::DepthStencilAttachment |
-                ImageUsageFlags::Sampled |
-                ImageUsageFlags::TransferSrc |
-                ImageUsageFlags::TransferDst,
-            std::move(name),
-            options);
-    }
+        static HardwareImageDesc depth_attachment(uint32_t width,
+                                                  uint32_t height,
+                                                  Format format,
+                                                  std::string name = {},
+                                                  HardwareImageOptions options = {})
+        {
+            return texture_2d(width,
+                              height,
+                              format,
+                              ImageUsageFlags::DepthStencilAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
+                              std::move(name),
+                              options);
+        }
     };
 
     struct HardwareImage
     {
     public:
         HardwareImage() noexcept = default;
-        explicit HardwareImage(const HardwareImageDesc& desc);
         HardwareImage(const HardwareImageDesc& desc, std::span<const std::byte> upload_data);
 
         HardwareImage(const HardwareImage& other);
@@ -434,337 +411,66 @@ namespace Corona::Horizon
         HardwareImage& operator=(const HardwareImage& other);
         HardwareImage& operator=(HardwareImage&& other) noexcept;
 
-        void reset() noexcept;
-        void swap(HardwareImage& other) noexcept;
-
-        [[nodiscard]] bool valid() const noexcept;
-        explicit operator bool() const noexcept { return valid(); }
-
         [[nodiscard]] std::uintptr_t get_image_id() const noexcept { return image_id; }
-        [[nodiscard]] const HardwareImageDesc& desc() const noexcept { return desc_; }
-
-        [[nodiscard]] uint32_t width() const noexcept { return desc_.extent.width; }
-        [[nodiscard]] uint32_t height() const noexcept { return desc_.extent.height; }
-        [[nodiscard]] uint32_t depth() const noexcept { return desc_.extent.depth; }
-        [[nodiscard]] uint32_t array_layers() const noexcept { return desc_.array_layers; }
-        [[nodiscard]] uint32_t mip_levels() const noexcept { return desc_.mip_levels; }
-        [[nodiscard]] uint32_t sample_count() const noexcept { return desc_.sample_count; }
-        [[nodiscard]] Format format() const noexcept { return desc_.format; }
-        [[nodiscard]] ImageDimension dimension() const noexcept { return desc_.dimension; }
-        [[nodiscard]] ImageUsageFlags usage() const noexcept { return desc_.usage; }
-        [[nodiscard]] CpuAccessMode cpu_access() const noexcept { return desc_.cpu_access; }
-
-        // Required access style: image[layer][mip].
         [[nodiscard]] HardwareImageLayerSelector operator[](uint32_t layer) const;
-
-        [[nodiscard]] HardwareImage whole() const
-        {
-            HardwareImage result = *this;
-            result.range_ = ImageSubresourceRange::whole();
-            return result;
-        }
-
-        [[nodiscard]] HardwareImage layer(uint32_t layer_index) const
-        {
-            validate_layer(layer_index);
-
-            HardwareImage result = *this;
-            result.range_ = {
-                .base_layer = layer_index,
-                .layer_count = 1,
-                .base_mip = 0,
-                .mip_count = ImageSubresourceRange::remaining,
-            };
-            return result;
-        }
-
-        [[nodiscard]] HardwareImage mip(uint32_t mip_index) const
-        {
-            validate_mip(mip_index);
-
-            HardwareImage result = *this;
-            result.range_ = {
-                .base_layer = 0,
-                .layer_count = ImageSubresourceRange::remaining,
-                .base_mip = mip_index,
-                .mip_count = 1,
-            };
-            return result;
-        }
-
-        [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const
-        {
-            validate_layer(layer_index);
-            validate_mip(mip_index);
-
-            HardwareImage result = *this;
-            result.range_ = ImageSubresourceRange::single(layer_index, mip_index);
-            return result;
-        }
-
-        [[nodiscard]] ImageSubresourceRange range() const
-        {
-            return resolve_range(range_, desc_.array_layers, desc_.mip_levels);
-        }
-
-        [[nodiscard]] bool is_whole() const
-        {
-            const ImageSubresourceRange resolved = range();
-            return resolved.base_layer == 0 &&
-                   resolved.layer_count == desc_.array_layers &&
-                   resolved.base_mip == 0 &&
-                   resolved.mip_count == desc_.mip_levels;
-        }
-
-        [[nodiscard]] bool is_single_subresource() const
-        {
-            return range().is_single();
-        }
-
-        [[nodiscard]] uint32_t base_layer() const { return range().base_layer; }
-        [[nodiscard]] uint32_t layer_count() const { return range().layer_count; }
-        [[nodiscard]] uint32_t base_mip() const { return range().base_mip; }
-        [[nodiscard]] uint32_t mip_count() const { return range().mip_count; }
-
-        [[nodiscard]] ImageSubresource selected_subresource() const
-        {
-            const ImageSubresourceRange resolved = range();
-
-            if (!resolved.is_single())
-                throw std::logic_error("HardwareImage does not represent a single subresource.");
-
-            return {
-                .layer = resolved.base_layer,
-                .mip = resolved.base_mip,
-            };
-        }
-
-        [[nodiscard]] uint32_t subresource_index(uint32_t layer_index, uint32_t mip_index) const
-        {
-            validate_layer(layer_index);
-            validate_mip(mip_index);
-            return layer_index * desc_.mip_levels + mip_index;
-        }
-
-        [[nodiscard]] uint32_t subresource_index() const
-        {
-            const ImageSubresource sub = selected_subresource();
-            return subresource_index(sub.layer, sub.mip);
-        }
-
-        [[nodiscard]] uint32_t subresource_count() const noexcept
-        {
-            return desc_.array_layers * desc_.mip_levels;
-        }
-
-        [[nodiscard]] ImageExtent mip_extent(uint32_t mip_index) const
-        {
-            validate_mip(mip_index);
-
-            auto reduce = [mip_index](uint32_t value) noexcept {
-                const uint32_t reduced = value >> mip_index;
-                return reduced == 0 ? 1u : reduced;
-            };
-
-            return {
-                .width = reduce(desc_.extent.width),
-                .height = reduce(desc_.extent.height),
-                .depth = reduce(desc_.extent.depth),
-            };
-        }
-
-        [[nodiscard]] ImageExtent extent() const
-        {
-            if (is_single_subresource())
-                return mip_extent(selected_subresource().mip);
-
-            return desc_.extent;
-        }
-
-        [[nodiscard]] ImageSubresourceLayout get_subresource_layout(uint32_t layer_index, uint32_t mip_index) const;
-        [[nodiscard]] void* get_mapped_subresource(uint32_t layer_index, uint32_t mip_index) const;
-
-        [[nodiscard]] ImageSubresourceLayout get_subresource_layout() const
-        {
-            const ImageSubresource sub = selected_subresource();
-            return get_subresource_layout(sub.layer, sub.mip);
-        }
-
-        [[nodiscard]] void* get_mapped_subresource() const
-        {
-            const ImageSubresource sub = selected_subresource();
-            return get_mapped_subresource(sub.layer, sub.mip);
-        }
-
-        bool write_subresource_bytes(
-            uint32_t layer_index,
-            uint32_t mip_index,
-            std::span<const std::byte> data,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const;
-
-        bool read_subresource_bytes(
-            uint32_t layer_index,
-            uint32_t mip_index,
-            std::span<std::byte> output,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const;
-
-        bool write_bytes(
-            std::span<const std::byte> data,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const
-        {
-            const ImageSubresource sub = selected_subresource();
-            return write_subresource_bytes(sub.layer, sub.mip, data, row_pitch, slice_pitch);
-        }
-
-        bool read_bytes(
-            std::span<std::byte> output,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const
-        {
-            const ImageSubresource sub = selected_subresource();
-            return read_subresource_bytes(sub.layer, sub.mip, output, row_pitch, slice_pitch);
-        }
-
+        [[nodiscard]] HardwareImage whole() const;
+        [[nodiscard]] HardwareImage layer(uint32_t layer_index) const;
+        [[nodiscard]] HardwareImage mip(uint32_t mip_index) const;
+        [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const;
+        [[nodiscard]] uint32_t subresource_index(uint32_t layer_index, uint32_t mip_index) const;
+        [[nodiscard]] uint32_t subresource_count() const noexcept;
+        [[nodiscard]] ImageExtent mip_extent(uint32_t mip_index) const;
+        [[nodiscard]] ImageExtent extent() const;
+        bool write_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
+        bool read_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
+        bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
+        bool read_bytes(std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
+        
         template <HardwareImageElement T>
-        bool write_subresource(
-            uint32_t layer_index,
-            uint32_t mip_index,
-            std::span<const T> data,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const
+        bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
-            return write_subresource_bytes(
-                layer_index,
-                mip_index,
-                std::as_bytes(data),
-                row_pitch,
-                slice_pitch);
+            return write_subresource_bytes(layer_index, mip_index, std::as_bytes(data), row_pitch, slice_pitch);
         }
 
         template <HardwareImageElement T>
         requires (!std::is_const_v<T>)
-        bool read_subresource(
-            uint32_t layer_index,
-            uint32_t mip_index,
-            std::span<T> output,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const
+        bool read_subresource(uint32_t layer_index,uint32_t mip_index,std::span<T> output,uint64_t row_pitch = 0,uint64_t slice_pitch = 0) const
         {
-            return read_subresource_bytes(
-                layer_index,
-                mip_index,
-                std::as_writable_bytes(output),
-                row_pitch,
-                slice_pitch);
+            return read_subresource_bytes(layer_index, mip_index, std::as_writable_bytes(output), row_pitch, slice_pitch);
         }
 
         template <HardwareImageElement T>
-        bool write(
-            std::span<const T> data,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const
+        bool write(std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return write_bytes(std::as_bytes(data), row_pitch, slice_pitch);
         }
 
         template <HardwareImageElement T>
         requires (!std::is_const_v<T>)
-        bool read(
-            std::span<T> output,
-            uint64_t row_pitch = 0,
-            uint64_t slice_pitch = 0) const
+        bool read(std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return read_bytes(std::as_writable_bytes(output), row_pitch, slice_pitch);
         }
 
         void set_clear_color(float r, float g, float b, float a);
 
-        [[nodiscard]] ImageCopyCommand copy_to(
-            const HardwareImage& dst,
-            uint32_t src_layer = 0,
-            uint32_t dst_layer = 0,
-            uint32_t src_mip = 0,
-            uint32_t dst_mip = 0) const;
-
-        [[nodiscard]] ImageToBufferCommand copy_to(
-            const HardwareBuffer& dst,
-            uint32_t image_layer = 0,
-            uint32_t image_mip = 0,
-            uint64_t buffer_offset = 0) const;
-
-        [[nodiscard]] BufferToImageCommand copy_from(
-            const HardwareBuffer& src,
-            uint64_t buffer_offset = 0,
-            uint32_t image_layer = 0,
-            uint32_t image_mip = 0) const;
-
+        [[nodiscard]] ImageCopyCommand copy_to(const HardwareImage &dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
+        [[nodiscard]] ImageToBufferCommand copy_to(const HardwareBuffer &dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
+        [[nodiscard]] BufferToImageCommand copy_from(const HardwareBuffer &src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-
-        static HardwareImage import_external_memory(
-            const ExternalHandle& handle,
-            const HardwareImageDesc& desc,
-            uint64_t allocation_size = 0);
-
+        static HardwareImage import_external_memory(const ExternalHandle& handle,const HardwareImageDesc& desc,uint64_t allocation_size = 0);
         ExternalHandle export_memory() const;
-
+        
     private:
-        explicit HardwareImage(std::uintptr_t id, HardwareImageDesc desc) noexcept
-            : image_id(id)
-            , desc_(std::move(desc))
-        {
-        }
-
-        static ImageSubresourceRange resolve_range(
-            ImageSubresourceRange image_range,
-            uint32_t total_layers,
-            uint32_t total_mips)
-        {
-            if (image_range.base_layer > total_layers || image_range.base_mip > total_mips)
-                throw std::out_of_range("HardwareImage subresource range base is out of bounds.");
-
-            if (image_range.layer_count == ImageSubresourceRange::remaining)
-                image_range.layer_count = total_layers - image_range.base_layer;
-
-            if (image_range.mip_count == ImageSubresourceRange::remaining)
-                image_range.mip_count = total_mips - image_range.base_mip;
-
-            if (image_range.layer_count == 0 || image_range.mip_count == 0)
-                throw std::invalid_argument("HardwareImage subresource range must be non-empty.");
-
-            if (image_range.layer_count > total_layers - image_range.base_layer)
-                throw std::out_of_range("HardwareImage layer range is out of bounds.");
-
-            if (image_range.mip_count > total_mips - image_range.base_mip)
-                throw std::out_of_range("HardwareImage mip range is out of bounds.");
-
-            return image_range;
-        }
-
-        void validate_layer(uint32_t layer_index) const
-        {
-            if (layer_index >= desc_.array_layers)
-                throw std::out_of_range("HardwareImage layer is out of bounds.");
-        }
-
-        void validate_mip(uint32_t mip_index) const
-        {
-            if (mip_index >= desc_.mip_levels)
-                throw std::out_of_range("HardwareImage mip is out of bounds.");
-        }
-
-    private:
-        std::uintptr_t image_id = 0;
-        HardwareImageDesc desc_ {};
+        std::atomic<std::uintptr_t> image_id;
+        mutable std::mutex image_mutex;
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
 
-        friend class HardwareImageLayerSelector;
+        friend struct HardwareImageLayerSelector;
         friend struct HardwareBuffer;
     };
 
-    class HardwareImageLayerSelector
+    struct HardwareImageLayerSelector
     {
     public:
         HardwareImageLayerSelector(const HardwareImage& image, uint32_t layer_index)
