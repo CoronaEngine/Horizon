@@ -581,6 +581,37 @@ namespace Corona::Horizon
             auto reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv, EmbeddedShader::ShaderLanguage::HLSL);
             return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv), std::move(reflection)));
         }
+
+        [[nodiscard]] bool is_compute() const noexcept
+        {
+            return stage == PipelineShaderStage::Compute;
+        }
+
+        [[nodiscard]] bool is_vertex() const noexcept
+        {
+            return stage == PipelineShaderStage::Vertex;
+        }
+
+        [[nodiscard]] bool is_fragment() const noexcept
+        {
+            return stage == PipelineShaderStage::Fragment;
+        }
+
+        [[nodiscard]] bool is_ray_tracing() const noexcept
+        {
+            switch (stage)
+            {
+            case PipelineShaderStage::RayGeneration:
+            case PipelineShaderStage::Miss:
+            case PipelineShaderStage::ClosestHit:
+            case PipelineShaderStage::AnyHit:
+            case PipelineShaderStage::Intersection:
+            case PipelineShaderStage::Callable:
+                return true;
+            default:
+                return false;
+            }
+        }
     };
 
     struct EdslPipelineOptions
@@ -903,62 +934,52 @@ namespace Corona::Horizon
 
     struct RayTracingPipelineDesc
     {
-        std::vector<RayTracingShaderDesc> shaders;
+        std::vector<PipelineShaderDesc> shaders;
         std::vector<RayTracingHitGroupDesc> hit_groups;
 
         uint32_t max_recursion_depth = 1;
         uint32_t max_payload_size = 0;
         uint32_t max_attribute_size = 8;
 
-        PipelineReflectionDesc reflection;
         std::string debug_name;
 
         uint32_t add_shader(RayTracingShaderDesc shader)
         {
+            if (!shader.is_ray_tracing())
+                throw std::invalid_argument("RayTracingPipelineDesc only accepts ray tracing shader stages.");
+
             shaders.push_back(std::move(shader));
             return static_cast<uint32_t>(shaders.size() - 1);
         }
 
-        uint32_t add_ray_generation_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        uint32_t add_ray_generation_shader(std::vector<uint32_t> spirv)
         {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::RayGeneration,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::RayGeneration, std::move(spirv)));
         }
 
-        uint32_t add_miss_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        uint32_t add_miss_shader(std::vector<uint32_t> spirv)
         {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Miss,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Miss, std::move(spirv)));
         }
 
-        uint32_t add_closest_hit_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        uint32_t add_closest_hit_shader(std::vector<uint32_t> spirv)
         {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::ClosestHit,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::ClosestHit, std::move(spirv)));
         }
 
-        uint32_t add_any_hit_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        uint32_t add_any_hit_shader(std::vector<uint32_t> spirv)
         {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::AnyHit,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::AnyHit, std::move(spirv)));
         }
 
-        uint32_t add_intersection_shader(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        uint32_t add_intersection_shader(std::vector<uint32_t> spirv)
         {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Intersection,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Intersection, std::move(spirv)));
         }
 
-        uint32_t add_callable_shader(std::vector<uint32_t> spirv,std::string entry_point = "main")
+        uint32_t add_callable_shader(std::vector<uint32_t> spirv)
         {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Callable,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
+            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Callable, std::move(spirv)));
         }
 
         RayTracingPipelineDesc& add_hit_group(RayTracingHitGroupDesc hit_group)
@@ -985,9 +1006,9 @@ namespace Corona::Horizon
             return *this;
         }
 
-        RayTracingPipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
+        RayTracingPipelineDesc& set_debug_name(std::string value)
         {
-            reflection = value;
+            debug_name = std::move(value);
             return *this;
         }
     };
