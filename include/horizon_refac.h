@@ -755,28 +755,30 @@ namespace Corona::Horizon
         }
 
         template <typename VS, typename FS>
-        static RasterizerPipelineDesc from_edsl(VS &&vertex_shader_code,
-                                                FS &&fragment_shader_code,
+        static RasterizerPipelineDesc from_edsl(VS&& vertex_shader_code,
+                                                FS&& fragment_shader_code,
                                                 EdslPipelineOptions options = {},
                                                 std::source_location source_location = std::source_location::current())
         {
-            auto object = EmbeddedShader::RasterizedPipelineObject::compile(
-                std::forward<VS>(vertex_shader_code),
-                std::forward<FS>(fragment_shader_code),
-                options.compiler,
-                source_location);
+            auto object = EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
+                                                                            std::forward<FS>(fragment_shader_code),
+                                                                            options.compiler,
+                                                                            source_location);
 
             RasterizerPipelineDesc desc(
-                PipelineShaderDesc{
+                PipelineShaderDesc
+                {
                     PipelineShaderStage::Vertex,
-                    object.vertex->getShaderCode(
-                        EmbeddedShader::ShaderLanguage::SpirV,
-                        options.compiler.enableBindless)},
-                PipelineShaderDesc{
+                    object.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                 options.compiler.enableBindless)
+                },
+                PipelineShaderDesc
+                {
                     PipelineShaderStage::Fragment,
-                    object.fragment->getShaderCode(
-                        EmbeddedShader::ShaderLanguage::SpirV,
-                        options.compiler.enableBindless)});
+                    object.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                   options.compiler.enableBindless)
+                }
+            );
 
             if (options.auto_bind)
                 desc.auto_bind_entries = std::move(object.autoBindEntries);
@@ -784,71 +786,43 @@ namespace Corona::Horizon
             return desc;
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        RasterizerPipelineDesc& set_vertex_shader(PipelineShaderDesc shader)
+        static RasterizerPipelineDesc from_spirv(std::vector<uint32_t> vertex_spirv, std::vector<uint32_t> fragment_spirv)
         {
-            vertex_shader = std::move(shader);
-            vertex_shader.stage = PipelineShaderStage::Vertex;
-            return *this;
+            return RasterizerPipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Vertex, std::move(vertex_spirv)),
+                                          PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment,std::move(fragment_spirv)));
         }
 
-        RasterizerPipelineDesc& set_fragment_shader(PipelineShaderDesc shader)
+        static RasterizerPipelineDesc from_source(std::string vertex_source,
+                                                  std::string fragment_source,
+                                                  EmbeddedShader::ShaderLanguage vertex_language = EmbeddedShader::ShaderLanguage::GLSL,
+                                                  EmbeddedShader::ShaderLanguage fragment_language = EmbeddedShader::ShaderLanguage::GLSL,
+                                                  EmbeddedShader::CompilerOption compiler_option = {},
+                                                  std::source_location source_location = std::source_location::current())
         {
-            fragment_shader = std::move(shader);
-            fragment_shader.stage = PipelineShaderStage::Fragment;
-            return *this;
-        }
+            EmbeddedShader::ShaderCodeCompiler vertex_compiler(vertex_source,
+                                                               EmbeddedShader::ShaderStage::VertexShader,
+                                                               vertex_language,
+                                                               compiler_option,
+                                                               source_location);
 
-        RasterizerPipelineDesc& set_vertex_spirv(std::vector<uint32_t> spirv,
-                                                 std::string entry_point = "main")
-        {
-            return set_vertex_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Vertex,
-                                                                    std::move(spirv),
-                                                                    std::move(entry_point)));
-        }
+            EmbeddedShader::ShaderCodeCompiler fragment_compiler(fragment_source,
+                                                                 EmbeddedShader::ShaderStage::FragmentShader,
+                                                                 fragment_language,
+                                                                 compiler_option,
+                                                                 source_location);
 
-        RasterizerPipelineDesc& set_fragment_spirv(std::vector<uint32_t> spirv,
-                                                   std::string entry_point = "main")
-        {
-            return set_fragment_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment,
-                                                                      std::move(spirv),
-                                                                      std::move(entry_point)));
-        }
-
-        RasterizerPipelineDesc& set_vertex_source(std::string source,
-                                                  EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-                                                  std::string entry_point = "main")
-        {
-            return set_vertex_shader(PipelineShaderDesc::from_source(PipelineShaderStage::Vertex,
-                                                                     std::move(source),
-                                                                     language,
-                                                                     std::move(entry_point)));
-        }
-
-        RasterizerPipelineDesc& set_fragment_source(std::string source,
-                                                    EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-                                                    std::string entry_point = "main")
-        {
-            return set_fragment_shader(PipelineShaderDesc::from_source(PipelineShaderStage::Fragment,
-                                                                       std::move(source),
-                                                                       language,
-                                                                       std::move(entry_point)));
+            return RasterizerPipelineDesc(
+                PipelineShaderDesc
+                {
+                    PipelineShaderStage::Vertex,
+                    vertex_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless)
+                },
+                PipelineShaderDesc
+                {
+                    PipelineShaderStage::Fragment,
+                    fragment_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless)
+                }
+            );
         }
 
         RasterizerPipelineDesc& set_rasterizer(RasterizerStateDesc value) noexcept
@@ -860,6 +834,8 @@ namespace Corona::Horizon
         RasterizerPipelineDesc& set_depth_stencil(DepthStencilStateDesc value) noexcept
         {
             depth_stencil = value;
+            if (!value.depth_test_enabled && !value.stencil_test_enabled)
+                depth_attachment.enabled = false;
             return *this;
         }
 
@@ -875,21 +851,15 @@ namespace Corona::Horizon
             return *this;
         }
 
-        RasterizerPipelineDesc& set_render_target_layout(RenderTargetLayoutDesc value)
+        RasterizerPipelineDesc& set_depth_attachment(DepthAttachmentDesc value) noexcept
         {
-            render_target_layout = std::move(value);
+            depth_attachment = value;
             return *this;
         }
 
         RasterizerPipelineDesc& set_multiview_count(uint32_t value) noexcept
         {
-            render_target_layout.set_multiview_count(value);
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
-        {
-            reflection = value;
+            multiview_count = std::max(1u, value);
             return *this;
         }
 
@@ -897,41 +867,6 @@ namespace Corona::Horizon
         {
             debug_name = std::move(value);
             return *this;
-        }
-    };
-
-    struct RayTracingShaderDesc
-    {
-        RayTracingShaderStage stage = RayTracingShaderStage::RayGeneration;
-        std::vector<uint32_t> spirv;
-        std::string source;
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
-        std::string entry_point = "main";
-        std::string debug_name;
-
-        static RayTracingShaderDesc from_spirv(RayTracingShaderStage stage,
-                                               std::vector<uint32_t> code,
-                                               std::string entry_point = "main")
-        {
-            RayTracingShaderDesc desc;
-            desc.stage = stage;
-            desc.spirv = std::move(code);
-            desc.language = EmbeddedShader::ShaderLanguage::SpirV;
-            desc.entry_point = std::move(entry_point);
-            return desc;
-        }
-
-        static RayTracingShaderDesc from_source(RayTracingShaderStage stage,
-                                                std::string code,
-                                                EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-                                                std::string entry_point = "main")
-        {
-            RayTracingShaderDesc desc;
-            desc.stage = stage;
-            desc.source = std::move(code);
-            desc.language = language;
-            desc.entry_point = std::move(entry_point);
-            return desc;
         }
     };
 
