@@ -80,6 +80,7 @@ namespace EmbeddedShader
 
 	    static std::vector<uint32_t> spirvLinker(const std::vector<std::vector<uint32_t>> &binaries);
 		//static ShaderCodeModule::ShaderResources slangReflectedBindInfo(const std::string& shaderCode);
+	    static bool isSpirvValid(const std::vector<uint32_t>& spirvCode);
 	private:
 	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};
 		static void slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath, size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection);

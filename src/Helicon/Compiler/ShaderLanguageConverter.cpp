@@ -126,6 +126,7 @@ namespace EmbeddedShader
 		}
 
 		glslang::TIntermediate* intermediate = nullptr;
+	    spv::SpvBuildLogger logger;
 		if (isLink)
 		{
 		    glslang::TProgram program;
@@ -147,15 +148,19 @@ namespace EmbeddedShader
 
 			intermediate = program.getIntermediate(stage);
 
-		    glslang::GlslangToSpv(*intermediate, resultSpirvCode);
+		    glslang::GlslangToSpv(*intermediate, resultSpirvCode,&logger);
 
 		}
 	    else
 		{
 		    intermediate = shader.getIntermediate();
 
-		    glslang::GlslangToSpv(*intermediate, resultSpirvCode);
+		    glslang::GlslangToSpv(*intermediate, resultSpirvCode,&logger);
 		}
+	    auto log = logger.getAllMessages();
+	    if (!log.empty()) {
+	        std::cerr << "SpvBuildLogger: " << log << "\n";
+	    }
 
 		glslang::FinalizeProcess();
 
@@ -1289,17 +1294,46 @@ namespace EmbeddedShader
                 break;
         }
     });
-	    std::vector<uint32_t> result;
-	    auto spv_result = spvtools::Link(spvToolContext,binaries, &result);
-	    // if (SPV_SUCCESS != spv_result)
-     //    {
-     //        throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
-     //    }
-	    return result;
+        std::vector<uint32_t> result;
+
+        auto spv_result = spvtools::Link(spvToolContext,binaries, &result);
+        if (SPV_SUCCESS != spv_result)
+        {
+            throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
+        }
+	    //debug file
+	    std::fstream debugFile("D:/SlangTest/spirv_validation_error.spv", std::ios::binary | std::ios::out);
+	    debugFile.write(reinterpret_cast<const char*>(result.data()), static_cast<std::streamsize>(result.size() * sizeof(uint32_t)));
+	    debugFile.close();
+
+        isSpirvValid(result);
+        return result;
+    }
+
+    bool ShaderLanguageConverter::isSpirvValid(const std::vector<uint32_t> &spirvCode)
+    {
+	    spv_diagnostic diagnostic = nullptr;
+	    spv_const_binary_t binary = { spirvCode.data(), spirvCode.size() };
+
+	    spv_result_t result = spvValidate(spvToolContext.CContext(), &binary, &diagnostic);
+	    if (result == SPV_SUCCESS) {
+	        spvDiagnosticDestroy(diagnostic);
+	        return true;
+	    }
+        std::cerr << "❌ SPIR-V 验证失败 (错误码: " << result << ")\n";
+
+        if (diagnostic) {
+            std::cerr << "位置: 字索引 " << diagnostic->position.index
+                << ", 行 " << diagnostic->position.line
+                << ", 列 " << diagnostic->position.column << "\n";
+            std::cerr << "详情: " << diagnostic->error << "\n";
+        }
+	    spvDiagnosticDestroy(diagnostic);
+	    return false;
     }
 
     void ShaderLanguageConverter::slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath,
-	                                                size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection)
+                                                    size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection)
 	{
 		auto type = field->getTypeLayout();
 		auto name = accessPath.empty() ? field->getName() : accessPath.data() + std::string(".") + field->getName();
