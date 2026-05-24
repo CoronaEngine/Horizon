@@ -687,10 +687,10 @@ namespace EmbeddedShader
                 slang::CompilerOptionName::BindlessSpaceIndex,
                 {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
             },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::NoMangle,
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
+	        },
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::IncompleteLibrary,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -1301,10 +1301,6 @@ namespace EmbeddedShader
         {
             throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
         }
-	    //debug file
-	    std::fstream debugFile("D:/SlangTest/spirv_validation_error.spv", std::ios::binary | std::ios::out);
-	    debugFile.write(reinterpret_cast<const char*>(result.data()), static_cast<std::streamsize>(result.size() * sizeof(uint32_t)));
-	    debugFile.close();
 
         isSpirvValid(result);
         return result;
