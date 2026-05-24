@@ -20,6 +20,10 @@
 #include <ktm/ktm.h>
 
 #include "format.h"
+#include "Compiler/ShaderCodeCompiler.h"
+#include "Codegen/ComputePipelineObject.h"
+#include "Codegen/RasterizedPipelineObject.h"
+#include "Codegen/VariateProxy.h"
 
 namespace Corona::Horizon
 {
@@ -567,72 +571,89 @@ namespace Corona::Horizon
 
     struct PipelineShaderDesc
     {
-        PipelineShaderStage stage = PipelineShaderStage::Compute;
-        std::vector<uint32_t> spirv;
-        std::string source;
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL;
-        std::string entry_point = "main";
-        std::string debug_name;
+        PipelineShaderStage stage;
+        EmbeddedShader::ShaderCodeModule module;
 
-        static PipelineShaderDesc from_spirv(PipelineShaderStage stage,
-                                             std::vector<uint32_t> code,
-                                             std::string entry_point = "main")
-        {
-            PipelineShaderDesc desc;
-            desc.stage = stage;
-            desc.spirv = std::move(code);
-            desc.language = EmbeddedShader::ShaderLanguage::SpirV;
-            desc.entry_point = std::move(entry_point);
-            return desc;
-        }
+        PipelineShaderDesc(PipelineShaderStage stage, EmbeddedShader::ShaderCodeModule module) : stage(stage), module(std::move(module)) {}
 
-        static PipelineShaderDesc from_source(PipelineShaderStage stage,
-                                              std::string code,
-                                              EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-                                              std::string entry_point = "main")
+        static PipelineShaderDesc from_spirv(PipelineShaderStage stage, std::vector<uint32_t> spirv)
         {
-            PipelineShaderDesc desc;
-            desc.stage = stage;
-            desc.source = std::move(code);
-            desc.language = language;
-            desc.entry_point = std::move(entry_point);
-            return desc;
+            auto reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv, EmbeddedShader::ShaderLanguage::HLSL);
+            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv), std::move(reflection)));
         }
+    };
+
+    struct EdslPipelineOptions
+    {
+        EmbeddedShader::CompilerOption compiler;
+        bool auto_bind = true;
     };
 
     struct ComputePipelineDesc
     {
         PipelineShaderDesc compute_shader;
-        PipelineReflectionDesc reflection;
+        ktm::uvec3 thread_group_size = {1, 1, 1};
+        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
 
-        ComputePipelineDesc& set_shader(PipelineShaderDesc shader)
+        ComputePipelineDesc(PipelineShaderDesc shader, ktm::uvec3 numthreads = {1, 1, 1}) : compute_shader(std::move(shader)), thread_group_size(numthreads)
         {
-            compute_shader = std::move(shader);
-            compute_shader.stage = PipelineShaderStage::Compute;
+            if (compute_shader.stage != PipelineShaderStage::Compute)
+                throw std::invalid_argument("ComputePipelineDesc requires a compute shader.");
+        }
+
+        template <typename F>
+        static ComputePipelineDesc from_edsl(F &&compute_shader_code, ktm::uvec3 numthreads = {1, 1, 1}, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
+        {
+            auto object = EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location);
+
+            ComputePipelineDesc desc(
+                PipelineShaderDesc
+                {
+                    PipelineShaderStage::Compute,
+                    object.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,options.compiler.enableBindless)
+                },
+                numthreads
+            );
+
+            desc.auto_bind_entries = std::move(object.autoBindEntries);
+            return desc;
+        }
+
+        static ComputePipelineDesc from_spirv(std::vector<uint32_t> spirv)
+        {
+            return ComputePipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, std::move(spirv)));
+        }
+
+        static ComputePipelineDesc from_source(std::string source,
+                                               EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                                               EmbeddedShader::CompilerOption compiler_option = {},
+                                               std::source_location source_location = std::source_location::current())
+        {
+            EmbeddedShader::ShaderCodeCompiler compiler(source,
+                                                        EmbeddedShader::ShaderStage::ComputeShader,
+                                                        language,
+                                                        compiler_option,
+                                                        source_location);
+
+            return ComputePipelineDesc(
+                PipelineShaderDesc
+                {
+                    PipelineShaderStage::Compute,
+                    compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,compiler_option.enableBindless)
+                }
+            );
+        }
+
+        ComputePipelineDesc& set_thread_group_size(ktm::uvec3 value) noexcept
+        {
+            thread_group_size = value;
             return *this;
         }
 
-        ComputePipelineDesc& set_spirv(std::vector<uint32_t> spirv, std::string entry_point = "main")
+        ComputePipelineDesc& set_debug_name(std::string value)
         {
-            return set_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute,
-                                                             std::move(spirv),
-                                                             std::move(entry_point)));
-        }
-
-        ComputePipelineDesc& set_source(std::string source,
-                                        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-                                        std::string entry_point = "main")
-        {
-            return set_shader(PipelineShaderDesc::from_source(PipelineShaderStage::Compute,
-                                                              std::move(source),
-                                                              language,
-                                                              std::move(entry_point)));
-        }
-
-        ComputePipelineDesc& set_reflection(PipelineReflectionDesc value) noexcept
-        {
-            reflection = value;
+            debug_name = std::move(value);
             return *this;
         }
     };
@@ -717,10 +738,68 @@ namespace Corona::Horizon
         DepthStencilStateDesc depth_stencil;
         BlendStateDesc blend;
         MultisampleStateDesc multisample;
-        RenderTargetLayoutDesc render_target_layout;
-        PipelineReflectionDesc reflection;
+        DepthAttachmentDesc depth_attachment;
 
+        uint32_t multiview_count = 1;
+
+        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
+
+        RasterizerPipelineDesc(PipelineShaderDesc vertex, PipelineShaderDesc fragment) : vertex_shader(std::move(vertex)), fragment_shader(std::move(fragment))
+        {
+            if (vertex_shader.stage != PipelineShaderStage::Vertex)
+                throw std::invalid_argument("RasterizerPipelineDesc requires a vertex shader.");
+
+            if (fragment_shader.stage != PipelineShaderStage::Fragment)
+                throw std::invalid_argument("RasterizerPipelineDesc requires a fragment shader.");
+        }
+
+        template <typename VS, typename FS>
+        static RasterizerPipelineDesc from_edsl(VS &&vertex_shader_code,
+                                                FS &&fragment_shader_code,
+                                                EdslPipelineOptions options = {},
+                                                std::source_location source_location = std::source_location::current())
+        {
+            auto object = EmbeddedShader::RasterizedPipelineObject::compile(
+                std::forward<VS>(vertex_shader_code),
+                std::forward<FS>(fragment_shader_code),
+                options.compiler,
+                source_location);
+
+            RasterizerPipelineDesc desc(
+                PipelineShaderDesc{
+                    PipelineShaderStage::Vertex,
+                    object.vertex->getShaderCode(
+                        EmbeddedShader::ShaderLanguage::SpirV,
+                        options.compiler.enableBindless)},
+                PipelineShaderDesc{
+                    PipelineShaderStage::Fragment,
+                    object.fragment->getShaderCode(
+                        EmbeddedShader::ShaderLanguage::SpirV,
+                        options.compiler.enableBindless)});
+
+            if (options.auto_bind)
+                desc.auto_bind_entries = std::move(object.autoBindEntries);
+
+            return desc;
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         RasterizerPipelineDesc& set_vertex_shader(PipelineShaderDesc shader)
         {
