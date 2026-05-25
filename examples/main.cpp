@@ -3,6 +3,7 @@
 #include "example_default/example_default.h"
 #include "example_glsl/example_glsl.h"
 #include "example_edsl/example_edsl.h"
+#include "example_include/example_include.h"
 
 #include <exception>
 #include <iostream>
@@ -16,7 +17,8 @@ int main()
         //run_example_default();
         //un_example_baseline();
         //run_example_glsl();
-        run_example_edsl();
+        //run_example_edsl();
+        run_example_include();
     }
     catch (const std::exception &e)
     {

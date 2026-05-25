@@ -5,6 +5,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_glsl/example_glsl.cpp
     example_edsl/example_edsl.cpp
     example_default/example_default.cpp
+    example_include/example_include.cpp
 )
 
 set(HORIZON_EXAMPLE_HEADERS
@@ -13,6 +14,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_glsl/example_glsl.h
     example_edsl/example_edsl.h
     example_default/example_default.h
+    example_include/example_include.h
 )
 
 add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})
@@ -28,27 +30,6 @@ target_link_libraries(HorizonExamples PRIVATE
     glm
     glfw
     Horizon)
-
-find_program(GLSLANG_VALIDATOR_EXECUTABLE
-    NAMES glslangValidator glslangValidator.exe
-    HINTS "$ENV{VULKAN_SDK}/Bin"
-)
-
-if(NOT GLSLANG_VALIDATOR_EXECUTABLE)
-    message(FATAL_ERROR "glslangValidator not found. Install the Vulkan SDK or add glslangValidator to PATH.")
-endif()
-
-add_custom_command(TARGET HorizonExamples POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HorizonExamples>/shaders"
-    COMMAND "${GLSLANG_VALIDATOR_EXECUTABLE}" -V -S vert
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/baseline_vert.glsl"
-        -o "$<TARGET_FILE_DIR:HorizonExamples>/shaders/baseline_vert.spv"
-    COMMAND "${GLSLANG_VALIDATOR_EXECUTABLE}" -V -S frag
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/baseline_frag.glsl"
-        -o "$<TARGET_FILE_DIR:HorizonExamples>/shaders/baseline_frag.spv"
-    COMMENT "Compiling baseline shaders"
-    VERBATIM
-)
 
 helicon_install_runtime_deps(HorizonExamples)
 corona_copy_tbb_runtime_artifacts(HorizonExamples)
