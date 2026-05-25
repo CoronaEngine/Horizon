@@ -39,13 +39,12 @@ namespace Corona::Horizon
     //struct BottomLevelAccelerationStructure;
     //struct TopLevelAccelerationStructure;
 
-    struct PipelineState;
     struct PipelineBindingScope;
     struct ResourceProxy;
 
-    struct ComputePipelineBase;
-    struct RasterizerPipelineBase;
-    struct RayTracingPipelineBase;
+    struct ComputePipeline;
+    struct RasterizerPipeline;
+    struct RayTracingPipeline;
 
     struct HardwareExecutor;
     struct HardwareDisplayer;
@@ -1216,74 +1215,57 @@ namespace Corona::Horizon
 
     struct HardwareExecutor
     {
-  public:
-    HardwareExecutor();
-    HardwareExecutor(const HardwareExecutor &other);
-    HardwareExecutor(HardwareExecutor &&other) noexcept;
-    ~HardwareExecutor();
+    public:
+        HardwareExecutor();
+        HardwareExecutor(const HardwareExecutor &other);
+        HardwareExecutor(HardwareExecutor &&other) noexcept;
+        ~HardwareExecutor();
 
-    HardwareExecutor &operator=(const HardwareExecutor &other);
-    HardwareExecutor &operator=(HardwareExecutor &&other) noexcept;
+        HardwareExecutor &operator=(const HardwareExecutor &other);
+        HardwareExecutor &operator=(HardwareExecutor &&other) noexcept;
 
-    HardwareExecutor &operator<<(ComputePipelineBase &computePipeline);
-    HardwareExecutor &operator<<(RasterizerPipelineBase &rasterizerPipeline);
-    HardwareExecutor &operator<<(HardwareExecutor &other);
-    HardwareExecutor &operator<<(const CopyCommand &cmd);
+        HardwareExecutor &operator<<(ComputePipeline &computePipeline);
+        HardwareExecutor &operator<<(RasterizerPipelineBase &rasterizerPipeline);
+        HardwareExecutor &operator<<(HardwareExecutor &other);
+        HardwareExecutor &operator<<(const CopyCommand &cmd);
 
-    HardwareExecutor &wait(HardwareExecutor &other);
-    HardwareExecutor &commit();
+        HardwareExecutor &wait(HardwareExecutor &other);
+        HardwareExecutor &commit();
 
-    // ========== 延迟释放相关接口 ==========
-    /// @brief 等待所有延迟释放的资源完成（阻塞）
-    void waitForDeferredResources();
+        // ========== 延迟释放相关接口 ==========
+        /// @brief 等待所有延迟释放的资源完成（阻塞）
+        void waitForDeferredResources();
 
-    /// @brief 手动触发一次清理（非阻塞）
-    void cleanupDeferredResources();
+        /// @brief 手动触发一次清理（非阻塞）
+        void cleanupDeferredResources();
 
-    [[nodiscard]] uintptr_t getExecutorID() const
+    private:
+        mutable std::mutex executorMutex;
+        std::atomic<std::uintptr_t> executorID;
+    };
+
+
+
+    // ================================================================
+    // HardwareDisplayer
+    // ================================================================
+
+    struct HardwareDisplayer
     {
-        return executorID.load(std::memory_order_acquire);
-    }
+    public:
+        explicit HardwareDisplayer(void *surface = nullptr);
+        HardwareDisplayer(const HardwareDisplayer &other);
+        HardwareDisplayer(HardwareDisplayer &&other) noexcept;
+        ~HardwareDisplayer();
 
-  private:
-    mutable std::mutex executorMutex;
-    std::atomic<std::uintptr_t> executorID;
-};
+        HardwareDisplayer &operator=(const HardwareDisplayer &other);
+        HardwareDisplayer &operator=(HardwareDisplayer &&other) noexcept;
+        HardwareDisplayer &operator<<(const HardwareImage &image);
 
+        HardwareDisplayer &wait(const HardwareExecutor &executor);
 
-
-// ================================================================
-// HardwareDisplayer
-// ================================================================
-
-struct HardwareDisplayer
-{
-  public:
-    explicit HardwareDisplayer(void *surface = nullptr);
-    HardwareDisplayer(const HardwareDisplayer &other);
-    HardwareDisplayer(HardwareDisplayer &&other) noexcept;
-    ~HardwareDisplayer();
-
-    HardwareDisplayer &operator=(const HardwareDisplayer &other);
-    HardwareDisplayer &operator=(HardwareDisplayer &&other) noexcept;
-    HardwareDisplayer &operator<<(const HardwareImage &image);
-
-    HardwareDisplayer &wait(const HardwareExecutor &executor);
-
-    [[nodiscard]] uintptr_t getDisplayerID() const
-    {
-        return displaySurfaceID.load(std::memory_order_acquire);
-    }
-
-  private:
-    std::atomic<std::uintptr_t> displaySurfaceID;
-    mutable std::mutex displayerMutex;
-};
-
+    private:
+        std::atomic<std::uintptr_t> displaySurfaceID;
+        mutable std::mutex displayerMutex;
+    };
 }
-
-
-
-
-
-
