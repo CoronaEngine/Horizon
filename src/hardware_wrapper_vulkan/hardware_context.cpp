@@ -47,7 +47,7 @@ namespace Corona::Horizon::Vulkan
 
     bool supports_required_api(VkPhysicalDevice physical_device)
     {
-        VkPhysicalDeviceProperties properties{};
+        VkPhysicalDeviceProperties properties {};
         vkGetPhysicalDeviceProperties(physical_device, &properties);
 
         if (properties.apiVersion >= required_api_version)
@@ -80,7 +80,7 @@ namespace Corona::Horizon::Vulkan
 
     VkDebugUtilsMessengerCreateInfoEXT debug_messenger_create_info()
     {
-        VkDebugUtilsMessengerCreateInfoEXT create_info { };
+        VkDebugUtilsMessengerCreateInfoEXT create_info {};
         create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
                                       VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -149,224 +149,224 @@ namespace Corona::Horizon::Vulkan
         CFW_LOG_DEBUG("Hardware Context initialized with {} device(s)", devices_.size());
     }
 
-HardwareContext::~HardwareContext()
-{
-    for (auto &device : devices_)
+    HardwareContext::~HardwareContext()
     {
-        if (!device)
+        for (auto &device : devices_)
         {
-            continue;
+            if (!device)
+            {
+                continue;
+            }
+
+            device->resource_manager.cleanUpResourceManager();
+            device->device_manager.cleanUpDeviceManager();
         }
 
-        device->resource_manager.cleanUpResourceManager();
-        device->device_manager.cleanUpDeviceManager();
-    }
+        devices_.clear();
+        main_device_.reset();
 
-    devices_.clear();
-    main_device_.reset();
+        cleanup_debug_messenger();
 
-    cleanup_debug_messenger();
-
-    if (instance_ != VK_NULL_HANDLE)
-    {
-        // vkDestroyInstance(instance_, nullptr);
-        instance_ = VK_NULL_HANDLE;
-    }
-}
-
-void HardwareContext::prepare_features()
-{
-    create_info_.requiredInstanceExtensions = [](const VkInstance&, const VkPhysicalDevice&) {
-        std::set<const char*> extensions
+        if (instance_ != VK_NULL_HANDLE)
         {
-            "VK_KHR_surface",
-            // VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,       // 移除: 未使用且部分设备不支持
-            // VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,  // 移除: surface_maintenance1 的依赖
-            VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME
-        };
+            //vkDestroyInstance(instance_, nullptr);
+            instance_ = VK_NULL_HANDLE;
+        }
+    }
+
+    void HardwareContext::prepare_features()
+    {
+        create_info_.requiredInstanceExtensions = [](const VkInstance&, const VkPhysicalDevice&) {
+            std::set<const char*> extensions
+            {
+                "VK_KHR_surface",
+                // VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,       // 移除: 未使用且部分设备不支持
+                // VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,  // 移除: surface_maintenance1 的依赖
+                VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+                VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
+                VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME
+            };
 
 #if _WIN32 || _WIN64
-        extensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+            extensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif __APPLE__
-        extensions.insert(VK_MVK_MOLTENVK_EXTENSION_NAME);
-        extensions.insert(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+            extensions.insert(VK_MVK_MOLTENVK_EXTENSION_NAME);
+            extensions.insert(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
 #elif __linux__
-        extensions.insert(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+            extensions.insert(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
 #endif
-        return extensions;
-    };
-
-    create_info_.requiredDeviceExtensions = [](const VkInstance&, const VkPhysicalDevice&) {
-        return std::set<const char*>
-        {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-            // VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,  // 移除: 部分 AMD 核显不支持
-            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-            VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
-            VK_KHR_MULTIVIEW_EXTENSION_NAME,
-            //VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME,
-            VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
-            VK_EXT_SHADER_SUBGROUP_BALLOT_EXTENSION_NAME,
-            VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
-            VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
-            VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
-#if _WIN32 || _WIN64
-            VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME
-#elif __linux__
-            VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME
-#endif
+            return extensions;
         };
-    };
 
-    create_info_.requiredDeviceFeatures = [](const VkInstance&, const VkPhysicalDevice&) {
-        VkPhysicalDeviceFeatures features { };
-        features.samplerAnisotropy = VK_TRUE;
-        features.shaderInt16 = VK_TRUE;
-        features.wideLines = VK_TRUE;
-        features.fragmentStoresAndAtomics = VK_TRUE;
+        create_info_.requiredDeviceExtensions = [](const VkInstance&, const VkPhysicalDevice&) {
+            return std::set<const char*>
+            {
+                VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                // VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,  // 移除: 部分 AMD 核显不支持
+                VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+                VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+                VK_KHR_MULTIVIEW_EXTENSION_NAME,
+                //VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME,
+                VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+                VK_EXT_SHADER_SUBGROUP_BALLOT_EXTENSION_NAME,
+                VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+                VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
+                VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+                VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+                VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
+#if _WIN32 || _WIN64
+                VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+                VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME
+#elif __linux__
+                VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+                VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME
+#endif
+            };
+        };
 
-        VkPhysicalDeviceVulkan11Features features11 { };
-        features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-        features11.multiview = VK_TRUE;
+        create_info_.requiredDeviceFeatures = [](const VkInstance&, const VkPhysicalDevice&) {
+            VkPhysicalDeviceFeatures features {};
+            features.samplerAnisotropy = VK_TRUE;
+            features.shaderInt16 = VK_TRUE;
+            features.wideLines = VK_TRUE;
+            features.fragmentStoresAndAtomics = VK_TRUE;
 
-        VkPhysicalDeviceVulkan12Features features12 { };
-        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-        features12.bufferDeviceAddress = VK_TRUE;
-        features12.shaderFloat16 = VK_TRUE;
-        features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-        features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-        features12.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
-        features12.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
-        features12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
-        features12.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
-        features12.descriptorBindingPartiallyBound = VK_TRUE;
-        features12.runtimeDescriptorArray = VK_TRUE;
-        features12.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
-        features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
-        features12.descriptorIndexing = VK_TRUE;
-        features12.timelineSemaphore = VK_TRUE;
+            VkPhysicalDeviceVulkan11Features features11 {};
+            features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+            features11.multiview = VK_TRUE;
 
-        VkPhysicalDeviceVulkan13Features features13 { };
-        features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-        features13.synchronization2 = VK_TRUE;
+            VkPhysicalDeviceVulkan12Features features12 {};
+            features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+            features12.bufferDeviceAddress = VK_TRUE;
+            features12.shaderFloat16 = VK_TRUE;
+            features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+            features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+            features12.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
+            features12.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
+            features12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
+            features12.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+            features12.descriptorBindingPartiallyBound = VK_TRUE;
+            features12.runtimeDescriptorArray = VK_TRUE;
+            features12.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
+            features12.descriptorBindingVariableDescriptorCount = VK_TRUE;
+            features12.descriptorIndexing = VK_TRUE;
+            features12.timelineSemaphore = VK_TRUE;
 
-        // 移除: swapchainMaintenance1 特性 (部分 AMD 核显不支持)
-        // VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT features_swapchain_maintenance1{};
-        // features_swapchain_maintenance1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
-        // features_swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
+            VkPhysicalDeviceVulkan13Features features13 {};
+            features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+            features13.synchronization2 = VK_TRUE;
 
-        return (DeviceFeaturesChain() | features | features11 | features12 | features13);
-    };
-}
+            // 移除: swapchainMaintenance1 特性 (部分 AMD 核显不支持)
+            // VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT features_swapchain_maintenance1{};
+            // features_swapchain_maintenance1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+            // features_swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
 
-void HardwareContext::create_instance()
-{
-    auto requested_extensions = create_info_.requiredInstanceExtensions(instance_, nullptr);
-    std::vector<const char*> requested_layers;
+            return (DeviceFeaturesChain() | features | features11 | features12 | features13);
+        };
+    }
+
+    void HardwareContext::create_instance()
+    {
+        auto requested_extensions = create_info_.requiredInstanceExtensions(instance_, nullptr);
+        std::vector<const char*> requested_layers;
 
 #ifdef CORONA_ENGINE_DEBUG
-    const bool enable_validation = validation_layer_available();
-    if (enable_validation)
-    {
-        requested_extensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        requested_extensions.insert(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-        requested_layers.push_back("VK_LAYER_KHRONOS_validation");
-    }
-#endif
-
-    const auto enabled_extensions = supported_instance_extensions(std::move(requested_extensions));
-
-    VkApplicationInfo app_info{};
-    app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app_info.apiVersion = required_api_version;
-
-    VkInstanceCreateInfo instance_info{};
-    instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instance_info.pApplicationInfo = &app_info;
-    instance_info.enabledExtensionCount = static_cast<uint32_t>(enabled_extensions.size());
-    instance_info.ppEnabledExtensionNames = enabled_extensions.data();
-    instance_info.enabledLayerCount = static_cast<uint32_t>(requested_layers.size());
-    instance_info.ppEnabledLayerNames = requested_layers.data();
-
-#ifdef CORONA_ENGINE_DEBUG
-    VkDebugUtilsMessengerCreateInfoEXT debug_info{};
-    if (!requested_layers.empty())
-    {
-        debug_info = debug_messenger_create_info();
-        instance_info.pNext = &debug_info;
-    }
-#endif
-
-    coronaHardwareCheck(vkCreateInstance(&instance_info, nullptr, &instance_));
-
-#ifdef CORONA_ENGINE_DEBUG
-    if (!requested_layers.empty())
-    {
-        setup_debug_messenger();
-    }
-#endif
-}
-
-void HardwareContext::create_devices()
-{
-    uint32_t device_count = 0;
-    vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
-
-    if (device_count == 0)
-    {
-        throw std::runtime_error("Failed to find GPUs! Please ensure you have a Vulkan-capable GPU.");
-    }
-
-    std::vector<VkPhysicalDevice> physical_devices(device_count);
-    vkEnumeratePhysicalDevices(instance_, &device_count, physical_devices.data());
-
-    devices_.reserve(physical_devices.size());
-    for (VkPhysicalDevice physical_device : physical_devices)
-    {
-        if (!supports_required_api(physical_device))
+        const bool enable_validation = validation_layer_available();
+        if (enable_validation)
         {
-            continue;
+            requested_extensions.insert(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            requested_extensions.insert(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+            requested_layers.push_back("VK_LAYER_KHRONOS_validation");
+        }
+#endif
+
+        const auto enabled_extensions = supported_instance_extensions(std::move(requested_extensions));
+
+        VkApplicationInfo app_info {};
+        app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        app_info.apiVersion = required_api_version;
+
+        VkInstanceCreateInfo instance_info {};
+        instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        instance_info.pApplicationInfo = &app_info;
+        instance_info.enabledExtensionCount = static_cast<uint32_t>(enabled_extensions.size());
+        instance_info.ppEnabledExtensionNames = enabled_extensions.data();
+        instance_info.enabledLayerCount = static_cast<uint32_t>(requested_layers.size());
+        instance_info.ppEnabledLayerNames = requested_layers.data();
+
+#ifdef CORONA_ENGINE_DEBUG
+        VkDebugUtilsMessengerCreateInfoEXT debug_info {};
+        if (!requested_layers.empty())
+        {
+            debug_info = debug_messenger_create_info();
+            instance_info.pNext = &debug_info;
+        }
+#endif
+
+        coronaHardwareCheck(vkCreateInstance(&instance_info, nullptr, &instance_));
+
+#ifdef CORONA_ENGINE_DEBUG
+        if (!requested_layers.empty())
+        {
+            setup_debug_messenger();
+        }
+#endif
+    }
+
+    void HardwareContext::create_devices()
+    {
+        uint32_t device_count = 0;
+        vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
+
+        if (device_count == 0)
+        {
+            throw std::runtime_error("Failed to find GPUs! Please ensure you have a Vulkan-capable GPU.");
         }
 
-        auto device = std::make_shared<DeviceContext>();
-        device->device_manager.initDeviceManager(create_info_, instance_, physical_device);
-        device->resource_manager.initResourceManager(device->device_manager, instance_);
-        devices_.push_back(std::move(device));
+        std::vector<VkPhysicalDevice> physical_devices(device_count);
+        vkEnumeratePhysicalDevices(instance_, &device_count, physical_devices.data());
+
+        devices_.reserve(physical_devices.size());
+        for (VkPhysicalDevice physical_device : physical_devices)
+        {
+            if (!supports_required_api(physical_device))
+            {
+                continue;
+            }
+
+            auto device = std::make_shared<DeviceContext>();
+            device->device_manager.initDeviceManager(create_info_, instance_, physical_device);
+            device->resource_manager.initResourceManager(device->device_manager, instance_);
+            devices_.push_back(std::move(device));
+        }
+
+        if (devices_.empty())
+        {
+            throw std::runtime_error("No Vulkan 1.4-capable GPU found.");
+        }
     }
 
-    if (devices_.empty())
+    void HardwareContext::setup_debug_messenger()
     {
-        throw std::runtime_error("No Vulkan 1.4-capable GPU found.");
-    }
-}
-
-void HardwareContext::setup_debug_messenger()
-{
 #ifdef CORONA_ENGINE_DEBUG
-    VkDebugUtilsMessengerCreateInfoEXT create_info = debug_messenger_create_info();
-    if (createDebugUtilsMessengerEXT(instance_, &create_info, nullptr, &debug_messenger_) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Failed to set up debug messenger!");
-    }
+        VkDebugUtilsMessengerCreateInfoEXT create_info = debug_messenger_create_info();
+        if (createDebugUtilsMessengerEXT(instance_, &create_info, nullptr, &debug_messenger_) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to set up debug messenger!");
+        }
 #endif
-}
+    }
 
-void HardwareContext::cleanup_debug_messenger()
-{
-#ifdef CORONA_ENGINE_DEBUG
-    if (debug_messenger_ != VK_NULL_HANDLE && instance_ != VK_NULL_HANDLE)
+    void HardwareContext::cleanup_debug_messenger()
     {
-        destroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
-        debug_messenger_ = VK_NULL_HANDLE;
-    }
+#ifdef CORONA_ENGINE_DEBUG
+        if (debug_messenger_ != VK_NULL_HANDLE && instance_ != VK_NULL_HANDLE)
+        {
+            destroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
+            debug_messenger_ = VK_NULL_HANDLE;
+        }
 #endif
-}
+    }
 
     void HardwareContext::setup_cross_device_semaphores()
     {
