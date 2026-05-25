@@ -9,3 +9,5 @@ Storage 的实现过重：动态扩容、收缩、迭代、读写锁、超时日
 ResourcePool.h 这个名字也不准确，它更像 GlobalResourceRegistry.h。
 
 先记录问题，后面解决
+
+测试 Hardware image layer 和 mipmap 相关功能：
