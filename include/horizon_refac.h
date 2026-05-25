@@ -1125,238 +1125,88 @@ namespace Corona::Horizon
     // Pipeline Runtime
     // ================================================================
 
-    struct PipelineState
-    {
-      public:
-        [[nodiscard]] uintptr_t getPipelineID() const noexcept
-        {
-            return pipelineID_.load(std::memory_order_acquire);
-        }
-
-      protected:
-        mutable std::mutex pipelineMutex_;
-        std::atomic<std::uintptr_t> pipelineID_{0};
-        std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
-    };
-
-    struct ComputePipelineBase : PipelineBindingScope, ReflectedPipelineBindings<ComputePipelineBase>
+    struct ComputePipeline : PipelineBindingScope, ReflectedPipelineBindings<ComputePipeline>
     {
     public:
-        ComputePipelineBase();
+        ComputePipeline();
+        ComputePipeline(ComputePipelineDesc& desc, const std::source_location &source_location = std::source_location::current());
 
-    ComputePipelineBase(
-        const std::string& shaderCode,
-        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-        const std::source_location& sourceLocation = std::source_location::current());
+        ComputePipeline(const ComputePipeline& other);
+        ComputePipeline(ComputePipeline&& other) noexcept;
+        ~ComputePipeline();
 
-    ComputePipelineBase(
-        const std::vector<uint32_t>& spirV,
-        const std::source_location& sourceLocation = std::source_location::current());
+        ComputePipeline& operator=(const ComputePipeline& other);
+        ComputePipeline& operator=(ComputePipeline&& other) noexcept;
+        ComputePipeline& operator()(uint16_t x, uint16_t y, uint16_t z);
 
-    template<typename F>
-        requires std::invocable<F> && (!std::is_convertible_v<F, std::string>)
-    ComputePipelineBase(
-        F&& computeShaderCode,
-        ktm::uvec3 numthreads = ktm::uvec3(1),
-        EmbeddedShader::CompilerOption compilerOption = {},
-        std::source_location sourceLocation = std::source_location::current());
+    private:
+        void bind_push_constant(const BindingSlot &slot, const void *data, size_t size) override
+        {
+            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type);
+        }
 
-    ComputePipelineBase(const ComputePipelineBase& other);
-    ComputePipelineBase(ComputePipelineBase&& other) noexcept;
-    ~ComputePipelineBase();
+        void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) override
+        {
+            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type);
+        }
 
-    ComputePipelineBase& operator=(const ComputePipelineBase& other);
-    ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
+        void bind_image(const BindingSlot &slot, const HardwareImage &image) override
+        {
+            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type);
+        }
 
-    ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
+        void set_push_constant_direct(uint64_t byte_offset, const void *data, size_t size, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer &buffer, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage &image, int32_t bind_type);
 
-    [[nodiscard]] uintptr_t getComputePipelineID() const noexcept
+        mutable std::mutex compute_pipeline_mutex_;
+        std::atomic<std::uintptr_t> compute_pipeline_id_{0};
+    };
+
+    struct RasterizerPipeline : PipelineBindingScope, ReflectedPipelineBindings<RasterizerPipeline>
     {
-        return getPipelineID();
-    }
+    public:
+        RasterizerPipeline();
+        RasterizerPipeline(RasterizerPipelineDesc& desc, const std::source_location& source_location = std::source_location::current());
 
-private:
-    void bindPushConstant(const detail::BindingSlot& slot, const void* data, size_t size) override
+        RasterizerPipeline(const RasterizerPipeline &other);
+        RasterizerPipeline(RasterizerPipeline &&other) noexcept;
+        ~RasterizerPipeline();
+
+        RasterizerPipelineBase &operator=(const RasterizerPipelineBase &other);
+        RasterizerPipelineBase &operator=(RasterizerPipelineBase &&other) noexcept;
+
+        RasterizerPipelineBase &operator()(uint16_t width, uint16_t height);
+        RasterizerPipelineBase &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer);
+        RasterizerPipelineBase &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer, const DrawIndexedParams &params);
+
+    private:
+        void bind_push_constant(const BindingSlot &slot, const void *data, size_t size) override
+        {
+            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type);
+        }
+
+        void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) override
+        {
+            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type);
+        }
+
+        void bind_image(const BindingSlot &slot, const HardwareImage &image) override
+        {
+            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location);
+        }
+
+        void set_push_constant_direct(uint64_t byte_offset, const void *data, size_t size, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer &buffer, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage &image, int32_t bind_type, uint32_t location = 0);
+
+        mutable std::mutex rasterizer_pipeline_mutex_;
+        std::atomic<std::uintptr_t> rasterizer_pipeline_id_{0};
+    };
+
+    struct RayTracingPipelineBase : PipelineBindingScope, ReflectedPipelineBindings<RayTracingPipelineBase>
     {
-        setPushConstantDirect(slot.byteOffset, data, size, slot.bindType);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const HardwareBuffer& buffer) override
-    {
-        setResourceDirect(slot.byteOffset, slot.typeSize, buffer, slot.bindType);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const HardwareImage& image) override
-    {
-        setResourceDirect(slot.byteOffset, slot.typeSize, image, slot.bindType);
-    }
-
-    void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType);
-};
-
-struct RasterizerPipelineBase
-    : PipelineState
-    , PipelineBindingScope
-    , ReflectedPipelineBindings<RasterizerPipelineBase>
-{
-public:
-    RasterizerPipelineBase();
-
-    RasterizerPipelineBase(
-        std::string vertexShaderCode,
-        std::string fragmentShaderCode,
-        uint32_t multiviewCount = 1,
-        EmbeddedShader::ShaderLanguage vertexShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
-        EmbeddedShader::ShaderLanguage fragmentShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
-        const std::source_location& sourceLocation = std::source_location::current());
-
-    RasterizerPipelineBase(
-        const std::vector<uint32_t>& vertexSpirV,
-        const std::vector<uint32_t>& fragmentSpirV,
-        uint32_t multiviewCount = 1,
-        const std::source_location& sourceLocation = std::source_location::current());
-
-    template<typename VF, typename FF>
-        requires (!std::is_convertible_v<VF, std::string>)
-              && (!std::is_convertible_v<FF, std::string>)
-              && (!std::is_same_v<std::remove_cvref_t<VF>, std::vector<uint32_t>>)
-              && (!std::is_same_v<std::remove_cvref_t<FF>, std::vector<uint32_t>>)
-    RasterizerPipelineBase(
-        VF&& vertexShaderCode,
-        FF&& fragmentShaderCode,
-        uint32_t multiviewCount = 1,
-        EmbeddedShader::CompilerOption compilerOption = {},
-        std::source_location sourceLocation = std::source_location::current());
-
-    RasterizerPipelineBase(const RasterizerPipelineBase& other);
-    RasterizerPipelineBase(RasterizerPipelineBase&& other) noexcept;
-    ~RasterizerPipelineBase();
-
-    RasterizerPipelineBase& operator=(const RasterizerPipelineBase& other);
-    RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
-
-    void setDepthEnabled(bool enabled);
-    void setDepthImage(HardwareImage& depthImage);
-    [[nodiscard]] HardwareImage getDepthImage();
-
-    RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
-    RasterizerPipelineBase& record(const HardwareBuffer& indexBuffer, const HardwareBuffer& vertexBuffer);
-    RasterizerPipelineBase& record(const HardwareBuffer& indexBuffer, const HardwareBuffer& vertexBuffer, const DrawIndexedParams& params);
-
-    template<typename T>
-    RasterizerPipelineBase& bindRenderTarget(uint32_t location, EmbeddedShader::Texture2DProxy<T>& proxy)
-    {
-        autoBindEntries_.push_back({
-            &proxy.boundResource_,
-            0,
-            0,
-            static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
-            location
-        });
-        return *this;
-    }
-
-    template<typename... Ts>
-    RasterizerPipelineBase& bindOutputTargets(EmbeddedShader::Texture2DProxy<Ts>&... targets)
-    {
-        uint32_t location = 0;
-        (bindRenderTarget(location++, targets), ...);
-        return *this;
-    }
-
-    [[nodiscard]] uintptr_t getRasterizerPipelineID() const noexcept
-    {
-        return getPipelineID();
-    }
-
-    [[nodiscard]] uintptr_t getGraphicsPipelineID() const noexcept
-    {
-        return getPipelineID();
-    }
-
-private:
-    void bindPushConstant(const detail::BindingSlot& slot, const void* data, size_t size) override
-    {
-        setPushConstantDirect(slot.byteOffset, data, size, slot.bindType);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const HardwareBuffer& buffer) override
-    {
-        setResourceDirect(slot.byteOffset, slot.typeSize, buffer, slot.bindType);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const HardwareImage& image) override
-    {
-        setResourceDirect(slot.byteOffset, slot.typeSize, image, slot.bindType, slot.location);
-    }
-
-    void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
-};
-
-struct RayTracingPipelineBase
-    : PipelineState
-    , PipelineBindingScope
-    , ReflectedPipelineBindings<RayTracingPipelineBase>
-{
-public:
-    RayTracingPipelineBase();
-
-    explicit RayTracingPipelineBase(
-        RayTracingPipelineDesc desc,
-        const std::source_location& sourceLocation = std::source_location::current());
-
-    RayTracingPipelineBase(
-        const std::vector<uint32_t>& rayGenerationSpirV,
-        const std::vector<uint32_t>& missSpirV,
-        const std::vector<uint32_t>& closestHitSpirV,
-        uint32_t maxRecursionDepth = 1,
-        const std::source_location& sourceLocation = std::source_location::current());
-
-    RayTracingPipelineBase(const RayTracingPipelineBase& other);
-    RayTracingPipelineBase(RayTracingPipelineBase&& other) noexcept;
-    ~RayTracingPipelineBase();
-
-    RayTracingPipelineBase& operator=(const RayTracingPipelineBase& other);
-    RayTracingPipelineBase& operator=(RayTracingPipelineBase&& other) noexcept;
-
-    RayTracingPipelineBase& operator()(uint32_t width, uint32_t height = 1, uint32_t depth = 1);
-    RayTracingPipelineBase& record(const RayDispatchDesc& dispatch);
-
-    [[nodiscard]] uintptr_t getRayTracingPipelineID() const noexcept
-    {
-        return getPipelineID();
-    }
-
-private:
-    void bindPushConstant(const detail::BindingSlot& slot, const void* data, size_t size) override
-    {
-        setPushConstantDirect(slot.byteOffset, data, size, slot.bindType);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const HardwareBuffer& buffer) override
-    {
-        setResourceDirect(slot.byteOffset, slot.typeSize, buffer, slot.bindType);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const HardwareImage& image) override
-    {
-        setResourceDirect(slot.byteOffset, slot.typeSize, image, slot.bindType, slot.location);
-    }
-
-    void bindResource(const detail::BindingSlot& slot, const TopLevelAccelerationStructure& accelerationStructure) override
-    {
-        setAccelerationStructureDirect(slot.byteOffset, slot.typeSize, accelerationStructure, slot.bindType);
-    }
-
-    void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
-    void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
-    void setAccelerationStructureDirect(uint64_t byteOffset, uint32_t typeSize, const TopLevelAccelerationStructure& accelerationStructure, int32_t bindType);
-};
+    };
 
 
 
@@ -1364,8 +1214,8 @@ private:
     // HardwareExecutor
     // ================================================================
 
-struct HardwareExecutor
-{
+    struct HardwareExecutor
+    {
   public:
     HardwareExecutor();
     HardwareExecutor(const HardwareExecutor &other);
