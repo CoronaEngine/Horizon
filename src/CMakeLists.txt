@@ -7,6 +7,11 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
+
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
 )
 
 set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/Horizon.h")
