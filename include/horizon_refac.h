@@ -1119,6 +1119,12 @@ namespace Corona::Horizon
         }
     };
 
+    
+
+    // ================================================================
+    // Pipeline Runtime
+    // ================================================================
+
     struct PipelineState
     {
       public:
@@ -1132,10 +1138,6 @@ namespace Corona::Horizon
         std::atomic<std::uintptr_t> pipelineID_{0};
         std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
     };
-
-    // ================================================================
-    // Pipeline Runtime
-    // ================================================================
 
     struct ComputePipelineBase : PipelineBindingScope, ReflectedPipelineBindings<ComputePipelineBase>
     {
@@ -1193,11 +1195,6 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType);
 };
-
-
-// ================================================================
-// Rasterizer Pipeline Base
-// ================================================================
 
 struct RasterizerPipelineBase
     : PipelineState
@@ -1300,10 +1297,6 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
 };
 
-// ================================================================
-// Ray Tracing Pipeline Base
-// ================================================================
-
 struct RayTracingPipelineBase
     : PipelineState
     , PipelineBindingScope
@@ -1367,20 +1360,9 @@ private:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-//////////////////////////////////////////////////////////////////////////
-// HardwareExecutor
-//////////////////////////////////////////////////////////////////////////
+    // ================================================================
+    // HardwareExecutor
+    // ================================================================
 
 struct HardwareExecutor
 {
@@ -1418,9 +1400,11 @@ struct HardwareExecutor
     std::atomic<std::uintptr_t> executorID;
 };
 
-//////////////////////////////////////////////////////////////////////////
+
+
+// ================================================================
 // HardwareDisplayer
-//////////////////////////////////////////////////////////////////////////
+// ================================================================
 
 struct HardwareDisplayer
 {
@@ -1445,6 +1429,7 @@ struct HardwareDisplayer
     std::atomic<std::uintptr_t> displaySurfaceID;
     mutable std::mutex displayerMutex;
 };
+
 }
 
 
