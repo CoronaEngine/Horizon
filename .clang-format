@@ -4,3 +4,11 @@ BasedOnStyle: Microsoft
 ColumnLimit: 0
 IndentWidth: 4
 UseTab: Never
+NamespaceIndentation: All
+PointerAlignment: Left
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+FixNamespaceComments: false
+SpaceBeforeCpp11BracedList: true
+Cpp11BracedListStyle: false
+ReflowComments: Never
