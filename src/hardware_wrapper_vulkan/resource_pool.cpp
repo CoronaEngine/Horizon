@@ -1,14 +1,8 @@
 #include "resource_pool.h"
 
-#include "hardware_wrapper_vulkan/DisplayVulkan/DisplayManager.h"
-#include "hardware_wrapper_vulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "hardware_wrapper_vulkan/PipelineVulkan/ComputePipeline.h"
-#include "hardware_wrapper_vulkan/PipelineVulkan/RasterizerPipeline.h"
-
-BufferHardwareStorage globalBufferStorages;
-ImageHardwareStorage globalImageStorages;
-RasterizerPipelineStorage gRasterizerPipelineStorage;
-ComputePipelineStorage gComputePipelineStorage;
-DisplayerHardwareStorage globalDisplayerStorages;
-ExecutorStorage gExecutorStorage;
-PushConstantStorage globalPushConstantStorages;
+Corona::Kernel::Utils::Storage<BufferWrap> g_buffer_storages;
+Corona::Kernel::Utils::Storage<ImageWrap> g_image_storages;
+Corona::Kernel::Utils::Storage<RasterizerPipelineWrap> g_rasterizer_pipeline_storages;
+Corona::Kernel::Utils::Storage<ComputePipelineWrap> g_compute_pipeline_storages;
+Corona::Kernel::Utils::Storage<ExecutorWrap> g_executor_storages;
+Corona::Kernel::Utils::Storage<DisplayerWrap> g_displayer_storages;
