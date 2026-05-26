@@ -1,4 +1,14 @@
+#pragma once
 
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <unordered_map>
+#include <vector>
+
+#include "features_chain.h"
 
 namespace Corona::Horizon
 {

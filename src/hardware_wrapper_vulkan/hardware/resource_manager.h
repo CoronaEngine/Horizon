@@ -5,8 +5,9 @@
 #include <vector>
 
 #include <ktm/ktm.h>
-#include <vk_mem_alloc.h>
+
 #include <volk.h>
+#include <vk_mem_alloc.h>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
