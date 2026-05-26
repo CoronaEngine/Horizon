@@ -170,6 +170,32 @@ namespace Corona::Horizon
         &VkPhysicalDeviceVulkan13Features::maintenance4,
     };
 
+    constexpr std::array vulkan_14_feature_fields 
+    {
+        &VkPhysicalDeviceVulkan14Features::globalPriorityQuery,
+        &VkPhysicalDeviceVulkan14Features::shaderSubgroupRotate,
+        &VkPhysicalDeviceVulkan14Features::shaderSubgroupRotateClustered,
+        &VkPhysicalDeviceVulkan14Features::shaderFloatControls2,
+        &VkPhysicalDeviceVulkan14Features::shaderExpectAssume,
+        &VkPhysicalDeviceVulkan14Features::rectangularLines,
+        &VkPhysicalDeviceVulkan14Features::bresenhamLines,
+        &VkPhysicalDeviceVulkan14Features::smoothLines,
+        &VkPhysicalDeviceVulkan14Features::stippledRectangularLines,
+        &VkPhysicalDeviceVulkan14Features::stippledBresenhamLines,
+        &VkPhysicalDeviceVulkan14Features::stippledSmoothLines,
+        &VkPhysicalDeviceVulkan14Features::vertexAttributeInstanceRateDivisor,
+        &VkPhysicalDeviceVulkan14Features::vertexAttributeInstanceRateZeroDivisor,
+        &VkPhysicalDeviceVulkan14Features::indexTypeUint8,
+        &VkPhysicalDeviceVulkan14Features::dynamicRenderingLocalRead,
+        &VkPhysicalDeviceVulkan14Features::maintenance5,
+        &VkPhysicalDeviceVulkan14Features::maintenance6,
+        &VkPhysicalDeviceVulkan14Features::pipelineProtectedAccess,
+        &VkPhysicalDeviceVulkan14Features::pipelineRobustness,
+        &VkPhysicalDeviceVulkan14Features::hostImageCopy,
+        &VkPhysicalDeviceVulkan14Features::pushDescriptor,
+    };
+
+
 
 
 
