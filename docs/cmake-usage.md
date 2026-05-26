@@ -103,6 +103,8 @@ cmake --preset ninja-msvc
 cmake --build --preset msvc-debug --target HorizonExamples
 ```
 
+Visual Studio 2026 日常调试也推荐使用这一组 preset。VS 配置下拉框中常见显示名是 `Debug (ninja-msvc-msvc-debug)`，详细流程见 [vs-debugging.md](vs-debugging.md)。
+
 如果你只想构建库和工具：
 
 ```powershell
