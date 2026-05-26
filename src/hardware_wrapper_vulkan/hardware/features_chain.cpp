@@ -195,8 +195,253 @@ namespace Corona::Horizon
         &VkPhysicalDeviceVulkan14Features::pushDescriptor,
     };
 
+    constexpr std::array acceleration_structure_feature_fields 
+    {
+        &VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructure,
+        &VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructureCaptureReplay,
+        &VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructureIndirectBuild,
+        &VkPhysicalDeviceAccelerationStructureFeaturesKHR::accelerationStructureHostCommands,
+        &VkPhysicalDeviceAccelerationStructureFeaturesKHR::descriptorBindingAccelerationStructureUpdateAfterBind,
+    };
 
+    constexpr std::array ray_tracing_pipeline_feature_fields 
+    {
+        &VkPhysicalDeviceRayTracingPipelineFeaturesKHR::rayTracingPipeline,
+        &VkPhysicalDeviceRayTracingPipelineFeaturesKHR::rayTracingPipelineShaderGroupHandleCaptureReplay,
+        &VkPhysicalDeviceRayTracingPipelineFeaturesKHR::rayTracingPipelineShaderGroupHandleCaptureReplayMixed,
+        &VkPhysicalDeviceRayTracingPipelineFeaturesKHR::rayTracingPipelineTraceRaysIndirect,
+        &VkPhysicalDeviceRayTracingPipelineFeaturesKHR::rayTraversalPrimitiveCulling,
+    };
 
+    constexpr std::array ray_query_feature_fields 
+    {
+        &VkPhysicalDeviceRayQueryFeaturesKHR::rayQuery,
+    };
 
+    template <typename feature_type, std::size_t field_count> DeviceFeaturesChain apply_to_chain(const DeviceFeaturesChain& chain,
+                                                                                                 const feature_type& features,
+                                                                                                 feature_type DeviceFeaturesChain::* destination,
+                                                                                                 const std::array<VkBool32 feature_type::*, field_count>& fields,
+                                                                                                 FeatureBoolOp op)
+    {
+        DeviceFeaturesChain result(chain);
+        apply_feature_fields(result.*destination, features, fields, op);
+        return result;
+    }
 
+    DeviceFeaturesChain::DeviceFeaturesChain()
+    {
+        initialize_chain();
+    }
+
+    DeviceFeaturesChain::DeviceFeaturesChain(const DeviceFeaturesChain& other)
+    {
+        copy_from(other);
+    }
+
+    DeviceFeaturesChain::DeviceFeaturesChain(DeviceFeaturesChain&& other) noexcept
+    {
+        copy_from(other);
+    }
+
+    DeviceFeaturesChain& DeviceFeaturesChain::operator=(const DeviceFeaturesChain& other)
+    {
+        if (this != &other)
+        {
+            copy_from(other);
+        }
+
+        return *this;
+    }
+
+    DeviceFeaturesChain& DeviceFeaturesChain::operator=(DeviceFeaturesChain&& other) noexcept
+    {
+        if (this != &other)
+        {
+            copy_from(other);
+        }
+
+        return *this;
+    }
+
+    void DeviceFeaturesChain::copy_from(const DeviceFeaturesChain& other) noexcept
+    {
+        device_features_2 = other.device_features_2;
+        device_features_11 = other.device_features_11;
+        device_features_12 = other.device_features_12;
+        device_features_13 = other.device_features_13;
+        device_features_14 = other.device_features_14;
+        swapchain_maintenance_1_features = other.swapchain_maintenance_1_features;
+        acceleration_structure_features = other.acceleration_structure_features;
+        ray_tracing_pipeline_features = other.ray_tracing_pipeline_features;
+        ray_query_features = other.ray_query_features;
+
+        initialize_chain();
+    }
+
+    void DeviceFeaturesChain::initialize_chain() noexcept
+    {
+        swapchain_maintenance_1_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+        swapchain_maintenance_1_features.pNext = nullptr;
+
+        acceleration_structure_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+        acceleration_structure_features.pNext = nullptr;
+
+        ray_tracing_pipeline_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+        ray_tracing_pipeline_features.pNext = nullptr;
+
+        ray_query_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+        ray_query_features.pNext = nullptr;
+
+        device_features_14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+        device_features_14.pNext = nullptr;
+
+        device_features_13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        device_features_13.pNext = &device_features_14;
+
+        device_features_12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        device_features_12.pNext = &device_features_13;
+
+        device_features_11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+        device_features_11.pNext = &device_features_12;
+
+        device_features_2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        device_features_2.pNext = &device_features_11;
+    }
+
+    VkPhysicalDeviceFeatures2* DeviceFeaturesChain::chain_head()
+    {
+        return &device_features_2;
+    }
+
+    const VkPhysicalDeviceFeatures2* DeviceFeaturesChain::chain_head() const
+    {
+        return &device_features_2;
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const DeviceFeaturesChain& features) const
+    {
+        return (*this & features.device_features_2.features & features.device_features_11 & features.device_features_12 & features.device_features_13 & features.device_features_14 & features.acceleration_structure_features & features.ray_tracing_pipeline_features & features.ray_query_features & features.swapchain_maintenance_1_features);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const DeviceFeaturesChain& features) const
+    {
+        return (*this | features.device_features_2.features | features.device_features_11 | features.device_features_12 | features.device_features_13 | features.device_features_14 | features.acceleration_structure_features | features.ray_tracing_pipeline_features | features.ray_query_features | features.swapchain_maintenance_1_features);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceFeatures2& features) const
+    {
+        return *this & features.features;
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceFeatures2& features) const
+    {
+        return *this | features.features;
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceFeatures& features) const
+    {
+        DeviceFeaturesChain result(*this);
+        apply_feature_fields(
+            result.device_features_2.features,
+            features,
+            physical_device_feature_fields,
+            feature_bool_op::and_op);
+        return result;
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceFeatures& features) const
+    {
+        DeviceFeaturesChain result(*this);
+        apply_feature_fields(
+            result.device_features_2.features,
+            features,
+            physical_device_feature_fields,
+            feature_bool_op::or_op);
+        return result;
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceVulkan11Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_11, vulkan_11_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceVulkan11Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_11, vulkan_11_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceVulkan12Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_12, vulkan_12_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceVulkan12Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_12, vulkan_12_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceVulkan13Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_13, vulkan_13_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceVulkan13Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_13, vulkan_13_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceVulkan14Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_14, vulkan_14_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceVulkan14Features& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::device_features_14, vulkan_14_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceAccelerationStructureFeaturesKHR& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::acceleration_structure_features, acceleration_structure_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceAccelerationStructureFeaturesKHR& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::acceleration_structure_features, acceleration_structure_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceRayTracingPipelineFeaturesKHR& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::ray_tracing_pipeline_features, ray_tracing_pipeline_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceRayTracingPipelineFeaturesKHR& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::ray_tracing_pipeline_features, ray_tracing_pipeline_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceRayQueryFeaturesKHR& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::ray_query_features, ray_query_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceRayQueryFeaturesKHR& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::ray_query_features, ray_query_feature_fields, feature_bool_op::or_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator&(const VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::swapchain_maintenance_1_features, swapchain_maintenance_1_feature_fields, feature_bool_op::and_op);
+    }
+
+    DeviceFeaturesChain DeviceFeaturesChain::operator|(const VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT& features) const
+    {
+        return apply_to_chain(this, features, &DeviceFeaturesChain::swapchain_maintenance_1_features, swapchain_maintenance_1_feature_fields, feature_bool_op::or_op);
+    }
 }
