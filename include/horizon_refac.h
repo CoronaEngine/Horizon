@@ -1159,7 +1159,7 @@ namespace Corona::Horizon
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage &image, int32_t bind_type);
 
         mutable std::mutex compute_pipeline_mutex_;
-        std::atomic<std::uintptr_t> compute_pipeline_id_{0};
+        std::atomic<std::uintptr_t> compute_pipeline_id_;
     };
 
     struct RasterizerPipeline : PipelineBindingScope, ReflectedPipelineBindings<RasterizerPipeline>
@@ -1200,7 +1200,7 @@ namespace Corona::Horizon
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage &image, int32_t bind_type, uint32_t location = 0);
 
         mutable std::mutex rasterizer_pipeline_mutex_;
-        std::atomic<std::uintptr_t> rasterizer_pipeline_id_{0};
+        std::atomic<std::uintptr_t> rasterizer_pipeline_id_;
     };
 
     struct RayTracingPipelineBase : PipelineBindingScope, ReflectedPipelineBindings<RayTracingPipelineBase>
