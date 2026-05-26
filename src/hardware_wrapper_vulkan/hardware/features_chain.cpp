@@ -151,5 +151,26 @@ namespace Corona::Horizon
         &VkPhysicalDeviceVulkan12Features::subgroupBroadcastDynamicId,
     };
 
+    constexpr std::array vulkan_13_feature_fields 
+    {
+        &VkPhysicalDeviceVulkan13Features::robustImageAccess,
+        &VkPhysicalDeviceVulkan13Features::inlineUniformBlock,
+        &VkPhysicalDeviceVulkan13Features::descriptorBindingInlineUniformBlockUpdateAfterBind,
+        &VkPhysicalDeviceVulkan13Features::pipelineCreationCacheControl,
+        &VkPhysicalDeviceVulkan13Features::privateData,
+        &VkPhysicalDeviceVulkan13Features::shaderDemoteToHelperInvocation,
+        &VkPhysicalDeviceVulkan13Features::shaderTerminateInvocation,
+        &VkPhysicalDeviceVulkan13Features::subgroupSizeControl,
+        &VkPhysicalDeviceVulkan13Features::computeFullSubgroups,
+        &VkPhysicalDeviceVulkan13Features::synchronization2,
+        &VkPhysicalDeviceVulkan13Features::textureCompressionASTC_HDR,
+        &VkPhysicalDeviceVulkan13Features::shaderZeroInitializeWorkgroupMemory,
+        &VkPhysicalDeviceVulkan13Features::dynamicRendering,
+        &VkPhysicalDeviceVulkan13Features::shaderIntegerDotProduct,
+        &VkPhysicalDeviceVulkan13Features::maintenance4,
+    };
+
+
+
 
 }
