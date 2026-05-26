@@ -1,21 +1,20 @@
 <#
     sync-agents.ps1
     ----------------
-    Helper for keeping AGENTS.md synchronized with AGENTS.zh-CN.md.
+    Helper for checking and prompting synchronization between
+    human-maintained Chinese agent files and English AI-facing files.
 
     Usage:
         .\tools\sync-agents.ps1
-            Print the prompt to give Codex after editing AGENTS.zh-CN.md.
-            This is the script form of the `=sa` project command.
-
         .\tools\sync-agents.ps1 -Prompt
-            Same as the default behavior.
+            Print the prompt to give an AI agent after editing Chinese sources.
+            Running the script without switches prints the same prompt.
 
         .\tools\sync-agents.ps1 -Check
-            Check whether AGENTS.md contains a sync marker matching the current
-            AGENTS.zh-CN.md SHA256 hash.
+            Check whether English files contain sync markers matching the
+            current Chinese source SHA256 hashes.
 
-    This script does not modify AGENTS.md or AGENTS.zh-CN.md.
+    This script does not modify files.
 #>
 Param(
     [switch]$Check,
@@ -25,55 +24,156 @@ Param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$repoRoot = Resolve-Path "$PSScriptRoot\.."
-$chinesePath = Join-Path $repoRoot "AGENTS.zh-CN.md"
-$englishPath = Join-Path $repoRoot "AGENTS.md"
+$repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 
-if (-not (Test-Path $chinesePath)) {
-    throw "Missing AGENTS.zh-CN.md"
+$syncPairs = @(
+    @{
+        Source = "AGENTS.zh-CN.md"
+        Target = "AGENTS.md"
+        Marker = "AGENTS_ZH_CN_SHA256"
+        Label = "root AGENTS"
+    },
+    @{
+        Source = "docs/agents/zh-CN/index.md"
+        Target = "docs/agents/index.md"
+        Marker = "AGENT_DOCS_INDEX_ZH_CN_SHA256"
+        Label = "agent docs index"
+    },
+    @{
+        Source = "docs/agents/zh-CN/build.md"
+        Target = "docs/agents/build.md"
+        Marker = "AGENT_DOCS_BUILD_ZH_CN_SHA256"
+        Label = "build context"
+    },
+    @{
+        Source = "docs/agents/zh-CN/git.md"
+        Target = "docs/agents/git.md"
+        Marker = "AGENT_DOCS_GIT_ZH_CN_SHA256"
+        Label = "git context"
+    },
+    @{
+        Source = "docs/agents/zh-CN/formatting.md"
+        Target = "docs/agents/formatting.md"
+        Marker = "AGENT_DOCS_FORMATTING_ZH_CN_SHA256"
+        Label = "formatting context"
+    },
+    @{
+        Source = "docs/agents/zh-CN/vulkan.md"
+        Target = "docs/agents/vulkan.md"
+        Marker = "AGENT_DOCS_VULKAN_ZH_CN_SHA256"
+        Label = "vulkan context"
+    },
+    @{
+        Source = "docs/agents/zh-CN/helicon.md"
+        Target = "docs/agents/helicon.md"
+        Marker = "AGENT_DOCS_HELICON_ZH_CN_SHA256"
+        Label = "helicon context"
+    },
+    @{
+        Source = "docs/agents/zh-CN/push-constants.md"
+        Target = "docs/agents/push-constants.md"
+        Marker = "AGENT_DOCS_PUSH_CONSTANTS_ZH_CN_SHA256"
+        Label = "push constant context"
+    },
+    @{
+        Source = ".agents/skills/horizon-workflow/SKILL.zh-CN.md"
+        Target = ".agents/skills/horizon-workflow/SKILL.md"
+        Marker = "HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256"
+        Label = "horizon workflow skill"
+    }
+)
+
+function Get-AbsoluteRepoPath {
+    param([string]$RelativePath)
+    return Join-Path $repoRoot $RelativePath
 }
 
-if (-not (Test-Path $englishPath)) {
-    throw "Missing AGENTS.md"
+function Get-SyncState {
+    param([hashtable]$Pair)
+
+    $sourcePath = Get-AbsoluteRepoPath $Pair.Source
+    $targetPath = Get-AbsoluteRepoPath $Pair.Target
+
+    if (-not (Test-Path -LiteralPath $sourcePath)) {
+        throw "Missing source file: $($Pair.Source)"
+    }
+
+    if (-not (Test-Path -LiteralPath $targetPath)) {
+        throw "Missing target file: $($Pair.Target)"
+    }
+
+    $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $targetText = Get-Content -Raw -Encoding UTF8 -LiteralPath $targetPath
+    $markerPattern = "<!-- $($Pair.Marker): ([a-fA-F0-9]+) -->"
+    $hasMarker = $targetText -match $markerPattern
+    $storedHash = if ($hasMarker) { $Matches[1].ToLowerInvariant() } else { "" }
+
+    return [pscustomobject]@{
+        Label = $Pair.Label
+        Source = $Pair.Source
+        Target = $Pair.Target
+        Marker = $Pair.Marker
+        SourceHash = $sourceHash
+        StoredHash = $storedHash
+        HasMarker = $hasMarker
+        InSync = ($hasMarker -and $storedHash -eq $sourceHash)
+    }
 }
 
-$chineseHash = (Get-FileHash $chinesePath -Algorithm SHA256).Hash.ToLowerInvariant()
-$englishText = Get-Content -Raw -Path $englishPath
-$markerPattern = "<!-- AGENTS_ZH_CN_SHA256: ([a-fA-F0-9]+) -->"
-$hasMarker = $englishText -match $markerPattern
-$storedHash = if ($hasMarker) { $Matches[1].ToLowerInvariant() } else { "" }
+$states = foreach ($pair in $syncPairs) {
+    Get-SyncState -Pair $pair
+}
 
 if ($Check) {
-    if (-not $hasMarker) {
-        Write-Host "AGENTS.md has no sync marker."
-        Write-Host "Current AGENTS.zh-CN.md SHA256: $chineseHash"
+    $failed = @($states | Where-Object { -not $_.InSync })
+
+    if ($failed.Count -gt 0) {
+        foreach ($state in $failed) {
+            if (-not $state.HasMarker) {
+                Write-Host "$($state.Target) has no sync marker for $($state.Source)."
+            }
+            else {
+                Write-Host "$($state.Target) is stale for $($state.Source)."
+                Write-Host "Stored hash:  $($state.StoredHash)"
+                Write-Host "Current hash: $($state.SourceHash)"
+            }
+        }
         exit 1
     }
 
-    if ($storedHash -ne $chineseHash) {
-        Write-Host "AGENTS.md is stale."
-        Write-Host "Stored hash:  $storedHash"
-        Write-Host "Current hash: $chineseHash"
-        exit 1
-    }
-
-    Write-Host "AGENTS.md is in sync with AGENTS.zh-CN.md."
+    Write-Host "All agent English files are in sync with Chinese sources."
     exit 0
 }
 
-Write-Host @"
-Please update AGENTS.md from AGENTS.zh-CN.md.
+$markerLines = $states | ForEach-Object {
+    "- $($_.Target): <!-- $($_.Marker): $($_.SourceHash) -->"
+}
 
-This is the `=sa` project command: sync agents.
+$pairLines = $states | ForEach-Object {
+    "- $($_.Source) -> $($_.Target)"
+}
 
-Rules:
-- Treat AGENTS.zh-CN.md as the source of truth.
-- Keep AGENTS.md in English.
-- Preserve the same section structure.
-- Make the English concise, direct, and optimized as AI project context.
-- Preserve all commands, paths, warnings, and forbidden actions.
-- Add or update this marker near the top of AGENTS.md after syncing:
-  <!-- AGENTS_ZH_CN_SHA256: $chineseHash -->
-- Do not modify AGENTS.zh-CN.md unless explicitly asked.
-- Do not modify unrelated files.
-"@
+$promptLines = @(
+    'Please synchronize the English AI-facing files from their Chinese source files.',
+    '',
+    'This is the `=sa` project command: sync all agent context files.',
+    '',
+    'Rules:',
+    '- Treat Chinese files as the source of truth.',
+    '- Keep English files concise, direct, and optimized for AI context.',
+    '- Preserve command names, paths, warnings, validation rules, and forbidden actions.',
+    '- Preserve each file''s purpose and section structure where practical.',
+    '- Add or update these markers in the matching English files:',
+    ($markerLines -join [Environment]::NewLine),
+    '- Do not modify Chinese source files unless explicitly asked.',
+    '- Do not modify unrelated files.',
+    '- Do not create `.agents/skills/*/zh-CN/SKILL.md`; use `SKILL.zh-CN.md` for Chinese skill sources to avoid duplicate skill discovery.',
+    '',
+    'Pairs:',
+    ($pairLines -join [Environment]::NewLine),
+    '',
+    'After editing, run:',
+    '.\tools\sync-agents.ps1 -Check'
+)
+
+Write-Output ($promptLines -join [Environment]::NewLine)
