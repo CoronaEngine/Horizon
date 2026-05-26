@@ -48,6 +48,7 @@
 ## 推荐构建方式（Windows）
 
 更完整的 CMake 使用说明见 [docs/cmake-usage.md](docs/cmake-usage.md)。
+Visual Studio 调试流程见 [docs/vs-debugging.md](docs/vs-debugging.md)。
 
 当前仓库中的 Corona Framework 已直接纳入 `modules/corona/`，不再通过远程 `FetchContent` 拉取；其余第三方依赖仍可能在 configure 阶段由 CMake 自动获取。
 
@@ -88,6 +89,7 @@ executor << compute
 ## 文档索引
 
 - [docs/cmake-usage.md](docs/cmake-usage.md)：本项目 CMake 结构、preset、构建目标与常见问题说明
+- [docs/vs-debugging.md](docs/vs-debugging.md)：Visual Studio 2026 下的 CMake preset、调试目标与命令行复现方式
 
 ## 许可证
 
