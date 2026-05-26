@@ -42,7 +42,7 @@ namespace Corona::Horizon
 
         VkInstance instance_ { VK_NULL_HANDLE };
         VkDebugUtilsMessengerEXT debug_messenger_ { VK_NULL_HANDLE };
-        CreateCallback create_info_ {};
+        HardwareCreateConfig create_config_ {};
 
         std::vector<std::shared_ptr<DeviceContext>> devices_;
         std::shared_ptr<DeviceContext> main_device_;

@@ -1,3 +1,7 @@
+#if defined(_WIN32)
+#define VK_USE_PLATFORM_WIN32_KHR
+#endif
+
 #include "hardware_context.h"
 
 #include <algorithm>
@@ -9,9 +13,9 @@
 #define VOLK_IMPLEMENTATION
 #include <volk.h>
 
-namespace Corona::Horizon::Vulkan
+namespace Corona::Horizon
 {
-    constexpr VkApiVersion required_api_version = VK_API_VERSION_1_4;
+    constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
 
     bool has_extension(const std::vector<VkExtensionProperties>& extensions, const char* name)
     {
@@ -158,8 +162,8 @@ namespace Corona::Horizon::Vulkan
                 continue;
             }
 
-            device->resource_manager.cleanUpResourceManager();
-            device->device_manager.cleanUpDeviceManager();
+            //device->resource_manager.cleanUpResourceManager();
+            //device->device_manager.cleanUpDeviceManager();
         }
 
         devices_.clear();
@@ -169,14 +173,14 @@ namespace Corona::Horizon::Vulkan
 
         if (instance_ != VK_NULL_HANDLE)
         {
-            //vkDestroyInstance(instance_, nullptr);
+            vkDestroyInstance(instance_, nullptr);
             instance_ = VK_NULL_HANDLE;
         }
     }
 
     void HardwareContext::prepare_features()
     {
-        create_info_.requiredInstanceExtensions = [](const VkInstance&, const VkPhysicalDevice&) {
+        create_config_.get_instance_extensions = [](const VkInstance&, const VkPhysicalDevice&) {
             std::set<const char*> extensions
             {
                 "VK_KHR_surface",
@@ -198,7 +202,7 @@ namespace Corona::Horizon::Vulkan
             return extensions;
         };
 
-        create_info_.requiredDeviceExtensions = [](const VkInstance&, const VkPhysicalDevice&) {
+        create_config_.get_device_extensions = [](const VkInstance&, const VkPhysicalDevice&) {
             return std::set<const char*>
             {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -224,7 +228,7 @@ namespace Corona::Horizon::Vulkan
             };
         };
 
-        create_info_.requiredDeviceFeatures = [](const VkInstance&, const VkPhysicalDevice&) {
+        create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice&) {
             VkPhysicalDeviceFeatures features {};
             features.samplerAnisotropy = VK_TRUE;
             features.shaderInt16 = VK_TRUE;
@@ -267,7 +271,7 @@ namespace Corona::Horizon::Vulkan
 
     void HardwareContext::create_instance()
     {
-        auto requested_extensions = create_info_.requiredInstanceExtensions(instance_, nullptr);
+        auto requested_extensions = create_config_.get_instance_extensions(instance_, nullptr);
         std::vector<const char*> requested_layers;
 
 #ifdef CORONA_ENGINE_DEBUG
@@ -303,7 +307,11 @@ namespace Corona::Horizon::Vulkan
         }
 #endif
 
-        coronaHardwareCheck(vkCreateInstance(&instance_info, nullptr, &instance_));
+        const VkResult result = vkCreateInstance(&instance_info, nullptr, &instance_);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to create Vulkan instance.");
+        }
 
 #ifdef CORONA_ENGINE_DEBUG
         if (!requested_layers.empty())
@@ -335,8 +343,8 @@ namespace Corona::Horizon::Vulkan
             }
 
             auto device = std::make_shared<DeviceContext>();
-            device->device_manager.initDeviceManager(create_info_, instance_, physical_device);
-            device->resource_manager.initResourceManager(device->device_manager, instance_);
+            //device->device_manager.initDeviceManager(create_info_, instance_, physical_device);
+            //device->resource_manager.initResourceManager(device->device_manager, instance_);
             devices_.push_back(std::move(device));
         }
 
@@ -388,7 +396,7 @@ namespace Corona::Horizon::Vulkan
                 }
             }
 
-            devices_[device_index]->device_manager.importForeignSemaphores(peer_devices);
+            //devices_[device_index]->device_manager.importForeignSemaphores(peer_devices);
         }
 
         CFW_LOG_DEBUG("Cross-device timeline semaphore import completed for {} devices", devices_.size());
@@ -396,12 +404,12 @@ namespace Corona::Horizon::Vulkan
 
     void HardwareContext::choose_main_device()
     {
-        main_device_ = *std::min_element(devices_.begin(), devices_.end(), [](const auto& left, const auto& right) {
+        /*main_device_ = *std::min_element(devices_.begin(), devices_.end(), [](const auto& left, const auto& right) {
             const auto left_type = left->device_manager.getFeaturesUtils().supportedProperties.properties.deviceType;
             const auto right_type = right->device_manager.getFeaturesUtils().supportedProperties.properties.deviceType;
             return getDeviceTypePriority(left_type) < getDeviceTypePriority(right_type);
         });
 
-        CFW_LOG_DEBUG("Selected main device: {}", main_device_->device_manager.getFeaturesUtils().supportedProperties.properties.deviceName);
+        CFW_LOG_DEBUG("Selected main device: {}", main_device_->device_manager.getFeaturesUtils().supportedProperties.properties.deviceName);*/
     }
 }
