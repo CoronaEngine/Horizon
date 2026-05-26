@@ -84,5 +84,21 @@ namespace Corona::Horizon
         &VkPhysicalDeviceFeatures::inheritedQueries,
     };
 
+    constexpr std::array vulkan_11_feature_fields 
+    {
+        &VkPhysicalDeviceVulkan11Features::storageBuffer16BitAccess,
+        &VkPhysicalDeviceVulkan11Features::uniformAndStorageBuffer16BitAccess,
+        &VkPhysicalDeviceVulkan11Features::storagePushConstant16,
+        &VkPhysicalDeviceVulkan11Features::storageInputOutput16,
+        &VkPhysicalDeviceVulkan11Features::multiview,
+        &VkPhysicalDeviceVulkan11Features::multiviewGeometryShader,
+        &VkPhysicalDeviceVulkan11Features::multiviewTessellationShader,
+        &VkPhysicalDeviceVulkan11Features::variablePointersStorageBuffer,
+        &VkPhysicalDeviceVulkan11Features::variablePointers,
+        &VkPhysicalDeviceVulkan11Features::protectedMemory,
+        &VkPhysicalDeviceVulkan11Features::samplerYcbcrConversion,
+        &VkPhysicalDeviceVulkan11Features::shaderDrawParameters,
+    };
+
 
 }
