@@ -47,8 +47,7 @@
 
 ## 推荐构建方式（Windows）
 
-更完整的 CMake 使用说明见 [docs/cmake-usage.md](docs/cmake-usage.md)。
-Visual Studio 调试流程见 [docs/vs-debugging.md](docs/vs-debugging.md)。
+构建、preset 和 Visual Studio 调试细节已收束到 [docs/agents/zh-CN/build.md](docs/agents/zh-CN/build.md)。
 
 当前仓库中的 Corona Framework 已直接纳入 `modules/corona/`，不再通过远程 `FetchContent` 拉取；其余第三方依赖仍可能在 configure 阶段由 CMake 自动获取。
 
@@ -70,6 +69,8 @@ cmake --build --preset vs2022-debug --target HorizonExamples
 
 - 每个 configure preset 使用独立构建目录，例如 `build/ninja-msvc`、`build/ninja-clang`、`build/vs2022`。
 - 在 Ninja 和 Visual Studio 之间切换时，不再共用同一个 CMake cache；如果某个 preset 缓存损坏，只清理对应的 `build/<preset>` 目录即可。
+- 命令行复现 MSVC 构建时，优先进入 Visual Studio Developer Command Prompt；普通 PowerShell 可能缺少 MSVC include/lib 环境。
+- FetchContent 源码缓存位于 `build/_deps`，各 preset 的第三方构建产物位于 `build/<preset>/deps`。
 
 ## 示例程序
 
@@ -88,8 +89,8 @@ executor << compute
 
 ## 文档索引
 
-- [docs/cmake-usage.md](docs/cmake-usage.md)：本项目 CMake 结构、preset、构建目标与常见问题说明
-- [docs/vs-debugging.md](docs/vs-debugging.md)：Visual Studio 2026 下的 CMake preset、调试目标与命令行复现方式
+- [docs/agents/zh-CN/build.md](docs/agents/zh-CN/build.md)：CMake、preset、构建验证和 Visual Studio 调试上下文
+- [docs/agents/zh-CN/index.md](docs/agents/zh-CN/index.md)：AI 上下文包索引
 
 ## 许可证
 
