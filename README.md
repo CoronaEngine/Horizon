@@ -33,7 +33,7 @@
 - `src/HardwareWrapperVulkan/`：Vulkan 设备、资源、执行与显示
 - `src/Helicon/`：DSL、AST、代码生成、编译与反射
 - `examples/`：示例程序与 shader 资源
-- `tools/`：`ShaderCompileScripts`、格式化脚本与统计工具
+- `tools/`：`ShaderCompileScripts`、`dev.ps1` 和 `code-format.ps1`
 - `modules/corona/`：已内嵌的 Corona Framework（当前 Horizon 的基础依赖之一）
 - `third-party/`：预置 `slang`、`dxc` 二进制与头库
 - `docs/`：项目文档

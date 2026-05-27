@@ -9,6 +9,7 @@
         .\tools\dev.ps1 build Horizon
         .\tools\dev.ps1 format-check
         .\tools\dev.ps1 format
+        .\tools\dev.ps1 format src/hardware_wrapper_vulkan
 #>
 [CmdletBinding()]
 Param(
@@ -16,9 +17,9 @@ Param(
     [ValidateSet("status", "configure", "build", "format-check", "format")]
     [string]$Command = "status",
 
-    [Parameter(Position = 1)]
+    [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$Target = "Horizon"
+    [string[]]$Target = @("Horizon")
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +41,31 @@ function Invoke-NativeCommand {
     }
 }
 
+function Get-FormatArguments {
+    $targetValues = @($Target)
+    if ($targetValues.Count -eq 1 -and $targetValues[0] -eq "Horizon") {
+        return @()
+    }
+
+    return @($targetValues)
+}
+
+function Invoke-FormatScript {
+    param([Parameter(Mandatory = $true)][bool]$CheckOnly)
+
+    $script = Join-Path $RepoRoot "tools\code-format.ps1"
+    $arguments = @(Get-FormatArguments)
+    if ($CheckOnly) {
+        & $script -Check @arguments
+    }
+    else {
+        & $script @arguments
+    }
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 Push-Location -LiteralPath $RepoRoot
 try {
     switch ($Command) {
@@ -51,13 +77,13 @@ try {
             Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "ninja-msvc")
         }
         "build" {
-            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", "--preset", "msvc-debug", "--target", $Target)
+            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", "--preset", "msvc-debug", "--target", $Target[0])
         }
         "format-check" {
-            & (Join-Path $RepoRoot "tools\code-format.ps1") -Check
+            Invoke-FormatScript -CheckOnly $true
         }
         "format" {
-            & (Join-Path $RepoRoot "tools\code-format.ps1")
+            Invoke-FormatScript -CheckOnly $false
         }
     }
 }
