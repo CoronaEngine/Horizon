@@ -1,8 +1,9 @@
-set(HORIZON_TEST_COMMON_SOURCES
-    common/test_main.cpp
+horizon_add_test(HorizonTests
+    main.cpp
+    vulkan/test_hardware_context.cpp
 )
 
-horizon_add_test(HorizonSmokeTests
-    ${HORIZON_TEST_COMMON_SOURCES}
-    smoke/test_smoke.cpp
+set_tests_properties(HorizonTests
+    PROPERTIES
+        SKIP_RETURN_CODE 77
 )

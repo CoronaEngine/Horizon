@@ -1,5 +1,5 @@
 # Horizon Build Context
-<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 3ad070acd2930fd29db3d0692e745418d26c2742bcadfa0ae8bf5ed22741ddb5 -->
+<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: c4c03b372d13c6573afb270a34cd917356747620f9029a392c831c1b45e62e92 -->
 
 Load this file only for CMake, preset, build, CI, or validation-command work.
 
@@ -8,6 +8,7 @@ Load this file only for CMake, preset, build, CI, or validation-command work.
 - `Horizon`: main static library.
 - `ShaderCompileScripts`: shader/codegen tool target under `tools/`.
 - `HorizonExamples`: examples target, enabled by `HORIZON_BUILD_EXAMPLES`.
+- `HorizonTests`: unified correctness test entry under `tests/`.
 
 ## Common Commands
 
@@ -28,6 +29,8 @@ cmake --preset ninja-msvc
 cmake --build --preset msvc-debug --target Horizon
 cmake --build --preset msvc-debug --target ShaderCompileScripts
 cmake --build --preset msvc-debug --target HorizonExamples
+cmake --build --preset msvc-debug --target HorizonTests
+ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```
 
 ## Rules
@@ -36,6 +39,7 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - `src/CMakeLists.txt` defines `Horizon`.
 - `tools/CMakeLists.txt` defines `ShaderCompileScripts`.
 - `examples/CMakeLists.txt` defines `HorizonExamples`.
+- `tests/CMakeLists.txt` defines `HorizonTests`.
 - `include/` is the public include surface.
 - Keep Vulkan, VMA, Windows, and implementation-only types out of public headers unless truly required.
 - After CMake changes, run configure plus the smallest relevant build.
@@ -51,6 +55,7 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - Run `cmake --list-presets` when local preset availability is uncertain.
 - Common build directories are `build/ninja-msvc`, `build/ninja-clang`, `build/vs2022`, `build/ninja-linux-gcc`, `build/ninja-linux-clang`, and `build/ninja-macos`.
 - `HORIZON_BUILD_EXAMPLES` controls `examples/` and example dependencies; disabling it removes `HorizonExamples`.
+- `HORIZON_BUILD_TESTS` controls `tests/`; the test entry is `HorizonTests`, and `HorizonTests.exe --list` explains what it covers.
 - `modules/ocarina` participates only when CUDA is needed and `CUDA_PATH` is set.
 
 ## FetchContent Rules
@@ -77,6 +82,14 @@ cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common
 ```
 
 Replace the target as needed; use `Horizon` for library validation and `HorizonExamples` when reproducing example debugging.
+
+Use the unified test entry for test validation:
+
+```powershell
+cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 && cmake --build --preset msvc-debug --target HorizonTests && ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure"
+```
+
+Run `build\ninja-msvc\tests\Debug\HorizonTests.exe --list` to see what the tests cover.
 
 ## Notes
 

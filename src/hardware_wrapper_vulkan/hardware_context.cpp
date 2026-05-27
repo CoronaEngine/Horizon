@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <set>
 #include <stdexcept>
+#include <utility>
 
 #include "corona/kernel/core/i_logger.h"
 
@@ -135,27 +137,12 @@ namespace Corona::Horizon
 
     HardwareContext::HardwareContext()
     {
-        if (volkInitialize() != VK_SUCCESS)
-        {
-            throw std::runtime_error("Failed to initialize Volk!");
-        }
-
         prepare_features();
-        create_instance();
-        volkLoadInstance(instance_);
-
-        create_devices();
-
-        //setup_cross_device_semaphores();
-
-        choose_main_device();
-
-        CFW_LOG_DEBUG("Hardware Context initialized with {} device(s)", devices_.size());
     }
 
     HardwareContext::~HardwareContext()
     {
-        for (auto &device : devices_)
+        for (auto& device : devices_)
         {
             if (!device)
             {
@@ -178,11 +165,28 @@ namespace Corona::Horizon
         }
     }
 
+    VkInstance HardwareContext::instance()
+    {
+        ensure_instance();
+        return instance_;
+    }
+
+    const std::vector<std::shared_ptr<HardwareContext::DeviceContext>>& HardwareContext::devices()
+    {
+        ensure_devices();
+        return devices_;
+    }
+
+    std::shared_ptr<HardwareContext::DeviceContext> HardwareContext::main_device()
+    {
+        ensure_devices();
+        return main_device_;
+    }
+
     void HardwareContext::prepare_features()
     {
         create_config_.get_instance_extensions = [](const VkInstance&, const VkPhysicalDevice&) {
-            std::set<const char*> extensions
-            {
+            std::set<const char*> extensions {
                 "VK_KHR_surface",
                 // VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME,       // 移除: 未使用且部分设备不支持
                 // VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,  // 移除: surface_maintenance1 的依赖
@@ -203,8 +207,7 @@ namespace Corona::Horizon
         };
 
         create_config_.get_device_extensions = [](const VkInstance&, const VkPhysicalDevice&) {
-            return std::set<const char*>
-            {
+            return std::set<const char*> {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 // VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME,  // 移除: 部分 AMD 核显不支持
                 VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
@@ -269,6 +272,41 @@ namespace Corona::Horizon
         };
     }
 
+    void HardwareContext::ensure_volk()
+    {
+        static std::once_flag volk_once;
+
+        std::call_once(volk_once, [] {
+            if (volkInitialize() != VK_SUCCESS)
+            {
+                throw std::runtime_error("Failed to initialize Volk!");
+            }
+        });
+    }
+
+    void HardwareContext::ensure_instance()
+    {
+        ensure_volk();
+        std::call_once(instance_once_, [this] {
+            create_instance();
+            volkLoadInstance(instance_);
+        });
+    }
+
+    void HardwareContext::ensure_devices()
+    {
+        std::call_once(devices_once_, [this] {
+            ensure_instance();
+            create_devices();
+
+            //setup_cross_device_semaphores();
+
+            choose_main_device();
+
+            CFW_LOG_DEBUG("Hardware Context initialized with {} device(s)", devices_.size());
+        });
+    }
+
     void HardwareContext::create_instance()
     {
         auto requested_extensions = create_config_.get_instance_extensions(instance_, nullptr);
@@ -307,16 +345,28 @@ namespace Corona::Horizon
         }
 #endif
 
-        const VkResult result = vkCreateInstance(&instance_info, nullptr, &instance_);
+        VkInstance instance = VK_NULL_HANDLE;
+        const VkResult result = vkCreateInstance(&instance_info, nullptr, &instance);
         if (result != VK_SUCCESS)
         {
             throw std::runtime_error("Failed to create Vulkan instance.");
         }
 
+        instance_ = instance;
+
 #ifdef CORONA_ENGINE_DEBUG
         if (!requested_layers.empty())
         {
-            setup_debug_messenger();
+            try
+            {
+                setup_debug_messenger();
+            }
+            catch (...)
+            {
+                vkDestroyInstance(instance_, nullptr);
+                instance_ = VK_NULL_HANDLE;
+                throw;
+            }
         }
 #endif
     }
@@ -324,7 +374,11 @@ namespace Corona::Horizon
     void HardwareContext::create_devices()
     {
         uint32_t device_count = 0;
-        vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
+        VkResult result = vkEnumeratePhysicalDevices(instance_, &device_count, nullptr);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to enumerate Vulkan physical devices.");
+        }
 
         if (device_count == 0)
         {
@@ -332,9 +386,14 @@ namespace Corona::Horizon
         }
 
         std::vector<VkPhysicalDevice> physical_devices(device_count);
-        vkEnumeratePhysicalDevices(instance_, &device_count, physical_devices.data());
+        result = vkEnumeratePhysicalDevices(instance_, &device_count, physical_devices.data());
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to enumerate Vulkan physical devices.");
+        }
 
-        devices_.reserve(physical_devices.size());
+        std::vector<std::shared_ptr<DeviceContext>> devices;
+        devices.reserve(physical_devices.size());
         for (VkPhysicalDevice physical_device : physical_devices)
         {
             if (!supports_required_api(physical_device))
@@ -345,13 +404,15 @@ namespace Corona::Horizon
             auto device = std::make_shared<DeviceContext>();
             //device->device_manager.initDeviceManager(create_info_, instance_, physical_device);
             //device->resource_manager.initResourceManager(device->device_manager, instance_);
-            devices_.push_back(std::move(device));
+            devices.push_back(std::move(device));
         }
 
-        if (devices_.empty())
+        if (devices.empty())
         {
             throw std::runtime_error("No Vulkan 1.4-capable GPU found.");
         }
+
+        devices_ = std::move(devices);
     }
 
     void HardwareContext::setup_debug_messenger()
@@ -411,5 +472,6 @@ namespace Corona::Horizon
         });
 
         CFW_LOG_DEBUG("Selected main device: {}", main_device_->device_manager.getFeaturesUtils().supportedProperties.properties.deviceName);*/
+        main_device_ = devices_.empty() ? nullptr : devices_.front();
     }
 }

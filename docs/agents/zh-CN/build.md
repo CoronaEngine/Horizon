@@ -7,6 +7,7 @@
 - `Horizon`：主静态库。
 - `ShaderCompileScripts`：`tools/` 下的 shader/codegen 工具目标。
 - `HorizonExamples`：示例目标，由 `HORIZON_BUILD_EXAMPLES` 控制。
+- `HorizonTests`：统一正确性测试入口，定义在 `tests/`。
 
 ## 常用命令
 
@@ -27,6 +28,8 @@ cmake --preset ninja-msvc
 cmake --build --preset msvc-debug --target Horizon
 cmake --build --preset msvc-debug --target ShaderCompileScripts
 cmake --build --preset msvc-debug --target HorizonExamples
+cmake --build --preset msvc-debug --target HorizonTests
+ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```
 
 ## 规则
@@ -35,6 +38,7 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - `src/CMakeLists.txt` 定义 `Horizon`。
 - `tools/CMakeLists.txt` 定义 `ShaderCompileScripts`。
 - `examples/CMakeLists.txt` 定义 `HorizonExamples`。
+- `tests/CMakeLists.txt` 定义 `HorizonTests`。
 - `include/` 是公共 include surface。
 - 不要把 Vulkan、VMA、Windows 或仅实现层需要的类型暴露到公共头，除非公共 API 确实需要。
 - 修改 CMake 后，运行 configure 和最小相关 build。
@@ -50,6 +54,7 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - 不确定本机可用项时运行 `cmake --list-presets`。
 - 常见构建目录为 `build/ninja-msvc`、`build/ninja-clang`、`build/vs2022`、`build/ninja-linux-gcc`、`build/ninja-linux-clang`、`build/ninja-macos`。
 - `HORIZON_BUILD_EXAMPLES` 控制 `examples/` 和示例依赖；关闭后不会生成 `HorizonExamples`。
+- `HORIZON_BUILD_TESTS` 控制 `tests/`；测试入口为 `HorizonTests`，可用 `HorizonTests.exe --list` 查看覆盖说明。
 - `modules/ocarina` 只在需要 CUDA 且 `CUDA_PATH` 已设置时参与。
 
 ## FetchContent 规则
@@ -76,6 +81,14 @@ cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common
 ```
 
 按任务替换 target；库验证优先用 `Horizon`，复现示例调试时用 `HorizonExamples`。
+
+测试验证使用统一入口：
+
+```powershell
+cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 && cmake --build --preset msvc-debug --target HorizonTests && ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure"
+```
+
+需要了解测试覆盖内容时运行 `build\ninja-msvc\tests\Debug\HorizonTests.exe --list`。
 
 ## 备注
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <volk.h>
@@ -10,6 +11,8 @@
 
 namespace Corona::Horizon
 {
+    struct HardwareContextTestAccess;
+
     struct HardwareContext
     {
     public:
@@ -27,11 +30,13 @@ namespace Corona::Horizon
         HardwareContext(HardwareContext&&) = delete;
         HardwareContext& operator=(HardwareContext&&) = delete;
 
-        [[nodiscard]] VkInstance instance() const { return instance_; }
-        [[nodiscard]] const std::vector<std::shared_ptr<DeviceContext>>& devices() const { return devices_; }
-        [[nodiscard]] std::shared_ptr<DeviceContext> main_device() const { return main_device_; }
+        [[nodiscard]] VkInstance instance();
+        [[nodiscard]] const std::vector<std::shared_ptr<DeviceContext>>& devices();
+        [[nodiscard]] std::shared_ptr<DeviceContext> main_device();
 
     private:
+        friend struct HardwareContextTestAccess;
+
         void prepare_features();
         void create_instance();
         void create_devices();
@@ -39,6 +44,13 @@ namespace Corona::Horizon
         void setup_cross_device_semaphores();
         void setup_debug_messenger();
         void cleanup_debug_messenger();
+
+        void ensure_volk();
+        void ensure_instance();
+        void ensure_devices();
+
+        std::once_flag instance_once_;
+        std::once_flag devices_once_;
 
         VkInstance instance_ { VK_NULL_HANDLE };
         VkDebugUtilsMessengerEXT debug_messenger_ { VK_NULL_HANDLE };
