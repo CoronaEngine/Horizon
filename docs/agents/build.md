@@ -1,5 +1,5 @@
 # Horizon Build Context
-<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 5cecbdf3c573ee4c9a61a451ef2cf72f81d6650cfa1565438c4fe6f3b3a1768e -->
+<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: bc328c29aecf54f3c295686180ab13d7b0a55abec474527c6e4e7db3099289e1 -->
 
 Load this file only for CMake, preset, build, CI, or validation-command work.
 
@@ -40,6 +40,15 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - Keep Vulkan, VMA, Windows, and implementation-only types out of public headers unless truly required.
 - After CMake changes, run configure plus the smallest relevant build.
 - The common entry point for newcomers and agents is `tools/dev.ps1`; use direct `cmake` commands only when investigating lower-level issues.
+- Each configure preset uses its own `build/<preset>` directory; do not assume all generators share `build/`.
+- FetchContent dependencies use a shared source cache and preset-local build directories; see `docs/cmake-usage.md`.
+
+## Deep References
+
+Load these longer docs only when the task needs them:
+
+- CMake structure, presets, build directories, optional modules, troubleshooting: `docs/cmake-usage.md`
+- Visual Studio / VS CMake debugging, executable paths, command-line reproduction: `docs/vs-debugging.md`
 
 ## Notes
 

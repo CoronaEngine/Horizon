@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 # ======================== Helicon 依赖 ========================
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     pfr
     GIT_REPOSITORY https://github.com/boostorg/pfr.git
     GIT_TAG develop
@@ -9,7 +9,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pfr)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     ktm
     GIT_REPOSITORY https://github.com/YGXXD/ktm.git
     GIT_TAG main
@@ -17,7 +17,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ktm)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     preprocessor
     GIT_REPOSITORY https://github.com/boostorg/preprocessor.git
     GIT_TAG develop
@@ -25,7 +25,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(preprocessor)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     glslang
     GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
     GIT_TAG main
@@ -35,7 +35,7 @@ set(ENABLE_OPT OFF)
 set(ENABLE_GLSLANG_BINARIES OFF)
 FetchContent_MakeAvailable(glslang)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     SPIRV-Cross
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
     GIT_TAG main
@@ -47,7 +47,7 @@ set(SPIRV_CROSS_ENABLE_TESTS OFF)
 set(SPIRV_CROSS_CLI OFF)
 FetchContent_MakeAvailable(SPIRV-Cross)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     SPIRV-Headers
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
     GIT_TAG vulkan-sdk-1.4.341
@@ -55,7 +55,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SPIRV-Headers)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     SPIRV-Tools
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
     GIT_TAG vulkan-sdk-1.4.341
@@ -75,7 +75,7 @@ endif()
 
 # ---- fmt (header-only) ----
 set(FMT_OS OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git
     GIT_TAG main
@@ -90,7 +90,7 @@ target_include_directories(fmt-header-only INTERFACE ${fmt_SOURCE_DIR}/include)
 
 # ---- spdlog (强制使用外部 fmt) ----
 set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG v1.x
@@ -102,7 +102,7 @@ set_target_properties(spdlog PROPERTIES
 target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
 
 # ---- xxHash (header-only, 不使用其顶层 CMakeLists) ----
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     xxhash
     GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
     GIT_TAG dev
@@ -119,7 +119,7 @@ set_target_properties(xxhash PROPERTIES
 
 # ======================== 其他依赖 ========================
 set(VOLK_PULL_IN_VULKAN OFF) # We will provide Vulkan-Headers ourselves
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
     GIT_TAG master
@@ -127,7 +127,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(volk)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     Vulkan-Headers
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
     GIT_TAG v1.4.341
@@ -135,7 +135,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Vulkan-Headers)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     VulkanMemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
     GIT_TAG master

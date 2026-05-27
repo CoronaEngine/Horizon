@@ -11,7 +11,7 @@
 - VS 配置下拉框中常见显示名：`Debug (ninja-msvc-msvc-debug)`
 - 调试目标：`HorizonExamples`
 - 主示例入口：[examples/main.cpp](../examples/main.cpp)
-- 生成后的可执行文件通常位于：`build/examples/Debug/HorizonExamples.exe`
+- 生成后的可执行文件通常位于：`build/ninja-msvc/examples/Debug/HorizonExamples.exe`
 
 这个配置对应的命令行为：
 
@@ -48,8 +48,7 @@ cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common
 构建成功后，可以直接运行：
 
 ```powershell
-.\build\examples\Debug\HorizonExamples.exe
+.\build\ninja-msvc\examples\Debug\HorizonExamples.exe
 ```
 
 如果要排查启动卡住的位置，优先在 Visual Studio 中用 `F5` 调试 `HorizonExamples`，再结合 Output / Debug 输出查看 Vulkan、shader 编译和运行时依赖复制相关日志。
-

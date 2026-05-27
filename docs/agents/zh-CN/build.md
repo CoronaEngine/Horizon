@@ -39,6 +39,15 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - 不要把 Vulkan、VMA、Windows 或仅实现层需要的类型暴露到公共头，除非公共 API 确实需要。
 - 修改 CMake 后，运行 configure 和最小相关 build。
 - 新人和 Agent 的常用入口是 `tools/dev.ps1`；只有需要排查底层问题时才直接用 `cmake`。
+- 每个 configure preset 使用独立的 `build/<preset>` 目录，不要假设所有生成器共享 `build/`。
+- FetchContent 依赖采用共享源码缓存和 preset 本地构建目录；细节见 `docs/cmake-usage.md`。
+
+## 深度参考
+
+只在任务需要时加载这些长文档：
+
+- CMake 结构、preset、构建目录、可选模块、常见问题：`docs/cmake-usage.md`
+- Visual Studio / VS CMake 调试、可执行文件路径、命令行复现：`docs/vs-debugging.md`
 
 ## 备注
 

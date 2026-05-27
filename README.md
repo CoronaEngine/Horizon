@@ -68,8 +68,8 @@ cmake --build --preset vs2022-debug --target HorizonExamples
 
 ### 重要注意
 
-- 所有 configure preset 共享同一个 `binaryDir=${sourceDir}/build`。
-- 在 `ninja-msvc` 和 `vs2022` 之间切换前，请清理/重建 `build/`，避免生成器冲突。
+- 每个 configure preset 使用独立构建目录，例如 `build/ninja-msvc`、`build/ninja-clang`、`build/vs2022`。
+- 在 Ninja 和 Visual Studio 之间切换时，不再共用同一个 CMake cache；如果某个 preset 缓存损坏，只清理对应的 `build/<preset>` 目录即可。
 
 ## 示例程序
 

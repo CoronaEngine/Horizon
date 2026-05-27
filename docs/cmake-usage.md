@@ -68,10 +68,19 @@ Preset 定义位于 [CMakePresets.json](../CMakePresets.json)。
 
 - ninja-macos：Ninja Multi-Config
 
-所有 configure preset 都继承自 base，并共享以下目录：
+所有 configure preset 都继承自 base，但每个生成器使用独立构建目录，避免 Ninja 和 Visual Studio 之间复用同一个 CMake cache：
 
-- binaryDir = ${sourceDir}/build
-- installDir = ${sourceDir}/install
+- ninja-msvc：`${sourceDir}/build/ninja-msvc`
+- ninja-clang：`${sourceDir}/build/ninja-clang`
+- vs2022：`${sourceDir}/build/vs2022`
+- ninja-linux-gcc：`${sourceDir}/build/ninja-linux-gcc`
+- ninja-linux-clang：`${sourceDir}/build/ninja-linux-clang`
+- ninja-macos：`${sourceDir}/build/ninja-macos`
+
+所有 preset 仍共享：
+
+- installDir = `${sourceDir}/install`
+- FetchContent 源码缓存 = `${sourceDir}/build/_deps`
 
 另外默认开启：
 
@@ -182,31 +191,87 @@ $env:CUDA_PATH
 
 ## 8. 目录与产物
 
-当前 preset 统一将构建目录放在 build 下，因此常见产物路径通常在这些位置：
+当前 preset 都放在 `build/<preset>` 下，因此常见产物路径通常在这些位置：
 
-- build/bin/Debug
-- build/bin/Release
-- build/bin/RelWithDebInfo
-- build/lib
-- build/compile_commands.json
+- build/ninja-msvc/bin/Debug
+- build/ninja-msvc/bin/Release
+- build/ninja-msvc/bin/RelWithDebInfo
+- build/ninja-msvc/lib
+- build/ninja-msvc/compile_commands.json
+
+其他 preset 的产物位于对应目录，例如 `build/vs2022`、`build/ninja-clang`、`build/ninja-linux-gcc`。
+
+FetchContent 依赖的源码克隆统一放在 `build/_deps/*-src`，供多个 preset 复用。每个 preset 仍会在自己的构建目录下生成独立的第三方构建产物，例如 `build/ninja-msvc/deps/*-build`，避免不同编译器或生成器共用同一份第三方 CMake cache。
 
 项目中部分目标还会在构建后自动复制 Helicon 运行时依赖到目标输出目录。
 
-## 9. 多生成器切换的注意事项
+## 9. FetchContent 依赖缓存设计
 
-这个项目最需要注意的一点，是所有 configure preset 共享同一个 build 目录。
+Horizon 的第三方依赖需要同时解决两个问题：
+
+- 多个 configure preset 不应重复从 GitHub clone 同一份源码。
+- 不同编译器或生成器不应共用同一份第三方构建目录，否则容易混用 CMake cache、编译器探测结果或生成器状态。
+
+因此项目采用“源码共享、构建分离”的布局：
+
+- 共享源码缓存：`build/_deps/*-src`
+- 共享下载/更新临时目录：`build/_deps/*-tmp`
+- preset 本地构建目录：`build/<preset>/deps/*-build`
+
+例如 `ninja-msvc` 会使用：
+
+- `build/_deps/glslang-src`
+- `build/_deps/glslang-tmp`
+- `build/ninja-msvc/deps/glslang-build`
+
+如果之后再 configure `ninja-clang` 或 `vs2022`，CMake 会复用 `build/_deps/glslang-src`，但会生成各自独立的 `build/ninja-clang/deps/glslang-build` 或 `build/vs2022/deps/glslang-build`。
+
+实现入口是 [cmake/HorizonFetchContent.cmake](../cmake/HorizonFetchContent.cmake)：
+
+- `HORIZON_FETCHCONTENT_SOURCE_ROOT` 默认指向 `${PROJECT_SOURCE_DIR}/build/_deps`。
+- `HORIZON_FETCHCONTENT_BINARY_ROOT` 默认指向 `${PROJECT_BINARY_DIR}/deps`。
+- `FETCHCONTENT_BASE_DIR` 被固定到共享源码缓存根目录，使 CMake 自己的 FetchContent 临时目录也集中到 `build/_deps`。
+- 项目内依赖声明使用 `horizon_fetchcontent_declare(...)`，它会在未显式指定目录时自动补上共享 `SOURCE_DIR` 和 preset 本地 `BINARY_DIR`。
+
+新增 FetchContent 依赖时，优先使用：
+
+```cmake
+horizon_fetchcontent_declare(
+    dependency-name
+    GIT_REPOSITORY https://example.com/dependency.git
+    GIT_TAG main
+    EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(dependency-name)
+```
+
+不要直接使用裸 `FetchContent_Declare(...)`，除非该依赖确实需要自定义 `SOURCE_DIR` 或 `BINARY_DIR`。如果第三方子项目也使用 FetchContent，并且需要在 Horizon 顶层构建时接入同一套目录规则，可以像 `modules/corona/cmake/CoronaThirdParty.cmake` 那样先判断 `COMMAND horizon_fetchcontent_declare`，顶层构建时使用 Horizon 包装函数，独立构建该子项目时保留原生 `FetchContent_Declare(...)`。
+
+常见清理方式：
+
+- 只清理某个 preset 的 CMake cache 和构建产物：删除 `build/<preset>`。
+- 强制重新构建第三方依赖，但保留已 clone 的源码：删除 `build/<preset>/deps` 后重新 configure/build。
+- 强制重新拉取第三方源码：删除 `build/_deps`。
+
+正常日常开发通常只需要清理 `build/<preset>`。删除整个 `build` 会同时移除共享源码缓存，下一次 configure 需要重新 clone 所有 FetchContent 依赖。
+
+## 10. 多生成器切换的注意事项
+
+每个 configure preset 都有自己的 build 子目录。
 
 这意味着：
 
 - 可以在同一生成器下切换不同 configuration
-- 不建议直接在 ninja-msvc 和 vs2022 之间复用同一个已存在的 build 目录
-- 生成器切换前应清理 build，避免缓存和生成器状态冲突
+- 可以在 ninja-msvc 和 vs2022 之间切换，而不会复用同一个 CMake cache
+- 如果某个 preset 的缓存损坏，只需要清理对应的 `build/<preset>` 目录
 
-Windows 下清理示例：
+Windows 下清理 ninja-msvc 示例：
 
 ```powershell
-Remove-Item -Recurse -Force .\build
+Remove-Item -Recurse -Force .\build\ninja-msvc
 ```
+
+这只会清理 ninja-msvc 的 CMake cache 和构建产物，不会删除共享的第三方源码克隆。只有在需要强制重新拉取第三方依赖时，才删除 `build/_deps`。
 
 之后再重新 configure：
 
@@ -214,11 +279,13 @@ Remove-Item -Recurse -Force .\build
 cmake --preset ninja-msvc
 ```
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### 第一次 configure 很慢
 
 原因通常是 CMake 正在获取剩余第三方依赖，这是预期行为。当前 `modules/corona` 已在仓库内，不属于这类远程拉取。
+
+如果 `build/_deps` 已经存在，后续 configure 通常只会检查或更新已有 checkout，不应在各个 `build/<preset>/_deps` 下重新 clone 同一批源码。若看到新的 preset 私有 `_deps` 目录，优先检查是否有新增依赖绕过了 `horizon_fetchcontent_declare(...)`。
 
 ### 找不到 Python
 
@@ -231,11 +298,42 @@ cmake --preset ninja-msvc
 - configure 时关闭了 HORIZON_BUILD_EXAMPLES
 - 当前 configure 失败，导致 examples 子目录没有正确生成目标
 
-### 切换生成器后 configure 失败
+### configure 失败或缓存异常
 
-优先删除 build 目录，再重新执行对应的 configure preset。
+优先删除对应的 preset 构建目录，再重新执行 configure。例如：
 
-## 11. 建议工作流
+```powershell
+Remove-Item -Recurse -Force .\build\ninja-msvc
+cmake --preset ninja-msvc
+```
+
+### 出现多个 `_deps` 目录
+
+当前预期只有一个共享 `_deps` 目录：
+
+```text
+build/_deps
+```
+
+如果出现 `build/<preset>/_deps`，通常是以下原因之一：
+
+- 旧 cache 或旧目录残留；确认当前 `CMakeCache.txt` 中的 `FETCHCONTENT_BASE_DIR` 指向 `build/_deps` 后，可以删除这个旧目录。
+- 新增依赖直接调用了 `FetchContent_Declare(...)`，没有走 `horizon_fetchcontent_declare(...)`。
+- 第三方子项目在 Horizon 顶层构建时绕过了 Horizon 的 FetchContent 目录规则。
+
+排查时可以先看当前 cache：
+
+```powershell
+Select-String -Path .\build\ninja-msvc\CMakeCache.txt -Pattern "FETCHCONTENT_BASE_DIR|HORIZON_FETCHCONTENT"
+```
+
+再检查源码里的 FetchContent 声明：
+
+```powershell
+rg "FetchContent_Declare|horizon_fetchcontent_declare" CMakeLists.txt cmake modules
+```
+
+## 12. 建议工作流
 
 如果你只是日常开发，推荐使用下面这套最稳定的流程：
 
@@ -244,4 +342,4 @@ cmake --preset ninja-msvc
 cmake --build --preset msvc-debug --target HorizonExamples
 ```
 
-如果你准备在不同生成器之间切换，先清理 build，再重新 configure，不要直接复用旧缓存。
+如果你准备在不同生成器之间切换，可以直接执行对应 configure preset。不同 preset 会进入各自的 `build/<preset>` 目录。
