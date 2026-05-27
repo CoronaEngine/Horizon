@@ -1,5 +1,5 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: 594018cce8b706fadcd9de3e1539c187ce7864f1d3e78d7fe3347ece8b4444ef -->
+<!-- AGENTS_ZH_CN_SHA256: 728fde54c0b1b831e100ce9893e7afdd474d1d38aa483058281d3f6b652e03db -->
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.
 > Other Chinese sources live in `docs/agents/zh-CN/` and `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
@@ -58,9 +58,9 @@ After changing agent docs or skills, check sync:
 For C++, CMake, tooling, or example changes, choose the relevant build:
 
 ```powershell
-cmake --build --preset msvc-debug --target Horizon
-cmake --build --preset msvc-debug --target ShaderCompileScripts
-cmake --build --preset msvc-debug --target HorizonExamples
+.\tools\dev.ps1 build Horizon
+.\tools\dev.ps1 build ShaderCompileScripts
+.\tools\dev.ps1 build HorizonExamples
 ```
 
 Docs-only changes usually do not require a CMake build.

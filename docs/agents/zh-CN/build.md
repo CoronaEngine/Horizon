@@ -10,6 +10,18 @@
 
 ## 常用命令
 
+优先使用统一开发入口：
+
+```powershell
+.\tools\dev.ps1 status
+.\tools\dev.ps1 configure
+.\tools\dev.ps1 build Horizon
+.\tools\dev.ps1 build ShaderCompileScripts
+.\tools\dev.ps1 build HorizonExamples
+```
+
+`tools/dev.ps1` 只封装已有命令。调试 CMake 或 CI 问题时，可以直接运行底层命令：
+
 ```powershell
 cmake --preset ninja-msvc
 cmake --build --preset msvc-debug --target Horizon
@@ -26,6 +38,7 @@ cmake --build --preset msvc-debug --target HorizonExamples
 - `include/` 是公共 include surface。
 - 不要把 Vulkan、VMA、Windows 或仅实现层需要的类型暴露到公共头，除非公共 API 确实需要。
 - 修改 CMake 后，运行 configure 和最小相关 build。
+- 新人和 Agent 的常用入口是 `tools/dev.ps1`；只有需要排查底层问题时才直接用 `cmake`。
 
 ## 备注
 

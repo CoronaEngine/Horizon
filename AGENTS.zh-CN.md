@@ -57,9 +57,9 @@ AI 在本仓库工作时必须：
 C++ / CMake / 工具 / 示例改动按需运行：
 
 ```powershell
-cmake --build --preset msvc-debug --target Horizon
-cmake --build --preset msvc-debug --target ShaderCompileScripts
-cmake --build --preset msvc-debug --target HorizonExamples
+.\tools\dev.ps1 build Horizon
+.\tools\dev.ps1 build ShaderCompileScripts
+.\tools\dev.ps1 build HorizonExamples
 ```
 
 纯文档改动通常不需要 CMake 构建。
