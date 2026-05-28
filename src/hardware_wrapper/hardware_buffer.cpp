@@ -1,6 +1,5 @@
 #include "horizon_refac.h"
 #include "validation/hardware_validation.h"
-
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 namespace Corona::Horizon

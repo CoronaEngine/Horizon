@@ -402,7 +402,7 @@ namespace Corona::Horizon
             }
 
             auto device = std::make_shared<DeviceContext>();
-            //device->device_manager.initDeviceManager(create_info_, instance_, physical_device);
+            device->device_manager.initialize(create_config_, instance_, physical_device);
             //device->resource_manager.initResourceManager(device->device_manager, instance_);
             devices.push_back(std::move(device));
         }
