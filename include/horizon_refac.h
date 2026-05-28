@@ -141,7 +141,7 @@ namespace Corona::Horizon
         }
     };
 
-    class HardwareBuffer : public ResourceHandleBase
+    class HardwareBuffer : public ResourceHandle
     {
     public:
         HardwareBuffer() = default;
@@ -154,7 +154,7 @@ namespace Corona::Horizon
 
         HardwareBuffer& operator=(const HardwareBuffer& other) noexcept = default;
         HardwareBuffer& operator=(HardwareBuffer&& other) noexcept = default;
-        [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandleBase::operator bool(); }
+        [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
 
         [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return resource_id(); }
         [[nodiscard]] uint64_t get_element_size() const;
@@ -241,8 +241,10 @@ namespace Corona::Horizon
         requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
-            using T = std::ranges::range_value_t<Range>;
-            return vertex<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
+            return vertex<std::ranges::range_value_t<Range>>(
+                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
+                std::move(name),
+                options);
         }
 
         template <HardwareIndexType T>
@@ -255,8 +257,10 @@ namespace Corona::Horizon
         requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
-            using T = std::ranges::range_value_t<Range>;
-            return index<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
+            return index<std::ranges::range_value_t<Range>>(
+                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
+                std::move(name),
+                options);
         }
 
         template <HardwareTransferable T>
@@ -275,8 +279,10 @@ namespace Corona::Horizon
         requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer storage(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
-            using T = std::ranges::range_value_t<Range>;
-            return storage<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
+            return storage<std::ranges::range_value_t<Range>>(
+                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
+                std::move(name),
+                options);
         }
 
         //[[nodiscard]] BufferCopyCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
@@ -1108,23 +1114,21 @@ namespace Corona::Horizon
     //    requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
     //    ResourceProxy& operator=(const T& value)
     //    {
-    //        using Value = std::remove_cvref_t<T>;
-
-    //        if constexpr (std::same_as<Value, HardwareBuffer>)
+    //        if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareBuffer>)
     //        {
     //            pipeline_.bind_buffer(slot_, value);
     //        }
-    //        else if constexpr (std::same_as<Value, HardwareImage>)
+    //        else if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareImage>)
     //        {
     //            pipeline_.bind_image(slot_, value);
     //        }
-    //        /*else if constexpr (std::same_as<Value, TopLevelAccelerationStructure>)
+    //        /*else if constexpr (std::same_as<std::remove_cvref_t<T>, TopLevelAccelerationStructure>)
     //        {
     //            pipeline_.bindResource(slot_, value);
     //        }*/
     //        else
     //        {
-    //            static_assert(HardwareTransferable<Value>, "Pipeline push constants must be trivially copyable non-pointer values.");
+    //            static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
     //            pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
     //        }
 

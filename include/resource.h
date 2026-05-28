@@ -7,32 +7,32 @@
 
 namespace Corona::Horizon
 {
-    struct ResourceAccess;
+    struct ResourceBridge;
 
-    struct IResourceControlBlock
+    struct IResourceRef
     {
-        virtual ~IResourceControlBlock() = default;
+        virtual ~IResourceRef() = default;
 
         [[nodiscard]] virtual std::uintptr_t id() const noexcept = 0;
         [[nodiscard]] virtual bool valid() const noexcept = 0;
     };
 
-    class ResourceHandleBase
+    class ResourceHandle
     {
     public:
-        ResourceHandleBase() noexcept = default;
+        ResourceHandle() noexcept = default;
 
-        ResourceHandleBase(const ResourceHandleBase& other) noexcept
+        ResourceHandle(const ResourceHandle& other) noexcept
         {
             resource_.store(other.resource_.load(std::memory_order_acquire), std::memory_order_release);
         }
 
-        ResourceHandleBase(ResourceHandleBase&& other) noexcept
+        ResourceHandle(ResourceHandle&& other) noexcept
         {
             resource_.store(other.resource_.exchange({}, std::memory_order_acq_rel), std::memory_order_release);
         }
 
-        ResourceHandleBase& operator=(const ResourceHandleBase& other) noexcept
+        ResourceHandle& operator=(const ResourceHandle& other) noexcept
         {
             if (this != &other)
                 resource_.store(other.resource_.load(std::memory_order_acquire), std::memory_order_release);
@@ -40,7 +40,7 @@ namespace Corona::Horizon
             return *this;
         }
 
-        ResourceHandleBase& operator=(ResourceHandleBase&& other) noexcept
+        ResourceHandle& operator=(ResourceHandle&& other) noexcept
         {
             if (this != &other)
                 resource_.store(other.resource_.exchange({}, std::memory_order_acq_rel), std::memory_order_release);
@@ -62,36 +62,36 @@ namespace Corona::Horizon
         }
 
     private:
-        friend struct ResourceAccess;
+        friend struct ResourceBridge;
 
-        void set_resource(std::shared_ptr<IResourceControlBlock> resource) noexcept
+        void set_resource(std::shared_ptr<IResourceRef> resource) noexcept
         {
             resource_.store(std::move(resource), std::memory_order_release);
         }
 
-        [[nodiscard]] std::shared_ptr<IResourceControlBlock> resource_token() const noexcept
+        [[nodiscard]] std::shared_ptr<IResourceRef> resource_ref() const noexcept
         {
             return resource_.load(std::memory_order_acquire);
         }
 
-        std::atomic<std::shared_ptr<IResourceControlBlock>> resource_{};
+        std::atomic<std::shared_ptr<IResourceRef>> resource_{};
     };
 
-    struct ResourceAccess
+    struct ResourceBridge
     {
-        static void set(ResourceHandleBase& owner, std::shared_ptr<IResourceControlBlock> resource) noexcept
+        static void set(ResourceHandle& owner, std::shared_ptr<IResourceRef> resource) noexcept
         {
             owner.set_resource(std::move(resource));
         }
 
-        [[nodiscard]] static std::shared_ptr<IResourceControlBlock> token(const ResourceHandleBase& owner) noexcept
+        [[nodiscard]] static std::shared_ptr<IResourceRef> token(const ResourceHandle& owner) noexcept
         {
-            return owner.resource_token();
+            return owner.resource_ref();
         }
 
-        [[nodiscard]] static std::shared_ptr<const void> keep_alive(const ResourceHandleBase& owner) noexcept
+        [[nodiscard]] static std::shared_ptr<const IResourceRef> keep_alive(const ResourceHandle& owner) noexcept
         {
-            return std::static_pointer_cast<const void>(owner.resource_token());
+            return std::static_pointer_cast<const IResourceRef>(owner.resource_ref());
         }
     };
 }
