@@ -11,6 +11,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
 option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" ${PROJECT_IS_TOP_LEVEL})
 option(HORIZON_BUILD_BENCHMARKS "Build Horizon performance benchmarks" OFF)
+option(HORIZON_ENABLE_VALIDATION "Enable Horizon runtime validation checks" ON)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
