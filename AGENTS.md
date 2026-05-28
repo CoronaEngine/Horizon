@@ -1,5 +1,5 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: 728fde54c0b1b831e100ce9893e7afdd474d1d38aa483058281d3f6b652e03db -->
+<!-- AGENTS_ZH_CN_SHA256: 15e29e35e3d688eacc5492a2174e19d26a468a8e1d55e51f8fb067978ccfb74d -->
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.
 > Other Chinese sources live in `docs/agents/zh-CN/` and `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
@@ -86,6 +86,18 @@ Check whether all English agent files are synchronized with Chinese sources.
 - Only run `.\tools\sync-agents.ps1 -Check`.
 - Do not modify files.
 - If stale, tell the user to run `=sa`.
+
+### `=ai`
+
+Distill durable project context from this or recent AI conversations into the project AI materials.
+
+- Run `git status --short --branch` first, and do not overwrite or revert existing user changes.
+- Preserve only stable, reusable content: project rules, directory responsibilities, architecture decisions, naming/lifetime/concurrency conventions, validation workflows, and recurring user preferences in this repo.
+- Do not preserve temporary guesses, one-off command output, unresolved debates, casual chat, secrets, or overly narrow implementation details.
+- Choose the target by ownership: root rules go in `AGENTS.zh-CN.md`; focused context goes in `docs/agents/zh-CN/*.md`; shared workflow or commands go in `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
+- After changing a Chinese source, sync the matching English file and update the SHA256 marker.
+- If nothing is certain or valuable enough to preserve, do not edit files; report candidates and why they were not preserved.
+- Run `.\tools\sync-agents.ps1 -Check` and report the result.
 
 ### `=gc`
 

@@ -1,8 +1,8 @@
 ---
 name: horizon-workflow
-description: Vendor-neutral workflow for AI agents working in the Horizon C++ Vulkan repository. Use when an agent edits this repo, handles =sa/=ca/=gc/=cm/=gh commands, or needs routing to build, GitHub, formatting, Vulkan, Helicon, or push-constant context.
+description: Vendor-neutral workflow for AI agents working in the Horizon C++ Vulkan repository. Use when an agent edits this repo, handles =sa/=ca/=ai/=gc/=cm/=gh commands, or needs routing to build, GitHub, formatting, Vulkan, Helicon, or push-constant context.
 ---
-<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: be4bac2be599c38135b93cd2f298de064b86e5fab7d1e422e8e9a13628a9de5f -->
+<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: d0552f31463ed4cad55c08958e738ac78aa55f41b1d5fb23dd6bcbb707f9e929 -->
 
 # Horizon Workflow
 
@@ -20,11 +20,14 @@ This skill is plain Markdown so Codex, Claude, Cursor, Gemini CLI, or other agen
 
 - `=sa`: sync all English agent files from Chinese sources.
 - `=ca`: check whether all English agent files are synchronized with Chinese sources.
+- `=ai`: distill durable project context from recent AI conversations into project AI materials.
 - `=gc`: run GitHub publication precheck only.
 - `=cm`: commit intended changes to the current local branch only.
 - `=gh`: commit intended changes and publish them to a GitHub PR.
 
 For `=sa` and `=ca`, use `tools/sync-agents.ps1`.
+
+For `=ai`, inspect `git status --short --branch` first. Preserve only stable, reusable project rules, architecture decisions, naming/lifetime/concurrency conventions, validation workflows, and user preferences. Do not preserve temporary guesses, one-off output, unresolved debates, casual chat, or secrets. Write to the right Chinese source file, sync the English AI-facing file, and run `tools/sync-agents.ps1 -Check`; if nothing is certain enough, report candidates and why they were not preserved.
 
 For `=gc`, `=cm`, and `=gh`, read `docs/agents/git.md` before acting.
 

@@ -1,29 +1,18 @@
 #pragma once
 
-#include <array>
-#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <mutex>
 #include <ranges>
-#include <shared_mutex>
-#include <source_location>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
-
-#include <ktm/ktm.h>
 
 #include "format.h"
-#include "Compiler/ShaderCodeCompiler.h"
-#include "Codegen/ComputePipelineObject.h"
-#include "Codegen/RasterizedPipelineObject.h"
-#include "Codegen/VariateProxy.h"
+#include "resource.h"
 
 #ifndef HORIZON_ENABLE_VALIDATION
 #define HORIZON_ENABLE_VALIDATION 1
@@ -81,7 +70,7 @@ namespace Corona::Horizon
     template <typename T>
     concept HardwareTransferable = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
-    // index 限制 uint16_t/uint32_t。
+    // index limited to uint16_t/uint32_t.
     template <typename T>
     concept HardwareIndexType = std::same_as<std::remove_cvref_t<T>, uint16_t> || std::same_as<std::remove_cvref_t<T>, uint32_t>;
 
@@ -152,22 +141,22 @@ namespace Corona::Horizon
         }
     };
 
-    struct HardwareBuffer
+    class HardwareBuffer : public ResourceHandleBase
     {
     public:
-        HardwareBuffer();
+        HardwareBuffer() = default;
         HardwareBuffer(const HardwareBufferDesc &desc, std::span<const std::byte> upload_data = {});
 
         // Copies share the same underlying GPU buffer handle.
-        HardwareBuffer(const HardwareBuffer& other);
-        HardwareBuffer(HardwareBuffer&& other) noexcept;
-        ~HardwareBuffer();
+        HardwareBuffer(const HardwareBuffer& other) noexcept = default;
+        HardwareBuffer(HardwareBuffer&& other) noexcept = default;
+        ~HardwareBuffer() = default;
 
-        HardwareBuffer& operator=(const HardwareBuffer& other);
-        HardwareBuffer& operator=(HardwareBuffer&& other) noexcept;
-        explicit operator bool() const;
+        HardwareBuffer& operator=(const HardwareBuffer& other) noexcept = default;
+        HardwareBuffer& operator=(HardwareBuffer&& other) noexcept = default;
+        [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandleBase::operator bool(); }
 
-        [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return buffer_id; }
+        [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return resource_id(); }
         [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
         [[nodiscard]] uint64_t get_byte_size() const
@@ -297,9 +286,6 @@ namespace Corona::Horizon
         //[[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
-        std::atomic<std::uintptr_t> buffer_id;
-        mutable std::mutex buffer_mutex;
-
         friend class HardwareImage;
     };
 
