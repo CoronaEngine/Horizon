@@ -55,6 +55,7 @@ namespace Corona::Horizon
             switch (capability)
             {
             case QueueCapability::Graphics:
+            case QueueCapability::Present:
                 return VK_QUEUE_GRAPHICS_BIT;
             case QueueCapability::Compute:
                 return VK_QUEUE_COMPUTE_BIT;
@@ -414,6 +415,7 @@ namespace Corona::Horizon
         graphics_queues_.clear();
         compute_queues_.clear();
         transfer_queues_.clear();
+        present_queues_.clear();
         queues_.clear();
 
         if (logical_device_ != VK_NULL_HANDLE)
@@ -490,6 +492,7 @@ namespace Corona::Horizon
             add_queue_if_supported(graphics_queues_, queue_ref, family.flags, QueueCapability::Graphics);
             add_queue_if_supported(compute_queues_, queue_ref, family.flags, QueueCapability::Compute);
             add_queue_if_supported(transfer_queues_, queue_ref, family.flags, QueueCapability::Transfer);
+            add_queue_if_supported(present_queues_, queue_ref, family.flags, QueueCapability::Present);
 
             queues_.push_back(std::move(owned_queue));
         }
@@ -513,6 +516,8 @@ namespace Corona::Horizon
         {
         case QueueCapability::Graphics:
             return graphics_queues_;
+        case QueueCapability::Present:
+            return present_queues_.empty() ? graphics_queues_ : present_queues_;
         case QueueCapability::Compute:
             return compute_queues_.empty() ? graphics_queues_ : compute_queues_;
         case QueueCapability::Transfer:

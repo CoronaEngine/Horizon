@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 73774ad89e6c9e3947eeeaf003f327b185334e8fa9edf0ce2ca166b2880e7100 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 23133139210a6811a04cafa05fc309b45807028a508f923878504c42d69fb006 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -41,8 +41,13 @@ Be careful with:
 
 ## Executor / Queue Refactor
 
+- The public feel of the new command system may be `stream << ... << commit()`, but the internal path is fixed: `Stream` facade -> `CommandRecorder` typed IR -> `ExecutionCompiler` / submission plan -> Vulkan command encoder -> `Queue` submit; do not let recorder or visitor code execute Vulkan commands directly.
+- Command objects should be value types or small shared-state objects; do not return raw `CommandRecordVulkan*` values that can dangle. Use `SubmissionKeepAlive`, `keep_alive(shared_ptr<T>)`, or host callbacks when lifetime must extend through a submission.
+- Command IR payloads should stay explicit: copy, dispatch, begin/end rendering, draw indexed, present, host callback, and keep alive; each IR entry carries `DeviceMask`, `QueueCapability`, resource access, and feature requirements.
+- Present is an execution graph node, not an after-commit side step; swapchain `OUT_OF_DATE` / `SUBOPTIMAL` and related states return through `SubmitReceipt` / present results, while Vulkan submit failures still throw.
+- `DeviceMask` v1 only means explicit target devices and replicated submissions, not automatic load balancing; if a resource is not on the target device and cannot be imported or copied, fail during compile.
 - In the lower-case Vulkan backend, `CommandRecorder` records only abstract IR, resource references, access modes, queue capabilities, feature requirements, and device masks; recording must not create descriptor sets, pipelines, VkCommandBuffers, or Vulkan/VMA resources.
-- `ExecutionCompiler` turns IR into per `{device, queue}` submission batches, and owns resource allocation, descriptor/pipeline cache lookup, barrier planning, MGPU partitioning, and actual command buffer filling.
+- `ExecutionCompiler` turns IR into a per `{device, queue}` submission DAG / plan, and owns barrier planning, MGPU partitioning, present expansion, and cross-device sync decisions; descriptor/pipeline lookup, rendering info, and actual `VkCommandBuffer` filling belong to the Vulkan encoder.
 - `Queue` should only wrap one `VkQueue`: serialize `vkQueueSubmit2`, maintain the timeline semaphore, command buffer pool, in-flight tracked buffers, and retirement; do not put scheduling policy, cross-GPU sync policy, or resource allocation policy inside Queue.
 - `TrackedCommandBuffer` holds `SubmissionKeepAlive` and strong references to resource control blocks until the Queue timeline reaches the submitted value; retirement clears keep-alives and returns the command buffer to the pool.
 - `HardwareExecutor` orchestrates record/compile/submit, DAG order, error policy, and `CrossDeviceSync`; do not maintain another delayed-release queue inside the executor.

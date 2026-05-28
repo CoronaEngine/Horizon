@@ -43,6 +43,21 @@ namespace
         }
     }
 
+    [[nodiscard]] std::vector<Corona::Horizon::Tests::TestCase> filter_tests(
+        const std::vector<Corona::Horizon::Tests::TestCase>& tests,
+        std::string_view filter)
+    {
+        std::vector<Corona::Horizon::Tests::TestCase> filtered;
+        for (const auto& test : tests)
+        {
+            if (test.name == filter || test.name.starts_with(filter))
+            {
+                filtered.push_back(test);
+            }
+        }
+        return filtered;
+    }
+
     [[nodiscard]] int run_tests(const std::vector<Corona::Horizon::Tests::TestCase>& tests)
     {
         int passed = 0;
@@ -116,9 +131,14 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        std::cerr << "Unknown argument: " << command << "\n"
-                  << "Use --list to show what this test executable covers.\n";
-        return EXIT_FAILURE;
+        auto filtered_tests = filter_tests(tests, command);
+        if (filtered_tests.empty())
+        {
+            std::cerr << "Unknown test filter: " << command << "\n"
+                      << "Use --list to show what this test executable covers.\n";
+            return EXIT_FAILURE;
+        }
+        return run_tests(filtered_tests);
     }
 
     return run_tests(tests);

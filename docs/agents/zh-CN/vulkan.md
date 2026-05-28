@@ -40,8 +40,13 @@
 
 ## Executor / Queue 重构
 
+- 新指令系统的外部手感可以是 `stream << ... << commit()`，但内部路径固定为 `Stream` facade -> `CommandRecorder` typed IR -> `ExecutionCompiler`/submission plan -> Vulkan command encoder -> `Queue` submit；不要让 recorder 或 visitor 直接执行 Vulkan 命令。
+- 命令对象使用值语义或 small shared-state；不要返回可能悬挂的 raw `CommandRecordVulkan*`。需要延长生命周期时使用 `SubmissionKeepAlive`、`keep_alive(shared_ptr<T>)` 或 host callback。
+- Command IR payload 应保持明确：copy、dispatch、begin/end rendering、draw indexed、present、host callback、keep alive；每条 IR 带 `DeviceMask`、`QueueCapability`、资源访问和 feature requirements。
+- Present 是 execution graph 的一类节点，不是 executor commit 后的附加步骤；swapchain `OUT_OF_DATE` / `SUBOPTIMAL` 等状态通过 `SubmitReceipt` / present result 返回，Vulkan submit 失败继续抛异常。
+- `DeviceMask` v1 只表示显式目标设备和复制提交，不做自动负载均衡；资源不在目标设备且无法导入或复制时，应在 compile 阶段报错。
 - lower-case Vulkan 后端的 `CommandRecorder` 只记录抽象 IR、资源引用、访问模式、队列能力、feature requirement 和 device mask；录制阶段不要创建 descriptor set、pipeline、VkCommandBuffer 或 Vulkan/VMA 资源。
-- `ExecutionCompiler` 负责把 IR 编译为 per `{device, queue}` 的提交批次，并在这里做资源分配、descriptor/pipeline 缓存查询、barrier 规划、MGPU 分区和实际 command buffer 填充。
+- `ExecutionCompiler` 负责把 IR 编译为 per `{device, queue}` 的提交 DAG / plan，并在这里做 barrier 规划、MGPU 分区、present 展开和跨设备同步决策；descriptor/pipeline 查找、rendering info 和实际 `VkCommandBuffer` 填充属于 Vulkan encoder。
 - `Queue` 只封装单个 `VkQueue` 的职责：串行化 `vkQueueSubmit2`、维护 timeline semaphore、command buffer pool、in-flight tracked buffers 和 retire；不要把调度策略、跨 GPU 同步策略或资源分配策略放进 Queue。
 - `TrackedCommandBuffer` 持有 `SubmissionKeepAlive` 和资源 control block 强引用，直到 Queue 的 timeline 到达提交值；retire 时清空 keep-alive 并把 command buffer 归还到池。
 - `HardwareExecutor` 编排 record/compile/submit、DAG 顺序、错误策略和 `CrossDeviceSync`；不要在 executor 内部再维护一套延迟释放队列。

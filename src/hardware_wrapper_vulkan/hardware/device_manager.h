@@ -144,5 +144,6 @@ namespace Corona::Horizon
         std::vector<Queue*> graphics_queues_;
         std::vector<Queue*> compute_queues_;
         std::vector<Queue*> transfer_queues_;
+        std::vector<Queue*> present_queues_;
     };
 }
