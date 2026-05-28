@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 899e9d8e6571ced96f3c613fc9b4be317fa3c7206577ada1d047397c0bc145b8 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 73774ad89e6c9e3947eeeaf003f327b185334e8fa9edf0ce2ca166b2880e7100 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -38,6 +38,17 @@ Be careful with:
 - GPU deferred release should be handled by command/executor keep-alives that hold the control block until the fence/timeline completes; raw `uintptr_t` IDs are not ownership or GPU-lifetime guarantees.
 - Keep resource lifetime naming concise and consistent: public handle layer uses `IResourceRef`, `ResourceHandle`, and `ResourceBridge`; resource pool layer uses `ResourceStore<Resource, Releaser>`, `Slot`, `Read`, `Write`, `Handle`, and `Token`; release policies use `*Releaser`, not `*Destroy` or `DestroyPolicy`.
 - Do not use `using` aliases to hide core types in resource wrapper or resource pool refactors; this project prefers explicit types, especially for public resource handles and concurrent resource pool interfaces.
+
+## Executor / Queue Refactor
+
+- In the lower-case Vulkan backend, `CommandRecorder` records only abstract IR, resource references, access modes, queue capabilities, feature requirements, and device masks; recording must not create descriptor sets, pipelines, VkCommandBuffers, or Vulkan/VMA resources.
+- `ExecutionCompiler` turns IR into per `{device, queue}` submission batches, and owns resource allocation, descriptor/pipeline cache lookup, barrier planning, MGPU partitioning, and actual command buffer filling.
+- `Queue` should only wrap one `VkQueue`: serialize `vkQueueSubmit2`, maintain the timeline semaphore, command buffer pool, in-flight tracked buffers, and retirement; do not put scheduling policy, cross-GPU sync policy, or resource allocation policy inside Queue.
+- `TrackedCommandBuffer` holds `SubmissionKeepAlive` and strong references to resource control blocks until the Queue timeline reaches the submitted value; retirement clears keep-alives and returns the command buffer to the pool.
+- `HardwareExecutor` orchestrates record/compile/submit, DAG order, error policy, and `CrossDeviceSync`; do not maintain another delayed-release queue inside the executor.
+- Timeline semaphores are the default completion signal; use per-submit fences only when a backend or platform limitation needs a fallback.
+- `VK_KHR_deferred_host_operations` is only for splitting supported expensive host-side Vulkan operations across worker threads; it is not a GPU submission, resource lifetime, or delayed-destruction mechanism.
+- Prefer fake queue / fake timeline injection for no-GPU tests of submit, retirement, keep-alive release, cross-queue token dependencies, and failure paths; keep real Vulkan smoke tests in `HorizonTests`.
 
 ## Include Boundaries
 

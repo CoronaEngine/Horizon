@@ -1,165 +1,148 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
+#include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
-#include <set>
-#include <unordered_map>
 #include <vector>
 
+#include <volk.h>
+
 #include "features_chain.h"
+#include "hardware_wrapper_vulkan/hardware/execution.h"
 
 namespace Corona::Horizon
 {
-    // command buffer with resource tracking
-    class TrackedCommandBuffer
+    struct QueueFamilyInfo
     {
-    public:
-        // the command buffer itself
-        vk::CommandBuffer cmdBuf = vk::CommandBuffer();
-        vk::CommandPool cmdPool = vk::CommandPool();
-
-        std::vector<RefCountPtr<IResource>> referencedResources;   // to keep them alive
-        std::vector<RefCountPtr<Buffer>> referencedStagingBuffers; // to allow synchronous mapBuffer
-
-        uint64_t recordingID = 0;
-        uint64_t submissionID = 0;
-
-        explicit TrackedCommandBuffer(const VulkanContext& context)
-            : m_Context(context)
-        {
-        }
-
-        ~TrackedCommandBuffer();
-
-    private:
-        vk::Instance instance;
-        vk::PhysicalDevice physicalDevice;
-        vk::Device device;
-        vk::AllocationCallbacks* allocationCallbacks;
-        vk::PipelineCache pipelineCache;
+        uint32_t family_index { 0 };
+        uint32_t queue_count { 0 };
+        VkQueueFlags flags { 0 };
     };
 
     class TrackedCommandBuffer
     {
     public:
-        TrackedCommandBuffer(VkDevice device, uint32_t queue_family_index)
-            : device_(device)
-        {
-            VkCommandPoolCreateInfo pool_info {};
-            pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT |
-                              VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-            pool_info.queueFamilyIndex = queue_family_index;
-
-            check_vk(vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool),
-                     "vkCreateCommandPool failed");
-
-            VkCommandBufferAllocateInfo alloc_info {};
-            alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-            alloc_info.commandPool = command_pool;
-            alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            alloc_info.commandBufferCount = 1;
-
-            check_vk(vkAllocateCommandBuffers(device_, &alloc_info, &command_buffer),
-                     "vkAllocateCommandBuffers failed");
-        }
-
-        ~TrackedCommandBuffer()
-        {
-            if (device_ != VK_NULL_HANDLE && command_pool != VK_NULL_HANDLE)
-            {
-                vkDestroyCommandPool(device_, command_pool, nullptr);
-            }
-        }
+        TrackedCommandBuffer() = default;
+        TrackedCommandBuffer(VkDevice device, uint32_t queue_family_index);
+        ~TrackedCommandBuffer();
 
         TrackedCommandBuffer(const TrackedCommandBuffer&) = delete;
         TrackedCommandBuffer& operator=(const TrackedCommandBuffer&) = delete;
+        TrackedCommandBuffer(TrackedCommandBuffer&&) = delete;
+        TrackedCommandBuffer& operator=(TrackedCommandBuffer&&) = delete;
 
-        VkCommandPool command_pool = VK_NULL_HANDLE;
-        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
-        uint64_t recording_id = 0;
-        uint64_t submission_id = 0;
-        std::vector<std::shared_ptr<void>> keep_alive;
+        [[nodiscard]] VkCommandBuffer vk() const noexcept { return command_buffer_; }
+        [[nodiscard]] VkCommandPool pool() const noexcept { return command_pool_; }
+        [[nodiscard]] uint64_t recording_id() const noexcept { return recording_id_; }
+        [[nodiscard]] uint64_t submission_id() const noexcept { return submission_id_; }
+        [[nodiscard]] const SubmissionKeepAlive& keep_alive() const noexcept { return keep_alive_; }
+
+        void reset_for_recording(uint64_t recording_id);
+        void mark_submitted(uint64_t submission_id, SubmissionKeepAlive keep_alive);
+        void retire() noexcept;
 
     private:
-        VkDevice device_ = VK_NULL_HANDLE;
+        VkDevice device_ { VK_NULL_HANDLE };
+        VkCommandPool command_pool_ { VK_NULL_HANDLE };
+        VkCommandBuffer command_buffer_ { VK_NULL_HANDLE };
+        uint64_t recording_id_ { 0 };
+        uint64_t submission_id_ { 0 };
+        SubmissionKeepAlive keep_alive_ {};
     };
 
-    // represents a hardware queue
     class Queue
     {
     public:
-        vk::Semaphore trackingSemaphore;
-
-        Queue(const VulkanContext& context, CommandQueue queueID, vk::Queue queue, uint32_t queueFamilyIndex);
+        Queue(DeviceId device_id, QueueCapability capability);
+        Queue(VkDevice device,
+              VkQueue queue,
+              uint32_t queue_family_index,
+              uint32_t queue_index,
+              DeviceId device_id,
+              QueueCapability capability);
         ~Queue();
 
-        // creates a command buffer and its synchronization resources
-        TrackedCommandBufferPtr createCommandBuffer();
+        Queue(const Queue&) = delete;
+        Queue& operator=(const Queue&) = delete;
+        Queue(Queue&&) = delete;
+        Queue& operator=(Queue&&) = delete;
 
-        TrackedCommandBufferPtr getOrCreateCommandBuffer();
+        [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire();
+        [[nodiscard]] SubmissionToken submit(QueueSubmission& submission,
+                                             std::span<const SubmitWait> waits,
+                                             std::span<const SubmitSignal> signals);
+        void retire_completed();
 
-        void addWaitSemaphore(vk::Semaphore semaphore, uint64_t value);
-        void addSignalSemaphore(vk::Semaphore semaphore, uint64_t value);
+        [[nodiscard]] uint64_t completed_value() const;
+        [[nodiscard]] uint64_t last_submitted_value() const noexcept;
+        [[nodiscard]] QueueId id() const noexcept { return id_; }
+        [[nodiscard]] VkQueue vk_queue() const noexcept { return queue_; }
+        [[nodiscard]] VkSemaphore timeline() const noexcept { return timeline_; }
+        [[nodiscard]] bool is_fake() const noexcept { return device_ == VK_NULL_HANDLE; }
+        [[nodiscard]] size_t in_flight_count() const;
+        [[nodiscard]] size_t pooled_count() const;
 
-        // submits a command buffer to this queue, returns submissionID
-        uint64_t submit(ICommandList* const* ppCmd, size_t numCmd);
-
-        void updateTextureTileMappings(ITexture* texture, const TextureTilesMapping* tileMappings, uint32_t numTileMappings);
-
-        // retire any command buffers that have finished execution from the pending execution list
-        void retireCommandBuffers();
-
-        TrackedCommandBufferPtr getCommandBufferInFlight(uint64_t submissionID);
-
-        uint64_t updateLastFinishedID();
-        uint64_t getLastSubmittedID() const { return m_LastSubmittedID; }
-        uint64_t getLastFinishedID() const { return m_LastFinishedID; }
-        CommandQueue getQueueID() const { return m_QueueID; }
-        vk::Queue getVkQueue() const { return m_Queue; }
-
-        bool pollCommandList(uint64_t commandListID);
-        bool waitCommandList(uint64_t commandListID, uint64_t timeout);
+        void mark_completed_for_tests(uint64_t value) noexcept;
+        void fail_next_submit_for_tests() noexcept;
 
     private:
-        const VulkanContext& m_Context;
+        [[nodiscard]] uint64_t query_completed_value() const;
+        void create_timeline_semaphore();
 
-        vk::Queue m_Queue;
-        CommandQueue m_QueueID;
-        uint32_t m_QueueFamilyIndex = uint32_t(-1);
+        mutable std::mutex mutex_;
+        VkDevice device_ { VK_NULL_HANDLE };
+        VkQueue queue_ { VK_NULL_HANDLE };
+        VkSemaphore timeline_ { VK_NULL_HANDLE };
+        QueueId id_ {};
 
-        std::mutex m_Mutex;
-        std::vector<vk::Semaphore> m_WaitSemaphores;
-        std::vector<uint64_t> m_WaitSemaphoreValues;
-        std::vector<vk::Semaphore> m_SignalSemaphores;
-        std::vector<uint64_t> m_SignalSemaphoreValues;
+        uint64_t next_recording_id_ { 0 };
+        uint64_t last_submitted_value_ { 0 };
+        mutable std::atomic<uint64_t> last_completed_value_ { 0 };
+        bool fail_next_submit_ { false };
 
-        uint64_t m_LastRecordingID = 0;
-        uint64_t m_LastSubmittedID = 0;
-        uint64_t m_LastFinishedID = 0;
-
-        // tracks the list of command buffers in flight on this queue
-        std::list<TrackedCommandBufferPtr> m_CommandBuffersInFlight;
-        std::list<TrackedCommandBufferPtr> m_CommandBuffersPool;
-    };
-
-    class DeviceQueues
-    {
-
+        std::deque<std::shared_ptr<TrackedCommandBuffer>> in_flight_;
+        std::deque<std::shared_ptr<TrackedCommandBuffer>> pool_;
     };
 
     class DeviceManager
     {
     public:
-        DeviceManager();
+        DeviceManager() = default;
         ~DeviceManager();
 
-        void initialize(const HardwareCreateConfig& config, const VkInstance& instance, const VkPhysicalDevice& physical_device);
+        DeviceManager(const DeviceManager&) = delete;
+        DeviceManager& operator=(const DeviceManager&) = delete;
+        DeviceManager(DeviceManager&&) = delete;
+        DeviceManager& operator=(DeviceManager&&) = delete;
+
+        void initialize(const HardwareCreateConfig& config, VkInstance instance, VkPhysicalDevice physical_device);
         void shutdown() noexcept;
 
-    private:
-    };
+        [[nodiscard]] VkPhysicalDevice physical_device() const noexcept { return physical_device_; }
+        [[nodiscard]] VkDevice logical_device() const noexcept { return logical_device_; }
+        [[nodiscard]] const VkPhysicalDeviceProperties2& properties() const noexcept { return properties_; }
+        [[nodiscard]] const DeviceFeaturesChain& enabled_features() const noexcept { return enabled_features_; }
+        [[nodiscard]] const std::vector<QueueFamilyInfo>& queue_families() const noexcept { return queue_families_; }
 
+        [[nodiscard]] Queue* queue_for(QueueCapability capability) noexcept;
+        [[nodiscard]] const Queue* queue_for(QueueCapability capability) const noexcept;
+        [[nodiscard]] const std::vector<Queue*>& queues_for(QueueCapability capability) const noexcept;
+
+    private:
+        void create_device(const HardwareCreateConfig& config);
+        void create_queues();
+
+        VkInstance instance_ { VK_NULL_HANDLE };
+        VkPhysicalDevice physical_device_ { VK_NULL_HANDLE };
+        VkDevice logical_device_ { VK_NULL_HANDLE };
+        VkPhysicalDeviceProperties2 properties_ {};
+        DeviceFeaturesChain enabled_features_ {};
+        std::vector<QueueFamilyInfo> queue_families_;
+        std::vector<std::unique_ptr<Queue>> queues_;
+        std::vector<Queue*> graphics_queues_;
+        std::vector<Queue*> compute_queues_;
+        std::vector<Queue*> transfer_queues_;
+    };
 }

@@ -38,6 +38,17 @@
 - 资源生命周期命名保持简洁统一：公共句柄层使用 `IResourceRef`、`ResourceHandle`、`ResourceBridge`；资源池层使用 `ResourceStore<Resource, Releaser>`、`Slot`、`Read`、`Write`、`Handle`、`Token`；释放策略使用 `*Releaser`，不要使用 `*Destroy` 或 `DestroyPolicy`。
 - 资源 wrapper / resource pool 重构中不要用 `using` 别名隐藏核心类型；项目偏好显式类型，尤其是公共资源句柄和并发资源池接口。
 
+## Executor / Queue 重构
+
+- lower-case Vulkan 后端的 `CommandRecorder` 只记录抽象 IR、资源引用、访问模式、队列能力、feature requirement 和 device mask；录制阶段不要创建 descriptor set、pipeline、VkCommandBuffer 或 Vulkan/VMA 资源。
+- `ExecutionCompiler` 负责把 IR 编译为 per `{device, queue}` 的提交批次，并在这里做资源分配、descriptor/pipeline 缓存查询、barrier 规划、MGPU 分区和实际 command buffer 填充。
+- `Queue` 只封装单个 `VkQueue` 的职责：串行化 `vkQueueSubmit2`、维护 timeline semaphore、command buffer pool、in-flight tracked buffers 和 retire；不要把调度策略、跨 GPU 同步策略或资源分配策略放进 Queue。
+- `TrackedCommandBuffer` 持有 `SubmissionKeepAlive` 和资源 control block 强引用，直到 Queue 的 timeline 到达提交值；retire 时清空 keep-alive 并把 command buffer 归还到池。
+- `HardwareExecutor` 编排 record/compile/submit、DAG 顺序、错误策略和 `CrossDeviceSync`；不要在 executor 内部再维护一套延迟释放队列。
+- Timeline semaphore 是默认完成信号；只有后端或平台限制需要 fallback 时才使用 per-submit fence。
+- `VK_KHR_deferred_host_operations` 只用于把支持该扩展的昂贵 host-side Vulkan 操作拆到线程池，不能当作 GPU 提交、资源生命周期或延迟销毁机制。
+- 无 GPU 单测优先注入 fake queue / fake timeline，验证 submit、retire、keep-alive 释放、跨 queue token 依赖和失败路径；真实 Vulkan smoke 继续放在 `HorizonTests`。
+
 ## Include 边界
 
 - 暴露 Vulkan 类型的内部 header 可以直接 include `<volk.h>`。
