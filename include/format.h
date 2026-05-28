@@ -601,4 +601,17 @@ namespace Corona::Horizon
         uint32_t depth = 1;
     };
 
+
+
+    // ================================================================
+    // Validation
+    // ================================================================
+
+    enum class HardwareValidationMode : uint8_t
+    {
+        Disabled,
+        Log,
+        Throw,
+    };
+
 } // namespace Corona::Horizon

@@ -25,12 +25,17 @@
 #include "Codegen/RasterizedPipelineObject.h"
 #include "Codegen/VariateProxy.h"
 
+#ifndef HORIZON_ENABLE_VALIDATION
+#define HORIZON_ENABLE_VALIDATION 1
+#endif
+
 namespace Corona::Horizon
 {
     // ================================================================
     // Forward Declarations
     // ================================================================
 
+    struct HardwareValidationConfig;
     struct HardwareBuffer;
     struct HardwareImage;
     struct HardwareImageLayerSelector;
@@ -57,15 +62,14 @@ namespace Corona::Horizon
     // Validation
     // ================================================================
 
-    // 开启校验层，后面可以修改或者删除
-
     struct HardwareValidationConfig
     {
-        bool enabled = true;
-        bool throw_on_error = false;
+        HardwareValidationMode mode = HardwareValidationMode::Throw;
     };
 
-    void set_hardware_validation_config(const HardwareValidationConfig &config);
+    void set_hardware_validation_config(HardwareValidationConfig config);
+    [[nodiscard]] HardwareValidationConfig get_hardware_validation_config();
+    [[nodiscard]] bool is_hardware_validation_enabled();
 
 
 
@@ -73,6 +77,7 @@ namespace Corona::Horizon
     // HardwareBuffer
     // ================================================================
 
+    // Hardware data must be plain value data; do not store CPU pointers inside transferred structs.
     template <typename T>
     concept HardwareTransferable = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
@@ -85,7 +90,7 @@ namespace Corona::Horizon
         uint64_t element_count = 0;
         uint32_t element_size = 0;
         BufferUsageFlags usage = BufferUsageFlags::None;
-        CpuAccessMode cpu_access = CpuAccessMode::None;
+        CpuAccessMode cpu_access = CpuAccessMode::Write;
         bool dedicated = false;
         bool exportable = false;
         std::string debug_name;
@@ -98,41 +103,50 @@ namespace Corona::Horizon
             return *this;
         }
 
-        template <HardwareTransferable T>
-        static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] uint64_t byte_size() const
         {
-            // 如果 count 很大，乘法先溢出了，validation 后面也看不出来。
-            if (count > std::numeric_limits<uint64_t>::max() / sizeof(T))
+            if (element_count == 0 || element_size == 0)
+                return 0;
+
+            if (element_count > std::numeric_limits<uint64_t>::max() / element_size)
                 throw std::overflow_error("HardwareBufferDesc total byte size overflow.");
 
+            return element_count * uint64_t(element_size);
+        }
+
+        template <HardwareTransferable T>
+        [[nodiscard]] static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
+        {
             HardwareBufferDesc desc;
             desc.element_count = count;
             desc.element_size = uint32_t(sizeof(T));
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            return desc.apply(options);
+            desc.apply(options);
+            (void)desc.byte_size();
+            return desc;
         }
 
         template <HardwareTransferable T>
-        static HardwareBufferDesc vertex(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Vertex, std::move(name), options);
         }
 
         template <HardwareIndexType T>
-        static HardwareBufferDesc index(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name), options);
         }
 
         template <HardwareTransferable T>
-        static HardwareBufferDesc uniform(std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc uniform(std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(1, BufferUsageFlags::TransferDst | BufferUsageFlags::Uniform, std::move(name), options);
         }
 
         template <HardwareTransferable T>
-        static HardwareBufferDesc storage(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc storage(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
         {
             return typed<T>(count, BufferUsageFlags::TransferSrc | BufferUsageFlags::TransferDst | BufferUsageFlags::Storage, std::move(name), options);
         }
@@ -144,6 +158,7 @@ namespace Corona::Horizon
         HardwareBuffer();
         HardwareBuffer(const HardwareBufferDesc &desc, std::span<const std::byte> upload_data = {});
 
+        // Copies share the same underlying GPU buffer handle.
         HardwareBuffer(const HardwareBuffer& other);
         HardwareBuffer(HardwareBuffer&& other) noexcept;
         ~HardwareBuffer();
@@ -155,100 +170,131 @@ namespace Corona::Horizon
         [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return buffer_id; }
         [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
-        [[nodiscard]] void* get_mapped_data() const;
+        [[nodiscard]] uint64_t get_byte_size() const
+        {
+            const uint64_t element_count = get_element_count();
+            const uint64_t element_size = get_element_size();
+            if (element_size != 0 && element_count > std::numeric_limits<uint64_t>::max() / element_size)
+                throw std::overflow_error("HardwareBuffer total byte size overflow.");
 
-        bool write_bytes(std::span<const std::byte> data, uint64_t offset = 0) const;
-        bool read_bytes(std::span<std::byte> output, uint64_t offset = 0) const;
+            return element_count * element_size;
+        }
+        [[nodiscard]] void* get_mapped_data() const;
+        [[nodiscard]] std::span<std::byte> get_mapped_bytes() const
+        {
+            auto* data = static_cast<std::byte*>(get_mapped_data());
+            if (data == nullptr)
+                return {};
+
+            const uint64_t mapped_size = get_byte_size();
+            if (mapped_size > std::numeric_limits<size_t>::max())
+                return {};
+
+            return {data, static_cast<size_t>(mapped_size)};
+        }
+
+        [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
+        [[nodiscard]] bool read_bytes(std::span<std::byte> output, uint64_t byte_offset = 0) const;
 
         template <HardwareTransferable T>
-        bool write(std::span<const T> data, uint64_t offset = 0) const
+        [[nodiscard]] bool write(std::span<const T> data, uint64_t byte_offset = 0) const
         {
-            return write_bytes(std::as_bytes(data), offset);
+            return write_bytes(std::as_bytes(data), byte_offset);
         }
 
         template <HardwareTransferable T>
-        bool write_value(const T& value, uint64_t offset = 0) const
+        [[nodiscard]] bool write_elements(std::span<const T> data, uint64_t first_element = 0) const
         {
-            return write(std::span<const T>(&value, 1), offset);
+            if (first_element > std::numeric_limits<uint64_t>::max() / sizeof(T))
+                return false;
+
+            return write(data, first_element * sizeof(T));
+        }
+
+        template <HardwareTransferable T>
+        [[nodiscard]] bool write_value(const T& value, uint64_t byte_offset = 0) const
+        {
+            return write(std::span<const T>(&value, 1), byte_offset);
+        }
+
+        template <HardwareTransferable T>
+        [[nodiscard]] bool write_element(const T& value, uint64_t element_index = 0) const
+        {
+            return write_elements(std::span<const T>(&value, 1), element_index);
         }
 
         template <HardwareTransferable T>
         requires (!std::is_const_v<T>)
-        bool read(std::span<T> output, uint64_t offset = 0) const
+        [[nodiscard]] bool read(std::span<T> output, uint64_t byte_offset = 0) const
         {
-            return read_bytes(std::as_writable_bytes(output), offset);
-        }
-
-        static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
-        {
-            if (element_size == 0)
-                throw std::invalid_argument("element_size must not be zero.");
-
-            if (data.size_bytes() % element_size != 0)
-                throw std::invalid_argument("data size must be divisible by element_size.");
-
-            HardwareBufferDesc desc;
-            desc.element_count = uint64_t(data.size_bytes() / element_size);
-            desc.element_size = element_size;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            desc.apply(options);
-            return HardwareBuffer(desc, data);
+            return read_bytes(std::as_writable_bytes(output), byte_offset);
         }
 
         template <HardwareTransferable T>
-        static HardwareBuffer vertex(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
+        requires (!std::is_const_v<T>)
+        [[nodiscard]] bool read_elements(std::span<T> output, uint64_t first_element = 0) const
+        {
+            if (first_element > std::numeric_limits<uint64_t>::max() / sizeof(T))
+                return false;
+
+            return read(output, first_element * sizeof(T));
+        }
+
+        [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {});
+
+        template <HardwareTransferable T>
+        [[nodiscard]] static HardwareBuffer vertex(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name), options), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
         requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
-        static HardwareBuffer vertex(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             using T = std::ranges::range_value_t<Range>;
             return vertex<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
         }
 
         template <HardwareIndexType T>
-        static HardwareBuffer index(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer index(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name), options), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
         requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
-        static HardwareBuffer index(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             using T = std::ranges::range_value_t<Range>;
             return index<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
         }
 
         template <HardwareTransferable T>
-        static HardwareBuffer uniform(const T& value, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer uniform(const T& value, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::uniform<T>(std::move(name), options), std::as_bytes(std::span<const T>(&value, 1)));
         }
 
         template <HardwareTransferable T>
-        static HardwareBuffer storage(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer storage(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return HardwareBuffer(HardwareBufferDesc::storage<T>(data.size(), std::move(name), options), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
         requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
-        static HardwareBuffer storage(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer storage(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             using T = std::ranges::range_value_t<Range>;
             return storage<T>(std::span<const T>(std::ranges::data(data), std::ranges::size(data)), std::move(name), options);
         }
 
-        [[nodiscard]] BufferCopyCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
-        [[nodiscard]] BufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
-        [[nodiscard]] uint32_t store_descriptor() const;
-        static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
-        [[nodiscard]] ExternalMemoryHandle export_external() const;
+        //[[nodiscard]] BufferCopyCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
+        //[[nodiscard]] BufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
+        //[[nodiscard]] uint32_t store_descriptor() const;
+        //[[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
+        //[[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
         std::atomic<std::uintptr_t> buffer_id;
@@ -263,7 +309,7 @@ namespace Corona::Horizon
     // HardwareImage
     // ================================================================
 
-    struct HardwareImageDesc
+    /*struct HardwareImageDesc
     {
         ImageDimension dimension = ImageDimension::Image2D;
         ImageExtent extent {};
@@ -483,7 +529,7 @@ namespace Corona::Horizon
     inline HardwareImageLayerSelector HardwareImage::operator[](uint32_t layer_index) const
     {
         return HardwareImageLayerSelector(*this, layer_index);
-    }
+    }*/
 
     
     
@@ -491,7 +537,7 @@ namespace Corona::Horizon
     // HardwarePushConstant
     // ================================================================
 
-    inline constexpr uint32_t kPortablePushConstantByteSize = 128;
+    /*inline constexpr uint32_t kPortablePushConstantByteSize = 128;
 
     template <typename T>
     concept HardwarePushConstantValue = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && 
@@ -560,7 +606,7 @@ namespace Corona::Horizon
     private:
         HardwarePushConstantDesc desc_;
         std::array<std::byte, max_byte_size> storage_{};
-    };
+    };*/
 
 
 
@@ -568,7 +614,7 @@ namespace Corona::Horizon
     // Pipeline Descriptors
     // ================================================================
 
-    struct PipelineShaderDesc
+    /*struct PipelineShaderDesc
     {
         PipelineShaderStage stage;
         EmbeddedShader::ShaderCodeModule module;
@@ -1010,7 +1056,7 @@ namespace Corona::Horizon
             debug_name = std::move(value);
             return *this;
         }
-    };
+    };*/
 
 
 
@@ -1018,105 +1064,105 @@ namespace Corona::Horizon
     // Pipeline Binding
     // ================================================================
 
-    template<typename T>
-    concept ReflectedBindingKey = requires(const T& t)
-    {
-        t.byte_offset;
-        t.type_size;
-        t.bind_type;
-        t.location;
-    };
+    //template<typename T>
+    //concept ReflectedBindingKey = requires(const T& t)
+    //{
+    //    t.byte_offset;
+    //    t.type_size;
+    //    t.bind_type;
+    //    t.location;
+    //};
 
-    struct BindingSlot
-    {
-        uint64_t byte_offset = 0;
-        uint32_t type_size = 0;
-        int32_t bind_type = -1;
-        uint32_t location = 0;
+    //struct BindingSlot
+    //{
+    //    uint64_t byte_offset = 0;
+    //    uint32_t type_size = 0;
+    //    int32_t bind_type = -1;
+    //    uint32_t location = 0;
 
-        template<ReflectedBindingKey T>
-        static constexpr BindingSlot from(const T& key) noexcept
-        {
-            return 
-            {
-                key.byte_offset,
-                key.type_size,
-                key.bind_type,
-                key.location
-            };
-        }
-    };
+    //    template<ReflectedBindingKey T>
+    //    static constexpr BindingSlot from(const T& key) noexcept
+    //    {
+    //        return 
+    //        {
+    //            key.byte_offset,
+    //            key.type_size,
+    //            key.bind_type,
+    //            key.location
+    //        };
+    //    }
+    //};
 
-    struct PipelineBindingScope
-    {
-    protected:
-        virtual ~PipelineBindingScope() = default;
+    //struct PipelineBindingScope
+    //{
+    //protected:
+    //    virtual ~PipelineBindingScope() = default;
 
-    private:
-        friend struct ResourceProxy;
+    //private:
+    //    friend struct ResourceProxy;
 
-        virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
-        virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
-        virtual void bind_image(const BindingSlot &slot, const HardwareImage &image) = 0;
-        /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
-        {
-            throw std::runtime_error("This pipeline does not support acceleration structure binding.");
-        }*/
-    };
+    //    virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
+    //    virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
+    //    virtual void bind_image(const BindingSlot &slot, const HardwareImage &image) = 0;
+    //    /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
+    //    {
+    //        throw std::runtime_error("This pipeline does not support acceleration structure binding.");
+    //    }*/
+    //};
 
-    struct ResourceProxy
-    {
-    public:
-        ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
+    //struct ResourceProxy
+    //{
+    //public:
+    //    ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
 
-        ResourceProxy& operator=(const ResourceProxy&) = delete;
-        ResourceProxy& operator=(ResourceProxy&&) = delete;
+    //    ResourceProxy& operator=(const ResourceProxy&) = delete;
+    //    ResourceProxy& operator=(ResourceProxy&&) = delete;
 
-        template <typename T>
-        requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
-        ResourceProxy& operator=(const T& value)
-        {
-            using Value = std::remove_cvref_t<T>;
+    //    template <typename T>
+    //    requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
+    //    ResourceProxy& operator=(const T& value)
+    //    {
+    //        using Value = std::remove_cvref_t<T>;
 
-            if constexpr (std::same_as<Value, HardwareBuffer>)
-            {
-                pipeline_.bind_buffer(slot_, value);
-            }
-            else if constexpr (std::same_as<Value, HardwareImage>)
-            {
-                pipeline_.bind_image(slot_, value);
-            }
-            /*else if constexpr (std::same_as<Value, TopLevelAccelerationStructure>)
-            {
-                pipeline_.bindResource(slot_, value);
-            }*/
-            else
-            {
-                static_assert(HardwareTransferable<Value>, "Pipeline push constants must be trivially copyable non-pointer values.");
-                pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
-            }
+    //        if constexpr (std::same_as<Value, HardwareBuffer>)
+    //        {
+    //            pipeline_.bind_buffer(slot_, value);
+    //        }
+    //        else if constexpr (std::same_as<Value, HardwareImage>)
+    //        {
+    //            pipeline_.bind_image(slot_, value);
+    //        }
+    //        /*else if constexpr (std::same_as<Value, TopLevelAccelerationStructure>)
+    //        {
+    //            pipeline_.bindResource(slot_, value);
+    //        }*/
+    //        else
+    //        {
+    //            static_assert(HardwareTransferable<Value>, "Pipeline push constants must be trivially copyable non-pointer values.");
+    //            pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
+    //        }
 
-            return *this;
-        }
+    //        return *this;
+    //    }
 
-    private:
-        PipelineBindingScope& pipeline_;
-        BindingSlot slot_;
-    };
+    //private:
+    //    PipelineBindingScope& pipeline_;
+    //    BindingSlot slot_;
+    //};
 
-    template<typename Derived>
-    struct ReflectedPipelineBindings
-    {
-        template<ReflectedBindingKey ProxyType>
-        ResourceProxy operator[](const ProxyType& proxy)
-        {
-            template <ReflectedBindingKey ProxyType>
-            [[nodiscard]] ResourceProxy operator[](const ProxyType& proxy)
-            {
-                return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
-            }
-        }
-    };
+    //template<typename Derived>
+    //struct ReflectedPipelineBindings
+    //{
+    //    template<ReflectedBindingKey ProxyType>
+    //    ResourceProxy operator[](const ProxyType& proxy)
+    //    {
+    //        template <ReflectedBindingKey ProxyType>
+    //        [[nodiscard]] ResourceProxy operator[](const ProxyType& proxy)
+    //        {
+    //            return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
+    //        }
+    //    }
+    //};
 
     
 
@@ -1124,7 +1170,7 @@ namespace Corona::Horizon
     // Pipeline Runtime
     // ================================================================
 
-    struct ComputePipeline : PipelineBindingScope, ReflectedPipelineBindings<ComputePipeline>
+    /*struct ComputePipeline : PipelineBindingScope, ReflectedPipelineBindings<ComputePipeline>
     {
     public:
         ComputePipeline();
@@ -1205,7 +1251,7 @@ namespace Corona::Horizon
 
     struct RayTracingPipelineBase : PipelineBindingScope, ReflectedPipelineBindings<RayTracingPipelineBase>
     {
-    };
+    };*/
 
 
 
@@ -1213,36 +1259,36 @@ namespace Corona::Horizon
     // HardwareExecutor
     // ================================================================
 
-    struct HardwareExecutor
-    {
-    public:
-        HardwareExecutor();
-        HardwareExecutor(const HardwareExecutor &other);
-        HardwareExecutor(HardwareExecutor &&other) noexcept;
-        ~HardwareExecutor();
+    //struct HardwareExecutor
+    //{
+    //public:
+    //    HardwareExecutor();
+    //    HardwareExecutor(const HardwareExecutor &other);
+    //    HardwareExecutor(HardwareExecutor &&other) noexcept;
+    //    ~HardwareExecutor();
 
-        HardwareExecutor &operator=(const HardwareExecutor &other);
-        HardwareExecutor &operator=(HardwareExecutor &&other) noexcept;
+    //    HardwareExecutor &operator=(const HardwareExecutor &other);
+    //    HardwareExecutor &operator=(HardwareExecutor &&other) noexcept;
 
-        HardwareExecutor &operator<<(ComputePipeline &computePipeline);
-        HardwareExecutor &operator<<(RasterizerPipelineBase &rasterizerPipeline);
-        HardwareExecutor &operator<<(HardwareExecutor &other);
-        HardwareExecutor &operator<<(const CopyCommand &cmd);
+    //    HardwareExecutor &operator<<(ComputePipeline &computePipeline);
+    //    HardwareExecutor &operator<<(RasterizerPipelineBase &rasterizerPipeline);
+    //    HardwareExecutor &operator<<(HardwareExecutor &other);
+    //    HardwareExecutor &operator<<(const CopyCommand &cmd);
 
-        HardwareExecutor &wait(HardwareExecutor &other);
-        HardwareExecutor &commit();
+    //    HardwareExecutor &wait(HardwareExecutor &other);
+    //    HardwareExecutor &commit();
 
-        // ========== 延迟释放相关接口 ==========
-        /// @brief 等待所有延迟释放的资源完成（阻塞）
-        void waitForDeferredResources();
+    //    // ========== 延迟释放相关接口 ==========
+    //    /// @brief 等待所有延迟释放的资源完成（阻塞）
+    //    void waitForDeferredResources();
 
-        /// @brief 手动触发一次清理（非阻塞）
-        void cleanupDeferredResources();
+    //    /// @brief 手动触发一次清理（非阻塞）
+    //    void cleanupDeferredResources();
 
-    private:
-        mutable std::mutex executorMutex;
-        std::atomic<std::uintptr_t> executorID;
-    };
+    //private:
+    //    mutable std::mutex executorMutex;
+    //    std::atomic<std::uintptr_t> executorID;
+    //};
 
 
 
@@ -1250,7 +1296,7 @@ namespace Corona::Horizon
     // HardwareDisplayer
     // ================================================================
 
-    struct HardwareDisplayer
+    /*struct HardwareDisplayer
     {
     public:
         explicit HardwareDisplayer(void *surface = nullptr);
@@ -1267,5 +1313,5 @@ namespace Corona::Horizon
     private:
         std::atomic<std::uintptr_t> displaySurfaceID;
         mutable std::mutex displayerMutex;
-    };
+    };*/
 }

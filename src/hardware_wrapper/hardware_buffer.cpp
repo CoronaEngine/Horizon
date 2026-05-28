@@ -1,4 +1,6 @@
 #include "horizon_refac.h"
+#include "validation/hardware_validation.h"
+
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 namespace Corona::Horizon
@@ -7,6 +9,11 @@ namespace Corona::Horizon
 
 	HardwareBuffer::HardwareBuffer(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data)
 	{
+        buffer_id.store(0, std::memory_order_relaxed);
+
+        if (!validate_buffer_desc(desc, upload_data))
+            return;
+
         auto const buffer_id = globalBufferStorages.allocate();
         bufferID.store(buffer_id, std::memory_order_release);
         auto const handle = globalBufferStorages.acquire_write(buffer_id);
@@ -164,6 +171,19 @@ namespace Corona::Horizon
         return self_buffer_id > 0 && globalBufferStorages.acquire_read(self_buffer_id)->bufferHandle != VK_NULL_HANDLE;
     }
 
+    HardwareBuffer HardwareBuffer::from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name, HardwareBufferOptions options)
+    {
+        validate_buffer_source_data(data, element_size);
+
+        HardwareBufferDesc desc;
+        desc.element_count = uint64_t(data.size_bytes() / element_size);
+        desc.element_size = element_size;
+        desc.usage = usage;
+        desc.debug_name = std::move(name);
+        desc.apply(options);
+        return HardwareBuffer(desc, data);
+    }
+
     uint64_t HardwareBuffer::get_element_size() const
     {
         return globalBufferStorages.acquire_read(bufferID.load(std::memory_order_acquire))->elementSize;
@@ -239,6 +259,9 @@ namespace Corona::Horizon
 
 	HardwareBuffer HardwareBuffer::import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc)
 	{
+        if (!validate_buffer_desc(desc))
+            return {};
+
         ResourceManager::ExternalMemoryHandle memory_handle;
 #if _WIN32 || _WIN64
         memory_handle.handle = memHandle.handle;

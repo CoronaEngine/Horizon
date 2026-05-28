@@ -28,6 +28,11 @@ target_include_directories(Horizon
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+target_compile_definitions(Horizon
+    PUBLIC
+    HORIZON_ENABLE_VALIDATION=$<BOOL:${HORIZON_ENABLE_VALIDATION}>
+)
+
 # 链接库依赖
 target_link_libraries(volk PUBLIC Vulkan-Headers)
 
