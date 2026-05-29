@@ -446,5 +446,3 @@ namespace Corona::Horizon
         uint64_t next_submit_serial_ { 0 };
     };
 }
-
-#include "hardware_wrapper_vulkan/hardware/command.h"

@@ -297,9 +297,7 @@ namespace Corona::Horizon
         std::call_once(devices_once_, [this] {
             ensure_instance();
             create_devices();
-
             //setup_cross_device_semaphores();
-
             choose_main_device();
 
             CFW_LOG_DEBUG("Hardware Context initialized with {} device(s)", devices_.size());
