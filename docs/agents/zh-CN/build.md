@@ -90,6 +90,12 @@ cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common
 
 需要了解测试覆盖内容时运行 `build\ninja-msvc\tests\Debug\HorizonTests.exe --list`。
 
+## MSVC UTF-8 和预处理器诊断
+
+- 排查中文注释或 UTF-8 源码导致的 MSVC 问题时，先生成 `compile_commands.json`，检查实际编译命令是否带有 `/source-charset:utf-8`、`/execution-charset:utf-8` 或等效 `/utf-8`。
+- 最终修复优先放在目标级编译选项；不要把全局 `CL=/utf-8` 当作项目修复，因为它可能和已有 charset 选项混用并触发 `D8016`。
+- MSVC 会解析跳过分支的 `#elif` 条件文本；`__has_attribute(...)` 这类编译器 built-in 应放进已确认编译器分支的嵌套 `#if`，避免在 MSVC 下出现 `C4067`。
+
 ## 备注
 
 - 当前推荐流程偏 Windows / MSVC / Ninja。

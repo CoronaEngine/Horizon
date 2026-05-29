@@ -307,8 +307,12 @@ static constexpr size_t CFW_CACHE_LINE_SIZE = 64;  // 保守值
 #define CFW_FALLTHROUGH [[fallthrough]]
 #elif defined(CFW_COMPILER_GCC) && CFW_COMPILER_VERSION >= 70000
 #define CFW_FALLTHROUGH __attribute__((fallthrough))
-#elif defined(CFW_COMPILER_CLANG) && __has_attribute(fallthrough)
+#elif defined(CFW_COMPILER_CLANG)
+#if __has_attribute(fallthrough)
 #define CFW_FALLTHROUGH __attribute__((fallthrough))
+#else
+#define CFW_FALLTHROUGH
+#endif
 #else
 #define CFW_FALLTHROUGH
 #endif

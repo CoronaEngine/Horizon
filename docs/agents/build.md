@@ -1,5 +1,5 @@
 # Horizon Build Context
-<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: c4c03b372d13c6573afb270a34cd917356747620f9029a392c831c1b45e62e92 -->
+<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: b7ab2b48cdb2a0c92fe4195bbd09a2419d350a8d8634e85e88f1e546e610f504 -->
 
 Load this file only for CMake, preset, build, CI, or validation-command work.
 
@@ -90,6 +90,12 @@ cmd.exe /d /s /c "`"C:\Program Files\Microsoft Visual Studio\18\Community\Common
 ```
 
 Run `build\ninja-msvc\tests\Debug\HorizonTests.exe --list` to see what the tests cover.
+
+## MSVC UTF-8 And Preprocessor Diagnostics
+
+- When diagnosing MSVC failures from Chinese comments or UTF-8 source, generate `compile_commands.json` first and check whether the real compile commands include `/source-charset:utf-8`, `/execution-charset:utf-8`, or equivalent `/utf-8`.
+- Put final fixes in target-level compile options; do not treat global `CL=/utf-8` as a project fix because it can mix with existing charset flags and trigger `D8016`.
+- MSVC still parses skipped `#elif` condition text; put compiler built-ins such as `__has_attribute(...)` inside nested `#if` blocks after the compiler branch is known, otherwise MSVC can emit `C4067`.
 
 ## Notes
 
