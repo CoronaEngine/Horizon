@@ -76,6 +76,98 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_partial_timeline_retirement_keeps_newer_work()
+    {
+        Corona::Horizon::Queue queue({ 0 }, Corona::Horizon::QueueCapability::Transfer);
+        std::weak_ptr<int> first_weak;
+        std::weak_ptr<int> second_weak;
+
+        Corona::Horizon::SubmissionToken first_token;
+        Corona::Horizon::SubmissionToken second_token;
+        {
+            auto first_marker = std::make_shared<int>(1);
+            first_weak = first_marker;
+
+            Corona::Horizon::QueueSubmission submission;
+            submission.command_buffer = queue.acquire();
+            submission.keep_alive.add_object(first_marker);
+            first_marker.reset();
+            first_token = queue.submit(submission, {}, {});
+        }
+
+        {
+            auto second_marker = std::make_shared<int>(2);
+            second_weak = second_marker;
+
+            Corona::Horizon::QueueSubmission submission;
+            submission.command_buffer = queue.acquire();
+            submission.keep_alive.add_object(second_marker);
+            second_marker.reset();
+            second_token = queue.submit(submission, {}, {});
+        }
+
+        expect(first_token.value == 1, "First submission should signal timeline value 1.");
+        expect(second_token.value == 2, "Second submission should signal timeline value 2.");
+        expect(queue.in_flight_count() == 2, "Both submissions should start in flight.");
+
+        queue.mark_completed_for_tests(first_token.value);
+        queue.retire_completed();
+        expect(queue.in_flight_count() == 1, "Partial timeline completion should keep newer work in flight.");
+        expect(queue.pooled_count() == 1, "Only the completed command buffer should return to the pool.");
+        expect(first_weak.expired(), "The completed submission keep-alive should be released.");
+        expect(!second_weak.expired(), "The newer submission keep-alive should stay alive.");
+
+        queue.mark_completed_for_tests(second_token.value);
+        queue.retire_completed();
+        expect(queue.in_flight_count() == 0, "All work should retire after the second completion value.");
+        expect(queue.pooled_count() == 2, "Both retired command buffers should be pooled.");
+        expect(second_weak.expired(), "The second keep-alive should release after retirement.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_retired_command_buffer_is_reused()
+    {
+        Corona::Horizon::Queue queue({ 0 }, Corona::Horizon::QueueCapability::Transfer);
+
+        Corona::Horizon::QueueSubmission submission;
+        submission.command_buffer = queue.acquire();
+        Corona::Horizon::TrackedCommandBuffer* retired_command_buffer = submission.command_buffer.get();
+        const uint64_t first_recording_id = submission.command_buffer->recording_id();
+
+        const Corona::Horizon::SubmissionToken token = queue.submit(submission, {}, {});
+        queue.mark_completed_for_tests(token.value);
+        queue.retire_completed();
+        expect(queue.pooled_count() == 1, "Completed command buffer should be available for reuse.");
+
+        std::shared_ptr<Corona::Horizon::TrackedCommandBuffer> reused = queue.acquire();
+        expect(reused.get() == retired_command_buffer, "Queue should reuse retired command buffers before allocating new ones.");
+        expect(reused->recording_id() == first_recording_id + 1, "Reused command buffer should receive a new recording id.");
+        expect(reused->submission_id() == 0, "Reused command buffer should be reset out of submitted state.");
+        expect(queue.pooled_count() == 0, "Acquiring the reused command buffer should remove it from the pool.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_submit_creates_missing_command_buffer()
+    {
+        Corona::Horizon::Queue queue({ 0 }, Corona::Horizon::QueueCapability::Transfer);
+
+        Corona::Horizon::QueueSubmission submission;
+        const Corona::Horizon::SubmissionToken token = queue.submit(submission, {}, {});
+
+        expect(token.value == 1, "Submit without a caller command buffer should still signal timeline value 1.");
+        expect(submission.command_buffer == nullptr, "Successful submit should move the auto-created command buffer into the queue.");
+        expect(queue.in_flight_count() == 1, "Auto-created command buffer should be tracked in flight.");
+
+        queue.mark_completed_for_tests(token.value);
+        queue.retire_completed();
+        expect(queue.in_flight_count() == 0, "Auto-created command buffer should retire normally.");
+        expect(queue.pooled_count() == 1, "Auto-created command buffer should return to the pool.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_submit_failure_keeps_submission_resources()
     {
         Corona::Horizon::Queue queue({ 0 }, Corona::Horizon::QueueCapability::Transfer);
@@ -440,6 +532,21 @@ namespace Corona::Horizon::Tests
                 "execution.keep_alive_retirement",
                 "Fake queue keeps submission resources alive until its timeline completion value retires the command buffer.",
                 test_keep_alive_retires_after_timeline_completion,
+            },
+            {
+                "execution.partial_timeline_retirement",
+                "Fake queue retires only submissions whose timeline values have completed.",
+                test_partial_timeline_retirement_keeps_newer_work,
+            },
+            {
+                "execution.command_buffer_pool_reuse",
+                "Queue reuses retired command buffers before allocating fresh tracked buffers.",
+                test_retired_command_buffer_is_reused,
+            },
+            {
+                "execution.submit_auto_command_buffer",
+                "Queue submit creates and tracks a command buffer when the caller did not acquire one first.",
+                test_submit_creates_missing_command_buffer,
             },
             {
                 "execution.submit_failure_keeps_resources",

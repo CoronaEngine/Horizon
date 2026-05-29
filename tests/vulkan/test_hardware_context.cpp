@@ -187,6 +187,20 @@ namespace
         expect(!devices.empty(), "devices() should expose at least one device.");
         expect(context.main_device() != nullptr, "devices() should select a main device.");
 
+        for (const std::shared_ptr<Corona::Horizon::HardwareContext::DeviceContext>& device : devices)
+        {
+            expect(device != nullptr, "devices() should not expose null device contexts.");
+            const Corona::Horizon::DeviceManager& device_manager = device->device_manager;
+            expect(device_manager.physical_device() != VK_NULL_HANDLE,
+                   "DeviceManager should keep the selected physical device.");
+            expect(device_manager.logical_device() != VK_NULL_HANDLE,
+                   "DeviceManager should create a logical Vulkan device.");
+            expect(!device_manager.queue_families().empty(),
+                   "DeviceManager should capture at least one queue family.");
+            expect(device_manager.queue_for(Corona::Horizon::QueueCapability::Transfer) != nullptr,
+                   "DeviceManager should expose a queue usable for transfer work.");
+        }
+
         return Corona::Horizon::Tests::TestResult::pass();
     }
 

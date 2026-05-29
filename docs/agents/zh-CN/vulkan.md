@@ -29,6 +29,14 @@
 - Image layout 和 memory barrier。
 - Swapchain 和 display 逻辑。
 
+## Device / Queue 边界
+
+- `HardwareContext::create_devices()` 负责枚举和过滤 physical device、创建每个 `DeviceContext`、接线 `DeviceManager` / `ResourceManager`，不要在这里累积 logical device、queue family 或 queue submit 策略。
+- `DeviceManager` 负责给定 `VkInstance` / `VkPhysicalDevice` 后的 per-device 初始化：筛选 device extension、启用 feature chain、创建 `VkDevice`、记录 queue family 快照，并创建 `Queue` 包装。
+- `DeviceManager` 不负责跨 GPU 同步策略、资源分配策略、execution DAG 调度或延迟释放队列；这些职责分别留给 `HardwareExecutor`、resource manager / pool、compiler / encoder 和 `Queue` 的 timeline retire。
+- 同一个 Vulkan queue family 可能同时服务 graphics、compute、transfer。`QueueCapability` 查找表可以做 fallback，但不要把某个 queue 的 primary capability 当作排他的硬件能力。
+- 后续如果 `DeviceManager` 的初始化参数继续增长，优先收敛为纯数据 `DeviceCreateDesc`；不要把 instance/debug layer、validation messenger 或全局上下文策略塞进 device-create payload。
+
 ## 资源生命周期重构
 
 - 重构公共 resource wrapper 时，优先采用 handle 语义：wrapper 复制/移动只共享 `ResourceHandle` / `IResourceRef`，不要重新引入每个 wrapper 一套 `atomic<uintptr_t>` ID、手写 ref-count 和锁。

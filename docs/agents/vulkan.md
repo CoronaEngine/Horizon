@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 2f29d35c024880001cb975e805d06264f2dc84832823d1b1644f7ea179538473 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 6c03f0be9c68893c26768a2a6db835a1a75a3f30b3b28ad232c70640494256c0 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -29,6 +29,14 @@ Be careful with:
 - Queue family selection.
 - Image layouts and memory barriers.
 - Swapchain and display logic.
+
+## Device / Queue Boundaries
+
+- `HardwareContext::create_devices()` enumerates and filters physical devices, creates each `DeviceContext`, and wires `DeviceManager` / `ResourceManager`; do not accumulate logical-device, queue-family, or queue-submit policy there.
+- `DeviceManager` handles per-device initialization after receiving a `VkInstance` / `VkPhysicalDevice`: filter device extensions, enable the feature chain, create `VkDevice`, snapshot queue families, and create `Queue` wrappers.
+- `DeviceManager` does not own cross-GPU sync policy, resource allocation policy, execution DAG scheduling, or delayed-release queues; keep those in `HardwareExecutor`, resource manager / pool, compiler / encoder, and `Queue` timeline retirement respectively.
+- One Vulkan queue family can serve graphics, compute, and transfer. `QueueCapability` lookup tables may provide fallback, but do not treat a queue's primary capability as exclusive hardware capability.
+- If `DeviceManager` initialization inputs keep growing, prefer a plain-data `DeviceCreateDesc`; do not put instance/debug layers, validation messenger setup, or global context policy into the device-create payload.
 
 ## Resource Lifetime Refactor
 

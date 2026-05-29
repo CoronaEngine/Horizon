@@ -1,47 +1,134 @@
-# Horizon 测试入口
+# Horizon Test Entry
+<!-- TESTS_README_ZH_CN_SHA256: 334de6d7006413ad47677b05f9f6d3891377573873a5446897c7d6230bfb2382 -->
 
-`HorizonTests` 是当前测试目录的统一入口。它和 `examples/main.cpp` 的思路类似：一个可执行文件集中运行多个测试用例，但每个测试用例必须带名称和说明，方便新人先看懂它测什么。
+Chinese source: `README.zh-CN.md`. Keep this English default entry in sync with that file.
 
-## 运行方式
+These README files document the test suite. They are not part of the `.agents` / `docs/agents` synchronization mechanism, and they should not become a skill. Update both files when adding or removing a test module, or when the intended coverage of a test changes. Implementation-only test edits do not need README changes.
 
-查看测试清单和覆盖说明：
+The `TESTS_README_ZH_CN_SHA256` marker stores the SHA256 of the Chinese source for manual staleness checks. It is intentionally not wired into `tools/sync-agents.ps1`.
 
-```powershell
-build\ninja-msvc\tests\Debug\HorizonTests.exe --list
-```
+## Running Tests
 
-运行测试：
-
-```powershell
-build\ninja-msvc\tests\Debug\HorizonTests.exe
-```
-
-通过 CTest 运行：
-
-```powershell
-ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
-```
-
-构建测试目标：
+Build the test target:
 
 ```powershell
 cmake --build --preset msvc-debug --target HorizonTests
 ```
 
-Windows/MSVC 命令行验证时，优先先进入 Visual Studio Developer Command Prompt。
+List tests and their coverage descriptions:
 
-## 当前覆盖
+```powershell
+build\ninja-msvc\tests\Debug\HorizonTests.exe --list
+```
 
-- `hardware_context.lazy_construction`：构造 `HardwareContext` 不应创建 Vulkan instance，也不应枚举设备。
-- `hardware_context.local_lifecycle`：局部 `HardwareContext` 通过 `instance()` 按需创建 `VkInstance`，通过 `devices()` / `main_device()` 按需加载设备和主设备。
-- `hardware_context.global_entrypoints`：全局入口 `hardware_context()`、`vulkan_instance()`、`all_devices()`、`resource_manager()`、`device_manager()` 共用同一个 lazy singleton。
+Run all tests:
 
-Vulkan 环境不满足要求时，相关用例返回 skip。CTest 使用返回码 `77` 识别整组测试全部跳过的情况。
+```powershell
+build\ninja-msvc\tests\Debug\HorizonTests.exe
+```
 
-## 新增测试约定
+Run through CTest:
 
-- 不要在测试模块里定义 `main()`；统一入口是 `tests/main.cpp`。
-- 新测试模块返回 `std::vector<TestCase>`，并在 `tests/test_registry.h` 声明收集函数。
-- 每个 `TestCase` 必须填写稳定的 `name` 和面向新人可读的 `description`。
-- 普通失败直接抛出 `std::runtime_error`；环境缺失时返回 `TestResult::skip(...)`。
-- 不要为了测试把生产接口变胖；确实需要检查内部状态时，优先使用测试专用 `friend` access shim。
+```powershell
+ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
+```
+
+On Windows/MSVC command-line validation, prefer entering the Visual Studio Developer Command Prompt first.
+
+## Test Harness
+
+`HorizonTests` is the unified entrypoint for the current test directory. It is similar in shape to `examples/main.cpp`: one executable runs multiple test cases, and every test case carries a stable name plus a readable description so newcomers can see what it covers before reading implementation details.
+
+- `tests/main.cpp`: collects tests, handles `--list`, filters by name prefix, runs tests, and prints the summary.
+- `tests/test_registry.h`: defines `TestCase`, `TestResult`, and each test module collection function declaration.
+- `tests/CMakeLists.txt`: defines the `HorizonTests` target and maps the all-skipped return code to CTest skip code `77`.
+- `tests/vulkan/*.cpp`: current lower-case Vulkan backend test modules.
+
+`TestCase::name` is used for command-line filtering, CTest output, and log search. `TestCase::description` explains the intended coverage. `HorizonTests.exe --list` prints all test names and descriptions.
+
+## Current Modules
+
+### `tests/vulkan/test_hardware_context.cpp`
+
+Validates lower-case Vulkan `HardwareContext` lazy initialization, real Vulkan environment gating, and whether global helper entrypoints share one lazy singleton.
+
+This file runs a Vulkan environment precheck first:
+
+- `volkInitialize()` must succeed.
+- The Vulkan loader must report at least `VK_API_VERSION_1_4`.
+- A temporary `VkInstance` must be creatable.
+- Physical devices must be enumerable.
+- At least one physical device must be Vulkan 1.4-capable.
+
+When the environment is unavailable, the related cases return `TestResult::skip(...)` instead of treating missing Vulkan support as a test failure.
+
+Covered cases:
+
+- `hardware_context.lazy_construction`
+  - Constructing a local `HardwareContext` must not create a `VkInstance`.
+  - Constructing a local `HardwareContext` must not enumerate Vulkan devices.
+  - The test uses `HardwareContextTestAccess` to inspect lazy state without exposing test probes as production API.
+
+- `hardware_context.local_lifecycle`
+  - A new local `HardwareContext` starts with instance and devices unloaded.
+  - Calling `instance()` creates `VkInstance` on demand, without enumerating devices as a side effect.
+  - Calling `devices()` / `main_device()` enumerates devices, creates each `DeviceContext`, and selects a main device on demand.
+  - Every `DeviceContext` contains a valid `DeviceManager`.
+  - `DeviceManager` keeps the selected `VkPhysicalDevice`, creates a `VkDevice`, records queue families, and exposes at least one queue usable for transfer work.
+
+- `hardware_context.global_entrypoints`
+  - `hardware_context()` returns a stable global singleton.
+  - `vulkan_instance()` creates and returns `VkInstance` through the same singleton.
+  - `all_devices()` loads the device list through the same singleton.
+  - `main_device_context()`, `resource_manager()`, and `device_manager()` come from the selected main device.
+
+This module does not test rendering, swapchains, real present, resource allocation policy, or command encoding. It protects Vulkan context and device initialization entrypoint lifetime boundaries.
+
+### `tests/vulkan/test_execution_system.cpp`
+
+Validates the no-GPU path of the lower-case Vulkan execution stack: fake queues, timeline retirement, keep-alive lifetimes, command IR recording, compile plans, the stream facade, present receipts, and concurrency boundaries.
+
+These tests mostly use injectable `Queue` / `HardwareExecutor` paths and do not require a local Vulkan device. Real Vulkan smoke coverage remains in `test_hardware_context.cpp`.
+
+Covered cases:
+
+- `execution.keep_alive_retirement`: submitted resources stay alive until their timeline completion value retires the command buffer.
+- `execution.partial_timeline_retirement`: only submissions with completed timeline values retire; newer in-flight work remains alive.
+- `execution.command_buffer_pool_reuse`: retired command buffers are reused before allocating new ones and receive a new recording id.
+- `execution.submit_auto_command_buffer`: `Queue::submit()` creates and tracks a command buffer when the caller did not acquire one first.
+- `execution.submit_failure_keeps_resources`: injected submit failure leaves keep-alive and command buffer ownership in the caller submission.
+- `execution.recorder_compiler_ir`: `CommandRecorder` records only abstract IR, and `ExecutionCompiler` collects queue requirements, keep-alives, and resource hazards.
+- `execution.hardware_executor_injected_queue`: `HardwareExecutor` submits compiled work through an injected queue resolver.
+- `execution.stream_facade_commit`: `HardwareStream` accepts ocarina-style commands and commits them through executor queues.
+- `execution.stream_batch_order`: `CommandBatch` and `HardwareStream` preserve typed IR order before compile.
+- `execution.ocarina_value_commands`: value command objects erase into `CommandBatch` / `HardwareStream`.
+- `execution.compiler_dag_order`: non-contiguous queue batches are not incorrectly merged across queue types, and resource reuse creates explicit DAG dependencies.
+- `execution.host_callback_retire`: host callbacks are retained by command buffer keep-alives and run when the timeline retires.
+- `execution.present_receipt`: present nodes submit through the present queue and report status through `SubmitReceipt`.
+- `execution.cross_device_present`: cross-device present can record a CPU bridge fallback, while ordinary cross-device resource hazards fail without explicit sync.
+- `execution.parallel_record_and_submit`: independent recorders can close concurrently, and `Queue` serializes timeline increments for parallel fake submissions.
+
+This module does not fill real `VkCommandBuffer` objects, create pipelines or descriptors, or verify actual GPU execution results. It protects execution planning and submission lifetimes, not the Vulkan encoder.
+
+## Adding Tests
+
+- Do not define `main()` in test modules; the unified entrypoint is `tests/main.cpp`.
+- A new test module returns `std::vector<TestCase>` and declares its collection function in `tests/test_registry.h`.
+- Append the new module in `tests/main.cpp` inside `collect_tests()`.
+- Add the new test source file to `tests/CMakeLists.txt`.
+- Every `TestCase` must provide a stable `name` and a newcomer-readable `description`.
+- Use English/ASCII for `name` so command-line filtering, CTest output, and log search remain stable.
+- `description`, failure messages, and skip reasons may use Chinese; the test target uses `horizon_add_test()` to fix MSVC source and execution charsets to UTF-8.
+- Throw `std::runtime_error` for ordinary failures; return `TestResult::skip(...)` when the environment is unavailable.
+- Do not make production APIs larger just for tests. When internal state must be inspected, prefer a test-only `friend` access shim.
+- When adding, deleting, or renaming test modules, update both `README.zh-CN.md` and `README.md`.
+
+## Skip Rules
+
+Individual cases can return `TestResult::skip(...)` when the current machine lacks a required environment. The current runner behavior is:
+
+- If any case fails, the executable returns failure.
+- If no cases fail and at least one case passes, the executable returns success.
+- If every selected case is skipped, the executable returns `77`.
+
+`tests/CMakeLists.txt` configures `77` as CTest `SKIP_RETURN_CODE`, so machines without Vulkan support can report an explicit skip instead of a false failure.

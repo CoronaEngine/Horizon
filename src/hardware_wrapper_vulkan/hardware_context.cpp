@@ -19,13 +19,6 @@ namespace Corona::Horizon
 {
     constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
 
-    bool has_extension(const std::vector<VkExtensionProperties>& extensions, const char* name)
-    {
-        return std::any_of(extensions.begin(), extensions.end(), [name](const VkExtensionProperties& extension) {
-            return std::strcmp(name, extension.extensionName) == 0;
-        });
-    }
-
     std::vector<const char*> supported_instance_extensions(std::set<const char*> requested_extensions)
     {
         uint32_t extension_count = 0;
@@ -34,12 +27,18 @@ namespace Corona::Horizon
         std::vector<VkExtensionProperties> available_extensions(extension_count);
         vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, available_extensions.data());
 
+        const auto contains_extension = [&available_extensions](const char* name) {
+            return std::any_of(available_extensions.begin(), available_extensions.end(), [name](const VkExtensionProperties& extension) {
+                return std::strcmp(name, extension.extensionName) == 0;
+            });
+        };
+
         std::vector<const char*> enabled_extensions;
         enabled_extensions.reserve(requested_extensions.size());
 
         for (const char* extension : requested_extensions)
         {
-            if (has_extension(available_extensions, extension))
+            if (contains_extension(extension))
             {
                 enabled_extensions.push_back(extension);
                 continue;

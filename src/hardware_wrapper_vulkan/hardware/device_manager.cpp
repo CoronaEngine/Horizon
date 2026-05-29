@@ -13,13 +13,6 @@ namespace Corona::Horizon
     // Helper
     // ================================================================
 
-    [[nodiscard]] bool has_extension(const std::vector<VkExtensionProperties>& extensions, const char* name)
-    {
-        return std::any_of(extensions.begin(), extensions.end(), [name](const VkExtensionProperties& extension) {
-            return std::strcmp(extension.extensionName, name) == 0;
-            });
-    }
-
     [[nodiscard]] std::vector<const char*> filter_supported_device_extensions(VkPhysicalDevice physical_device, const std::set<const char*>& requested)
     {
         uint32_t extension_count = 0;
@@ -36,12 +29,18 @@ namespace Corona::Horizon
             throw std::runtime_error("vkEnumerateDeviceExtensionProperties failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
+        const auto contains_extension = [&available](const char* name) {
+            return std::any_of(available.begin(), available.end(), [name](const VkExtensionProperties& extension) {
+                return std::strcmp(extension.extensionName, name) == 0;
+            });
+        };
+
         std::vector<const char*> enabled;
         enabled.reserve(requested.size());
 
         for (const char* extension : requested)
         {
-            if (has_extension(available, extension))
+            if (contains_extension(extension))
             {
                 enabled.push_back(extension);
             }
@@ -55,7 +54,7 @@ namespace Corona::Horizon
         switch (capability)
         {
         case QueueCapability::Graphics:
-        //case QueueCapability::Present:
+            //case QueueCapability::Present:
             return VK_QUEUE_GRAPHICS_BIT;
         case QueueCapability::Compute:
             return VK_QUEUE_COMPUTE_BIT;
@@ -74,12 +73,10 @@ namespace Corona::Horizon
         }
     }
 
-
-
     // ================================================================
     // TrackedCommandBuffer
     // ================================================================
-    
+
     TrackedCommandBuffer::TrackedCommandBuffer(VkDevice device, uint32_t queue_family_index) : device_(device)
     {
         if (device_ == VK_NULL_HANDLE)
@@ -107,7 +104,7 @@ namespace Corona::Horizon
         alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc_info.commandBufferCount = 1;
 
-        VkResult result = vkAllocateCommandBuffers(device_, &alloc_info, &command_buffer_);
+        result = vkAllocateCommandBuffers(device_, &alloc_info, &command_buffer_);
         if (result != VK_SUCCESS)
         {
             vkDestroyCommandPool(device_, command_pool_, nullptr);
@@ -161,8 +158,6 @@ namespace Corona::Horizon
         recording_id_ = 0;
         submission_id_ = 0;
     }
-
-
 
     // ================================================================
     // Queue
@@ -419,8 +414,6 @@ namespace Corona::Horizon
         std::lock_guard lock(mutex_);
         fail_next_submit_ = true;
     }
-
-
 
     // ================================================================
     // DeviceManager
