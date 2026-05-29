@@ -1,7 +1,7 @@
 # Horizon AI 入口
 
 > 本文件是根 AI 入口的中文源文件。修改根规则时，先改这里，再同步更新 `AGENTS.md`。
-> 其他中文源位于 `docs/agents/zh-CN/` 和 `.agents/skills/horizon-workflow/SKILL.zh-CN.md`。
+> 其他中文源位于 `docs/agents/zh-CN/`、`docs/tasks/zh-CN/` 和 `.agents/skills/horizon-workflow/SKILL.zh-CN.md`。
 > 英文文件是 AI 默认读取入口，必须与中文源保持一致。
 
 ## 1. 核心原则
@@ -44,6 +44,7 @@ AI 在本仓库工作时必须：
 - `tools/`：工具程序和脚本。
 - `examples/`：示例程序和 shader 资源。
 - `docs/agents/`：按需加载的 AI 上下文包。
+- `docs/tasks/`：短小任务清单、复现步骤和验证配方。
 - `.agents/skills/`：项目共享 Agent skill。
 
 ## 4. 默认验证
@@ -73,7 +74,7 @@ C++ / CMake / 工具 / 示例改动按需运行：
 根据中文源同步所有英文 Agent 文件。
 
 - 不要修改中文源文件。
-- 同步范围包括根 `AGENTS.md`、`docs/agents/*.md` 和项目 skill。
+- 同步范围包括根 `AGENTS.md`、`docs/agents/*.md`、`docs/tasks/*.md` 和项目 skill。
 - 保持章节结构一致；英文要短、直接、适合作为 AI 上下文。
 - 更新对应英文文件顶部的 sync marker。
 - 运行 `.\tools\sync-agents.ps1 -Check`。
@@ -91,9 +92,11 @@ C++ / CMake / 工具 / 示例改动按需运行：
 把本轮或近期 AI 对话中值得长期保留的项目上下文沉淀到项目 AI 资料中。
 
 - 先查看 `git status --short --branch`，不要覆盖或回滚用户已有改动。
+- 先判断材料是否值得沉淀：必须能在下一轮减少误判、缩短定位、明确禁止动作，或固定验证入口。
 - 只沉淀稳定、可复用的内容：项目规则、目录职责、架构决策、命名/生命周期/并发约定、验证流程、用户在本仓库内反复表达的偏好。
 - 不要沉淀临时猜测、一次性命令输出、未定论争议、聊天闲谈、秘密信息、过窄的实现细节。
-- 按归属选择目标：根规则写入 `AGENTS.zh-CN.md`；专项上下文写入 `docs/agents/zh-CN/*.md`；共享工作流或口令写入 `.agents/skills/horizon-workflow/SKILL.zh-CN.md`。
+- 按归属选择目标：根规则写入 `AGENTS.zh-CN.md`；长期专项上下文写入 `docs/agents/zh-CN/*.md`；短小任务清单、复现步骤或验证配方写入 `docs/tasks/zh-CN/*.md`；共享工作流、口令、意图识别规则或跨 Agent 行为写入 `.agents/skills/horizon-workflow/SKILL.zh-CN.md`。
+- 写入前确认依据：用户明确偏好、已验证命令、当前代码事实或已落地设计；证据不足时只列候选，不写成规则。
 - 修改中文源后，同步对应英文文件并更新 SHA256 marker。
 - 如果没有足够确定、值得写入的内容，不要改文件，只汇报候选项和不沉淀的理由。
 - 完成后运行 `.\tools\sync-agents.ps1 -Check` 并汇报结果。
@@ -138,6 +141,7 @@ C++ / CMake / 工具 / 示例改动按需运行：
 
 - `AGENTS.zh-CN.md` -> `AGENTS.md`
 - `docs/agents/zh-CN/*.md` -> `docs/agents/*.md`
+- `docs/tasks/zh-CN/*.md` -> `docs/tasks/*.md`
 - `.agents/skills/horizon-workflow/SKILL.zh-CN.md` -> `.agents/skills/horizon-workflow/SKILL.md`
 
 每次修改任一中文源后，必须同步对应英文文件：

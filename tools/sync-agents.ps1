@@ -76,6 +76,30 @@ $syncPairs = @(
         Label = "push constant context"
     },
     @{
+        Source = "docs/tasks/zh-CN/formatting.md"
+        Target = "docs/tasks/formatting.md"
+        Marker = "TASK_DOCS_FORMATTING_ZH_CN_SHA256"
+        Label = "formatting task notes"
+    },
+    @{
+        Source = "docs/tasks/zh-CN/hardware-buffer-validation.md"
+        Target = "docs/tasks/hardware-buffer-validation.md"
+        Marker = "TASK_DOCS_HARDWARE_BUFFER_VALIDATION_ZH_CN_SHA256"
+        Label = "hardware buffer validation task notes"
+    },
+    @{
+        Source = "docs/tasks/zh-CN/shader-reflection.md"
+        Target = "docs/tasks/shader-reflection.md"
+        Marker = "TASK_DOCS_SHADER_REFLECTION_ZH_CN_SHA256"
+        Label = "shader reflection task notes"
+    },
+    @{
+        Source = "docs/tasks/zh-CN/vulkan-backend.md"
+        Target = "docs/tasks/vulkan-backend.md"
+        Marker = "TASK_DOCS_VULKAN_BACKEND_ZH_CN_SHA256"
+        Label = "vulkan backend task notes"
+    },
+    @{
         Source = ".agents/skills/horizon-workflow/SKILL.zh-CN.md"
         Target = ".agents/skills/horizon-workflow/SKILL.md"
         Marker = "HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256"

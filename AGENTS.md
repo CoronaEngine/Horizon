@@ -1,8 +1,8 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: 15e29e35e3d688eacc5492a2174e19d26a468a8e1d55e51f8fb067978ccfb74d -->
+<!-- AGENTS_ZH_CN_SHA256: 4509e91a60ec147761b936dda40f02deb8178fa84293bd5f02ffbf627dffeaa3 -->
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.
-> Other Chinese sources live in `docs/agents/zh-CN/` and `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
+> Other Chinese sources live in `docs/agents/zh-CN/`, `docs/tasks/zh-CN/`, and `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
 > English files are the default AI entrypoints and must stay aligned with Chinese sources.
 
 ## 1. Core Rules
@@ -45,6 +45,7 @@ The skill is plain Markdown and vendor-neutral; it is not Codex-specific.
 - `tools/`: tool programs and scripts.
 - `examples/`: example programs and shader assets.
 - `docs/agents/`: on-demand AI context packs.
+- `docs/tasks/`: short task checklists, reproduction steps, and validation recipes.
 - `.agents/skills/`: shared project agent skills.
 
 ## 4. Default Validation
@@ -74,7 +75,7 @@ These commands use the `=` prefix to avoid conflicts with slash commands and men
 Sync all English agent files from their Chinese sources.
 
 - Do not modify Chinese source files.
-- Sync scope includes root `AGENTS.md`, `docs/agents/*.md`, and the project skill.
+- Sync scope includes root `AGENTS.md`, `docs/agents/*.md`, `docs/tasks/*.md`, and the project skill.
 - Preserve the same section structure; English should stay short, direct, and AI-context friendly.
 - Update sync markers near the top of matching English files.
 - Run `.\tools\sync-agents.ps1 -Check`.
@@ -92,9 +93,11 @@ Check whether all English agent files are synchronized with Chinese sources.
 Distill durable project context from this or recent AI conversations into the project AI materials.
 
 - Run `git status --short --branch` first, and do not overwrite or revert existing user changes.
+- First decide whether the material is worth preserving: it must reduce future misreads, shorten orientation, clarify forbidden actions, or lock in a validation entrypoint.
 - Preserve only stable, reusable content: project rules, directory responsibilities, architecture decisions, naming/lifetime/concurrency conventions, validation workflows, and recurring user preferences in this repo.
 - Do not preserve temporary guesses, one-off command output, unresolved debates, casual chat, secrets, or overly narrow implementation details.
-- Choose the target by ownership: root rules go in `AGENTS.zh-CN.md`; focused context goes in `docs/agents/zh-CN/*.md`; shared workflow or commands go in `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
+- Choose the target by ownership: root rules go in `AGENTS.zh-CN.md`; long-lived focused context goes in `docs/agents/zh-CN/*.md`; short task checklists, reproduction steps, or validation recipes go in `docs/tasks/zh-CN/*.md`; shared workflow, commands, intent-recognition rules, or cross-agent behavior go in `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
+- Confirm the evidence before writing: explicit user preferences, verified commands, current code facts, or settled designs. If evidence is weak, report candidates instead of turning them into rules.
 - After changing a Chinese source, sync the matching English file and update the SHA256 marker.
 - If nothing is certain or valuable enough to preserve, do not edit files; report candidates and why they were not preserved.
 - Run `.\tools\sync-agents.ps1 -Check` and report the result.
@@ -139,6 +142,7 @@ Sync relationships:
 
 - `AGENTS.zh-CN.md` -> `AGENTS.md`
 - `docs/agents/zh-CN/*.md` -> `docs/agents/*.md`
+- `docs/tasks/zh-CN/*.md` -> `docs/tasks/*.md`
 - `.agents/skills/horizon-workflow/SKILL.zh-CN.md` -> `.agents/skills/horizon-workflow/SKILL.md`
 
 Whenever any Chinese source changes, update its matching English file:

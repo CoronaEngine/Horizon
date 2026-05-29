@@ -1,4 +1,5 @@
 # Shader Reflection Task Notes
+<!-- TASK_DOCS_SHADER_REFLECTION_ZH_CN_SHA256: 99abb372478871d3d500a18e6703fc398df50bc6882b2aaf55b13e719016eb86 -->
 
 ## Related Paths
 

@@ -2,7 +2,7 @@
 name: horizon-workflow
 description: Vendor-neutral workflow for AI agents working in the Horizon C++ Vulkan repository. Use when an agent edits this repo, handles =sa/=ca/=ai/=gc/=cm/=gh commands, or needs routing to build, GitHub, formatting, Vulkan, Helicon, or push-constant context.
 ---
-<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: d0552f31463ed4cad55c08958e738ac78aa55f41b1d5fb23dd6bcbb707f9e929 -->
+<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: 5688fd926f10362e56ea1b7c71a285b28002811327e0b188a53bec1c33799f06 -->
 
 # Horizon Workflow
 
@@ -27,7 +27,18 @@ This skill is plain Markdown so Codex, Claude, Cursor, Gemini CLI, or other agen
 
 For `=sa` and `=ca`, use `tools/sync-agents.ps1`.
 
-For `=ai`, inspect `git status --short --branch` first. Preserve only stable, reusable project rules, architecture decisions, naming/lifetime/concurrency conventions, validation workflows, and user preferences. Do not preserve temporary guesses, one-off output, unresolved debates, casual chat, or secrets. Write to the right Chinese source file, sync the English AI-facing file, and run `tools/sync-agents.ps1 -Check`; if nothing is certain enough, report candidates and why they were not preserved.
+For `=ai`:
+
+1. Inspect `git status --short --branch` first, and do not overwrite or revert existing user changes.
+2. Extract reusable intent from recent conversations: user trigger phrases, the correct entrypoint, forbidden actions, validation commands, and settled designs.
+3. Decide whether the material is worth preserving: it must reduce future misreads, shorten orientation, improve implementation speed, or lower hallucination risk. Do not preserve temporary guesses, one-off output, unresolved debates, casual chat, secrets, or overly narrow implementation details.
+4. Write to the right owner:
+   - Root repository rules: `AGENTS.zh-CN.md`.
+   - Long-lived domain context: `docs/agents/zh-CN/*.md`.
+   - Short task checklists, reproduction steps, and validation recipes: `docs/tasks/zh-CN/*.md`.
+   - Shared workflow, commands, intent recognition, and cross-agent behavior: `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
+5. Confirm evidence before writing: explicit user preferences, current code, verified commands, or settled designs. If evidence is weak, report candidates and why they were not preserved.
+6. After changing a Chinese source, sync the English AI-facing file and run `tools/sync-agents.ps1 -Check`.
 
 For `=gc`, `=cm`, and `=gh`, read `docs/agents/git.md` before acting.
 
@@ -41,6 +52,14 @@ For `=gc`, `=cm`, and `=gh`, read `docs/agents/git.md` before acting.
 - Push constants: `docs/agents/push-constants.md`
 
 If a context pack is missing, inspect source files directly and keep the answer explicit about assumptions.
+
+## AI Material and Skill Design
+
+- Keep Horizon routing thin: root `AGENTS` only holds entry rules, long-lived domain context lives in `docs/agents/zh-CN/`, short task checklists and validation recipes live in `docs/tasks/zh-CN/`, and skills carry only strongly triggered workflows and intent recognition.
+- Do not copy external repository AI frameworks wholesale. Before borrowing, compare repository structure, language source, sync mechanism, context size, and drift risk; discard frameworks that do not fit Horizon.
+- Avoid turning skills into long API manuals. Put stable domain detail in `docs/agents/zh-CN/*.md`; put concrete reproduction steps or recurring tasks in `docs/tasks/zh-CN/*.md`.
+- Add a new skill only when there is a clear trigger phrase, repeated workflow, or frequent-misread risk; every skill must have an accurate frontmatter `description`.
+- Useful lightweight structures to borrow include `Common Mistakes`, `Key Paths`, `Validation`, and `Do` / `Do not` sections because they reduce misreads and hallucination.
 
 ## Non-Negotiables
 

@@ -5,9 +5,10 @@
 全局中文源还有：
 
 - `AGENTS.zh-CN.md`
+- `docs/tasks/zh-CN/*.md`
 - `.agents/skills/horizon-workflow/SKILL.zh-CN.md`
 
-英文文件是 Agent 默认读取入口：
+英文文件是 Agent 默认读取入口或按需任务说明：
 
 - `docs/agents/index.md`
 - `docs/agents/build.md`
@@ -16,6 +17,7 @@
 - `docs/agents/vulkan.md`
 - `docs/agents/helicon.md`
 - `docs/agents/push-constants.md`
+- `docs/tasks/*.md`
 
 共享工作流 skill：
 

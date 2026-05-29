@@ -1,4 +1,5 @@
 # Formatting Task Notes
+<!-- TASK_DOCS_FORMATTING_ZH_CN_SHA256: 14537433ec35cd3202036b44d91f73fcc8350284e31552d1dc12cbf9dcaf2c39 -->
 
 ## Style Source
 

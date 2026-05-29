@@ -1,4 +1,5 @@
 # Hardware Buffer Validation Task Notes
+<!-- TASK_DOCS_HARDWARE_BUFFER_VALIDATION_ZH_CN_SHA256: 48c763f58ad91b916057fcf43b125134afa17b7611b187bde90e8ba090527ca7 -->
 
 ## Boundary
 

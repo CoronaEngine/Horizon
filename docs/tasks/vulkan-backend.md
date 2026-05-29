@@ -1,4 +1,5 @@
 # Vulkan Backend Task Notes
+<!-- TASK_DOCS_VULKAN_BACKEND_ZH_CN_SHA256: 29dde2111de0a73bf411c6214d9cb63952249dc484f428b0951acdf6f90ddd54 -->
 
 ## Directory Scope
 
