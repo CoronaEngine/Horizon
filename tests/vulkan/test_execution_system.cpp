@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -214,6 +215,38 @@ namespace
         expect(task.commands[0].op == Corona::Horizon::CommandOp::CopyBuffer, "First stream command should be copy.");
         expect(task.commands[1].op == Corona::Horizon::CommandOp::Dispatch, "Second stream command should be dispatch.");
         expect(task.commands[0].sequence == 0 && task.commands[1].sequence == 1, "Recorder should preserve command sequence numbers.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_ocarina_style_value_commands_feed_stream()
+    {
+        Corona::Horizon::HardwareExecutor executor;
+        Corona::Horizon::ResourceHandle src = test_resource(315);
+        Corona::Horizon::ResourceHandle dst = test_resource(316);
+        Corona::Horizon::ResourceHandle shader = test_resource(317);
+
+        Corona::Horizon::BufferCopyCommand copy_command =
+            Corona::Horizon::copy({ src }, { dst }, { 4, 8, 32 });
+        expect(copy_command.copy_region().size == 32, "Typed copy command should expose its payload.");
+
+        auto retained = std::make_shared<int>(9);
+
+        Corona::Horizon::CommandBatch batch;
+        batch << copy_command
+              << Corona::Horizon::dispatch({ shader }, { 3, 2, 1 })
+              << Corona::Horizon::keep_alive(retained)
+              << Corona::Horizon::keep_alive(std::string { "host payload" });
+
+        auto stream = executor.stream();
+        stream << batch;
+        Corona::Horizon::RecordedTask task = stream.close_for_tests();
+
+        expect(task.commands.size() == 4, "Typed value commands should erase into stream commands.");
+        expect(task.commands[0].op == Corona::Horizon::CommandOp::CopyBuffer, "First typed command should record copy IR.");
+        expect(task.commands[1].op == Corona::Horizon::CommandOp::Dispatch, "Second typed command should record dispatch IR.");
+        expect(task.commands[2].op == Corona::Horizon::CommandOp::KeepAlive, "Shared pointer keep_alive should record keep-alive IR.");
+        expect(task.commands[3].op == Corona::Horizon::CommandOp::KeepAlive, "Copyable host values should record keep-alive IR.");
 
         return Corona::Horizon::Tests::TestResult::pass();
     }
@@ -432,6 +465,11 @@ namespace Corona::Horizon::Tests
                 "execution.stream_batch_order",
                 "CommandBatch and HardwareStream preserve typed IR order before compile.",
                 test_stream_batch_and_close_for_tests_preserve_order,
+            },
+            {
+                "execution.ocarina_value_commands",
+                "Ocarina-style value command objects erase into CommandBatch and HardwareStream.",
+                test_ocarina_style_value_commands_feed_stream,
             },
             {
                 "execution.compiler_dag_order",

@@ -397,62 +397,6 @@ namespace Corona::Horizon
         }
     }
 
-    StreamCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices)
-    {
-        return StreamCommand([src, dst, region, devices](CommandRecorder& recorder) {
-            recorder.copy(src, dst, region, devices);
-        });
-    }
-
-    StreamCommand dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices)
-    {
-        return StreamCommand([shader, desc, devices](CommandRecorder& recorder) {
-            recorder.dispatch(shader, desc, devices);
-        });
-    }
-
-    StreamCommand begin_rendering(RenderingDesc desc, DeviceMask devices)
-    {
-        return StreamCommand([desc, devices](CommandRecorder& recorder) {
-            recorder.begin_rendering(desc, devices);
-        });
-    }
-
-    StreamCommand end_rendering(DeviceMask devices)
-    {
-        return StreamCommand([devices](CommandRecorder& recorder) {
-            recorder.end_rendering(devices);
-        });
-    }
-
-    StreamCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices)
-    {
-        return StreamCommand([index, vertex, desc, devices](CommandRecorder& recorder) {
-            recorder.draw_indexed(index, vertex, desc, devices);
-        });
-    }
-
-    StreamCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device, bool allow_cpu_bridge_fallback)
-    {
-        return StreamCommand([displayer, image, present_device, allow_cpu_bridge_fallback](CommandRecorder& recorder) {
-            recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
-        });
-    }
-
-    StreamCommand host_callback(std::function<void()> callback)
-    {
-        return StreamCommand([callback = std::move(callback)](CommandRecorder& recorder) mutable {
-            recorder.host_callback(std::move(callback));
-        });
-    }
-
-    StreamCommand keep_alive(std::shared_ptr<void> object)
-    {
-        return StreamCommand([object = std::move(object)](CommandRecorder& recorder) {
-            recorder.keep_alive(object);
-        });
-    }
-
     ExecutionPlan ExecutionCompiler::compile(const RecordedTask& task) const
     {
         ExecutionPlan plan;

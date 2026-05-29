@@ -361,21 +361,6 @@ namespace Corona::Horizon
         RequirementSet requirements_ {};
     };
 
-    [[nodiscard]] StreamCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
-    [[nodiscard]] StreamCommand dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
-    [[nodiscard]] StreamCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {});
-    [[nodiscard]] StreamCommand end_rendering(DeviceMask devices = {});
-    [[nodiscard]] StreamCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
-    [[nodiscard]] StreamCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
-    [[nodiscard]] StreamCommand host_callback(std::function<void()> callback);
-    [[nodiscard]] StreamCommand keep_alive(std::shared_ptr<void> object);
-
-    template <typename T>
-    [[nodiscard]] StreamCommand keep_alive(std::shared_ptr<T> object)
-    {
-        return keep_alive(std::static_pointer_cast<void>(std::move(object)));
-    }
-
     class ExecutionCompiler
     {
     public:
@@ -461,3 +446,5 @@ namespace Corona::Horizon
         uint64_t next_submit_serial_ { 0 };
     };
 }
+
+#include "hardware_wrapper_vulkan/hardware/command.h"
