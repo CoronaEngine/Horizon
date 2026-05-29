@@ -14,6 +14,13 @@
 
 namespace Corona::Horizon
 {
+    struct QueueFamilyInfo
+    {
+        uint32_t family_index { 0 };
+        uint32_t queue_count { 0 };
+        VkQueueFlags flags { 0 };
+    };
+
     class TrackedCommandBuffer
     {
     public:
@@ -58,9 +65,7 @@ namespace Corona::Horizon
         Queue& operator=(Queue&&) = delete;
 
         [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire();
-        [[nodiscard]] SubmissionToken submit(QueueSubmission& submission,
-                                             std::span<const SubmitWait> waits,
-                                             std::span<const SubmitSignal> signals);
+        [[nodiscard]] SubmissionToken submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals);
         void retire_completed();
 
         [[nodiscard]] uint64_t completed_value() const;
@@ -112,7 +117,7 @@ namespace Corona::Horizon
         [[nodiscard]] VkDevice logical_device() const noexcept { return logical_device_; }
         [[nodiscard]] const VkPhysicalDeviceProperties2& properties() const noexcept { return properties_; }
         [[nodiscard]] const DeviceFeaturesChain& enabled_features() const noexcept { return enabled_features_; }
-        [[nodiscard]] const std::vector<VkQueueFamilyProperties>& queue_families() const noexcept { return queue_families_; }
+        [[nodiscard]] const std::vector<QueueFamilyInfo>& queue_families() const noexcept { return queue_families_; }
 
         [[nodiscard]] Queue* queue_for(QueueCapability capability) noexcept;
         [[nodiscard]] const Queue* queue_for(QueueCapability capability) const noexcept;
@@ -128,10 +133,11 @@ namespace Corona::Horizon
         VkPhysicalDeviceProperties2 properties_ {};
         DeviceFeaturesChain enabled_features_ {};
 
-        std::vector<VkQueueFamilyProperties> queue_families_;
+        std::vector<QueueFamilyInfo> queue_families_;
         std::vector<std::unique_ptr<Queue>> queues_;
         std::vector<Queue*> graphics_queues_;
         std::vector<Queue*> compute_queues_;
         std::vector<Queue*> transfer_queues_;
+        //std::vector<Queue*> present_queues_;
     };
 }

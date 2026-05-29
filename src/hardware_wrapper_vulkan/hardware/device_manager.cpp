@@ -9,74 +9,78 @@
 
 namespace Corona::Horizon
 {
-    namespace
+    // ================================================================
+    // Helper
+    // ================================================================
+
+    [[nodiscard]] bool has_extension(const std::vector<VkExtensionProperties>& extensions, const char* name)
     {
-        void check_vk(VkResult result, const char* message)
-        {
-            if (result != VK_SUCCESS)
-            {
-                throw std::runtime_error(std::string(message) + " VkResult=" + std::to_string(static_cast<int>(result)));
-            }
-        }
-
-        [[nodiscard]] bool has_extension(const std::vector<VkExtensionProperties>& extensions, const char* name)
-        {
-            return std::any_of(extensions.begin(), extensions.end(), [name](const VkExtensionProperties& extension) {
-                return std::strcmp(extension.extensionName, name) == 0;
+        return std::any_of(extensions.begin(), extensions.end(), [name](const VkExtensionProperties& extension) {
+            return std::strcmp(extension.extensionName, name) == 0;
             });
+    }
+
+    [[nodiscard]] std::vector<const char*> filter_supported_device_extensions(VkPhysicalDevice physical_device, const std::set<const char*>& requested)
+    {
+        uint32_t extension_count = 0;
+        VkResult result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, nullptr);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkEnumerateDeviceExtensionProperties failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
-        [[nodiscard]] std::vector<const char*> filter_supported_device_extensions(VkPhysicalDevice physical_device,
-                                                                                  const std::set<const char*>& requested)
+        std::vector<VkExtensionProperties> available(extension_count);
+        result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, available.data());
+        if (result != VK_SUCCESS)
         {
-            uint32_t extension_count = 0;
-            check_vk(vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, nullptr),
-                     "vkEnumerateDeviceExtensionProperties failed.");
-
-            std::vector<VkExtensionProperties> available(extension_count);
-            check_vk(vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, available.data()),
-                     "vkEnumerateDeviceExtensionProperties failed.");
-
-            std::vector<const char*> enabled;
-            enabled.reserve(requested.size());
-            for (const char* extension : requested)
-            {
-                if (has_extension(available, extension))
-                {
-                    enabled.push_back(extension);
-                }
-            }
-
-            return enabled;
+            throw std::runtime_error("vkEnumerateDeviceExtensionProperties failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
-        [[nodiscard]] VkQueueFlags capability_flag(QueueCapability capability) noexcept
-        {
-            switch (capability)
-            {
-            case QueueCapability::Graphics:
-            case QueueCapability::Present:
-                return VK_QUEUE_GRAPHICS_BIT;
-            case QueueCapability::Compute:
-                return VK_QUEUE_COMPUTE_BIT;
-            case QueueCapability::Transfer:
-                return VK_QUEUE_TRANSFER_BIT;
-            }
+        std::vector<const char*> enabled;
+        enabled.reserve(requested.size());
 
-            return 0;
+        for (const char* extension : requested)
+        {
+            if (has_extension(available, extension))
+            {
+                enabled.push_back(extension);
+            }
         }
 
-        void add_queue_if_supported(std::vector<Queue*>& queues, Queue& queue, VkQueueFlags flags, QueueCapability capability)
+        return enabled;
+    }
+
+    [[nodiscard]] VkQueueFlags capability_flag(QueueCapability capability) noexcept
+    {
+        switch (capability)
         {
-            if ((flags & capability_flag(capability)) != 0)
-            {
-                queues.push_back(&queue);
-            }
+        case QueueCapability::Graphics:
+        //case QueueCapability::Present:
+            return VK_QUEUE_GRAPHICS_BIT;
+        case QueueCapability::Compute:
+            return VK_QUEUE_COMPUTE_BIT;
+        case QueueCapability::Transfer:
+            return VK_QUEUE_TRANSFER_BIT;
+        }
+
+        return 0;
+    }
+
+    void add_queue_if_supported(std::vector<Queue*>& queues, Queue& queue, VkQueueFlags flags, QueueCapability capability)
+    {
+        if ((flags & capability_flag(capability)) != 0)
+        {
+            queues.push_back(&queue);
         }
     }
 
-    TrackedCommandBuffer::TrackedCommandBuffer(VkDevice device, uint32_t queue_family_index)
-        : device_(device)
+
+
+    // ================================================================
+    // TrackedCommandBuffer
+    // ================================================================
+    
+    TrackedCommandBuffer::TrackedCommandBuffer(VkDevice device, uint32_t queue_family_index) : device_(device)
     {
         if (device_ == VK_NULL_HANDLE)
         {
@@ -88,7 +92,14 @@ namespace Corona::Horizon
         pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
         pool_info.queueFamilyIndex = queue_family_index;
 
-        check_vk(vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_), "vkCreateCommandPool failed.");
+        VkResult result = vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkCreateCommandPool failed. queue_family_index=" +
+                                     std::to_string(queue_family_index) +
+                                     ", VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
 
         VkCommandBufferAllocateInfo alloc_info {};
         alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -96,7 +107,17 @@ namespace Corona::Horizon
         alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc_info.commandBufferCount = 1;
 
-        check_vk(vkAllocateCommandBuffers(device_, &alloc_info, &command_buffer_), "vkAllocateCommandBuffers failed.");
+        VkResult result = vkAllocateCommandBuffers(device_, &alloc_info, &command_buffer_);
+        if (result != VK_SUCCESS)
+        {
+            vkDestroyCommandPool(device_, command_pool_, nullptr);
+            command_pool_ = VK_NULL_HANDLE;
+
+            throw std::runtime_error("vkAllocateCommandBuffers failed. queue_family_index=" +
+                                     std::to_string(queue_family_index) +
+                                     ", VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
     }
 
     TrackedCommandBuffer::~TrackedCommandBuffer()
@@ -117,7 +138,14 @@ namespace Corona::Horizon
 
         if (command_buffer_ != VK_NULL_HANDLE)
         {
-            check_vk(vkResetCommandBuffer(command_buffer_, 0), "vkResetCommandBuffer failed.");
+            VkResult result = vkResetCommandBuffer(command_buffer_, 0);
+            if (result != VK_SUCCESS)
+            {
+                throw std::runtime_error("vkResetCommandBuffer failed. recording_id=" +
+                                         std::to_string(recording_id_) +
+                                         ", VkResult=" +
+                                         std::to_string(static_cast<int>(result)));
+            }
         }
     }
 
@@ -134,18 +162,19 @@ namespace Corona::Horizon
         submission_id_ = 0;
     }
 
+
+
+    // ================================================================
+    // Queue
+    // ================================================================
+
     Queue::Queue(DeviceId device_id, QueueCapability capability)
     {
         id_.device = device_id;
         id_.capability = capability;
     }
 
-    Queue::Queue(VkDevice device,
-                 VkQueue queue,
-                 uint32_t queue_family_index,
-                 uint32_t queue_index,
-                 DeviceId device_id,
-                 QueueCapability capability)
+    Queue::Queue(VkDevice device, VkQueue queue, uint32_t queue_family_index, uint32_t queue_index, DeviceId device_id, QueueCapability capability)
         : device_(device), queue_(queue)
     {
         id_.device = device_id;
@@ -186,7 +215,11 @@ namespace Corona::Horizon
         create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         create_info.pNext = &type_info;
 
-        check_vk(vkCreateSemaphore(device_, &create_info, nullptr, &timeline_), "vkCreateSemaphore failed.");
+        VkResult result = vkCreateSemaphore(device_, &create_info, nullptr, &timeline_);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkCreateSemaphore failed. VkResult=" + std::to_string(static_cast<int>(result)));
+        }
     }
 
     std::shared_ptr<TrackedCommandBuffer> Queue::acquire()
@@ -209,9 +242,7 @@ namespace Corona::Horizon
         return command_buffer;
     }
 
-    SubmissionToken Queue::submit(QueueSubmission& submission,
-                                  std::span<const SubmitWait> waits,
-                                  std::span<const SubmitSignal> signals)
+    SubmissionToken Queue::submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals)
     {
         std::lock_guard lock(mutex_);
 
@@ -288,7 +319,16 @@ namespace Corona::Horizon
             submit_info.commandBufferInfoCount = 1;
             submit_info.pCommandBufferInfos = &command_info;
 
-            check_vk(vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE), "vkQueueSubmit2 failed.");
+            VkResult result = vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE);
+            if (result != VK_SUCCESS)
+            {
+                throw std::runtime_error("vkQueueSubmit2 failed. family_index=" +
+                                         std::to_string(id_.family_index) +
+                                         ", queue_index=" +
+                                         std::to_string(id_.queue_index) +
+                                         ", VkResult=" +
+                                         std::to_string(static_cast<int>(result)));
+            }
         }
 
         last_submitted_value_ = signal_value;
@@ -306,7 +346,17 @@ namespace Corona::Horizon
         }
 
         uint64_t value = 0;
-        check_vk(vkGetSemaphoreCounterValue(device_, timeline_, &value), "vkGetSemaphoreCounterValue failed.");
+        VkResult result = vkGetSemaphoreCounterValue(device_, timeline_, &value);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkGetSemaphoreCounterValue failed. family_index=" +
+                                     std::to_string(id_.family_index) +
+                                     ", queue_index=" +
+                                     std::to_string(id_.queue_index) +
+                                     ", VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
+
         last_completed_value_.store(value, std::memory_order_release);
         return value;
     }
@@ -370,6 +420,12 @@ namespace Corona::Horizon
         fail_next_submit_ = true;
     }
 
+
+
+    // ================================================================
+    // DeviceManager
+    // ================================================================
+
     DeviceManager::~DeviceManager()
     {
         shutdown();
@@ -415,7 +471,7 @@ namespace Corona::Horizon
         graphics_queues_.clear();
         compute_queues_.clear();
         transfer_queues_.clear();
-        present_queues_.clear();
+        //present_queues_.clear();
         queues_.clear();
 
         if (logical_device_ != VK_NULL_HANDLE)
@@ -433,8 +489,7 @@ namespace Corona::Horizon
 
     void DeviceManager::create_device(const HardwareCreateConfig& config)
     {
-        std::vector<const char*> enabled_extensions =
-            filter_supported_device_extensions(physical_device_, config.get_device_extensions(instance_, physical_device_));
+        std::vector<const char*> enabled_extensions = filter_supported_device_extensions(physical_device_, config.get_device_extensions(instance_, physical_device_));
 
         DeviceFeaturesChain supported_features;
         vkGetPhysicalDeviceFeatures2(physical_device_, supported_features.chain_head());
@@ -449,6 +504,7 @@ namespace Corona::Horizon
             VkDeviceQueueCreateInfo queue_info {};
             queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queue_info.queueFamilyIndex = queue_families_[index].family_index;
+            // TODO: 这里后面需要更改
             queue_info.queueCount = 1;
             queue_info.pQueuePriorities = &priorities[index];
             queue_infos.push_back(queue_info);
@@ -462,7 +518,12 @@ namespace Corona::Horizon
         create_info.ppEnabledExtensionNames = enabled_extensions.empty() ? nullptr : enabled_extensions.data();
         create_info.pNext = enabled_features_.chain_head();
 
-        check_vk(vkCreateDevice(physical_device_, &create_info, nullptr, &logical_device_), "vkCreateDevice failed.");
+        VkResult result = vkCreateDevice(physical_device_, &create_info, nullptr, &logical_device_);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkCreateDevice failed. VkResult=" + std::to_string(static_cast<int>(result)));
+        }
+
         volkLoadDevice(logical_device_);
     }
 
@@ -492,7 +553,7 @@ namespace Corona::Horizon
             add_queue_if_supported(graphics_queues_, queue_ref, family.flags, QueueCapability::Graphics);
             add_queue_if_supported(compute_queues_, queue_ref, family.flags, QueueCapability::Compute);
             add_queue_if_supported(transfer_queues_, queue_ref, family.flags, QueueCapability::Transfer);
-            add_queue_if_supported(present_queues_, queue_ref, family.flags, QueueCapability::Present);
+            //add_queue_if_supported(present_queues_, queue_ref, family.flags, QueueCapability::Present);
 
             queues_.push_back(std::move(owned_queue));
         }
@@ -516,8 +577,8 @@ namespace Corona::Horizon
         {
         case QueueCapability::Graphics:
             return graphics_queues_;
-        case QueueCapability::Present:
-            return present_queues_.empty() ? graphics_queues_ : present_queues_;
+        /*case QueueCapability::Present:
+            return present_queues_.empty() ? graphics_queues_ : present_queues_;*/
         case QueueCapability::Compute:
             return compute_queues_.empty() ? graphics_queues_ : compute_queues_;
         case QueueCapability::Transfer:
