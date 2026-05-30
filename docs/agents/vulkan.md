@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 6c03f0be9c68893c26768a2a6db835a1a75a3f30b3b28ad232c70640494256c0 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 2454af94221c83a481e0a615d0ce00de27e67c7b1ac576276ae97c2978a42076 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -29,6 +29,14 @@ Be careful with:
 - Queue family selection.
 - Image layouts and memory barriers.
 - Swapchain and display logic.
+
+## Concurrency and Compute Direction
+
+- Backend design assumes multithreaded callers. Public APIs, backend facades, resource pools, descriptor / pipeline caches, and execution entrypoints must not rely on a hidden "single caller thread" premise.
+- Mutable shared state needs a clear strategy: explicit locks, atomics, owner-thread serialization, or immutable snapshots. If a cross-thread access boundary is unclear, narrow ownership first and add tests instead of relying on call-order convention.
+- A single `VkQueue` may serialize `vkQueueSubmit2` inside `Queue`; higher-level record / compile / submit / retire work may progress concurrently, but scheduling policy stays in `HardwareExecutor` / compiler, not in `Queue`.
+- Compute / dispatch is a first-class execution path alongside graphics / present. Express `QueueCapability::Compute`, storage resource access, no-swapchain workflows, and future compute graphs through typed IR, device masks, queue capability, and explicit resource access.
+- As the project evolves toward a compute framework, public `include/` types should stay backend-neutral and not graphics-only; do not bake render pass, swapchain, or present assumptions into generic resource and execution abstractions.
 
 ## Device / Queue Boundaries
 

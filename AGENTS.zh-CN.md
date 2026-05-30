@@ -6,7 +6,7 @@
 
 ## 1. 核心原则
 
-Horizon 是一个 C++20 Vulkan 图形硬件抽象层，包含公共 API、Vulkan 后端、Helicon shader/codegen/reflection、示例和工具脚本。
+Horizon 是一个 C++20 Vulkan 图形硬件抽象层，包含公共 API、Vulkan 后端、Helicon shader/codegen/reflection、示例和工具脚本。项目要求面向多线程并发使用环境，并会逐步迭代为计算框架。
 
 AI 在本仓库工作时必须：
 
@@ -15,6 +15,8 @@ AI 在本仓库工作时必须：
 - 修改前查看 `git status --short --branch`。
 - 不要回滚用户已有改动。
 - 不要无关修改 `third-party/`、`modules/` 或历史镜像目录。
+- 新增公共 API、后端对象或共享状态时，默认考虑多线程并发调用；不要引入隐式单线程假设，必须明确所有权、同步边界或不可变快照策略。
+- 保留 compute / dispatch 为一等执行路径；不要把 graphics / present 特例沉入通用资源、执行或公共抽象。
 - 每次实质改动都给出验证命令和结果。
 
 ## 2. 路由表

@@ -1,5 +1,5 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: 4509e91a60ec147761b936dda40f02deb8178fa84293bd5f02ffbf627dffeaa3 -->
+<!-- AGENTS_ZH_CN_SHA256: e8a3aa93b191fc53ff86ab4261e0fde703bb23c87008320f3e1aded3aa401bf0 -->
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.
 > Other Chinese sources live in `docs/agents/zh-CN/`, `docs/tasks/zh-CN/`, and `.agents/skills/horizon-workflow/SKILL.zh-CN.md`.
@@ -7,7 +7,7 @@
 
 ## 1. Core Rules
 
-Horizon is a C++20 Vulkan graphics hardware abstraction layer with public APIs, a Vulkan backend, Helicon shader/codegen/reflection, examples, and tooling.
+Horizon is a C++20 Vulkan graphics hardware abstraction layer with public APIs, a Vulkan backend, Helicon shader/codegen/reflection, examples, and tooling. The project must support multithreaded concurrent use and is expected to evolve toward a compute framework.
 
 When working in this repository:
 
@@ -16,6 +16,8 @@ When working in this repository:
 - Check `git status --short --branch` before editing.
 - Never revert user changes unless explicitly asked.
 - Avoid unrelated edits under `third-party/`, `modules/`, or historical mirror trees.
+- When adding public APIs, backend objects, or shared state, assume multithreaded callers; do not introduce implicit single-thread assumptions, and make ownership, synchronization boundaries, or immutable snapshot strategy explicit.
+- Keep compute / dispatch as first-class execution paths; do not bury graphics / present special cases inside generic resource, execution, or public abstractions.
 - Report verification commands and results for meaningful changes.
 
 ## 2. Context Router

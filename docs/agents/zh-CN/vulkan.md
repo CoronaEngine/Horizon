@@ -29,6 +29,14 @@
 - Image layout 和 memory barrier。
 - Swapchain 和 display 逻辑。
 
+## 并发和计算方向
+
+- 后端设计默认面对多线程并发调用；公共 API、backend facade、resource pool、descriptor / pipeline cache 和 execution 入口都不要依赖“只有一个调用线程”的隐含前提。
+- 可变共享状态必须选择清晰策略：显式锁、atomic、owner-thread 串行化或不可变快照。跨线程访问边界不清楚时，先收窄所有权，再补测试，不要靠调用顺序约定维持正确性。
+- 单个 `VkQueue` 的 `vkQueueSubmit2` 可以在 `Queue` 内部串行化；更高层的 record / compile / submit / retire 可以并发推进，但调度策略仍属于 `HardwareExecutor` / compiler，而不是塞进 `Queue`。
+- compute / dispatch 是和 graphics / present 并列的一等执行路径。`QueueCapability::Compute`、storage 资源访问、无 swapchain 工作流和 future compute graph 都应通过 typed IR、device mask、queue capability 与显式资源访问表达。
+- 面向未来计算框架演进时，`include/` 中的公共类型继续保持后端无关、非 graphics-only；不要为了当前渲染路径方便，把 render pass、swapchain 或 present 假设写进通用资源和执行抽象。
+
 ## Device / Queue 边界
 
 - `HardwareContext::create_devices()` 负责枚举和过滤 physical device、创建每个 `DeviceContext`、接线 `DeviceManager` / `ResourceManager`，不要在这里累积 logical device、queue family 或 queue submit 策略。
