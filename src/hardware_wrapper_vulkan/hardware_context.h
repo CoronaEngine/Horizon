@@ -31,7 +31,7 @@ namespace Corona::Horizon
         HardwareContext& operator=(HardwareContext&&) = delete;
 
         [[nodiscard]] VkInstance instance();
-        [[nodiscard]] const std::vector<std::shared_ptr<DeviceContext>>& devices();
+        [[nodiscard]] std::vector<std::shared_ptr<DeviceContext>> devices();
         [[nodiscard]] std::shared_ptr<DeviceContext> main_device();
 
     private:
@@ -65,5 +65,5 @@ namespace Corona::Horizon
     ResourceManager& resource_manager();
     DeviceManager& device_manager();
     VkInstance vulkan_instance();
-    const std::vector<std::shared_ptr<HardwareContext::DeviceContext>>& all_devices();
+    std::vector<std::shared_ptr<HardwareContext::DeviceContext>> all_devices();
 }

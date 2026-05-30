@@ -129,7 +129,7 @@ namespace Corona::Horizon
         return hardware_context().instance();
     }
 
-    const std::vector<std::shared_ptr<HardwareContext::DeviceContext>>& all_devices()
+    std::vector<std::shared_ptr<HardwareContext::DeviceContext>> all_devices()
     {
         return hardware_context().devices();
     }
@@ -170,7 +170,7 @@ namespace Corona::Horizon
         return instance_;
     }
 
-    const std::vector<std::shared_ptr<HardwareContext::DeviceContext>>& HardwareContext::devices()
+    std::vector<std::shared_ptr<HardwareContext::DeviceContext>> HardwareContext::devices()
     {
         ensure_devices();
         return devices_;

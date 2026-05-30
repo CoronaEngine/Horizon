@@ -2,8 +2,12 @@
 
 #include "hardware_wrapper_vulkan/hardware_context.h"
 
+#include <array>
+#include <exception>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <volk.h>
@@ -181,7 +185,7 @@ namespace
         expect(!Corona::Horizon::HardwareContextTestAccess::are_devices_loaded(context),
                "instance() should not enumerate devices.");
 
-        const auto& devices = context.devices();
+        const auto devices = context.devices();
         expect(Corona::Horizon::HardwareContextTestAccess::are_devices_loaded(context),
                "devices() should mark devices as loaded.");
         expect(!devices.empty(), "devices() should expose at least one device.");
@@ -204,6 +208,78 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_local_context_concurrent_access()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        Corona::Horizon::HardwareContext context;
+
+        constexpr size_t thread_count = 8;
+        std::array<std::thread, thread_count> threads;
+        std::array<std::exception_ptr, thread_count> failures {};
+        std::array<VkInstance, thread_count> instances {};
+        std::array<std::shared_ptr<Corona::Horizon::HardwareContext::DeviceContext>, thread_count> main_devices {};
+        std::array<size_t, thread_count> device_counts {};
+
+        for (size_t index = 0; index < thread_count; ++index)
+        {
+            threads[index] = std::thread([&, index] {
+                try
+                {
+                    instances[index] = context.instance();
+                    const auto devices = context.devices();
+                    main_devices[index] = context.main_device();
+                    device_counts[index] = devices.size();
+
+                    expect(instances[index] != VK_NULL_HANDLE,
+                           "Concurrent instance() should return a valid Vulkan instance.");
+                    expect(!devices.empty(),
+                           "Concurrent devices() should return a non-empty device snapshot.");
+                    expect(main_devices[index] != nullptr,
+                           "Concurrent main_device() should return a selected device.");
+                    expect(devices.front() == main_devices[index],
+                           "Concurrent devices() snapshots should retain the selected main device.");
+                }
+                catch (...)
+                {
+                    failures[index] = std::current_exception();
+                }
+            });
+        }
+
+        for (std::thread& thread : threads)
+        {
+            thread.join();
+        }
+
+        for (const std::exception_ptr& failure : failures)
+        {
+            if (failure)
+            {
+                std::rethrow_exception(failure);
+            }
+        }
+
+        const VkInstance expected_instance = instances.front();
+        const auto expected_main_device = main_devices.front();
+        const size_t expected_device_count = device_counts.front();
+        for (size_t index = 1; index < thread_count; ++index)
+        {
+            expect(instances[index] == expected_instance,
+                   "Concurrent instance() calls should publish the same VkInstance.");
+            expect(main_devices[index] == expected_main_device,
+                   "Concurrent main_device() calls should publish the same shared device context.");
+            expect(device_counts[index] == expected_device_count,
+                   "Concurrent devices() calls should publish consistent device snapshots.");
+        }
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_global_context_entrypoints()
     {
         const auto environment = require_vulkan_environment();
@@ -220,7 +296,7 @@ namespace
         expect(Corona::Horizon::HardwareContextTestAccess::is_instance_loaded(context),
                "vulkan_instance() should mark the singleton instance as loaded.");
 
-        const auto& devices = Corona::Horizon::all_devices();
+        const auto devices = Corona::Horizon::all_devices();
         expect(Corona::Horizon::HardwareContextTestAccess::are_devices_loaded(context),
                "all_devices() should load singleton devices.");
         expect(!devices.empty(), "all_devices() should expose at least one device.");
@@ -251,6 +327,11 @@ namespace Corona::Horizon::Tests
                 "hardware_context.local_lifecycle",
                 "A local HardwareContext creates VkInstance on instance(), then loads devices and main_device() on demand.",
                 test_local_context_lifecycle,
+            },
+            {
+                "hardware_context.concurrent_access",
+                "Concurrent HardwareContext access publishes one VkInstance and shared device snapshots.",
+                test_local_context_concurrent_access,
             },
             {
                 "hardware_context.global_entrypoints",

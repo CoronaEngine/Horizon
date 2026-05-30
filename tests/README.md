@@ -1,5 +1,5 @@
 # Horizon Test Entry
-<!-- TESTS_README_ZH_CN_SHA256: 334de6d7006413ad47677b05f9f6d3891377573873a5446897c7d6230bfb2382 -->
+<!-- TESTS_README_ZH_CN_SHA256: b666e6617df53789255cfc93f3d9c68cc8f8839c13feb8c34a575a034b815414 -->
 
 Chinese source: `README.zh-CN.md`. Keep this English default entry in sync with that file.
 
@@ -76,10 +76,14 @@ Covered cases:
   - Every `DeviceContext` contains a valid `DeviceManager`.
   - `DeviceManager` keeps the selected `VkPhysicalDevice`, creates a `VkDevice`, records queue families, and exposes at least one queue usable for transfer work.
 
+- `hardware_context.concurrent_access`
+  - Multiple threads calling `instance()`, `devices()`, and `main_device()` on the same local `HardwareContext` must publish the same `VkInstance`.
+  - `devices()` returns a device snapshot that holds `shared_ptr` ownership, and all threads should observe a consistent device count and the same main device.
+
 - `hardware_context.global_entrypoints`
   - `hardware_context()` returns a stable global singleton.
   - `vulkan_instance()` creates and returns `VkInstance` through the same singleton.
-  - `all_devices()` loads the device list through the same singleton.
+  - `all_devices()` loads and returns a device snapshot through the same singleton.
   - `main_device_context()`, `resource_manager()`, and `device_manager()` come from the selected main device.
 
 This module does not test rendering, swapchains, real present, resource allocation policy, or command encoding. It protects Vulkan context and device initialization entrypoint lifetime boundaries.

@@ -75,10 +75,14 @@ Windows/MSVC 命令行验证时，优先先进入 Visual Studio Developer Comman
   - 每个 `DeviceContext` 应包含有效的 `DeviceManager`。
   - `DeviceManager` 应保留选中的 `VkPhysicalDevice`、创建 `VkDevice`、记录 queue family，并暴露至少一个可用于 transfer work 的 queue。
 
+- `hardware_context.concurrent_access`
+  - 多个线程同时调用同一个局部 `HardwareContext` 的 `instance()`、`devices()` 和 `main_device()` 时，应发布同一个 `VkInstance`。
+  - `devices()` 应返回持有 `shared_ptr` 的设备快照，所有线程都应看到一致的设备数量和同一个 main device。
+
 - `hardware_context.global_entrypoints`
   - `hardware_context()` 应返回稳定的全局 singleton。
   - `vulkan_instance()` 应通过同一个 singleton 创建并返回 `VkInstance`。
-  - `all_devices()` 应通过同一个 singleton 加载设备列表。
+  - `all_devices()` 应通过同一个 singleton 加载并返回设备列表快照。
   - `main_device_context()`、`resource_manager()`、`device_manager()` 应来自同一个被选中的 main device。
 
 这个模块不测试渲染、swapchain、真实 present、资源分配策略或命令编码；它只保护 Vulkan 上下文和设备初始化入口的生命周期边界。
