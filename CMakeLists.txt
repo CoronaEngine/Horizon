@@ -9,8 +9,10 @@ project(
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(HORIZON_BUILD_TOOLS "Build Horizon tool executables" OFF)
-option(HORIZON_BUILD_EXAMPLES "Build Horizon examples" OFF)
-option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" OFF)
+option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
+option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" ${PROJECT_IS_TOP_LEVEL})
+#option(HORIZON_BUILD_EXAMPLES "Build Horizon examples" OFF)
+#option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" OFF)
 option(HORIZON_BUILD_BENCHMARKS "Build Horizon performance benchmarks" OFF)
 option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module when CUDA is available" OFF)
 option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
