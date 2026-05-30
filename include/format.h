@@ -614,4 +614,4 @@ namespace Corona::Horizon
         Throw,
     };
 
-} // namespace Corona::Horizon
+}
