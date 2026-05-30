@@ -88,6 +88,12 @@ $syncPairs = @(
         Label = "hardware buffer validation task notes"
     },
     @{
+        Source = "docs/tasks/zh-CN/optional-build-targets.md"
+        Target = "docs/tasks/optional-build-targets.md"
+        Marker = "TASK_DOCS_OPTIONAL_BUILD_TARGETS_ZH_CN_SHA256"
+        Label = "optional build targets task notes"
+    },
+    @{
         Source = "docs/tasks/zh-CN/shader-reflection.md"
         Target = "docs/tasks/shader-reflection.md"
         Marker = "TASK_DOCS_SHADER_REFLECTION_ZH_CN_SHA256"

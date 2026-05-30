@@ -1,14 +1,14 @@
 # Horizon Build Context
-<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: b7ab2b48cdb2a0c92fe4195bbd09a2419d350a8d8634e85e88f1e546e610f504 -->
+<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 38bdd5bfc550cd3dece5e94bcb6af3ff820ec0b1b9e8db7c2294fca39c968e6a -->
 
 Load this file only for CMake, preset, build, CI, or validation-command work.
 
 ## Targets
 
 - `Horizon`: main static library.
-- `ShaderCompileScripts`: shader/codegen tool target under `tools/`.
-- `HorizonExamples`: examples target, enabled by `HORIZON_BUILD_EXAMPLES`.
-- `HorizonTests`: unified correctness test entry under `tests/`.
+- `ShaderCompileScripts`: shader/codegen tool target under `tools/`, enabled by `HORIZON_BUILD_TOOLS`.
+- `HorizonExamples`: examples target, enabled by `HORIZON_BUILD_EXAMPLES`; enabling examples also enables `tools/`.
+- `HorizonTests`: unified correctness test entry under `tests/`, enabled by `HORIZON_BUILD_TESTS`.
 
 ## Common Commands
 
@@ -33,6 +33,21 @@ cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```
 
+Default configure favors a clean build: only library-required targets are enabled. `tools/`, `examples/`, `tests/`, `benchmarks/`, `modules/ocarina`, third-party command line tools, and third-party install rules are off by default. Enable them explicitly when needed:
+
+```powershell
+cmake --preset ninja-msvc -DHORIZON_BUILD_TOOLS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_EXAMPLES=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_TESTS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_BENCHMARKS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_OCARINA=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_OCARINA=ON -DHORIZON_BUILD_OCARINA_TESTS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_DEPENDENCY_TOOLS=ON
+cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
+```
+
+For newcomer on-demand target selection, load `docs/tasks/optional-build-targets.md` first; it contains the short command table, clean-configuration reset, and validation steps.
+
 ## Rules
 
 - Root `CMakeLists.txt` owns project options, dependencies, and subdirectories.
@@ -54,9 +69,11 @@ ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 - Linux presets are `ninja-linux-gcc` and `ninja-linux-clang`; macOS uses `ninja-macos`.
 - Run `cmake --list-presets` when local preset availability is uncertain.
 - Common build directories are `build/ninja-msvc`, `build/ninja-clang`, `build/vs2022`, `build/ninja-linux-gcc`, `build/ninja-linux-clang`, and `build/ninja-macos`.
+- `HORIZON_BUILD_TOOLS` controls `tools/`; disabling it removes `ShaderCompileScripts`.
 - `HORIZON_BUILD_EXAMPLES` controls `examples/` and example dependencies; disabling it removes `HorizonExamples`.
 - `HORIZON_BUILD_TESTS` controls `tests/`; the test entry is `HorizonTests`, and `HorizonTests.exe --list` explains what it covers.
-- `modules/ocarina` participates only when CUDA is needed and `CUDA_PATH` is set.
+- `HORIZON_BUILD_OCARINA` controls `modules/ocarina`; it also requires `CUDA_PATH`. `HORIZON_BUILD_OCARINA_TESTS` separately controls ocarina's own tests.
+- `HORIZON_BUILD_DEPENDENCY_TOOLS` controls SPIRV-Tools-style third-party command line tools; `HORIZON_ENABLE_DEPENDENCY_INSTALL` controls third-party install rules.
 
 ## FetchContent Rules
 

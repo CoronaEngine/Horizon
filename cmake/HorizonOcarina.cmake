@@ -1,5 +1,9 @@
 include_guard(GLOBAL)
 
+if(NOT HORIZON_BUILD_OCARINA)
+    return()
+endif()
+
 if(NOT DEFINED ENV{CUDA_PATH})
     return()
 endif()

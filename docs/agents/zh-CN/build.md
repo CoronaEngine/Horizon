@@ -5,9 +5,9 @@
 ## 目标
 
 - `Horizon`：主静态库。
-- `ShaderCompileScripts`：`tools/` 下的 shader/codegen 工具目标。
-- `HorizonExamples`：示例目标，由 `HORIZON_BUILD_EXAMPLES` 控制。
-- `HorizonTests`：统一正确性测试入口，定义在 `tests/`。
+- `ShaderCompileScripts`：`tools/` 下的 shader/codegen 工具目标，由 `HORIZON_BUILD_TOOLS` 控制。
+- `HorizonExamples`：示例目标，由 `HORIZON_BUILD_EXAMPLES` 控制，启用示例时也会启用 `tools/`。
+- `HorizonTests`：统一正确性测试入口，定义在 `tests/`，由 `HORIZON_BUILD_TESTS` 控制。
 
 ## 常用命令
 
@@ -32,6 +32,21 @@ cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```
 
+默认 configure 偏向干净构建：只启用库本体需要的目标，`tools/`、`examples/`、`tests/`、`benchmarks/`、`modules/ocarina`、第三方命令行工具和第三方安装规则都默认关闭。按需开启时使用显式 cache 选项：
+
+```powershell
+cmake --preset ninja-msvc -DHORIZON_BUILD_TOOLS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_EXAMPLES=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_TESTS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_BENCHMARKS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_OCARINA=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_OCARINA=ON -DHORIZON_BUILD_OCARINA_TESTS=ON
+cmake --preset ninja-msvc -DHORIZON_BUILD_DEPENDENCY_TOOLS=ON
+cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
+```
+
+新人按需开启目标时，优先加载 `docs/tasks/optional-build-targets.md`；那里有短命令表、恢复干净配置和验证步骤。
+
 ## 规则
 
 - 根 `CMakeLists.txt` 负责项目选项、依赖和子目录。
@@ -53,9 +68,11 @@ ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 - Linux preset 为 `ninja-linux-gcc`、`ninja-linux-clang`；macOS preset 为 `ninja-macos`。
 - 不确定本机可用项时运行 `cmake --list-presets`。
 - 常见构建目录为 `build/ninja-msvc`、`build/ninja-clang`、`build/vs2022`、`build/ninja-linux-gcc`、`build/ninja-linux-clang`、`build/ninja-macos`。
+- `HORIZON_BUILD_TOOLS` 控制 `tools/`；关闭后不会生成 `ShaderCompileScripts`。
 - `HORIZON_BUILD_EXAMPLES` 控制 `examples/` 和示例依赖；关闭后不会生成 `HorizonExamples`。
 - `HORIZON_BUILD_TESTS` 控制 `tests/`；测试入口为 `HorizonTests`，可用 `HorizonTests.exe --list` 查看覆盖说明。
-- `modules/ocarina` 只在需要 CUDA 且 `CUDA_PATH` 已设置时参与。
+- `HORIZON_BUILD_OCARINA` 控制 `modules/ocarina`；还需要 `CUDA_PATH` 已设置。`HORIZON_BUILD_OCARINA_TESTS` 单独控制 ocarina 自测。
+- `HORIZON_BUILD_DEPENDENCY_TOOLS` 控制 SPIRV-Tools 等第三方命令行工具；`HORIZON_ENABLE_DEPENDENCY_INSTALL` 控制第三方安装规则。
 
 ## FetchContent 规则
 
