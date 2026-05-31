@@ -3,7 +3,7 @@ include_guard(GLOBAL)
 # ======================== Helicon 依赖 ========================
 horizon_fetchcontent_declare(
     pfr
-    GIT_REPOSITORY https://github.com/boostorg/pfr.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/pfr.git
     GIT_TAG develop
     EXCLUDE_FROM_ALL
 )
@@ -11,7 +11,7 @@ FetchContent_MakeAvailable(pfr)
 
 horizon_fetchcontent_declare(
     ktm
-    GIT_REPOSITORY https://github.com/YGXXD/ktm.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/ktm.git
     GIT_TAG main
     EXCLUDE_FROM_ALL
     SOURCE_SUBDIR cmake/horizon-skip-subdir
@@ -20,7 +20,7 @@ FetchContent_MakeAvailable(ktm)
 
 horizon_fetchcontent_declare(
     preprocessor
-    GIT_REPOSITORY https://github.com/boostorg/preprocessor.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/preprocessor.git
     GIT_TAG develop
     EXCLUDE_FROM_ALL
 )
@@ -28,7 +28,7 @@ FetchContent_MakeAvailable(preprocessor)
 
 horizon_fetchcontent_declare(
     glslang
-    GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/glslang.git
     GIT_TAG main
     EXCLUDE_FROM_ALL
 )
@@ -39,7 +39,7 @@ FetchContent_MakeAvailable(glslang)
 
 horizon_fetchcontent_declare(
     SPIRV-Cross
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/SPIRV-Cross.git
     GIT_TAG main
     EXCLUDE_FROM_ALL
 )
@@ -56,7 +56,7 @@ FetchContent_MakeAvailable(SPIRV-Cross)
 
 horizon_fetchcontent_declare(
     SPIRV-Headers
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/SPIRV-Headers.git
     GIT_TAG vulkan-sdk-1.4.341
     EXCLUDE_FROM_ALL
 )
@@ -64,7 +64,7 @@ FetchContent_MakeAvailable(SPIRV-Headers)
 
 horizon_fetchcontent_declare(
     SPIRV-Tools
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/SPIRV-Tools.git
     GIT_TAG vulkan-sdk-1.4.341
     EXCLUDE_FROM_ALL
 )
@@ -96,7 +96,7 @@ if(HORIZON_BUILD_OCARINA AND DEFINED ENV{CUDA_PATH})
 set(FMT_OS OFF CACHE BOOL "" FORCE)
 horizon_fetchcontent_declare(
     fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/fmt.git
     GIT_TAG main
     EXCLUDE_FROM_ALL
 )
@@ -142,7 +142,7 @@ set(VOLK_PULL_IN_VULKAN OFF) # We will provide Vulkan-Headers ourselves
 set(VOLK_INSTALL ${HORIZON_ENABLE_DEPENDENCY_INSTALL} CACHE BOOL "" FORCE)
 horizon_fetchcontent_declare(
     volk
-    GIT_REPOSITORY https://github.com/zeux/volk.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/volk.git
     GIT_TAG master
     EXCLUDE_FROM_ALL
 )
