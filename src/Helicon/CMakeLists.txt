@@ -16,7 +16,7 @@ target_include_directories(Helicon PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${ktm_SOURCE_DIR}"
     "${pfr_SOURCE_DIR}/include"
-    "${PROJECT_SOURCE_DIR}/third-party/slang/include"
+    "${HORIZON_SLANG_INCLUDE_DIR}"
     "${PROJECT_SOURCE_DIR}/third-party/dxc/inc"
 )
 
@@ -52,8 +52,8 @@ endif()
 message(STATUS "Target Arch: ${TARGET_ARCH}")
 
 target_link_directories(Helicon PUBLIC
-    ${PROJECT_SOURCE_DIR}/third-party/slang/lib
-    ${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}
+    "${HORIZON_SLANG_LIBRARY_DIR}"
+    "${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}"
 )
 
 target_link_libraries(Helicon PUBLIC
@@ -71,7 +71,7 @@ target_link_libraries(Helicon PUBLIC
     SPIRV-Tools-link
 )
 
-file(GLOB SLANG_DLLS "${PROJECT_SOURCE_DIR}/third-party/slang/bin/*.dll")
+file(GLOB SLANG_DLLS "${HORIZON_SLANG_BINARY_DIR}/*.dll")
 file(GLOB DXC_DLLS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")
 
 if(SLANG_DLLS AND DXC_DLLS)

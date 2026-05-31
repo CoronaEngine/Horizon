@@ -25,6 +25,7 @@
 - [cmake/HorizonCoreDependencies.cmake](../cmake/HorizonCoreDependencies.cmake)：核心依赖和第三方库拉取
 - [cmake/HorizonRuntimeDeps.cmake](../cmake/HorizonRuntimeDeps.cmake)：运行时依赖复制函数
 - [cmake/HorizonCorona.cmake](../cmake/HorizonCorona.cmake)：内嵌 `modules/corona` 的接入桥接
+- [cmake/HorizonSlang.cmake](../cmake/HorizonSlang.cmake)：Slang 二进制包下载、校验与解压
 - [cmake/HorizonExampleDependencies.cmake](../cmake/HorizonExampleDependencies.cmake)：示例依赖
 - [cmake/HorizonOcarina.cmake](../cmake/HorizonOcarina.cmake)：可选的 ocarina 模块接入
 - [cmake/HeliconShaderCompile.cmake](../cmake/HeliconShaderCompile.cmake)：shader 自动编译支持
@@ -33,6 +34,7 @@
 
 - `modules/corona` 已作为仓库内一等源码接入，不再由 Horizon 在 configure 时远程下载
 - Corona 的 examples/tests 由 [cmake/HorizonCorona.cmake](../cmake/HorizonCorona.cmake) 在顶层集成时显式关闭
+- Slang 使用固定版本的官方二进制包，在首次 configure 时下载到 `third-party/slang/download/` 并解压到 `third-party/slang/src/`
 - 其余第三方依赖仍可能通过 FetchContent 在首次 configure 时获取
 
 ## 3. 主要构建目标
@@ -166,6 +168,16 @@ option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when oc
 cmake --preset ninja-msvc -D HORIZON_BUILD_EXAMPLES=OFF
 ```
 
+### HORIZON_SLANG_ROOT
+
+默认情况下，根级 CMake 会在首次 configure 时下载 Slang `2026.10` Windows 64 位二进制包，并校验 SHA256。下载缓存位于 `third-party/slang/download/`，解压后的可用目录位于 `third-party/slang/src/`，这些生成内容不会进入 git。
+
+如果本地已经安装或缓存了兼容的 Slang 发行包，可以用 `HORIZON_SLANG_ROOT` 指向包含 `include/`、`lib/`、`bin/` 的目录：
+
+```powershell
+cmake --preset ninja-msvc -D HORIZON_SLANG_ROOT=D:/deps/slang-2026.10-windows-x86_64
+```
+
 ### ocarina 模块
 
 项目不会默认构建 modules/ocarina。只有在环境变量 CUDA_PATH 已定义时，才会执行 [cmake/HorizonOcarina.cmake](../cmake/HorizonOcarina.cmake) 中的逻辑。
@@ -216,7 +228,7 @@ cmake --preset ninja-msvc
 
 ### 第一次 configure 很慢
 
-原因通常是 CMake 正在获取剩余第三方依赖，这是预期行为。当前 `modules/corona` 已在仓库内，不属于这类远程拉取。
+原因通常是 CMake 正在获取剩余第三方依赖，这是预期行为。当前 `modules/corona` 已在仓库内，不属于这类远程拉取；Slang 二进制包也会在首次 configure 时下载并解压，后续会复用本地缓存。
 
 ### 找不到 Python
 
