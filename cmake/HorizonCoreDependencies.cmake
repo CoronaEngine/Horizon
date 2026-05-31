@@ -111,7 +111,7 @@ target_include_directories(fmt-header-only INTERFACE ${fmt_SOURCE_DIR}/include)
 set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
 horizon_fetchcontent_declare(
     spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/spdlog.git
     GIT_TAG v1.x
     EXCLUDE_FROM_ALL
 )
@@ -123,7 +123,7 @@ target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
 # ---- xxHash (header-only, 不使用其顶层 CMakeLists) ----
 horizon_fetchcontent_declare(
     xxhash
-    GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/xxHash.git
     GIT_TAG dev
     EXCLUDE_FROM_ALL
 )
@@ -150,7 +150,7 @@ FetchContent_MakeAvailable(volk)
 
 horizon_fetchcontent_declare(
     Vulkan-Headers
-    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/Vulkan-Headers.git
     GIT_TAG v1.4.341
     EXCLUDE_FROM_ALL
 )
@@ -159,7 +159,7 @@ FetchContent_MakeAvailable(Vulkan-Headers)
 
 horizon_fetchcontent_declare(
     VulkanMemoryAllocator
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/VulkanMemoryAllocator.git
     GIT_TAG master
     EXCLUDE_FROM_ALL
 )
