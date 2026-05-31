@@ -938,9 +938,10 @@ namespace EmbeddedShader
 	   //  slangGlobalSession->createSession(sessionDesc, session.writeRef());
     //
     //
+	   //  Slang::ComPtr irBlob{slang_createBlob(moduleData.data(),moduleData.size())};
 	   //  Slang::ComPtr<slang::IModule> slangModule;
 	   //  {
-	   //      session->loadModuleFromIRBlob("test-module","test-module",);
+	   //      session->loadModuleFromIRBlob("test-module","test-module",irBlob);
 	   //  }
     // }
 
