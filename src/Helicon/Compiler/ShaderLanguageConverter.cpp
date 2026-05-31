@@ -613,10 +613,11 @@ namespace EmbeddedShader
 	    {
 	        throw std::logic_error("No target language specified for Slang compilation.");
 	    }
-	    Slang::ComPtr<slang::IGlobalSession> globalSession;
-	    createGlobalSession(globalSession.writeRef());
 
-	    slang::SessionDesc sessionDesc = {};
+	    Slang::ComPtr<slang::IGlobalSession> globalSession = slangGlobalSession;
+	    initSlangGlobalSession();
+
+        slang::SessionDesc sessionDesc = {};
 
 	    std::vector<slang::TargetDesc> targets(targetLanguage.size() + targetBinary.size());
 
@@ -828,8 +829,123 @@ namespace EmbeddedShader
 		return reflectedResources;
 	}
 
-	std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
-	                                                                  Slang::ComPtr<slang::IComponentType>& program)
+    std::vector<uint8_t> ShaderLanguageConverter::slangModuleCompiler(std::string_view shaderCode, ShaderLanguage srcLanguage)
+    {
+	    initSlangGlobalSession();
+
+        slang::SessionDesc sessionDesc{};
+	    slang::TargetDesc targetDesc{};
+	    targetDesc.format = SLANG_CPP_SOURCE;
+	    sessionDesc.targets = &targetDesc;
+	    sessionDesc.targetCount = 1;
+
+	    std::string_view srcStr = "slang";
+	    switch (srcLanguage)
+	    {
+
+        case ShaderLanguage::GLSL:
+	        srcStr = "glsl";
+            break;
+        case ShaderLanguage::HLSL:
+	        srcStr = "hlsl";
+            break;
+        case ShaderLanguage::Slang:
+	        break;
+	    case ShaderLanguage::DXIL:
+	    case ShaderLanguage::DXBC:
+	    case ShaderLanguage::SpirV:
+	        throw std::runtime_error("Unsupported source language for Slang module compilation.");
+        }
+
+	    std::array options =
+        {
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::Language,
+                {slang::CompilerOptionValueKind::String, 0, 0, srcStr.data(), nullptr}
+            },
+        };
+
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+	    Slang::ComPtr<slang::ISession> session;
+        slangGlobalSession->createSession(sessionDesc, session.writeRef());
+        Slang::ComPtr<slang::IModule> slangModule;
+	    {
+            auto hashStr = std::to_string(std::hash<std::string_view>()(shaderCode));
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            slangModule = session->loadModuleFromSourceString(hashStr.c_str(), hashStr.c_str(),
+                                                              shaderCode.data(),
+                                                              diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (!slangModule)
+            {
+                throw std::runtime_error("Failed to load Slang module.");
+            }
+        }
+
+	    Slang::ComPtr<slang::IBlob> moduleBlob;
+	    {
+	        auto result = slangModule->serialize(moduleBlob.writeRef());
+	        if (result != SLANG_OK || !moduleBlob)
+	        {
+	            throw std::runtime_error("Failed to serialize Slang module.");
+	        }
+	    }
+	    std::vector result(static_cast<uint8_t const*>(moduleBlob->getBufferPointer()),static_cast<uint8_t const*>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
+	    return result;
+    }
+
+    // void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
+    // {
+	   //  initSlangGlobalSession();
+    //
+	   //  slang::SessionDesc sessionDesc{};
+	   //  slang::TargetDesc targetDesc{};
+	   //  targetDesc.format = SLANG_CPP_SOURCE;
+	   //  sessionDesc.targets = &targetDesc;
+	   //  sessionDesc.targetCount = 1;
+    //
+	   //  std::array options =
+    //     {
+	   //      slang::CompilerOptionEntry{
+	   //          slang::CompilerOptionName::BindlessSpaceIndex,
+    //             {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+	   //      },
+    //         slang::CompilerOptionEntry{
+    //             slang::CompilerOptionName::NoMangle,
+    //             {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+    //         },
+    //         slang::CompilerOptionEntry{
+    //             slang::CompilerOptionName::IncompleteLibrary,
+    //             {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+    //         },
+    //     };
+	   //  sessionDesc.compilerOptionEntries = options.data();
+	   //  sessionDesc.compilerOptionEntryCount = options.size();
+	   //  Slang::ComPtr<slang::ISession> session;
+	   //  slangGlobalSession->createSession(sessionDesc, session.writeRef());
+    //
+    //
+	   //  Slang::ComPtr<slang::IModule> slangModule;
+	   //  {
+	   //      session->loadModuleFromIRBlob("test-module","test-module",);
+	   //  }
+    // }
+
+    std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
+                                                                      Slang::ComPtr<slang::IComponentType>& program)
 	{
 		std::vector<uint32_t> result;
 		// 1. Create Global Session
@@ -1422,4 +1538,14 @@ namespace EmbeddedShader
 		bindInfo.semantic = var->getSemanticName() ? var->getSemanticName() : "";
 		resource.bindInfoPool.push_back(bindInfo);
 	}
+
+    void ShaderLanguageConverter::initSlangGlobalSession()
+    {
+	    if (!slangGlobalSession)
+	    {
+	        SlangGlobalSessionDesc desc{};
+	        desc.enableGLSL = true;
+	        createGlobalSession(&desc,slangGlobalSession.writeRef());
+	    }
+    }
 }
