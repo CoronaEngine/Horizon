@@ -70,7 +70,7 @@ namespace EmbeddedShader
             bool isEnabledReflection, bool isEnabledLink = true);
 
 	    static std::vector<uint8_t> slangModuleCompiler(std::string_view shaderCode,ShaderLanguage srcLanguage);
-	    //static void testSlangModule(const std::vector<uint8_t>& moduleData);
+	    static void testSlangModule(const std::vector<uint8_t>& moduleData);
 
 		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
 #ifdef WIN32

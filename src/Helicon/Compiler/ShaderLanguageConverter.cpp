@@ -907,43 +907,50 @@ namespace EmbeddedShader
 	    return result;
     }
 
-    // void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
-    // {
-	   //  initSlangGlobalSession();
-    //
-	   //  slang::SessionDesc sessionDesc{};
-	   //  slang::TargetDesc targetDesc{};
-	   //  targetDesc.format = SLANG_CPP_SOURCE;
-	   //  sessionDesc.targets = &targetDesc;
-	   //  sessionDesc.targetCount = 1;
-    //
-	   //  std::array options =
-    //     {
-	   //      slang::CompilerOptionEntry{
-	   //          slang::CompilerOptionName::BindlessSpaceIndex,
-    //             {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-	   //      },
-    //         slang::CompilerOptionEntry{
-    //             slang::CompilerOptionName::NoMangle,
-    //             {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-    //         },
-    //         slang::CompilerOptionEntry{
-    //             slang::CompilerOptionName::IncompleteLibrary,
-    //             {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-    //         },
-    //     };
-	   //  sessionDesc.compilerOptionEntries = options.data();
-	   //  sessionDesc.compilerOptionEntryCount = options.size();
-	   //  Slang::ComPtr<slang::ISession> session;
-	   //  slangGlobalSession->createSession(sessionDesc, session.writeRef());
-    //
-    //
-	   //  Slang::ComPtr irBlob{slang_createBlob(moduleData.data(),moduleData.size())};
-	   //  Slang::ComPtr<slang::IModule> slangModule;
-	   //  {
-	   //      session->loadModuleFromIRBlob("test-module","test-module",irBlob);
-	   //  }
-    // }
+    void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
+    {
+	    initSlangGlobalSession();
+
+	    slang::SessionDesc sessionDesc{};
+	    slang::TargetDesc targetDesc{};
+	    targetDesc.format = SLANG_CPP_SOURCE;
+	    sessionDesc.targets = &targetDesc;
+	    sessionDesc.targetCount = 1;
+
+	    std::array options =
+        {
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+	        },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+        };
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+	    Slang::ComPtr<slang::ISession> session;
+	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
+
+
+	    Slang::ComPtr irBlob{slang_createBlob(moduleData.data(),moduleData.size())};
+	    Slang::ComPtr<slang::IModule> slangModule;
+	    {
+	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        slangModule = session->loadModuleFromIRBlob("test-module","test-module",irBlob,diagnosticsBlob.writeRef());
+	        diagnoseIfNeeded(diagnosticsBlob);
+	        if (!slangModule)
+	        {
+	            throw std::runtime_error("Failed to load Slang module.");
+	        }
+	    }
+	    std::cout << "slang-module loaded successfully!" << std::endl;
+    }
 
     std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
                                                                       Slang::ComPtr<slang::IComponentType>& program)
