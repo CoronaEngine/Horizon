@@ -173,11 +173,6 @@ namespace EmbeddedShader
                     codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
                 if (option.compileHLSL)
                     codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-#ifdef WIN32
-                // codeDXIL = ShaderLanguageConverter::dxilCompiler(codeHLSL, inputStage);
-                // if (!bindless)
-                //     codeDXBC = ShaderLanguageConverter::dxbcCompiler(codeHLSL, inputStage);
-#endif
                 break;
             case ShaderLanguage::HLSL:
                 codeHLSL = shaderCode;
@@ -187,12 +182,6 @@ namespace EmbeddedShader
                     codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
                 if (option.compileHLSL)
                     codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-#ifdef WIN32
-                if (option.compileDXIL)
-                    codeDXIL = ShaderLanguageConverter::dxilCompiler(codeHLSL, inputStage);
-                if (option.compileDXBC)
-                    codeDXBC = ShaderLanguageConverter::dxbcCompiler(codeHLSL, inputStage);
-#endif
                 break;
                 //case ShaderLanguage::SpirV:
                 //    codeSpirV = shaderCode;
@@ -216,12 +205,6 @@ namespace EmbeddedShader
                 codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
             if (option.compileHLSL)
                 codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-#ifdef WIN32
-            if (option.compileDXIL)
-                codeDXIL = ShaderLanguageConverter::dxilCompiler(codeHLSL, inputStage);
-            if (option.compileDXBC)
-                codeDXBC = ShaderLanguageConverter::dxbcCompiler(codeHLSL, inputStage);
-#endif
         }
         
         //auto functionSignatures = ShaderLanguageConverter::spirvCrossGetFunctionSignatures(codeSpirV);

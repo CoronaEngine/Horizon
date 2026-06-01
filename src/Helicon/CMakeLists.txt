@@ -17,7 +17,6 @@ target_include_directories(Helicon PUBLIC
     "${ktm_SOURCE_DIR}"
     "${pfr_SOURCE_DIR}/include"
     "${HORIZON_SLANG_INCLUDE_DIR}"
-    "${PROJECT_SOURCE_DIR}/third-party/dxc/inc"
 )
 
 # --- 架构检测 ---
@@ -53,7 +52,6 @@ message(STATUS "Target Arch: ${TARGET_ARCH}")
 
 target_link_directories(Helicon PUBLIC
     "${HORIZON_SLANG_LIBRARY_DIR}"
-    "${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}"
 )
 
 target_link_libraries(Helicon PUBLIC
@@ -66,8 +64,6 @@ target_link_libraries(Helicon PUBLIC
     slang
     slang-rt
     gfx
-    dxcompiler
-    dxil
     SPIRV-Tools-link
 )
 
