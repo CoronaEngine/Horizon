@@ -63,6 +63,7 @@
 - 新指令系统的外部手感可以是 `stream << ... << commit()`，但内部路径固定为 `Stream` facade -> `CommandRecorder` typed IR -> `ExecutionCompiler`/submission plan -> Vulkan command encoder -> `Queue` submit；不要让 recorder 或 visitor 直接执行 Vulkan 命令。
 - 命令对象使用值语义或 small shared-state；不要返回可能悬挂的 raw `CommandRecordVulkan*`。需要延长生命周期时使用 `SubmissionKeepAlive`、`keep_alive(shared_ptr<T>)` 或 host callback。
 - 借鉴 ocarina 指令系统时，只移植 value command、batch 和 keep-alive 的书写手感，不移植 command pool、raw `Command*`、visitor 直接执行模式；Horizon 的 command object 应是薄值对象，暴露 payload，并能擦除为 `StreamCommand` 后记录到 `CommandRecorder` typed IR。
+- value command 的类型名采用“操作动词 + 对象”的顺序并对齐 IR 语义，例如 `CopyBufferCommand`、`CopyBufferToImageCommand`；不要使用 `BufferCopyCommand`、`BufferToImageCommand` 这类 noun-first 或省略操作动词的 facade 名称。
 - `CommandBatch` 可以接收这些 value command 并保持顺序；host 侧生命周期保留使用 `keep_alive(shared_ptr<T>)` 或 `keep_alive(copyable values...)`，最终都进入 `SubmissionKeepAlive`，不要让 command pool 承担 GPU 延迟销毁。
 - Command IR payload 应保持明确：copy、dispatch、begin/end rendering、draw indexed、present、host callback、keep alive；每条 IR 带 `DeviceMask`、`QueueCapability`、资源访问和 feature requirements。
 - Present 是 execution graph 的一类节点，不是 executor commit 后的附加步骤；swapchain `OUT_OF_DATE` / `SUBOPTIMAL` 等状态通过 `SubmitReceipt` / present result 返回，Vulkan submit 失败继续抛异常。

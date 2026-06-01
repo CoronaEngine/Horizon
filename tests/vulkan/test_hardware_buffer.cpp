@@ -1,6 +1,8 @@
 #include "test_registry.h"
 
+#include "hardware_wrapper_vulkan/hardware/command.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/resource_pool.h"
 #include "horizon_refac.h"
 
 #include <algorithm>
@@ -15,6 +17,15 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
 
 #include <volk.h>
 
@@ -66,6 +77,27 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    void close_external_handle(Corona::Horizon::ExternalMemoryHandle handle) noexcept
+    {
+#if defined(_WIN32) || defined(_WIN64)
+        if (handle.type == Corona::Horizon::ExternalMemoryHandleType::OpaqueWin32)
+        {
+            HANDLE native = static_cast<HANDLE>(handle.handle);
+            if (native != nullptr && native != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(native);
+            }
+        }
+#elif defined(__linux__)
+        if (handle.type == Corona::Horizon::ExternalMemoryHandleType::OpaqueFd && handle.fd >= 0)
+        {
+            close(handle.fd);
+        }
+#else
+        (void)handle;
+#endif
     }
 
     template <typename T, size_t Size>
@@ -404,6 +436,171 @@ namespace
 
         return Corona::Horizon::Tests::TestResult::pass();
     }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_copy_to_buffer_command_facade()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        const std::array<uint32_t, 4> src_data { 1, 2, 3, 4 };
+        const std::array<uint32_t, 4> dst_data { 0, 0, 0, 0 };
+        Corona::Horizon::HardwareBuffer src =
+            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_cmd.src", host_read_write_options());
+        Corona::Horizon::HardwareBuffer dst =
+            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(dst_data), "hardware_buffer.copy_cmd.dst", host_read_write_options());
+
+        const Corona::Horizon::BufferRange source_range { sizeof(uint32_t), sizeof(uint32_t) * 2 };
+        Corona::Horizon::CopyBufferCommand command = src.copy_to(dst, source_range, sizeof(uint32_t));
+
+        expect(command.copy_region().src_offset == sizeof(uint32_t), "HardwareBuffer::copy_to should preserve source offset.");
+        expect(command.copy_region().dst_offset == sizeof(uint32_t), "HardwareBuffer::copy_to should preserve destination offset.");
+        expect(command.copy_region().size == sizeof(uint32_t) * 2, "HardwareBuffer::copy_to should preserve copy byte size.");
+
+        auto src_token = Corona::Horizon::ResourceBridge::keep_alive(command.source().handle);
+        auto dst_token = Corona::Horizon::ResourceBridge::keep_alive(command.destination().handle);
+        expect(src_token && src_token->id() == src.get_buffer_id(), "CopyBufferCommand should retain the source HardwareBuffer handle.");
+        expect(dst_token && dst_token->id() == dst.get_buffer_id(), "CopyBufferCommand should retain the destination HardwareBuffer handle.");
+
+        Corona::Horizon::CommandRecorder recorder;
+        command.record(recorder);
+        Corona::Horizon::RecordedTask task = recorder.close();
+        expect(task.commands.size() == 1, "HardwareBuffer::copy_to command should record one IR command.");
+        expect(task.commands[0].op == Corona::Horizon::CommandOp::CopyBuffer, "HardwareBuffer::copy_to should record CopyBuffer IR.");
+        expect(task.commands[0].payload.copy.size == sizeof(uint32_t) * 2, "Recorded CopyBuffer IR should preserve byte size.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_copy_to_image_command_facade()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        const std::array<uint32_t, 4> src_data { 1, 2, 3, 4 };
+        Corona::Horizon::HardwareBuffer src =
+            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_image.src", host_read_write_options());
+
+        Corona::Horizon::HardwareImage image;
+        auto image_resource = Corona::Horizon::resource_pool().images.create([] {
+            return Corona::Horizon::ImageWrap {};
+        });
+        Corona::Horizon::ResourceBridge::set(
+            image,
+            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::NoopReleaser>>(
+                std::move(image_resource)));
+
+        Corona::Horizon::CopyBufferToImageCommand command = src.copy_to(image, sizeof(uint32_t), 2, 3);
+
+        expect(command.copy_region().buffer_offset == sizeof(uint32_t), "HardwareBuffer::copy_to(image) should preserve the buffer offset.");
+        expect(command.copy_region().image_layer == 2, "HardwareBuffer::copy_to(image) should preserve the image layer.");
+        expect(command.copy_region().image_mip == 3, "HardwareBuffer::copy_to(image) should preserve the image mip.");
+
+        auto src_token = Corona::Horizon::ResourceBridge::keep_alive(command.source().handle);
+        auto image_token = Corona::Horizon::ResourceBridge::keep_alive(command.destination().handle);
+        expect(src_token && src_token->id() == src.get_buffer_id(), "CopyBufferToImageCommand should retain the source HardwareBuffer handle.");
+        expect(image_token && image_token->id() == image.get_image_id(), "CopyBufferToImageCommand should retain the destination HardwareImage handle.");
+
+        Corona::Horizon::CommandRecorder recorder;
+        command.record(recorder);
+        Corona::Horizon::RecordedTask task = recorder.close();
+        expect(task.commands.size() == 1, "HardwareBuffer::copy_to(image) command should record one IR command.");
+        expect(task.commands[0].op == Corona::Horizon::CommandOp::CopyBufferToImage, "HardwareBuffer::copy_to(image) should record CopyBufferToImage IR.");
+        expect(task.commands[0].payload.buffer_image_copy.buffer_offset == sizeof(uint32_t), "Recorded CopyBufferToImage IR should preserve buffer offset.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_store_descriptor_is_stable()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        const std::array<uint32_t, 2> initial { 42, 43 };
+        Corona::Horizon::HardwareBuffer buffer =
+            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.descriptor", host_read_write_options());
+
+        try
+        {
+            const uint32_t first = buffer.store_descriptor();
+            const uint32_t second = buffer.store_descriptor();
+            expect(first == second, "HardwareBuffer::store_descriptor should return a stable descriptor index for the same buffer.");
+        }
+        catch (const std::runtime_error& error)
+        {
+            return Corona::Horizon::Tests::TestResult::skip(std::string("Storage buffer descriptors are unavailable on this Vulkan device: ") + error.what());
+        }
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_external_export_import_buffer()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        Corona::Horizon::HardwareBufferOptions options = host_read_write_options();
+        options.dedicated = true;
+        options.exportable = true;
+
+        const std::array<uint32_t, 4> initial { 7, 8, 9, 10 };
+        const Corona::Horizon::HardwareBufferDesc desc =
+            Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(initial.size(), "hardware_buffer.external", options);
+
+        Corona::Horizon::HardwareBuffer imported;
+        Corona::Horizon::ExternalMemoryHandle handle {};
+        Corona::Horizon::ExternalMemoryHandle second_handle {};
+        bool import_succeeded = false;
+
+        try
+        {
+            Corona::Horizon::HardwareBuffer source(desc, std::as_bytes(std::span<const uint32_t>(initial)));
+            handle = source.export_external();
+            expect(static_cast<bool>(handle), "HardwareBuffer::export_external should return a valid external memory handle.");
+            second_handle = source.export_external();
+            expect(static_cast<bool>(second_handle), "Repeated HardwareBuffer::export_external should return a valid external memory handle.");
+
+            imported = Corona::Horizon::HardwareBuffer::import_external(handle, desc);
+            import_succeeded = true;
+        }
+        catch (const std::exception& error)
+        {
+#if defined(__linux__)
+            if (!import_succeeded)
+            {
+                close_external_handle(handle);
+            }
+            close_external_handle(second_handle);
+#else
+            close_external_handle(handle);
+            close_external_handle(second_handle);
+#endif
+            return Corona::Horizon::Tests::TestResult::skip(std::string("External HardwareBuffer import/export is unavailable on this Vulkan device: ") + error.what());
+        }
+
+#if defined(_WIN32) || defined(_WIN64)
+        close_external_handle(handle);
+        close_external_handle(second_handle);
+#elif defined(__linux__)
+        close_external_handle(second_handle);
+#endif
+
+        expect(static_cast<bool>(imported), "HardwareBuffer::import_external should create a valid buffer wrapper.");
+        expect(imported.get_byte_size() == desc.byte_size(), "Imported HardwareBuffer should preserve the logical byte size.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
 }
 
 namespace Corona::Horizon::Tests
@@ -430,6 +627,26 @@ namespace Corona::Horizon::Tests
                 "hardware_buffer.concurrent_disjoint_io",
                 "Multiple threads can copy one HardwareBuffer handle and read/write disjoint host-mapped ranges safely.",
                 test_concurrent_disjoint_read_write,
+            },
+            {
+                "hardware_buffer.copy_to_buffer_command",
+                "HardwareBuffer::copy_to returns a value command that preserves ranges and records CopyBuffer IR.",
+                test_copy_to_buffer_command_facade,
+            },
+            {
+                "hardware_buffer.copy_to_image_command",
+                "HardwareBuffer::copy_to(image) returns a value command that preserves image copy metadata and records CopyBufferToImage IR.",
+                test_copy_to_image_command_facade,
+            },
+            {
+                "hardware_buffer.store_descriptor_stable",
+                "HardwareBuffer::store_descriptor writes a storage-buffer descriptor and returns a stable index.",
+                test_store_descriptor_is_stable,
+            },
+            {
+                "hardware_buffer.external_export_import",
+                "Exportable HardwareBuffer memory can round-trip through the ResourceManager external import/export facade when supported.",
+                test_external_export_import_buffer,
             },
         };
     }

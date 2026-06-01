@@ -303,6 +303,9 @@ namespace Corona::Horizon
 
         DeviceManager* device_manager { nullptr };
         ResourceManager* resource_manager { nullptr };
+#if defined(_WIN32) || defined(_WIN64)
+        void* exported_win32_handle { nullptr };
+#endif
 
         [[nodiscard]] bool valid() const noexcept
         {
@@ -340,6 +343,9 @@ namespace Corona::Horizon
             bindless_index = -1;
             device_manager = nullptr;
             resource_manager = nullptr;
+#if defined(_WIN32) || defined(_WIN64)
+            exported_win32_handle = nullptr;
+#endif
         }
     };
 

@@ -37,7 +37,7 @@ namespace Corona::Horizon
         }
     }
 
-    struct BufferCopyCommand
+    struct CopyBufferCommand
     {
         BufferRef src {};
         BufferRef dst {};
@@ -52,6 +52,34 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const
         {
             recorder.copy(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyBufferToImageCommand
+    {
+        BufferRef src {};
+        ImageRef dst {};
+        BufferImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] BufferRef source() const noexcept { return src; }
+        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
+        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_to_image(src, dst, region, devices);
         }
 
         [[nodiscard]] StreamCommand stream_command() const
@@ -255,7 +283,12 @@ namespace Corona::Horizon
         std::shared_ptr<void> object_ {};
     };
 
-    [[nodiscard]] inline BufferCopyCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {})
+    [[nodiscard]] inline CopyBufferCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {})
+    {
+        return { src, dst, region, devices };
+    }
+
+    [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
     {
         return { src, dst, region, devices };
     }

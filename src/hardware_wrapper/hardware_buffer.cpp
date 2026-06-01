@@ -1,9 +1,11 @@
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
+#include "hardware_wrapper_vulkan/hardware/command.h"
 #include "horizon_refac.h"
 #include "validation/hardware_validation.h"
 
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 
 namespace Corona::Horizon
 {
@@ -35,6 +37,11 @@ namespace Corona::Horizon
             return static_cast<uint64_t>(byte_count) <= total_size - byte_offset;
         }
 
+        [[nodiscard]] bool fits_range_u64(uint64_t total_size, uint64_t byte_offset, uint64_t byte_count) noexcept
+        {
+            return byte_offset <= total_size && byte_count <= total_size - byte_offset;
+        }
+
         [[nodiscard]] bool offset_to_size_t(uint64_t byte_offset, size_t& out) noexcept
         {
             if (byte_offset > std::numeric_limits<size_t>::max())
@@ -42,6 +49,16 @@ namespace Corona::Horizon
 
             out = static_cast<size_t>(byte_offset);
             return true;
+        }
+
+        [[nodiscard]] BufferRef buffer_ref(const HardwareBuffer& buffer)
+        {
+            return { static_cast<const ResourceHandle&>(buffer) };
+        }
+
+        [[nodiscard]] ImageRef image_ref(const HardwareImage& image)
+        {
+            return { static_cast<const ResourceHandle&>(image) };
         }
     }
 
@@ -166,5 +183,74 @@ namespace Corona::Horizon
 
         std::memcpy(output.data(), mapped + mapped_offset, output.size_bytes());
         return true;
+    }
+
+    CopyBufferCommand HardwareBuffer::copy_to(const HardwareBuffer& dst, BufferRange src, uint64_t dst_offset) const
+    {
+        if (!validate_buffer_copy(*this, dst, src, dst_offset))
+            return {};
+
+        if (!*this || !dst)
+            return {};
+
+        const uint64_t src_size = get_byte_size();
+        const BufferRange resolved = src.resolve(src_size);
+        if (resolved.byte_size == 0)
+            return {};
+
+        if (!fits_range_u64(src_size, resolved.byte_offset, resolved.byte_size))
+            return {};
+
+        if (!fits_range_u64(dst.get_byte_size(), dst_offset, resolved.byte_size))
+            return {};
+
+        return copy(buffer_ref(*this), buffer_ref(dst), { resolved.byte_offset, dst_offset, resolved.byte_size });
+    }
+
+    CopyBufferToImageCommand HardwareBuffer::copy_to(const HardwareImage& dst, uint64_t buffer_offset, uint32_t image_layer, uint32_t image_mip) const
+    {
+        if (!*this || !dst)
+            return {};
+
+        if (buffer_offset > get_byte_size())
+            return {};
+
+        return copy_to_image(buffer_ref(*this), image_ref(dst), { buffer_offset, image_layer, image_mip });
+    }
+
+    uint32_t HardwareBuffer::store_descriptor() const
+    {
+        const auto buffer = write_buffer(*this);
+        if (!buffer)
+            throw std::invalid_argument("HardwareBuffer::store_descriptor requires a valid buffer.");
+
+        return resource_manager().store_descriptor(*buffer);
+    }
+
+    HardwareBuffer HardwareBuffer::import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc)
+    {
+        if (!handle)
+            throw std::invalid_argument("HardwareBuffer::import_external requires a valid external memory handle.");
+
+        if (!validate_buffer_desc(desc))
+            return {};
+
+        HardwareBuffer buffer;
+        auto resource = resource_pool().buffers.create(
+            [&handle, &desc] {
+                return resource_manager().import_buffer(handle, desc);
+            });
+
+        ResourceBridge::set(buffer, make_token<ResourceStore<BufferWrap, BufferReleaser>>(std::move(resource)));
+        return buffer;
+    }
+
+    ExternalMemoryHandle HardwareBuffer::export_external() const
+    {
+        auto buffer = write_buffer(*this);
+        if (!buffer)
+            throw std::invalid_argument("HardwareBuffer::export_external requires a valid buffer.");
+
+        return resource_manager().export_buffer(*buffer);
     }
 }

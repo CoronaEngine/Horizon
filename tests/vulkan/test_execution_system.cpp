@@ -318,7 +318,7 @@ namespace
         Corona::Horizon::ResourceHandle dst = test_resource(316);
         Corona::Horizon::ResourceHandle shader = test_resource(317);
 
-        Corona::Horizon::BufferCopyCommand copy_command =
+        Corona::Horizon::CopyBufferCommand copy_command =
             Corona::Horizon::copy({ src }, { dst }, { 4, 8, 32 });
         expect(copy_command.copy_region().size == 32, "Typed copy command should expose its payload.");
 

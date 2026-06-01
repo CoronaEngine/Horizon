@@ -37,6 +37,7 @@ namespace Corona::Horizon
     enum class CommandOp
     {
         CopyBuffer,
+        CopyBufferToImage,
         Dispatch,
         BeginRendering,
         EndRendering,
@@ -104,6 +105,13 @@ namespace Corona::Horizon
         uint64_t size { 0 };
     };
 
+    struct BufferImageCopyRegion
+    {
+        uint64_t buffer_offset { 0 };
+        uint32_t image_layer { 0 };
+        uint32_t image_mip { 0 };
+    };
+
     struct DispatchDesc
     {
         uint32_t groups_x { 1 };
@@ -146,6 +154,7 @@ namespace Corona::Horizon
     struct CommandPayload
     {
         CopyRegion copy {};
+        BufferImageCopyRegion buffer_image_copy {};
         DispatchDesc dispatch {};
         RenderingDesc rendering {};
         DrawIndexedDesc draw_indexed {};
@@ -338,6 +347,7 @@ namespace Corona::Horizon
     {
     public:
         void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
+        void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
         void dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});

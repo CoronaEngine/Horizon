@@ -26,9 +26,11 @@ namespace Corona::Horizon
 
     struct HardwareValidationConfig;
     class HardwareBuffer;
-    struct HardwareImage;
+    class HardwareImage;
     struct HardwareImageLayerSelector;
     struct HardwarePushConstant;
+    struct CopyBufferCommand;
+    struct CopyBufferToImageCommand;
 
     //struct BottomLevelAccelerationStructure;
     //struct TopLevelAccelerationStructure;
@@ -285,11 +287,11 @@ namespace Corona::Horizon
                 options);
         }
 
-        //[[nodiscard]] BufferCopyCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
-        //[[nodiscard]] BufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
-        //[[nodiscard]] uint32_t store_descriptor() const;
-        //[[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
-        //[[nodiscard]] ExternalMemoryHandle export_external() const;
+        [[nodiscard]] CopyBufferCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
+        [[nodiscard]] CopyBufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
+        [[nodiscard]] uint32_t store_descriptor() const;
+        [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
+        [[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
         friend class HardwareImage;
@@ -300,6 +302,21 @@ namespace Corona::Horizon
     // ================================================================
     // HardwareImage
     // ================================================================
+
+    class HardwareImage : public ResourceHandle
+    {
+    public:
+        HardwareImage() = default;
+        HardwareImage(const HardwareImage& other) noexcept = default;
+        HardwareImage(HardwareImage&& other) noexcept = default;
+        ~HardwareImage() = default;
+
+        HardwareImage& operator=(const HardwareImage& other) noexcept = default;
+        HardwareImage& operator=(HardwareImage&& other) noexcept = default;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
+        [[nodiscard]] std::uintptr_t get_image_id() const noexcept { return resource_id(); }
+    };
 
     /*struct HardwareImageDesc
     {
@@ -494,7 +511,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] ImageCopyCommand copy_to(const HardwareImage &dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
         [[nodiscard]] ImageToBufferCommand copy_to(const HardwareBuffer &dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
-        [[nodiscard]] BufferToImageCommand copy_from(const HardwareBuffer &src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
+        [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer &src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
         static HardwareImage import_external(const ExternalMemoryHandle &handle, const HardwareImageDesc &desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;

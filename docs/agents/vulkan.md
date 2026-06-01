@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 48f28b1e0dd5ec3c24fb2471d4e29e01d3d597ab0aaa1e821d6488e91fd2a8a4 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 00496726f27f18c701849dc3326cf7ebac31d33bbb4bd13876d2f708bc45056f -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -64,6 +64,7 @@ Be careful with:
 - The public feel of the new command system may be `stream << ... << commit()`, but the internal path is fixed: `Stream` facade -> `CommandRecorder` typed IR -> `ExecutionCompiler` / submission plan -> Vulkan command encoder -> `Queue` submit; do not let recorder or visitor code execute Vulkan commands directly.
 - Command objects should be value types or small shared-state objects; do not return raw `CommandRecordVulkan*` values that can dangle. Use `SubmissionKeepAlive`, `keep_alive(shared_ptr<T>)`, or host callbacks when lifetime must extend through a submission.
 - When borrowing ocarina's command system, port the value-command, batch, and keep-alive ergonomics, not command pools, raw `Command*`, or visitor-driven direct execution; Horizon command objects should be thin value facades that expose payload and erase to `StreamCommand` before recording into `CommandRecorder` typed IR.
+- Name value command types as verb + object and align them with IR semantics, such as `CopyBufferCommand` and `CopyBufferToImageCommand`; avoid noun-first or verb-omitted facade names such as `BufferCopyCommand` or `BufferToImageCommand`.
 - `CommandBatch` may accept these value commands while preserving order; host-side lifetime retention should use `keep_alive(shared_ptr<T>)` or `keep_alive(copyable values...)`, both ending in `SubmissionKeepAlive`, and command pools must not own GPU delayed destruction.
 - Command IR payloads should stay explicit: copy, dispatch, begin/end rendering, draw indexed, present, host callback, and keep alive; each IR entry carries `DeviceMask`, `QueueCapability`, resource access, and feature requirements.
 - Present is an execution graph node, not an after-commit side step; swapchain `OUT_OF_DATE` / `SUBOPTIMAL` and related states return through `SubmitReceipt` / present results, while Vulkan submit failures still throw.
