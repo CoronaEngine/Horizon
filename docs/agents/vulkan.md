@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 2454af94221c83a481e0a615d0ce00de27e67c7b1ac576276ae97c2978a42076 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 48f28b1e0dd5ec3c24fb2471d4e29e01d3d597ab0aaa1e821d6488e91fd2a8a4 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -41,6 +41,7 @@ Be careful with:
 ## Device / Queue Boundaries
 
 - `HardwareContext::create_devices()` enumerates and filters physical devices, creates each `DeviceContext`, and wires `DeviceManager` / `ResourceManager`; do not accumulate logical-device, queue-family, or queue-submit policy there.
+- `ResourceManager` depends on an initialized `DeviceManager` for instance / physical device / logical device access; `HardwareContext` only wires initialization and must not own buffer allocation policy.
 - `DeviceManager` handles per-device initialization after receiving a `VkInstance` / `VkPhysicalDevice`: filter device extensions, enable the feature chain, create `VkDevice`, snapshot queue families, and create `Queue` wrappers.
 - `DeviceManager` does not own cross-GPU sync policy, resource allocation policy, execution DAG scheduling, or delayed-release queues; keep those in `HardwareExecutor`, resource manager / pool, compiler / encoder, and `Queue` timeline retirement respectively.
 - One Vulkan queue family can serve graphics, compute, and transfer. `QueueCapability` lookup tables may provide fallback, but do not treat a queue's primary capability as exclusive hardware capability.
@@ -54,6 +55,9 @@ Be careful with:
 - GPU deferred release should be handled by command/executor keep-alives that hold the control block until the fence/timeline completes; raw `uintptr_t` IDs are not ownership or GPU-lifetime guarantees.
 - Keep resource lifetime naming concise and consistent: public handle layer uses `IResourceRef`, `ResourceHandle`, and `ResourceBridge`; resource pool layer uses `ResourceStore<Resource, Releaser>`, `Slot`, `Read`, `Write`, `Handle`, and `Token`; release policies use `*Releaser`, not `*Destroy` or `DestroyPolicy`.
 - Do not use `using` aliases to hide core types in resource wrapper or resource pool refactors; this project prefers explicit types, especially for public resource handles and concurrent resource pool interfaces.
+- In the lower-case Vulkan backend, native buffer creation/destruction belongs to `ResourceManager`: it owns the per-device `VmaAllocator`, derives `VkBufferUsageFlags` / VMA allocation from `HardwareBufferDesc`, and pairs cleanup in `destroy_buffer(BufferWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `BufferReleaser` delegation.
+- The `HardwareBuffer` wrapper should only connect public objects to `ResourceBridge` / `ResourceStore` tokens; do not restore the old wrapper-local `bufferID`, `globalBufferStorages`, handwritten ref-counts, or extra locks.
+- Keep the buffer creation chain split in the NVRHI style: `src/hardware_wrapper/validation` handles descriptor/public API validation, `ResourceManager` handles Vulkan/VMA object creation and memory choice, and state tracking, descriptor binding validation, upload/write/copy paths stay in later usage stages.
 
 ## Executor / Queue Refactor
 
@@ -80,6 +84,7 @@ Be careful with:
 - Windows `HANDLE` should only appear in internal interfaces that truly expose it.
 - `VOLK_IMPLEMENTATION` must never appear in a header.
 - `VMA_IMPLEMENTATION` must appear in exactly one `.cpp`.
+- Internal headers on the VOLK/VMA dynamic-loading path must define `VK_NO_PROTOTYPES` before including `<volk.h>` / `<vk_mem_alloc.h>` when no-prototype mode is needed; do not let VMA auto-declare Vulkan prototypes.
 - Do not create a catch-all Vulkan utility header that centralizes every dependency.
 
 ## Public API Boundary

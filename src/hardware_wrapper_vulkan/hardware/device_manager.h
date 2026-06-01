@@ -114,6 +114,7 @@ namespace Corona::Horizon
         void shutdown() noexcept;
 
         [[nodiscard]] VkPhysicalDevice physical_device() const noexcept { return physical_device_; }
+        [[nodiscard]] VkInstance instance() const noexcept { return instance_; }
         [[nodiscard]] VkDevice logical_device() const noexcept { return logical_device_; }
         [[nodiscard]] const VkPhysicalDeviceProperties2& properties() const noexcept { return properties_; }
         [[nodiscard]] const DeviceFeaturesChain& enabled_features() const noexcept { return enabled_features_; }

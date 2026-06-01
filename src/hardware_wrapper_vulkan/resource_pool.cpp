@@ -1,11 +1,17 @@
 #include "resource_pool.h"
 
+#include "hardware_wrapper_vulkan/hardware/resource_manager.h"
+
 namespace Corona::Horizon
 {
     void destroy_buffer(BufferWrap& buffer) noexcept
     {
-        // ResourceManager does not expose BufferWrap destruction yet.
-        // Keep the pool release path stable and leave native cleanup wiring to that API.
+        if (buffer.resource_manager != nullptr)
+        {
+            buffer.resource_manager->destroy_buffer(buffer);
+            return;
+        }
+
         buffer.clear_handles();
     }
 

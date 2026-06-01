@@ -4,11 +4,15 @@
 #define NOMINMAX
 #endif
 
-#include "horizon_refac.h"
-#include "corona/kernel/utils/storage.h"
+#ifndef VK_NO_PROTOTYPES
+#define VK_NO_PROTOTYPES
+#endif
 
-#include <volk.h>
+#include "corona/kernel/utils/storage.h"
+#include "horizon_refac.h"
+
 #include <vk_mem_alloc.h>
+#include <volk.h>
 
 #include <atomic>
 #include <cstdint>

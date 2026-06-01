@@ -40,6 +40,7 @@
 ## Device / Queue 边界
 
 - `HardwareContext::create_devices()` 负责枚举和过滤 physical device、创建每个 `DeviceContext`、接线 `DeviceManager` / `ResourceManager`，不要在这里累积 logical device、queue family 或 queue submit 策略。
+- `ResourceManager` 依赖已经初始化的 `DeviceManager` 来取得 instance / physical device / logical device；`HardwareContext` 只负责接线初始化，不承载 buffer 分配策略。
 - `DeviceManager` 负责给定 `VkInstance` / `VkPhysicalDevice` 后的 per-device 初始化：筛选 device extension、启用 feature chain、创建 `VkDevice`、记录 queue family 快照，并创建 `Queue` 包装。
 - `DeviceManager` 不负责跨 GPU 同步策略、资源分配策略、execution DAG 调度或延迟释放队列；这些职责分别留给 `HardwareExecutor`、resource manager / pool、compiler / encoder 和 `Queue` 的 timeline retire。
 - 同一个 Vulkan queue family 可能同时服务 graphics、compute、transfer。`QueueCapability` 查找表可以做 fallback，但不要把某个 queue 的 primary capability 当作排他的硬件能力。
@@ -53,6 +54,9 @@
 - GPU 延迟释放应由提交后的 command/executor keep-alive 持有 control block，直到 fence/timeline 完成；不要把裸 `uintptr_t` ID 当作所有权或 GPU 生命周期保证。
 - 资源生命周期命名保持简洁统一：公共句柄层使用 `IResourceRef`、`ResourceHandle`、`ResourceBridge`；资源池层使用 `ResourceStore<Resource, Releaser>`、`Slot`、`Read`、`Write`、`Handle`、`Token`；释放策略使用 `*Releaser`，不要使用 `*Destroy` 或 `DestroyPolicy`。
 - 资源 wrapper / resource pool 重构中不要用 `using` 别名隐藏核心类型；项目偏好显式类型，尤其是公共资源句柄和并发资源池接口。
+- lower-case Vulkan 后端的 native buffer 创建/销毁由 `ResourceManager` 负责：持有 per-device `VmaAllocator`、根据 `HardwareBufferDesc` 选择 `VkBufferUsageFlags` / VMA allocation，并在 `destroy_buffer(BufferWrap&)` 成对释放；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `BufferReleaser` 委托。
+- `HardwareBuffer` wrapper 只把公共对象接到 `ResourceBridge` / `ResourceStore` token；不要恢复旧的 wrapper-local `bufferID`、`globalBufferStorages`、手写 ref-count 或额外锁。
+- buffer 创建链路保持 NVRHI 风格的职责拆分：`src/hardware_wrapper/validation` 做描述符/公共 API 校验，`ResourceManager` 做 Vulkan/VMA 对象创建和内存选择，状态跟踪、descriptor 绑定校验、upload/write/copy 路径留给后续使用阶段。
 
 ## Executor / Queue 重构
 
@@ -79,6 +83,7 @@
 - Windows `HANDLE` 只应出现在确实暴露该类型的内部接口里。
 - `VOLK_IMPLEMENTATION` 不能出现在 header。
 - `VMA_IMPLEMENTATION` 只能出现在一个 `.cpp`。
+- 同时接入 VOLK/VMA 动态加载路径的内部 header，如果需要无原型模式，必须在 include `<volk.h>` / `<vk_mem_alloc.h>` 之前定义 `VK_NO_PROTOTYPES`；不要让 VMA 自动声明 Vulkan 原型。
 - 不要创建集中所有 Vulkan 依赖的万能工具头。
 
 ## 公共 API 边界
