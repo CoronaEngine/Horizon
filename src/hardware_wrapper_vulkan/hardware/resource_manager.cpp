@@ -37,9 +37,17 @@ namespace Corona::Horizon
         [[nodiscard]] VkExternalMemoryHandleTypeFlags external_memory_handle_type() noexcept
         {
 #if defined(_WIN32) || defined(_WIN64)
+#if VMA_EXTERNAL_MEMORY_WIN32
             return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+            return 0;
+#endif
 #elif defined(__linux__)
+#if VMA_EXTERNAL_MEMORY
             return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+            return 0;
+#endif
 #else
             return 0;
 #endif
@@ -214,7 +222,7 @@ namespace Corona::Horizon
         create_info.device = device_manager_->logical_device();
         create_info.pVulkanFunctions = &vulkan_functions;
 
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && VMA_EXTERNAL_MEMORY_WIN32
         create_info.flags |= VMA_ALLOCATOR_CREATE_KHR_EXTERNAL_MEMORY_WIN32_BIT;
 #endif
 

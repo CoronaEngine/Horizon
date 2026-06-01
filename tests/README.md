@@ -1,5 +1,5 @@
 # Horizon Test Entry
-<!-- TESTS_README_ZH_CN_SHA256: b666e6617df53789255cfc93f3d9c68cc8f8839c13feb8c34a575a034b815414 -->
+<!-- TESTS_README_ZH_CN_SHA256: 58e6c349b7fbdc87e72aae756000b6bde9ad2ad833aaf6e7647b259f0b9238e2 -->
 
 Chinese source: `README.zh-CN.md`. Keep this English default entry in sync with that file.
 
@@ -87,6 +87,38 @@ Covered cases:
   - `main_device_context()`, `resource_manager()`, and `device_manager()` come from the selected main device.
 
 This module does not test rendering, swapchains, real present, resource allocation policy, or command encoding. It protects Vulkan context and device initialization entrypoint lifetime boundaries.
+
+### `tests/vulkan/test_hardware_buffer.cpp`
+
+Validates lower-case Vulkan `HardwareBuffer` creation, host-mapped read/write, copy / move handle lifetime, range validation, and concurrent access boundaries.
+
+This file uses the same Vulkan environment precheck as `test_hardware_context.cpp`. When the environment is unavailable, cases return `TestResult::skip(...)`. The tests create real Vulkan buffers and VMA allocations, so they require an available Vulkan 1.4 device.
+
+Covered cases:
+
+- `hardware_buffer.create_upload_read_write`
+  - `HardwareBuffer::storage()` creates a valid buffer.
+  - Element size, element count, and byte size preserve descriptor semantics.
+  - A `CpuAccessMode::ReadWrite` buffer exposes host mapped memory.
+  - Initial upload data can be read back.
+  - Typed element range writes and single element writes update only the requested range.
+
+- `hardware_buffer.copy_move_lifetime`
+  - Copy construction, move construction, and copy assignment share one resource id.
+  - Resetting the original wrapper keeps the underlying resource alive through copy / survivor wrappers.
+  - After the last `HardwareBuffer` wrapper resets, the `ResourceBridge` token is released.
+
+- `hardware_buffer.range_and_mapping`
+  - In validation `Throw` mode, out-of-range host writes throw `std::invalid_argument`.
+  - With validation disabled, out-of-range host reads / writes return `false` instead of writing past bounds.
+  - A `CpuAccessMode::None` buffer can create a real Vulkan buffer but does not expose mapped host memory.
+
+- `hardware_buffer.concurrent_disjoint_io`
+  - Multiple threads can copy one `HardwareBuffer` wrapper and share one resource id.
+  - Multiple threads can write non-overlapping host-mapped ranges and read back their own ranges.
+  - After all threads complete, reading from the original wrapper returns the expected full data.
+
+This module does not test GPU command-buffer copy, staging upload, descriptor binding, pipeline use, external memory import/export, or real GPU barriers. Those belong in later encoder / descriptor / execution smoke tests.
 
 ### `tests/vulkan/test_execution_system.cpp`
 

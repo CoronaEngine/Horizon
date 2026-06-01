@@ -25,7 +25,7 @@ namespace Corona::Horizon
     // ================================================================
 
     struct HardwareValidationConfig;
-    struct HardwareBuffer;
+    class HardwareBuffer;
     struct HardwareImage;
     struct HardwareImageLayerSelector;
     struct HardwarePushConstant;

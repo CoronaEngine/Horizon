@@ -9,6 +9,10 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.c"
     #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
 
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/hardware_buffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/validation/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/validation/*.h"
+
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.c"

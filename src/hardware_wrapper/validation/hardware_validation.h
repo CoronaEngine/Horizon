@@ -11,7 +11,7 @@ namespace Corona::Horizon
     // Keep pure descriptor math and hard safety invariants in the owning public types.
     // Validation compile/runtime switches gate optional diagnostics only.
 
-    struct HardwareBuffer;
+    class HardwareBuffer;
     struct HardwareBufferDesc;
     struct BufferRange;
 

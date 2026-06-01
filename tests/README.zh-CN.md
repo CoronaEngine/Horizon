@@ -87,6 +87,38 @@ Windows/MSVC 命令行验证时，优先先进入 Visual Studio Developer Comman
 
 这个模块不测试渲染、swapchain、真实 present、资源分配策略或命令编码；它只保护 Vulkan 上下文和设备初始化入口的生命周期边界。
 
+### `tests/vulkan/test_hardware_buffer.cpp`
+
+验证 lower-case Vulkan backend 的 `HardwareBuffer` 创建、host-mapped 读写、copy / move 句柄生命周期、范围校验和并发访问边界。
+
+这个文件使用和 `test_hardware_context.cpp` 相同的 Vulkan 环境预检；环境不满足时返回 `TestResult::skip(...)`。测试会创建真实 Vulkan buffer 和 VMA allocation，因此需要可用的 Vulkan 1.4 设备。
+
+覆盖用例：
+
+- `hardware_buffer.create_upload_read_write`
+  - `HardwareBuffer::storage()` 应创建有效 buffer。
+  - element size、element count 和 byte size 应保留描述符语义。
+  - `CpuAccessMode::ReadWrite` buffer 应暴露 host mapped memory。
+  - 初始 upload data 应能 read back。
+  - typed element range write 和 single element write 应只修改指定区间。
+
+- `hardware_buffer.copy_move_lifetime`
+  - copy 构造、move 构造和 copy 赋值应共享同一个 resource id。
+  - reset 原始 wrapper 后，copy / survivor wrapper 应继续保持底层资源有效。
+  - 最后一个 `HardwareBuffer` wrapper reset 后，`ResourceBridge` token 应释放。
+
+- `hardware_buffer.range_and_mapping`
+  - validation `Throw` 模式下，越界 host write 应抛出 `std::invalid_argument`。
+  - validation 关闭时，越界 host read / write 应返回 `false`，不写越界内存。
+  - `CpuAccessMode::None` buffer 应能创建真实 Vulkan buffer，但不暴露 mapped host memory。
+
+- `hardware_buffer.concurrent_disjoint_io`
+  - 多个线程可以复制同一个 `HardwareBuffer` wrapper，并共享同一个 resource id。
+  - 多个线程写入互不重叠的 host-mapped 区间后，每个线程能读回自己的区间。
+  - 全部线程完成后，从原始 wrapper 读回的完整数据应匹配预期。
+
+这个模块不测试 GPU command buffer copy、staging upload、descriptor 绑定、pipeline 使用、external memory import/export 或真实 GPU barrier；这些应放在后续 encoder / descriptor / execution smoke 测试中。
+
 ### `tests/vulkan/test_execution_system.cpp`
 
 验证 lower-case Vulkan execution stack 的无 GPU 路径：fake queue、timeline retirement、keep-alive 生命周期、命令 IR 记录、编译计划、stream facade、present receipt 和并发边界。

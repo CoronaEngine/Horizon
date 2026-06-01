@@ -39,5 +39,6 @@ namespace Corona::Horizon::Tests
     };
 
     [[nodiscard]] std::vector<TestCase> hardware_context_tests();
+    [[nodiscard]] std::vector<TestCase> hardware_buffer_tests();
     [[nodiscard]] std::vector<TestCase> execution_system_tests();
 }

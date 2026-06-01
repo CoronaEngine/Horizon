@@ -20,6 +20,7 @@ namespace
     {
         std::vector<Corona::Horizon::Tests::TestCase> tests;
         append_tests(tests, Corona::Horizon::Tests::hardware_context_tests());
+        append_tests(tests, Corona::Horizon::Tests::hardware_buffer_tests());
         append_tests(tests, Corona::Horizon::Tests::execution_system_tests());
         return tests;
     }
