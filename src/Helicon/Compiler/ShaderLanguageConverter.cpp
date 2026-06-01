@@ -607,10 +607,14 @@ namespace EmbeddedShader
 	        throw std::logic_error("No target language specified for Slang compilation.");
 	    }
 
-	    Slang::ComPtr<slang::IGlobalSession> globalSession = slangGlobalSession;
-	    initSlangGlobalSession();
+		initSlangGlobalSession();
+		Slang::ComPtr<slang::IGlobalSession> globalSession = slangGlobalSession;
+		if (!globalSession)
+		{
+			throw std::runtime_error("Failed to create Slang global session.");
+		}
 
-        slang::SessionDesc sessionDesc = {};
+		slang::SessionDesc sessionDesc = {};
 
 	    std::vector<slang::TargetDesc> targets(targetLanguage.size() + targetBinary.size());
 
