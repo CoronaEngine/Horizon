@@ -30,6 +30,23 @@ namespace Corona::Horizon
             return element_size == sizeof(uint16_t) || element_size == sizeof(uint32_t);
         }
 
+        [[nodiscard]] bool is_supported_sample_count(uint32_t sample_count) noexcept
+        {
+            switch (sample_count)
+            {
+            case 1:
+            case 2:
+            case 4:
+            case 8:
+            case 16:
+            case 32:
+            case 64:
+                return true;
+            default:
+                return false;
+            }
+        }
+
         [[nodiscard]] HardwareValidationConfig read_validation_config()
         {
             std::lock_guard lock(validation_config_mutex);
@@ -193,5 +210,49 @@ namespace Corona::Horizon
             return validation_error("HardwareBuffer read requires host-mapped memory.");
 
         return validate_range(buffer.get_byte_size(), offset, output.size_bytes(), "HardwareBuffer read range exceeds buffer size.");
+    }
+
+    bool validate_image_desc(const HardwareImageDesc& desc, std::span<const std::byte> upload_data)
+    {
+        if (desc.format == Format::UNKNOWN || desc.format == Format::COUNT)
+            return validation_error("HardwareImageDesc format must be a concrete image format.", true);
+
+        if (desc.extent.width == 0 || desc.extent.height == 0 || desc.extent.depth == 0)
+            return validation_error("HardwareImageDesc extent dimensions must be greater than zero.", true);
+
+        if (desc.array_layers == 0)
+            return validation_error("HardwareImageDesc array_layers must be greater than zero.", true);
+
+        if (desc.mip_levels == 0)
+            return validation_error("HardwareImageDesc mip_levels must be greater than zero.", true);
+
+        if (!is_supported_sample_count(desc.sample_count))
+            return validation_error("HardwareImageDesc sample_count must be 1, 2, 4, 8, 16, 32, or 64.", true);
+
+        if (desc.dimension == ImageDimension::Image3D && desc.array_layers != 1)
+            return validation_error("3D HardwareImage resources must use one array layer.", true);
+
+        if ((desc.dimension == ImageDimension::Cube || desc.dimension == ImageDimension::CubeArray) && desc.array_layers % 6 != 0)
+            return validation_error("Cube HardwareImage resources require an array layer count divisible by 6.", true);
+
+        if (desc.sample_count > 1 && desc.mip_levels > 1)
+            return validation_error("Multisampled HardwareImage resources must use one mip level.", true);
+
+        if (!optional_validation_enabled())
+            return true;
+
+        if (desc.usage == ImageUsageFlags::None)
+            return validation_error("HardwareImageDesc usage must not be None.");
+
+        if (desc.cpu_access != CpuAccessMode::None && desc.sample_count > 1)
+            return validation_error("Host-visible HardwareImage resources must not be multisampled.");
+
+        if (desc.exportable && !desc.dedicated)
+            validation_warning("Exportable HardwareImage will force dedicated allocation.");
+
+        if (!upload_data.empty() && desc.cpu_access == CpuAccessMode::None)
+            validation_warning("HardwareImage upload data only copies immediately for host-visible images until GPU upload commands are encoded.");
+
+        return true;
     }
 }

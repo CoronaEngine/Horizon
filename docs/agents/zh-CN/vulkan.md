@@ -57,6 +57,8 @@
 - lower-case Vulkan 后端的 native buffer 创建/销毁由 `ResourceManager` 负责：持有 per-device `VmaAllocator`、根据 `HardwareBufferDesc` 选择 `VkBufferUsageFlags` / VMA allocation，并在 `destroy_buffer(BufferWrap&)` 成对释放；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `BufferReleaser` 委托。
 - `HardwareBuffer` wrapper 只把公共对象接到 `ResourceBridge` / `ResourceStore` token；不要恢复旧的 wrapper-local `bufferID`、`globalBufferStorages`、手写 ref-count 或额外锁。
 - buffer 创建链路保持 NVRHI 风格的职责拆分：`src/hardware_wrapper/validation` 做描述符/公共 API 校验，`ResourceManager` 做 Vulkan/VMA 对象创建和内存选择，状态跟踪、descriptor 绑定校验、upload/write/copy 路径留给后续使用阶段。
+- lower-case Vulkan 后端的 native image 创建/销毁同样由 `ResourceManager` 负责：管理 VMA allocation、推导 usage / format / aspect / image view、处理 external import/export 和 sampled descriptor，并在 `destroy_image(ImageWrap&)` 中成对释放 `VkImageView` 与 VMA allocation；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `ImageReleaser` 委托。
+- `HardwareImage` wrapper 只把公共对象和 layer/mip/subresource 视图接到 `ResourceBridge` / `ResourceStore` token；子资源视图共享同一个 token。host linear image I/O 中省略 `row_pitch` / `slice_pitch` 表示调用方数据紧密排列，实际拷贝必须通过 `vkGetImageSubresourceLayout` 的 rowPitch / depthPitch 分行分层处理，不要对整段 allocation 做裸 `memcpy`。
 
 ## Executor / Queue 重构
 

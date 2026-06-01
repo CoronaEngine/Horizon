@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 00496726f27f18c701849dc3326cf7ebac31d33bbb4bd13876d2f708bc45056f -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 64166447e7e5d5df67686b7e9ec61f7de4e05fbe1be5da993843a2e213fd2027 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -58,6 +58,8 @@ Be careful with:
 - In the lower-case Vulkan backend, native buffer creation/destruction belongs to `ResourceManager`: it owns the per-device `VmaAllocator`, derives `VkBufferUsageFlags` / VMA allocation from `HardwareBufferDesc`, and pairs cleanup in `destroy_buffer(BufferWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `BufferReleaser` delegation.
 - The `HardwareBuffer` wrapper should only connect public objects to `ResourceBridge` / `ResourceStore` tokens; do not restore the old wrapper-local `bufferID`, `globalBufferStorages`, handwritten ref-counts, or extra locks.
 - Keep the buffer creation chain split in the NVRHI style: `src/hardware_wrapper/validation` handles descriptor/public API validation, `ResourceManager` handles Vulkan/VMA object creation and memory choice, and state tracking, descriptor binding validation, upload/write/copy paths stay in later usage stages.
+- In the lower-case Vulkan backend, native image creation/destruction also belongs to `ResourceManager`: it owns VMA allocation, derives usage / format / aspect / image view state, handles external import/export and sampled descriptors, and pairs `VkImageView` / VMA allocation cleanup in `destroy_image(ImageWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `ImageReleaser` delegation.
+- The `HardwareImage` wrapper should only connect public objects and layer/mip/subresource views to `ResourceBridge` / `ResourceStore` tokens; subresource views share the same token. For host linear image I/O, omitted `row_pitch` / `slice_pitch` means tightly packed caller data, and copies must walk `vkGetImageSubresourceLayout` rowPitch / depthPitch instead of doing a raw `memcpy` over the allocation.
 
 ## Executor / Queue Refactor
 

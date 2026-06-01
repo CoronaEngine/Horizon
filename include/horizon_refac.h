@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -31,6 +33,8 @@ namespace Corona::Horizon
     struct HardwarePushConstant;
     struct CopyBufferCommand;
     struct CopyBufferToImageCommand;
+    struct CopyImageCommand;
+    struct CopyImageToBufferCommand;
 
     //struct BottomLevelAccelerationStructure;
     //struct TopLevelAccelerationStructure;
@@ -303,22 +307,7 @@ namespace Corona::Horizon
     // HardwareImage
     // ================================================================
 
-    class HardwareImage : public ResourceHandle
-    {
-    public:
-        HardwareImage() = default;
-        HardwareImage(const HardwareImage& other) noexcept = default;
-        HardwareImage(HardwareImage&& other) noexcept = default;
-        ~HardwareImage() = default;
-
-        HardwareImage& operator=(const HardwareImage& other) noexcept = default;
-        HardwareImage& operator=(HardwareImage&& other) noexcept = default;
-
-        [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
-        [[nodiscard]] std::uintptr_t get_image_id() const noexcept { return resource_id(); }
-    };
-
-    /*struct HardwareImageDesc
+    struct HardwareImageDesc
     {
         ImageDimension dimension = ImageDimension::Image2D;
         ImageExtent extent {};
@@ -453,20 +442,21 @@ namespace Corona::Horizon
         }
     };
 
-    struct HardwareImage
+    class HardwareImage : public ResourceHandle
     {
     public:
-        HardwareImage();
+        HardwareImage() = default;
         HardwareImage(const HardwareImageDesc& desc, std::span<const std::byte> upload_data = {});
 
-        HardwareImage(const HardwareImage& other);
-        HardwareImage(HardwareImage&& other) noexcept;
-        ~HardwareImage();
+        HardwareImage(const HardwareImage& other) noexcept = default;
+        HardwareImage(HardwareImage&& other) noexcept = default;
+        ~HardwareImage() = default;
 
-        HardwareImage& operator=(const HardwareImage& other);
-        HardwareImage& operator=(HardwareImage&& other) noexcept;
+        HardwareImage& operator=(const HardwareImage& other) noexcept = default;
+        HardwareImage& operator=(HardwareImage&& other) noexcept = default;
 
-        [[nodiscard]] std::uintptr_t get_image_id() const noexcept { return image_id; }
+        [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
+        [[nodiscard]] std::uintptr_t get_image_id() const noexcept { return resource_id(); }
         [[nodiscard]] HardwareImageLayerSelector operator[](uint32_t layer) const;
         [[nodiscard]] HardwareImage whole() const;
         [[nodiscard]] HardwareImage layer(uint32_t layer_index) const;
@@ -509,16 +499,14 @@ namespace Corona::Horizon
 
         void set_clear_color(float r, float g, float b, float a);
 
-        [[nodiscard]] ImageCopyCommand copy_to(const HardwareImage &dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
-        [[nodiscard]] ImageToBufferCommand copy_to(const HardwareBuffer &dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
+        [[nodiscard]] CopyImageCommand copy_to(const HardwareImage &dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
+        [[nodiscard]] CopyImageToBufferCommand copy_to(const HardwareBuffer &dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer &src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
         static HardwareImage import_external(const ExternalMemoryHandle &handle, const HardwareImageDesc &desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
         
     private:
-        std::atomic<std::uintptr_t> image_id;
-        mutable std::mutex image_mutex;
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
 
         friend struct HardwareImageLayerSelector;
@@ -538,7 +526,7 @@ namespace Corona::Horizon
     inline HardwareImageLayerSelector HardwareImage::operator[](uint32_t layer_index) const
     {
         return HardwareImageLayerSelector(*this, layer_index);
-    }*/
+    }
 
     
     

@@ -492,7 +492,7 @@ namespace
         });
         Corona::Horizon::ResourceBridge::set(
             image,
-            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::NoopReleaser>>(
+            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
                 std::move(image_resource)));
 
         Corona::Horizon::CopyBufferToImageCommand command = src.copy_to(image, sizeof(uint32_t), 2, 3);

@@ -206,6 +206,23 @@ namespace Corona::Horizon
         commands_.push_back(std::move(command));
     }
 
+    void CommandRecorder::copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices)
+    {
+        ensure_open();
+        mark_requirement(QueueCapability::Transfer);
+
+        CommandIR command;
+        command.op = CommandOp::CopyImage;
+        command.devices = devices;
+        command.queue = QueueCapability::Transfer;
+        command.payload.image_copy = region;
+        command.sequence = next_sequence();
+        command.resources.push_back({ src.handle, AccessKind::Read, 0 });
+        command.resources.push_back({ dst.handle, AccessKind::Write, 0 });
+        mark_device_requirements(devices);
+        commands_.push_back(std::move(command));
+    }
+
     void CommandRecorder::copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices)
     {
         ensure_open();
@@ -213,6 +230,23 @@ namespace Corona::Horizon
 
         CommandIR command;
         command.op = CommandOp::CopyBufferToImage;
+        command.devices = devices;
+        command.queue = QueueCapability::Transfer;
+        command.payload.buffer_image_copy = region;
+        command.sequence = next_sequence();
+        command.resources.push_back({ src.handle, AccessKind::Read, 0 });
+        command.resources.push_back({ dst.handle, AccessKind::Write, 0 });
+        mark_device_requirements(devices);
+        commands_.push_back(std::move(command));
+    }
+
+    void CommandRecorder::copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices)
+    {
+        ensure_open();
+        mark_requirement(QueueCapability::Transfer);
+
+        CommandIR command;
+        command.op = CommandOp::CopyImageToBuffer;
         command.devices = devices;
         command.queue = QueueCapability::Transfer;
         command.payload.buffer_image_copy = region;

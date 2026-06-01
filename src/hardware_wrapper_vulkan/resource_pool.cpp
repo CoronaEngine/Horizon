@@ -15,6 +15,17 @@ namespace Corona::Horizon
         buffer.clear_handles();
     }
 
+    void destroy_image(ImageWrap& image) noexcept
+    {
+        if (image.resource_manager != nullptr)
+        {
+            image.resource_manager->destroy_image(image);
+            return;
+        }
+
+        image.clear_handles();
+    }
+
     ResourcePool& resource_pool()
     {
         static ResourcePool* pool = new ResourcePool();

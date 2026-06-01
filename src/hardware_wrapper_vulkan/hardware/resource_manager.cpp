@@ -47,6 +47,190 @@ namespace Corona::Horizon
             return result;
         }
 
+        [[nodiscard]] VkFormat to_vk_format(Format format) noexcept
+        {
+            switch (format)
+            {
+            case Format::R8_UINT: return VK_FORMAT_R8_UINT;
+            case Format::R8_SINT: return VK_FORMAT_R8_SINT;
+            case Format::R8_UNORM: return VK_FORMAT_R8_UNORM;
+            case Format::R8_SNORM: return VK_FORMAT_R8_SNORM;
+            case Format::RG8_UINT: return VK_FORMAT_R8G8_UINT;
+            case Format::RG8_SINT: return VK_FORMAT_R8G8_SINT;
+            case Format::RG8_UNORM: return VK_FORMAT_R8G8_UNORM;
+            case Format::RG8_SNORM: return VK_FORMAT_R8G8_SNORM;
+            case Format::R16_UINT: return VK_FORMAT_R16_UINT;
+            case Format::R16_SINT: return VK_FORMAT_R16_SINT;
+            case Format::R16_UNORM: return VK_FORMAT_R16_UNORM;
+            case Format::R16_SNORM: return VK_FORMAT_R16_SNORM;
+            case Format::R16_FLOAT: return VK_FORMAT_R16_SFLOAT;
+            case Format::BGRA4_UNORM: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
+            case Format::B5G6R5_UNORM: return VK_FORMAT_B5G6R5_UNORM_PACK16;
+            case Format::B5G5R5A1_UNORM: return VK_FORMAT_B5G5R5A1_UNORM_PACK16;
+            case Format::RGBA8_UINT: return VK_FORMAT_R8G8B8A8_UINT;
+            case Format::RGBA8_SINT: return VK_FORMAT_R8G8B8A8_SINT;
+            case Format::RGBA8_UNORM: return VK_FORMAT_R8G8B8A8_UNORM;
+            case Format::RGBA8_SNORM: return VK_FORMAT_R8G8B8A8_SNORM;
+            case Format::BGRA8_UNORM: return VK_FORMAT_B8G8R8A8_UNORM;
+            case Format::BGRX8_UNORM: return VK_FORMAT_B8G8R8A8_UNORM;
+            case Format::SRGBA8_UNORM: return VK_FORMAT_R8G8B8A8_SRGB;
+            case Format::SBGRA8_UNORM: return VK_FORMAT_B8G8R8A8_SRGB;
+            case Format::SBGRX8_UNORM: return VK_FORMAT_B8G8R8A8_SRGB;
+            case Format::R10G10B10A2_UNORM: return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+            case Format::R11G11B10_FLOAT: return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+            case Format::RG16_UINT: return VK_FORMAT_R16G16_UINT;
+            case Format::RG16_SINT: return VK_FORMAT_R16G16_SINT;
+            case Format::RG16_UNORM: return VK_FORMAT_R16G16_UNORM;
+            case Format::RG16_SNORM: return VK_FORMAT_R16G16_SNORM;
+            case Format::RG16_FLOAT: return VK_FORMAT_R16G16_SFLOAT;
+            case Format::R32_UINT: return VK_FORMAT_R32_UINT;
+            case Format::R32_SINT: return VK_FORMAT_R32_SINT;
+            case Format::R32_FLOAT: return VK_FORMAT_R32_SFLOAT;
+            case Format::RGBA16_UINT: return VK_FORMAT_R16G16B16A16_UINT;
+            case Format::RGBA16_SINT: return VK_FORMAT_R16G16B16A16_SINT;
+            case Format::RGBA16_FLOAT: return VK_FORMAT_R16G16B16A16_SFLOAT;
+            case Format::RGBA16_UNORM: return VK_FORMAT_R16G16B16A16_UNORM;
+            case Format::RGBA16_SNORM: return VK_FORMAT_R16G16B16A16_SNORM;
+            case Format::RG32_UINT: return VK_FORMAT_R32G32_UINT;
+            case Format::RG32_SINT: return VK_FORMAT_R32G32_SINT;
+            case Format::RG32_FLOAT: return VK_FORMAT_R32G32_SFLOAT;
+            case Format::RGB32_UINT: return VK_FORMAT_R32G32B32_UINT;
+            case Format::RGB32_SINT: return VK_FORMAT_R32G32B32_SINT;
+            case Format::RGB32_FLOAT: return VK_FORMAT_R32G32B32_SFLOAT;
+            case Format::RGBA32_UINT: return VK_FORMAT_R32G32B32A32_UINT;
+            case Format::RGBA32_SINT: return VK_FORMAT_R32G32B32A32_SINT;
+            case Format::RGBA32_FLOAT: return VK_FORMAT_R32G32B32A32_SFLOAT;
+            case Format::D16: return VK_FORMAT_D16_UNORM;
+            case Format::D24S8: return VK_FORMAT_D24_UNORM_S8_UINT;
+            case Format::X24G8_UINT: return VK_FORMAT_S8_UINT;
+            case Format::D32: return VK_FORMAT_D32_SFLOAT;
+            case Format::D32S8: return VK_FORMAT_D32_SFLOAT_S8_UINT;
+            case Format::X32G8_UINT: return VK_FORMAT_S8_UINT;
+            case Format::BC1_UNORM: return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+            case Format::BC1_UNORM_SRGB: return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+            case Format::BC2_UNORM: return VK_FORMAT_BC2_UNORM_BLOCK;
+            case Format::BC2_UNORM_SRGB: return VK_FORMAT_BC2_SRGB_BLOCK;
+            case Format::BC3_UNORM: return VK_FORMAT_BC3_UNORM_BLOCK;
+            case Format::BC3_UNORM_SRGB: return VK_FORMAT_BC3_SRGB_BLOCK;
+            case Format::BC4_UNORM: return VK_FORMAT_BC4_UNORM_BLOCK;
+            case Format::BC4_SNORM: return VK_FORMAT_BC4_SNORM_BLOCK;
+            case Format::BC5_UNORM: return VK_FORMAT_BC5_UNORM_BLOCK;
+            case Format::BC5_SNORM: return VK_FORMAT_BC5_SNORM_BLOCK;
+            case Format::BC6H_UFLOAT: return VK_FORMAT_BC6H_UFLOAT_BLOCK;
+            case Format::BC6H_SFLOAT: return VK_FORMAT_BC6H_SFLOAT_BLOCK;
+            case Format::BC7_UNORM: return VK_FORMAT_BC7_UNORM_BLOCK;
+            case Format::BC7_UNORM_SRGB: return VK_FORMAT_BC7_SRGB_BLOCK;
+            case Format::UNKNOWN:
+            case Format::COUNT:
+                break;
+            }
+
+            return VK_FORMAT_UNDEFINED;
+        }
+
+        [[nodiscard]] VkImageUsageFlags to_vk_image_usage(ImageUsageFlags usage) noexcept
+        {
+            VkImageUsageFlags result = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+            if (has_flag(usage, ImageUsageFlags::Sampled))
+                result |= VK_IMAGE_USAGE_SAMPLED_BIT;
+
+            if (has_flag(usage, ImageUsageFlags::Storage))
+                result |= VK_IMAGE_USAGE_STORAGE_BIT;
+
+            if (has_flag(usage, ImageUsageFlags::ColorAttachment))
+                result |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+            if (has_flag(usage, ImageUsageFlags::DepthStencilAttachment))
+                result |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+            return result;
+        }
+
+        [[nodiscard]] VkImageType to_vk_image_type(ImageDimension dimension) noexcept
+        {
+            switch (dimension)
+            {
+            case ImageDimension::Image1D:
+                return VK_IMAGE_TYPE_1D;
+            case ImageDimension::Image3D:
+                return VK_IMAGE_TYPE_3D;
+            case ImageDimension::Image2D:
+            case ImageDimension::Image2DArray:
+            case ImageDimension::Cube:
+            case ImageDimension::CubeArray:
+                return VK_IMAGE_TYPE_2D;
+            }
+
+            return VK_IMAGE_TYPE_2D;
+        }
+
+        [[nodiscard]] VkImageViewType to_vk_image_view_type(const HardwareImageDesc& desc, ImageSubresourceRange range) noexcept
+        {
+            const bool single_layer = range.layer_count == 1;
+            switch (desc.dimension)
+            {
+            case ImageDimension::Image1D:
+                return single_layer ? VK_IMAGE_VIEW_TYPE_1D : VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+            case ImageDimension::Image3D:
+                return VK_IMAGE_VIEW_TYPE_3D;
+            case ImageDimension::Cube:
+                return single_layer ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_CUBE;
+            case ImageDimension::CubeArray:
+                return single_layer ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+            case ImageDimension::Image2DArray:
+                return single_layer ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            case ImageDimension::Image2D:
+                return single_layer ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            }
+
+            return VK_IMAGE_VIEW_TYPE_2D;
+        }
+
+        [[nodiscard]] VkSampleCountFlagBits to_vk_sample_count(uint32_t sample_count) noexcept
+        {
+            switch (sample_count)
+            {
+            case 1: return VK_SAMPLE_COUNT_1_BIT;
+            case 2: return VK_SAMPLE_COUNT_2_BIT;
+            case 4: return VK_SAMPLE_COUNT_4_BIT;
+            case 8: return VK_SAMPLE_COUNT_8_BIT;
+            case 16: return VK_SAMPLE_COUNT_16_BIT;
+            case 32: return VK_SAMPLE_COUNT_32_BIT;
+            case 64: return VK_SAMPLE_COUNT_64_BIT;
+            default: return VK_SAMPLE_COUNT_1_BIT;
+            }
+        }
+
+        [[nodiscard]] VkImageAspectFlags aspect_mask(Format format) noexcept
+        {
+            switch (format)
+            {
+            case Format::D16:
+            case Format::D32:
+                return VK_IMAGE_ASPECT_DEPTH_BIT;
+            case Format::D24S8:
+            case Format::D32S8:
+                return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            case Format::X24G8_UINT:
+            case Format::X32G8_UINT:
+                return VK_IMAGE_ASPECT_STENCIL_BIT;
+            default:
+                return VK_IMAGE_ASPECT_COLOR_BIT;
+            }
+        }
+
+        [[nodiscard]] ImageSubresourceRange resolve_range(ImageSubresourceRange range, const HardwareImageDesc& desc) noexcept
+        {
+            if (range.layer_count == ImageSubresourceRange::remaining)
+                range.layer_count = range.base_layer < desc.array_layers ? desc.array_layers - range.base_layer : 0;
+
+            if (range.mip_count == ImageSubresourceRange::remaining)
+                range.mip_count = range.base_mip < desc.mip_levels ? desc.mip_levels - range.base_mip : 0;
+
+            return range;
+        }
+
         [[nodiscard]] VkExternalMemoryHandleTypeFlags external_memory_handle_type() noexcept
         {
 #if defined(_WIN32) || defined(_WIN64)
@@ -139,6 +323,41 @@ namespace Corona::Horizon
             }
         }
 
+        void require_external_image_feature(VkPhysicalDevice physical_device,
+                                            const VkImageCreateInfo& create_info,
+                                            VkExternalMemoryHandleTypeFlagBits handle_type,
+                                            VkExternalMemoryFeatureFlagBits feature,
+                                            const char* operation)
+        {
+            VkPhysicalDeviceExternalImageFormatInfo external_info {};
+            external_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+            external_info.handleType = handle_type;
+
+            VkPhysicalDeviceImageFormatInfo2 format_info {};
+            format_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+            format_info.pNext = &external_info;
+            format_info.format = create_info.format;
+            format_info.type = create_info.imageType;
+            format_info.tiling = create_info.tiling;
+            format_info.usage = create_info.usage;
+            format_info.flags = create_info.flags;
+
+            VkExternalImageFormatProperties external_properties {};
+            external_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+
+            VkImageFormatProperties2 image_properties {};
+            image_properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+            image_properties.pNext = &external_properties;
+
+            const VkResult result = vkGetPhysicalDeviceImageFormatProperties2(physical_device, &format_info, &image_properties);
+            throw_if_failed(result, operation);
+
+            if ((external_properties.externalMemoryProperties.externalMemoryFeatures & feature) == 0)
+            {
+                throw std::runtime_error(std::string(operation) + " is not supported for this HardwareImage usage.");
+            }
+        }
+
         [[nodiscard]] uint32_t clamp_descriptor_capacity(uint32_t preferred, uint32_t limit) noexcept
         {
             if (limit == 0)
@@ -171,6 +390,31 @@ namespace Corona::Horizon
             name_info.objectType = VK_OBJECT_TYPE_BUFFER;
             name_info.objectHandle = reinterpret_cast<uint64_t>(buffer.buffer_handle);
             name_info.pObjectName = buffer.desc.debug_name.c_str();
+            (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+        }
+
+        void name_image(VkDevice device, VmaAllocator allocator, const ImageWrap& image) noexcept
+        {
+            if (image.desc.debug_name.empty())
+            {
+                return;
+            }
+
+            if (image.image_alloc != VK_NULL_HANDLE)
+            {
+                vmaSetAllocationName(allocator, image.image_alloc, image.desc.debug_name.c_str());
+            }
+
+            if (vkSetDebugUtilsObjectNameEXT == nullptr || image.image_handle == VK_NULL_HANDLE)
+            {
+                return;
+            }
+
+            VkDebugUtilsObjectNameInfoEXT name_info {};
+            name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            name_info.objectType = VK_OBJECT_TYPE_IMAGE;
+            name_info.objectHandle = reinterpret_cast<uint64_t>(image.image_handle);
+            name_info.pObjectName = image.desc.debug_name.c_str();
             (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
         }
     }
@@ -267,6 +511,37 @@ namespace Corona::Horizon
         return alloc_info;
     }
 
+    VmaAllocationCreateInfo ResourceManager::allocation_info(const HardwareImageDesc& desc) const noexcept
+    {
+        VmaAllocationCreateInfo alloc_info {};
+
+        switch (desc.cpu_access)
+        {
+        case CpuAccessMode::None:
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            break;
+        case CpuAccessMode::Read:
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+            alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            break;
+        case CpuAccessMode::Write:
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+            alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            break;
+        case CpuAccessMode::ReadWrite:
+            alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+            alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            break;
+        }
+
+        if (desc.dedicated || desc.exportable)
+        {
+            alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+        }
+
+        return alloc_info;
+    }
+
     VkBufferCreateInfo ResourceManager::buffer_info(const HardwareBufferDesc& desc, std::vector<uint32_t>& queue_family_indices) const
     {
         VkBufferCreateInfo create_info {};
@@ -297,6 +572,59 @@ namespace Corona::Horizon
         }
 
         return create_info;
+    }
+
+    VkImageCreateInfo ResourceManager::image_info(const HardwareImageDesc& desc) const
+    {
+        VkImageCreateInfo create_info {};
+        create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        create_info.flags = 0;
+        create_info.imageType = to_vk_image_type(desc.dimension);
+        create_info.format = to_vk_format(desc.format);
+        create_info.extent = { desc.extent.width, desc.extent.height, desc.extent.depth };
+        create_info.mipLevels = desc.mip_levels;
+        create_info.arrayLayers = desc.array_layers;
+        create_info.samples = to_vk_sample_count(desc.sample_count);
+        create_info.tiling = desc.cpu_access == CpuAccessMode::None ? VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR;
+        create_info.usage = to_vk_image_usage(desc.usage);
+        create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        if (desc.dimension == ImageDimension::Cube || desc.dimension == ImageDimension::CubeArray)
+        {
+            create_info.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        }
+
+        return create_info;
+    }
+
+    VkImageView ResourceManager::create_image_view(const ImageWrap& image, ImageSubresourceRange range) const
+    {
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE || image.image_handle == VK_NULL_HANDLE)
+        {
+            return VK_NULL_HANDLE;
+        }
+
+        range = resolve_range(range, image.desc);
+        if (range.layer_count == 0 || range.mip_count == 0)
+        {
+            return VK_NULL_HANDLE;
+        }
+
+        VkImageViewCreateInfo view_info {};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image = image.image_handle;
+        view_info.viewType = to_vk_image_view_type(image.desc, range);
+        view_info.format = image.image_format;
+        view_info.subresourceRange.aspectMask = image.aspect_mask;
+        view_info.subresourceRange.baseArrayLayer = range.base_layer;
+        view_info.subresourceRange.layerCount = range.layer_count;
+        view_info.subresourceRange.baseMipLevel = range.base_mip;
+        view_info.subresourceRange.levelCount = range.mip_count;
+
+        VkImageView view = VK_NULL_HANDLE;
+        throw_if_failed(vkCreateImageView(device_manager_->logical_device(), &view_info, nullptr, &view), "vkCreateImageView");
+        return view;
     }
 
     void ResourceManager::create_allocator()
@@ -427,6 +755,118 @@ namespace Corona::Horizon
         next_storage_buffer_descriptor_ = 0;
     }
 
+    void ResourceManager::create_sampled_image_descriptors()
+    {
+        if (sampled_image_descriptors_.set != VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::store_descriptor called before initialize().");
+        }
+
+        VkPhysicalDeviceDescriptorIndexingProperties indexing_properties {};
+        indexing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+
+        VkPhysicalDeviceProperties2 properties {};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &indexing_properties;
+        vkGetPhysicalDeviceProperties2(device_manager_->physical_device(), &properties);
+
+        VkPhysicalDeviceVulkan12Features features12 {};
+        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+        VkPhysicalDeviceFeatures2 features {};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features.pNext = &features12;
+        vkGetPhysicalDeviceFeatures2(device_manager_->physical_device(), &features);
+
+        VkDescriptorBindingFlags binding_flags = 0;
+        VkDescriptorSetLayoutCreateFlags layout_flags = 0;
+        VkDescriptorPoolCreateFlags pool_flags = 0;
+        uint32_t descriptor_limit = properties.properties.limits.maxDescriptorSetSampledImages;
+
+        if (features12.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE)
+        {
+            binding_flags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+            layout_flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+            pool_flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+            descriptor_limit = indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages;
+        }
+
+        constexpr uint32_t preferred_descriptor_count = 4096;
+        const uint32_t descriptor_count = clamp_descriptor_capacity(preferred_descriptor_count, descriptor_limit);
+        if (descriptor_count == 0)
+        {
+            throw std::runtime_error("Sampled image descriptors are not supported by this Vulkan device.");
+        }
+
+        VkDescriptorSetLayoutBinding binding {};
+        binding.binding = 0;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        binding.descriptorCount = descriptor_count;
+        binding.stageFlags = VK_SHADER_STAGE_ALL;
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_info {};
+        binding_flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        binding_flags_info.bindingCount = 1;
+        binding_flags_info.pBindingFlags = &binding_flags;
+
+        VkDescriptorSetLayoutCreateInfo layout_info {};
+        layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layout_info.flags = layout_flags;
+        layout_info.bindingCount = 1;
+        layout_info.pBindings = &binding;
+        layout_info.pNext = binding_flags != 0 ? &binding_flags_info : nullptr;
+
+        throw_if_failed(vkCreateDescriptorSetLayout(device_manager_->logical_device(),
+                                                    &layout_info,
+                                                    nullptr,
+                                                    &sampled_image_descriptors_.layout),
+                        "vkCreateDescriptorSetLayout(sampled image)");
+
+        VkDescriptorPoolSize pool_size {};
+        pool_size.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        pool_size.descriptorCount = descriptor_count;
+
+        VkDescriptorPoolCreateInfo pool_info {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags = pool_flags;
+        pool_info.maxSets = 1;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = &pool_size;
+
+        try
+        {
+            throw_if_failed(vkCreateDescriptorPool(device_manager_->logical_device(),
+                                                   &pool_info,
+                                                   nullptr,
+                                                   &sampled_image_descriptors_.pool),
+                            "vkCreateDescriptorPool(sampled image)");
+
+            VkDescriptorSetAllocateInfo alloc_info {};
+            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            alloc_info.descriptorPool = sampled_image_descriptors_.pool;
+            alloc_info.descriptorSetCount = 1;
+            alloc_info.pSetLayouts = &sampled_image_descriptors_.layout;
+
+            throw_if_failed(vkAllocateDescriptorSets(device_manager_->logical_device(),
+                                                     &alloc_info,
+                                                     &sampled_image_descriptors_.set),
+                            "vkAllocateDescriptorSets(sampled image)");
+        }
+        catch (...)
+        {
+            destroy_descriptors_unlocked();
+            throw;
+        }
+
+        sampled_image_descriptors_.capacity = descriptor_count;
+        next_sampled_image_descriptor_ = 0;
+    }
+
     void ResourceManager::destroy_descriptors_unlocked() noexcept
     {
         if (device_manager_ != nullptr && device_manager_->logical_device() != VK_NULL_HANDLE)
@@ -440,10 +880,22 @@ namespace Corona::Horizon
             {
                 vkDestroyDescriptorSetLayout(device_manager_->logical_device(), storage_buffer_descriptors_.layout, nullptr);
             }
+
+            if (sampled_image_descriptors_.pool != VK_NULL_HANDLE)
+            {
+                vkDestroyDescriptorPool(device_manager_->logical_device(), sampled_image_descriptors_.pool, nullptr);
+            }
+
+            if (sampled_image_descriptors_.layout != VK_NULL_HANDLE)
+            {
+                vkDestroyDescriptorSetLayout(device_manager_->logical_device(), sampled_image_descriptors_.layout, nullptr);
+            }
         }
 
         storage_buffer_descriptors_ = {};
+        sampled_image_descriptors_ = {};
         next_storage_buffer_descriptor_ = 0;
+        next_sampled_image_descriptor_ = 0;
     }
 
     BufferWrap ResourceManager::create_buffer(const HardwareBufferDesc& desc)
@@ -747,6 +1199,392 @@ namespace Corona::Horizon
         return descriptor_index;
     }
 
+    ImageWrap ResourceManager::create_image(const HardwareImageDesc& desc)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::create_image called before initialize().");
+        }
+
+        if (desc.extent.width == 0 || desc.extent.height == 0 || desc.extent.depth == 0 ||
+            desc.array_layers == 0 || desc.mip_levels == 0 || to_vk_format(desc.format) == VK_FORMAT_UNDEFINED)
+        {
+            return {};
+        }
+
+        ImageWrap image;
+        image.desc = desc;
+        image.range = ImageSubresourceRange::whole();
+        image.image_usage = to_vk_image_usage(desc.usage);
+        image.image_format = to_vk_format(desc.format);
+        image.aspect_mask = aspect_mask(desc.format);
+        image.device_manager = device_manager_;
+        image.resource_manager = this;
+
+        VkImageCreateInfo create_info = image_info(desc);
+
+        VkExternalMemoryImageCreateInfo external_image {};
+        if (desc.exportable)
+        {
+            const VkExternalMemoryHandleTypeFlags handle_type = external_memory_handle_type();
+            if (handle_type == 0)
+            {
+                throw std::runtime_error("Exportable HardwareImage is not supported on this platform.");
+            }
+
+            external_image.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+            external_image.handleTypes = handle_type;
+            create_info.pNext = &external_image;
+            require_external_image_feature(device_manager_->physical_device(),
+                                           create_info,
+                                           static_cast<VkExternalMemoryHandleTypeFlagBits>(handle_type),
+                                           VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT,
+                                           "Exportable HardwareImage");
+        }
+
+        VmaAllocationCreateInfo alloc_info = allocation_info(desc);
+        VkResult result = VK_SUCCESS;
+
+        if (desc.dedicated || desc.exportable)
+        {
+            VkExportMemoryAllocateInfo export_info {};
+            void* memory_next = nullptr;
+
+            if (desc.exportable)
+            {
+                export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+                export_info.handleTypes = external_memory_handle_type();
+                memory_next = &export_info;
+            }
+
+            result = vmaCreateDedicatedImage(allocator_,
+                                             &create_info,
+                                             &alloc_info,
+                                             memory_next,
+                                             &image.image_handle,
+                                             &image.image_alloc,
+                                             &image.image_alloc_info);
+        }
+        else
+        {
+            result = vmaCreateImage(allocator_,
+                                    &create_info,
+                                    &alloc_info,
+                                    &image.image_handle,
+                                    &image.image_alloc,
+                                    &image.image_alloc_info);
+        }
+
+        throw_if_failed(result, "vmaCreateImage");
+
+        try
+        {
+            image.allocation_size = image.image_alloc_info.size != 0 ? static_cast<uint64_t>(image.image_alloc_info.size) : 0;
+            image.imported = false;
+            image.owns_native_image = true;
+            image.image_view = create_image_view(image, ImageSubresourceRange::whole());
+            name_image(device_manager_->logical_device(), allocator_, image);
+        }
+        catch (...)
+        {
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                vkDestroyImageView(device_manager_->logical_device(), image.image_view, nullptr);
+            }
+            if (image.image_handle != VK_NULL_HANDLE && image.image_alloc != VK_NULL_HANDLE)
+            {
+                vmaDestroyImage(allocator_, image.image_handle, image.image_alloc);
+            }
+            image.clear_handles();
+            throw;
+        }
+
+        return image;
+    }
+
+    ImageWrap ResourceManager::import_image(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::import_image called before initialize().");
+        }
+
+        if (!handle)
+        {
+            throw std::invalid_argument("ResourceManager::import_image requires a valid external memory handle.");
+        }
+
+        if (desc.extent.width == 0 || desc.extent.height == 0 || desc.extent.depth == 0 ||
+            desc.array_layers == 0 || desc.mip_levels == 0 || to_vk_format(desc.format) == VK_FORMAT_UNDEFINED)
+        {
+            return {};
+        }
+
+        const VkExternalMemoryHandleTypeFlagBits handle_type = to_vk_external_memory_handle_type(handle.type);
+        if (handle_type == 0)
+        {
+            throw std::runtime_error("External image memory handle type is not supported on this platform.");
+        }
+
+        const uint64_t imported_allocation_size = allocation_size != 0
+            ? allocation_size
+            : handle.allocation_size;
+        const BufferRange memory_range = handle.memory_range.resolve(imported_allocation_size);
+        if (memory_range.byte_offset != 0)
+        {
+            throw std::invalid_argument("HardwareImage external import only supports zero-offset dedicated memory.");
+        }
+
+        ImageWrap image;
+        image.desc = desc;
+        image.range = ImageSubresourceRange::whole();
+        image.image_usage = to_vk_image_usage(desc.usage);
+        image.image_format = to_vk_format(desc.format);
+        image.aspect_mask = aspect_mask(desc.format);
+        image.device_manager = device_manager_;
+        image.resource_manager = this;
+
+        VkImageCreateInfo create_info = image_info(desc);
+
+        VkExternalMemoryImageCreateInfo external_image {};
+        external_image.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+        external_image.handleTypes = handle_type;
+        create_info.pNext = &external_image;
+
+        require_external_image_feature(device_manager_->physical_device(),
+                                       create_info,
+                                       handle_type,
+                                       VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
+                                       "Imported HardwareImage");
+
+        VmaAllocationCreateInfo alloc_info = allocation_info(desc);
+        alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+#if defined(_WIN32) || defined(_WIN64)
+        VkImportMemoryWin32HandleInfoKHR import_info {};
+        import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+        import_info.handleType = handle_type;
+        import_info.handle = static_cast<HANDLE>(handle.handle);
+        void* import_next = &import_info;
+#elif defined(__linux__) && VMA_EXTERNAL_MEMORY
+        VkImportMemoryFdInfoKHR import_info {};
+        import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+        import_info.handleType = handle_type;
+        import_info.fd = handle.fd;
+        void* import_next = &import_info;
+#else
+        void* import_next = nullptr;
+#endif
+
+        if (import_next == nullptr)
+        {
+            throw std::runtime_error("External image memory import is not supported on this platform.");
+        }
+
+        const VkResult result = vmaCreateDedicatedImage(allocator_,
+                                                        &create_info,
+                                                        &alloc_info,
+                                                        import_next,
+                                                        &image.image_handle,
+                                                        &image.image_alloc,
+                                                        &image.image_alloc_info);
+        throw_if_failed(result, "vmaCreateDedicatedImage(import)");
+
+        try
+        {
+            image.allocation_size = imported_allocation_size != 0
+                ? imported_allocation_size
+                : static_cast<uint64_t>(image.image_alloc_info.size);
+            image.imported = true;
+            image.owns_native_image = true;
+            image.image_view = create_image_view(image, ImageSubresourceRange::whole());
+            name_image(device_manager_->logical_device(), allocator_, image);
+        }
+        catch (...)
+        {
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                vkDestroyImageView(device_manager_->logical_device(), image.image_view, nullptr);
+            }
+            if (image.image_handle != VK_NULL_HANDLE && image.image_alloc != VK_NULL_HANDLE)
+            {
+                vmaDestroyImage(allocator_, image.image_handle, image.image_alloc);
+            }
+            image.clear_handles();
+            throw;
+        }
+
+        return image;
+    }
+
+    ExternalMemoryHandle ResourceManager::export_image(ImageWrap& image)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::export_image called before initialize().");
+        }
+
+        if (!image.valid() || image.image_alloc == VK_NULL_HANDLE)
+        {
+            throw std::invalid_argument("ResourceManager::export_image requires a valid HardwareImage allocation.");
+        }
+
+        if (!image.desc.exportable)
+        {
+            throw std::logic_error("HardwareImage was not created with exportable=true.");
+        }
+
+        const uint64_t allocation_size = image.allocation_size != 0
+            ? image.allocation_size
+            : static_cast<uint64_t>(image.image_alloc_info.size);
+        const BufferRange memory_range { 0, allocation_size };
+
+#if defined(_WIN32) || defined(_WIN64)
+        if (image.exported_win32_handle == nullptr)
+        {
+            VmaAllocationInfo allocation_info {};
+            vmaGetAllocationInfo(allocator_, image.image_alloc, &allocation_info);
+
+            auto get_memory_win32_handle =
+                reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(vkGetDeviceProcAddr(device_manager_->logical_device(), "vkGetMemoryWin32HandleKHR"));
+            if (get_memory_win32_handle == nullptr)
+            {
+                throw std::runtime_error("vkGetMemoryWin32HandleKHR is not available on this Vulkan device.");
+            }
+
+            VkMemoryGetWin32HandleInfoKHR handle_info {};
+            handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+            handle_info.memory = allocation_info.deviceMemory;
+            handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+            HANDLE exported_handle = nullptr;
+            const VkResult result = get_memory_win32_handle(device_manager_->logical_device(), &handle_info, &exported_handle);
+            throw_if_failed(result, "vkGetMemoryWin32HandleKHR");
+            image.exported_win32_handle = exported_handle;
+        }
+
+        HANDLE duplicate = duplicate_win32_handle(static_cast<HANDLE>(image.exported_win32_handle));
+        return ExternalMemoryHandle::win32(duplicate, allocation_size, memory_range);
+#elif defined(__linux__) && VMA_EXTERNAL_MEMORY
+        VmaAllocationInfo allocation_info {};
+        vmaGetAllocationInfo(allocator_, image.image_alloc, &allocation_info);
+
+        VkMemoryGetFdInfoKHR fd_info {};
+        fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+        fd_info.memory = allocation_info.deviceMemory;
+        fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        int fd = -1;
+        const VkResult result = vkGetMemoryFdKHR(device_manager_->logical_device(), &fd_info, &fd);
+        throw_if_failed(result, "vkGetMemoryFdKHR");
+        return ExternalMemoryHandle::opaque_fd(fd, allocation_size, memory_range);
+#else
+        throw std::runtime_error("External image memory export is not supported on this platform.");
+#endif
+    }
+
+    uint32_t ResourceManager::store_descriptor(ImageWrap& image)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::store_descriptor called before initialize().");
+        }
+
+        if (!image.valid() || image.image_view == VK_NULL_HANDLE)
+        {
+            throw std::invalid_argument("ResourceManager::store_descriptor requires a valid HardwareImage.");
+        }
+
+        if (!has_flag(image.desc.usage, ImageUsageFlags::Sampled))
+        {
+            throw std::invalid_argument("HardwareImage::store_descriptor currently requires ImageUsageFlags::Sampled.");
+        }
+
+        create_sampled_image_descriptors();
+
+        if (image.bindless_index < 0)
+        {
+            if (next_sampled_image_descriptor_ >= sampled_image_descriptors_.capacity)
+            {
+                throw std::runtime_error("Sampled image descriptor array is full.");
+            }
+
+            image.bindless_index = static_cast<std::int32_t>(next_sampled_image_descriptor_++);
+        }
+
+        const uint32_t descriptor_index = static_cast<uint32_t>(image.bindless_index);
+        if (descriptor_index >= sampled_image_descriptors_.capacity)
+        {
+            throw std::runtime_error("HardwareImage descriptor index exceeds the sampled image descriptor array.");
+        }
+
+        VkDescriptorImageInfo image_info {};
+        image_info.imageView = image.image_view;
+        image_info.imageLayout = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
+            ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            : image.image_layout;
+
+        VkWriteDescriptorSet write {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = sampled_image_descriptors_.set;
+        write.dstBinding = 0;
+        write.dstArrayElement = descriptor_index;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.pImageInfo = &image_info;
+
+        vkUpdateDescriptorSets(device_manager_->logical_device(), 1, &write, 0, nullptr);
+        return descriptor_index;
+    }
+
+    ImageSubresourceLayout ResourceManager::image_subresource_layout(const ImageWrap& image, uint32_t layer, uint32_t mip) const
+    {
+        std::lock_guard lock(mutex_);
+
+        ImageSubresourceLayout result {};
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE || !image.valid())
+        {
+            return result;
+        }
+
+        VkImageAspectFlagBits aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        if ((image.aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0)
+        {
+            aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+        else if ((image.aspect_mask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0)
+        {
+            aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+
+        VkImageSubresource subresource {};
+        subresource.aspectMask = aspect;
+        subresource.mipLevel = mip;
+        subresource.arrayLayer = layer;
+
+        VkSubresourceLayout layout {};
+        vkGetImageSubresourceLayout(device_manager_->logical_device(), image.image_handle, &subresource, &layout);
+
+        result.byte_offset = layout.offset;
+        result.byte_size = layout.size;
+        result.row_pitch = layout.rowPitch;
+        result.slice_pitch = layout.depthPitch != 0 ? layout.depthPitch : layout.arrayPitch;
+        result.extent = {
+            std::max(1u, image.desc.extent.width >> mip),
+            std::max(1u, image.desc.extent.height >> mip),
+            std::max(1u, image.desc.extent.depth >> mip),
+        };
+        return result;
+    }
+
     void ResourceManager::destroy_buffer(BufferWrap& buffer) noexcept
     {
         std::lock_guard lock(mutex_);
@@ -785,5 +1623,39 @@ namespace Corona::Horizon
         }
 
         buffer.clear_handles();
+    }
+
+    void ResourceManager::destroy_image(ImageWrap& image) noexcept
+    {
+        std::lock_guard lock(mutex_);
+
+#if defined(_WIN32) || defined(_WIN64)
+        if (image.desc.exportable)
+        {
+            close_win32_handle(image.exported_win32_handle);
+        }
+#endif
+
+        if (device_manager_ != nullptr && device_manager_->logical_device() != VK_NULL_HANDLE)
+        {
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                vkDestroyImageView(device_manager_->logical_device(), image.image_view, nullptr);
+            }
+        }
+
+        if (image.owns_native_image && image.image_handle != VK_NULL_HANDLE)
+        {
+            if (allocator_ != VK_NULL_HANDLE && image.image_alloc != VK_NULL_HANDLE)
+            {
+                vmaDestroyImage(allocator_, image.image_handle, image.image_alloc);
+            }
+            else if (device_manager_ != nullptr && device_manager_->logical_device() != VK_NULL_HANDLE)
+            {
+                vkDestroyImage(device_manager_->logical_device(), image.image_handle, nullptr);
+            }
+        }
+
+        image.clear_handles();
     }
 }

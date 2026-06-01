@@ -20,6 +20,7 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace Corona::Horizon
 {
@@ -353,9 +354,75 @@ namespace Corona::Horizon
 
     struct ImageWrap
     {
-        std::shared_ptr<const IResourceRef> parent {};
+        HardwareImageDesc desc {};
+        ImageSubresourceRange range { ImageSubresourceRange::whole() };
+
+        std::uint64_t allocation_size { 0 };
+
+        VkImage image_handle { VK_NULL_HANDLE };
+        VkImageView image_view { VK_NULL_HANDLE };
+        VkImageUsageFlags image_usage { 0 };
+        VkImageAspectFlags aspect_mask { VK_IMAGE_ASPECT_COLOR_BIT };
+        VkFormat image_format { VK_FORMAT_UNDEFINED };
+        VkImageLayout image_layout { VK_IMAGE_LAYOUT_UNDEFINED };
+        VmaAllocation image_alloc { VK_NULL_HANDLE };
+        VmaAllocationInfo image_alloc_info {};
+
+        bool imported { false };
         bool owns_native_image { true };
+
+        std::int32_t bindless_index { -1 };
+        VkClearValue clear_value {};
+
+        DeviceManager* device_manager { nullptr };
+        ResourceManager* resource_manager { nullptr };
+#if defined(_WIN32) || defined(_WIN64)
+        void* exported_win32_handle { nullptr };
+#endif
+
+        [[nodiscard]] bool valid() const noexcept
+        {
+            return image_handle != VK_NULL_HANDLE;
+        }
+
+        [[nodiscard]] void* mapped_data() const noexcept
+        {
+            return image_alloc_info.pMappedData;
+        }
+
+        [[nodiscard]] std::uint64_t mapped_size() const noexcept
+        {
+            if (allocation_size != 0)
+            {
+                return allocation_size;
+            }
+            return static_cast<std::uint64_t>(image_alloc_info.size);
+        }
+
+        void clear_handles() noexcept
+        {
+            image_handle = VK_NULL_HANDLE;
+            image_view = VK_NULL_HANDLE;
+            image_usage = 0;
+            aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+            image_format = VK_FORMAT_UNDEFINED;
+            image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            image_alloc = VK_NULL_HANDLE;
+            image_alloc_info = {};
+            allocation_size = 0;
+            imported = false;
+            owns_native_image = true;
+            bindless_index = -1;
+            clear_value = {};
+            device_manager = nullptr;
+            resource_manager = nullptr;
+#if defined(_WIN32) || defined(_WIN64)
+            exported_win32_handle = nullptr;
+#endif
+        }
     };
+
+    void destroy_image(ImageWrap& image) noexcept;
 
     struct ComputePipelineWrap
     {
@@ -393,6 +460,14 @@ namespace Corona::Horizon
         }
     };
 
+    struct ImageReleaser
+    {
+        void operator()(ImageWrap& image) const noexcept
+        {
+            destroy_image(image);
+        }
+    };
+
     struct NoopReleaser
     {
         template <typename T>
@@ -404,7 +479,7 @@ namespace Corona::Horizon
     struct ResourcePool
     {
         ResourceStore<BufferWrap, BufferReleaser> buffers;
-        ResourceStore<ImageWrap, NoopReleaser> images;
+        ResourceStore<ImageWrap, ImageReleaser> images;
         ResourceStore<ComputePipelineWrap, NoopReleaser> compute_pipelines;
         ResourceStore<RasterizerPipelineWrap, NoopReleaser> rasterizer_pipelines;
         ResourceStore<DisplayerWrap, NoopReleaser> displayers;

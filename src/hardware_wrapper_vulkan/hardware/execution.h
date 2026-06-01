@@ -44,7 +44,9 @@ namespace Corona::Horizon
         DrawIndexed,
         Present,
         HostCallback,
-        KeepAlive
+        KeepAlive,
+        CopyImage,
+        CopyImageToBuffer
     };
 
     enum class FeatureRequirement
@@ -112,6 +114,14 @@ namespace Corona::Horizon
         uint32_t image_mip { 0 };
     };
 
+    struct ImageCopyRegion
+    {
+        uint32_t src_layer { 0 };
+        uint32_t dst_layer { 0 };
+        uint32_t src_mip { 0 };
+        uint32_t dst_mip { 0 };
+    };
+
     struct DispatchDesc
     {
         uint32_t groups_x { 1 };
@@ -154,6 +164,7 @@ namespace Corona::Horizon
     struct CommandPayload
     {
         CopyRegion copy {};
+        ImageCopyRegion image_copy {};
         BufferImageCopyRegion buffer_image_copy {};
         DispatchDesc dispatch {};
         RenderingDesc rendering {};
@@ -347,7 +358,9 @@ namespace Corona::Horizon
     {
     public:
         void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
+        void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
         void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
+        void copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
         void dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});
