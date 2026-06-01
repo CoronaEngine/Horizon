@@ -29,8 +29,9 @@ namespace Corona::Horizon
     struct HardwareValidationConfig;
     class HardwareBuffer;
     class HardwareImage;
-    struct HardwareImageLayerSelector;
-    struct HardwarePushConstant;
+    class HardwareImageLayerSelector;
+    //struct HardwarePushConstant;
+
     struct CopyBufferCommand;
     struct CopyBufferToImageCommand;
     struct CopyImageCommand;
@@ -39,15 +40,15 @@ namespace Corona::Horizon
     //struct BottomLevelAccelerationStructure;
     //struct TopLevelAccelerationStructure;
 
-    struct PipelineBindingScope;
-    struct ResourceProxy;
+    class PipelineBindingScope;
+    class ResourceProxy;
 
-    struct ComputePipeline;
-    struct RasterizerPipeline;
-    struct RayTracingPipeline;
+    class ComputePipeline;
+    class RasterizerPipeline;
+    class RayTracingPipeline;
 
-    struct HardwareExecutor;
-    struct HardwareDisplayer;
+    class HardwareExecutor;
+    class HardwareDisplayer;
 
     struct BindingSlot;
 
@@ -611,7 +612,7 @@ namespace Corona::Horizon
     // Pipeline Descriptors
     // ================================================================
 
-    /*struct PipelineShaderDesc
+    struct PipelineShaderDesc
     {
         PipelineShaderStage stage;
         EmbeddedShader::ShaderCodeModule module;
@@ -1053,7 +1054,7 @@ namespace Corona::Horizon
             debug_name = std::move(value);
             return *this;
         }
-    };*/
+    };
 
 
 
@@ -1061,103 +1062,103 @@ namespace Corona::Horizon
     // Pipeline Binding
     // ================================================================
 
-    //template<typename T>
-    //concept ReflectedBindingKey = requires(const T& t)
-    //{
-    //    t.byte_offset;
-    //    t.type_size;
-    //    t.bind_type;
-    //    t.location;
-    //};
+    template<typename T>
+    concept ReflectedBindingKey = requires(const T& t)
+    {
+        t.byte_offset;
+        t.type_size;
+        t.bind_type;
+        t.location;
+    };
 
-    //struct BindingSlot
-    //{
-    //    uint64_t byte_offset = 0;
-    //    uint32_t type_size = 0;
-    //    int32_t bind_type = -1;
-    //    uint32_t location = 0;
+    struct BindingSlot
+    {
+        uint64_t byte_offset = 0;
+        uint32_t type_size = 0;
+        int32_t bind_type = -1;
+        uint32_t location = 0;
 
-    //    template<ReflectedBindingKey T>
-    //    static constexpr BindingSlot from(const T& key) noexcept
-    //    {
-    //        return 
-    //        {
-    //            key.byte_offset,
-    //            key.type_size,
-    //            key.bind_type,
-    //            key.location
-    //        };
-    //    }
-    //};
+        template<ReflectedBindingKey T>
+        static constexpr BindingSlot from(const T& key) noexcept
+        {
+            return 
+            {
+                key.byte_offset,
+                key.type_size,
+                key.bind_type,
+                key.location
+            };
+        }
+    };
 
-    //struct PipelineBindingScope
-    //{
-    //protected:
-    //    virtual ~PipelineBindingScope() = default;
+    struct PipelineBindingScope
+    {
+    protected:
+        virtual ~PipelineBindingScope() = default;
 
-    //private:
-    //    friend struct ResourceProxy;
+    private:
+        friend struct ResourceProxy;
 
-    //    virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
-    //    virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
-    //    virtual void bind_image(const BindingSlot &slot, const HardwareImage &image) = 0;
-    //    /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
-    //    {
-    //        throw std::runtime_error("This pipeline does not support acceleration structure binding.");
-    //    }*/
-    //};
+        virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
+        virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
+        virtual void bind_image(const BindingSlot &slot, const HardwareImage &image) = 0;
+        /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
+        {
+            throw std::runtime_error("This pipeline does not support acceleration structure binding.");
+        }*/
+    };
 
-    //struct ResourceProxy
-    //{
-    //public:
-    //    ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
+    struct ResourceProxy
+    {
+    public:
+        ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
 
-    //    ResourceProxy& operator=(const ResourceProxy&) = delete;
-    //    ResourceProxy& operator=(ResourceProxy&&) = delete;
+        ResourceProxy& operator=(const ResourceProxy&) = delete;
+        ResourceProxy& operator=(ResourceProxy&&) = delete;
 
-    //    template <typename T>
-    //    requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
-    //    ResourceProxy& operator=(const T& value)
-    //    {
-    //        if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareBuffer>)
-    //        {
-    //            pipeline_.bind_buffer(slot_, value);
-    //        }
-    //        else if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareImage>)
-    //        {
-    //            pipeline_.bind_image(slot_, value);
-    //        }
-    //        /*else if constexpr (std::same_as<std::remove_cvref_t<T>, TopLevelAccelerationStructure>)
-    //        {
-    //            pipeline_.bindResource(slot_, value);
-    //        }*/
-    //        else
-    //        {
-    //            static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
-    //            pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
-    //        }
+        template <typename T>
+        requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
+        ResourceProxy& operator=(const T& value)
+        {
+            if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareBuffer>)
+            {
+                pipeline_.bind_buffer(slot_, value);
+            }
+            else if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareImage>)
+            {
+                pipeline_.bind_image(slot_, value);
+            }
+            /*else if constexpr (std::same_as<std::remove_cvref_t<T>, TopLevelAccelerationStructure>)
+            {
+                pipeline_.bindResource(slot_, value);
+            }*/
+            else
+            {
+                static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
+                pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
+            }
 
-    //        return *this;
-    //    }
+            return *this;
+        }
 
-    //private:
-    //    PipelineBindingScope& pipeline_;
-    //    BindingSlot slot_;
-    //};
+    private:
+        PipelineBindingScope& pipeline_;
+        BindingSlot slot_;
+    };
 
-    //template<typename Derived>
-    //struct ReflectedPipelineBindings
-    //{
-    //    template<ReflectedBindingKey ProxyType>
-    //    ResourceProxy operator[](const ProxyType& proxy)
-    //    {
-    //        template <ReflectedBindingKey ProxyType>
-    //        [[nodiscard]] ResourceProxy operator[](const ProxyType& proxy)
-    //        {
-    //            return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
-    //        }
-    //    }
-    //};
+    template<typename Derived>
+    struct ReflectedPipelineBindings
+    {
+        template<ReflectedBindingKey ProxyType>
+        ResourceProxy operator[](const ProxyType& proxy)
+        {
+            template <ReflectedBindingKey ProxyType>
+            [[nodiscard]] ResourceProxy operator[](const ProxyType& proxy)
+            {
+                return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
+            }
+        }
+    };
 
     
 
@@ -1165,7 +1166,7 @@ namespace Corona::Horizon
     // Pipeline Runtime
     // ================================================================
 
-    /*struct ComputePipeline : PipelineBindingScope, ReflectedPipelineBindings<ComputePipeline>
+    struct ComputePipeline : PipelineBindingScope, ReflectedPipelineBindings<ComputePipeline>
     {
     public:
         ComputePipeline();
@@ -1244,9 +1245,9 @@ namespace Corona::Horizon
         std::atomic<std::uintptr_t> rasterizer_pipeline_id_;
     };
 
-    struct RayTracingPipelineBase : PipelineBindingScope, ReflectedPipelineBindings<RayTracingPipelineBase>
+    struct RayTracingPipeline : PipelineBindingScope, ReflectedPipelineBindings<RayTracingPipelineBase>
     {
-    };*/
+    };
 
 
 
