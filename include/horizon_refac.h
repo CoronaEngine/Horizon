@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <concepts>
 #include <cstddef>
@@ -8,11 +9,19 @@
 #include <mutex>
 #include <ranges>
 #include <span>
+#include <source_location>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
+#include <ktm/ktm.h>
+
+#include "Codegen/ComputePipelineObject.h"
+#include "Codegen/RasterizedPipelineObject.h"
+#include "Compiler/ShaderCodeCompiler.h"
+#include "Compiler/ShaderLanguageConverter.h"
 #include "format.h"
 #include "resource.h"
 
@@ -510,11 +519,11 @@ namespace Corona::Horizon
     private:
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
 
-        friend struct HardwareImageLayerSelector;
-        friend struct HardwareBuffer;
+        friend class HardwareImageLayerSelector;
+        friend class HardwareBuffer;
     };
 
-    struct HardwareImageLayerSelector
+    class HardwareImageLayerSelector
     {
     public:
         HardwareImageLayerSelector(const HardwareImage &image, uint32_t layer_index) : image_(image), layer_(layer_index) {}
@@ -734,13 +743,27 @@ namespace Corona::Horizon
 
     struct BlendStateDesc
     {
+        static constexpr BlendAttachmentDesc opaque_attachment() noexcept
+        {
+            BlendAttachmentDesc desc;
+            desc.blend_enabled = false;
+            return desc;
+        }
+
+        static constexpr BlendAttachmentDesc alpha_blend_attachment() noexcept
+        {
+            BlendAttachmentDesc desc;
+            desc.blend_enabled = true;
+            return desc;
+        }
+
         bool logic_op_enabled = false;
-        std::vector<BlendAttachmentDesc> attachments = {BlendAttachmentDesc::alpha_blend()};
+        std::vector<BlendAttachmentDesc> attachments = {alpha_blend_attachment()};
 
         BlendStateDesc& set_attachment(uint32_t index, BlendAttachmentDesc desc)
         {
             if (attachments.size() <= index)
-                attachments.resize(size_t(index) + 1, BlendAttachmentDesc::alpha_blend());
+                attachments.resize(size_t(index) + 1, alpha_blend_attachment());
 
             attachments[index] = std::move(desc);
             return *this;
@@ -748,14 +771,14 @@ namespace Corona::Horizon
 
         BlendStateDesc& set_attachment_count(uint32_t count)
         {
-            attachments.resize(count, BlendAttachmentDesc::alpha_blend());
+            attachments.resize(count, alpha_blend_attachment());
             return *this;
         }
 
         BlendStateDesc& set_opaque()
         {
             for (auto& attachment : attachments)
-                attachment = BlendAttachmentDesc::opaque();
+                attachment = opaque_attachment();
 
             return *this;
         }
@@ -763,7 +786,7 @@ namespace Corona::Horizon
         BlendStateDesc& set_alpha_blend()
         {
             for (auto& attachment : attachments)
-                attachment = BlendAttachmentDesc::alpha_blend();
+                attachment = alpha_blend_attachment();
 
             return *this;
         }
@@ -799,6 +822,41 @@ namespace Corona::Horizon
         RenderTargetLayoutDesc& set_multiview_count(uint32_t value) noexcept
         {
             multiview_count = value;
+            return *this;
+        }
+    };
+
+    struct DepthAttachmentDesc
+    {
+        bool enabled = false;
+        Format format = Format::UNKNOWN;
+        std::string debug_name;
+
+        static DepthAttachmentDesc with_format(Format value, std::string name = {})
+        {
+            DepthAttachmentDesc desc;
+            desc.enabled = value != Format::UNKNOWN;
+            desc.format = value;
+            desc.debug_name = std::move(name);
+            return desc;
+        }
+
+        DepthAttachmentDesc& set_enabled(bool value) noexcept
+        {
+            enabled = value;
+            return *this;
+        }
+
+        DepthAttachmentDesc& set_format(Format value) noexcept
+        {
+            format = value;
+            enabled = value != Format::UNKNOWN;
+            return *this;
+        }
+
+        DepthAttachmentDesc& set_debug_name(std::string value)
+        {
+            debug_name = std::move(value);
             return *this;
         }
     };
@@ -986,7 +1044,7 @@ namespace Corona::Horizon
 
         std::string debug_name;
 
-        uint32_t add_shader(RayTracingShaderDesc shader)
+        uint32_t add_shader(PipelineShaderDesc shader)
         {
             if (!shader.is_ray_tracing())
                 throw std::invalid_argument("RayTracingPipelineDesc only accepts ray tracing shader stages.");
@@ -1081,7 +1139,7 @@ namespace Corona::Horizon
         template<ReflectedBindingKey T>
         static constexpr BindingSlot from(const T& key) noexcept
         {
-            return 
+            return
             {
                 key.byte_offset,
                 key.type_size,
@@ -1091,13 +1149,13 @@ namespace Corona::Horizon
         }
     };
 
-    struct PipelineBindingScope
+    class PipelineBindingScope
     {
     protected:
         virtual ~PipelineBindingScope() = default;
 
     private:
-        friend struct ResourceProxy;
+        friend class ResourceProxy;
 
         virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
         virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
@@ -1108,7 +1166,7 @@ namespace Corona::Horizon
         }*/
     };
 
-    struct ResourceProxy
+    class ResourceProxy
     {
     public:
         ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
@@ -1135,7 +1193,7 @@ namespace Corona::Horizon
             else
             {
                 static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
-                pipeline_.bind_push_constant(slot_, &value, sizeof(Value));
+                pipeline_.bind_push_constant(slot_, &value, sizeof(std::remove_cvref_t<T>));
             }
 
             return *this;
@@ -1150,13 +1208,10 @@ namespace Corona::Horizon
     struct ReflectedPipelineBindings
     {
         template<ReflectedBindingKey ProxyType>
+        [[nodiscard]]
         ResourceProxy operator[](const ProxyType& proxy)
         {
-            template <ReflectedBindingKey ProxyType>
-            [[nodiscard]] ResourceProxy operator[](const ProxyType& proxy)
-            {
-                return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
-            }
+            return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
         }
     };
 
@@ -1166,7 +1221,7 @@ namespace Corona::Horizon
     // Pipeline Runtime
     // ================================================================
 
-    struct ComputePipeline : PipelineBindingScope, ReflectedPipelineBindings<ComputePipeline>
+    class ComputePipeline : public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipeline>
     {
     public:
         ComputePipeline();
@@ -1204,7 +1259,7 @@ namespace Corona::Horizon
         std::atomic<std::uintptr_t> compute_pipeline_id_;
     };
 
-    struct RasterizerPipeline : PipelineBindingScope, ReflectedPipelineBindings<RasterizerPipeline>
+    class RasterizerPipeline : public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipeline>
     {
     public:
         RasterizerPipeline();
@@ -1214,12 +1269,12 @@ namespace Corona::Horizon
         RasterizerPipeline(RasterizerPipeline &&other) noexcept;
         ~RasterizerPipeline();
 
-        RasterizerPipelineBase &operator=(const RasterizerPipelineBase &other);
-        RasterizerPipelineBase &operator=(RasterizerPipelineBase &&other) noexcept;
+        RasterizerPipeline &operator=(const RasterizerPipeline &other);
+        RasterizerPipeline &operator=(RasterizerPipeline &&other) noexcept;
 
-        RasterizerPipelineBase &operator()(uint16_t width, uint16_t height);
-        RasterizerPipelineBase &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer);
-        RasterizerPipelineBase &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer, const DrawIndexedParams &params);
+        RasterizerPipeline &operator()(uint16_t width, uint16_t height);
+        RasterizerPipeline &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer);
+        RasterizerPipeline &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer, const DrawIndexedParams &params);
 
     private:
         void bind_push_constant(const BindingSlot &slot, const void *data, size_t size) override
@@ -1245,7 +1300,7 @@ namespace Corona::Horizon
         std::atomic<std::uintptr_t> rasterizer_pipeline_id_;
     };
 
-    struct RayTracingPipeline : PipelineBindingScope, ReflectedPipelineBindings<RayTracingPipelineBase>
+    class RayTracingPipeline : public PipelineBindingScope, public ReflectedPipelineBindings<RayTracingPipeline>
     {
     };
 
