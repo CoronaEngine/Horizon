@@ -14,14 +14,14 @@ namespace
         uint64_t result = 0;
         if (value.empty())
         {
-            throw std::invalid_argument("--frames requires a positive integer.");
+            throw std::invalid_argument("--frames requires a non-negative integer.");
         }
 
         for (char ch : value)
         {
             if (ch < '0' || ch > '9')
             {
-                throw std::invalid_argument("--frames requires a positive integer.");
+                throw std::invalid_argument("--frames requires a non-negative integer.");
             }
             result = result * 10 + static_cast<uint64_t>(ch - '0');
             if (result > UINT32_MAX)
@@ -31,6 +31,16 @@ namespace
         }
 
         return static_cast<uint32_t>(result);
+    }
+
+    [[nodiscard]] uint32_t parse_positive_count(std::string_view value, std::string_view label)
+    {
+        const uint32_t result = parse_frame_count(value);
+        if (result == 0)
+        {
+            throw std::invalid_argument(std::string(label) + " requires a positive integer.");
+        }
+        return result;
     }
 
     [[nodiscard]] ExampleDefaultThreadMode parse_thread_mode(std::string_view value)
@@ -74,6 +84,10 @@ namespace
         {
             return ExampleDefaultMode::MultiWindow;
         }
+        if (value == "stress")
+        {
+            return ExampleDefaultMode::Stress;
+        }
 
         throw std::invalid_argument("Unknown Horizon example: " + std::string(value));
     }
@@ -81,9 +95,11 @@ namespace
 
 int main(int argc, char** argv)
 {
-    uint32_t frames = 180;
+    uint32_t frames = 0;
     ExampleDefaultMode mode = ExampleDefaultMode::Default;
     ExampleDefaultThreadMode thread_mode = ExampleDefaultThreadMode::SingleThreaded;
+    ExampleDefaultStressConfig stress_config;
+    bool stress_config_used = false;
 
     try
     {
@@ -110,6 +126,28 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            if (arg == "--windows")
+            {
+                if (index + 1 >= argc)
+                {
+                    throw std::invalid_argument("--windows requires a value.");
+                }
+                stress_config.window_count = parse_positive_count(argv[++index], "--windows");
+                stress_config_used = true;
+                continue;
+            }
+
+            if (arg == "--render-threads")
+            {
+                if (index + 1 >= argc)
+                {
+                    throw std::invalid_argument("--render-threads requires a value.");
+                }
+                stress_config.render_thread_count = parse_positive_count(argv[++index], "--render-threads");
+                stress_config_used = true;
+                continue;
+            }
+
             if (!arg.starts_with("--"))
             {
                 mode = parse_example_mode(arg);
@@ -124,7 +162,12 @@ int main(int argc, char** argv)
             throw std::invalid_argument("--threads is currently supported only by the default example mode.");
         }
 
-        run_example_default(frames, thread_mode, mode);
+        if (mode != ExampleDefaultMode::Stress && stress_config_used)
+        {
+            throw std::invalid_argument("--windows and --render-threads are currently supported only by the stress example mode.");
+        }
+
+        run_example_default(frames, thread_mode, mode, stress_config);
         return 0;
     }
     catch (const std::exception& error)

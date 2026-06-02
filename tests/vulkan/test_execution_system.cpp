@@ -591,20 +591,40 @@ void main()
 
         using RasterizerPipelineStore =
             Corona::Horizon::ResourceStore<Corona::Horizon::RasterizerPipelineWrap, Corona::Horizon::NoopReleaser>;
-        auto pipeline_resource =
-            Corona::Horizon::read<RasterizerPipelineStore>(Corona::Horizon::ResourceBridge::token(moved));
-        expect(pipeline_resource && pipeline_resource->impl,
-               "RasterizerPipeline ResourceHandle should point at a backend implementation.");
+        std::shared_ptr<Corona::Horizon::VulkanRasterizerPipeline> impl;
+        Corona::Horizon::VulkanRasterizerPipeline::Snapshot snapshot = [&] {
+            auto pipeline_resource =
+                Corona::Horizon::read<RasterizerPipelineStore>(Corona::Horizon::ResourceBridge::token(moved));
+            expect(pipeline_resource && pipeline_resource->impl,
+                   "RasterizerPipeline ResourceHandle should point at a backend implementation.");
 
-        auto impl =
-            std::static_pointer_cast<Corona::Horizon::VulkanRasterizerPipeline>(pipeline_resource->impl);
-        Corona::Horizon::VulkanRasterizerPipeline::Snapshot snapshot = impl->snapshot();
+            impl = std::static_pointer_cast<Corona::Horizon::VulkanRasterizerPipeline>(pipeline_resource->impl);
+            return impl->snapshot();
+        }();
         expect(snapshot.desc.auto_bind_entries.size() == 1,
                "RasterizerPipeline bind_render_target should update RasterizerPipelineDesc auto bindings.");
         expect(snapshot.images.size() == 1,
                "RasterizerPipeline operator() should bind render targets from descriptor auto bindings.");
         expect(snapshot.images[0].location == 2,
                "RasterizerPipeline should preserve the auto-bound render target location.");
+
+        Corona::Horizon::HardwareBuffer index =
+            test_buffer(3, sizeof(uint32_t), Corona::Horizon::BufferUsageFlags::Index);
+        Corona::Horizon::HardwareBuffer vertex =
+            test_buffer(4, sizeof(float) * 6, Corona::Horizon::BufferUsageFlags::Vertex);
+        Corona::Horizon::DrawIndexedParams params;
+        params.index_count = 3;
+        params.index_type = Corona::Horizon::IndexType::UInt32;
+        moved.record(index, vertex, params);
+
+        snapshot = impl->snapshot();
+        expect(snapshot.draws.size() == 1,
+               "RasterizerPipeline should expose recorded draws before clear_records.");
+
+        moved.clear_records();
+        snapshot = impl->snapshot();
+        expect(snapshot.draws.empty(),
+               "RasterizerPipeline clear_records should remove recorded draws for dynamic mesh re-recording.");
 
         return Corona::Horizon::Tests::TestResult::pass();
     }

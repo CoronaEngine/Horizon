@@ -127,6 +127,15 @@ namespace Corona::Horizon
         return *this;
     }
 
+    RasterizerPipeline& RasterizerPipeline::clear_records()
+    {
+        std::shared_ptr<IResourceRef> token;
+        token = ResourceBridge::token(*this);
+
+        pipeline_impl(token)->clear_records();
+        return *this;
+    }
+
     RasterizerPipeline& RasterizerPipeline::bind_render_target(uint32_t location, HardwareImage& image)
     {
         set_resource_direct(0,

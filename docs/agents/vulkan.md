@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 64166447e7e5d5df67686b7e9ec61f7de4e05fbe1be5da993843a2e213fd2027 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 6d688b3c7b9d721a3a6c877f5dd2402d56736266b612bedfca4e88981a07ee93 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -34,7 +34,8 @@ Be careful with:
 
 - Backend design assumes multithreaded callers. Public APIs, backend facades, resource pools, descriptor / pipeline caches, and execution entrypoints must not rely on a hidden "single caller thread" premise.
 - Mutable shared state needs a clear strategy: explicit locks, atomics, owner-thread serialization, or immutable snapshots. If a cross-thread access boundary is unclear, narrow ownership first and add tests instead of relying on call-order convention.
-- A single `VkQueue` may serialize `vkQueueSubmit2` inside `Queue`; higher-level record / compile / submit / retire work may progress concurrently, but scheduling policy stays in `HardwareExecutor` / compiler, not in `Queue`.
+- All host access to a single `VkQueue` must be serialized inside `Queue`; this includes both `vkQueueSubmit2` and `vkQueuePresentKHR`. Multi-window / multi-render-thread paths may share one present queue, so `DisplayManager` and examples must not bypass `Queue` for queue-level Vulkan API calls.
+- Higher-level record / compile / submit / retire work may progress concurrently, but scheduling policy stays in `HardwareExecutor` / compiler, not in `Queue`.
 - Compute / dispatch is a first-class execution path alongside graphics / present. Express `QueueCapability::Compute`, storage resource access, no-swapchain workflows, and future compute graphs through typed IR, device masks, queue capability, and explicit resource access.
 - As the project evolves toward a compute framework, public `include/` types should stay backend-neutral and not graphics-only; do not bake render pass, swapchain, or present assumptions into generic resource and execution abstractions.
 
@@ -73,7 +74,7 @@ Be careful with:
 - `DeviceMask` v1 only means explicit target devices and replicated submissions, not automatic load balancing; if a resource is not on the target device and cannot be imported or copied, fail during compile.
 - In the lower-case Vulkan backend, `CommandRecorder` records only abstract IR, resource references, access modes, queue capabilities, feature requirements, and device masks; recording must not create descriptor sets, pipelines, VkCommandBuffers, or Vulkan/VMA resources.
 - `ExecutionCompiler` turns IR into a per `{device, queue}` submission DAG / plan, and owns barrier planning, MGPU partitioning, present expansion, and cross-device sync decisions; descriptor/pipeline lookup, rendering info, and actual `VkCommandBuffer` filling belong to the Vulkan encoder.
-- `Queue` should only wrap one `VkQueue`: serialize `vkQueueSubmit2`, maintain the timeline semaphore, command buffer pool, in-flight tracked buffers, and retirement; do not put scheduling policy, cross-GPU sync policy, or resource allocation policy inside Queue.
+- `Queue` should only wrap one `VkQueue`: serialize queue-level host access such as submit / present, maintain the timeline semaphore, command buffer pool, in-flight tracked buffers, and retirement; do not put scheduling policy, cross-GPU sync policy, or resource allocation policy inside Queue.
 - `TrackedCommandBuffer` holds `SubmissionKeepAlive` and strong references to resource control blocks until the Queue timeline reaches the submitted value; retirement clears keep-alives and returns the command buffer to the pool.
 - `HardwareExecutor` orchestrates record/compile/submit, DAG order, error policy, and `CrossDeviceSync`; do not maintain another delayed-release queue inside the executor.
 - Timeline semaphores are the default completion signal; use per-submit fences only when a backend or platform limitation needs a fallback.

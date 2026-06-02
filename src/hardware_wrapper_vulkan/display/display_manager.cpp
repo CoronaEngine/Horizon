@@ -521,7 +521,7 @@ namespace Corona::Horizon
         present_info.pSwapchains = &swapchain_;
         present_info.pImageIndices = &pending.image_index;
 
-        const VkResult vk_result = vkQueuePresentKHR(present_queue_->vk_queue(), &present_info);
+        const VkResult vk_result = present_queue_->present(present_info);
         result.status = present_status(vk_result);
         result.message = present_message(result.status);
 

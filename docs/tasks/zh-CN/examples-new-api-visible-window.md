@@ -5,13 +5,13 @@
 - 需要恢复或验证 `HorizonExamples` 是否能用新 public API 打开 GLFW 窗口、提交 Vulkan 渲染并 present。
 - 目标是重构后的新 API 路线；不要为了跑通示例恢复 `ImageFormat`、`BufferUsage`、`HardwareImageCreateInfo` 等旧 public 名字。
 - 旧 `examples/example_baseline`、`example_glsl`、`example_edsl` 可以作为参考；当前可运行示例统一迁移到 `examples/example_default/` 的新 API mode，不重新编入旧示例 target。
-- 第一阶段验收是可见窗口和 present smoke；第二阶段是 `mesh/render/display` 三线程 default smoke；第三迁移批次恢复 texture、compute、EDSL、GLSL 和 multi-window 的最小 smoke mode。
+- 第一阶段验收是可见窗口和 present smoke；第二阶段是 `mesh/render/display` 三线程 default smoke；第三迁移批次恢复 texture、compute、EDSL、GLSL 和 multi-window 的最小 smoke mode；多窗口多 render 线程压力验证使用独立的 `stress` mode。
 
 ## 入口和范围
 
 - public umbrella 是 `include/Horizon.h`，应导出 `format.h`、`resource.h`、`horizon_refac.h` 和新执行/显示 facade。
 - 示例入口是 `examples/main.cpp`，默认运行 `default`，应支持 `--frames N` 自动退出。
-- 当前可运行示例放在 `examples/example_default/`，通过 `default`、`glsl`、`edsl`、`texture`、`compute`、`multi-window` 这些 mode 覆盖新 API smoke。
+- 当前可运行示例放在 `examples/example_default/`，通过 `default`、`glsl`、`edsl`、`texture`、`compute`、`multi-window` 这些 mode 覆盖新 API smoke；`stress` mode 用于多窗口并发 present 压测。
 - 三线程第二阶段通过 `default --threads mesh-render-display` 显式启用；`--threads` 仅用于 default mode，其他 mode 保持单线程 smoke。
 - 实现范围优先放在 `src/hardware_wrapper` 和 `src/hardware_wrapper_vulkan`；`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan` 只作历史参考。
 
@@ -32,6 +32,12 @@
 - `compute` 使用最小 GLSL compute shader 写 storage image 后 present，验证 `ComputePipeline::command_batch()`、storage image descriptor 和 dispatch encoder。
 - `multi-window` 使用两个 GLFW Win32 窗口和两个 render target，验证 lower-case display/swapchain 可创建并 present 多个窗口。
 - 这些 mode 仍是 smoke，不恢复旧 default 的 texture、compute、EDSL、GLSL、多窗口组合行为，也不恢复旧 public API 兼容层。
+
+## 多窗口压力模式
+
+- `stress` mode 用于验证多 GLFW 窗口、多 mesh 线程、多 render 线程和多个 swapchain present 的并发路径；默认 8 个窗口和 4 个 render 线程，可用 `--windows N`、`--render-threads N` 调整。
+- 每个窗口只应由一个 render 线程提交 present，避免多个线程同时操作同一个 swapchain；多个窗口可以共享主设备 present queue，以覆盖 `Queue` 对 submit / present host access 的串行化。
+- `stress` 仍是单 render target、最小动态 mesh 的压力 smoke，不代表恢复旧 default 的多窗口组合行为。
 
 ## Present 路径
 
@@ -68,6 +74,8 @@ build\ninja-msvc\examples\Debug\HorizonExamples.exe edsl --frames 3
 build\ninja-msvc\examples\Debug\HorizonExamples.exe texture --frames 3
 build\ninja-msvc\examples\Debug\HorizonExamples.exe compute --frames 3
 build\ninja-msvc\examples\Debug\HorizonExamples.exe multi-window --frames 3
+build\ninja-msvc\examples\Debug\HorizonExamples.exe stress --windows 8 --render-threads 4 --frames 20
+build\ninja-msvc\examples\Debug\HorizonExamples.exe stress --windows 16 --render-threads 16 --frames 120
 
 git diff --check
 ```

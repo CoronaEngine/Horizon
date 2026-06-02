@@ -1249,6 +1249,7 @@ namespace Corona::Horizon
         RasterizerPipeline& operator()(uint16_t width, uint16_t height);
         RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
         RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        RasterizerPipeline& clear_records();
         RasterizerPipeline& bind_render_target(uint32_t location, HardwareImage& image);
         [[nodiscard]] CommandBatch command_batch() const;
         [[nodiscard]] explicit operator bool() const noexcept;

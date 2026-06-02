@@ -333,6 +333,18 @@ namespace Corona::Horizon
         return { id_.device, id_, signal_value, timeline_ };
     }
 
+    VkResult Queue::present(const VkPresentInfoKHR& present_info)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (queue_ == VK_NULL_HANDLE)
+        {
+            return VK_SUCCESS;
+        }
+
+        return vkQueuePresentKHR(queue_, &present_info);
+    }
+
     uint64_t Queue::query_completed_value() const
     {
         if (device_ == VK_NULL_HANDLE || timeline_ == VK_NULL_HANDLE)

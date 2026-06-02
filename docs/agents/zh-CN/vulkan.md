@@ -33,7 +33,8 @@
 
 - 后端设计默认面对多线程并发调用；公共 API、backend facade、resource pool、descriptor / pipeline cache 和 execution 入口都不要依赖“只有一个调用线程”的隐含前提。
 - 可变共享状态必须选择清晰策略：显式锁、atomic、owner-thread 串行化或不可变快照。跨线程访问边界不清楚时，先收窄所有权，再补测试，不要靠调用顺序约定维持正确性。
-- 单个 `VkQueue` 的 `vkQueueSubmit2` 可以在 `Queue` 内部串行化；更高层的 record / compile / submit / retire 可以并发推进，但调度策略仍属于 `HardwareExecutor` / compiler，而不是塞进 `Queue`。
+- 单个 `VkQueue` 的 host access 必须在 `Queue` 内部统一串行化；这包括 `vkQueueSubmit2` 和 `vkQueuePresentKHR`。多窗口 / 多 render 线程可能共享同一个 present queue，不要让 `DisplayManager` 或示例线程绕过 `Queue` 直接调用 queue-level Vulkan API。
+- 更高层的 record / compile / submit / retire 可以并发推进，但调度策略仍属于 `HardwareExecutor` / compiler，而不是塞进 `Queue`。
 - compute / dispatch 是和 graphics / present 并列的一等执行路径。`QueueCapability::Compute`、storage 资源访问、无 swapchain 工作流和 future compute graph 都应通过 typed IR、device mask、queue capability 与显式资源访问表达。
 - 面向未来计算框架演进时，`include/` 中的公共类型继续保持后端无关、非 graphics-only；不要为了当前渲染路径方便，把 render pass、swapchain 或 present 假设写进通用资源和执行抽象。
 
@@ -72,7 +73,7 @@
 - `DeviceMask` v1 只表示显式目标设备和复制提交，不做自动负载均衡；资源不在目标设备且无法导入或复制时，应在 compile 阶段报错。
 - lower-case Vulkan 后端的 `CommandRecorder` 只记录抽象 IR、资源引用、访问模式、队列能力、feature requirement 和 device mask；录制阶段不要创建 descriptor set、pipeline、VkCommandBuffer 或 Vulkan/VMA 资源。
 - `ExecutionCompiler` 负责把 IR 编译为 per `{device, queue}` 的提交 DAG / plan，并在这里做 barrier 规划、MGPU 分区、present 展开和跨设备同步决策；descriptor/pipeline 查找、rendering info 和实际 `VkCommandBuffer` 填充属于 Vulkan encoder。
-- `Queue` 只封装单个 `VkQueue` 的职责：串行化 `vkQueueSubmit2`、维护 timeline semaphore、command buffer pool、in-flight tracked buffers 和 retire；不要把调度策略、跨 GPU 同步策略或资源分配策略放进 Queue。
+- `Queue` 只封装单个 `VkQueue` 的职责：串行化 submit / present 等 queue-level host access、维护 timeline semaphore、command buffer pool、in-flight tracked buffers 和 retire；不要把调度策略、跨 GPU 同步策略或资源分配策略放进 Queue。
 - `TrackedCommandBuffer` 持有 `SubmissionKeepAlive` 和资源 control block 强引用，直到 Queue 的 timeline 到达提交值；retire 时清空 keep-alive 并把 command buffer 归还到池。
 - `HardwareExecutor` 编排 record/compile/submit、DAG 顺序、错误策略和 `CrossDeviceSync`；不要在 executor 内部再维护一套延迟释放队列。
 - Timeline semaphore 是默认完成信号；只有后端或平台限制需要 fallback 时才使用 per-submit fence。

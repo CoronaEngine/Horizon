@@ -1,18 +1,18 @@
 # Horizon Examples New API Visible Window Notes
-<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 41bd24491ca614b630646513f085dfddd81b57752c44de693a531932e9614c74 -->
+<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 80a1c34bd41cb9d0adc582b096be8f122d5cc79147297a764f90714060b2e1a4 -->
 
 ## When To Use
 
 - Use this when restoring or validating `HorizonExamples` with the new public API: open a GLFW window, submit Vulkan rendering, and present.
 - Stay on the refactored new API path. Do not restore old public names such as `ImageFormat`, `BufferUsage`, or `HardwareImageCreateInfo` just to run examples.
 - Old `examples/example_baseline`, `example_glsl`, and `example_edsl` may remain references; current runnable samples migrate into new API modes under `examples/example_default/` instead of recompiling the old example targets.
-- First-stage acceptance is the visible-window and present smoke path; second stage is the `mesh/render/display` threaded default smoke; the third migration batch restores minimal texture, compute, EDSL, GLSL, and multi-window smoke modes.
+- First-stage acceptance is the visible-window and present smoke path; second stage is the `mesh/render/display` threaded default smoke; the third migration batch restores minimal texture, compute, EDSL, GLSL, and multi-window smoke modes; use the separate `stress` mode for multi-window / multi-render-thread validation.
 
 ## Entrypoints And Scope
 
 - The public umbrella is `include/Horizon.h`; it should export `format.h`, `resource.h`, `horizon_refac.h`, and the new execution/display facades.
 - The executable entrypoint is `examples/main.cpp`; it defaults to `default` and should support `--frames N` for automatic exit.
-- The current runnable samples live in `examples/example_default/` and cover new API smoke modes: `default`, `glsl`, `edsl`, `texture`, `compute`, and `multi-window`.
+- The current runnable samples live in `examples/example_default/` and cover new API smoke modes: `default`, `glsl`, `edsl`, `texture`, `compute`, and `multi-window`; `stress` mode is for concurrent multi-window present pressure.
 - The second-stage three-thread path is enabled explicitly with `default --threads mesh-render-display`; `--threads` applies only to default mode, while the other modes remain single-thread smoke paths.
 - Keep implementation work in `src/hardware_wrapper` and `src/hardware_wrapper_vulkan`; treat `src/HardwareWrapper` and `src/HardwareWrapperVulkan` as historical references.
 
@@ -33,6 +33,12 @@
 - `compute` uses a minimal GLSL compute shader to write a storage image and present it, validating `ComputePipeline::command_batch()`, storage image descriptors, and the dispatch encoder.
 - `multi-window` uses two GLFW Win32 windows and two render targets to validate that the lower-case display/swapchain path can create and present multiple windows.
 - These modes are still smoke tests. Do not restore the old default example's combined texture, compute, EDSL, GLSL, or multi-window behavior, and do not restore the old public API compatibility layer.
+
+## Multi-Window Stress Mode
+
+- `stress` mode validates concurrent paths with multiple GLFW windows, multiple mesh threads, multiple render threads, and multiple swapchain presents. It defaults to 8 windows and 4 render threads; tune it with `--windows N` and `--render-threads N`.
+- Each window should be presented by only one render thread to avoid multiple threads touching the same swapchain; multiple windows may still share the main-device present queue, which exercises `Queue` serialization for submit / present host access.
+- `stress` is still a single-render-target, minimal dynamic-mesh pressure smoke. It is not a restoration of the old default example's combined multi-window behavior.
 
 ## Present Path
 
@@ -69,6 +75,8 @@ build\ninja-msvc\examples\Debug\HorizonExamples.exe edsl --frames 3
 build\ninja-msvc\examples\Debug\HorizonExamples.exe texture --frames 3
 build\ninja-msvc\examples\Debug\HorizonExamples.exe compute --frames 3
 build\ninja-msvc\examples\Debug\HorizonExamples.exe multi-window --frames 3
+build\ninja-msvc\examples\Debug\HorizonExamples.exe stress --windows 8 --render-threads 4 --frames 20
+build\ninja-msvc\examples\Debug\HorizonExamples.exe stress --windows 16 --render-threads 16 --frames 120
 
 git diff --check
 ```
