@@ -1,7 +1,7 @@
 # Horizon AI 入口
 
 > 本文件是根 AI 入口的中文源文件。修改根规则时，先改这里，再同步更新 `AGENTS.md`。
-> 其他中文源位于 `docs/agents/zh-CN/`、`docs/tasks/zh-CN/` 和 `.agents/skills/horizon-workflow/SKILL.zh-CN.md`。
+> 其他中文源位于 `docs/agents/zh-CN/`、`docs/tasks/zh-CN/` 和 `.agents/skills/*/SKILL.zh-CN.md`。
 > 英文文件是 AI 默认读取入口，必须与中文源保持一致。
 
 ## 1. 核心原则
@@ -32,7 +32,8 @@ AI 在本仓库工作时必须：
 
 项目内共享 Agent skill：
 
-- `.agents/skills/horizon-workflow/SKILL.md`
+- `.agents/skills/horizon-workflow/SKILL.md`：仓库通用工作流、口令路由和上下文路由。
+- `.agents/skills/agent-project-system/SKILL.md`：AI-first 项目状态文档系统；处理完整吸收、初始化、采纳、恢复、长任务状态和证据闭环时使用。
 
 该 skill 是通用 Markdown 工作流，不局限于 Codex；其他 AI Agent 也可以读取。
 
@@ -76,7 +77,7 @@ C++ / CMake / 工具 / 示例改动按需运行：
 根据中文源同步所有英文 Agent 文件。
 
 - 不要修改中文源文件。
-- 同步范围包括根 `AGENTS.md`、`docs/agents/*.md`、`docs/tasks/*.md` 和项目 skill。
+- 同步范围包括根 `AGENTS.md`、`docs/agents/*.md`、`docs/tasks/*.md` 和项目 skills。
 - 保持章节结构一致；英文要短、直接、适合作为 AI 上下文。
 - 更新对应英文文件顶部的 sync marker。
 - 运行 `.\tools\sync-agents.ps1 -Check`。
@@ -98,6 +99,7 @@ C++ / CMake / 工具 / 示例改动按需运行：
 - 只沉淀稳定、可复用的内容：项目规则、目录职责、架构决策、命名/生命周期/并发约定、验证流程、用户在本仓库内反复表达的偏好。
 - 不要沉淀临时猜测、一次性命令输出、未定论争议、聊天闲谈、秘密信息、过窄的实现细节。
 - 按归属选择目标：根规则写入 `AGENTS.zh-CN.md`；长期专项上下文写入 `docs/agents/zh-CN/*.md`；短小任务清单、复现步骤或验证配方写入 `docs/tasks/zh-CN/*.md`；共享工作流、口令、意图识别规则或跨 Agent 行为写入 `.agents/skills/horizon-workflow/SKILL.zh-CN.md`。
+- 如果沉淀对象是项目状态系统、长任务恢复、证据账本、TODO 状态或失败探索，先加载 `.agents/skills/agent-project-system/SKILL.md` 及其 Horizon adapter；按现有 `AGENTS` / `docs/agents` / `docs/tasks` / skill / sync 框架映射，不要默认创建 `.agent-os/` 或 `CLAUDE.md`。
 - 写入前确认依据：用户明确偏好、已验证命令、当前代码事实或已落地设计；证据不足时只列候选，不写成规则。
 - 修改中文源后，同步对应英文文件并更新 SHA256 marker。
 - 如果没有足够确定、值得写入的内容，不要改文件，只汇报候选项和不沉淀的理由。
@@ -145,6 +147,7 @@ C++ / CMake / 工具 / 示例改动按需运行：
 - `docs/agents/zh-CN/*.md` -> `docs/agents/*.md`
 - `docs/tasks/zh-CN/*.md` -> `docs/tasks/*.md`
 - `.agents/skills/horizon-workflow/SKILL.zh-CN.md` -> `.agents/skills/horizon-workflow/SKILL.md`
+- `.agents/skills/agent-project-system/SKILL.zh-CN.md` -> `.agents/skills/agent-project-system/SKILL.md`
 
 每次修改任一中文源后，必须同步对应英文文件：
 

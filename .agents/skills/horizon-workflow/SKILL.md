@@ -2,7 +2,7 @@
 name: horizon-workflow
 description: Vendor-neutral workflow for AI agents working in the Horizon C++ Vulkan repository. Use when an agent edits this repo, handles =sa/=ca/=ai/=gc/=cm/=gh commands, or needs routing to build, GitHub, formatting, Vulkan, Helicon, or push-constant context.
 ---
-<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: 5688fd926f10362e56ea1b7c71a285b28002811327e0b188a53bec1c33799f06 -->
+<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: 4a92115d92c8ad38f5ce60d7e1ad469649ef472e8f3cabffe9a328f2029257b1 -->
 
 # Horizon Workflow
 
@@ -57,6 +57,8 @@ If a context pack is missing, inspect source files directly and keep the answer 
 
 - Keep Horizon routing thin: root `AGENTS` only holds entry rules, long-lived domain context lives in `docs/agents/zh-CN/`, short task checklists and validation recipes live in `docs/tasks/zh-CN/`, and skills carry only strongly triggered workflows and intent recognition.
 - Do not copy external repository AI frameworks wholesale. Before borrowing, compare repository structure, language source, sync mechanism, context size, and drift risk; discard frameworks that do not fit Horizon.
+- When the user asks to absorb, initialize, adopt, or recover a project-state system, load `.agents/skills/agent-project-system/SKILL.md`; when the target is this Horizon repository, continue with its `references/horizon-adapter.md`. The complete generic system lives in that skill, while Horizon only wires in the adapted recovery entrypoint, single next action, evidence loop, failed explorations, and necessary TODO state.
+- When multi-turn or long-running tasks need recoverable state, first use the Horizon adapter in `agent-project-system`; by default, do not create `.agent-os/` or `CLAUDE.md` at the Horizon root unless the user explicitly asks for a separate state system.
 - Avoid turning skills into long API manuals. Put stable domain detail in `docs/agents/zh-CN/*.md`; put concrete reproduction steps or recurring tasks in `docs/tasks/zh-CN/*.md`.
 - Add a new skill only when there is a clear trigger phrase, repeated workflow, or frequent-misread risk; every skill must have an accurate frontmatter `description`.
 - Useful lightweight structures to borrow include `Common Mistakes`, `Key Paths`, `Validation`, and `Do` / `Do not` sections because they reduce misreads and hallucination.

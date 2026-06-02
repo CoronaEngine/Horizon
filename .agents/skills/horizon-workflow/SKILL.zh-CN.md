@@ -56,6 +56,8 @@ description: Horizon C++ Vulkan 仓库的通用 Agent 工作流。Agent 修改�
 
 - Horizon 保持薄路由：根 `AGENTS` 只放入口规则，长期领域上下文放 `docs/agents/zh-CN/`，短任务清单和验证配方放 `docs/tasks/zh-CN/`，skill 只承载强触发的工作流和意图识别。
 - 不要整体照搬外部仓库的 AI 框架。借鉴前先比较仓库结构、语言源、同步机制、上下文体量和过期风险；不适合 Horizon 的框架应舍弃。
+- 用户要求吸收、初始化、采纳或恢复项目状态系统时，加载 `.agents/skills/agent-project-system/SKILL.md`，目标是 Horizon 本仓库时继续读取其 `references/horizon-adapter.md`；完整通用系统放在该 skill 中，Horizon 本仓库只接入适配后的恢复入口、唯一下一步、证据闭环、失败探索和必要 TODO 状态。
+- 多轮或长任务需要可恢复状态时，先使用 `agent-project-system` 的 Horizon 适配规则；默认不要在 Horizon 根目录创建 `.agent-os/` 或 `CLAUDE.md`，除非用户明确要求独立状态系统。
 - 避免把 skill 写成长篇 API 手册。稳定领域细节优先沉淀到 `docs/agents/zh-CN/*.md`，具体复现步骤或常见任务优先沉淀到 `docs/tasks/zh-CN/*.md`。
 - 只有存在明确触发词、重复工作流或高频误判风险时才新增 skill；每个 skill 必须有准确的 frontmatter `description`。
 - 可借鉴的轻量结构包括 `Common Mistakes`、`Key Paths`、`Validation`、`Do` / `Do not`，用于减少误判和幻觉。

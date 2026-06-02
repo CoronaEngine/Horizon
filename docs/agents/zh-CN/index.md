@@ -6,7 +6,7 @@
 
 - `AGENTS.zh-CN.md`
 - `docs/tasks/zh-CN/*.md`
-- `.agents/skills/horizon-workflow/SKILL.zh-CN.md`
+- `.agents/skills/*/SKILL.zh-CN.md`
 
 英文文件是 Agent 默认读取入口或按需任务说明：
 
@@ -19,9 +19,10 @@
 - `docs/agents/push-constants.md`
 - `docs/tasks/*.md`
 
-共享工作流 skill：
+共享项目 skill：
 
-- `.agents/skills/horizon-workflow/SKILL.md`
+- `.agents/skills/horizon-workflow/SKILL.md`：仓库工作流、口令路由和上下文路由。
+- `.agents/skills/agent-project-system/SKILL.md`：项目状态文档系统、长任务恢复、证据闭环和失败探索。
 
 保持每个上下文包短小稳定。优先新增小文件，不要把细节塞回 `AGENTS.md`。
 

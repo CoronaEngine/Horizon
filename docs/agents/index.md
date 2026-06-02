@@ -1,5 +1,5 @@
 # Horizon Agent Context Index
-<!-- AGENT_DOCS_INDEX_ZH_CN_SHA256: 1fdf8a1afcfcb4c657913facee60e1f122bfcd02f501baf8a426a0294a5043f6 -->
+<!-- AGENT_DOCS_INDEX_ZH_CN_SHA256: a075847831247a53cd51b9596437ba29dc8b7284d0d3277d25b24cc8746699e2 -->
 
 This directory contains vendor-neutral AI context packs. Any agent can read them; they are not Codex-specific.
 
@@ -8,7 +8,7 @@ Chinese sources are human-maintained:
 - `AGENTS.zh-CN.md`
 - `docs/agents/zh-CN/*.md`
 - `docs/tasks/zh-CN/*.md`
-- `.agents/skills/horizon-workflow/SKILL.zh-CN.md`
+- `.agents/skills/*/SKILL.zh-CN.md`
 
 Start with root `AGENTS.md`, then load only the relevant context pack or task note:
 
@@ -20,9 +20,10 @@ Start with root `AGENTS.md`, then load only the relevant context pack or task no
 - `push-constants.md`: push constant reflection and runtime consumer path.
 - `docs/tasks/*.md`: short task checklists, reproduction steps, and validation recipes.
 
-Shared workflow skill:
+Shared project skills:
 
-- `.agents/skills/horizon-workflow/SKILL.md`
+- `.agents/skills/horizon-workflow/SKILL.md`: repository workflow, project command routing, and context routing.
+- `.agents/skills/agent-project-system/SKILL.md`: project state document system, long-task recovery, evidence loops, and failed explorations.
 
 Keep these files stable and focused. Prefer adding a new small context pack over growing `AGENTS.md`.
 

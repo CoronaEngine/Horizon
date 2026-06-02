@@ -116,6 +116,12 @@ $syncPairs = @(
         Target = ".agents/skills/horizon-workflow/SKILL.md"
         Marker = "HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256"
         Label = "horizon workflow skill"
+    },
+    @{
+        Source = ".agents/skills/agent-project-system/SKILL.zh-CN.md"
+        Target = ".agents/skills/agent-project-system/SKILL.md"
+        Marker = "AGENT_PROJECT_SYSTEM_SKILL_ZH_CN_SHA256"
+        Label = "agent project system skill"
     }
 )
 
