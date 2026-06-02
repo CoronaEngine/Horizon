@@ -3,6 +3,7 @@
 #include "device_manager.h"
 #include "hardware_wrapper_vulkan/display/display_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/pipeline/vulkan_compute_pipeline.h"
 #include "hardware_wrapper_vulkan/pipeline/vulkan_rasterizer_pipeline.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
@@ -37,6 +38,7 @@ namespace Corona::Horizon
 
         using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
         using ImageStore = ResourceStore<ImageWrap, ImageReleaser>;
+        using ComputePipelineStore = ResourceStore<ComputePipelineWrap, NoopReleaser>;
         using RasterizerPipelineStore = ResourceStore<RasterizerPipelineWrap, NoopReleaser>;
 
         [[nodiscard]] BufferStore::Read read_buffer(const ResourceHandle& handle)
@@ -57,6 +59,11 @@ namespace Corona::Horizon
         [[nodiscard]] RasterizerPipelineStore::Read read_rasterizer_pipeline(const ResourceHandle& handle)
         {
             return read<RasterizerPipelineStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] ComputePipelineStore::Read read_compute_pipeline(const ResourceHandle& handle)
+        {
+            return read<ComputePipelineStore>(ResourceBridge::token(handle));
         }
 
         [[nodiscard]] uint32_t resolve_layer_count(const ImageWrap& image) noexcept
@@ -228,6 +235,15 @@ namespace Corona::Horizon
                 throw std::logic_error("DrawIndexed command requires a valid RasterizerPipeline.");
 
             return std::static_pointer_cast<VulkanRasterizerPipeline>(pipeline->impl);
+        }
+
+        [[nodiscard]] std::shared_ptr<VulkanComputePipeline> compute_impl(const ResourceHandle& handle)
+        {
+            auto pipeline = read_compute_pipeline(handle);
+            if (!pipeline || !pipeline->impl)
+                throw std::logic_error("Dispatch command requires a valid ComputePipeline.");
+
+            return std::static_pointer_cast<VulkanComputePipeline>(pipeline->impl);
         }
 
         [[nodiscard]] std::vector<DeviceId> devices_from_mask(DeviceMask mask)
@@ -468,6 +484,7 @@ namespace Corona::Horizon
         command.payload.dispatch = desc;
         command.sequence = next_sequence();
         command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
+        command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
         mark_device_requirements(devices);
         commands_.push_back(std::move(command));
     }
@@ -954,6 +971,75 @@ namespace Corona::Horizon
                                        dst->buffer_handle,
                                        1,
                                        &copy);
+                break;
+            }
+            case CommandOp::Dispatch:
+            {
+                if (command.resources.empty())
+                    throw std::logic_error("Dispatch command is missing a ComputePipeline resource.");
+
+                const DispatchDesc& dispatch = command.payload.dispatch;
+                std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(command.resources[0].handle);
+
+                for (const DispatchResourceBinding& binding : dispatch.bindings)
+                {
+                    if (binding.kind != DispatchBindingKind::StorageImage)
+                    {
+                        continue;
+                    }
+
+                    ImageStore::Write image = write_image(binding.resource);
+                    if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
+                    {
+                        throw std::logic_error("Dispatch storage image binding requires a valid HardwareImage.");
+                    }
+
+                    transition_image(command_buffer,
+                                     *image,
+                                     VK_IMAGE_LAYOUT_GENERAL,
+                                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                }
+
+                VulkanComputePipeline::PreparedDispatch prepared = pipeline->prepare_dispatch(device_, dispatch);
+                if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
+                    throw std::logic_error("Dispatch resolved an invalid compute pipeline.");
+
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, prepared.pipeline);
+                if (prepared.descriptor_set != VK_NULL_HANDLE)
+                {
+                    vkCmdBindDescriptorSets(command_buffer,
+                                            VK_PIPELINE_BIND_POINT_COMPUTE,
+                                            prepared.layout,
+                                            0,
+                                            1,
+                                            &prepared.descriptor_set,
+                                            0,
+                                            nullptr);
+                }
+
+                if (!dispatch.push_constant_data.empty())
+                {
+                    if (dispatch.push_constant_data.size() > std::numeric_limits<uint32_t>::max())
+                        throw std::overflow_error("Dispatch push constant data exceeds uint32_t.");
+
+                    vkCmdPushConstants(command_buffer,
+                                       prepared.layout,
+                                       VK_SHADER_STAGE_COMPUTE_BIT,
+                                       0,
+                                       static_cast<uint32_t>(dispatch.push_constant_data.size()),
+                                       dispatch.push_constant_data.data());
+                }
+
+                if (prepared.descriptor_set_lifetime)
+                {
+                    submission.keep_alive.add_object(prepared.descriptor_set_lifetime);
+                }
+
+                vkCmdDispatch(command_buffer,
+                              std::max(1u, dispatch.groups_x),
+                              std::max(1u, dispatch.groups_y),
+                              std::max(1u, dispatch.groups_z));
                 break;
             }
             case CommandOp::BeginRendering:

@@ -47,12 +47,42 @@ namespace
 
         throw std::invalid_argument("Unknown --threads mode: " + std::string(value));
     }
+
+    [[nodiscard]] ExampleDefaultMode parse_example_mode(std::string_view value)
+    {
+        if (value == "default")
+        {
+            return ExampleDefaultMode::Default;
+        }
+        if (value == "glsl")
+        {
+            return ExampleDefaultMode::Glsl;
+        }
+        if (value == "edsl")
+        {
+            return ExampleDefaultMode::Edsl;
+        }
+        if (value == "texture")
+        {
+            return ExampleDefaultMode::Texture;
+        }
+        if (value == "compute")
+        {
+            return ExampleDefaultMode::Compute;
+        }
+        if (value == "multi-window")
+        {
+            return ExampleDefaultMode::MultiWindow;
+        }
+
+        throw std::invalid_argument("Unknown Horizon example: " + std::string(value));
+    }
 }
 
 int main(int argc, char** argv)
 {
     uint32_t frames = 180;
-    std::string_view example = "default";
+    ExampleDefaultMode mode = ExampleDefaultMode::Default;
     ExampleDefaultThreadMode thread_mode = ExampleDefaultThreadMode::SingleThreaded;
 
     try
@@ -80,22 +110,22 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            if (arg == "default")
+            if (!arg.starts_with("--"))
             {
-                example = "default";
+                mode = parse_example_mode(arg);
                 continue;
             }
 
             throw std::invalid_argument("Unknown HorizonExamples argument: " + std::string(arg));
         }
 
-        if (example == "default")
+        if (mode != ExampleDefaultMode::Default && thread_mode != ExampleDefaultThreadMode::SingleThreaded)
         {
-            run_example_default(frames, thread_mode);
-            return 0;
+            throw std::invalid_argument("--threads is currently supported only by the default example mode.");
         }
 
-        throw std::invalid_argument("Unknown Horizon example: " + std::string(example));
+        run_example_default(frames, thread_mode, mode);
+        return 0;
     }
     catch (const std::exception& error)
     {

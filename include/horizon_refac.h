@@ -1193,11 +1193,11 @@ namespace Corona::Horizon
     // Pipeline Runtime
     // ================================================================
 
-    class ComputePipeline : public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipeline>
+    class ComputePipeline : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipeline>
     {
     public:
         ComputePipeline();
-        ComputePipeline(ComputePipelineDesc& desc, const std::source_location& source_location = std::source_location::current());
+        explicit ComputePipeline(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
 
         ComputePipeline(const ComputePipeline& other);
         ComputePipeline(ComputePipeline&& other) noexcept;
@@ -1206,6 +1206,11 @@ namespace Corona::Horizon
         ComputePipeline& operator=(const ComputePipeline& other);
         ComputePipeline& operator=(ComputePipeline&& other) noexcept;
         ComputePipeline& operator()(uint16_t x, uint16_t y, uint16_t z);
+        ComputePipeline& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
+        ComputePipeline& bind_storage_image(uint32_t binding, const HardwareImage& image);
+        [[nodiscard]] CommandBatch command_batch() const;
+        [[nodiscard]] explicit operator bool() const noexcept;
+        [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
 
     private:
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
@@ -1226,9 +1231,6 @@ namespace Corona::Horizon
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type);
-
-        mutable std::mutex compute_pipeline_mutex_;
-        std::atomic<std::uintptr_t> compute_pipeline_id_;
     };
 
     class RasterizerPipeline : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipeline>

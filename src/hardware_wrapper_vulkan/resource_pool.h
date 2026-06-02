@@ -426,7 +426,7 @@ namespace Corona::Horizon
 
     struct ComputePipelineWrap
     {
-        void* impl { nullptr };
+        std::shared_ptr<void> impl {};
     };
 
     struct RasterizerPipelineWrap

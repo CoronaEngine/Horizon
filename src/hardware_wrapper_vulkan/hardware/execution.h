@@ -123,11 +123,35 @@ namespace Corona::Horizon
         uint32_t dst_mip { 0 };
     };
 
+    struct ResourceUse
+    {
+        ResourceHandle handle {};
+        AccessKind access { AccessKind::Read };
+        uint64_t stages { 0 };
+    };
+
+    enum class DispatchBindingKind
+    {
+        StorageBuffer,
+        StorageImage
+    };
+
+    struct DispatchResourceBinding
+    {
+        uint32_t binding { 0 };
+        ResourceHandle resource {};
+        DispatchBindingKind kind { DispatchBindingKind::StorageBuffer };
+        AccessKind access { AccessKind::ReadWrite };
+    };
+
     struct DispatchDesc
     {
         uint32_t groups_x { 1 };
         uint32_t groups_y { 1 };
         uint32_t groups_z { 1 };
+        std::vector<DispatchResourceBinding> bindings;
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
     };
 
     struct RenderingDesc
@@ -159,13 +183,6 @@ namespace Corona::Horizon
         ImageRef swapchain_image {};
         DeviceId present_device {};
         bool allow_cpu_bridge_fallback { true };
-    };
-
-    struct ResourceUse
-    {
-        ResourceHandle handle {};
-        AccessKind access { AccessKind::Read };
-        uint64_t stages { 0 };
     };
 
     struct CommandPayload
