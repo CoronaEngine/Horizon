@@ -1,5 +1,5 @@
 # Horizon Test Entry
-<!-- TESTS_README_ZH_CN_SHA256: 58e6c349b7fbdc87e72aae756000b6bde9ad2ad833aaf6e7647b259f0b9238e2 -->
+<!-- TESTS_README_ZH_CN_SHA256: db8c337632ee0a5ea256b81ac8225a83f936b78a064a13370e06a677bb3a0036 -->
 
 Chinese source: `README.zh-CN.md`. Keep this English default entry in sync with that file.
 
@@ -143,6 +143,7 @@ Covered cases:
 - `execution.present_receipt`: present nodes submit through the present queue and report status through `SubmitReceipt`.
 - `execution.cross_device_present`: cross-device present can record a CPU bridge fallback, while ordinary cross-device resource hazards fail without explicit sync.
 - `execution.parallel_record_and_submit`: independent recorders can close concurrently, and `Queue` serializes timeline increments for parallel fake submissions.
+- `execution.mesh_render_display_threads`: mesh, render, and display threads exchange frame snapshots while present remains an execution node.
 
 This module does not fill real `VkCommandBuffer` objects, create pipelines or descriptors, or verify actual GPU execution results. It protects execution planning and submission lifetimes, not the Vulkan encoder.
 

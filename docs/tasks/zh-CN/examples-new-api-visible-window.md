@@ -5,13 +5,23 @@
 - 需要恢复或验证 `HorizonExamples` 是否能用新 public API 打开 GLFW 窗口、提交 Vulkan 渲染并 present。
 - 目标是重构后的新 API 路线；不要为了跑通示例恢复 `ImageFormat`、`BufferUsage`、`HardwareImageCreateInfo` 等旧 public 名字。
 - 旧 `examples/example_baseline`、`example_glsl`、`example_edsl` 可以作为参考，但默认不要编入当前第一阶段验收。
+- 第一阶段验收只是可见窗口和 present smoke；texture、compute、EDSL、GLSL、多窗口旧 default 行为都放到后续迁移批次。
 
 ## 入口和范围
 
 - public umbrella 是 `include/Horizon.h`，应导出 `format.h`、`resource.h`、`horizon_refac.h` 和新执行/显示 facade。
 - 示例入口是 `examples/main.cpp`，默认运行 `default`，应支持 `--frames N` 自动退出。
 - 当前可运行示例放在 `examples/example_default/`，保持单窗口、单离屏 color target、最小图元或 fullscreen triangle。
+- 三线程第二阶段通过 `--threads mesh-render-display` 显式启用；默认仍保留第一阶段单线程 smoke 路径。
 - 实现范围优先放在 `src/hardware_wrapper` 和 `src/hardware_wrapper_vulkan`；`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan` 只作历史参考。
+
+## 三线程第二阶段
+
+- `mesh` 线程负责 CPU mesh 数据生成或更新，产出不可变帧快照或上传请求，不共享可变 mesh 容器。
+- `render` 线程消费 mesh 快照，录制/提交 `executor.stream() << ... << present(displayer, image) << commit()`。
+- `display` 线程负责 GLFW 窗口生命周期、事件轮询、退出信号和 `HardwareDisplayer` 创建；主线程只启动、join 和汇总错误。
+- `present(displayer, image)` 仍是 execution graph node，不要把 present 改成 display 线程里的 commit 后 side step。
+- `HardwareBuffer`、`HardwareImage`、pipeline wrapper 跨线程只复制 handle；不要跨线程裸改 backend 可变状态。
 
 ## Present 路径
 
@@ -39,8 +49,10 @@ build\ninja-msvc\tests\Debug\HorizonTests.exe hardware_context.lazy_construction
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.stream_facade_commit
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.rasterizer_pipeline_ir
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.present_receipt
+build\ninja-msvc\tests\Debug\HorizonTests.exe execution.mesh_render_display_threads
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.rasterizer_pipeline_real_vulkan_render
 build\ninja-msvc\examples\Debug\HorizonExamples.exe --frames 3
+build\ninja-msvc\examples\Debug\HorizonExamples.exe default --threads mesh-render-display --frames 3
 
 git diff --check
 ```

@@ -1,18 +1,28 @@
 # Horizon Examples New API Visible Window Notes
-<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: e074fe7e392ec367c931a08c4470cc138ba0c039e39633b07e12ee81f922fda7 -->
+<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 00ec90155cd69a1a748e106b1ac94dceeb35899e1042009a03bc8f6e4b152c99 -->
 
 ## When To Use
 
 - Use this when restoring or validating `HorizonExamples` with the new public API: open a GLFW window, submit Vulkan rendering, and present.
 - Stay on the refactored new API path. Do not restore old public names such as `ImageFormat`, `BufferUsage`, or `HardwareImageCreateInfo` just to run examples.
 - Old `examples/example_baseline`, `example_glsl`, and `example_edsl` may remain references, but should not be compiled for the first-stage acceptance by default.
+- First-stage acceptance is only the visible-window and present smoke path; texture, compute, EDSL, GLSL, and old multi-window default behavior remain later migration batches.
 
 ## Entrypoints And Scope
 
 - The public umbrella is `include/Horizon.h`; it should export `format.h`, `resource.h`, `horizon_refac.h`, and the new execution/display facades.
 - The executable entrypoint is `examples/main.cpp`; it defaults to `default` and should support `--frames N` for automatic exit.
 - The current runnable sample lives in `examples/example_default/`: one window, one offscreen color target, and a minimal primitive or fullscreen triangle.
+- The second-stage three-thread path is enabled explicitly with `--threads mesh-render-display`; the default keeps the first-stage single-thread smoke path.
 - Keep implementation work in `src/hardware_wrapper` and `src/hardware_wrapper_vulkan`; treat `src/HardwareWrapper` and `src/HardwareWrapperVulkan` as historical references.
+
+## Three-Thread Second Stage
+
+- The `mesh` thread owns CPU mesh generation or updates and produces immutable frame snapshots or upload requests; it must not share mutable mesh containers.
+- The `render` thread consumes mesh snapshots and submits `executor.stream() << ... << present(displayer, image) << commit()`.
+- The `display` thread owns the GLFW window lifecycle, event polling, exit signal, and `HardwareDisplayer` creation; the main thread only starts, joins, and aggregates errors.
+- `present(displayer, image)` remains an execution graph node; do not move present into a post-commit side step on the display thread.
+- `HardwareBuffer`, `HardwareImage`, and pipeline wrappers may cross threads by copied handles only; do not mutate backend state through raw cross-thread access.
 
 ## Present Path
 
@@ -40,8 +50,10 @@ build\ninja-msvc\tests\Debug\HorizonTests.exe hardware_context.lazy_construction
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.stream_facade_commit
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.rasterizer_pipeline_ir
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.present_receipt
+build\ninja-msvc\tests\Debug\HorizonTests.exe execution.mesh_render_display_threads
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.rasterizer_pipeline_real_vulkan_render
 build\ninja-msvc\examples\Debug\HorizonExamples.exe --frames 3
+build\ninja-msvc\examples\Debug\HorizonExamples.exe default --threads mesh-render-display --frames 3
 
 git diff --check
 ```

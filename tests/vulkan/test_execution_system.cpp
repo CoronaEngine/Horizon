@@ -10,9 +10,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <deque>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1013,6 +1017,249 @@ void main()
 
         return Corona::Horizon::Tests::TestResult::pass();
     }
+
+    struct MeshRenderDisplayThreadState
+    {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::deque<uint32_t> mesh_frames;
+        std::shared_ptr<Corona::Horizon::DisplayManager> display_manager;
+        std::exception_ptr failure;
+        Corona::Horizon::DisplayerRef displayer { 601 };
+        uint32_t mesh_produced { 0 };
+        uint32_t render_consumed { 0 };
+        uint32_t present_results { 0 };
+        uint64_t submitted_timeline { 0 };
+        size_t in_flight_after_retire { 0 };
+        bool display_ready { false };
+        bool mesh_finished { false };
+        bool render_finished { false };
+        bool stop_requested { false };
+    };
+
+    void publish_thread_failure(MeshRenderDisplayThreadState& state)
+    {
+        {
+            std::lock_guard lock(state.mutex);
+            if (state.failure == nullptr)
+            {
+                state.failure = std::current_exception();
+            }
+            state.stop_requested = true;
+        }
+        state.cv.notify_all();
+    }
+
+    [[nodiscard]] bool push_mesh_frame(MeshRenderDisplayThreadState& state, uint32_t frame)
+    {
+        std::unique_lock lock(state.mutex);
+        state.cv.wait(lock, [&] {
+            return state.stop_requested || state.mesh_frames.size() < 2;
+        });
+
+        if (state.stop_requested)
+        {
+            return false;
+        }
+
+        state.mesh_frames.push_back(frame);
+        ++state.mesh_produced;
+        lock.unlock();
+        state.cv.notify_all();
+        return true;
+    }
+
+    [[nodiscard]] std::optional<uint32_t> pop_mesh_frame(MeshRenderDisplayThreadState& state)
+    {
+        std::unique_lock lock(state.mutex);
+        state.cv.wait(lock, [&] {
+            return state.stop_requested || !state.mesh_frames.empty() || state.mesh_finished;
+        });
+
+        if (state.stop_requested || state.mesh_frames.empty())
+        {
+            return std::nullopt;
+        }
+
+        uint32_t frame = state.mesh_frames.front();
+        state.mesh_frames.pop_front();
+        lock.unlock();
+        state.cv.notify_all();
+        return frame;
+    }
+
+    [[nodiscard]] Corona::Horizon::DisplayerRef wait_for_fake_display(MeshRenderDisplayThreadState& state)
+    {
+        std::unique_lock lock(state.mutex);
+        state.cv.wait(lock, [&] {
+            return state.display_ready || state.stop_requested || state.failure != nullptr;
+        });
+
+        std::exception_ptr failure = state.failure;
+        if (failure != nullptr)
+        {
+            lock.unlock();
+            std::rethrow_exception(failure);
+        }
+
+        expect(state.display_ready, "Display thread should publish a displayer before render starts.");
+        return state.displayer;
+    }
+
+    void mesh_thread_for_tests(MeshRenderDisplayThreadState& state, uint32_t frame_count) noexcept
+    {
+        try
+        {
+            for (uint32_t frame = 0; frame < frame_count; ++frame)
+            {
+                if (!push_mesh_frame(state, frame))
+                {
+                    break;
+                }
+            }
+        }
+        catch (...)
+        {
+            publish_thread_failure(state);
+        }
+
+        {
+            std::lock_guard lock(state.mutex);
+            state.mesh_finished = true;
+        }
+        state.cv.notify_all();
+    }
+
+    void display_thread_for_tests(MeshRenderDisplayThreadState& state) noexcept
+    {
+        try
+        {
+            std::shared_ptr<Corona::Horizon::DisplayManager> manager =
+                Corona::Horizon::make_fake_display_manager(state.displayer);
+            manager->set_fake_present_status_for_tests(Corona::Horizon::PresentStatus::Presented, "mesh/render/display fake present");
+            Corona::Horizon::register_display_manager(manager);
+
+            {
+                std::lock_guard lock(state.mutex);
+                state.display_manager = std::move(manager);
+                state.display_ready = true;
+            }
+            state.cv.notify_all();
+
+            std::unique_lock lock(state.mutex);
+            state.cv.wait(lock, [&] {
+                return state.render_finished || state.stop_requested || state.failure != nullptr;
+            });
+        }
+        catch (...)
+        {
+            publish_thread_failure(state);
+        }
+    }
+
+    void render_thread_for_tests(MeshRenderDisplayThreadState& state) noexcept
+    {
+        try
+        {
+            Corona::Horizon::DisplayerRef displayer = wait_for_fake_display(state);
+            Corona::Horizon::Queue present_queue({ 0 }, Corona::Horizon::QueueCapability::Present);
+            Corona::Horizon::HardwareExecutor executor(
+                [&](Corona::Horizon::DeviceId, Corona::Horizon::QueueCapability capability) -> Corona::Horizon::Queue& {
+                    expect(capability == Corona::Horizon::QueueCapability::Present,
+                           "Threaded render path should submit only the present queue in this fake test.");
+                    return present_queue;
+                });
+
+            Corona::Horizon::ResourceHandle image = test_resource(602);
+            uint32_t consumed = 0;
+            uint32_t presented = 0;
+            for (std::optional<uint32_t> frame = pop_mesh_frame(state);
+                 frame;
+                 frame = pop_mesh_frame(state))
+            {
+                (void)*frame;
+                Corona::Horizon::SubmitReceipt receipt =
+                    executor.stream()
+                    << Corona::Horizon::present(displayer, { image }, { 0 })
+                    << Corona::Horizon::commit();
+
+                expect(receipt.tokens.size() == 1, "Each threaded fake frame should submit one present batch.");
+                expect(receipt.presents.size() == 1, "Each threaded fake frame should report one present result.");
+                expect(receipt.presents[0].status == Corona::Horizon::PresentStatus::Presented,
+                       "Fake display manager should surface a Presented receipt.");
+                ++consumed;
+                ++presented;
+            }
+
+            const uint64_t submitted = present_queue.last_submitted_value();
+            present_queue.mark_completed_for_tests(submitted);
+            present_queue.retire_completed();
+
+            {
+                std::lock_guard lock(state.mutex);
+                state.render_consumed = consumed;
+                state.present_results = presented;
+                state.submitted_timeline = submitted;
+                state.in_flight_after_retire = present_queue.in_flight_count();
+                state.render_finished = true;
+                state.stop_requested = true;
+            }
+            state.cv.notify_all();
+        }
+        catch (...)
+        {
+            publish_thread_failure(state);
+            {
+                std::lock_guard lock(state.mutex);
+                state.render_finished = true;
+                state.stop_requested = true;
+            }
+            state.cv.notify_all();
+        }
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_mesh_render_display_thread_pipeline()
+    {
+        constexpr uint32_t frame_count = 4;
+        MeshRenderDisplayThreadState state;
+
+        std::thread display_thread(display_thread_for_tests, std::ref(state));
+        std::thread mesh_thread(mesh_thread_for_tests, std::ref(state), frame_count);
+        std::thread render_thread(render_thread_for_tests, std::ref(state));
+
+        mesh_thread.join();
+        render_thread.join();
+        display_thread.join();
+
+        std::exception_ptr failure;
+        uint32_t mesh_produced = 0;
+        uint32_t render_consumed = 0;
+        uint32_t present_results = 0;
+        uint64_t submitted_timeline = 0;
+        size_t in_flight_after_retire = 0;
+        {
+            std::lock_guard lock(state.mutex);
+            failure = state.failure;
+            mesh_produced = state.mesh_produced;
+            render_consumed = state.render_consumed;
+            present_results = state.present_results;
+            submitted_timeline = state.submitted_timeline;
+            in_flight_after_retire = state.in_flight_after_retire;
+        }
+
+        if (failure != nullptr)
+        {
+            std::rethrow_exception(failure);
+        }
+
+        expect(mesh_produced == frame_count, "Mesh thread should produce every requested immutable frame snapshot.");
+        expect(render_consumed == frame_count, "Render thread should consume every mesh frame snapshot.");
+        expect(present_results == frame_count, "Render thread should receive one present result per frame.");
+        expect(submitted_timeline == frame_count, "Present queue should serialize one submission per consumed frame.");
+        expect(in_flight_after_retire == 0, "Threaded fake present submissions should retire cleanly.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
 }
 
 namespace Corona::Horizon::Tests
@@ -1109,6 +1356,11 @@ namespace Corona::Horizon::Tests
                 "execution.parallel_record_and_submit",
                 "Independent recorders close concurrently and Queue serializes parallel fake submissions.",
                 test_parallel_recorders_and_serialized_queue_submit,
+            },
+            {
+                "execution.mesh_render_display_threads",
+                "Mesh, render, and display threads exchange frame snapshots and keep present as an execution node.",
+                test_mesh_render_display_thread_pipeline,
             },
         };
     }

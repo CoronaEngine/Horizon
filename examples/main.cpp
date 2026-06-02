@@ -32,12 +32,28 @@ namespace
 
         return static_cast<uint32_t>(result);
     }
+
+    [[nodiscard]] ExampleDefaultThreadMode parse_thread_mode(std::string_view value)
+    {
+        if (value == "single" || value == "single-threaded")
+        {
+            return ExampleDefaultThreadMode::SingleThreaded;
+        }
+
+        if (value == "mesh-render-display")
+        {
+            return ExampleDefaultThreadMode::MeshRenderDisplay;
+        }
+
+        throw std::invalid_argument("Unknown --threads mode: " + std::string(value));
+    }
 }
 
 int main(int argc, char** argv)
 {
     uint32_t frames = 180;
     std::string_view example = "default";
+    ExampleDefaultThreadMode thread_mode = ExampleDefaultThreadMode::SingleThreaded;
 
     try
     {
@@ -54,6 +70,16 @@ int main(int argc, char** argv)
                 continue;
             }
 
+            if (arg == "--threads")
+            {
+                if (index + 1 >= argc)
+                {
+                    throw std::invalid_argument("--threads requires a value.");
+                }
+                thread_mode = parse_thread_mode(argv[++index]);
+                continue;
+            }
+
             if (arg == "default")
             {
                 example = "default";
@@ -65,7 +91,7 @@ int main(int argc, char** argv)
 
         if (example == "default")
         {
-            run_example_default(frames);
+            run_example_default(frames, thread_mode);
             return 0;
         }
 

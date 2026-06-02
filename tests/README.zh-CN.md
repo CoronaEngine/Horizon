@@ -142,6 +142,7 @@ Windows/MSVC 命令行验证时，优先先进入 Visual Studio Developer Comman
 - `execution.present_receipt`：present node 通过 present queue 提交，并在 `SubmitReceipt` 中报告 present 状态。
 - `execution.cross_device_present`：跨设备 present 可记录 CPU bridge fallback，普通跨设备资源 hazard 在没有显式同步时应失败。
 - `execution.parallel_record_and_submit`：独立 recorders 可以并发 close，`Queue` 必须串行化并发 fake submissions 的 timeline 增量。
+- `execution.mesh_render_display_threads`：mesh、render、display 三线程交换帧快照，并保持 present 是 execution node。
 
 这个模块不填充真实 `VkCommandBuffer`，不创建 pipeline / descriptor，也不验证实际 GPU 执行结果。它保护 execution 计划和提交生命周期，而不是 Vulkan encoder。
 
