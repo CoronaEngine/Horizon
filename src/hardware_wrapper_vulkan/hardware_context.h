@@ -66,4 +66,6 @@ namespace Corona::Horizon
     DeviceManager& device_manager();
     VkInstance vulkan_instance();
     std::vector<std::shared_ptr<HardwareContext::DeviceContext>> all_devices();
+
+    extern HardwareContext g_hardware_context;
 }

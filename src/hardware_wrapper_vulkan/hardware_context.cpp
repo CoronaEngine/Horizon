@@ -17,6 +17,8 @@
 
 namespace Corona::Horizon
 {
+    HardwareContext g_hardware_context;
+
     constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
 
     std::vector<const char*> supported_instance_extensions(std::set<const char*> requested_extensions)
@@ -69,6 +71,25 @@ namespace Corona::Horizon
         return false;
     }
 
+    int device_type_priority(VkPhysicalDeviceType type) noexcept
+    {
+        switch (type)
+        {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return 0;
+        case VK_PHYSICAL_DEVICE_TYPE_OTHER:
+            return 1;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            return 2;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return 3;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            return 4;
+        default:
+            return 5;
+        }
+    }
+
 #ifdef CORONA_ENGINE_DEBUG
     bool validation_layer_available()
     {
@@ -99,8 +120,7 @@ namespace Corona::Horizon
 
     HardwareContext& hardware_context()
     {
-        static HardwareContext context;
-        return context;
+        return g_hardware_context;
     }
 
     HardwareContext::DeviceContext& main_device_context()
@@ -462,13 +482,17 @@ namespace Corona::Horizon
 
     void HardwareContext::choose_main_device()
     {
-        /*main_device_ = *std::min_element(devices_.begin(), devices_.end(), [](const auto& left, const auto& right) {
-            const auto left_type = left->device_manager.getFeaturesUtils().supportedProperties.properties.deviceType;
-            const auto right_type = right->device_manager.getFeaturesUtils().supportedProperties.properties.deviceType;
-            return getDeviceTypePriority(left_type) < getDeviceTypePriority(right_type);
+        if (devices_.empty())
+        {
+            throw std::runtime_error("No hardware devices available.");
+        }
+
+        main_device_ = *std::min_element(devices_.begin(), devices_.end(), [](const auto& left, const auto& right) {
+            const auto left_type = left->device_manager.properties().properties.deviceType;
+            const auto right_type = right->device_manager.properties().properties.deviceType;
+            return device_type_priority(left_type) < device_type_priority(right_type);
         });
 
-        CFW_LOG_DEBUG("Selected main device: {}", main_device_->device_manager.getFeaturesUtils().supportedProperties.properties.deviceName);*/
-        main_device_ = devices_.empty() ? nullptr : devices_.front();
+        CFW_LOG_DEBUG("Selected main device: {}", main_device_->device_manager.properties().properties.deviceName);
     }
 }

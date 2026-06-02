@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 6d688b3c7b9d721a3a6c877f5dd2402d56736266b612bedfca4e88981a07ee93 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: cf56aaa345fa0d0bd027c28edcd936524e0ca54e5ccd0da24f132874b7346541 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -42,6 +42,10 @@ Be careful with:
 ## Device / Queue Boundaries
 
 - `HardwareContext::create_devices()` enumerates and filters physical devices, creates each `DeviceContext`, and wires `DeviceManager` / `ResourceManager`; do not accumulate logical-device, queue-family, or queue-submit policy there.
+- The lower-case `HardwareContext` may be exposed as a global publishing entry, but it should remain lightweight and lazy: the constructor only prepares configuration, while `VkInstance` / device creation stays behind `std::once_flag` / `std::call_once` and is triggered by accessors; `devices()` / `all_devices()` return `shared_ptr<DeviceContext>` snapshots instead of exposing the internal container by reference.
+- If mirroring the historical camel-case backend's global `HardwareContext`, do not copy its eager Vulkan initialization; also avoid touching GPU state from other global object constructors, where static initialization order can bite.
+- During `HardwareContext` shutdown, stop external worker/render threads first, then release in `ResourceManager::shutdown()`, `DeviceManager::shutdown()`, `vkDestroyInstance` order; do not restore the old `cleanUpResourceManager()` / `cleanUpDeviceManager()` names.
+- Lower-case main-device selection reads `DeviceManager::properties().properties.deviceType` / `deviceName`; do not use the historical backend's `getFeaturesUtils()` path. Keep a discrete-GPU-first priority helper local to `hardware_context.cpp`.
 - `ResourceManager` depends on an initialized `DeviceManager` for instance / physical device / logical device access; `HardwareContext` only wires initialization and must not own buffer allocation policy.
 - `DeviceManager` handles per-device initialization after receiving a `VkInstance` / `VkPhysicalDevice`: filter device extensions, enable the feature chain, create `VkDevice`, snapshot queue families, and create `Queue` wrappers.
 - `DeviceManager` does not own cross-GPU sync policy, resource allocation policy, execution DAG scheduling, or delayed-release queues; keep those in `HardwareExecutor`, resource manager / pool, compiler / encoder, and `Queue` timeline retirement respectively.

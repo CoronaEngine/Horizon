@@ -41,6 +41,10 @@
 ## Device / Queue 边界
 
 - `HardwareContext::create_devices()` 负责枚举和过滤 physical device、创建每个 `DeviceContext`、接线 `DeviceManager` / `ResourceManager`，不要在这里累积 logical device、queue family 或 queue submit 策略。
+- lower-case `HardwareContext` 可以作为全局发布入口，但仍应保持轻量和懒初始化：构造函数只准备配置，`VkInstance` / device 创建继续通过 `std::once_flag` / `std::call_once` 在访问时触发；`devices()` / `all_devices()` 返回 `shared_ptr<DeviceContext>` 快照，不要暴露内部容器引用。
+- 如果模仿历史 camel-case 后端暴露全局 `HardwareContext`，不要把旧后端的 eager Vulkan 初始化搬过来；也不要在其他全局对象构造期间主动访问 GPU，以免触发静态初始化顺序问题。
+- `HardwareContext` 销毁时应先停用外部 worker/render 线程，再按 `ResourceManager::shutdown()`、`DeviceManager::shutdown()`、`vkDestroyInstance` 的顺序释放；不要恢复旧后端的 `cleanUpResourceManager()` / `cleanUpDeviceManager()` 命名。
+- lower-case 主设备选择读取 `DeviceManager::properties().properties.deviceType` / `deviceName`；不要使用历史后端的 `getFeaturesUtils()` 路径。独显优先级 helper 放在 `hardware_context.cpp` 本地即可。
 - `ResourceManager` 依赖已经初始化的 `DeviceManager` 来取得 instance / physical device / logical device；`HardwareContext` 只负责接线初始化，不承载 buffer 分配策略。
 - `DeviceManager` 负责给定 `VkInstance` / `VkPhysicalDevice` 后的 per-device 初始化：筛选 device extension、启用 feature chain、创建 `VkDevice`、记录 queue family 快照，并创建 `Queue` 包装。
 - `DeviceManager` 不负责跨 GPU 同步策略、资源分配策略、execution DAG 调度或延迟释放队列；这些职责分别留给 `HardwareExecutor`、resource manager / pool、compiler / encoder 和 `Queue` 的 timeline retire。
