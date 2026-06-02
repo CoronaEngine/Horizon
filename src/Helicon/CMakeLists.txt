@@ -67,12 +67,27 @@ target_link_libraries(Helicon PUBLIC
     SPIRV-Tools-link
 )
 
-file(GLOB SLANG_DLLS "${HORIZON_SLANG_BINARY_DIR}/*.dll")
-file(GLOB DXC_DLLS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")
+set(HELICON_RUNTIME_DEPS)
 
-if(SLANG_DLLS AND DXC_DLLS)
-    message(STATUS "Found Slang and DXC DLLs")
+if(WIN32)
+    file(GLOB SLANG_DLLS CONFIGURE_DEPENDS "${HORIZON_SLANG_BINARY_DIR}/*.dll")
+    if(NOT SLANG_DLLS)
+        message(FATAL_ERROR "Slang runtime DLLs were not found under ${HORIZON_SLANG_BINARY_DIR}")
+    endif()
+
+    list(APPEND HELICON_RUNTIME_DEPS ${SLANG_DLLS})
+
+    file(GLOB DXC_DLLS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")
+    if(DXC_DLLS)
+        list(APPEND HELICON_RUNTIME_DEPS ${DXC_DLLS})
+    else()
+        message(STATUS "DXC runtime DLLs were not found for ${TARGET_ARCH}; continuing with Slang runtime DLLs only")
+    endif()
+endif()
+
+if(HELICON_RUNTIME_DEPS)
+    message(STATUS "Found Helicon runtime DLLs: ${HELICON_RUNTIME_DEPS}")
     set_target_properties(Helicon PROPERTIES
-        INTERFACE_HELICON_RUNTIME_DEPS "${SLANG_DLLS};${DXC_DLLS}"
+        INTERFACE_HELICON_RUNTIME_DEPS "${HELICON_RUNTIME_DEPS}"
     )
 endif()
