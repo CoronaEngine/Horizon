@@ -1,15 +1,23 @@
 #include "test_registry.h"
 
+#include "hardware_wrapper_vulkan/display/display_manager.h"
 #include "hardware_wrapper_vulkan/hardware/device_manager.h"
 #include "hardware_wrapper_vulkan/hardware/execution.h"
+#include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/pipeline/vulkan_rasterizer_pipeline.h"
+#include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -37,11 +45,266 @@ namespace
         std::uintptr_t id_ { 0 };
     };
 
+    struct TestRenderTargetProxy
+    {
+        void* boundResource_ { nullptr };
+    };
+
+    constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
+
+    struct PrecheckResult
+    {
+        bool available { false };
+        std::string reason;
+    };
+
+    [[nodiscard]] std::string vk_result_name(VkResult result)
+    {
+        return std::to_string(static_cast<int>(result));
+    }
+
+    [[nodiscard]] std::string api_version_string(uint32_t version)
+    {
+        return std::to_string(VK_VERSION_MAJOR(version)) + "." +
+               std::to_string(VK_VERSION_MINOR(version)) + "." +
+               std::to_string(VK_VERSION_PATCH(version));
+    }
+
+    [[nodiscard]] PrecheckResult check_vulkan_environment()
+    {
+        if (volkInitialize() != VK_SUCCESS)
+        {
+            return { false, "Vulkan loader is not available." };
+        }
+
+        uint32_t loader_version = VK_API_VERSION_1_0;
+        if (vkEnumerateInstanceVersion != nullptr)
+        {
+            const VkResult result = vkEnumerateInstanceVersion(&loader_version);
+            if (result != VK_SUCCESS)
+            {
+                return { false, "vkEnumerateInstanceVersion failed with VkResult " + vk_result_name(result) + "." };
+            }
+        }
+
+        if (loader_version < required_api_version)
+        {
+            return { false,
+                     "Vulkan loader reports " + api_version_string(loader_version) +
+                         ", but " + api_version_string(required_api_version) + " is required." };
+        }
+
+        VkApplicationInfo app_info {};
+        app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        app_info.apiVersion = required_api_version;
+
+        VkInstanceCreateInfo instance_info {};
+        instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        instance_info.pApplicationInfo = &app_info;
+
+        VkInstance instance = VK_NULL_HANDLE;
+        VkResult result = vkCreateInstance(&instance_info, nullptr, &instance);
+        if (result != VK_SUCCESS)
+        {
+            return { false, "vkCreateInstance failed with VkResult " + vk_result_name(result) + "." };
+        }
+
+        volkLoadInstance(instance);
+
+        uint32_t device_count = 0;
+        result = vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
+        if (result != VK_SUCCESS)
+        {
+            vkDestroyInstance(instance, nullptr);
+            return { false, "vkEnumeratePhysicalDevices failed with VkResult " + vk_result_name(result) + "." };
+        }
+
+        if (device_count == 0)
+        {
+            vkDestroyInstance(instance, nullptr);
+            return { false, "No Vulkan physical devices were found." };
+        }
+
+        std::vector<VkPhysicalDevice> physical_devices(device_count);
+        result = vkEnumeratePhysicalDevices(instance, &device_count, physical_devices.data());
+        if (result != VK_SUCCESS)
+        {
+            vkDestroyInstance(instance, nullptr);
+            return { false, "vkEnumeratePhysicalDevices failed with VkResult " + vk_result_name(result) + "." };
+        }
+
+        for (VkPhysicalDevice physical_device : physical_devices)
+        {
+            VkPhysicalDeviceProperties properties {};
+            vkGetPhysicalDeviceProperties(physical_device, &properties);
+            if (properties.apiVersion >= required_api_version)
+            {
+                vkDestroyInstance(instance, nullptr);
+                return { true, {} };
+            }
+        }
+
+        vkDestroyInstance(instance, nullptr);
+        return { false, "No Vulkan 1.4-capable physical device was found." };
+    }
+
+    [[nodiscard]] const PrecheckResult& vulkan_precheck()
+    {
+        static const PrecheckResult result = check_vulkan_environment();
+        return result;
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult require_vulkan_environment()
+    {
+        const PrecheckResult& precheck = vulkan_precheck();
+        if (!precheck.available)
+        {
+            return Corona::Horizon::Tests::TestResult::skip(precheck.reason);
+        }
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::HardwareBufferOptions host_read_write_buffer_options() noexcept
+    {
+        Corona::Horizon::HardwareBufferOptions options;
+        options.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
+        return options;
+    }
+
     [[nodiscard]] Corona::Horizon::ResourceHandle test_resource(std::uintptr_t id)
     {
         Corona::Horizon::ResourceHandle handle;
         Corona::Horizon::ResourceBridge::set(handle, std::make_shared<TestResourceRef>(id));
         return handle;
+    }
+
+    [[nodiscard]] Corona::Horizon::HardwareBuffer test_buffer(uint64_t element_count,
+                                                              uint32_t element_size,
+                                                              Corona::Horizon::BufferUsageFlags usage)
+    {
+        Corona::Horizon::HardwareBuffer buffer;
+        auto resource = Corona::Horizon::resource_pool().buffers.create([=] {
+            Corona::Horizon::BufferWrap wrap;
+            wrap.desc.element_count = element_count;
+            wrap.desc.element_size = element_size;
+            wrap.desc.usage = usage;
+            return wrap;
+        });
+
+        Corona::Horizon::ResourceBridge::set(
+            buffer,
+            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::BufferWrap, Corona::Horizon::BufferReleaser>>(
+                std::move(resource)));
+        return buffer;
+    }
+
+    [[nodiscard]] Corona::Horizon::HardwareImage test_color_image(uint32_t width, uint32_t height)
+    {
+        Corona::Horizon::HardwareImage image;
+        auto resource = Corona::Horizon::resource_pool().images.create([=] {
+            Corona::Horizon::ImageWrap wrap;
+            wrap.desc = Corona::Horizon::HardwareImageDesc::color_attachment(width, height, Corona::Horizon::Format::RGBA8_UNORM);
+            return wrap;
+        });
+
+        Corona::Horizon::ResourceBridge::set(
+            image,
+            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
+                std::move(resource)));
+        return image;
+    }
+
+    [[nodiscard]] Corona::Horizon::RasterizerPipelineDesc test_rasterizer_desc()
+    {
+        EmbeddedShader::ShaderCodeModule::ShaderResources vertex_resources;
+        vertex_resources.pushConstantSize = sizeof(uint32_t);
+
+        EmbeddedShader::ShaderCodeModule::ShaderResources fragment_resources;
+        fragment_resources.pushConstantSize = sizeof(uint32_t);
+
+        Corona::Horizon::RasterizerPipelineDesc desc(
+            {
+                Corona::Horizon::PipelineShaderStage::Vertex,
+                EmbeddedShader::ShaderCodeModule(std::vector<uint32_t> { 0x07230203u }, std::move(vertex_resources)),
+            },
+            {
+                Corona::Horizon::PipelineShaderStage::Fragment,
+                EmbeddedShader::ShaderCodeModule(std::vector<uint32_t> { 0x07230203u }, std::move(fragment_resources)),
+            });
+        desc.depth_stencil.depth_test_enabled = false;
+        desc.depth_stencil.depth_write_enabled = false;
+        return desc;
+    }
+
+    [[nodiscard]] Corona::Horizon::RasterizerPipelineDesc real_rasterizer_desc()
+    {
+        EmbeddedShader::CompilerOption compiler_option;
+        compiler_option.compileGLSL = false;
+        compiler_option.compileHLSL = false;
+        compiler_option.compileDXIL = false;
+        compiler_option.compileDXBC = false;
+        compiler_option.compileSpirV = true;
+        compiler_option.enableBindless = false;
+
+        Corona::Horizon::RasterizerPipelineDesc desc = Corona::Horizon::RasterizerPipelineDesc::from_source(
+            R"glsl(
+#version 450
+
+vec2 fullscreen_positions[3] = vec2[](
+    vec2(-1.0, -1.0),
+    vec2( 3.0, -1.0),
+    vec2(-1.0,  3.0)
+);
+
+void main()
+{
+    gl_Position = vec4(fullscreen_positions[gl_VertexIndex], 0.0, 1.0);
+}
+)glsl",
+            R"glsl(
+#version 450
+
+layout(location = 0) out vec4 out_color;
+
+void main()
+{
+    out_color = vec4(1.0, 0.0, 0.0, 1.0);
+}
+)glsl",
+            EmbeddedShader::ShaderLanguage::GLSL,
+            EmbeddedShader::ShaderLanguage::GLSL,
+            compiler_option);
+
+        desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
+        desc.depth_stencil.depth_test_enabled = false;
+        desc.depth_stencil.depth_write_enabled = false;
+        return desc;
+    }
+
+    void wait_for_token(Corona::Horizon::Queue& queue, Corona::Horizon::SubmissionToken token)
+    {
+        if (token.timeline == VK_NULL_HANDLE)
+        {
+            queue.mark_completed_for_tests(token.value);
+            queue.retire_completed();
+            return;
+        }
+
+        VkSemaphoreWaitInfo wait_info {};
+        wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        wait_info.semaphoreCount = 1;
+        wait_info.pSemaphores = &token.timeline;
+        wait_info.pValues = &token.value;
+
+        const VkResult result = vkWaitSemaphores(queue.device(), &wait_info, 5'000'000'000ull);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkWaitSemaphores failed while waiting for RasterizerPipeline smoke test. VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
+
+        queue.retire_completed();
     }
 
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_keep_alive_retires_after_timeline_completion()
@@ -225,6 +488,220 @@ namespace
         expect(plan.submissions[0].commands.size() == 2, "Compiled submission should retain command order.");
         expect(plan.submissions[0].keep_alive.resource_count() == 2, "Compiler should keep each referenced resource alive once.");
         expect(!plan.submissions[0].barriers.empty(), "Read/write reuse of the same resources should produce a barrier record.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_rasterizer_pipeline_records_graphics_ir()
+    {
+        Corona::Horizon::VulkanRasterizerPipeline pipeline(test_rasterizer_desc());
+        Corona::Horizon::HardwareBuffer index =
+            test_buffer(6, sizeof(uint16_t), Corona::Horizon::BufferUsageFlags::Index);
+        Corona::Horizon::HardwareBuffer vertex =
+            test_buffer(3, sizeof(float) * 5, Corona::Horizon::BufferUsageFlags::Vertex);
+        Corona::Horizon::HardwareImage color = test_color_image(128, 64);
+
+        const uint32_t push_constant = 42;
+        pipeline.set_extent(128, 64);
+        pipeline.set_resource_direct(
+            0,
+            0,
+            color,
+            static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
+            0);
+        pipeline.set_push_constant_direct(
+            0,
+            &push_constant,
+            sizeof(push_constant),
+            static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers));
+
+        Corona::Horizon::DrawIndexedParams params;
+        params.index_count = 3;
+        params.first_index = 1;
+        params.vertex_offset = -2;
+        Corona::Horizon::ResourceHandle pipeline_handle = test_resource(999);
+        pipeline.record(pipeline_handle, index, vertex, params);
+
+        Corona::Horizon::VulkanRasterizerPipeline::Snapshot snapshot = pipeline.snapshot();
+        expect(snapshot.width == 128 && snapshot.height == 64, "RasterizerPipeline should retain the render extent.");
+        expect(snapshot.images.size() == 1, "RasterizerPipeline should retain the bound render target.");
+        expect(snapshot.draws.size() == 1, "RasterizerPipeline should retain one draw record.");
+        expect(snapshot.draws[0].params.index_count == 3, "RasterizerPipeline should preserve draw index_count.");
+        expect(snapshot.draws[0].push_constant_data.size() >= sizeof(push_constant), "Draw records should snapshot push constants.");
+        expect(std::memcmp(snapshot.draws[0].push_constant_data.data(), &push_constant, sizeof(push_constant)) == 0,
+               "Draw records should snapshot push constant bytes.");
+
+        Corona::Horizon::CommandBatch batch = pipeline.command_batch();
+        Corona::Horizon::CommandRecorder recorder;
+        for (const Corona::Horizon::StreamCommand& command : batch.commands())
+        {
+            command.record(recorder);
+        }
+
+        Corona::Horizon::RecordedTask task = recorder.close();
+        expect(task.commands.size() == 3, "RasterizerPipeline command batch should record begin, draw, and end commands.");
+        expect(task.commands[0].op == Corona::Horizon::CommandOp::BeginRendering, "RasterizerPipeline should begin rendering before drawing.");
+        expect(task.commands[1].op == Corona::Horizon::CommandOp::DrawIndexed, "RasterizerPipeline should record DrawIndexed IR.");
+        expect(task.commands[2].op == Corona::Horizon::CommandOp::EndRendering, "RasterizerPipeline should end rendering after drawing.");
+        expect(task.commands[0].payload.rendering.width == 128, "Rendering IR should preserve width.");
+        expect(task.commands[1].payload.draw_indexed.first_index == 1, "DrawIndexed IR should preserve first_index.");
+        expect(task.commands[1].payload.draw_indexed.vertex_offset == -2, "DrawIndexed IR should preserve vertex_offset.");
+        std::shared_ptr<Corona::Horizon::IResourceRef> draw_pipeline_token =
+            Corona::Horizon::ResourceBridge::token(task.commands[1].payload.draw_indexed.pipeline);
+        expect(draw_pipeline_token && draw_pipeline_token->id() == 999,
+               "DrawIndexed IR should carry the rasterizer pipeline handle.");
+        expect(task.commands[1].payload.draw_indexed.push_constant_data.size() >= sizeof(push_constant),
+               "DrawIndexed IR should carry the push constant snapshot.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_rasterizer_pipeline_uses_resource_handle()
+    {
+        Corona::Horizon::RasterizerPipeline pipeline(test_rasterizer_desc());
+        expect(static_cast<bool>(pipeline), "RasterizerPipeline should expose ResourceHandle validity.");
+
+        const std::uintptr_t pipeline_id = pipeline.get_rasterizer_pipeline_id();
+        expect(pipeline_id != 0, "RasterizerPipeline should expose a non-empty resource id.");
+
+        std::shared_ptr<const Corona::Horizon::IResourceRef> keep_alive =
+            Corona::Horizon::ResourceBridge::keep_alive(pipeline);
+        expect(keep_alive && keep_alive->id() == pipeline_id,
+               "RasterizerPipeline should provide its token through ResourceBridge.");
+
+        Corona::Horizon::RasterizerPipeline copy = pipeline;
+        expect(copy.get_rasterizer_pipeline_id() == pipeline_id,
+               "RasterizerPipeline copies should share the underlying resource handle.");
+
+        Corona::Horizon::RasterizerPipeline moved = std::move(copy);
+        expect(moved.get_rasterizer_pipeline_id() == pipeline_id,
+               "RasterizerPipeline moves should transfer the underlying resource handle.");
+        expect(copy.get_rasterizer_pipeline_id() == 0,
+               "Moved-from RasterizerPipeline should no longer own a resource handle.");
+
+        Corona::Horizon::HardwareImage color = test_color_image(64, 32);
+        TestRenderTargetProxy target;
+        target.boundResource_ = &color;
+        moved.bind_render_target(2, target);
+        moved(64, 32);
+
+        using RasterizerPipelineStore =
+            Corona::Horizon::ResourceStore<Corona::Horizon::RasterizerPipelineWrap, Corona::Horizon::NoopReleaser>;
+        auto pipeline_resource =
+            Corona::Horizon::read<RasterizerPipelineStore>(Corona::Horizon::ResourceBridge::token(moved));
+        expect(pipeline_resource && pipeline_resource->impl,
+               "RasterizerPipeline ResourceHandle should point at a backend implementation.");
+
+        auto impl =
+            std::static_pointer_cast<Corona::Horizon::VulkanRasterizerPipeline>(pipeline_resource->impl);
+        Corona::Horizon::VulkanRasterizerPipeline::Snapshot snapshot = impl->snapshot();
+        expect(snapshot.desc.auto_bind_entries.size() == 1,
+               "RasterizerPipeline bind_render_target should update RasterizerPipelineDesc auto bindings.");
+        expect(snapshot.images.size() == 1,
+               "RasterizerPipeline operator() should bind render targets from descriptor auto bindings.");
+        expect(snapshot.images[0].location == 2,
+               "RasterizerPipeline should preserve the auto-bound render target location.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_rasterizer_pipeline_real_vulkan_render()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        Corona::Horizon::DeviceManager& manager = Corona::Horizon::device_manager();
+        if (manager.queue_for(Corona::Horizon::QueueCapability::Graphics) == nullptr)
+        {
+            return Corona::Horizon::Tests::TestResult::skip("No graphics-capable Vulkan queue was found.");
+        }
+        if (manager.queue_for(Corona::Horizon::QueueCapability::Transfer) == nullptr)
+        {
+            return Corona::Horizon::Tests::TestResult::skip("No transfer-capable Vulkan queue was found.");
+        }
+
+        constexpr uint32_t width = 4;
+        constexpr uint32_t height = 4;
+        constexpr uint32_t pixel_count = width * height;
+
+        Corona::Horizon::HardwareImage color(
+            Corona::Horizon::HardwareImageDesc::color_attachment(width,
+                                                                 height,
+                                                                 Corona::Horizon::Format::RGBA8_UNORM,
+                                                                 "execution.rasterizer.real.color"));
+        color.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+
+        const std::array<uint16_t, 3> indices { 0, 1, 2 };
+        Corona::Horizon::HardwareBuffer index =
+            Corona::Horizon::HardwareBuffer::index<uint16_t>(std::span<const uint16_t>(indices),
+                                                             "execution.rasterizer.real.index",
+                                                             host_read_write_buffer_options());
+
+        const std::array<uint32_t, 1> dummy_vertex { 0 };
+        Corona::Horizon::HardwareBuffer vertex =
+            Corona::Horizon::HardwareBuffer::vertex<uint32_t>(std::span<const uint32_t>(dummy_vertex),
+                                                              "execution.rasterizer.real.vertex",
+                                                              host_read_write_buffer_options());
+
+        const std::vector<uint32_t> zeros(pixel_count, 0);
+        Corona::Horizon::HardwareBuffer readback =
+            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(zeros),
+                                                               "execution.rasterizer.real.readback",
+                                                               host_read_write_buffer_options());
+
+        Corona::Horizon::RasterizerPipeline pipeline(real_rasterizer_desc());
+        TestRenderTargetProxy target;
+        target.boundResource_ = &color;
+        pipeline.bind_render_target(0, target);
+        pipeline(static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+
+        Corona::Horizon::DrawIndexedParams params;
+        params.index_count = static_cast<uint32_t>(indices.size());
+        params.index_type = Corona::Horizon::IndexType::UInt16;
+        pipeline.record(index, vertex, params);
+
+        using RasterizerPipelineStore =
+            Corona::Horizon::ResourceStore<Corona::Horizon::RasterizerPipelineWrap, Corona::Horizon::NoopReleaser>;
+        auto pipeline_resource =
+            Corona::Horizon::read<RasterizerPipelineStore>(Corona::Horizon::ResourceBridge::token(pipeline));
+        expect(pipeline_resource && pipeline_resource->impl,
+               "Real RasterizerPipeline smoke test should resolve the Vulkan implementation.");
+
+        auto impl =
+            std::static_pointer_cast<Corona::Horizon::VulkanRasterizerPipeline>(pipeline_resource->impl);
+        Corona::Horizon::CommandBatch batch = impl->command_batch();
+        batch << color.copy_to(readback);
+
+        Corona::Horizon::HardwareExecutor executor([&manager](Corona::Horizon::DeviceId, Corona::Horizon::QueueCapability capability) -> Corona::Horizon::Queue& {
+            Corona::Horizon::Queue* queue = manager.queue_for(capability);
+            if (queue == nullptr)
+            {
+                throw std::runtime_error("RasterizerPipeline smoke test could not resolve a Vulkan queue.");
+            }
+            return *queue;
+        });
+
+        Corona::Horizon::SubmitReceipt receipt =
+            executor.stream()
+            << batch
+            << Corona::Horizon::commit();
+
+        expect(!receipt.tokens.empty(), "Real RasterizerPipeline smoke test should submit Vulkan queue work.");
+        for (Corona::Horizon::SubmissionToken token : receipt.tokens)
+        {
+            Corona::Horizon::Queue* queue = manager.queue_for(token.queue.capability);
+            expect(queue != nullptr, "Submitted RasterizerPipeline token should resolve to a queue for retirement.");
+            wait_for_token(*queue, token);
+        }
+
+        std::vector<uint32_t> pixels(pixel_count, 0);
+        expect(readback.read<uint32_t>(pixels), "RasterizerPipeline smoke test should read back the copied color attachment.");
+
+        const uint32_t center = pixels[(height / 2) * width + (width / 2)];
+        expect(center == 0xff0000ffu, "RasterizerPipeline should render the red fullscreen triangle into the color attachment.");
 
         return Corona::Horizon::Tests::TestResult::pass();
     }
@@ -416,6 +893,21 @@ namespace
         expect(receipt.presents[0].status == Corona::Horizon::PresentStatus::Skipped,
                "No swapchain-bound DisplayManager should report a skipped present.");
 
+        std::shared_ptr<Corona::Horizon::DisplayManager> manager =
+            Corona::Horizon::make_fake_display_manager({ 78 });
+        manager->set_fake_present_status_for_tests(Corona::Horizon::PresentStatus::Presented, "fake presented");
+        Corona::Horizon::register_display_manager(manager);
+
+        Corona::Horizon::SubmitReceipt fake_receipt =
+            executor.stream()
+            << Corona::Horizon::present({ 78 }, { image }, { 0 })
+            << Corona::Horizon::commit();
+
+        expect(fake_receipt.tokens.size() == 1, "Registered fake DisplayManager should still submit a present batch.");
+        expect(fake_receipt.presents.size() == 1, "Registered fake DisplayManager should report one present result.");
+        expect(fake_receipt.presents[0].status == Corona::Horizon::PresentStatus::Presented,
+               "Registered fake DisplayManager status should flow through SubmitReceipt.");
+
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
@@ -557,6 +1049,21 @@ namespace Corona::Horizon::Tests
                 "execution.recorder_compiler_ir",
                 "CommandRecorder records abstract IR and ExecutionCompiler collects requirements, keep-alives, and hazards.",
                 test_recorder_and_compiler_collect_requirements,
+            },
+            {
+                "execution.rasterizer_pipeline_ir",
+                "RasterizerPipeline keeps render state and erases recorded draws into graphics IR.",
+                test_rasterizer_pipeline_records_graphics_ir,
+            },
+            {
+                "execution.rasterizer_pipeline_handle",
+                "RasterizerPipeline exposes the same ResourceHandle lifetime semantics as other public resources.",
+                test_rasterizer_pipeline_uses_resource_handle,
+            },
+            {
+                "execution.rasterizer_pipeline_real_vulkan_render",
+                "RasterizerPipeline creates a real Vulkan graphics pipeline, renders, copies the color target, and verifies readback.",
+                test_rasterizer_pipeline_real_vulkan_render,
             },
             {
                 "execution.hardware_executor_injected_queue",

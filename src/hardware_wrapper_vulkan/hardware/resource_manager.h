@@ -8,6 +8,7 @@
 #include <volk.h>
 
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "hardware_wrapper_vulkan/resource_pool.h"
@@ -36,10 +37,13 @@ namespace Corona::Horizon
         [[nodiscard]] BufferWrap import_buffer(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_buffer(BufferWrap& buffer);
         [[nodiscard]] uint32_t store_descriptor(BufferWrap& buffer);
+        void flush_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size);
+        void invalidate_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size);
         void destroy_buffer(BufferWrap& buffer) noexcept;
 
         [[nodiscard]] ImageWrap create_image(const HardwareImageDesc& desc);
         [[nodiscard]] ImageWrap import_image(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
+        [[nodiscard]] ImageWrap wrap_swapchain_image(VkImage image, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, std::string debug_name = {});
         [[nodiscard]] ExternalMemoryHandle export_image(ImageWrap& image);
         [[nodiscard]] uint32_t store_descriptor(ImageWrap& image);
         [[nodiscard]] ImageSubresourceLayout image_subresource_layout(const ImageWrap& image, uint32_t layer, uint32_t mip) const;

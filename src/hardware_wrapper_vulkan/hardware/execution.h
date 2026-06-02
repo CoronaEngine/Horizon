@@ -12,6 +12,7 @@
 
 #include <volk.h>
 
+#include "format.h"
 #include "resource.h"
 
 namespace Corona::Horizon
@@ -139,17 +140,23 @@ namespace Corona::Horizon
 
     struct DrawIndexedDesc
     {
+        ResourceHandle pipeline {};
         uint32_t index_count { 0 };
         uint32_t instance_count { 1 };
         uint32_t first_index { 0 };
         int32_t vertex_offset { 0 };
         uint32_t first_instance { 0 };
+        IndexType index_type { IndexType::Auto };
+        bool enable_scissor { false };
+        ScissorRect scissor {};
+        std::vector<std::byte> push_constant_data;
     };
 
     struct PresentDesc
     {
         DisplayerRef displayer {};
         ImageRef image {};
+        ImageRef swapchain_image {};
         DeviceId present_device {};
         bool allow_cpu_bridge_fallback { true };
     };
@@ -357,6 +364,8 @@ namespace Corona::Horizon
     class CommandRecorder
     {
     public:
+        CommandRecorder() = default;
+
         void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
         void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
         void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
@@ -397,7 +406,13 @@ namespace Corona::Horizon
     class VulkanCommandEncoder
     {
     public:
+        VulkanCommandEncoder() = default;
+        explicit VulkanCommandEncoder(VkDevice device);
+
         void encode(CompiledSubmission& submission) const;
+
+    private:
+        VkDevice device_ { VK_NULL_HANDLE };
     };
 
     class CrossDeviceSync
@@ -415,6 +430,27 @@ namespace Corona::Horizon
         };
 
         std::vector<ImportedTimeline> imported_timelines_;
+    };
+
+    class HardwareDisplayer
+    {
+    public:
+        HardwareDisplayer();
+        explicit HardwareDisplayer(void* native_window);
+        HardwareDisplayer(const HardwareDisplayer& other) noexcept = default;
+        HardwareDisplayer(HardwareDisplayer&& other) noexcept = default;
+        ~HardwareDisplayer();
+
+        HardwareDisplayer& operator=(const HardwareDisplayer& other) noexcept = default;
+        HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept = default;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return displayer_.id != 0 && manager_ != nullptr; }
+        [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer_; }
+        [[nodiscard]] std::uintptr_t get_displayer_id() const noexcept { return displayer_.id; }
+
+    private:
+        DisplayerRef displayer_ {};
+        std::shared_ptr<void> manager_ {};
     };
 
     class HardwareStream
@@ -460,7 +496,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] HardwareStream stream();
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
-        [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan) const;
+        [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
 
     private:

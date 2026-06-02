@@ -79,7 +79,11 @@ namespace Corona::Horizon
             const auto buffer = write_buffer(*this);
             auto* mapped = buffer ? static_cast<std::byte*>(buffer->mapped_data()) : nullptr;
             if (mapped != nullptr && fits_range(buffer->logical_size(), 0, upload_data.size_bytes()) && fits_range(buffer->mapped_size(), 0, upload_data.size_bytes()))
+            {
                 std::memcpy(mapped, upload_data.data(), upload_data.size_bytes());
+                if (buffer->resource_manager != nullptr)
+                    buffer->resource_manager->flush_buffer(*buffer, 0, static_cast<uint64_t>(upload_data.size_bytes()));
+            }
         }
     }
 
@@ -149,6 +153,8 @@ namespace Corona::Horizon
             return false;
 
         std::memcpy(mapped + mapped_offset, data.data(), data.size_bytes());
+        if (buffer->resource_manager != nullptr)
+            buffer->resource_manager->flush_buffer(*buffer, byte_offset, static_cast<uint64_t>(data.size_bytes()));
         return true;
     }
 
@@ -180,6 +186,9 @@ namespace Corona::Horizon
 
         if (!fits_range(buffer->mapped_size(), byte_offset, output.size_bytes()))
             return false;
+
+        if (buffer->resource_manager != nullptr)
+            buffer->resource_manager->invalidate_buffer(*buffer, byte_offset, static_cast<uint64_t>(output.size_bytes()));
 
         std::memcpy(output.data(), mapped + mapped_offset, output.size_bytes());
         return true;

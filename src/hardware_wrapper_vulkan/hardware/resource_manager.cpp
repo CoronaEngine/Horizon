@@ -128,6 +128,20 @@ namespace Corona::Horizon
             return VK_FORMAT_UNDEFINED;
         }
 
+        [[nodiscard]] Format from_vk_format(VkFormat format) noexcept
+        {
+            switch (format)
+            {
+            case VK_FORMAT_R8G8B8A8_UNORM: return Format::RGBA8_UNORM;
+            case VK_FORMAT_R8G8B8A8_SRGB: return Format::SRGBA8_UNORM;
+            case VK_FORMAT_B8G8R8A8_UNORM: return Format::BGRA8_UNORM;
+            case VK_FORMAT_B8G8R8A8_SRGB: return Format::SBGRA8_UNORM;
+            default: break;
+            }
+
+            return Format::UNKNOWN;
+        }
+
         [[nodiscard]] VkImageUsageFlags to_vk_image_usage(ImageUsageFlags usage) noexcept
         {
             VkImageUsageFlags result = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -1199,6 +1213,50 @@ namespace Corona::Horizon
         return descriptor_index;
     }
 
+    void ResourceManager::flush_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size)
+    {
+        if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE || byte_size == 0)
+            return;
+
+        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
+            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
+        {
+            throw std::overflow_error("HardwareBuffer flush range exceeds VkDeviceSize.");
+        }
+
+        std::lock_guard lock(mutex_);
+        if (allocator_ == VK_NULL_HANDLE)
+            return;
+
+        throw_if_failed(vmaFlushAllocation(allocator_,
+                                           buffer.buffer_alloc,
+                                           static_cast<VkDeviceSize>(byte_offset),
+                                           static_cast<VkDeviceSize>(byte_size)),
+                        "vmaFlushAllocation");
+    }
+
+    void ResourceManager::invalidate_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size)
+    {
+        if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE || byte_size == 0)
+            return;
+
+        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
+            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
+        {
+            throw std::overflow_error("HardwareBuffer invalidate range exceeds VkDeviceSize.");
+        }
+
+        std::lock_guard lock(mutex_);
+        if (allocator_ == VK_NULL_HANDLE)
+            return;
+
+        throw_if_failed(vmaInvalidateAllocation(allocator_,
+                                                buffer.buffer_alloc,
+                                                static_cast<VkDeviceSize>(byte_offset),
+                                                static_cast<VkDeviceSize>(byte_size)),
+                        "vmaInvalidateAllocation");
+    }
+
     ImageWrap ResourceManager::create_image(const HardwareImageDesc& desc)
     {
         std::lock_guard lock(mutex_);
@@ -1413,6 +1471,58 @@ namespace Corona::Horizon
             if (image.image_handle != VK_NULL_HANDLE && image.image_alloc != VK_NULL_HANDLE)
             {
                 vmaDestroyImage(allocator_, image.image_handle, image.image_alloc);
+            }
+            image.clear_handles();
+            throw;
+        }
+
+        return image;
+    }
+
+    ImageWrap ResourceManager::wrap_swapchain_image(VkImage native_image,
+                                                    VkFormat format,
+                                                    VkExtent2D extent,
+                                                    VkImageUsageFlags usage,
+                                                    std::string debug_name)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::wrap_swapchain_image called before initialize().");
+        }
+
+        if (native_image == VK_NULL_HANDLE || format == VK_FORMAT_UNDEFINED || extent.width == 0 || extent.height == 0)
+        {
+            return {};
+        }
+
+        ImageWrap image;
+        image.desc = HardwareImageDesc::texture_2d(extent.width,
+                                                   extent.height,
+                                                   from_vk_format(format),
+                                                   ImageUsageFlags::ColorAttachment | ImageUsageFlags::TransferDst,
+                                                   std::move(debug_name));
+        image.range = ImageSubresourceRange::whole();
+        image.image_handle = native_image;
+        image.image_usage = usage;
+        image.image_format = format;
+        image.aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
+        image.device_manager = device_manager_;
+        image.resource_manager = this;
+        image.owns_native_image = false;
+        image.imported = false;
+
+        try
+        {
+            image.image_view = create_image_view(image, ImageSubresourceRange::whole());
+            name_image(device_manager_->logical_device(), allocator_, image);
+        }
+        catch (...)
+        {
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                vkDestroyImageView(device_manager_->logical_device(), image.image_view, nullptr);
             }
             image.clear_handles();
             throw;

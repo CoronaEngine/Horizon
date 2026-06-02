@@ -9,4 +9,5 @@ horizon_add_test(HorizonTests
 set_tests_properties(HorizonTests
     PROPERTIES
         SKIP_RETURN_CODE 77
+        TIMEOUT 120
 )

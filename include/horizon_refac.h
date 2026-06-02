@@ -6,10 +6,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <ranges>
-#include <span>
 #include <source_location>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -49,6 +50,8 @@ namespace Corona::Horizon
     //struct BottomLevelAccelerationStructure;
     //struct TopLevelAccelerationStructure;
 
+    class CommandBatch;
+
     class PipelineBindingScope;
     class ResourceProxy;
 
@@ -60,8 +63,6 @@ namespace Corona::Horizon
     class HardwareDisplayer;
 
     struct BindingSlot;
-
-
 
     // ================================================================
     // Validation
@@ -75,8 +76,6 @@ namespace Corona::Horizon
     void set_hardware_validation_config(HardwareValidationConfig config);
     [[nodiscard]] HardwareValidationConfig get_hardware_validation_config();
     [[nodiscard]] bool is_hardware_validation_enabled();
-
-
 
     // ================================================================
     // HardwareBuffer
@@ -161,7 +160,7 @@ namespace Corona::Horizon
     {
     public:
         HardwareBuffer() = default;
-        HardwareBuffer(const HardwareBufferDesc &desc, std::span<const std::byte> upload_data = {});
+        HardwareBuffer(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data = {});
 
         // Copies share the same underlying GPU buffer handle.
         HardwareBuffer(const HardwareBuffer& other) noexcept = default;
@@ -195,7 +194,7 @@ namespace Corona::Horizon
             if (mapped_size > std::numeric_limits<size_t>::max())
                 return {};
 
-            return {data, static_cast<size_t>(mapped_size)};
+            return { data, static_cast<size_t>(mapped_size) };
         }
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
@@ -229,14 +228,14 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-        requires (!std::is_const_v<T>)
+            requires(!std::is_const_v<T>)
         [[nodiscard]] bool read(std::span<T> output, uint64_t byte_offset = 0) const
         {
             return read_bytes(std::as_writable_bytes(output), byte_offset);
         }
 
         template <HardwareTransferable T>
-        requires (!std::is_const_v<T>)
+            requires(!std::is_const_v<T>)
         [[nodiscard]] bool read_elements(std::span<T> output, uint64_t first_element = 0) const
         {
             if (first_element > std::numeric_limits<uint64_t>::max() / sizeof(T))
@@ -254,7 +253,7 @@ namespace Corona::Horizon
         }
 
         template <std::ranges::contiguous_range Range>
-        requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
+            requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return vertex<std::ranges::range_value_t<Range>>(
@@ -270,7 +269,7 @@ namespace Corona::Horizon
         }
 
         template <std::ranges::contiguous_range Range>
-        requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
+            requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return index<std::ranges::range_value_t<Range>>(
@@ -292,7 +291,7 @@ namespace Corona::Horizon
         }
 
         template <std::ranges::contiguous_range Range>
-        requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
+            requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer storage(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
         {
             return storage<std::ranges::range_value_t<Range>>(
@@ -304,14 +303,12 @@ namespace Corona::Horizon
         [[nodiscard]] CopyBufferCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-        [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle &handle, const HardwareBufferDesc &desc);
+        [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
         friend class HardwareImage;
     };
-
-
 
     // ================================================================
     // HardwareImage
@@ -339,7 +336,7 @@ namespace Corona::Horizon
             return *this;
         }
 
-        static HardwareImageDesc texture_2d(uint32_t width, 
+        static HardwareImageDesc texture_2d(uint32_t width,
                                             uint32_t height,
                                             Format format,
                                             ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
@@ -348,7 +345,7 @@ namespace Corona::Horizon
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image2D;
-            desc.extent = {width, height, 1};
+            desc.extent = { width, height, 1 };
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
@@ -365,7 +362,7 @@ namespace Corona::Horizon
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image2DArray;
-            desc.extent = {width, height, 1};
+            desc.extent = { width, height, 1 };
             desc.array_layers = layers;
             desc.format = format;
             desc.usage = usage;
@@ -383,7 +380,7 @@ namespace Corona::Horizon
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image3D;
-            desc.extent = {width, height, depth};
+            desc.extent = { width, height, depth };
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
@@ -398,7 +395,7 @@ namespace Corona::Horizon
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Cube;
-            desc.extent = {size, size, 1};
+            desc.extent = { size, size, 1 };
             desc.array_layers = 6;
             desc.format = format;
             desc.usage = usage;
@@ -415,7 +412,7 @@ namespace Corona::Horizon
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::CubeArray;
-            desc.extent = {size, size, 1};
+            desc.extent = { size, size, 1 };
             desc.array_layers = cube_count * 6;
             desc.format = format;
             desc.usage = usage;
@@ -480,7 +477,7 @@ namespace Corona::Horizon
         bool read_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool read_bytes(std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-        
+
         template <HardwareTransferable T>
         bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
@@ -488,8 +485,8 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-        requires (!std::is_const_v<T>)
-        bool read_subresource(uint32_t layer_index,uint32_t mip_index,std::span<T> output,uint64_t row_pitch = 0,uint64_t slice_pitch = 0) const
+            requires(!std::is_const_v<T>)
+        bool read_subresource(uint32_t layer_index, uint32_t mip_index, std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return read_subresource_bytes(layer_index, mip_index, std::as_writable_bytes(output), row_pitch, slice_pitch);
         }
@@ -501,7 +498,7 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-        requires (!std::is_const_v<T>)
+            requires(!std::is_const_v<T>)
         bool read(std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return read_bytes(std::as_writable_bytes(output), row_pitch, slice_pitch);
@@ -509,13 +506,13 @@ namespace Corona::Horizon
 
         void set_clear_color(float r, float g, float b, float a);
 
-        [[nodiscard]] CopyImageCommand copy_to(const HardwareImage &dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
-        [[nodiscard]] CopyImageToBufferCommand copy_to(const HardwareBuffer &dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
-        [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer &src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
+        [[nodiscard]] CopyImageCommand copy_to(const HardwareImage& dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
+        [[nodiscard]] CopyImageToBufferCommand copy_to(const HardwareBuffer& dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
+        [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer& src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-        static HardwareImage import_external(const ExternalMemoryHandle &handle, const HardwareImageDesc &desc, uint64_t allocation_size = 0);
+        static HardwareImage import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
-        
+
     private:
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
 
@@ -526,8 +523,9 @@ namespace Corona::Horizon
     class HardwareImageLayerSelector
     {
     public:
-        HardwareImageLayerSelector(const HardwareImage &image, uint32_t layer_index) : image_(image), layer_(layer_index) {}
+        HardwareImageLayerSelector(const HardwareImage& image, uint32_t layer_index) : image_(image), layer_(layer_index) {}
         [[nodiscard]] HardwareImage operator[](uint32_t mip_index) const;
+
     private:
         HardwareImage image_;
         uint32_t layer_ = 0;
@@ -538,8 +536,6 @@ namespace Corona::Horizon
         return HardwareImageLayerSelector(*this, layer_index);
     }
 
-    
-    
     // ================================================================
     // HardwarePushConstant
     // ================================================================
@@ -615,8 +611,6 @@ namespace Corona::Horizon
         std::array<std::byte, max_byte_size> storage_{};
     };*/
 
-
-
     // ================================================================
     // Pipeline Descriptors
     // ================================================================
@@ -675,29 +669,26 @@ namespace Corona::Horizon
     struct ComputePipelineDesc
     {
         PipelineShaderDesc compute_shader;
-        ktm::uvec3 thread_group_size = {1, 1, 1};
+        ktm::uvec3 thread_group_size = { 1, 1, 1 };
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
 
-        ComputePipelineDesc(PipelineShaderDesc shader, ktm::uvec3 numthreads = {1, 1, 1}) : compute_shader(std::move(shader)), thread_group_size(numthreads)
+        ComputePipelineDesc(PipelineShaderDesc shader, ktm::uvec3 numthreads = { 1, 1, 1 }) : compute_shader(std::move(shader)), thread_group_size(numthreads)
         {
             if (compute_shader.stage != PipelineShaderStage::Compute)
                 throw std::invalid_argument("ComputePipelineDesc requires a compute shader.");
         }
 
         template <typename F>
-        static ComputePipelineDesc from_edsl(F &&compute_shader_code, ktm::uvec3 numthreads = {1, 1, 1}, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
+        static ComputePipelineDesc from_edsl(F&& compute_shader_code, ktm::uvec3 numthreads = { 1, 1, 1 }, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
         {
             auto object = EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location);
 
             ComputePipelineDesc desc(
-                PipelineShaderDesc
-                {
+                PipelineShaderDesc {
                     PipelineShaderStage::Compute,
-                    object.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,options.compiler.enableBindless)
-                },
-                numthreads
-            );
+                    object.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
+                numthreads);
 
             desc.auto_bind_entries = std::move(object.autoBindEntries);
             return desc;
@@ -720,12 +711,9 @@ namespace Corona::Horizon
                                                         source_location);
 
             return ComputePipelineDesc(
-                PipelineShaderDesc
-                {
+                PipelineShaderDesc {
                     PipelineShaderStage::Compute,
-                    compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,compiler_option.enableBindless)
-                }
-            );
+                    compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) });
         }
 
         ComputePipelineDesc& set_thread_group_size(ktm::uvec3 value) noexcept
@@ -758,7 +746,7 @@ namespace Corona::Horizon
         }
 
         bool logic_op_enabled = false;
-        std::vector<BlendAttachmentDesc> attachments = {alpha_blend_attachment()};
+        std::vector<BlendAttachmentDesc> attachments = { alpha_blend_attachment() };
 
         BlendStateDesc& set_attachment(uint32_t index, BlendAttachmentDesc desc)
         {
@@ -898,19 +886,14 @@ namespace Corona::Horizon
                                                                             source_location);
 
             RasterizerPipelineDesc desc(
-                PipelineShaderDesc
-                {
+                PipelineShaderDesc {
                     PipelineShaderStage::Vertex,
                     object.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                 options.compiler.enableBindless)
-                },
-                PipelineShaderDesc
-                {
+                                                 options.compiler.enableBindless) },
+                PipelineShaderDesc {
                     PipelineShaderStage::Fragment,
                     object.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                   options.compiler.enableBindless)
-                }
-            );
+                                                   options.compiler.enableBindless) });
 
             if (options.auto_bind)
                 desc.auto_bind_entries = std::move(object.autoBindEntries);
@@ -921,7 +904,7 @@ namespace Corona::Horizon
         static RasterizerPipelineDesc from_spirv(std::vector<uint32_t> vertex_spirv, std::vector<uint32_t> fragment_spirv)
         {
             return RasterizerPipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Vertex, std::move(vertex_spirv)),
-                                          PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment,std::move(fragment_spirv)));
+                                          PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment, std::move(fragment_spirv)));
         }
 
         static RasterizerPipelineDesc from_source(std::string vertex_source,
@@ -944,17 +927,12 @@ namespace Corona::Horizon
                                                                  source_location);
 
             return RasterizerPipelineDesc(
-                PipelineShaderDesc
-                {
+                PipelineShaderDesc {
                     PipelineShaderStage::Vertex,
-                    vertex_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless)
-                },
-                PipelineShaderDesc
-                {
+                    vertex_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) },
+                PipelineShaderDesc {
                     PipelineShaderStage::Fragment,
-                    fragment_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless)
-                }
-            );
+                    fragment_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) });
         }
 
         RasterizerPipelineDesc& set_rasterizer(RasterizerStateDesc value) noexcept
@@ -1114,15 +1092,12 @@ namespace Corona::Horizon
         }
     };
 
-
-
     // ================================================================
     // Pipeline Binding
     // ================================================================
 
-    template<typename T>
-    concept ReflectedBindingKey = requires(const T& t)
-    {
+    template <typename T>
+    concept ReflectedBindingKey = requires(const T& t) {
         t.byte_offset;
         t.type_size;
         t.bind_type;
@@ -1136,11 +1111,10 @@ namespace Corona::Horizon
         int32_t bind_type = -1;
         uint32_t location = 0;
 
-        template<ReflectedBindingKey T>
+        template <ReflectedBindingKey T>
         static constexpr BindingSlot from(const T& key) noexcept
         {
-            return
-            {
+            return {
                 key.byte_offset,
                 key.type_size,
                 key.bind_type,
@@ -1158,8 +1132,8 @@ namespace Corona::Horizon
         friend class ResourceProxy;
 
         virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
-        virtual void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) = 0;
-        virtual void bind_image(const BindingSlot &slot, const HardwareImage &image) = 0;
+        virtual void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) = 0;
+        virtual void bind_image(const BindingSlot& slot, const HardwareImage& image) = 0;
         /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
         {
             throw std::runtime_error("This pipeline does not support acceleration structure binding.");
@@ -1175,7 +1149,7 @@ namespace Corona::Horizon
         ResourceProxy& operator=(ResourceProxy&&) = delete;
 
         template <typename T>
-        requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
+            requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
         ResourceProxy& operator=(const T& value)
         {
             if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareBuffer>)
@@ -1204,18 +1178,16 @@ namespace Corona::Horizon
         BindingSlot slot_;
     };
 
-    template<typename Derived>
+    template <typename Derived>
     struct ReflectedPipelineBindings
     {
-        template<ReflectedBindingKey ProxyType>
+        template <ReflectedBindingKey ProxyType>
         [[nodiscard]]
         ResourceProxy operator[](const ProxyType& proxy)
         {
             return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
         }
     };
-
-    
 
     // ================================================================
     // Pipeline Runtime
@@ -1225,7 +1197,7 @@ namespace Corona::Horizon
     {
     public:
         ComputePipeline();
-        ComputePipeline(ComputePipelineDesc& desc, const std::source_location &source_location = std::source_location::current());
+        ComputePipeline(ComputePipelineDesc& desc, const std::source_location& source_location = std::source_location::current());
 
         ComputePipeline(const ComputePipeline& other);
         ComputePipeline(ComputePipeline&& other) noexcept;
@@ -1236,75 +1208,96 @@ namespace Corona::Horizon
         ComputePipeline& operator()(uint16_t x, uint16_t y, uint16_t z);
 
     private:
-        void bind_push_constant(const BindingSlot &slot, const void *data, size_t size) override
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type);
         }
 
-        void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) override
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
         {
             set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type);
         }
 
-        void bind_image(const BindingSlot &slot, const HardwareImage &image) override
+        void bind_image(const BindingSlot& slot, const HardwareImage& image) override
         {
             set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type);
         }
 
-        void set_push_constant_direct(uint64_t byte_offset, const void *data, size_t size, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer &buffer, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage &image, int32_t bind_type);
+        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type);
 
         mutable std::mutex compute_pipeline_mutex_;
         std::atomic<std::uintptr_t> compute_pipeline_id_;
     };
 
-    class RasterizerPipeline : public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipeline>
+    class RasterizerPipeline : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipeline>
     {
     public:
         RasterizerPipeline();
-        RasterizerPipeline(RasterizerPipelineDesc& desc, const std::source_location& source_location = std::source_location::current());
+        explicit RasterizerPipeline(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
 
-        RasterizerPipeline(const RasterizerPipeline &other);
-        RasterizerPipeline(RasterizerPipeline &&other) noexcept;
+        RasterizerPipeline(const RasterizerPipeline& other);
+        RasterizerPipeline(RasterizerPipeline&& other) noexcept;
         ~RasterizerPipeline();
 
-        RasterizerPipeline &operator=(const RasterizerPipeline &other);
-        RasterizerPipeline &operator=(RasterizerPipeline &&other) noexcept;
+        RasterizerPipeline& operator=(const RasterizerPipeline& other);
+        RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept;
 
-        RasterizerPipeline &operator()(uint16_t width, uint16_t height);
-        RasterizerPipeline &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer);
-        RasterizerPipeline &record(const HardwareBuffer &index_buffer, const HardwareBuffer &vertex_buffer, const DrawIndexedParams &params);
+        RasterizerPipeline& operator()(uint16_t width, uint16_t height);
+        RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
+        RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        RasterizerPipeline& bind_render_target(uint32_t location, HardwareImage& image);
+        [[nodiscard]] CommandBatch command_batch() const;
+        [[nodiscard]] explicit operator bool() const noexcept;
+        [[nodiscard]] std::uintptr_t get_rasterizer_pipeline_id() const noexcept { return resource_id(); }
+
+        template <typename TargetProxy>
+            requires requires(TargetProxy& proxy) { proxy.boundResource_; }
+        RasterizerPipeline& bind_render_target(uint32_t location, TargetProxy& proxy)
+        {
+            add_auto_bind_entry(
+                { &proxy.boundResource_,
+                  0,
+                  0,
+                  static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
+                  location });
+            return *this;
+        }
+
+        template <typename... TargetProxies>
+        RasterizerPipeline& bind_output_targets(TargetProxies&... targets)
+        {
+            uint32_t location = 0;
+            (bind_render_target(location++, targets), ...);
+            return *this;
+        }
 
     private:
-        void bind_push_constant(const BindingSlot &slot, const void *data, size_t size) override
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type);
         }
 
-        void bind_buffer(const BindingSlot &slot, const HardwareBuffer &buffer) override
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
         {
             set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type);
         }
 
-        void bind_image(const BindingSlot &slot, const HardwareImage &image) override
+        void bind_image(const BindingSlot& slot, const HardwareImage& image) override
         {
             set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location);
         }
 
-        void set_push_constant_direct(uint64_t byte_offset, const void *data, size_t size, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer &buffer, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage &image, int32_t bind_type, uint32_t location = 0);
-
-        mutable std::mutex rasterizer_pipeline_mutex_;
-        std::atomic<std::uintptr_t> rasterizer_pipeline_id_;
+        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0);
+        void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
     };
 
     class RayTracingPipeline : public PipelineBindingScope, public ReflectedPipelineBindings<RayTracingPipeline>
     {
     };
-
-
 
     // ================================================================
     // HardwareExecutor
@@ -1340,8 +1333,6 @@ namespace Corona::Horizon
     //    mutable std::mutex executorMutex;
     //    std::atomic<std::uintptr_t> executorID;
     //};
-
-
 
     // ================================================================
     // HardwareDisplayer

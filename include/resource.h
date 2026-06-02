@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -23,19 +22,19 @@ namespace Corona::Horizon
         ResourceHandle() noexcept = default;
 
         ResourceHandle(const ResourceHandle& other) noexcept
+            : resource_(other.resource_)
         {
-            resource_.store(other.resource_.load(std::memory_order_acquire), std::memory_order_release);
         }
 
         ResourceHandle(ResourceHandle&& other) noexcept
+            : resource_(std::move(other.resource_))
         {
-            resource_.store(other.resource_.exchange({}, std::memory_order_acq_rel), std::memory_order_release);
         }
 
         ResourceHandle& operator=(const ResourceHandle& other) noexcept
         {
             if (this != &other)
-                resource_.store(other.resource_.load(std::memory_order_acquire), std::memory_order_release);
+                resource_ = other.resource_;
 
             return *this;
         }
@@ -43,21 +42,21 @@ namespace Corona::Horizon
         ResourceHandle& operator=(ResourceHandle&& other) noexcept
         {
             if (this != &other)
-                resource_.store(other.resource_.exchange({}, std::memory_order_acq_rel), std::memory_order_release);
+                resource_ = std::move(other.resource_);
 
             return *this;
         }
 
         [[nodiscard]] explicit operator bool() const noexcept
         {
-            auto resource = resource_.load(std::memory_order_acquire);
+            auto resource = resource_;
             return resource && resource->valid();
         }
 
     protected:
         [[nodiscard]] std::uintptr_t resource_id() const noexcept
         {
-            auto resource = resource_.load(std::memory_order_acquire);
+            auto resource = resource_;
             return resource ? resource->id() : 0;
         }
 
@@ -66,15 +65,15 @@ namespace Corona::Horizon
 
         void set_resource(std::shared_ptr<IResourceRef> resource) noexcept
         {
-            resource_.store(std::move(resource), std::memory_order_release);
+            resource_ = std::move(resource);
         }
 
         [[nodiscard]] std::shared_ptr<IResourceRef> resource_ref() const noexcept
         {
-            return resource_.load(std::memory_order_acquire);
+            return resource_;
         }
 
-        std::atomic<std::shared_ptr<IResourceRef>> resource_{};
+        std::shared_ptr<IResourceRef> resource_{};
     };
 
     struct ResourceBridge

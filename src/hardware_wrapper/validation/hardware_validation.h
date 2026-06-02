@@ -15,6 +15,8 @@ namespace Corona::Horizon
     struct HardwareBufferDesc;
     struct HardwareImageDesc;
     struct BufferRange;
+    struct DrawIndexedParams;
+    struct RasterizerPipelineDesc;
 
     bool validate_buffer_source_data(std::span<const std::byte> data, uint32_t element_size);
     bool validate_buffer_desc(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data = {});
@@ -22,4 +24,6 @@ namespace Corona::Horizon
     bool validate_buffer_host_write(const HardwareBuffer& buffer, std::span<const std::byte> data, uint64_t offset = 0);
     bool validate_buffer_host_read(const HardwareBuffer& buffer, std::span<std::byte> output, uint64_t offset = 0);
     bool validate_image_desc(const HardwareImageDesc& desc, std::span<const std::byte> upload_data = {});
+    bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc);
+    bool validate_rasterizer_pipeline_record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
 }

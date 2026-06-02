@@ -71,6 +71,7 @@ namespace Corona::Horizon
         [[nodiscard]] uint64_t completed_value() const;
         [[nodiscard]] uint64_t last_submitted_value() const noexcept;
         [[nodiscard]] QueueId id() const noexcept { return id_; }
+        [[nodiscard]] VkDevice device() const noexcept { return device_; }
         [[nodiscard]] VkQueue vk_queue() const noexcept { return queue_; }
         [[nodiscard]] VkSemaphore timeline() const noexcept { return timeline_; }
         [[nodiscard]] bool is_fake() const noexcept { return device_ == VK_NULL_HANDLE; }

@@ -1,8 +1,14 @@
 #include "execution.h"
 
 #include "device_manager.h"
+#include "hardware_wrapper_vulkan/display/display_manager.h"
+#include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/pipeline/vulkan_rasterizer_pipeline.h"
+#include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
+#include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,6 +33,201 @@ namespace Corona::Horizon
         {
             std::shared_ptr<IResourceRef> token = ResourceBridge::token(handle);
             return token ? token->id() : 0;
+        }
+
+        using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
+        using ImageStore = ResourceStore<ImageWrap, ImageReleaser>;
+        using RasterizerPipelineStore = ResourceStore<RasterizerPipelineWrap, NoopReleaser>;
+
+        [[nodiscard]] BufferStore::Read read_buffer(const ResourceHandle& handle)
+        {
+            return read<BufferStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] BufferStore::Write write_buffer(const ResourceHandle& handle)
+        {
+            return write<BufferStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] ImageStore::Write write_image(const ResourceHandle& handle)
+        {
+            return write<ImageStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] RasterizerPipelineStore::Read read_rasterizer_pipeline(const ResourceHandle& handle)
+        {
+            return read<RasterizerPipelineStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] uint32_t resolve_layer_count(const ImageWrap& image) noexcept
+        {
+            const ImageSubresourceRange& range = image.range;
+            if (range.layer_count == ImageSubresourceRange::remaining)
+                return range.base_layer < image.desc.array_layers ? image.desc.array_layers - range.base_layer : 0;
+
+            return range.layer_count;
+        }
+
+        [[nodiscard]] uint32_t resolve_mip_count(const ImageWrap& image) noexcept
+        {
+            const ImageSubresourceRange& range = image.range;
+            if (range.mip_count == ImageSubresourceRange::remaining)
+                return range.base_mip < image.desc.mip_levels ? image.desc.mip_levels - range.base_mip : 0;
+
+            return range.mip_count;
+        }
+
+        [[nodiscard]] VkImageSubresourceRange vk_subresource_range(const ImageWrap& image) noexcept
+        {
+            return {
+                .aspectMask = image.aspect_mask,
+                .baseMipLevel = image.range.base_mip,
+                .levelCount = resolve_mip_count(image),
+                .baseArrayLayer = image.range.base_layer,
+                .layerCount = resolve_layer_count(image),
+            };
+        }
+
+        [[nodiscard]] VkImageSubresourceLayers vk_subresource_layers(const ImageWrap& image, uint32_t layer, uint32_t mip) noexcept
+        {
+            return {
+                .aspectMask = image.aspect_mask,
+                .mipLevel = mip,
+                .baseArrayLayer = layer,
+                .layerCount = 1,
+            };
+        }
+
+        [[nodiscard]] VkExtent3D mip_extent(const ImageWrap& image, uint32_t mip) noexcept
+        {
+            if (mip >= image.desc.mip_levels)
+            {
+                return {};
+            }
+
+            const auto shrink = [mip](uint32_t value) noexcept {
+                if (mip >= std::numeric_limits<uint32_t>::digits)
+                    return 1u;
+
+                return std::max(1u, value >> mip);
+            };
+
+            return {
+                .width = shrink(image.desc.extent.width),
+                .height = shrink(image.desc.extent.height),
+                .depth = image.desc.dimension == ImageDimension::Image3D ? shrink(image.desc.extent.depth) : 1u,
+            };
+        }
+
+        [[nodiscard]] VkExtent3D min_extent(VkExtent3D lhs, VkExtent3D rhs) noexcept
+        {
+            return {
+                .width = std::min(lhs.width, rhs.width),
+                .height = std::min(lhs.height, rhs.height),
+                .depth = std::min(lhs.depth, rhs.depth),
+            };
+        }
+
+        [[nodiscard]] VkBufferImageCopy buffer_image_region(const ImageWrap& image, BufferImageCopyRegion region) noexcept
+        {
+            VkBufferImageCopy copy {};
+            copy.bufferOffset = region.buffer_offset;
+            copy.bufferRowLength = 0;
+            copy.bufferImageHeight = 0;
+            copy.imageSubresource = vk_subresource_layers(image, region.image_layer, region.image_mip);
+            copy.imageOffset = { 0, 0, 0 };
+            copy.imageExtent = mip_extent(image, region.image_mip);
+            return copy;
+        }
+
+        void transition_image(VkCommandBuffer command_buffer,
+                              ImageWrap& image,
+                              VkImageLayout new_layout,
+                              VkPipelineStageFlags2 dst_stage,
+                              VkAccessFlags2 dst_access)
+        {
+            if (image.image_handle == VK_NULL_HANDLE || image.image_layout == new_layout)
+                return;
+
+            const VkPipelineStageFlags2 src_stage = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
+                ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
+                : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            const VkAccessFlags2 src_access = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
+                ? 0
+                : (VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+
+            VkImageMemoryBarrier2 barrier {};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.srcStageMask = src_stage;
+            barrier.srcAccessMask = src_access;
+            barrier.dstStageMask = dst_stage;
+            barrier.dstAccessMask = dst_access;
+            barrier.oldLayout = image.image_layout;
+            barrier.newLayout = new_layout;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = image.image_handle;
+            barrier.subresourceRange = vk_subresource_range(image);
+
+            VkDependencyInfo dependency {};
+            dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dependency.imageMemoryBarrierCount = 1;
+            dependency.pImageMemoryBarriers = &barrier;
+
+            vkCmdPipelineBarrier2(command_buffer, &dependency);
+            image.image_layout = new_layout;
+        }
+
+        [[nodiscard]] VkIndexType resolve_index_type(const DrawIndexedDesc& draw, const BufferWrap& index_buffer) noexcept
+        {
+            switch (draw.index_type)
+            {
+            case IndexType::UInt32:
+                return VK_INDEX_TYPE_UINT32;
+            case IndexType::UInt16:
+                return VK_INDEX_TYPE_UINT16;
+            case IndexType::Auto:
+            default:
+                return index_buffer.desc.element_size == sizeof(uint32_t) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+            }
+        }
+
+        [[nodiscard]] VkRect2D full_scissor(uint32_t width, uint32_t height) noexcept
+        {
+            return {
+                .offset = { 0, 0 },
+                .extent = { width, height },
+            };
+        }
+
+        [[nodiscard]] VkRect2D draw_scissor(const DrawIndexedDesc& draw, uint32_t width, uint32_t height) noexcept
+        {
+            if (!draw.enable_scissor)
+                return full_scissor(width, height);
+
+            const int32_t x = std::max<int32_t>(0, draw.scissor.x);
+            const int32_t y = std::max<int32_t>(0, draw.scissor.y);
+            const int32_t right = std::min<int32_t>(static_cast<int32_t>(width),
+                                                    draw.scissor.x + static_cast<int32_t>(draw.scissor.width));
+            const int32_t bottom = std::min<int32_t>(static_cast<int32_t>(height),
+                                                     draw.scissor.y + static_cast<int32_t>(draw.scissor.height));
+
+            if (right <= x || bottom <= y)
+                return { .offset = { 0, 0 }, .extent = { 0, 0 } };
+
+            return {
+                .offset = { x, y },
+                .extent = { static_cast<uint32_t>(right - x), static_cast<uint32_t>(bottom - y) },
+            };
+        }
+
+        [[nodiscard]] std::shared_ptr<VulkanRasterizerPipeline> rasterizer_impl(const ResourceHandle& handle)
+        {
+            auto pipeline = read_rasterizer_pipeline(handle);
+            if (!pipeline || !pipeline->impl)
+                throw std::logic_error("DrawIndexed command requires a valid RasterizerPipeline.");
+
+            return std::static_pointer_cast<VulkanRasterizerPipeline>(pipeline->impl);
         }
 
         [[nodiscard]] std::vector<DeviceId> devices_from_mask(DeviceMask mask)
@@ -129,9 +330,7 @@ namespace Corona::Horizon
     void StreamCommand::record(CommandRecorder& recorder) const
     {
         if (recorder_)
-        {
             recorder_(recorder);
-        }
     }
 
     CommandBatch& CommandBatch::operator<<(StreamCommand command)
@@ -321,6 +520,10 @@ namespace Corona::Horizon
         command.queue = QueueCapability::Graphics;
         command.payload.draw_indexed = desc;
         command.sequence = next_sequence();
+        if (desc.pipeline)
+        {
+            command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
+        }
         command.resources.push_back({ index.handle, AccessKind::Read, 0 });
         command.resources.push_back({ vertex.handle, AccessKind::Read, 0 });
         mark_device_requirements(devices);
@@ -339,7 +542,10 @@ namespace Corona::Horizon
         command.op = CommandOp::Present;
         command.devices = devices;
         command.queue = QueueCapability::Present;
-        command.payload.present = { displayer, image, present_device, allow_cpu_bridge_fallback };
+        command.payload.present.displayer = displayer;
+        command.payload.present.image = image;
+        command.payload.present.present_device = present_device;
+        command.payload.present.allow_cpu_bridge_fallback = allow_cpu_bridge_fallback;
         command.sequence = next_sequence();
         command.resources.push_back({ image.handle, AccessKind::Read, 0 });
         mark_device_requirements(devices);
@@ -588,6 +794,11 @@ namespace Corona::Horizon
         }
     }
 
+    VulkanCommandEncoder::VulkanCommandEncoder(VkDevice device)
+        : device_(device)
+    {
+    }
+
     void VulkanCommandEncoder::encode(CompiledSubmission& submission) const
     {
         if (!submission.command_buffer || submission.command_buffer->vk() == VK_NULL_HANDLE)
@@ -603,6 +814,384 @@ namespace Corona::Horizon
         if (result != VK_SUCCESS)
         {
             throw std::runtime_error("vkBeginCommandBuffer failed while encoding execution plan.");
+        }
+
+        struct ActiveRendering
+        {
+            bool active { false };
+            VkFormat color_format { VK_FORMAT_UNDEFINED };
+            VkFormat depth_format { VK_FORMAT_UNDEFINED };
+            uint32_t width { 0 };
+            uint32_t height { 0 };
+        } active_rendering;
+
+        VkCommandBuffer command_buffer = submission.command_buffer->vk();
+
+        for (const CommandIR& command : submission.commands)
+        {
+            switch (command.op)
+            {
+            case CommandOp::CopyBuffer:
+            {
+                if (command.resources.size() < 2u)
+                    throw std::logic_error("CopyBuffer command is missing source or destination buffers.");
+
+                const CopyRegion& region = command.payload.copy;
+                if (region.size == 0)
+                    break;
+
+                BufferStore::Read src = read_buffer(command.resources[0].handle);
+                BufferStore::Write dst = write_buffer(command.resources[1].handle);
+                if (!src || src->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyBuffer requires a valid source HardwareBuffer.");
+                if (!dst || dst->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyBuffer requires a valid destination HardwareBuffer.");
+
+                VkBufferCopy copy {};
+                copy.srcOffset = region.src_offset;
+                copy.dstOffset = region.dst_offset;
+                copy.size = region.size;
+                vkCmdCopyBuffer(command_buffer, src->buffer_handle, dst->buffer_handle, 1, &copy);
+                break;
+            }
+            case CommandOp::CopyBufferToImage:
+            {
+                if (command.resources.size() < 2u)
+                    throw std::logic_error("CopyBufferToImage command is missing source buffer or destination image.");
+
+                BufferStore::Read src = read_buffer(command.resources[0].handle);
+                ImageStore::Write dst = write_image(command.resources[1].handle);
+                if (!src || src->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyBufferToImage requires a valid source HardwareBuffer.");
+                if (!dst || dst->image_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyBufferToImage requires a valid destination HardwareImage.");
+
+                VkBufferImageCopy copy = buffer_image_region(*dst, command.payload.buffer_image_copy);
+                if (copy.imageExtent.width == 0 || copy.imageExtent.height == 0 || copy.imageExtent.depth == 0)
+                    break;
+
+                transition_image(command_buffer,
+                                 *dst,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
+                vkCmdCopyBufferToImage(command_buffer,
+                                       src->buffer_handle,
+                                       dst->image_handle,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                       1,
+                                       &copy);
+                break;
+            }
+            case CommandOp::CopyImage:
+            {
+                if (command.resources.size() < 2u)
+                    throw std::logic_error("CopyImage command is missing source or destination images.");
+
+                ImageStore::Write src = write_image(command.resources[0].handle);
+                ImageStore::Write dst = write_image(command.resources[1].handle);
+                if (!src || src->image_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyImage requires a valid source HardwareImage.");
+                if (!dst || dst->image_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyImage requires a valid destination HardwareImage.");
+
+                const ImageCopyRegion& region = command.payload.image_copy;
+                const VkExtent3D extent = min_extent(mip_extent(*src, region.src_mip),
+                                                     mip_extent(*dst, region.dst_mip));
+                if (extent.width == 0 || extent.height == 0 || extent.depth == 0)
+                    break;
+
+                transition_image(command_buffer,
+                                 *src,
+                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 VK_ACCESS_2_TRANSFER_READ_BIT);
+                transition_image(command_buffer,
+                                 *dst,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
+
+                VkImageCopy copy {};
+                copy.srcSubresource = vk_subresource_layers(*src, region.src_layer, region.src_mip);
+                copy.srcOffset = { 0, 0, 0 };
+                copy.dstSubresource = vk_subresource_layers(*dst, region.dst_layer, region.dst_mip);
+                copy.dstOffset = { 0, 0, 0 };
+                copy.extent = extent;
+                vkCmdCopyImage(command_buffer,
+                               src->image_handle,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               dst->image_handle,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1,
+                               &copy);
+                break;
+            }
+            case CommandOp::CopyImageToBuffer:
+            {
+                if (command.resources.size() < 2u)
+                    throw std::logic_error("CopyImageToBuffer command is missing source image or destination buffer.");
+
+                ImageStore::Write src = write_image(command.resources[0].handle);
+                BufferStore::Write dst = write_buffer(command.resources[1].handle);
+                if (!src || src->image_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyImageToBuffer requires a valid source HardwareImage.");
+                if (!dst || dst->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyImageToBuffer requires a valid destination HardwareBuffer.");
+
+                VkBufferImageCopy copy = buffer_image_region(*src, command.payload.buffer_image_copy);
+                if (copy.imageExtent.width == 0 || copy.imageExtent.height == 0 || copy.imageExtent.depth == 0)
+                    break;
+
+                transition_image(command_buffer,
+                                 *src,
+                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 VK_ACCESS_2_TRANSFER_READ_BIT);
+                vkCmdCopyImageToBuffer(command_buffer,
+                                       src->image_handle,
+                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                       dst->buffer_handle,
+                                       1,
+                                       &copy);
+                break;
+            }
+            case CommandOp::BeginRendering:
+            {
+                const RenderingDesc& rendering = command.payload.rendering;
+                ImageStore::Write color;
+                ImageStore::Write depth;
+
+                VkRenderingAttachmentInfo color_attachment {};
+                color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+
+                VkRenderingAttachmentInfo depth_attachment {};
+                depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+
+                if (rendering.color.handle)
+                {
+                    color = write_image(rendering.color.handle);
+                    if (!color || color->image_handle == VK_NULL_HANDLE || color->image_view == VK_NULL_HANDLE)
+                        throw std::logic_error("BeginRendering requires a valid color HardwareImage.");
+
+                    const bool clear_attachment = color->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    transition_image(command_buffer,
+                                     *color,
+                                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+
+                    color_attachment.imageView = color->image_view;
+                    color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                    color_attachment.loadOp = clear_attachment ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+                    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    color_attachment.clearValue = color->clear_value;
+                    active_rendering.color_format = color->image_format;
+                }
+
+                if (rendering.depth.handle)
+                {
+                    depth = write_image(rendering.depth.handle);
+                    if (!depth || depth->image_handle == VK_NULL_HANDLE || depth->image_view == VK_NULL_HANDLE)
+                        throw std::logic_error("BeginRendering requires a valid depth HardwareImage.");
+
+                    const bool clear_attachment = depth->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    transition_image(command_buffer,
+                                     *depth,
+                                     VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+
+                    depth_attachment.imageView = depth->image_view;
+                    depth_attachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                    depth_attachment.loadOp = clear_attachment ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+                    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    depth_attachment.clearValue = depth->clear_value;
+                    active_rendering.depth_format = depth->image_format;
+                }
+
+                VkRenderingInfo rendering_info {};
+                rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+                rendering_info.renderArea = full_scissor(rendering.width, rendering.height);
+                rendering_info.layerCount = 1;
+                rendering_info.colorAttachmentCount = rendering.color.handle ? 1u : 0u;
+                rendering_info.pColorAttachments = rendering.color.handle ? &color_attachment : nullptr;
+                rendering_info.pDepthAttachment = rendering.depth.handle ? &depth_attachment : nullptr;
+
+                vkCmdBeginRendering(command_buffer, &rendering_info);
+
+                VkViewport viewport {};
+                viewport.x = 0.0f;
+                viewport.y = 0.0f;
+                viewport.width = static_cast<float>(rendering.width);
+                viewport.height = static_cast<float>(rendering.height);
+                viewport.minDepth = 0.0f;
+                viewport.maxDepth = 1.0f;
+                vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+                VkRect2D scissor = full_scissor(rendering.width, rendering.height);
+                vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+                active_rendering.active = true;
+                active_rendering.width = rendering.width;
+                active_rendering.height = rendering.height;
+                break;
+            }
+            case CommandOp::EndRendering:
+                if (active_rendering.active)
+                {
+                    vkCmdEndRendering(command_buffer);
+                    active_rendering = {};
+                }
+                break;
+            case CommandOp::DrawIndexed:
+            {
+                if (!active_rendering.active)
+                    throw std::logic_error("DrawIndexed requires an active rendering scope.");
+
+                const DrawIndexedDesc& draw = command.payload.draw_indexed;
+                if (draw.index_count == 0)
+                    break;
+
+                if (!draw.pipeline)
+                    throw std::logic_error("DrawIndexed requires a RasterizerPipeline handle.");
+
+                const size_t buffer_offset = draw.pipeline ? 1u : 0u;
+                if (command.resources.size() < buffer_offset + 2u)
+                    throw std::logic_error("DrawIndexed command is missing index or vertex buffer resources.");
+
+                BufferStore::Read index = read_buffer(command.resources[buffer_offset].handle);
+                BufferStore::Read vertex = read_buffer(command.resources[buffer_offset + 1u].handle);
+                if (!index || index->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("DrawIndexed requires a valid index HardwareBuffer.");
+                if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
+
+                std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
+                VulkanRasterizerPipeline::GraphicsPipeline graphics_pipeline =
+                    pipeline->graphics_pipeline(device_,
+                                                active_rendering.color_format,
+                                                active_rendering.depth_format,
+                                                static_cast<uint32_t>(vertex->desc.element_size));
+                if (graphics_pipeline.pipeline == VK_NULL_HANDLE || graphics_pipeline.layout == VK_NULL_HANDLE)
+                    throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
+
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline);
+
+                VkBuffer vertex_buffer = vertex->buffer_handle;
+                VkDeviceSize vertex_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+                vkCmdBindIndexBuffer(command_buffer, index->buffer_handle, 0, resolve_index_type(draw, *index));
+
+                if (!draw.push_constant_data.empty())
+                {
+                    vkCmdPushConstants(command_buffer,
+                                       graphics_pipeline.layout,
+                                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                       0,
+                                       static_cast<uint32_t>(draw.push_constant_data.size()),
+                                       draw.push_constant_data.data());
+                }
+
+                VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
+                if (scissor.extent.width == 0 || scissor.extent.height == 0)
+                    break;
+
+                vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+                vkCmdDrawIndexed(command_buffer,
+                                 draw.index_count,
+                                 draw.instance_count,
+                                 draw.first_index,
+                                 draw.vertex_offset,
+                                 draw.first_instance);
+                break;
+            }
+            case CommandOp::Present:
+            {
+                const PresentDesc& present = command.payload.present;
+                if (!present.swapchain_image.handle)
+                    break;
+
+                ImageStore::Write src = write_image(present.image.handle);
+                ImageStore::Write dst = write_image(present.swapchain_image.handle);
+                if (!src || src->image_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("Present requires a valid source HardwareImage.");
+                if (!dst || dst->image_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("Present requires a valid swapchain HardwareImage.");
+
+                const VkExtent3D src_extent = mip_extent(*src, 0);
+                const VkExtent3D dst_extent = mip_extent(*dst, 0);
+                const VkExtent3D extent = min_extent(src_extent, dst_extent);
+                if (extent.width == 0 || extent.height == 0 || extent.depth == 0)
+                    break;
+
+                transition_image(command_buffer,
+                                 *src,
+                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 VK_ACCESS_2_TRANSFER_READ_BIT);
+                transition_image(command_buffer,
+                                 *dst,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
+
+                if (src->image_format == dst->image_format &&
+                    src_extent.width == dst_extent.width &&
+                    src_extent.height == dst_extent.height &&
+                    src_extent.depth == dst_extent.depth)
+                {
+                    VkImageCopy copy {};
+                    copy.srcSubresource = vk_subresource_layers(*src, 0, 0);
+                    copy.srcOffset = { 0, 0, 0 };
+                    copy.dstSubresource = vk_subresource_layers(*dst, 0, 0);
+                    copy.dstOffset = { 0, 0, 0 };
+                    copy.extent = extent;
+                    vkCmdCopyImage(command_buffer,
+                                   src->image_handle,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   dst->image_handle,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   1,
+                                   &copy);
+                }
+                else
+                {
+                    VkImageBlit blit {};
+                    blit.srcSubresource = vk_subresource_layers(*src, 0, 0);
+                    blit.srcOffsets[0] = { 0, 0, 0 };
+                    blit.srcOffsets[1] = {
+                        static_cast<int32_t>(src_extent.width),
+                        static_cast<int32_t>(src_extent.height),
+                        static_cast<int32_t>(src_extent.depth),
+                    };
+                    blit.dstSubresource = vk_subresource_layers(*dst, 0, 0);
+                    blit.dstOffsets[0] = { 0, 0, 0 };
+                    blit.dstOffsets[1] = {
+                        static_cast<int32_t>(dst_extent.width),
+                        static_cast<int32_t>(dst_extent.height),
+                        static_cast<int32_t>(dst_extent.depth),
+                    };
+                    vkCmdBlitImage(command_buffer,
+                                   src->image_handle,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   dst->image_handle,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   1,
+                                   &blit,
+                                   VK_FILTER_NEAREST);
+                }
+
+                transition_image(command_buffer,
+                                 *dst,
+                                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                 0);
+                break;
+            }
+            default:
+                break;
+            }
         }
 
         result = vkEndCommandBuffer(submission.command_buffer->vk());
@@ -705,12 +1294,41 @@ namespace Corona::Horizon
         return compiler_.compile(task);
     }
 
-    std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan) const
+    std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results) const
     {
-        if (!queue_resolver_)
+        const auto resolve_queue = [this](DeviceId device, QueueCapability capability) -> Queue& {
+            if (queue_resolver_)
+            {
+                return queue_resolver_(device, capability);
+            }
+
+            if (device.value != 0)
+            {
+                throw std::logic_error("Default HardwareExecutor currently resolves only the main device.");
+            }
+
+            Queue* queue = main_device_context().device_manager.queue_for(capability);
+            if (queue == nullptr)
+            {
+                throw std::runtime_error("Default HardwareExecutor could not resolve a queue for the requested capability.");
+            }
+            return *queue;
+        };
+
+        struct PreparedQueuePresent
         {
-            throw std::logic_error("HardwareExecutor requires a queue resolver before submit().");
-        }
+            std::shared_ptr<DisplayManager> manager;
+            PresentDesc desc {};
+        };
+
+        const auto skipped_present = [](const PresentDesc& desc, std::string message) {
+            PresentResult result;
+            result.status = PresentStatus::Skipped;
+            result.displayer = desc.displayer;
+            result.image = desc.image;
+            result.message = std::move(message);
+            return result;
+        };
 
         std::vector<SubmissionToken> tokens;
         tokens.reserve(plan.submissions.size());
@@ -719,13 +1337,59 @@ namespace Corona::Horizon
         for (size_t submission_index = 0; submission_index < plan.submissions.size(); ++submission_index)
         {
             CompiledSubmission& compiled_submission = plan.submissions[submission_index];
-            Queue& queue = queue_resolver_(compiled_submission.device, compiled_submission.queue);
+            Queue& queue = resolve_queue(compiled_submission.device, compiled_submission.queue);
+
+            std::vector<PreparedQueuePresent> prepared_presents;
+            size_t present_index = 0;
+            for (CommandIR& command : compiled_submission.commands)
+            {
+                if (command.op != CommandOp::Present)
+                {
+                    continue;
+                }
+
+                PresentDesc& desc = command.payload.present;
+                std::shared_ptr<DisplayManager> manager = display_manager_for(desc.displayer);
+                if (!manager)
+                {
+                    if (present_results != nullptr)
+                    {
+                        present_results->push_back(skipped_present(desc, "Present node has no registered DisplayManager."));
+                    }
+                    ++present_index;
+                    continue;
+                }
+
+                PreparedPresent prepared = manager->prepare_present(desc);
+                if (present_index < compiled_submission.presents.size())
+                {
+                    compiled_submission.presents[present_index] = desc;
+                }
+
+                if (!prepared.ready_for_submit)
+                {
+                    if (present_results != nullptr)
+                    {
+                        present_results->push_back(std::move(prepared.immediate_result));
+                    }
+                    ++present_index;
+                    continue;
+                }
+
+                compiled_submission.waits.push_back(prepared.wait);
+                compiled_submission.signals.push_back(prepared.signal);
+                compiled_submission.keep_alive.add_object(std::static_pointer_cast<void>(manager));
+                compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
+                prepared_presents.push_back({ std::move(manager), desc });
+                ++present_index;
+            }
+
             if (!compiled_submission.command_buffer)
             {
                 compiled_submission.command_buffer = queue.acquire();
             }
 
-            VulkanCommandEncoder encoder;
+            VulkanCommandEncoder encoder(queue.device());
             encoder.encode(compiled_submission);
 
             std::vector<SubmitWait> waits = compiled_submission.waits;
@@ -748,6 +1412,14 @@ namespace Corona::Horizon
             queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
             tokens.push_back(queue.submit(queue_submission, waits, compiled_submission.signals));
             submitted_tokens[submission_index] = tokens.back();
+
+            if (present_results != nullptr)
+            {
+                for (PreparedQueuePresent& present : prepared_presents)
+                {
+                    present_results->push_back(present.manager->present(present.desc, tokens.back()));
+                }
+            }
         }
 
         return tokens;
@@ -759,21 +1431,7 @@ namespace Corona::Horizon
 
         SubmitReceipt receipt;
         receipt.serial = ++next_submit_serial_;
-        receipt.tokens = submit(plan);
-
-        for (const CompiledSubmission& submission : plan.submissions)
-        {
-            for (const PresentDesc& present_desc : submission.presents)
-            {
-                PresentResult result;
-                result.status = PresentStatus::Skipped;
-                result.displayer = present_desc.displayer;
-                result.image = present_desc.image;
-                result.message = "Present node was recorded in the execution graph; no swapchain display manager is bound yet.";
-                receipt.presents.push_back(std::move(result));
-            }
-        }
-
+        receipt.tokens = submit(plan, &receipt.presents);
         return receipt;
     }
 }

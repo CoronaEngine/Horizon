@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hardware_wrapper_vulkan/hardware/execution.h"
+#include "horizon_refac.h"
 
 #include <tuple>
 #include <type_traits>
@@ -382,6 +383,14 @@ namespace Corona::Horizon
     [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
     {
         return { displayer, image, present_device, allow_cpu_bridge_fallback };
+    }
+
+    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer, const HardwareImage& image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
+    {
+        return present(displayer.displayer_ref(),
+                       { static_cast<const ResourceHandle&>(image) },
+                       present_device,
+                       allow_cpu_bridge_fallback);
     }
 
     [[nodiscard]] inline HostFunctionCommand host_callback(std::function<void()> callback)

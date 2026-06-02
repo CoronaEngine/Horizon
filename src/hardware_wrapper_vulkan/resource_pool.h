@@ -431,7 +431,7 @@ namespace Corona::Horizon
 
     struct RasterizerPipelineWrap
     {
-        void* impl { nullptr };
+        std::shared_ptr<void> impl {};
     };
 
     struct DisplayerWrap

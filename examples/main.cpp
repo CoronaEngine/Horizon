@@ -1,30 +1,79 @@
+#include "example_default/example_default.h"
 
-//#include "example_baseline/example_baseline.h"
-//#include "example_default/example_default.h"
-//#include "example_glsl/example_glsl.h"
-//#include "example_edsl/example_edsl.h"
-#include "hardware_wrapper_vulkan/hardware_context.h"
-
+#include <cstdint>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 
-int main()
+namespace
 {
+    [[nodiscard]] uint32_t parse_frame_count(std::string_view value)
+    {
+        uint64_t result = 0;
+        if (value.empty())
+        {
+            throw std::invalid_argument("--frames requires a positive integer.");
+        }
+
+        for (char ch : value)
+        {
+            if (ch < '0' || ch > '9')
+            {
+                throw std::invalid_argument("--frames requires a positive integer.");
+            }
+            result = result * 10 + static_cast<uint64_t>(ch - '0');
+            if (result > UINT32_MAX)
+            {
+                throw std::out_of_range("--frames exceeds uint32_t.");
+            }
+        }
+
+        return static_cast<uint32_t>(result);
+    }
+}
+
+int main(int argc, char** argv)
+{
+    uint32_t frames = 180;
+    std::string_view example = "default";
+
     try
     {
-        // 每一个方法都代表一个独立的示例，展示了不同的功能或者后端实现。可以根据需要选择运行其中一个或者多个示例。
+        for (int index = 1; index < argc; ++index)
+        {
+            std::string_view arg = argv[index] == nullptr ? std::string_view {} : std::string_view { argv[index] };
+            if (arg == "--frames")
+            {
+                if (index + 1 >= argc)
+                {
+                    throw std::invalid_argument("--frames requires a value.");
+                }
+                frames = parse_frame_count(argv[++index]);
+                continue;
+            }
 
-        //run_example_default();
-        //run_example_baseline();
-        //run_example_glsl();
-        //run_example_edsl();
-        Corona::Horizon::HardwareContext context;
+            if (arg == "default")
+            {
+                example = "default";
+                continue;
+            }
 
+            throw std::invalid_argument("Unknown HorizonExamples argument: " + std::string(arg));
+        }
+
+        if (example == "default")
+        {
+            run_example_default(frames);
+            return 0;
+        }
+
+        throw std::invalid_argument("Unknown Horizon example: " + std::string(example));
     }
-    catch (const std::exception &e)
+    catch (const std::exception& error)
     {
-        std::cerr << e.what() << '\n';
+        std::cerr << error.what() << '\n';
+        return 1;
     }
-
-    return 0;
 }

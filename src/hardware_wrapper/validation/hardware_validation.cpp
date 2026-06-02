@@ -1,11 +1,13 @@
 #include "hardware_validation.h"
 #include "horizon_refac.h"
 
+#include <cmath>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "corona/kernel/core/i_logger.h"
 
@@ -45,6 +47,28 @@ namespace Corona::Horizon
             default:
                 return false;
             }
+        }
+
+        [[nodiscard]] bool is_depth_stencil_format(Format format) noexcept
+        {
+            switch (format)
+            {
+            case Format::D16:
+            case Format::D24S8:
+            case Format::D32:
+            case Format::D32S8:
+            case Format::X24G8_UINT:
+            case Format::X32G8_UINT:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool shader_has_spirv(const PipelineShaderDesc& shader) noexcept
+        {
+            const auto* spirv = std::get_if<std::vector<uint32_t>>(&shader.module.shaderCode);
+            return spirv != nullptr && !spirv->empty();
         }
 
         [[nodiscard]] HardwareValidationConfig read_validation_config()
@@ -252,6 +276,90 @@ namespace Corona::Horizon
 
         if (!upload_data.empty() && desc.cpu_access == CpuAccessMode::None)
             validation_warning("HardwareImage upload data only copies immediately for host-visible images until GPU upload commands are encoded.");
+
+        return true;
+    }
+
+    bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc)
+    {
+        if (!desc.vertex_shader.is_vertex())
+            return validation_error("RasterizerPipelineDesc requires a vertex shader.", true);
+
+        if (!desc.fragment_shader.is_fragment())
+            return validation_error("RasterizerPipelineDesc requires a fragment shader.", true);
+
+        if (!shader_has_spirv(desc.vertex_shader))
+            return validation_error("RasterizerPipelineDesc vertex shader must contain SPIR-V code.", true);
+
+        if (!shader_has_spirv(desc.fragment_shader))
+            return validation_error("RasterizerPipelineDesc fragment shader must contain SPIR-V code.", true);
+
+        if (desc.multiview_count == 0)
+            return validation_error("RasterizerPipelineDesc multiview_count must be greater than zero.", true);
+
+        const uint32_t sample_count = static_cast<uint32_t>(desc.multisample.sample_count);
+        if (!is_supported_sample_count(sample_count))
+            return validation_error("RasterizerPipelineDesc multisample sample_count is not supported.", true);
+
+        if (!std::isfinite(desc.rasterizer.line_width) || desc.rasterizer.line_width <= 0.0f)
+            return validation_error("RasterizerPipelineDesc rasterizer line_width must be finite and greater than zero.", true);
+
+        if (!std::isfinite(desc.multisample.min_sample_shading) ||
+            desc.multisample.min_sample_shading < 0.0f ||
+            desc.multisample.min_sample_shading > 1.0f)
+        {
+            return validation_error("RasterizerPipelineDesc min_sample_shading must be in [0, 1].", true);
+        }
+
+        if (!optional_validation_enabled())
+            return true;
+
+        if (desc.depth_attachment.enabled)
+        {
+            if (!is_depth_stencil_format(desc.depth_attachment.format))
+                return validation_error("RasterizerPipelineDesc depth_attachment requires a depth/stencil format.");
+        }
+        else if (desc.depth_stencil.depth_test_enabled || desc.depth_stencil.stencil_test_enabled)
+        {
+            validation_warning("RasterizerPipelineDesc enables depth/stencil tests without a depth attachment.");
+        }
+
+        if (desc.blend.attachments.empty())
+            validation_warning("RasterizerPipelineDesc has no color blend attachments; bind render targets before recording draw work.");
+
+        return true;
+    }
+
+    bool validate_rasterizer_pipeline_record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params)
+    {
+        if (!optional_validation_enabled())
+            return true;
+
+        if (!index_buffer || !vertex_buffer)
+            return validation_error("RasterizerPipeline::record requires valid index and vertex buffers.");
+
+        const uint64_t index_element_size = index_buffer.get_element_size();
+        if (!is_index_element_size(static_cast<uint32_t>(index_element_size)))
+            return validation_error("RasterizerPipeline::record index buffer element size must be 2 or 4 bytes.");
+
+        const uint64_t index_count = index_buffer.get_element_count();
+        if (index_count == 0)
+            return validation_error("RasterizerPipeline::record index buffer must contain at least one element.");
+
+        if (params.first_index > index_count)
+            return validation_error("RasterizerPipeline::record first_index exceeds the index buffer element count.");
+
+        const uint64_t requested_count = params.index_count == 0
+                                             ? index_count - params.first_index
+                                             : params.index_count;
+        if (requested_count == 0)
+            return validation_error("RasterizerPipeline::record index_count resolves to zero.");
+
+        if (requested_count > index_count - params.first_index)
+            return validation_error("RasterizerPipeline::record index range exceeds the index buffer element count.");
+
+        if (vertex_buffer.get_element_count() == 0 || vertex_buffer.get_element_size() == 0)
+            return validation_error("RasterizerPipeline::record vertex buffer must contain typed vertex elements.");
 
         return true;
     }
