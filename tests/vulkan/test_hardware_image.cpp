@@ -172,20 +172,6 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
-    [[nodiscard]] Corona::Horizon::HardwareImageOptions host_read_write_image_options() noexcept
-    {
-        Corona::Horizon::HardwareImageOptions options;
-        options.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
-        return options;
-    }
-
-    [[nodiscard]] Corona::Horizon::HardwareBufferOptions host_read_write_buffer_options() noexcept
-    {
-        Corona::Horizon::HardwareBufferOptions options;
-        options.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
-        return options;
-    }
-
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_create_lifetime_and_subresources()
     {
         const auto environment = require_vulkan_environment();
@@ -259,8 +245,8 @@ namespace
                                                            4,
                                                            Corona::Horizon::Format::RGBA8_UNORM,
                                                            Corona::Horizon::ImageUsageFlags::TransferSrc | Corona::Horizon::ImageUsageFlags::TransferDst,
-                                                           "hardware_image.linear",
-                                                           host_read_write_image_options());
+                                                           "hardware_image.linear");
+        desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
 
         try
         {
@@ -320,10 +306,11 @@ namespace
         Corona::Horizon::HardwareImage src(desc);
         Corona::Horizon::HardwareImage dst(desc);
         const std::array<uint32_t, 16> staging_data {};
+        Corona::Horizon::HardwareBufferDesc buffer_desc =
+            Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(staging_data.size(), "hardware_image.copy.buffer");
+        buffer_desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
         Corona::Horizon::HardwareBuffer buffer =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(staging_data),
-                                                               "hardware_image.copy.buffer",
-                                                               host_read_write_buffer_options());
+            Corona::Horizon::HardwareBuffer(buffer_desc, std::as_bytes(std::span<const uint32_t>(staging_data)));
 
         Corona::Horizon::CopyImageCommand image_copy = src.copy_to(dst, 1, 0, 1, 0);
         expect(image_copy.copy_region().src_layer == 1, "CopyImageCommand should preserve source layer.");
@@ -379,16 +366,14 @@ namespace
             return Corona::Horizon::Tests::TestResult::skip(std::string("Sampled image descriptors are unavailable on this Vulkan device: ") + error.what());
         }
 
-        Corona::Horizon::HardwareImageOptions options;
-        options.dedicated = true;
-        options.exportable = true;
         Corona::Horizon::HardwareImageDesc external_desc =
             Corona::Horizon::HardwareImageDesc::texture_2d(4,
                                                            4,
                                                            Corona::Horizon::Format::RGBA8_UNORM,
                                                            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst,
-                                                           "hardware_image.external",
-                                                           options);
+                                                           "hardware_image.external");
+        external_desc.dedicated = true;
+        external_desc.exportable = true;
 
         Corona::Horizon::ExternalMemoryHandle handle {};
         Corona::Horizon::ExternalMemoryHandle second_handle {};

@@ -169,11 +169,11 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
-    [[nodiscard]] Corona::Horizon::HardwareBufferOptions host_read_write_buffer_options() noexcept
+    template <Corona::Horizon::HardwareTransferable T>
+    [[nodiscard]] Corona::Horizon::HardwareBuffer host_read_write_buffer(Corona::Horizon::HardwareBufferDesc desc, std::span<const T> upload_data)
     {
-        Corona::Horizon::HardwareBufferOptions options;
-        options.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
-        return options;
+        desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
+        return Corona::Horizon::HardwareBuffer(desc, std::as_bytes(upload_data));
     }
 
     [[nodiscard]] Corona::Horizon::ResourceHandle test_resource(std::uintptr_t id)
@@ -659,22 +659,22 @@ void main()
         color.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
         const std::array<uint16_t, 3> indices { 0, 1, 2 };
+        Corona::Horizon::HardwareBufferDesc index_desc =
+            Corona::Horizon::HardwareBufferDesc::index<uint16_t>(indices.size(), "execution.rasterizer.real.index");
         Corona::Horizon::HardwareBuffer index =
-            Corona::Horizon::HardwareBuffer::index<uint16_t>(std::span<const uint16_t>(indices),
-                                                             "execution.rasterizer.real.index",
-                                                             host_read_write_buffer_options());
+            host_read_write_buffer<uint16_t>(index_desc, std::span<const uint16_t>(indices));
 
         const std::array<uint32_t, 1> dummy_vertex { 0 };
+        Corona::Horizon::HardwareBufferDesc vertex_desc =
+            Corona::Horizon::HardwareBufferDesc::vertex<uint32_t>(dummy_vertex.size(), "execution.rasterizer.real.vertex");
         Corona::Horizon::HardwareBuffer vertex =
-            Corona::Horizon::HardwareBuffer::vertex<uint32_t>(std::span<const uint32_t>(dummy_vertex),
-                                                              "execution.rasterizer.real.vertex",
-                                                              host_read_write_buffer_options());
+            host_read_write_buffer<uint32_t>(vertex_desc, std::span<const uint32_t>(dummy_vertex));
 
         const std::vector<uint32_t> zeros(pixel_count, 0);
+        Corona::Horizon::HardwareBufferDesc readback_desc =
+            Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(zeros.size(), "execution.rasterizer.real.readback");
         Corona::Horizon::HardwareBuffer readback =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(zeros),
-                                                               "execution.rasterizer.real.readback",
-                                                               host_read_write_buffer_options());
+            host_read_write_buffer<uint32_t>(readback_desc, std::span<const uint32_t>(zeros));
 
         Corona::Horizon::RasterizerPipeline pipeline(real_rasterizer_desc());
         TestRenderTargetProxy target;

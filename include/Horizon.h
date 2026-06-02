@@ -99,14 +99,6 @@ namespace Corona::Horizon
         bool exportable = false;
         std::string debug_name;
 
-        HardwareBufferDesc& apply(const HardwareBufferOptions& options) noexcept
-        {
-            cpu_access = options.cpu_access;
-            dedicated = options.dedicated;
-            exportable = options.exportable;
-            return *this;
-        }
-
         [[nodiscard]] uint64_t byte_size() const
         {
             if (element_count == 0 || element_size == 0)
@@ -119,40 +111,39 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {})
         {
             HardwareBufferDesc desc;
             desc.element_count = count;
             desc.element_size = uint32_t(sizeof(T));
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            desc.apply(options);
             (void)desc.byte_size();
             return desc;
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Vertex, std::move(name), options);
+            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Vertex, std::move(name));
         }
 
         template <HardwareIndexType T>
-        [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name), options);
+            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name));
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc uniform(std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc uniform(std::string name = {})
         {
-            return typed<T>(1, BufferUsageFlags::TransferDst | BufferUsageFlags::Uniform, std::move(name), options);
+            return typed<T>(1, BufferUsageFlags::TransferDst | BufferUsageFlags::Uniform, std::move(name));
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc storage(uint64_t count, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBufferDesc storage(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferSrc | BufferUsageFlags::TransferDst | BufferUsageFlags::Storage, std::move(name), options);
+            return typed<T>(count, BufferUsageFlags::TransferSrc | BufferUsageFlags::TransferDst | BufferUsageFlags::Storage, std::move(name));
         }
     };
 
@@ -244,60 +235,57 @@ namespace Corona::Horizon
             return read(output, first_element * sizeof(T));
         }
 
-        [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {}, HardwareBufferOptions options = {});
+        [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer vertex(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer vertex(std::span<const T> data, std::string name = {})
         {
-            return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name), options), std::as_bytes(data));
+            return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name)), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
-        [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {})
         {
             return vertex<std::ranges::range_value_t<Range>>(
                 std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name),
-                options);
+                std::move(name));
         }
 
         template <HardwareIndexType T>
-        [[nodiscard]] static HardwareBuffer index(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer index(std::span<const T> data, std::string name = {})
         {
-            return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name), options), std::as_bytes(data));
+            return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name)), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
-        [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {})
         {
             return index<std::ranges::range_value_t<Range>>(
                 std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name),
-                options);
+                std::move(name));
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer uniform(const T& value, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer uniform(const T& value, std::string name = {})
         {
-            return HardwareBuffer(HardwareBufferDesc::uniform<T>(std::move(name), options), std::as_bytes(std::span<const T>(&value, 1)));
+            return HardwareBuffer(HardwareBufferDesc::uniform<T>(std::move(name)), std::as_bytes(std::span<const T>(&value, 1)));
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer storage(std::span<const T> data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer storage(std::span<const T> data, std::string name = {})
         {
-            return HardwareBuffer(HardwareBufferDesc::storage<T>(data.size(), std::move(name), options), std::as_bytes(data));
+            return HardwareBuffer(HardwareBufferDesc::storage<T>(data.size(), std::move(name)), std::as_bytes(data));
         }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
-        [[nodiscard]] static HardwareBuffer storage(const Range& data, std::string name = {}, HardwareBufferOptions options = {})
+        [[nodiscard]] static HardwareBuffer storage(const Range& data, std::string name = {})
         {
             return storage<std::ranges::range_value_t<Range>>(
                 std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name),
-                options);
+                std::move(name));
         }
 
         [[nodiscard]] CommandBatch upload(std::span<const std::byte> data, uint64_t dst_offset = 0) const;
@@ -329,20 +317,11 @@ namespace Corona::Horizon
         bool exportable = false;
         std::string debug_name;
 
-        HardwareImageDesc& apply(const HardwareImageOptions& options) noexcept
-        {
-            cpu_access = options.cpu_access;
-            dedicated = options.dedicated;
-            exportable = options.exportable;
-            return *this;
-        }
-
         static HardwareImageDesc texture_2d(uint32_t width,
                                             uint32_t height,
                                             Format format,
                                             ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {},
-                                            HardwareImageOptions options = {})
+                                            std::string name = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image2D;
@@ -350,7 +329,7 @@ namespace Corona::Horizon
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            return desc.apply(options);
+            return desc;
         }
 
         static HardwareImageDesc texture_2d_array(uint32_t width,
@@ -358,8 +337,7 @@ namespace Corona::Horizon
                                                   uint32_t layers,
                                                   Format format,
                                                   ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                                  std::string name = {},
-                                                  HardwareImageOptions options = {})
+                                                  std::string name = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image2DArray;
@@ -368,7 +346,7 @@ namespace Corona::Horizon
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            return desc.apply(options);
+            return desc;
         }
 
         static HardwareImageDesc texture_3d(uint32_t width,
@@ -376,8 +354,7 @@ namespace Corona::Horizon
                                             uint32_t depth,
                                             Format format,
                                             ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {},
-                                            HardwareImageOptions options = {})
+                                            std::string name = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Image3D;
@@ -385,14 +362,13 @@ namespace Corona::Horizon
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            return desc.apply(options);
+            return desc;
         }
 
         static HardwareImageDesc cube(uint32_t size,
                                       Format format,
                                       ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                      std::string name = {},
-                                      HardwareImageOptions options = {})
+                                      std::string name = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::Cube;
@@ -401,15 +377,14 @@ namespace Corona::Horizon
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            return desc.apply(options);
+            return desc;
         }
 
         static HardwareImageDesc cube_array(uint32_t size,
                                             uint32_t cube_count,
                                             Format format,
                                             ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {},
-                                            HardwareImageOptions options = {})
+                                            std::string name = {})
         {
             HardwareImageDesc desc;
             desc.dimension = ImageDimension::CubeArray;
@@ -418,35 +393,31 @@ namespace Corona::Horizon
             desc.format = format;
             desc.usage = usage;
             desc.debug_name = std::move(name);
-            return desc.apply(options);
+            return desc;
         }
 
         static HardwareImageDesc color_attachment(uint32_t width,
                                                   uint32_t height,
                                                   Format format,
-                                                  std::string name = {},
-                                                  HardwareImageOptions options = {})
+                                                  std::string name = {})
         {
             return texture_2d(width,
                               height,
                               format,
                               ImageUsageFlags::ColorAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
-                              std::move(name),
-                              options);
+                              std::move(name));
         }
 
         static HardwareImageDesc depth_attachment(uint32_t width,
                                                   uint32_t height,
                                                   Format format,
-                                                  std::string name = {},
-                                                  HardwareImageOptions options = {})
+                                                  std::string name = {})
         {
             return texture_2d(width,
                               height,
                               format,
                               ImageUsageFlags::DepthStencilAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
-                              std::move(name),
-                              options);
+                              std::move(name));
         }
     };
 

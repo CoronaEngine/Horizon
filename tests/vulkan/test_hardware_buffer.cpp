@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -204,11 +205,19 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
-    [[nodiscard]] Corona::Horizon::HardwareBufferOptions host_read_write_options() noexcept
+    template <Corona::Horizon::HardwareTransferable T>
+    [[nodiscard]] Corona::Horizon::HardwareBufferDesc host_read_write_storage_desc(uint64_t element_count, std::string name)
     {
-        Corona::Horizon::HardwareBufferOptions options;
-        options.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
-        return options;
+        Corona::Horizon::HardwareBufferDesc desc =
+            Corona::Horizon::HardwareBufferDesc::storage<T>(element_count, std::move(name));
+        desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
+        return desc;
+    }
+
+    template <Corona::Horizon::HardwareTransferable T>
+    [[nodiscard]] Corona::Horizon::HardwareBuffer host_read_write_storage_buffer(std::span<const T> data, std::string name)
+    {
+        return Corona::Horizon::HardwareBuffer(host_read_write_storage_desc<T>(data.size(), std::move(name)), std::as_bytes(data));
     }
 
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_create_upload_read_write()
@@ -221,7 +230,7 @@ namespace
 
         const std::array<uint32_t, 4> initial { 1, 2, 3, 4 };
         Corona::Horizon::HardwareBuffer buffer =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.read_write", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.read_write");
 
         expect(static_cast<bool>(buffer), "HardwareBuffer::storage should create a valid buffer.");
         expect(buffer.get_element_size() == sizeof(uint32_t), "HardwareBuffer should preserve element size.");
@@ -263,7 +272,7 @@ namespace
 
         {
             Corona::Horizon::HardwareBuffer original =
-                Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.copy_lifetime", host_read_write_options());
+                host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.copy_lifetime");
 
             expect(static_cast<bool>(original), "Original HardwareBuffer should be valid.");
             weak_token = Corona::Horizon::ResourceBridge::keep_alive(original);
@@ -315,7 +324,7 @@ namespace
 
         const std::array<uint32_t, 2> initial { 11, 12 };
         Corona::Horizon::HardwareBuffer buffer =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.bounds", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.bounds");
 
         bool threw = false;
         try
@@ -341,7 +350,7 @@ namespace
         }
 
         Corona::Horizon::HardwareBufferDesc device_local_desc =
-            Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(2, "hardware_buffer.device_local", {});
+            Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(2, "hardware_buffer.device_local");
         device_local_desc.cpu_access = Corona::Horizon::CpuAccessMode::None;
 
         Corona::Horizon::HardwareBuffer device_local(device_local_desc);
@@ -374,7 +383,7 @@ namespace
         }
 
         Corona::Horizon::HardwareBuffer shared =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(zeros), "hardware_buffer.concurrent", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(zeros), "hardware_buffer.concurrent");
         const std::uintptr_t shared_id = shared.get_buffer_id();
 
         std::array<std::thread, thread_count> threads;
@@ -448,9 +457,9 @@ namespace
         const std::array<uint32_t, 4> src_data { 1, 2, 3, 4 };
         const std::array<uint32_t, 4> dst_data { 0, 0, 0, 0 };
         Corona::Horizon::HardwareBuffer src =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_cmd.src", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_cmd.src");
         Corona::Horizon::HardwareBuffer dst =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(dst_data), "hardware_buffer.copy_cmd.dst", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(dst_data), "hardware_buffer.copy_cmd.dst");
 
         const Corona::Horizon::BufferRange source_range { sizeof(uint32_t), sizeof(uint32_t) * 2 };
         Corona::Horizon::CopyBufferCommand command = src.copy_to(dst, source_range, sizeof(uint32_t));
@@ -484,7 +493,7 @@ namespace
 
         const std::array<uint32_t, 4> src_data { 1, 2, 3, 4 };
         Corona::Horizon::HardwareBuffer src =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_image.src", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_image.src");
 
         Corona::Horizon::HardwareImage image;
         auto image_resource = Corona::Horizon::resource_pool().images.create([] {
@@ -526,7 +535,7 @@ namespace
 
         const std::array<uint32_t, 2> initial { 42, 43 };
         Corona::Horizon::HardwareBuffer buffer =
-            Corona::Horizon::HardwareBuffer::storage<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.descriptor", host_read_write_options());
+            host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(initial), "hardware_buffer.descriptor");
 
         try
         {
@@ -550,13 +559,11 @@ namespace
             return environment;
         }
 
-        Corona::Horizon::HardwareBufferOptions options = host_read_write_options();
-        options.dedicated = true;
-        options.exportable = true;
-
         const std::array<uint32_t, 4> initial { 7, 8, 9, 10 };
-        const Corona::Horizon::HardwareBufferDesc desc =
-            Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(initial.size(), "hardware_buffer.external", options);
+        Corona::Horizon::HardwareBufferDesc desc =
+            host_read_write_storage_desc<uint32_t>(initial.size(), "hardware_buffer.external");
+        desc.dedicated = true;
+        desc.exportable = true;
 
         Corona::Horizon::HardwareBuffer imported;
         Corona::Horizon::ExternalMemoryHandle handle {};

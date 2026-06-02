@@ -90,8 +90,7 @@ namespace Corona::Horizon
     HardwareBuffer HardwareBuffer::from_bytes(std::span<const std::byte> data,
                                               uint32_t element_size,
                                               BufferUsageFlags usage,
-                                              std::string name,
-                                              HardwareBufferOptions options)
+                                              std::string name)
     {
         if (!validate_buffer_source_data(data, element_size))
             return {};
@@ -101,7 +100,6 @@ namespace Corona::Horizon
         desc.element_size = element_size;
         desc.usage = usage;
         desc.debug_name = std::move(name);
-        desc.apply(options);
         return HardwareBuffer(desc, data);
     }
 

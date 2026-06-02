@@ -141,13 +141,6 @@ namespace Corona::Horizon
         return uint32_t(flags & bit) != 0;
     }
 
-    struct HardwareBufferOptions
-    {
-        CpuAccessMode cpu_access = CpuAccessMode::Write;
-        bool dedicated = false;
-        bool exportable = false;
-    };
-
     struct BufferRange
     {
         static constexpr uint64_t whole_size = ~uint64_t{0};
@@ -326,15 +319,6 @@ namespace Corona::Horizon
         uint64_t slice_pitch = 0;
         ImageExtent extent {};
     };
-
-    struct HardwareImageOptions
-    {
-        CpuAccessMode cpu_access = CpuAccessMode::None;
-        bool dedicated = false;
-        bool exportable = false;
-    };
-
-
 
     // ================================================================
     // Draw
