@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: cf56aaa345fa0d0bd027c28edcd936524e0ca54e5ccd0da24f132874b7346541 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 76c900a9d282873aeb2d916f8dcbb3cd24a82a7e9445b01f96da4db89857b6b5 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -63,6 +63,7 @@ Be careful with:
 - In the lower-case Vulkan backend, native buffer creation/destruction belongs to `ResourceManager`: it owns the per-device `VmaAllocator`, derives `VkBufferUsageFlags` / VMA allocation from `HardwareBufferDesc`, and pairs cleanup in `destroy_buffer(BufferWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `BufferReleaser` delegation.
 - The `HardwareBuffer` wrapper should only connect public objects to `ResourceBridge` / `ResourceStore` tokens; do not restore the old wrapper-local `bufferID`, `globalBufferStorages`, handwritten ref-counts, or extra locks.
 - Keep the buffer creation chain split in the NVRHI style: `src/hardware_wrapper/validation` handles descriptor/public API validation, `ResourceManager` handles Vulkan/VMA object creation and memory choice, and state tracking, descriptor binding validation, upload/write/copy paths stay in later usage stages.
+- The `HardwareBuffer` constructor is not an upload scheduler: it may only synchronously handle initial upload data for host-visible mapped memory. Device-local / `CpuAccessMode::None` uploads go through explicit `HardwareBuffer::upload(...) -> CommandBatch`, using a staging buffer, copy command, and `keep_alive` lifetime retention; do not hide executor submit, wait, or GPU copy inside resource constructors.
 - In the lower-case Vulkan backend, native image creation/destruction also belongs to `ResourceManager`: it owns VMA allocation, derives usage / format / aspect / image view state, handles external import/export and sampled descriptors, and pairs `VkImageView` / VMA allocation cleanup in `destroy_image(ImageWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `ImageReleaser` delegation.
 - The `HardwareImage` wrapper should only connect public objects and layer/mip/subresource views to `ResourceBridge` / `ResourceStore` tokens; subresource views share the same token. For host linear image I/O, omitted `row_pitch` / `slice_pitch` means tightly packed caller data, and copies must walk `vkGetImageSubresourceLayout` rowPitch / depthPitch instead of doing a raw `memcpy` over the allocation.
 
@@ -94,6 +95,7 @@ Be careful with:
 - `VMA_IMPLEMENTATION` must appear in exactly one `.cpp`.
 - Internal headers on the VOLK/VMA dynamic-loading path must define `VK_NO_PROTOTYPES` before including `<volk.h>` / `<vk_mem_alloc.h>` when no-prototype mode is needed; do not let VMA auto-declare Vulkan prototypes.
 - Do not create a catch-all Vulkan utility header that centralizes every dependency.
+- Lower-case implementation and tests should include the public API through the official `horizon.h` header; do not restore the transitional `horizon_refac.h` name or add a compatibility forwarding header.
 
 ## Public API Boundary
 

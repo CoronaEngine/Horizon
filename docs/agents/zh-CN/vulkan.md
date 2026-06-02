@@ -62,6 +62,7 @@
 - lower-case Vulkan 后端的 native buffer 创建/销毁由 `ResourceManager` 负责：持有 per-device `VmaAllocator`、根据 `HardwareBufferDesc` 选择 `VkBufferUsageFlags` / VMA allocation，并在 `destroy_buffer(BufferWrap&)` 成对释放；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `BufferReleaser` 委托。
 - `HardwareBuffer` wrapper 只把公共对象接到 `ResourceBridge` / `ResourceStore` token；不要恢复旧的 wrapper-local `bufferID`、`globalBufferStorages`、手写 ref-count 或额外锁。
 - buffer 创建链路保持 NVRHI 风格的职责拆分：`src/hardware_wrapper/validation` 做描述符/公共 API 校验，`ResourceManager` 做 Vulkan/VMA 对象创建和内存选择，状态跟踪、descriptor 绑定校验、upload/write/copy 路径留给后续使用阶段。
+- `HardwareBuffer` 构造函数不是 upload scheduler：只能在 host-visible mapped memory 上同步处理 initial upload data。device-local / `CpuAccessMode::None` 上传走显式 `HardwareBuffer::upload(...) -> CommandBatch`，通过 staging buffer、copy command 和 `keep_alive` 保留生命周期；不要在资源构造函数里隐藏 executor submit、wait 或 GPU copy。
 - lower-case Vulkan 后端的 native image 创建/销毁同样由 `ResourceManager` 负责：管理 VMA allocation、推导 usage / format / aspect / image view、处理 external import/export 和 sampled descriptor，并在 `destroy_image(ImageWrap&)` 中成对释放 `VkImageView` 与 VMA allocation；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `ImageReleaser` 委托。
 - `HardwareImage` wrapper 只把公共对象和 layer/mip/subresource 视图接到 `ResourceBridge` / `ResourceStore` token；子资源视图共享同一个 token。host linear image I/O 中省略 `row_pitch` / `slice_pitch` 表示调用方数据紧密排列，实际拷贝必须通过 `vkGetImageSubresourceLayout` 的 rowPitch / depthPitch 分行分层处理，不要对整段 allocation 做裸 `memcpy`。
 
@@ -93,6 +94,7 @@
 - `VMA_IMPLEMENTATION` 只能出现在一个 `.cpp`。
 - 同时接入 VOLK/VMA 动态加载路径的内部 header，如果需要无原型模式，必须在 include `<volk.h>` / `<vk_mem_alloc.h>` 之前定义 `VK_NO_PROTOTYPES`；不要让 VMA 自动声明 Vulkan 原型。
 - 不要创建集中所有 Vulkan 依赖的万能工具头。
+- lower-case 实现和测试引用公共 API 时使用正式头 `horizon.h`；不要恢复过渡名 `horizon_refac.h` 或添加兼容转发头。
 
 ## 公共 API 边界
 

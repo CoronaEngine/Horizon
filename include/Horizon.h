@@ -300,6 +300,7 @@ namespace Corona::Horizon
                 options);
         }
 
+        [[nodiscard]] CommandBatch upload(std::span<const std::byte> data, uint64_t dst_offset = 0) const;
         [[nodiscard]] CopyBufferCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;

@@ -23,7 +23,7 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
 )
 
-set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/Horizon.h")
+set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/horizon.h")
 
 add_subdirectory(Helicon)
 

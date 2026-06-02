@@ -1,11 +1,11 @@
-#include "hardware_wrapper_vulkan/hardware/resource_manager.h"
-#include "hardware_wrapper_vulkan/hardware/command.h"
-#include "horizon_refac.h"
-#include "validation/hardware_validation.h"
-
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+
+#include "hardware_wrapper_vulkan/hardware/resource_manager.h"
+#include "hardware_wrapper_vulkan/hardware/command.h"
+#include "horizon.h"
+#include "validation/hardware_validation.h"
 
 namespace Corona::Horizon
 {
@@ -192,6 +192,45 @@ namespace Corona::Horizon
 
         std::memcpy(output.data(), mapped + mapped_offset, output.size_bytes());
         return true;
+    }
+
+    CommandBatch HardwareBuffer::upload(std::span<const std::byte> data, uint64_t dst_offset) const
+    {
+        CommandBatch batch;
+        if (data.empty())
+            return batch;
+
+        if (!validate_buffer_upload(*this, data, dst_offset))
+            return batch;
+
+        if (data.data() == nullptr || !*this)
+            return batch;
+
+        const uint64_t byte_size = static_cast<uint64_t>(data.size_bytes());
+        if (!fits_range_u64(get_byte_size(), dst_offset, byte_size))
+            return batch;
+
+        std::string staging_name;
+        {
+            const auto dst = read_buffer(*this);
+            if (dst && !dst->desc.debug_name.empty())
+                staging_name = dst->desc.debug_name + ".upload";
+        }
+
+        HardwareBufferDesc staging_desc;
+        staging_desc.element_count = byte_size;
+        staging_desc.element_size = 1;
+        staging_desc.usage = BufferUsageFlags::TransferSrc;
+        staging_desc.cpu_access = CpuAccessMode::Write;
+        staging_desc.debug_name = std::move(staging_name);
+
+        HardwareBuffer staging(staging_desc, data);
+        if (!staging)
+            return batch;
+
+        batch << staging.copy_to(*this, { 0, byte_size }, dst_offset);
+        batch << keep_alive(std::move(staging));
+        return batch;
     }
 
     CopyBufferCommand HardwareBuffer::copy_to(const HardwareBuffer& dst, BufferRange src, uint64_t dst_offset) const

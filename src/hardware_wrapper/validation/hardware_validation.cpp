@@ -1,5 +1,5 @@
 #include "hardware_validation.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 
 #include <cmath>
 #include <limits>
@@ -163,6 +163,16 @@ namespace Corona::Horizon
         if (upload_data.size_bytes() > total_byte_size)
             return validation_error("HardwareBuffer upload data exceeds buffer byte size.", true);
 
+        if (!upload_data.empty() && upload_data.data() == nullptr)
+            return validation_error("HardwareBuffer upload data must not be null.", true);
+
+        if (!upload_data.empty() && desc.cpu_access == CpuAccessMode::None)
+        {
+            return validation_error(
+                "HardwareBuffer initial upload requires host-visible memory; create the buffer without upload data and record HardwareBuffer::upload for device-local buffers.",
+                true);
+        }
+
         if (!optional_validation_enabled())
             return true;
 
@@ -179,6 +189,23 @@ namespace Corona::Horizon
             validation_warning("Exportable HardwareBuffer will force dedicated allocation.");
 
         return true;
+    }
+
+    bool validate_buffer_upload(const HardwareBuffer& dst, std::span<const std::byte> data, uint64_t dst_offset)
+    {
+        if (data.empty())
+            return true;
+
+        if (data.data() == nullptr)
+            return validation_error("HardwareBuffer upload data must not be null.", true);
+
+        if (!optional_validation_enabled())
+            return true;
+
+        if (!dst)
+            return validation_error("HardwareBuffer upload requires a valid destination buffer.");
+
+        return validate_range(dst.get_byte_size(), dst_offset, data.size_bytes(), "HardwareBuffer upload range exceeds destination buffer size.");
     }
 
     bool validate_buffer_copy(const HardwareBuffer& src, const HardwareBuffer& dst, BufferRange src_range, uint64_t dst_offset)
