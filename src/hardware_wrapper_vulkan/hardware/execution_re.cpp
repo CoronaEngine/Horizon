@@ -1,5 +1,0 @@
-
-namespace Corona::Horizon
-{
-
-}
