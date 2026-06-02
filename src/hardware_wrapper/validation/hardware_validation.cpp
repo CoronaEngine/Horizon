@@ -1,4 +1,5 @@
 #include "hardware_validation.h"
+#include "hardware_wrapper/image_format_layout.h"
 #include "horizon.h"
 
 #include <cmath>
@@ -116,6 +117,88 @@ namespace Corona::Horizon
 
             if (size > total_size - offset)
                 return validation_error(message);
+
+            return true;
+        }
+
+        [[nodiscard]] ImageSubresourceRange resolve_range(ImageSubresourceRange range, const HardwareImageDesc& desc) noexcept
+        {
+            if (range.layer_count == ImageSubresourceRange::remaining)
+                range.layer_count = range.base_layer < desc.array_layers ? desc.array_layers - range.base_layer : 0;
+
+            if (range.mip_count == ImageSubresourceRange::remaining)
+                range.mip_count = range.base_mip < desc.mip_levels ? desc.mip_levels - range.base_mip : 0;
+
+            return range;
+        }
+
+        [[nodiscard]] bool valid_subresource(const HardwareImageDesc& desc, uint32_t layer, uint32_t mip) noexcept
+        {
+            return layer < desc.array_layers && mip < desc.mip_levels;
+        }
+
+        [[nodiscard]] ImageExtent image_mip_extent(const HardwareImageDesc& desc, uint32_t mip) noexcept
+        {
+            return detail::mip_extent(desc.extent, mip);
+        }
+
+        bool validate_image_host_layout(const HardwareImageDesc& desc,
+                                        ImageSubresourceRange range,
+                                        uint32_t layer_index,
+                                        uint32_t mip_index,
+                                        uint64_t host_size,
+                                        uint64_t row_pitch,
+                                        uint64_t slice_pitch,
+                                        std::string_view operation)
+        {
+            const ImageSubresourceRange current = resolve_range(range, desc);
+            if (layer_index >= current.layer_count || mip_index >= current.mip_count)
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " subresource is outside the current image view range.");
+
+            const uint32_t absolute_layer = current.base_layer + layer_index;
+            const uint32_t absolute_mip = current.base_mip + mip_index;
+            if (!valid_subresource(desc, absolute_layer, absolute_mip))
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " subresource exceeds the image descriptor range.");
+
+            const detail::FormatBlockLayout format = detail::format_block_layout(desc.format);
+            if (format.bytes_per_block == 0)
+            {
+                if (is_depth_stencil_format(desc.format))
+                    return validation_error(std::string("HardwareImage ") + std::string(operation) + " does not support depth/stencil byte I/O yet.");
+
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " requires a supported byte-addressable format.");
+            }
+
+            const ImageExtent extent = image_mip_extent(desc, absolute_mip);
+            const uint32_t row_blocks = detail::div_ceil(extent.width, format.block_width);
+            const uint32_t row_count = detail::div_ceil(extent.height, format.block_height);
+            const uint32_t slice_count = detail::div_ceil(extent.depth, format.block_depth);
+
+            uint64_t row_bytes = 0;
+            if (!detail::checked_mul(row_blocks, format.bytes_per_block, row_bytes))
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " row byte size overflows.");
+
+            const uint64_t host_row_pitch = row_pitch != 0 ? row_pitch : row_bytes;
+            uint64_t host_slice_pitch = slice_pitch;
+            if (host_slice_pitch == 0 && !detail::checked_mul(host_row_pitch, row_count, host_slice_pitch))
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " default slice pitch overflows.");
+
+            if (host_row_pitch < row_bytes)
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " row_pitch is smaller than one tightly packed row.");
+
+            uint64_t slice_size = 0;
+            if (!detail::strided_byte_size(1, row_count, 0, host_row_pitch, row_bytes, slice_size))
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " slice byte size overflows.");
+
+            if (slice_count > 1 && host_slice_pitch < slice_size)
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " slice_pitch is smaller than one caller-data slice.");
+
+            uint64_t required_size = 0;
+            if (!detail::strided_byte_size(slice_count, row_count, host_slice_pitch, host_row_pitch, row_bytes, required_size))
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " caller byte size overflows.");
+
+            if (host_size < required_size)
+                return validation_error(std::string("HardwareImage ") + std::string(operation) + " caller data is smaller than the requested subresource.");
 
             return true;
         }
@@ -277,6 +360,10 @@ namespace Corona::Horizon
         if (desc.mip_levels == 0)
             return validation_error("HardwareImageDesc mip_levels must be greater than zero.", true);
 
+        const uint32_t max_mips = detail::max_mip_levels(desc.extent);
+        if (desc.mip_levels > max_mips)
+            return validation_error("HardwareImageDesc mip_levels exceeds the extent mip chain length.", true);
+
         if (!is_supported_sample_count(desc.sample_count))
             return validation_error("HardwareImageDesc sample_count must be 1, 2, 4, 8, 16, 32, or 64.", true);
 
@@ -288,6 +375,16 @@ namespace Corona::Horizon
 
         if (desc.sample_count > 1 && desc.mip_levels > 1)
             return validation_error("Multisampled HardwareImage resources must use one mip level.", true);
+
+        if (!upload_data.empty() && upload_data.data() == nullptr)
+            return validation_error("HardwareImage upload data must not be null.", true);
+
+        if (!upload_data.empty() && desc.cpu_access == CpuAccessMode::None)
+        {
+            return validation_error(
+                "HardwareImage initial upload requires host-visible memory; create the image without upload data and record an explicit upload/copy path for device-local images.",
+                true);
+        }
 
         if (!optional_validation_enabled())
             return true;
@@ -301,10 +398,53 @@ namespace Corona::Horizon
         if (desc.exportable && !desc.dedicated)
             validation_warning("Exportable HardwareImage will force dedicated allocation.");
 
-        if (!upload_data.empty() && desc.cpu_access == CpuAccessMode::None)
-            validation_warning("HardwareImage upload data only copies immediately for host-visible images until GPU upload commands are encoded.");
-
         return true;
+    }
+
+    bool validate_image_host_write(const HardwareImageDesc& desc,
+                                   ImageSubresourceRange range,
+                                   uint32_t layer_index,
+                                   uint32_t mip_index,
+                                   std::span<const std::byte> data,
+                                   uint64_t row_pitch,
+                                   uint64_t slice_pitch)
+    {
+        if (data.empty())
+            return true;
+
+        if (data.data() == nullptr)
+            return validation_error("HardwareImage write data must not be null.");
+
+        if (!optional_validation_enabled())
+            return true;
+
+        if (desc.cpu_access != CpuAccessMode::Write && desc.cpu_access != CpuAccessMode::ReadWrite)
+            return validation_error("HardwareImage write requires host-write image memory.");
+
+        return validate_image_host_layout(desc, range, layer_index, mip_index, data.size_bytes(), row_pitch, slice_pitch, "write");
+    }
+
+    bool validate_image_host_read(const HardwareImageDesc& desc,
+                                  ImageSubresourceRange range,
+                                  uint32_t layer_index,
+                                  uint32_t mip_index,
+                                  std::span<std::byte> output,
+                                  uint64_t row_pitch,
+                                  uint64_t slice_pitch)
+    {
+        if (output.empty())
+            return true;
+
+        if (output.data() == nullptr)
+            return validation_error("HardwareImage read output must not be null.");
+
+        if (!optional_validation_enabled())
+            return true;
+
+        if (desc.cpu_access != CpuAccessMode::Read && desc.cpu_access != CpuAccessMode::ReadWrite)
+            return validation_error("HardwareImage read requires host-readable image memory.");
+
+        return validate_image_host_layout(desc, range, layer_index, mip_index, output.size_bytes(), row_pitch, slice_pitch, "read");
     }
 
     bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc)

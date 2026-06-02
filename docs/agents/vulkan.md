@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 76c900a9d282873aeb2d916f8dcbb3cd24a82a7e9445b01f96da4db89857b6b5 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: b165ba3c151a7584c4b11950d6f42826b09694303839f97ce6dd9660da6c7ea2 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -59,13 +59,14 @@ Be careful with:
 - Resource lifetime abstractions in `include/` must remain backend-neutral; do not expose Vulkan, VMA, Windows, or third-party types just to connect Storage, ResourcePool, or Vulkan implementation details.
 - GPU deferred release should be handled by command/executor keep-alives that hold the control block until the fence/timeline completes; raw `uintptr_t` IDs are not ownership or GPU-lifetime guarantees.
 - Keep resource lifetime naming concise and consistent: public handle layer uses `IResourceRef`, `ResourceHandle`, and `ResourceBridge`; resource pool layer uses `ResourceStore<Resource, Releaser>`, `Slot`, `Read`, `Write`, `Handle`, and `Token`; release policies use `*Releaser`, not `*Destroy` or `DestroyPolicy`.
-- Do not use `using` aliases to hide core types in resource wrapper or resource pool refactors; this project prefers explicit types, especially for public resource handles and concurrent resource pool interfaces.
+- Use `using` aliases sparingly across the project; in resource wrapper or resource pool refactors, especially do not use aliases to hide core types. Prefer explicit types, especially for public resource handles, `ResourceStore<Resource, Releaser>`, and concurrent resource pool interfaces.
 - In the lower-case Vulkan backend, native buffer creation/destruction belongs to `ResourceManager`: it owns the per-device `VmaAllocator`, derives `VkBufferUsageFlags` / VMA allocation from `HardwareBufferDesc`, and pairs cleanup in `destroy_buffer(BufferWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `BufferReleaser` delegation.
 - The `HardwareBuffer` wrapper should only connect public objects to `ResourceBridge` / `ResourceStore` tokens; do not restore the old wrapper-local `bufferID`, `globalBufferStorages`, handwritten ref-counts, or extra locks.
 - Keep the buffer creation chain split in the NVRHI style: `src/hardware_wrapper/validation` handles descriptor/public API validation, `ResourceManager` handles Vulkan/VMA object creation and memory choice, and state tracking, descriptor binding validation, upload/write/copy paths stay in later usage stages.
 - The `HardwareBuffer` constructor is not an upload scheduler: it may only synchronously handle initial upload data for host-visible mapped memory. Device-local / `CpuAccessMode::None` uploads go through explicit `HardwareBuffer::upload(...) -> CommandBatch`, using a staging buffer, copy command, and `keep_alive` lifetime retention; do not hide executor submit, wait, or GPU copy inside resource constructors.
 - In the lower-case Vulkan backend, native image creation/destruction also belongs to `ResourceManager`: it owns VMA allocation, derives usage / format / aspect / image view state, handles external import/export and sampled descriptors, and pairs `VkImageView` / VMA allocation cleanup in `destroy_image(ImageWrap&)`; `ResourcePool` only maintains `ResourceStore` slots, tokens, and `ImageReleaser` delegation.
 - The `HardwareImage` wrapper should only connect public objects and layer/mip/subresource views to `ResourceBridge` / `ResourceStore` tokens; subresource views share the same token. For host linear image I/O, omitted `row_pitch` / `slice_pitch` means tightly packed caller data, and copies must walk `vkGetImageSubresourceLayout` rowPitch / depthPitch instead of doing a raw `memcpy` over the allocation.
+- Keep `HardwareImage` host byte-I/O format blocks, mip extents, row/slice pitch, and overflow math centralized in `src/hardware_wrapper/image_format_layout.h`; do not duplicate format tables or hand-written multiplication across wrapper and validation layers. `src/hardware_wrapper/validation` owns descriptor, CPU access, subresource, unsupported depth/stencil, and caller pitch/size checks; mapped-allocation copies and VMA flush/invalidate stay in the wrapper / `ResourceManager`.
 
 ## Executor / Queue Refactor
 

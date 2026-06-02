@@ -47,6 +47,8 @@ namespace Corona::Horizon
         [[nodiscard]] ExternalMemoryHandle export_image(ImageWrap& image);
         [[nodiscard]] uint32_t store_descriptor(ImageWrap& image);
         [[nodiscard]] ImageSubresourceLayout image_subresource_layout(const ImageWrap& image, uint32_t layer, uint32_t mip) const;
+        void flush_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size);
+        void invalidate_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size);
         void destroy_image(ImageWrap& image) noexcept;
 
     private:

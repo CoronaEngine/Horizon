@@ -58,13 +58,14 @@
 - `include/` 中的资源生命周期抽象必须保持后端无关，不要为了接入 Storage、ResourcePool 或 Vulkan 实现而暴露 Vulkan、VMA、Windows 或第三方类型。
 - GPU 延迟释放应由提交后的 command/executor keep-alive 持有 control block，直到 fence/timeline 完成；不要把裸 `uintptr_t` ID 当作所有权或 GPU 生命周期保证。
 - 资源生命周期命名保持简洁统一：公共句柄层使用 `IResourceRef`、`ResourceHandle`、`ResourceBridge`；资源池层使用 `ResourceStore<Resource, Releaser>`、`Slot`、`Read`、`Write`、`Handle`、`Token`；释放策略使用 `*Releaser`，不要使用 `*Destroy` 或 `DestroyPolicy`。
-- 资源 wrapper / resource pool 重构中不要用 `using` 别名隐藏核心类型；项目偏好显式类型，尤其是公共资源句柄和并发资源池接口。
+- 项目整体偏好少用 `using` 别名；资源 wrapper / resource pool 重构中尤其不要用别名隐藏核心类型。优先写出显式类型，特别是公共资源句柄、`ResourceStore<Resource, Releaser>` 及并发资源池接口。
 - lower-case Vulkan 后端的 native buffer 创建/销毁由 `ResourceManager` 负责：持有 per-device `VmaAllocator`、根据 `HardwareBufferDesc` 选择 `VkBufferUsageFlags` / VMA allocation，并在 `destroy_buffer(BufferWrap&)` 成对释放；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `BufferReleaser` 委托。
 - `HardwareBuffer` wrapper 只把公共对象接到 `ResourceBridge` / `ResourceStore` token；不要恢复旧的 wrapper-local `bufferID`、`globalBufferStorages`、手写 ref-count 或额外锁。
 - buffer 创建链路保持 NVRHI 风格的职责拆分：`src/hardware_wrapper/validation` 做描述符/公共 API 校验，`ResourceManager` 做 Vulkan/VMA 对象创建和内存选择，状态跟踪、descriptor 绑定校验、upload/write/copy 路径留给后续使用阶段。
 - `HardwareBuffer` 构造函数不是 upload scheduler：只能在 host-visible mapped memory 上同步处理 initial upload data。device-local / `CpuAccessMode::None` 上传走显式 `HardwareBuffer::upload(...) -> CommandBatch`，通过 staging buffer、copy command 和 `keep_alive` 保留生命周期；不要在资源构造函数里隐藏 executor submit、wait 或 GPU copy。
 - lower-case Vulkan 后端的 native image 创建/销毁同样由 `ResourceManager` 负责：管理 VMA allocation、推导 usage / format / aspect / image view、处理 external import/export 和 sampled descriptor，并在 `destroy_image(ImageWrap&)` 中成对释放 `VkImageView` 与 VMA allocation；`ResourcePool` 只维护 `ResourceStore` 槽位、token 和 `ImageReleaser` 委托。
 - `HardwareImage` wrapper 只把公共对象和 layer/mip/subresource 视图接到 `ResourceBridge` / `ResourceStore` token；子资源视图共享同一个 token。host linear image I/O 中省略 `row_pitch` / `slice_pitch` 表示调用方数据紧密排列，实际拷贝必须通过 `vkGetImageSubresourceLayout` 的 rowPitch / depthPitch 分行分层处理，不要对整段 allocation 做裸 `memcpy`。
+- `HardwareImage` host byte I/O 的 format block、mip extent、row/slice pitch 与 overflow 计算集中在 `src/hardware_wrapper/image_format_layout.h`；不要在 wrapper 和 validation 层各复制一份 format 表或手写乘法。`src/hardware_wrapper/validation` 负责 desc、CPU access、subresource、depth/stencil 暂不支持、caller pitch/size 校验；mapped allocation 拷贝和 VMA flush/invalidate 留在 wrapper / `ResourceManager`。
 
 ## Executor / Queue 重构
 

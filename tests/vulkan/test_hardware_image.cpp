@@ -36,6 +36,26 @@ namespace
         std::string reason;
     };
 
+    class ValidationConfigGuard
+    {
+    public:
+        ValidationConfigGuard()
+            : previous_(Corona::Horizon::get_hardware_validation_config())
+        {
+        }
+
+        ValidationConfigGuard(const ValidationConfigGuard&) = delete;
+        ValidationConfigGuard& operator=(const ValidationConfigGuard&) = delete;
+
+        ~ValidationConfigGuard()
+        {
+            Corona::Horizon::set_hardware_validation_config(previous_);
+        }
+
+    private:
+        Corona::Horizon::HardwareValidationConfig previous_ {};
+    };
+
     [[nodiscard]] std::string vk_result_name(VkResult result)
     {
         return std::to_string(static_cast<int>(result));
@@ -232,6 +252,54 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_device_local_initial_upload_validation()
+    {
+        Corona::Horizon::HardwareImageDesc desc =
+            Corona::Horizon::HardwareImageDesc::texture_2d(2,
+                                                           2,
+                                                           Corona::Horizon::Format::RGBA8_UNORM,
+                                                           Corona::Horizon::ImageUsageFlags::TransferDst,
+                                                           "hardware_image.device_local_upload");
+        const std::array<uint32_t, 4> pixels {};
+
+        bool threw = false;
+        try
+        {
+            (void)Corona::Horizon::HardwareImage(desc, std::as_bytes(std::span<const uint32_t>(pixels)));
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+
+        expect(threw, "HardwareImage device-local initial upload should throw before creating a Vulkan image.");
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_image_descriptor_validation()
+    {
+        Corona::Horizon::HardwareImageDesc desc =
+            Corona::Horizon::HardwareImageDesc::texture_2d(2,
+                                                           2,
+                                                           Corona::Horizon::Format::RGBA8_UNORM,
+                                                           Corona::Horizon::ImageUsageFlags::TransferDst,
+                                                           "hardware_image.invalid_mips");
+        desc.mip_levels = 3;
+
+        bool threw = false;
+        try
+        {
+            (void)Corona::Horizon::HardwareImage(desc);
+        }
+        catch (const std::invalid_argument&)
+        {
+            threw = true;
+        }
+
+        expect(threw, "HardwareImageDesc should reject mip_levels beyond the extent mip chain.");
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_linear_image_host_io()
     {
         const auto environment = require_vulkan_environment();
@@ -257,6 +325,24 @@ namespace
             for (uint32_t i = 0; i < pixels.size(); ++i)
             {
                 pixels[i] = 0xff000000u | i;
+            }
+
+            bool threw = false;
+            try
+            {
+                (void)image.write<uint32_t>(pixels, 3 * sizeof(uint32_t));
+            }
+            catch (const std::invalid_argument&)
+            {
+                threw = true;
+            }
+            expect(threw, "HardwareImage write should reject row_pitch smaller than one packed row when validation is enabled.");
+
+            {
+                ValidationConfigGuard guard;
+                Corona::Horizon::set_hardware_validation_config({ Corona::Horizon::HardwareValidationMode::Disabled });
+                expect(!image.write<uint32_t>(pixels, 3 * sizeof(uint32_t)),
+                       "HardwareImage write with too-small row_pitch should return false when validation is disabled.");
             }
 
             constexpr uint64_t row_pitch = 4 * sizeof(uint32_t);
@@ -429,6 +515,16 @@ namespace Corona::Horizon::Tests
                 "hardware_image.create_lifetime_subresources",
                 "HardwareImage creation, copy lifetime, and layer/mip views share one resource token.",
                 test_create_lifetime_and_subresources,
+            },
+            {
+                "hardware_image.device_local_initial_upload_validation",
+                "Device-local HardwareImage initial uploads fail validation instead of silently dropping data.",
+                test_device_local_initial_upload_validation,
+            },
+            {
+                "hardware_image.descriptor_validation",
+                "HardwareImage descriptor validation rejects invalid mip chains before resource creation.",
+                test_image_descriptor_validation,
             },
             {
                 "hardware_image.linear_host_io",

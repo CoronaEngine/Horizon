@@ -1257,6 +1257,50 @@ namespace Corona::Horizon
                         "vmaInvalidateAllocation");
     }
 
+    void ResourceManager::flush_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size)
+    {
+        if (!image.valid() || image.image_alloc == VK_NULL_HANDLE || byte_size == 0)
+            return;
+
+        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
+            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
+        {
+            throw std::overflow_error("HardwareImage flush range exceeds VkDeviceSize.");
+        }
+
+        std::lock_guard lock(mutex_);
+        if (allocator_ == VK_NULL_HANDLE)
+            return;
+
+        throw_if_failed(vmaFlushAllocation(allocator_,
+                                           image.image_alloc,
+                                           static_cast<VkDeviceSize>(byte_offset),
+                                           static_cast<VkDeviceSize>(byte_size)),
+                        "vmaFlushAllocation");
+    }
+
+    void ResourceManager::invalidate_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size)
+    {
+        if (!image.valid() || image.image_alloc == VK_NULL_HANDLE || byte_size == 0)
+            return;
+
+        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
+            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
+        {
+            throw std::overflow_error("HardwareImage invalidate range exceeds VkDeviceSize.");
+        }
+
+        std::lock_guard lock(mutex_);
+        if (allocator_ == VK_NULL_HANDLE)
+            return;
+
+        throw_if_failed(vmaInvalidateAllocation(allocator_,
+                                                image.image_alloc,
+                                                static_cast<VkDeviceSize>(byte_offset),
+                                                static_cast<VkDeviceSize>(byte_size)),
+                        "vmaInvalidateAllocation");
+    }
+
     ImageWrap ResourceManager::create_image(const HardwareImageDesc& desc)
     {
         std::lock_guard lock(mutex_);

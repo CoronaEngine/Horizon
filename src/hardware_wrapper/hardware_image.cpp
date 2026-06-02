@@ -1,9 +1,9 @@
-#include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware/command.h"
+#include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "horizon.h"
+#include "image_format_layout.h"
 #include "validation/hardware_validation.h"
 
-#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -14,30 +14,19 @@ namespace Corona::Horizon
 
     namespace
     {
-        using ImageStore = ResourceStore<ImageWrap, ImageReleaser>;
-        using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
-
-        struct FormatLayout
+        [[nodiscard]] ResourceStore<ImageWrap, ImageReleaser>::Read read_image(const HardwareImage& image)
         {
-            uint32_t block_width { 1 };
-            uint32_t block_height { 1 };
-            uint32_t block_depth { 1 };
-            uint32_t bytes_per_block { 0 };
-        };
-
-        [[nodiscard]] ImageStore::Read read_image(const HardwareImage& image)
-        {
-            return read<ImageStore>(ResourceBridge::token(image));
+            return read<ResourceStore<ImageWrap, ImageReleaser>>(ResourceBridge::token(image));
         }
 
-        [[nodiscard]] ImageStore::Write write_image(const HardwareImage& image)
+        [[nodiscard]] ResourceStore<ImageWrap, ImageReleaser>::Write write_image(const HardwareImage& image)
         {
-            return write<ImageStore>(ResourceBridge::token(image));
+            return write<ResourceStore<ImageWrap, ImageReleaser>>(ResourceBridge::token(image));
         }
 
-        [[nodiscard]] BufferStore::Read read_buffer(const HardwareBuffer& buffer)
+        [[nodiscard]] ResourceStore<BufferWrap, BufferReleaser>::Read read_buffer(const HardwareBuffer& buffer)
         {
-            return read<BufferStore>(ResourceBridge::token(buffer));
+            return read<ResourceStore<BufferWrap, BufferReleaser>>(ResourceBridge::token(buffer));
         }
 
         [[nodiscard]] BufferRef buffer_ref(const HardwareBuffer& buffer)
@@ -48,100 +37,6 @@ namespace Corona::Horizon
         [[nodiscard]] ImageRef image_ref(const HardwareImage& image)
         {
             return { static_cast<const ResourceHandle&>(image) };
-        }
-
-        [[nodiscard]] FormatLayout format_layout(Format format) noexcept
-        {
-            switch (format)
-            {
-            case Format::R8_UINT:
-            case Format::R8_SINT:
-            case Format::R8_UNORM:
-            case Format::R8_SNORM:
-                return { 1, 1, 1, 1 };
-            case Format::RG8_UINT:
-            case Format::RG8_SINT:
-            case Format::RG8_UNORM:
-            case Format::RG8_SNORM:
-            case Format::R16_UINT:
-            case Format::R16_SINT:
-            case Format::R16_UNORM:
-            case Format::R16_SNORM:
-            case Format::R16_FLOAT:
-            case Format::BGRA4_UNORM:
-            case Format::B5G6R5_UNORM:
-            case Format::B5G5R5A1_UNORM:
-            case Format::D16:
-                return { 1, 1, 1, 2 };
-            case Format::RGBA8_UINT:
-            case Format::RGBA8_SINT:
-            case Format::RGBA8_UNORM:
-            case Format::RGBA8_SNORM:
-            case Format::BGRA8_UNORM:
-            case Format::BGRX8_UNORM:
-            case Format::SRGBA8_UNORM:
-            case Format::SBGRA8_UNORM:
-            case Format::SBGRX8_UNORM:
-            case Format::R10G10B10A2_UNORM:
-            case Format::R11G11B10_FLOAT:
-            case Format::RG16_UINT:
-            case Format::RG16_SINT:
-            case Format::RG16_UNORM:
-            case Format::RG16_SNORM:
-            case Format::RG16_FLOAT:
-            case Format::R32_UINT:
-            case Format::R32_SINT:
-            case Format::R32_FLOAT:
-            case Format::D24S8:
-            case Format::X24G8_UINT:
-            case Format::D32:
-            case Format::X32G8_UINT:
-                return { 1, 1, 1, 4 };
-            case Format::RGBA16_UINT:
-            case Format::RGBA16_SINT:
-            case Format::RGBA16_FLOAT:
-            case Format::RGBA16_UNORM:
-            case Format::RGBA16_SNORM:
-            case Format::RG32_UINT:
-            case Format::RG32_SINT:
-            case Format::RG32_FLOAT:
-            case Format::D32S8:
-                return { 1, 1, 1, 8 };
-            case Format::RGB32_UINT:
-            case Format::RGB32_SINT:
-            case Format::RGB32_FLOAT:
-                return { 1, 1, 1, 12 };
-            case Format::RGBA32_UINT:
-            case Format::RGBA32_SINT:
-            case Format::RGBA32_FLOAT:
-                return { 1, 1, 1, 16 };
-            case Format::BC1_UNORM:
-            case Format::BC1_UNORM_SRGB:
-            case Format::BC4_UNORM:
-            case Format::BC4_SNORM:
-                return { 4, 4, 1, 8 };
-            case Format::BC2_UNORM:
-            case Format::BC2_UNORM_SRGB:
-            case Format::BC3_UNORM:
-            case Format::BC3_UNORM_SRGB:
-            case Format::BC5_UNORM:
-            case Format::BC5_SNORM:
-            case Format::BC6H_UFLOAT:
-            case Format::BC6H_SFLOAT:
-            case Format::BC7_UNORM:
-            case Format::BC7_UNORM_SRGB:
-                return { 4, 4, 1, 16 };
-            case Format::UNKNOWN:
-            case Format::COUNT:
-                break;
-            }
-
-            return {};
-        }
-
-        [[nodiscard]] uint32_t div_ceil(uint32_t value, uint32_t divisor) noexcept
-        {
-            return divisor == 0 ? 0 : (value + divisor - 1) / divisor;
         }
 
         [[nodiscard]] ImageSubresourceRange resolve_range(ImageSubresourceRange range, const HardwareImageDesc& desc) noexcept
@@ -162,11 +57,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] ImageExtent image_mip_extent(const HardwareImageDesc& desc, uint32_t mip) noexcept
         {
-            return {
-                std::max(1u, desc.extent.width >> mip),
-                std::max(1u, desc.extent.height >> mip),
-                std::max(1u, desc.extent.depth >> mip),
-            };
+            return detail::mip_extent(desc.extent, mip);
         }
 
         [[nodiscard]] bool fits_range(uint64_t total_size, uint64_t byte_offset, uint64_t byte_count) noexcept
@@ -183,6 +74,95 @@ namespace Corona::Horizon
             return true;
         }
 
+        struct HostImageCopyLayout
+        {
+            uint64_t row_bytes { 0 };
+            uint32_t row_count { 0 };
+            uint32_t slice_count { 0 };
+            uint64_t host_row_pitch { 0 };
+            uint64_t host_slice_pitch { 0 };
+            size_t mapped_base_offset { 0 };
+            size_t row_size { 0 };
+        };
+
+        [[nodiscard]] bool resolve_host_image_copy_layout(const HardwareImageDesc& desc,
+                                                          ImageSubresourceLayout layout,
+                                                          uint64_t mapped_size,
+                                                          uint64_t row_pitch,
+                                                          uint64_t slice_pitch,
+                                                          uint64_t host_size,
+                                                          HostImageCopyLayout& out)
+        {
+            const detail::FormatBlockLayout format = detail::format_block_layout(desc.format);
+            if (format.bytes_per_block == 0 || layout.extent.width == 0 || layout.extent.height == 0 || layout.extent.depth == 0)
+                return false;
+
+            out = {};
+            out.row_count = detail::div_ceil(layout.extent.height, format.block_height);
+            out.slice_count = detail::div_ceil(layout.extent.depth, format.block_depth);
+
+            const uint32_t row_blocks = detail::div_ceil(layout.extent.width, format.block_width);
+            if (!detail::checked_mul(row_blocks, format.bytes_per_block, out.row_bytes))
+                return false;
+
+            out.host_row_pitch = row_pitch != 0 ? row_pitch : out.row_bytes;
+            if (slice_pitch != 0)
+            {
+                out.host_slice_pitch = slice_pitch;
+            }
+            else if (!detail::checked_mul(out.host_row_pitch, out.row_count, out.host_slice_pitch))
+            {
+                return false;
+            }
+
+            if (out.host_row_pitch < out.row_bytes || layout.row_pitch < out.row_bytes)
+                return false;
+
+            uint64_t host_slice_size = 0;
+            uint64_t device_slice_size = 0;
+            if (!detail::strided_byte_size(1, out.row_count, 0, out.host_row_pitch, out.row_bytes, host_slice_size) ||
+                !detail::strided_byte_size(1, out.row_count, 0, layout.row_pitch, out.row_bytes, device_slice_size))
+            {
+                return false;
+            }
+
+            if ((out.slice_count > 1 && out.host_slice_pitch < host_slice_size) ||
+                (out.slice_count > 1 && layout.slice_pitch < device_slice_size))
+            {
+                return false;
+            }
+
+            uint64_t required_host_size = 0;
+            uint64_t required_device_size = 0;
+            if (!detail::strided_byte_size(out.slice_count,
+                                           out.row_count,
+                                           out.host_slice_pitch,
+                                           out.host_row_pitch,
+                                           out.row_bytes,
+                                           required_host_size) ||
+                !detail::strided_byte_size(out.slice_count,
+                                           out.row_count,
+                                           layout.slice_pitch,
+                                           layout.row_pitch,
+                                           out.row_bytes,
+                                           required_device_size))
+            {
+                return false;
+            }
+
+            if (host_size < required_host_size || !fits_range(layout.byte_size, 0, required_device_size))
+                return false;
+
+            if (!fits_range(mapped_size, layout.byte_offset, layout.byte_size) ||
+                !byte_offset_to_size_t(layout.byte_offset, out.mapped_base_offset) ||
+                !byte_offset_to_size_t(out.row_bytes, out.row_size))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
         [[nodiscard]] bool copy_host_to_image(std::byte* mapped,
                                               uint64_t mapped_size,
                                               const HardwareImageDesc& desc,
@@ -194,50 +174,31 @@ namespace Corona::Horizon
             if (mapped == nullptr || data.data() == nullptr)
                 return false;
 
-            const FormatLayout format = format_layout(desc.format);
-            if (format.bytes_per_block == 0)
+            HostImageCopyLayout copy {};
+            if (!resolve_host_image_copy_layout(desc, layout, mapped_size, row_pitch, slice_pitch, data.size_bytes(), copy))
                 return false;
 
-            const uint64_t row_bytes = uint64_t(div_ceil(layout.extent.width, format.block_width)) * format.bytes_per_block;
-            const uint32_t row_count = div_ceil(layout.extent.height, format.block_height);
-            const uint32_t slice_count = div_ceil(layout.extent.depth, format.block_depth);
-            const uint64_t src_row_pitch = row_pitch != 0 ? row_pitch : row_bytes;
-            const uint64_t src_slice_pitch = slice_pitch != 0 ? slice_pitch : src_row_pitch * row_count;
-
-            if (src_row_pitch < row_bytes || layout.row_pitch < row_bytes)
-                return false;
-
-            if (row_count > 1 && src_slice_pitch < src_row_pitch * (row_count - 1) + row_bytes)
-                return false;
-
-            if (slice_count > 1 && layout.slice_pitch < layout.row_pitch * (row_count - 1) + row_bytes)
-                return false;
-
-            const uint64_t src_size = slice_count == 0 ? 0 : src_slice_pitch * (slice_count - 1) + src_row_pitch * (row_count - 1) + row_bytes;
-            if (data.size_bytes() < src_size)
-                return false;
-
-            if (!fits_range(mapped_size, layout.byte_offset, layout.byte_size))
-                return false;
-
-            size_t base_offset = 0;
-            if (!byte_offset_to_size_t(layout.byte_offset, base_offset))
-                return false;
-
-            for (uint32_t slice = 0; slice < slice_count; ++slice)
+            for (uint32_t slice = 0; slice < copy.slice_count; ++slice)
             {
                 const uint64_t dst_slice_offset = layout.slice_pitch * slice;
-                const uint64_t src_slice_offset = src_slice_pitch * slice;
-                for (uint32_t row = 0; row < row_count; ++row)
+                const uint64_t src_slice_offset = copy.host_slice_pitch * slice;
+                for (uint32_t row = 0; row < copy.row_count; ++row)
                 {
                     const uint64_t dst_offset = dst_slice_offset + layout.row_pitch * row;
-                    const uint64_t src_offset = src_slice_offset + src_row_pitch * row;
-                    if (!fits_range(layout.byte_size, dst_offset, row_bytes) || !fits_range(data.size_bytes(), src_offset, row_bytes))
+                    const uint64_t src_offset = src_slice_offset + copy.host_row_pitch * row;
+                    size_t dst_offset_size = 0;
+                    size_t src_offset_size = 0;
+                    if (!fits_range(layout.byte_size, dst_offset, copy.row_bytes) ||
+                        !fits_range(data.size_bytes(), src_offset, copy.row_bytes) ||
+                        !byte_offset_to_size_t(dst_offset, dst_offset_size) ||
+                        !byte_offset_to_size_t(src_offset, src_offset_size))
+                    {
                         return false;
+                    }
 
-                    std::memcpy(mapped + base_offset + static_cast<size_t>(dst_offset),
-                                data.data() + static_cast<size_t>(src_offset),
-                                static_cast<size_t>(row_bytes));
+                    std::memcpy(mapped + copy.mapped_base_offset + dst_offset_size,
+                                data.data() + src_offset_size,
+                                copy.row_size);
                 }
             }
 
@@ -255,50 +216,31 @@ namespace Corona::Horizon
             if (mapped == nullptr || output.data() == nullptr)
                 return false;
 
-            const FormatLayout format = format_layout(desc.format);
-            if (format.bytes_per_block == 0)
+            HostImageCopyLayout copy {};
+            if (!resolve_host_image_copy_layout(desc, layout, mapped_size, row_pitch, slice_pitch, output.size_bytes(), copy))
                 return false;
 
-            const uint64_t row_bytes = uint64_t(div_ceil(layout.extent.width, format.block_width)) * format.bytes_per_block;
-            const uint32_t row_count = div_ceil(layout.extent.height, format.block_height);
-            const uint32_t slice_count = div_ceil(layout.extent.depth, format.block_depth);
-            const uint64_t dst_row_pitch = row_pitch != 0 ? row_pitch : row_bytes;
-            const uint64_t dst_slice_pitch = slice_pitch != 0 ? slice_pitch : dst_row_pitch * row_count;
-
-            if (dst_row_pitch < row_bytes || layout.row_pitch < row_bytes)
-                return false;
-
-            if (row_count > 1 && dst_slice_pitch < dst_row_pitch * (row_count - 1) + row_bytes)
-                return false;
-
-            if (slice_count > 1 && layout.slice_pitch < layout.row_pitch * (row_count - 1) + row_bytes)
-                return false;
-
-            const uint64_t dst_size = slice_count == 0 ? 0 : dst_slice_pitch * (slice_count - 1) + dst_row_pitch * (row_count - 1) + row_bytes;
-            if (output.size_bytes() < dst_size)
-                return false;
-
-            if (!fits_range(mapped_size, layout.byte_offset, layout.byte_size))
-                return false;
-
-            size_t base_offset = 0;
-            if (!byte_offset_to_size_t(layout.byte_offset, base_offset))
-                return false;
-
-            for (uint32_t slice = 0; slice < slice_count; ++slice)
+            for (uint32_t slice = 0; slice < copy.slice_count; ++slice)
             {
                 const uint64_t src_slice_offset = layout.slice_pitch * slice;
-                const uint64_t dst_slice_offset = dst_slice_pitch * slice;
-                for (uint32_t row = 0; row < row_count; ++row)
+                const uint64_t dst_slice_offset = copy.host_slice_pitch * slice;
+                for (uint32_t row = 0; row < copy.row_count; ++row)
                 {
                     const uint64_t src_offset = src_slice_offset + layout.row_pitch * row;
-                    const uint64_t dst_offset = dst_slice_offset + dst_row_pitch * row;
-                    if (!fits_range(layout.byte_size, src_offset, row_bytes) || !fits_range(output.size_bytes(), dst_offset, row_bytes))
+                    const uint64_t dst_offset = dst_slice_offset + copy.host_row_pitch * row;
+                    size_t src_offset_size = 0;
+                    size_t dst_offset_size = 0;
+                    if (!fits_range(layout.byte_size, src_offset, copy.row_bytes) ||
+                        !fits_range(output.size_bytes(), dst_offset, copy.row_bytes) ||
+                        !byte_offset_to_size_t(src_offset, src_offset_size) ||
+                        !byte_offset_to_size_t(dst_offset, dst_offset_size))
+                    {
                         return false;
+                    }
 
-                    std::memcpy(output.data() + static_cast<size_t>(dst_offset),
-                                mapped + base_offset + static_cast<size_t>(src_offset),
-                                static_cast<size_t>(row_bytes));
+                    std::memcpy(output.data() + dst_offset_size,
+                                mapped + copy.mapped_base_offset + src_offset_size,
+                                copy.row_size);
                 }
             }
 
@@ -316,7 +258,7 @@ namespace Corona::Horizon
                 return resource_manager().create_image(desc);
             });
 
-        ResourceBridge::set(*this, make_token<ImageStore>(std::move(handle)));
+        ResourceBridge::set(*this, make_token<ResourceStore<ImageWrap, ImageReleaser>>(std::move(handle)));
 
         if (!upload_data.empty())
             (void)write_bytes(upload_data);
@@ -404,6 +346,9 @@ namespace Corona::Horizon
             return 0;
 
         const ImageSubresourceRange current = resolve_range(range_, image->desc);
+        if (current.layer_count == 0 || current.mip_count == 0)
+            return 0;
+
         if (current.layer_count > std::numeric_limits<uint32_t>::max() / current.mip_count)
             return 0;
 
@@ -441,6 +386,9 @@ namespace Corona::Horizon
         if (!image)
             return false;
 
+        if (!validate_image_host_write(image->desc, range_, layer_index, mip_index, data, row_pitch, slice_pitch))
+            return false;
+
         const ImageSubresourceRange current = resolve_range(range_, image->desc);
         if (layer_index >= current.layer_count || mip_index >= current.mip_count)
             return false;
@@ -451,13 +399,21 @@ namespace Corona::Horizon
             return false;
 
         ImageSubresourceLayout layout = resource_manager().image_subresource_layout(*image, absolute_layer, absolute_mip);
-        return copy_host_to_image(static_cast<std::byte*>(image->mapped_data()),
-                                  image->mapped_size(),
-                                  image->desc,
-                                  layout,
-                                  data,
-                                  row_pitch,
-                                  slice_pitch);
+        if (!copy_host_to_image(static_cast<std::byte*>(image->mapped_data()),
+                                image->mapped_size(),
+                                image->desc,
+                                layout,
+                                data,
+                                row_pitch,
+                                slice_pitch))
+        {
+            return false;
+        }
+
+        if (image->resource_manager != nullptr)
+            image->resource_manager->flush_image(*image, layout.byte_offset, layout.byte_size);
+
+        return true;
     }
 
     bool HardwareImage::read_subresource_bytes(uint32_t layer_index,
@@ -473,6 +429,9 @@ namespace Corona::Horizon
         if (!image)
             return false;
 
+        if (!validate_image_host_read(image->desc, range_, layer_index, mip_index, output, row_pitch, slice_pitch))
+            return false;
+
         const ImageSubresourceRange current = resolve_range(range_, image->desc);
         if (layer_index >= current.layer_count || mip_index >= current.mip_count)
             return false;
@@ -483,6 +442,9 @@ namespace Corona::Horizon
             return false;
 
         ImageSubresourceLayout layout = resource_manager().image_subresource_layout(*image, absolute_layer, absolute_mip);
+        if (image->resource_manager != nullptr)
+            image->resource_manager->invalidate_image(*image, layout.byte_offset, layout.byte_size);
+
         return copy_image_to_host(static_cast<const std::byte*>(image->mapped_data()),
                                   image->mapped_size(),
                                   image->desc,
@@ -572,7 +534,7 @@ namespace Corona::Horizon
                 return resource_manager().import_image(handle, desc, allocation_size);
             });
 
-        ResourceBridge::set(image, make_token<ImageStore>(std::move(resource)));
+        ResourceBridge::set(image, make_token<ResourceStore<ImageWrap, ImageReleaser>>(std::move(resource)));
         return image;
     }
 
