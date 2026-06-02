@@ -1,6 +1,6 @@
 #include "hardware_wrapper_vulkan/pipeline/vulkan_compute_pipeline.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 
 #include <memory>
 #include <stdexcept>

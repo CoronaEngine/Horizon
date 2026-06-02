@@ -9,7 +9,7 @@
 #endif
 
 #include "corona/kernel/utils/storage.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 
 #include <vk_mem_alloc.h>
 #include <volk.h>

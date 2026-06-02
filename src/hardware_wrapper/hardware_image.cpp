@@ -1,6 +1,6 @@
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware/command.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 #include "validation/hardware_validation.h"
 
 #include <algorithm>

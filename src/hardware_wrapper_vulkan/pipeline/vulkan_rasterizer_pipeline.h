@@ -1,7 +1,7 @@
 #pragma once
 
 #include "hardware_wrapper_vulkan/hardware/command.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "hardware_wrapper_vulkan/hardware/execution.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 
 #include <tuple>
 #include <type_traits>

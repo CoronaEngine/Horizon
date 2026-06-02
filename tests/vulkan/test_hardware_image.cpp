@@ -2,7 +2,7 @@
 
 #include "hardware_wrapper_vulkan/hardware/command.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
-#include "horizon_refac.h"
+#include "horizon.h"
 
 #include <algorithm>
 #include <array>
