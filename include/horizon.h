@@ -1,18 +1,18 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <source_location>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1275,565 +1275,45 @@ namespace Corona::Horizon
     };
 
     // ================================================================
-    // Execution Types and Commands
+    // HardwareExecutor
     // ================================================================
 
-    class Queue;
-    class CommandRecorder;
-    struct RecordedTask;
-    struct ExecutionPlan;
-
-    enum class QueueCapability
-    {
-        Graphics,
-        Compute,
-        Transfer,
-        Present
-    };
-
-    enum class AccessKind
-    {
-        Read,
-        Write,
-        ReadWrite
-    };
-
-    enum class CommandOp
-    {
-        CopyBuffer,
-        CopyBufferToImage,
-        Dispatch,
-        BeginRendering,
-        EndRendering,
-        DrawIndexed,
-        Present,
-        Wait,
-        HostCallback,
-        KeepAlive,
-        CopyImage,
-        CopyImageToBuffer
-    };
-
-    enum class FeatureRequirement
-    {
-        TimelineSemaphore,
-        Synchronization2,
-        DeferredHostOperations,
-        DeviceGroup
-    };
-
-    struct DeviceId
-    {
-        uint32_t value = 0;
-
-        [[nodiscard]] friend bool operator==(DeviceId left, DeviceId right) noexcept
-        {
-            return left.value == right.value;
-        }
-    };
-
-    struct DeviceMask
-    {
-        uint32_t bits = 1;
-    };
-
-    struct QueueId
-    {
-        DeviceId device {};
-        uint32_t family_index = 0;
-        uint32_t queue_index = 0;
-        QueueCapability capability = QueueCapability::Transfer;
-    };
-
-    struct BufferRef
-    {
-        ResourceHandle handle {};
-    };
-
-    struct ShaderRef
-    {
-        ResourceHandle handle {};
-    };
-
-    struct ImageRef
-    {
-        ResourceHandle handle {};
-    };
-
-    struct DisplayerRef
-    {
-        std::uintptr_t id = 0;
-    };
-
-    struct CopyRegion
-    {
-        uint64_t src_offset = 0;
-        uint64_t dst_offset = 0;
-        uint64_t size = 0;
-    };
-
-    struct BufferImageCopyRegion
-    {
-        uint64_t buffer_offset = 0;
-        uint32_t image_layer = 0;
-        uint32_t image_mip = 0;
-    };
-
-    struct ImageCopyRegion
-    {
-        uint32_t src_layer = 0;
-        uint32_t dst_layer = 0;
-        uint32_t src_mip = 0;
-        uint32_t dst_mip = 0;
-    };
-
-    struct ResourceUse
-    {
-        ResourceHandle handle {};
-        AccessKind access = AccessKind::Read;
-        uint64_t stages = 0;
-    };
-
-    enum class DispatchBindingKind
-    {
-        StorageBuffer,
-        StorageImage
-    };
-
-    struct DispatchResourceBinding
-    {
-        uint32_t binding = 0;
-        ResourceHandle resource {};
-        DispatchBindingKind kind = DispatchBindingKind::StorageBuffer;
-        AccessKind access = AccessKind::ReadWrite;
-    };
-
-    struct DispatchDesc
-    {
-        uint32_t groups_x = 1;
-        uint32_t groups_y = 1;
-        uint32_t groups_z = 1;
-        std::vector<DispatchResourceBinding> bindings;
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-    };
-
-    struct RenderingDesc
-    {
-        ImageRef color {};
-        ImageRef depth {};
-        uint32_t width = 0;
-        uint32_t height = 0;
-    };
-
-    struct DrawIndexedDesc
-    {
-        ResourceHandle pipeline {};
-        uint32_t index_count = 0;
-        uint32_t instance_count = 1;
-        uint32_t first_index = 0;
-        int32_t vertex_offset = 0;
-        uint32_t first_instance = 0;
-        IndexType index_type = IndexType::Auto;
-        bool enable_scissor = false;
-        ScissorRect scissor {};
-        std::vector<std::byte> push_constant_data;
-    };
-
-    struct PresentDesc
-    {
-        DisplayerRef displayer {};
-        ImageRef image {};
-        ImageRef swapchain_image {};
-        DeviceId present_device {};
-        bool allow_cpu_bridge_fallback = true;
-    };
-
-    enum class PresentStatus
-    {
-        None,
-        Presented,
-        Suboptimal,
-        OutOfDate,
-        Skipped
-    };
-
-    struct PresentResult
-    {
-        PresentStatus status = PresentStatus::None;
-        DisplayerRef displayer {};
-        ImageRef image {};
-        std::string message;
-    };
-
-    struct SubmissionToken
-    {
-        DeviceId device {};
-        QueueId queue {};
-        uint64_t value = 0;
-        std::uintptr_t timeline_handle = 0;
-
-        [[nodiscard]] bool has_timeline() const noexcept
-        {
-            return timeline_handle != 0;
-        }
-    };
-
-    struct SubmitReceipt
-    {
-        uint64_t serial = 0;
-        std::vector<SubmissionToken> tokens;
-        std::vector<PresentResult> presents;
-
-        [[nodiscard]] bool empty() const noexcept
-        {
-            return tokens.empty() && presents.empty();
-        }
-    };
-
-    struct CommitCommand
-    {
-    };
-
-    [[nodiscard]] CommitCommand commit() noexcept;
-
-    class StreamCommand
+    struct HardwareExecutor : public ResourceHandle
     {
     public:
-        StreamCommand() = default;
-        explicit StreamCommand(std::function<void(CommandRecorder&)> recorder);
+        HardwareExecutor() = default;
+        HardwareExecutor(const HardwareExecutor& other) noexcept = default;
+        HardwareExecutor(HardwareExecutor&& other) noexcept = default;
+        ~HardwareExecutor() = default;
 
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(recorder_); }
+        HardwareExecutor& operator=(const HardwareExecutor& other) noexcept = default;
+        HardwareExecutor& operator=(HardwareExecutor&& other) noexcept = default;
 
-    private:
-        std::function<void(CommandRecorder&)> recorder_ {};
+        HardwareExecutor& operator<<(RasterizerPipeline& rasterizer_pipeline);
+        HardwareExecutor& operator<<(ComputePipeline& compute_pipeline);
+        HardwareExecutor& operator<<(HardwareExecutor& other);
+        HardwareExecutor &operator<<(const CopyCommand &cmd);
+
+        HardwareExecutor& wait(HardwareExecutor& other);
+        HardwareExecutor& commit();
     };
-
-    class CommandBatch
-    {
-    public:
-        CommandBatch& operator<<(StreamCommand command);
-        [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
-        [[nodiscard]] bool empty() const noexcept { return commands_.empty(); }
-
-    private:
-        std::vector<StreamCommand> commands_;
-    };
-
-    struct CopyBufferCommand
-    {
-        BufferRef src {};
-        BufferRef dst {};
-        CopyRegion region {};
-        DeviceMask devices {};
-
-        [[nodiscard]] BufferRef source() const noexcept { return src; }
-        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
-        [[nodiscard]] CopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct CopyImageCommand
-    {
-        ImageRef src {};
-        ImageRef dst {};
-        ImageCopyRegion region {};
-        DeviceMask devices {};
-
-        [[nodiscard]] ImageRef source() const noexcept { return src; }
-        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
-        [[nodiscard]] ImageCopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct CopyBufferToImageCommand
-    {
-        BufferRef src {};
-        ImageRef dst {};
-        BufferImageCopyRegion region {};
-        DeviceMask devices {};
-
-        [[nodiscard]] BufferRef source() const noexcept { return src; }
-        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
-        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct CopyImageToBufferCommand
-    {
-        ImageRef src {};
-        BufferRef dst {};
-        BufferImageCopyRegion region {};
-        DeviceMask devices {};
-
-        [[nodiscard]] ImageRef source() const noexcept { return src; }
-        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
-        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct ShaderDispatchCommand
-    {
-        ShaderRef shader {};
-        DispatchDesc dispatch {};
-        DeviceMask devices {};
-
-        [[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
-        [[nodiscard]] DispatchDesc dispatch_desc() const noexcept { return dispatch; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct BeginRenderingCommand
-    {
-        RenderingDesc rendering {};
-        DeviceMask devices {};
-
-        [[nodiscard]] RenderingDesc rendering_desc() const noexcept { return rendering; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct EndRenderingCommand
-    {
-        DeviceMask devices {};
-
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct DrawIndexedCommand
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        DrawIndexedDesc draw {};
-        DeviceMask devices {};
-
-        [[nodiscard]] BufferRef index_buffer() const noexcept { return index; }
-        [[nodiscard]] BufferRef vertex_buffer() const noexcept { return vertex; }
-        [[nodiscard]] DrawIndexedDesc draw_desc() const noexcept { return draw; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct PresentCommand
-    {
-        DisplayerRef displayer {};
-        ImageRef image {};
-        DeviceId present_device {};
-        bool allow_cpu_bridge_fallback = true;
-
-        [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer; }
-        [[nodiscard]] ImageRef image_ref() const noexcept { return image; }
-        [[nodiscard]] DeviceId device() const noexcept { return present_device; }
-        [[nodiscard]] bool allow_fallback() const noexcept { return allow_cpu_bridge_fallback; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    struct WaitCommand
-    {
-        std::vector<SubmissionToken> tokens;
-
-        [[nodiscard]] bool empty() const noexcept { return tokens.empty(); }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-    };
-
-    class HostFunctionCommand
-    {
-    public:
-        HostFunctionCommand() = default;
-        explicit HostFunctionCommand(std::function<void()> callback);
-
-        [[nodiscard]] const std::function<void()>& callback() const noexcept { return callback_; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-
-    private:
-        std::function<void()> callback_ {};
-    };
-
-    class KeepAliveCommand
-    {
-    public:
-        KeepAliveCommand() = default;
-        explicit KeepAliveCommand(std::shared_ptr<void> object);
-
-        [[nodiscard]] const std::shared_ptr<void>& object() const noexcept { return object_; }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] StreamCommand stream_command() const;
-        [[nodiscard]] operator StreamCommand() const;
-
-    private:
-        std::shared_ptr<void> object_ {};
-    };
-
-    [[nodiscard]] CopyBufferCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
-    [[nodiscard]] CopyImageCommand copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
-    [[nodiscard]] CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-    [[nodiscard]] CopyImageToBufferCommand copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-    [[nodiscard]] ShaderDispatchCommand dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
-    [[nodiscard]] BeginRenderingCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {});
-    [[nodiscard]] EndRenderingCommand end_rendering(DeviceMask devices = {});
-    [[nodiscard]] DrawIndexedCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
-    [[nodiscard]] PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
-    [[nodiscard]] PresentCommand present(const HardwareDisplayer& displayer, const HardwareImage& image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
-    [[nodiscard]] WaitCommand wait(const SubmitReceipt& receipt);
-    [[nodiscard]] HostFunctionCommand host_callback(std::function<void()> callback);
-    [[nodiscard]] KeepAliveCommand keep_alive(std::shared_ptr<void> object);
-
-    template <typename T>
-        requires(!std::is_void_v<T>)
-    [[nodiscard]] KeepAliveCommand keep_alive(std::shared_ptr<T> object)
-    {
-        return keep_alive(std::static_pointer_cast<void>(std::move(object)));
-    }
-
-    namespace CommandDetail
-    {
-        template <typename T>
-        struct IsSharedPtr : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct IsSharedPtr<std::shared_ptr<T>> : std::true_type
-        {
-        };
-
-        template <typename T>
-        inline constexpr bool is_shared_ptr_v = IsSharedPtr<std::remove_cvref_t<T>>::value;
-
-        template <typename...>
-        inline constexpr bool single_shared_ptr_v = false;
-
-        template <typename T>
-        inline constexpr bool single_shared_ptr_v<T> = is_shared_ptr_v<T>;
-    }
-
-    template <typename... Args>
-        requires(sizeof...(Args) > 0u &&
-                 (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...) &&
-                 !CommandDetail::single_shared_ptr_v<Args...>)
-    [[nodiscard]] KeepAliveCommand keep_alive(Args&&... args)
-    {
-        using Storage = std::tuple<std::remove_cvref_t<Args>...>;
-        return keep_alive(std::static_pointer_cast<void>(
-            std::make_shared<Storage>(std::forward<Args>(args)...)));
-    }
 
     // ================================================================
-    // Display Facade
+    // HardwareDisplayer
     // ================================================================
 
-    class HardwareDisplayer
+    struct HardwareDisplayer : public ResourceHandle
     {
     public:
-        HardwareDisplayer();
-        explicit HardwareDisplayer(void* native_window);
-        HardwareDisplayer(const HardwareDisplayer& other) noexcept = default;
-        HardwareDisplayer(HardwareDisplayer&& other) noexcept = default;
+        explicit HardwareDisplayer(void *surface = nullptr);
+        HardwareDisplayer(const HardwareDisplayer &other);
+        HardwareDisplayer(HardwareDisplayer &&other) noexcept;
         ~HardwareDisplayer();
 
-        HardwareDisplayer& operator=(const HardwareDisplayer& other) noexcept = default;
-        HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept = default;
+        HardwareDisplayer &operator=(const HardwareDisplayer &other);
+        HardwareDisplayer &operator=(HardwareDisplayer &&other) noexcept;
+        HardwareDisplayer &operator<<(const HardwareImage &image);
 
-        [[nodiscard]] explicit operator bool() const noexcept { return displayer_.id != 0 && manager_ != nullptr; }
-        [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer_; }
-        [[nodiscard]] std::uintptr_t get_displayer_id() const noexcept { return displayer_.id; }
-
-    private:
-        DisplayerRef displayer_ {};
-        std::shared_ptr<void> manager_ {};
+        HardwareDisplayer &wait(const HardwareExecutor &executor);
     };
-
-    // ================================================================
-    // Execution Facade
-    // ================================================================
-
-    class HardwareStream
-    {
-    public:
-        explicit HardwareStream(HardwareExecutor& executor);
-        ~HardwareStream();
-
-        HardwareStream(const HardwareStream&) = delete;
-        HardwareStream& operator=(const HardwareStream&) = delete;
-        HardwareStream(HardwareStream&& other) noexcept;
-        HardwareStream& operator=(HardwareStream&& other) noexcept;
-
-        HardwareStream& operator<<(const StreamCommand& command);
-        HardwareStream& operator<<(const CommandBatch& commands);
-        [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
-
-        [[nodiscard]] SubmitReceipt commit();
-        [[nodiscard]] RecordedTask close_for_tests();
-
-    private:
-        class Impl;
-        std::unique_ptr<Impl> impl_;
-    };
-
-    class HardwareExecutor
-    {
-    public:
-        using QueueResolver = std::function<Queue&(DeviceId device, QueueCapability capability)>;
-
-        HardwareExecutor();
-        explicit HardwareExecutor(QueueResolver queue_resolver);
-        HardwareExecutor(const HardwareExecutor& other);
-        HardwareExecutor(HardwareExecutor&& other) noexcept;
-        ~HardwareExecutor();
-
-        HardwareExecutor& operator=(const HardwareExecutor& other);
-        HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
-
-        [[nodiscard]] RecordedTask record(std::function<void(CommandRecorder&)> fn) const;
-        [[nodiscard]] HardwareStream stream();
-        [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
-        [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
-        [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
-
-    private:
-        class Impl;
-        std::shared_ptr<Impl> impl_;
-    };
-
 }
