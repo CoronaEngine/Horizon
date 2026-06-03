@@ -1,19 +1,19 @@
 # Horizon Examples New API Visible Window Notes
-<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 80a1c34bd41cb9d0adc582b096be8f122d5cc79147297a764f90714060b2e1a4 -->
+<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 391b0b8ced0aad3511939d0a27d692dfccc21f2d6617a9d41740d56b4827cbf4 -->
 
 ## When To Use
 
 - Use this when restoring or validating `HorizonExamples` with the new public API: open a GLFW window, submit Vulkan rendering, and present.
 - Stay on the refactored new API path. Do not restore old public names such as `ImageFormat`, `BufferUsage`, or `HardwareImageCreateInfo` just to run examples.
-- Old `examples/example_baseline`, `example_glsl`, and `example_edsl` may remain references; current runnable samples migrate into new API modes under `examples/example_default/` instead of recompiling the old example targets.
-- First-stage acceptance is the visible-window and present smoke path; second stage is the `mesh/render/display` threaded default smoke; the third migration batch restores minimal texture, compute, EDSL, GLSL, and multi-window smoke modes; use the separate `stress` mode for multi-window / multi-render-thread validation.
+- `examples/example_baseline`, `example_default`, `example_edsl`, and `example_glsl` should all be compiled into `HorizonExamples`; if APIs break, migrate call sites to the current API instead of restoring old public compatibility names.
+- Current first acceptance is real visible-window smoke for the explicit `baseline`, `default`, `edsl`, and `glsl` entries. `default` should also cover the combined EDSL/GLSL windows. Restore texture, compute, multi-window, and stress as later modes if needed.
 
 ## Entrypoints And Scope
 
-- The public umbrella is `include/Horizon.h`; it should export `format.h`, `resource.h`, `horizon_refac.h`, and the new execution/display facades.
-- The executable entrypoint is `examples/main.cpp`; it defaults to `default` and should support `--frames N` for automatic exit.
-- The current runnable samples live in `examples/example_default/` and cover new API smoke modes: `default`, `glsl`, `edsl`, `texture`, `compute`, and `multi-window`; `stress` mode is for concurrent multi-window present pressure.
-- The second-stage three-thread path is enabled explicitly with `default --threads mesh-render-display`; `--threads` applies only to default mode, while the other modes remain single-thread smoke paths.
+- The public umbrella is `include/horizon.h`; old `include/Horizon.h` and `horizon_refac.h` names are migration history and should not be reintroduced in new examples.
+- The executable entrypoint is `examples/main.cpp`; it defaults to `default` and currently supports `baseline`, `default`, `edsl`, and `glsl`.
+- `examples/CMakeLists.txt` should compile `common.cpp`, `example_baseline`, `example_default`, `example_edsl`, and `example_glsl`, and copy baseline precompiled SPIR-V files beside the target output.
+- Do not assume `--frames`, `--threads`, `texture`, `compute`, `multi-window`, or `stress` exists. Check the current `examples/main.cpp` CLI before adding validation commands.
 - Keep implementation work in `src/hardware_wrapper` and `src/hardware_wrapper_vulkan`; treat `src/HardwareWrapper` and `src/HardwareWrapperVulkan` as historical references.
 
 ## Three-Thread Second Stage
@@ -54,6 +54,15 @@
 - If VMA reports `Some allocations were not freed` at test end, first inspect whether pipeline, command batch, or queue in-flight keep-alives still strongly retain buffer/image tokens.
 - After changing private class layout in public headers, if MSVC/Ninja incremental builds crash in impossible ways, run a clean rebuild before debugging source-level ownership.
 
+## Runtime Bug Triage
+
+- Do not treat a still-running process as a successful smoke. MSVC Debug CRT assertions leave the process alive behind a `Microsoft Visual C++ Runtime Library` window; smoke scripts should enumerate visible process window titles and fail on that title.
+- Launch examples once from the repo root and once from the target output directory. Old baseline code may read `readFile("shaders/xxx.spv")` through a relative path; if only the output directory works, first check shader post-build copy, working directory, and source-directory fallback.
+- For `vector subscript out of range`, inspect CPU containers and loop bounds before deep Vulkan debugging: cube constants should have 36 vertices; aggregate initializer changes must not drift `vertices.size()`; draw loops should use stable object counts, not containers being changed by another thread.
+- In threaded default paths, first look for shared `std::vector` `push_back` / `resize` / read races. Per-window/per-object storage-buffer containers should be created to fixed size before threads start; threads should only update existing buffer contents.
+- For handwritten GLSL through the current pipeline API, if `bindless space index unavailable` appears or assertions happen near `ComputePipelineDesc::from_source(...)` / `RasterizerPipelineDesc::from_source(...)`, first pass an explicit `EmbeddedShader::CompilerOption` with `enableBindless = false`, then inspect reflection bindings.
+- After a fix, smoke all explicit entries: `baseline`, `default`, `edsl`, and `glsl`. For `default`, confirm both EDSL and GLSL windows exist and no CRT assertion window appears.
+
 ## Validation
 
 ```powershell
@@ -68,15 +77,10 @@ build\ninja-msvc\tests\Debug\HorizonTests.exe execution.rasterizer_pipeline_ir
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.present_receipt
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.mesh_render_display_threads
 build\ninja-msvc\tests\Debug\HorizonTests.exe execution.rasterizer_pipeline_real_vulkan_render
-build\ninja-msvc\examples\Debug\HorizonExamples.exe --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe default --threads mesh-render-display --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe glsl --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe edsl --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe texture --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe compute --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe multi-window --frames 3
-build\ninja-msvc\examples\Debug\HorizonExamples.exe stress --windows 8 --render-threads 4 --frames 20
-build\ninja-msvc\examples\Debug\HorizonExamples.exe stress --windows 16 --render-threads 16 --frames 120
+build\ninja-msvc\examples\Debug\HorizonExamples.exe baseline
+build\ninja-msvc\examples\Debug\HorizonExamples.exe default
+build\ninja-msvc\examples\Debug\HorizonExamples.exe edsl
+build\ninja-msvc\examples\Debug\HorizonExamples.exe glsl
 
 git diff --check
 ```

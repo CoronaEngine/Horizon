@@ -1069,12 +1069,20 @@ namespace Corona::Horizon
     // ================================================================
 
     template <typename T>
-    concept ReflectedBindingKey = requires(const T& t) {
+    concept ReflectedBindingKey = requires(const T& t)
+    {
+        t.location;
+    } && (requires(const T& t)
+    {
         t.byte_offset;
         t.type_size;
         t.bind_type;
-        t.location;
-    };
+    } || requires(const T& t)
+    {
+        t.byteOffset;
+        t.typeSize;
+        t.bindType;
+    });
 
     struct BindingSlot
     {
@@ -1086,12 +1094,24 @@ namespace Corona::Horizon
         template <ReflectedBindingKey T>
         static constexpr BindingSlot from(const T& key) noexcept
         {
-            return {
-                key.byte_offset,
-                key.type_size,
-                key.bind_type,
-                key.location
-            };
+            if constexpr (requires { key.byte_offset; key.type_size; key.bind_type; })
+            {
+                return {
+                    key.byte_offset,
+                    key.type_size,
+                    key.bind_type,
+                    key.location
+                };
+            }
+            else
+            {
+                return {
+                    key.byteOffset,
+                    key.typeSize,
+                    key.bindType,
+                    key.location
+                };
+            }
         }
     };
 

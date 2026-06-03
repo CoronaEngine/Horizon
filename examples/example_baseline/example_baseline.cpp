@@ -1760,22 +1760,28 @@ class HelloTriangleApplication
 
     static std::vector<char> readFile(const std::string &filename)
     {
-        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+        const std::array<std::filesystem::path, 2> candidates = {
+            std::filesystem::path(filename),
+            std::filesystem::path(__FILE__).parent_path().parent_path() / filename};
 
-        if (!file.is_open())
+        for (const std::filesystem::path &path : candidates)
         {
-            throw std::runtime_error("failed to open file!");
+            std::ifstream file(path, std::ios::ate | std::ios::binary);
+            if (!file.is_open())
+            {
+                continue;
+            }
+
+            size_t fileSize = static_cast<size_t>(file.tellg());
+            std::vector<char> buffer(fileSize);
+
+            file.seekg(0);
+            file.read(buffer.data(), static_cast<std::streamsize>(fileSize));
+
+            return buffer;
         }
 
-        size_t fileSize = (size_t)file.tellg();
-        std::vector<char> buffer(fileSize);
-
-        file.seekg(0);
-        file.read(buffer.data(), fileSize);
-
-        file.close();
-
-        return buffer;
+        throw std::runtime_error("failed to open file: " + filename);
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData)

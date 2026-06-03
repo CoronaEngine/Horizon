@@ -2,7 +2,9 @@
 
 #include <ktm/ktm.h>
 
+#include <atomic>
 #include <chrono>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -11,7 +13,8 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#include "Horizon.h"
+#include "horizon.h"
+#include "hardware_wrapper_vulkan/hardware/execution.h"
 #include "common.h"
 #include "corona/kernel/core/i_logger.h"
 
@@ -19,6 +22,8 @@
 #include "Codegen/ControlFlows.h"
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
+
+using namespace Corona::Horizon;
 
 // 通过 CMake helicon_compile_shaders 自动编译生成的 shader 反射头文件
 // eDSL 路径不再依赖 GLSL 反射头文件，render target 通过 bindRenderTarget 自动绑定
@@ -52,6 +57,30 @@ struct VertexAttributeProxy
     EmbeddedShader::Float3 color;
 };
 
+constexpr char defaultStorageImageComputeShader[] = R"GLSL(
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, rgba16f) uniform image2D inputImageRGBA16;
+
+vec3 acesFilmicToneMapCurve(vec3 x)
+{
+    float a = 2.51f;
+    float b = 0.03f;
+    float c = 2.43f;
+    float d = 0.59f;
+    float e = 0.14f;
+
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+void main()
+{
+    vec4 color = imageLoad(inputImageRGBA16, ivec2(gl_GlobalInvocationID.xy));
+    imageStore(inputImageRGBA16, ivec2(gl_GlobalInvocationID.xy), vec4(acesFilmicToneMapCurve(color.xyz), 1.0));
+}
+)GLSL";
+
 void run_example_default()
 {
     // Corona::Kernel::CoronaLogger::get_logger()->set_log_level(quill::LogLevel::TraceL3);
@@ -61,7 +90,6 @@ void run_example_default()
     // testCompressedTextures();
 
     //CFW_LOG_INFO("Starting main application...");
-
     if (glfwInit() < 0)
     {
         return;
@@ -85,15 +113,16 @@ void run_example_default()
         std::vector<HardwareExecutor> executors(windows.size());
         for (size_t i = 0; i < finalOutputImages.size(); i++)
         {
-            HardwareImageCreateInfo createInfo;
-            createInfo.width = 1920;
-            createInfo.height = 1080;
-            createInfo.format = ImageFormat::RGBA16_FLOAT;
-            createInfo.usage = ImageUsage::StorageImage;
-            createInfo.arrayLayers = 1;
-            createInfo.mipLevels = 1;
+            HardwareImageDesc createInfo =
+                HardwareImageDesc::texture_2d(1920,
+                                              1080,
+                                              Format::RGBA16_FLOAT,
+                                              ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
+                                                  ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
+                                                  ImageUsageFlags::TransferDst);
 
             finalOutputImages[i] = HardwareImage(createInfo);
+            finalOutputImages[i].set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
         }
 
         // HardwareBuffer normalBuffer = HardwareBuffer(normals, BufferUsage::VertexBuffer);
@@ -124,7 +153,34 @@ void run_example_default()
         uint32_t textureID = textureResult.descriptorID;
         HardwareImage& texture = textureResult.texture;
 
+        constexpr size_t OBJECT_COUNT = 20;
+        std::vector<ktm::fmat4x4> baseModelMat(OBJECT_COUNT);
+        for (size_t i = 0; i < OBJECT_COUNT; i++)
+        {
+            baseModelMat[i] = ktm::translate3d(ktm::fvec3(static_cast<float>(i % 5) - 2.0f,
+                                                          static_cast<float>(i / 5) - 0.5f, 0.0f)) *
+                              ktm::scale3d(ktm::fvec3(0.1f, 0.1f, 0.1f)) *
+                              ktm::rotate3d_axis(ktm::radians(static_cast<float>(i) * 30.0f),
+                                                 ktm::fvec3(0.0f, 0.0f, 1.0f));
+        }
+
         std::vector<std::vector<HardwareBuffer>> rasterizerStorageBuffers(windows.size());
+        for (std::vector<HardwareBuffer>& storageBuffers : rasterizerStorageBuffers)
+        {
+            storageBuffers.reserve(OBJECT_COUNT);
+            for (size_t i = 0; i < OBJECT_COUNT; i++)
+            {
+                RasterizerStorageBufferObject initialData;
+                initialData.textureIndex = textureID;
+                initialData.model = baseModelMat[i];
+                const auto initialBytes = std::as_bytes(std::span<const RasterizerStorageBufferObject>(&initialData, 1));
+                storageBuffers.push_back(
+                    HardwareBuffer::from_bytes(initialBytes,
+                                               sizeof(RasterizerStorageBufferObject),
+                                               BufferUsageFlags::TransferSrc | BufferUsageFlags::TransferDst |
+                                                   BufferUsageFlags::Storage));
+            }
+        }
         //std::vector<HardwareBuffer> computeStorageBuffers(windows.size());
 
         std::atomic_bool running = true;
@@ -135,13 +191,8 @@ void run_example_default()
             //ComputeStorageBufferObject computeUniformData(windows.size());
             //computeStorageBuffers[threadIndex] = HardwareBuffer(sizeof(ComputeStorageBufferObject), BufferUsage::StorageBuffer);
 
-            std::vector<ktm::fmat4x4> modelMat(20);
-            std::vector<RasterizerStorageBufferObject> rasterizerStorageBufferObjects(modelMat.size());
-            for (size_t i = 0; i < modelMat.size(); i++)
-            {
-                modelMat[i] = (ktm::translate3d(ktm::fvec3((i % 5) - 2.0f, (i / 5) - 0.5f, 0.0f)) * ktm::scale3d(ktm::fvec3(0.1, 0.1, 0.1)) * ktm::rotate3d_axis(ktm::radians(i * 30.0f), ktm::fvec3(0.0f, 0.0f, 1.0f)));
-                rasterizerStorageBuffers[threadIndex].push_back(HardwareBuffer(sizeof(RasterizerStorageBufferObject), BufferUsage::StorageBuffer, &(modelMat[i])));
-            }
+            std::vector<RasterizerStorageBufferObject> rasterizerStorageBufferObjects(OBJECT_COUNT);
+            std::vector<HardwareBuffer>& storageBuffers = rasterizerStorageBuffers[threadIndex];
 
             auto startTime = std::chrono::high_resolution_clock::now();
             uint64_t frameCount = 0;
@@ -154,12 +205,13 @@ void run_example_default()
 
                 float currentTime = std::chrono::duration<float, std::chrono::seconds::period>(std::chrono::high_resolution_clock::now() - startTime).count();
 
-                for (size_t i = 0; i < rasterizerStorageBuffers[threadIndex].size(); i++)
+                for (size_t i = 0; i < storageBuffers.size(); i++)
                 {
                     // rasterizerUniformBufferObject[i].textureIndex = texture[0][0].storeDescriptor();
                     rasterizerStorageBufferObjects[i].textureIndex = textureID;
-                    rasterizerStorageBufferObjects[i].model = modelMat[i] * ktm::rotate3d_axis(currentTime * ktm::radians(90.0f), ktm::fvec3(0.0f, 0.0f, 1.0f));
-                    rasterizerStorageBuffers[threadIndex][i].copyFromData(&(rasterizerStorageBufferObjects[i]), sizeof(rasterizerStorageBufferObjects[i]));
+                    rasterizerStorageBufferObjects[i].model = baseModelMat[i] * ktm::rotate3d_axis(currentTime * ktm::radians(90.0f), ktm::fvec3(0.0f, 0.0f, 1.0f));
+                    (void)storageBuffers[i].write_bytes(
+                        std::as_bytes(std::span<const RasterizerStorageBufferObject>(&rasterizerStorageBufferObjects[i], 1)));
                 }
 
                 //computeUniformData.imageID = finalOutputImages[threadIndex].storeDescriptor();
@@ -211,16 +263,6 @@ void run_example_default()
         auto projMat = ktm::perspective_lh(ktm::radians(45.0f), 1920.0f / 1080.0f, 0.1f, 10.0f);
         auto vpMat = projMat * viewMat;
 
-        // Base model matrices (same formula as mesh thread)
-        constexpr size_t OBJECT_COUNT = 20;
-        std::vector<ktm::fmat4x4> baseModelMat(OBJECT_COUNT);
-        for (size_t i = 0; i < OBJECT_COUNT; i++)
-        {
-            baseModelMat[i] = ktm::translate3d(ktm::fvec3(static_cast<float>(i % 5) - 2.0f,
-                                                          static_cast<float>(i / 5) - 0.5f, 0.0f)) *
-                              ktm::scale3d(ktm::fvec3(0.1f, 0.1f, 0.1f)) * ktm::rotate3d_axis(ktm::radians(static_cast<float>(i) * 30.0f), ktm::fvec3(0.0f, 0.0f, 1.0f));
-        }
-
         // =====================================================================
         // renderThreadEDSL: EDSL 路径 — C++ lambda 定义 shader，自动绑定资源
         // =====================================================================
@@ -260,11 +302,12 @@ void run_example_default()
             };
 
             // 从 lambda 创建管线，bindOutputTargets 自动绑定 render target
-            RasterizerPipeline rasterizer(vsLambda, fsLambda);
-            rasterizer.bindOutputTargets(inputImageRGBA16);
+            RasterizerPipeline rasterizer(RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda));
+            rasterizer.bind_output_targets(inputImageRGBA16);
 
             // 从 lambda 创建 compute 管线，auto-bind 资源
-            ComputePipeline computer(compute, uvec3(8, 8, 1));
+            ComputePipeline computer(ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1)));
+            computer.bind_storage_image(0, finalOutputImages[threadIndex]);
 
             auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -273,20 +316,25 @@ void run_example_default()
                 float currentTime = std::chrono::duration<float, std::chrono::seconds::period>(
                                         std::chrono::high_resolution_clock::now() - startTime)
                                         .count();
-                HardwareBuffer indexBuffer = HardwareBuffer(indices, BufferUsage::IndexBuffer);
+                HardwareBuffer indexBuffer = HardwareBuffer::index(indices);
 
-                for (size_t i = 0; i < rasterizerStorageBuffers[threadIndex].size(); i++)
+                rasterizer.clear_records();
+                for (size_t i = 0; i < baseModelMat.size(); i++)
                 {
                     auto model = baseModelMat[i] * ktm::rotate3d_axis(
                                                        currentTime * ktm::radians(90.0f), ktm::fvec3(0.0f, 0.0f, 1.0f));
                     auto transformed = transformVerticesForObject(simpleVertices, vpMat * model);
-                    HardwareBuffer vertexBuffer(transformed, BufferUsage::VertexBuffer);
+                    HardwareBuffer vertexBuffer = HardwareBuffer::vertex(transformed);
                     rasterizer.record(indexBuffer, vertexBuffer);
                 }
 
-                executors[threadIndex] << rasterizer(1920, 1080)
-                                       << computer(1920 / 8, 1080 / 8, 1)
-                                       << executors[threadIndex].commit();
+                rasterizer(1920, 1080);
+                computer(1920 / 8, 1080 / 8, 1);
+                auto receipt = executors[threadIndex].stream()
+                    << rasterizer.command_batch()
+                    << computer.command_batch()
+                    << commit();
+                (void)receipt;
             }
         };
 
@@ -295,15 +343,19 @@ void run_example_default()
         // =====================================================================
         auto renderThreadGLSL = [&](uint32_t threadIndex) {
             // 简化后的 shader 无需 push constant / UBO，仅做 pass-through
-            RasterizerPipeline<default_vert_glsl, default_frag_glsl> rasterizer;
+            RasterizerPipeline rasterizer(
+                RasterizerPipelineDesc::from_spirv(default_vert_glsl::spirv, default_frag_glsl::spirv));
 
             // 绑定 render target
-            rasterizer.outColor = finalOutputImages[threadIndex];
+            rasterizer[default_frag_glsl::outColor] = finalOutputImages[threadIndex];
 
             // compute 管线保持不变
-            ComputePipeline<default_compute_glsl> computer;
-            uint32_t computeImageDescriptorID = finalOutputImages[threadIndex].storeDescriptor();
-            computer.GlobalUniformParam.imageID = computeImageDescriptorID;
+            EmbeddedShader::CompilerOption glslCompilerOptions;
+            glslCompilerOptions.enableBindless = false;
+            ComputePipeline computer(ComputePipelineDesc::from_source(defaultStorageImageComputeShader,
+                                                                      EmbeddedShader::ShaderLanguage::GLSL,
+                                                                      glslCompilerOptions));
+            computer.bind_storage_image(0, finalOutputImages[threadIndex]);
 
             auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -312,20 +364,25 @@ void run_example_default()
                 float currentTime = std::chrono::duration<float, std::chrono::seconds::period>(
                                         std::chrono::high_resolution_clock::now() - startTime)
                                         .count();
-                HardwareBuffer indexBuffer = HardwareBuffer(indices, BufferUsage::IndexBuffer);
+                HardwareBuffer indexBuffer = HardwareBuffer::index(indices);
 
-                for (size_t i = 0; i < rasterizerStorageBuffers[threadIndex].size(); i++)
+                rasterizer.clear_records();
+                for (size_t i = 0; i < baseModelMat.size(); i++)
                 {
                     auto model = baseModelMat[i] * ktm::rotate3d_axis(
                                                        currentTime * ktm::radians(90.0f), ktm::fvec3(0.0f, 0.0f, 1.0f));
                     auto transformed = transformVerticesForObject(simpleVertices, vpMat * model);
-                    HardwareBuffer vertexBuffer(transformed, BufferUsage::VertexBuffer);
+                    HardwareBuffer vertexBuffer = HardwareBuffer::vertex(transformed);
                     rasterizer.record(indexBuffer, vertexBuffer);
                 }
 
-                executors[threadIndex] << rasterizer(1920, 1080)
-                                       << computer(1920 / 8, 1080 / 8, 1)
-                                       << executors[threadIndex].commit();
+                rasterizer(1920, 1080);
+                computer(1920 / 8, 1080 / 8, 1);
+                auto receipt = executors[threadIndex].stream()
+                    << rasterizer.command_batch()
+                    << computer.command_batch()
+                    << commit();
+                (void)receipt;
             }
         };
 
@@ -333,6 +390,7 @@ void run_example_default()
             //CFW_LOG_INFO("Display thread {} started...", threadIndex);
 
             HardwareDisplayer displayManager = HardwareDisplayer(glfwGetWin32Window(windows[threadIndex]));
+            HardwareExecutor displayExecutor;
 
             auto startTime = std::chrono::high_resolution_clock::now();
             uint64_t frameCount = 0;
@@ -346,7 +404,10 @@ void run_example_default()
                 float time = std::chrono::duration<float, std::chrono::seconds::period>(std::chrono::high_resolution_clock::now() - startTime).count();
                 // CFW_LOG_INFO("Display thread {} frame {} at {:.3f}s", threadIndex, frameCount, time);
 
-                displayManager.wait(executors[threadIndex]) << finalOutputImages[threadIndex];
+                auto receipt = displayExecutor.stream()
+                    << present(displayManager, finalOutputImages[threadIndex])
+                    << commit();
+                (void)receipt;
                 ++frameCount;
 
                 // 通知 Mesh 线程开始下一帧
@@ -363,12 +424,13 @@ void run_example_default()
 
         for (size_t i = 0; i < windows.size(); i++)
         {
-            meshThreads.emplace_back(meshThread, i);
+            const uint32_t threadIndex = static_cast<uint32_t>(i);
+            meshThreads.emplace_back(meshThread, threadIndex);
             if (i % 2 == 0)
-                renderThreads.emplace_back(renderThreadEDSL, i);
+                renderThreads.emplace_back(renderThreadEDSL, threadIndex);
             else
-                renderThreads.emplace_back(renderThreadGLSL, i);
-            displayThreads.emplace_back(displayThread, i);
+                renderThreads.emplace_back(renderThreadGLSL, threadIndex);
+            displayThreads.emplace_back(displayThread, threadIndex);
         }
 
         while (running.load())

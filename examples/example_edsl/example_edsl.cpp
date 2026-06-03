@@ -8,6 +8,7 @@
 #include <Codegen/CustomLibrary.h>
 #include <Codegen/TypeAlias.h>
 #include <horizon.h>
+#include "hardware_wrapper_vulkan/hardware/execution.h"
 
 #include <array>
 #include <chrono>
@@ -17,12 +18,15 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
 #include <stb_image.h>
 #include <Codegen/ControlFlows.h>
 #include GLSL(shaders/edsl_header.glsl)
+
+using namespace Corona::Horizon;
 
 namespace example_baseline_edsl_detail
 {
@@ -31,9 +35,9 @@ constexpr uint32_t baseline_width = 800;
 constexpr uint32_t baseline_height = 600;
 constexpr float pi = 3.14159265358979323846f;
 
-constexpr EmbeddedShader::BindingKey model_binding{0, 64, 10, 0};
-constexpr EmbeddedShader::BindingKey view_binding{64, 64, 10, 0};
-constexpr EmbeddedShader::BindingKey proj_binding{128, 64, 10, 0};
+constexpr BindingSlot model_binding{0, 64, 10, 0};
+constexpr BindingSlot view_binding{64, 64, 10, 0};
+constexpr BindingSlot proj_binding{128, 64, 10, 0};
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
@@ -321,17 +325,25 @@ HardwareImage load_texture_image()
         throw std::runtime_error("failed to load texture image: " + texture_path);
     }
 
-    HardwareImageCreateInfo create_info;
-    create_info.width = static_cast<uint32_t>(width);
-    create_info.height = static_cast<uint32_t>(height);
-    create_info.format = ImageFormat::RGBA8_SRGB;
-    create_info.usage = ImageUsage::SampledImage;
-    create_info.arrayLayers = 1;
-    create_info.mipLevels = 1;
-
+    HardwareImageDesc create_info =
+        HardwareImageDesc::texture_2d(static_cast<uint32_t>(width),
+                                      static_cast<uint32_t>(height),
+                                      Format::SRGBA8_UNORM,
+                                      ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst);
     HardwareImage texture_image(create_info);
+    const auto pixel_bytes =
+        std::as_bytes(std::span<const stbi_uc>(pixels, static_cast<size_t>(width) * static_cast<size_t>(height) * 4u));
+    HardwareBufferDesc staging_desc;
+    staging_desc.element_count = pixel_bytes.size_bytes();
+    staging_desc.element_size = 1;
+    staging_desc.usage = BufferUsageFlags::TransferSrc;
+    staging_desc.cpu_access = CpuAccessMode::Write;
+    HardwareBuffer staging(staging_desc, pixel_bytes);
     HardwareExecutor upload_executor;
-    upload_executor << texture_image.copyFrom(pixels) << upload_executor.commit();
+    auto upload_receipt = upload_executor.stream()
+        << texture_image.copy_from(staging)
+        << commit();
+    (void)upload_receipt;
     stbi_image_free(pixels);
 
     return texture_image;
@@ -339,16 +351,16 @@ HardwareImage load_texture_image()
 
 HardwareImage create_render_target(uint32_t width, uint32_t height)
 {
-    HardwareImageCreateInfo create_info;
-    create_info.width = width;
-    create_info.height = height;
-    create_info.format = ImageFormat::RGBA16_FLOAT;
-    create_info.usage = ImageUsage::StorageImage;
-    create_info.arrayLayers = 1;
-    create_info.mipLevels = 1;
+    HardwareImageDesc create_info =
+        HardwareImageDesc::texture_2d(width,
+                                      height,
+                                      Format::RGBA16_FLOAT,
+                                      ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
+                                          ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
+                                          ImageUsageFlags::TransferDst);
 
     HardwareImage image(create_info);
-    image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
     return image;
 }
 
@@ -414,8 +426,8 @@ void run_example_edsl()
     try
     {
         baseline_mesh mesh = load_mesh();
-        HardwareBuffer vertex_buffer(mesh.vertices, BufferUsage::VertexBuffer);
-        HardwareBuffer index_buffer(mesh.indices, BufferUsage::IndexBuffer);
+        HardwareBuffer vertex_buffer = HardwareBuffer::vertex(mesh.vertices);
+        HardwareBuffer index_buffer = HardwareBuffer::index(mesh.indices);
         HardwareImage texture_image = load_texture_image();
         HardwareImage render_target = create_render_target(baseline_width, baseline_height);
         HardwareExecutor render_executor;
@@ -452,12 +464,11 @@ void run_example_edsl()
             return color * Float4(input->z, input->z, input->z, 1.0f);
         };
 
-        RasterizerPipeline rasterizer(vertex_shader, fragment_shader);
+        RasterizerPipeline rasterizer(RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader));
         // Input texture is sampled by the fragment shader; it must not be registered as a render target.
-        texture_proxy = texture_image;
 
         Texture2D<ktm::fvec4> output_proxy = render_target;
-        rasterizer.bindOutputTargets(output_proxy);
+        rasterizer.bind_output_targets(output_proxy);
 
         auto start_time = std::chrono::high_resolution_clock::now();
         while (!glfwWindowShouldClose(window))
@@ -477,17 +488,20 @@ void run_example_edsl()
             // HardwareBuffer vertex_buffer(transformed_vertices, BufferUsage::VertexBuffer);
 
             DrawIndexedParams draw_params;
-            draw_params.indexType = IndexType::UInt32;
-            draw_params.indexCount = static_cast<uint32_t>(mesh.indices.size());
+            draw_params.index_type = IndexType::UInt32;
+            draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
             // EDSL texture auto-binding writes the sampled image descriptor into
             // the rasterizer push constant block. record() snapshots that block
             // per draw, so bind before record just like the GLSL baseline does.
+            rasterizer.clear_records();
             rasterizer(baseline_width, baseline_height);
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
-            render_executor << rasterizer
-                            << render_executor.commit();
-            displayer.wait(render_executor) << render_target;
+            auto receipt = render_executor.stream()
+                << rasterizer.command_batch()
+                << present(displayer, render_target)
+                << commit();
+            (void)receipt;
         }
     }
     catch (const std::exception &e)
