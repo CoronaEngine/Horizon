@@ -35,7 +35,7 @@
 - `examples/`：示例程序与 shader 资源
 - `tools/`：`ShaderCompileScripts`、`dev.ps1` 和 `code-format.ps1`
 - `modules/corona/`：已内嵌的 Corona Framework（当前 Horizon 的基础依赖之一）
-- `third-party/`：预置 `slang`、`dxc` 二进制与头库
+- `third-party/`：预置 `dxc` 二进制与头库；`slang` 在 CMake configure 阶段按需下载解压
 - `docs/`：项目文档
 
 ## 构建要求
@@ -49,7 +49,7 @@
 
 构建、preset 和 Visual Studio 调试细节已收束到 [docs/agents/zh-CN/build.md](docs/agents/zh-CN/build.md)。
 
-当前仓库中的 Corona Framework 已直接纳入 `modules/corona/`，不再通过远程 `FetchContent` 拉取；其余第三方依赖仍可能在 configure 阶段由 CMake 自动获取。
+当前仓库中的 Corona Framework 已直接纳入 `modules/corona/`，不再通过远程 `FetchContent` 拉取；Slang 二进制包与其余第三方依赖仍可能在 configure 阶段由 CMake 自动获取。
 
 ### Ninja Multi-Config + MSVC（默认推荐）
 

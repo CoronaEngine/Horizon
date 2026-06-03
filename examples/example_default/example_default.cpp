@@ -22,9 +22,9 @@
 
 // 通过 CMake helicon_compile_shaders 自动编译生成的 shader 反射头文件
 // eDSL 路径不再依赖 GLSL 反射头文件，render target 通过 bindRenderTarget 自动绑定
-#include GLSL(shaders / default_vert.glsl)
-#include GLSL(shaders / default_frag.glsl)
-#include GLSL(shaders / default_compute.glsl)
+#include GLSL(shaders/default_vert.glsl)
+#include GLSL(shaders/default_frag.glsl)
+#include GLSL(shaders/default_compute.glsl)
 
 // storage buffer (used by mesh thread, retained for compatibility)
 struct RasterizerStorageBufferObject

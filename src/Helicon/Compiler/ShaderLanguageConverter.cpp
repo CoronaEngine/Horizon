@@ -21,13 +21,6 @@
 #include <set>
 #include <utility>
 
-#ifdef WIN32
-#include <atlbase.h>
-#include <dxcapi.h>
-#include <d3dcompiler.h>
-#pragma comment(lib, "d3dcompiler.lib")
-#endif
-
 namespace EmbeddedShader
 {
 
@@ -115,7 +108,7 @@ namespace EmbeddedShader
 		shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_4);
 		shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
 
-		if (isLink) shader.setEntryPoint("main");
+		//shader.setSourceEntryPoint("__no_entrypoint");
 
 		Includer includer;
 		includer.includePaths = includePaths;
@@ -126,6 +119,7 @@ namespace EmbeddedShader
 		}
 
 		glslang::TIntermediate* intermediate = nullptr;
+	    spv::SpvBuildLogger logger;
 		if (isLink)
 		{
 		    glslang::TProgram program;
@@ -147,15 +141,19 @@ namespace EmbeddedShader
 
 			intermediate = program.getIntermediate(stage);
 
-		    glslang::GlslangToSpv(*intermediate, resultSpirvCode);
+		    glslang::GlslangToSpv(*intermediate, resultSpirvCode,&logger);
 
 		}
 	    else
 		{
 		    intermediate = shader.getIntermediate();
 
-		    glslang::GlslangToSpv(*intermediate, resultSpirvCode);
+		    glslang::GlslangToSpv(*intermediate, resultSpirvCode,&logger);
 		}
+	    auto log = logger.getAllMessages();
+	    if (!log.empty()) {
+	        std::cerr << "SpvBuildLogger: " << log << "\n";
+	    }
 
 		glslang::FinalizeProcess();
 
@@ -608,10 +606,15 @@ namespace EmbeddedShader
 	    {
 	        throw std::logic_error("No target language specified for Slang compilation.");
 	    }
-	    Slang::ComPtr<slang::IGlobalSession> globalSession;
-	    createGlobalSession(globalSession.writeRef());
 
-	    slang::SessionDesc sessionDesc = {};
+		initSlangGlobalSession();
+		Slang::ComPtr<slang::IGlobalSession> globalSession = slangGlobalSession;
+		if (!globalSession)
+		{
+			throw std::runtime_error("Failed to create Slang global session.");
+		}
+
+		slang::SessionDesc sessionDesc = {};
 
 	    std::vector<slang::TargetDesc> targets(targetLanguage.size() + targetBinary.size());
 
@@ -682,10 +685,10 @@ namespace EmbeddedShader
                 slang::CompilerOptionName::BindlessSpaceIndex,
                 {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
             },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::NoMangle,
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
+	        },
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::IncompleteLibrary,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -823,8 +826,131 @@ namespace EmbeddedShader
 		return reflectedResources;
 	}
 
-	std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
-	                                                                  Slang::ComPtr<slang::IComponentType>& program)
+    std::vector<uint8_t> ShaderLanguageConverter::slangModuleCompiler(std::string_view shaderCode, ShaderLanguage srcLanguage)
+    {
+	    initSlangGlobalSession();
+
+        slang::SessionDesc sessionDesc{};
+	    slang::TargetDesc targetDesc{};
+	    targetDesc.format = SLANG_CPP_SOURCE;
+	    sessionDesc.targets = &targetDesc;
+	    sessionDesc.targetCount = 1;
+
+	    std::string_view srcStr = "slang";
+	    switch (srcLanguage)
+	    {
+
+        case ShaderLanguage::GLSL:
+	        srcStr = "glsl";
+            break;
+        case ShaderLanguage::HLSL:
+	        srcStr = "hlsl";
+            break;
+        case ShaderLanguage::Slang:
+	        break;
+	    case ShaderLanguage::DXIL:
+	    case ShaderLanguage::DXBC:
+	    case ShaderLanguage::SpirV:
+	        throw std::runtime_error("Unsupported source language for Slang module compilation.");
+        }
+
+	    std::array options =
+        {
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::Language,
+                {slang::CompilerOptionValueKind::String, 0, 0, srcStr.data(), nullptr}
+            },
+        };
+
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+	    Slang::ComPtr<slang::ISession> session;
+        slangGlobalSession->createSession(sessionDesc, session.writeRef());
+        Slang::ComPtr<slang::IModule> slangModule;
+	    {
+            auto hashStr = std::to_string(std::hash<std::string_view>()(shaderCode));
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            slangModule = session->loadModuleFromSourceString(hashStr.c_str(), hashStr.c_str(),
+                                                              shaderCode.data(),
+                                                              diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (!slangModule)
+            {
+                throw std::runtime_error("Failed to load Slang module.");
+            }
+        }
+
+	    Slang::ComPtr<slang::IBlob> moduleBlob;
+	    {
+	        auto result = slangModule->serialize(moduleBlob.writeRef());
+	        if (result != SLANG_OK || !moduleBlob)
+	        {
+	            throw std::runtime_error("Failed to serialize Slang module.");
+	        }
+	    }
+	    std::vector result(static_cast<uint8_t const*>(moduleBlob->getBufferPointer()),static_cast<uint8_t const*>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
+	    return result;
+    }
+
+    void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
+    {
+	    initSlangGlobalSession();
+
+	    slang::SessionDesc sessionDesc{};
+	    slang::TargetDesc targetDesc{};
+	    targetDesc.format = SLANG_CPP_SOURCE;
+	    sessionDesc.targets = &targetDesc;
+	    sessionDesc.targetCount = 1;
+
+	    std::array options =
+        {
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+	        },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+        };
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+	    Slang::ComPtr<slang::ISession> session;
+	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
+
+
+	    Slang::ComPtr irBlob{slang_createBlob(moduleData.data(),moduleData.size())};
+	    Slang::ComPtr<slang::IModule> slangModule;
+	    {
+	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        slangModule = session->loadModuleFromIRBlob("test-module","test-module",irBlob,diagnosticsBlob.writeRef());
+	        diagnoseIfNeeded(diagnosticsBlob);
+	        if (!slangModule)
+	        {
+	            throw std::runtime_error("Failed to load Slang module.");
+	        }
+	    }
+	    std::cout << "slang-module loaded successfully!" << std::endl;
+    }
+
+    std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
+                                                                      Slang::ComPtr<slang::IComponentType>& program)
 	{
 		std::vector<uint32_t> result;
 		// 1. Create Global Session
@@ -932,128 +1058,6 @@ namespace EmbeddedShader
 		program = linkedProgram;
 		return result;
 	}
-#ifdef WIN32
-	std::vector<uint32_t> ShaderLanguageConverter::dxilCompiler(const std::string& hlslShader, ShaderStage stage)
-	{
-		CComPtr<IDxcUtils> pUtils;
-		CComPtr<IDxcCompiler3> pCompiler;
-		DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils));
-		DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler));
-
-		std::wstring_view targetName;
-		switch (stage)
-		{
-			case ShaderStage::VertexShader:
-				targetName = L"vs_6_6";
-				break;
-			case ShaderStage::FragmentShader:
-				targetName = L"ps_6_6";
-				break;
-			case ShaderStage::ComputeShader:
-				targetName = L"cs_6_6";
-				break;
-			default:
-				throw std::runtime_error("Unknown shader stage");
-		}
-		LPCWSTR args[] =
-		{
-			L"Helicon", // Optional shader source file name for error reporting
-			// and for PIX shader source view.
-			L"-E", L"main", // Entry point.
-			L"-T", targetName.data(), // Target.
-#ifdef CABBAGE_ENGINE_DEBUG
-			L"-Zs", // Enable debug information (slim format)
-#endif
-		};
-
-		//
-		// Open source file.
-		//
-		CComPtr<IDxcBlobEncoding> pSource = nullptr;
-		pUtils->CreateBlob(hlslShader.data(), hlslShader.size() * sizeof(char), DXC_CP_ACP, &pSource);
-		DxcBuffer Source;
-		Source.Ptr = pSource->GetBufferPointer();
-		Source.Size = pSource->GetBufferSize();
-		Source.Encoding = DXC_CP_ACP; // Assume BOM says UTF8 or UTF16 or this is ANSI text.
-
-		//
-		// Compile it with specified arguments.
-		//
-		CComPtr<IDxcResult> pResults;
-		pCompiler->Compile(
-			&Source, // Source buffer.
-			args, // Array of pointers to arguments.
-			std::size(args), // Number of arguments.
-			nullptr, // User-provided interface to handle #include directives (optional).
-			IID_PPV_ARGS(&pResults) // Compiler output status, buffer, and errors.
-		);
-
-		//
-		// Print errors if present.
-		//
-		CComPtr<IDxcBlobUtf8> pErrors = nullptr;
-		pResults->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&pErrors), nullptr);
-		// Note that d3dcompiler would return null if no errors or warnings are present.
-		// IDxcCompiler3::Compile will always return an error buffer, but its length
-		// will be zero if there are no warnings or errors.
-		if (pErrors != nullptr && pErrors->GetStringLength() != 0)
-			wprintf(L"DXC Warnings and Errors:\n%S\n", pErrors->GetStringPointer());
-
-		HRESULT hrStatus;
-		pResults->GetStatus(&hrStatus);
-		if (FAILED(hrStatus))
-			throw std::runtime_error("Dxc Compilation Failed");
-
-		CComPtr<IDxcBlob> pShader = nullptr;
-		CComPtr<IDxcBlobUtf16> pShaderName = nullptr;
-		pResults->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&pShader), &pShaderName);
-		if (!pShader)
-			throw std::runtime_error("Dxc Compilation Failed");
-
-		std::vector<uint32_t> result(pShader->GetBufferSize() / sizeof(uint32_t));
-		memcpy(result.data(), pShader->GetBufferPointer(), pShader->GetBufferSize());
-		return result;
-	}
-
-	std::vector<uint32_t> ShaderLanguageConverter::dxbcCompiler(const std::string& hlslShader, ShaderStage stage)
-	{
-		UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-#ifdef CABBAGE_ENGINE_DEBUG
-		flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES;
-#endif
-
-		std::string_view targetName;
-		switch (stage)
-		{
-			case ShaderStage::VertexShader:
-				targetName = "vs_5_1";
-				break;
-			case ShaderStage::FragmentShader:
-				targetName = "ps_5_1";
-				break;
-			case ShaderStage::ComputeShader:
-				targetName = "cs_5_1";
-				break;
-			default:
-				throw std::runtime_error("Unknown shader stage");
-		}
-
-		CComPtr<ID3DBlob> code;
-		CComPtr<ID3DBlob> error;
-		D3DCompile(hlslShader.data(), hlslShader.size() * sizeof(char), "Helicon", nullptr, nullptr, "main",
-		           targetName.data(),
-		           flags, 0, &code, &error);
-		if (error && error->GetBufferSize() != 0)
-		{
-			printf("D3DCompiler Warnings and Errors:\n%s\n", static_cast<const char*>(error->GetBufferPointer()));
-			throw std::runtime_error("D3DCompiler Compilation Failed");
-		}
-
-		std::vector<uint32_t> result(code->GetBufferSize() / sizeof(uint32_t));
-		memcpy(result.data(), code->GetBufferPointer(), code->GetBufferSize());
-		return result;
-	}
-#endif
 
 	// get Reflected Bind Info
 	ShaderCodeModule::ShaderResources ShaderLanguageConverter::spirvCrossReflectedBindInfo(
@@ -1289,17 +1293,42 @@ namespace EmbeddedShader
                 break;
         }
     });
-	    std::vector<uint32_t> result;
-	    auto spv_result = spvtools::Link(spvToolContext,binaries, &result);
-	    // if (SPV_SUCCESS != spv_result)
-     //    {
-     //        throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
-     //    }
-	    return result;
+        std::vector<uint32_t> result;
+
+        auto spv_result = spvtools::Link(spvToolContext,binaries, &result);
+        if (SPV_SUCCESS != spv_result)
+        {
+            throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
+        }
+
+        isSpirvValid(result);
+        return result;
+    }
+
+    bool ShaderLanguageConverter::isSpirvValid(const std::vector<uint32_t> &spirvCode)
+    {
+	    spv_diagnostic diagnostic = nullptr;
+	    spv_const_binary_t binary = { spirvCode.data(), spirvCode.size() };
+
+	    spv_result_t result = spvValidate(spvToolContext.CContext(), &binary, &diagnostic);
+	    if (result == SPV_SUCCESS) {
+	        spvDiagnosticDestroy(diagnostic);
+	        return true;
+	    }
+        std::cerr << "❌ SPIR-V 验证失败 (错误码: " << result << ")\n";
+
+        if (diagnostic) {
+            std::cerr << "位置: 字索引 " << diagnostic->position.index
+                << ", 行 " << diagnostic->position.line
+                << ", 列 " << diagnostic->position.column << "\n";
+            std::cerr << "详情: " << diagnostic->error << "\n";
+        }
+	    spvDiagnosticDestroy(diagnostic);
+	    return false;
     }
 
     void ShaderLanguageConverter::slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath,
-	                                                size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection)
+                                                    size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection)
 	{
 		auto type = field->getTypeLayout();
 		auto name = accessPath.empty() ? field->getName() : accessPath.data() + std::string(".") + field->getName();
@@ -1392,4 +1421,14 @@ namespace EmbeddedShader
 		bindInfo.semantic = var->getSemanticName() ? var->getSemanticName() : "";
 		resource.bindInfoPool.push_back(bindInfo);
 	}
+
+    void ShaderLanguageConverter::initSlangGlobalSession()
+    {
+	    if (!slangGlobalSession)
+	    {
+	        SlangGlobalSessionDesc desc{};
+	        desc.enableGLSL = true;
+	        createGlobalSession(&desc,slangGlobalSession.writeRef());
+	    }
+    }
 }

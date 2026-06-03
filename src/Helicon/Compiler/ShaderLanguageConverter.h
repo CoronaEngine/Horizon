@@ -69,21 +69,23 @@ namespace EmbeddedShader
             std::vector<std::string> &targetsOutput,
             bool isEnabledReflection, bool isEnabledLink = true);
 
+	    static std::vector<uint8_t> slangModuleCompiler(std::string_view shaderCode,ShaderLanguage srcLanguage);
+	    static void testSlangModule(const std::vector<uint8_t>& moduleData);
+
 		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
-#ifdef WIN32
-		static std::vector<uint32_t> dxilCompiler(const std::string& hlslShader, ShaderStage stage);
-		static std::vector<uint32_t> dxbcCompiler(const std::string& hlslShader, ShaderStage stage);
-#endif
 
 		//get Reflected Bind Info
 		static ShaderCodeModule::ShaderResources spirvCrossReflectedBindInfo(std::vector<uint32_t> spirv_file, ShaderLanguage targetLanguage = ShaderLanguage::GLSL, int32_t targetVersion = 330);
 
 	    static std::vector<uint32_t> spirvLinker(const std::vector<std::vector<uint32_t>> &binaries);
 		//static ShaderCodeModule::ShaderResources slangReflectedBindInfo(const std::string& shaderCode);
+	    static bool isSpirvValid(const std::vector<uint32_t>& spirvCode);
 	private:
 	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};
+	    static inline thread_local Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
 		static void slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath, size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection);
 		static void slangReflectParameterBlock(slang::ProgramLayout* program, std::string_view uboName, ShaderCodeModule::ShaderResources& reflection);
 		static void slangReflectDescriptor(slang::VariableLayoutReflection* var, int set, std::string_view name, size_t varBaseOffset, ShaderCodeModule::ShaderResources& resource);
+	    static void initSlangGlobalSession();
 	};
 }

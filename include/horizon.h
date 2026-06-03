@@ -1274,46 +1274,4 @@ namespace Corona::Horizon
     {
     };
 
-    // ================================================================
-    // HardwareExecutor
-    // ================================================================
-
-    struct HardwareExecutor : public ResourceHandle
-    {
-    public:
-        HardwareExecutor() = default;
-        HardwareExecutor(const HardwareExecutor& other) noexcept = default;
-        HardwareExecutor(HardwareExecutor&& other) noexcept = default;
-        ~HardwareExecutor() = default;
-
-        HardwareExecutor& operator=(const HardwareExecutor& other) noexcept = default;
-        HardwareExecutor& operator=(HardwareExecutor&& other) noexcept = default;
-
-        HardwareExecutor& operator<<(RasterizerPipeline& rasterizer_pipeline);
-        HardwareExecutor& operator<<(ComputePipeline& compute_pipeline);
-        HardwareExecutor& operator<<(HardwareExecutor& other);
-        HardwareExecutor &operator<<(const CopyCommand &cmd);
-
-        HardwareExecutor& wait(HardwareExecutor& other);
-        HardwareExecutor& commit();
-    };
-
-    // ================================================================
-    // HardwareDisplayer
-    // ================================================================
-
-    struct HardwareDisplayer : public ResourceHandle
-    {
-    public:
-        explicit HardwareDisplayer(void *surface = nullptr);
-        HardwareDisplayer(const HardwareDisplayer &other);
-        HardwareDisplayer(HardwareDisplayer &&other) noexcept;
-        ~HardwareDisplayer();
-
-        HardwareDisplayer &operator=(const HardwareDisplayer &other);
-        HardwareDisplayer &operator=(HardwareDisplayer &&other) noexcept;
-        HardwareDisplayer &operator<<(const HardwareImage &image);
-
-        HardwareDisplayer &wait(const HardwareExecutor &executor);
-    };
 }

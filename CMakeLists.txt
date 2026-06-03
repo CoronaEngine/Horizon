@@ -27,6 +27,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_TLS_VERIFY OFF)
 
 add_compile_definitions(
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
@@ -40,6 +41,7 @@ add_compile_definitions(
 
 include(FetchContent)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonFetchContent.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonSlang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCoreDependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonRuntimeDeps.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCorona.cmake)

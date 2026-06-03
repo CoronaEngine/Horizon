@@ -572,6 +572,33 @@ class Storage {
     }
 
     /**
+     * @brief 尝试获取只读访问句柄（真正非阻塞版本）
+     *
+     * @param id 对象 ID
+     * @return ReadHandle 若锁不可用、ID 无效或未占用则返回无效句柄
+     */
+    [[nodiscard]]
+    ReadHandle try_acquire_read_nowait(ObjectId id) {
+        T* ptr = reinterpret_cast<T*>(id);
+        auto [_, parent_buffer] = get_parent_buffer(id);
+
+        if (!parent_buffer) {
+            return ReadHandle();
+        }
+
+        std::size_t index = (id - reinterpret_cast<ObjectId>(&(parent_buffer->buffer[0]))) / sizeof(T);
+        std::shared_lock<std::shared_timed_mutex> slot_lock(parent_buffer->mutexes[index], std::try_to_lock);
+        if (!slot_lock.owns_lock()) {
+            return ReadHandle();
+        }
+
+        if (parent_buffer->occupied[index].load(std::memory_order_acquire)) {
+            return ReadHandle(ptr, std::move(slot_lock));
+        }
+        return ReadHandle();
+    }
+
+    /**
      * @brief 获取读写访问句柄
      *
      * @param id 对象 ID
@@ -677,6 +704,33 @@ class Storage {
             return WriteHandle(ptr, std::move(slot_lock));
         }
         return WriteHandle();  // 槽位未占用，返回无效句柄
+    }
+
+    /**
+     * @brief 尝试获取读写访问句柄（真正非阻塞版本）
+     *
+     * @param id 对象 ID
+     * @return WriteHandle 若锁不可用、ID 无效或未占用则返回无效句柄
+     */
+    [[nodiscard]]
+    WriteHandle try_acquire_write_nowait(ObjectId id) {
+        T* ptr = reinterpret_cast<T*>(id);
+        auto [_, parent_buffer] = get_parent_buffer(id);
+
+        if (!parent_buffer) {
+            return WriteHandle();
+        }
+
+        std::size_t index = (id - reinterpret_cast<ObjectId>(&(parent_buffer->buffer[0]))) / sizeof(T);
+        std::unique_lock<std::shared_timed_mutex> slot_lock(parent_buffer->mutexes[index], std::try_to_lock);
+        if (!slot_lock.owns_lock()) {
+            return WriteHandle();
+        }
+
+        if (parent_buffer->occupied[index].load(std::memory_order_acquire)) {
+            return WriteHandle(ptr, std::move(slot_lock));
+        }
+        return WriteHandle();
     }
 
     /**

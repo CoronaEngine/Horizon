@@ -16,8 +16,7 @@ target_include_directories(Helicon PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${ktm_SOURCE_DIR}"
     "${pfr_SOURCE_DIR}/include"
-    "${PROJECT_SOURCE_DIR}/third-party/slang/include"
-    "${PROJECT_SOURCE_DIR}/third-party/dxc/inc"
+    "${HORIZON_SLANG_INCLUDE_DIR}"
 )
 
 # --- 架构检测 ---
@@ -52,8 +51,7 @@ endif()
 message(STATUS "Target Arch: ${TARGET_ARCH}")
 
 target_link_directories(Helicon PUBLIC
-    ${PROJECT_SOURCE_DIR}/third-party/slang/lib
-    ${PROJECT_SOURCE_DIR}/third-party/dxc/lib/${TARGET_ARCH}
+    "${HORIZON_SLANG_LIBRARY_DIR}"
 )
 
 target_link_libraries(Helicon PUBLIC
@@ -66,17 +64,30 @@ target_link_libraries(Helicon PUBLIC
     slang
     slang-rt
     gfx
-    dxcompiler
-    dxil
     SPIRV-Tools-link
 )
 
-file(GLOB SLANG_DLLS "${PROJECT_SOURCE_DIR}/third-party/slang/bin/*.dll")
-file(GLOB DXC_DLLS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")
+set(HELICON_RUNTIME_DEPS)
 
-if(SLANG_DLLS AND DXC_DLLS)
-    message(STATUS "Found Slang and DXC DLLs")
+if(WIN32)
+    file(GLOB SLANG_DLLS CONFIGURE_DEPENDS "${HORIZON_SLANG_BINARY_DIR}/*.dll")
+    if(NOT SLANG_DLLS)
+        message(FATAL_ERROR "Slang runtime DLLs were not found under ${HORIZON_SLANG_BINARY_DIR}")
+    endif()
+
+    list(APPEND HELICON_RUNTIME_DEPS ${SLANG_DLLS})
+
+    file(GLOB DXC_DLLS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")
+    if(DXC_DLLS)
+        list(APPEND HELICON_RUNTIME_DEPS ${DXC_DLLS})
+    else()
+        message(STATUS "DXC runtime DLLs were not found for ${TARGET_ARCH}; continuing with Slang runtime DLLs only")
+    endif()
+endif()
+
+if(HELICON_RUNTIME_DEPS)
+    message(STATUS "Found Helicon runtime DLLs: ${HELICON_RUNTIME_DEPS}")
     set_target_properties(Helicon PROPERTIES
-        INTERFACE_HELICON_RUNTIME_DEPS "${SLANG_DLLS};${DXC_DLLS}"
+        INTERFACE_HELICON_RUNTIME_DEPS "${HELICON_RUNTIME_DEPS}"
     )
 endif()
