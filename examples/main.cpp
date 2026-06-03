@@ -1,29 +1,36 @@
-
 #include "example_baseline/example_baseline.h"
 #include "example_default/example_default.h"
-#include "example_glsl/example_glsl.h"
 #include "example_edsl/example_edsl.h"
-#include "example_include/example_include.h"
+#include "example_glsl/example_glsl.h"
 
-#include <exception>
 #include <iostream>
+#include <string_view>
 
-int main()
+int main(int argc, char **argv)
 {
-    try
-    {
-        // 每一个方法都代表一个独立的示例，展示了不同的功能或者后端实现。可以根据需要选择运行其中一个或者多个示例。
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("default");
 
-        //run_example_default();
-        //run_example_baseline();
-        //run_example_glsl();
+    if (mode == "baseline")
+    {
+        run_example_baseline();
+        return 0;
+    }
+    if (mode == "default")
+    {
+        run_example_default();
+        return 0;
+    }
+    if (mode == "edsl")
+    {
         run_example_edsl();
-        //run_example_include();
+        return 0;
     }
-    catch (const std::exception &e)
+    if (mode == "glsl")
     {
-        std::cerr << e.what() << '\n';
+        run_example_glsl();
+        return 0;
     }
 
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl]\n";
     return 0;
 }

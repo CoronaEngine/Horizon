@@ -27,8 +27,8 @@ add_library(ocarina SHARED main.cpp)
 target_link_libraries(ocarina ocarina-native)
 
 
-# ocarina 自身的测试由根项目的 HORIZON_BUILD_EXAMPLES 统一控制
-if(HORIZON_BUILD_EXAMPLES)
+# ocarina tests are opt-in from the root Horizon project.
+if(HORIZON_BUILD_OCARINA_TESTS)
     add_subdirectory(tests)
 endif()
 
@@ -38,4 +38,3 @@ set_target_properties(ocarina PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         FOLDER "ocarina")
-

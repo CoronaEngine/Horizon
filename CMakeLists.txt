@@ -8,7 +8,17 @@ project(
 )
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(HORIZON_BUILD_TOOLS "Build Horizon tool executables" OFF)
 option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
+option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" ${PROJECT_IS_TOP_LEVEL})
+#option(HORIZON_BUILD_EXAMPLES "Build Horizon examples" OFF)
+#option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" OFF)
+option(HORIZON_BUILD_BENCHMARKS "Build Horizon performance benchmarks" OFF)
+option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module when CUDA is available" OFF)
+option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
+option(HORIZON_BUILD_DEPENDENCY_TOOLS "Build third-party command line tool executables" OFF)
+option(HORIZON_ENABLE_DEPENDENCY_INSTALL "Enable third-party dependency install rules" OFF)
+option(HORIZON_ENABLE_VALIDATION "Enable Horizon runtime validation checks" ON)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -30,6 +40,7 @@ add_compile_definitions(
 )
 
 include(FetchContent)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonFetchContent.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonSlang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCoreDependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonRuntimeDeps.cmake)
@@ -39,7 +50,21 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCorona.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
 
 add_subdirectory(src)
-add_subdirectory(tools)
+
+if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
+    add_subdirectory(tools)
+endif()
+
+if(HORIZON_BUILD_TESTS)
+    enable_testing()
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonTesting.cmake)
+    add_subdirectory(tests)
+endif()
+
+if(HORIZON_BUILD_BENCHMARKS)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonBenchmarking.cmake)
+    add_subdirectory(benchmarks)
+endif()
 
 if(HORIZON_BUILD_EXAMPLES)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonExampleDependencies.cmake)

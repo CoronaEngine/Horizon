@@ -141,13 +141,6 @@ namespace Corona::Horizon
         return uint32_t(flags & bit) != 0;
     }
 
-    struct HardwareBufferOptions
-    {
-        CpuAccessMode cpu_access = CpuAccessMode::Write;
-        bool dedicated = false;
-        bool exportable = false;
-    };
-
     struct BufferRange
     {
         static constexpr uint64_t whole_size = ~uint64_t{0};
@@ -327,15 +320,6 @@ namespace Corona::Horizon
         ImageExtent extent {};
     };
 
-    struct HardwareImageOptions
-    {
-        CpuAccessMode cpu_access = CpuAccessMode::None;
-        bool dedicated = false;
-        bool exportable = false;
-    };
-
-
-
     // ================================================================
     // Draw
     // ================================================================
@@ -357,11 +341,11 @@ namespace Corona::Horizon
 
     struct DrawIndexedParams
     {
-        uint32_t indexCount = 0;
-        uint32_t firstIndex = 0;
-        int32_t vertexOffset = 0;
-        IndexType indexType = IndexType::Auto;
-        bool enableScissor = false;
+        uint32_t index_count = 0;
+        uint32_t first_index = 0;
+        int32_t vertex_offset = 0;
+        IndexType index_type = IndexType::Auto;
+        bool enable_scissor = false;
         ScissorRect scissor{};
     };
 
@@ -461,6 +445,15 @@ namespace Corona::Horizon
         Max,
     };
 
+    enum class SampleCount : uint16_t
+    {
+        Count1 = 1,
+        Count2 = 2,
+        Count4 = 4,
+        Count8 = 8,
+        Count16 = 16,
+    };
+
     enum class ColorWriteMask : uint8_t
     {
         None = 0,
@@ -488,15 +481,6 @@ namespace Corona::Horizon
         return a;
     }
 
-    enum class SampleCount : uint16_t
-    {
-        Count1 = 1,
-        Count2 = 2,
-        Count4 = 4,
-        Count8 = 8,
-        Count16 = 16,
-    };
-
 
 
     // ================================================================
@@ -506,63 +490,58 @@ namespace Corona::Horizon
     struct RasterizerStateDesc
     {
         PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-        PolygonFillMode fillMode = PolygonFillMode::Fill;
-        CullMode cullMode = CullMode::Back;
-        FrontFace frontFace = FrontFace::CounterClockwise;
-        bool depthClampEnabled = false;
-        bool rasterizerDiscardEnabled = false;
-        float lineWidth = 1.0f;
+        PolygonFillMode fill_mode = PolygonFillMode::Fill;
+        CullMode cull_mode = CullMode::Back;
+        FrontFace front_face = FrontFace::CounterClockwise;
+
+        bool depth_clamp_enabled = false;
+        bool rasterizer_discard_enabled = false;
+
+        float line_width = 1.0f;
     };
 
     struct DepthStencilOpDesc
     {
-        StencilOp failOp = StencilOp::Keep;
-        StencilOp passOp = StencilOp::Keep;
-        StencilOp depthFailOp = StencilOp::Keep;
-        CompareOp compareOp = CompareOp::Always;
+        StencilOp fail_op = StencilOp::Keep;
+        StencilOp pass_op = StencilOp::Keep;
+        StencilOp depth_fail_op = StencilOp::Keep;
+        CompareOp compare_op = CompareOp::Always;
     };
 
     struct DepthStencilStateDesc
     {
-        bool depthTestEnabled = true;
-        bool depthWriteEnabled = true;
-        CompareOp depthCompareOp = CompareOp::LessOrEqual;
+        bool depth_test_enabled = true;
+        bool depth_write_enabled = true;
+        CompareOp depth_compare_op = CompareOp::LessOrEqual;
 
-        bool stencilTestEnabled = false;
+        bool stencil_test_enabled = false;
         DepthStencilOpDesc front;
         DepthStencilOpDesc back;
-        uint32_t stencilReadMask = 0xff;
-        uint32_t stencilWriteMask = 0xff;
-        uint32_t stencilReference = 0;
+        uint32_t stencil_read_mask = 0xff;
+        uint32_t stencil_write_mask = 0xff;
+        uint32_t stencil_reference = 0;
     };
 
     struct BlendAttachmentDesc
     {
-        bool blendEnabled = true;
+        bool blend_enabled = false;
 
-        BlendFactor srcColorBlendFactor = BlendFactor::SrcAlpha;
-        BlendFactor dstColorBlendFactor = BlendFactor::OneMinusSrcAlpha;
-        BlendOp colorBlendOp = BlendOp::Add;
+        BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
+        BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp color_blend_op = BlendOp::Add;
 
-        BlendFactor srcAlphaBlendFactor = BlendFactor::One;
-        BlendFactor dstAlphaBlendFactor = BlendFactor::OneMinusSrcAlpha;
-        BlendOp alphaBlendOp = BlendOp::Add;
+        BlendFactor src_alpha_blend_factor = BlendFactor::One;
+        BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp alpha_blend_op = BlendOp::Add;
 
-        ColorWriteMask colorWriteMask = ColorWriteMask::RGBA;
+        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
     };
 
     struct MultisampleStateDesc
     {
-        SampleCount sampleCount = SampleCount::Count1;
-        bool sampleShadingEnabled = false;
-        float minSampleShading = 1.0f;
-    };
-
-    struct PipelineReflectionDesc
-    {
-        bool enabled = true;
-        bool autoBindEnabled = true;
-        bool directFieldBindingEnabled = true;
+        SampleCount sample_count = SampleCount::Count1;
+        bool sample_shading_enabled = false;
+        float min_sample_shading = 1.0f;
     };
 
 
@@ -605,4 +584,18 @@ namespace Corona::Horizon
         uint32_t height = 1;
         uint32_t depth = 1;
     };
+
+
+
+    // ================================================================
+    // Validation
+    // ================================================================
+
+    enum class HardwareValidationMode : uint8_t
+    {
+        Disabled,
+        Log,
+        Throw,
+    };
+
 }

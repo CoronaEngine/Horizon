@@ -10,10 +10,57 @@
 
 #include <cstring>
 #include <exception>
+#include <span>
 
 #include "corona/kernel/core/i_logger.h"
+#include "hardware_wrapper_vulkan/hardware/execution.h"
+
+using namespace Corona::Horizon;
 
 namespace {
+
+HardwareImageDesc make_texture_desc(uint32_t width, uint32_t height, Format format)
+{
+    return HardwareImageDesc::texture_2d(width,
+                                         height,
+                                         format,
+                                         ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst);
+}
+
+std::span<const std::byte> byte_span(const unsigned char *data, size_t byte_count)
+{
+    return std::as_bytes(std::span<const unsigned char>(data, byte_count));
+}
+
+std::span<const std::byte> byte_span(const std::vector<uint8_t> &data)
+{
+    return std::as_bytes(std::span<const uint8_t>(data));
+}
+
+HardwareBuffer make_staging_buffer(std::span<const std::byte> data)
+{
+    HardwareBufferDesc desc;
+    desc.element_count = data.size_bytes();
+    desc.element_size = 1;
+    desc.usage = BufferUsageFlags::TransferSrc;
+    desc.cpu_access = CpuAccessMode::Write;
+    return HardwareBuffer(desc, data);
+}
+
+HardwareImage create_uploaded_image(const HardwareImageDesc &desc, std::span<const std::byte> data)
+{
+    HardwareImage image(desc);
+    if (!data.empty())
+    {
+        HardwareBuffer staging = make_staging_buffer(data);
+        HardwareExecutor executor;
+        auto receipt = executor.stream()
+            << image.copy_from(staging)
+            << commit();
+        (void)receipt;
+    }
+    return image;
+}
 
 std::vector<uint8_t> compressToBC1(const unsigned char *data, int width, int height, int channels)
 {
@@ -86,31 +133,20 @@ void testCompressedTextures()
     try
     {
         CFW_LOG_DEBUG("Testing BC1_RGB_UNORM format...");
-        HardwareImageCreateInfo bc1UnormCreateInfo;
-        bc1UnormCreateInfo.width = width;
-        bc1UnormCreateInfo.height = height;
-        bc1UnormCreateInfo.format = ImageFormat::BC1_RGB_UNORM;
-        bc1UnormCreateInfo.usage = ImageUsage::SampledImage;
-        bc1UnormCreateInfo.arrayLayers = 1;
-        bc1UnormCreateInfo.mipLevels = 1;
-
-        HardwareImage textureBC1Unorm(bc1UnormCreateInfo);
-        HardwareExecutor tempExecutor;
-        tempExecutor << textureBC1Unorm.copyFrom(compressedData.data()) << tempExecutor.commit();
-        CFW_LOG_DEBUG("BC1_RGB_UNORM texture created success, descriptor ID: {}", textureBC1Unorm.storeDescriptor());
+        HardwareImage textureBC1Unorm =
+            create_uploaded_image(make_texture_desc(static_cast<uint32_t>(width),
+                                                    static_cast<uint32_t>(height),
+                                                    Format::BC1_UNORM),
+                                  byte_span(compressedData));
+        CFW_LOG_DEBUG("BC1_RGB_UNORM texture created success, descriptor ID: {}", textureBC1Unorm.store_descriptor());
 
         CFW_LOG_DEBUG("Testing BC1_RGB_SRGB format...");
-        HardwareImageCreateInfo bc1SrgbCreateInfo;
-        bc1SrgbCreateInfo.width = width;
-        bc1SrgbCreateInfo.height = height;
-        bc1SrgbCreateInfo.format = ImageFormat::BC1_RGB_SRGB;
-        bc1SrgbCreateInfo.usage = ImageUsage::SampledImage;
-        bc1SrgbCreateInfo.arrayLayers = 1;
-        bc1SrgbCreateInfo.mipLevels = 1;
-
-        HardwareImage textureBC1Srgb(bc1SrgbCreateInfo);
-        tempExecutor << textureBC1Srgb.copyFrom(compressedData.data()) << tempExecutor.commit();
-        CFW_LOG_DEBUG("BC1_RGB_SRGB texture created success, descriptor ID: {}", textureBC1Srgb.storeDescriptor());
+        HardwareImage textureBC1Srgb =
+            create_uploaded_image(make_texture_desc(static_cast<uint32_t>(width),
+                                                    static_cast<uint32_t>(height),
+                                                    Format::BC1_UNORM_SRGB),
+                                  byte_span(compressedData));
+        CFW_LOG_DEBUG("BC1_RGB_SRGB texture created success, descriptor ID: {}", textureBC1Srgb.store_descriptor());
 
         CFW_LOG_DEBUG("=== All compressed format tests passed ===");
     }
@@ -136,18 +172,11 @@ TextureLoadResult loadTexture(const std::string &texturePath)
         return result;
     }
 
-    HardwareImageCreateInfo createInfo;
-    createInfo.width = width;
-    createInfo.height = height;
-    createInfo.format = ImageFormat::RGBA8_SRGB;
-    createInfo.usage = ImageUsage::SampledImage;
-    createInfo.arrayLayers = 1;
-    createInfo.mipLevels = 1;
-
-    result.texture = HardwareImage(createInfo);
-    HardwareExecutor tempExecutor;
-    tempExecutor << result.texture.copyFrom(data) << tempExecutor.commit();
-    result.descriptorID = result.texture.storeDescriptor();
+    const size_t byteCount = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+    result.texture = create_uploaded_image(
+        make_texture_desc(static_cast<uint32_t>(width), static_cast<uint32_t>(height), Format::SRGBA8_UNORM),
+        byte_span(data, byteCount));
+    result.descriptorID = result.texture.store_descriptor();
     result.success = true;
 
     stbi_image_free(data);
@@ -178,18 +207,12 @@ TextureLoadResult loadCompressedTexture(const std::string &texturePath, bool use
                   compressedData.size(),
                   static_cast<float>(width * height * 4) / compressedData.size());
 
-    HardwareImageCreateInfo createInfo;
-    createInfo.width = width;
-    createInfo.height = height;
-    createInfo.format = useSRGB ? ImageFormat::BC1_RGB_SRGB : ImageFormat::BC1_RGB_UNORM;
-    createInfo.usage = ImageUsage::SampledImage;
-    createInfo.arrayLayers = 1;
-    createInfo.mipLevels = 1;
-
-    result.texture = HardwareImage(createInfo);
-    HardwareExecutor tempExecutor;
-    tempExecutor << result.texture.copyFrom(compressedData.data()) << tempExecutor.commit();
-    result.descriptorID = result.texture.storeDescriptor();
+    result.texture = create_uploaded_image(
+        make_texture_desc(static_cast<uint32_t>(width),
+                          static_cast<uint32_t>(height),
+                          useSRGB ? Format::BC1_UNORM_SRGB : Format::BC1_UNORM),
+        byte_span(compressedData));
+    result.descriptorID = result.texture.store_descriptor();
     result.success = true;
 
     return result;
@@ -223,20 +246,18 @@ TextureLoadResult loadTextureWithMipmapAndLayers(const std::string &texturePath,
     }
     stbi_image_free(data);
 
-    HardwareImageCreateInfo createInfo;
-    createInfo.width = width;
-    createInfo.height = height;
-    createInfo.format = ImageFormat::RGBA8_SRGB;
-    createInfo.usage = ImageUsage::SampledImage;
-    createInfo.arrayLayers = arrayLayers;
-    createInfo.mipLevels = mipLevels;
+    HardwareImageDesc createInfo =
+        HardwareImageDesc::texture_2d_array(static_cast<uint32_t>(width),
+                                            static_cast<uint32_t>(height),
+                                            static_cast<uint32_t>(arrayLayers),
+                                            Format::SRGBA8_UNORM,
+                                            ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst);
+    createInfo.mip_levels = static_cast<uint32_t>(mipLevels);
 
-    result.texture = HardwareImage(createInfo);
+    result.texture = create_uploaded_image(createInfo, byte_span(layerData));
 
-    auto textureView = result.texture[viewLayer][viewMip];
-    HardwareExecutor tempExecutor;
-    tempExecutor << textureView.copyFrom(layerData.data()) << tempExecutor.commit();
-    result.descriptorID = textureView.storeDescriptor();
+    auto textureView = result.texture[static_cast<uint32_t>(viewLayer)][static_cast<uint32_t>(viewMip)];
+    result.descriptorID = textureView.store_descriptor();
     result.success = true;
 
     CFW_LOG_INFO("Texture with mipmap/layers loaded successfully, descriptor ID: {}", result.descriptorID);

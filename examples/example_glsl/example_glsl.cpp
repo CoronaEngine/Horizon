@@ -8,7 +8,8 @@
 #include GLSL(shaders/baseline_vert.glsl)
 #include GLSL(shaders/baseline_frag.glsl)
 
-#include <Horizon.h>
+#include <horizon.h>
+#include "hardware_wrapper_vulkan/hardware/execution.h"
 
 #include <array>
 #include <chrono>
@@ -19,10 +20,13 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
 #include <stb_image.h>
+
+using namespace Corona::Horizon;
 
 namespace
 {
@@ -80,11 +84,11 @@ void main()
 }
 )GLSL";
 
-constexpr EmbeddedShader::BindingKey model_binding{0, 64, 10, 0};
-constexpr EmbeddedShader::BindingKey view_binding{64, 64, 10, 0};
-constexpr EmbeddedShader::BindingKey proj_binding{128, 64, 10, 0};
-constexpr EmbeddedShader::BindingKey texture_binding{0, 4, 0, 0};
-constexpr EmbeddedShader::BindingKey output_binding{0, 16, 2, 0};
+constexpr BindingSlot model_binding{0, 64, 10, 0};
+constexpr BindingSlot view_binding{64, 64, 10, 0};
+constexpr BindingSlot proj_binding{128, 64, 10, 0};
+constexpr BindingSlot texture_binding{0, 4, 0, 0};
+constexpr BindingSlot output_binding{0, 16, 2, 0};
 
 struct vec3
 {
@@ -325,17 +329,25 @@ HardwareImage load_texture_image()
         throw std::runtime_error("failed to load texture image: " + texture_path);
     }
 
-    HardwareImageCreateInfo create_info;
-    create_info.width = static_cast<uint32_t>(width);
-    create_info.height = static_cast<uint32_t>(height);
-    create_info.format = ImageFormat::RGBA8_SRGB;
-    create_info.usage = ImageUsage::SampledImage;
-    create_info.arrayLayers = 1;
-    create_info.mipLevels = 1;
-
+    HardwareImageDesc create_info =
+        HardwareImageDesc::texture_2d(static_cast<uint32_t>(width),
+                                      static_cast<uint32_t>(height),
+                                      Format::SRGBA8_UNORM,
+                                      ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst);
     HardwareImage texture_image(create_info);
+    const auto pixel_bytes =
+        std::as_bytes(std::span<const stbi_uc>(pixels, static_cast<size_t>(width) * static_cast<size_t>(height) * 4u));
+    HardwareBufferDesc staging_desc;
+    staging_desc.element_count = pixel_bytes.size_bytes();
+    staging_desc.element_size = 1;
+    staging_desc.usage = BufferUsageFlags::TransferSrc;
+    staging_desc.cpu_access = CpuAccessMode::Write;
+    HardwareBuffer staging(staging_desc, pixel_bytes);
     HardwareExecutor upload_executor;
-    upload_executor << texture_image.copyFrom(pixels) << upload_executor.commit();
+    auto upload_receipt = upload_executor.stream()
+        << texture_image.copy_from(staging)
+        << commit();
+    (void)upload_receipt;
     stbi_image_free(pixels);
 
     return texture_image;
@@ -343,16 +355,16 @@ HardwareImage load_texture_image()
 
 HardwareImage create_render_target(uint32_t width, uint32_t height)
 {
-    HardwareImageCreateInfo create_info;
-    create_info.width = width;
-    create_info.height = height;
-    create_info.format = ImageFormat::RGBA16_FLOAT;
-    create_info.usage = ImageUsage::StorageImage;
-    create_info.arrayLayers = 1;
-    create_info.mipLevels = 1;
+    HardwareImageDesc create_info =
+        HardwareImageDesc::texture_2d(width,
+                                      height,
+                                      Format::RGBA16_FLOAT,
+                                      ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
+                                          ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
+                                          ImageUsageFlags::TransferDst);
 
     HardwareImage image(create_info);
-    image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
     return image;
 }
 
@@ -408,33 +420,36 @@ void run_example_glsl()
     try
     {
         baseline_mesh mesh = load_mesh();
-        HardwareBuffer vertex_buffer(mesh.vertices, BufferUsage::VertexBuffer);
-        HardwareBuffer index_buffer(mesh.indices, BufferUsage::IndexBuffer);
+        HardwareBuffer vertex_buffer = HardwareBuffer::vertex(mesh.vertices);
+        HardwareBuffer index_buffer = HardwareBuffer::index(mesh.indices);
         HardwareImage texture_image = load_texture_image();
         HardwareImage render_target = create_render_target(baseline_width, baseline_height);
         HardwareExecutor render_executor;
         HardwareDisplayer displayer(glfwGetWin32Window(window));
 
-        // Old tutorial-style SPIR-V path kept for reference. It uses set 0 for
-        // the UBO/texture descriptors, while Horizon's Vulkan backend reserves
-        // sets 0-2 for bindless resources and set 3 for the per-pipeline UBO.
-        // RasterizerPipeline<> rasterizer(baseline_model_vert::spirv, baseline_model_frag::spirv);
-        RasterizerPipeline<> rasterizer(
-            baseline_model_vertex_shader,
-            baseline_model_fragment_shader,
-            1,
-            EmbeddedShader::ShaderLanguage::GLSL,
-            EmbeddedShader::ShaderLanguage::GLSL);
+        EmbeddedShader::CompilerOption glsl_compiler_options;
+        glsl_compiler_options.enableBindless = false;
+        RasterizerPipeline rasterizer(
+            RasterizerPipelineDesc::from_source(baseline_model_vertex_shader,
+                                                baseline_model_fragment_shader,
+                                                EmbeddedShader::ShaderLanguage::GLSL,
+                                                EmbeddedShader::ShaderLanguage::GLSL,
+                                                glsl_compiler_options));
         // rasterizer[baseline_model_frag::outColor] = render_target;
         rasterizer[output_binding] = render_target;
         // bind_texture_to_reflected_slot(texture_image, baseline_model_frag::texSampler);
         // rasterizer[baseline_model_frag::texSampler] = texture_image;
-        rasterizer[texture_binding] = texture_image;
+        uint32_t texture_descriptor = texture_image.store_descriptor();
+        rasterizer[texture_binding] = texture_descriptor;
 
         auto start_time = std::chrono::high_resolution_clock::now();
         while (!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
+            if (glfwWindowShouldClose(window))
+            {
+                break;
+            }
 
             float time_seconds = std::chrono::duration<float, std::chrono::seconds::period>(
                                      std::chrono::high_resolution_clock::now() - start_time)
@@ -448,16 +463,20 @@ void run_example_glsl()
             rasterizer[proj_binding] = ubo.proj;
             // Texture handle is stored in push constants; record() consumes and
             // resets that temporary block, so it must be refreshed per draw.
-            rasterizer[texture_binding] = texture_image;
+            rasterizer[texture_binding] = texture_descriptor;
 
             DrawIndexedParams draw_params;
-            draw_params.indexType = IndexType::UInt32;
-            draw_params.indexCount = static_cast<uint32_t>(mesh.indices.size());
+            draw_params.index_type = IndexType::UInt32;
+            draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+            rasterizer.clear_records();
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
-            render_executor << rasterizer(baseline_width, baseline_height)
-                            << render_executor.commit();
-            displayer.wait(render_executor) << render_target;
+            rasterizer(baseline_width, baseline_height);
+            auto receipt = render_executor.stream()
+                << rasterizer.command_batch()
+                << present(displayer, render_target)
+                << commit();
+            (void)receipt;
         }
     }
     catch (const std::exception &e)

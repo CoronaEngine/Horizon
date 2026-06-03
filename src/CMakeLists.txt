@@ -1,15 +1,26 @@
 file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.cpp"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.hpp"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.c"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.h"
+
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.cpp"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.hpp"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.c"
+    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
+
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.h"
+
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
 )
 
-set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/Horizon.h")
+set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/horizon.h")
 
 add_subdirectory(Helicon)
 
@@ -20,6 +31,11 @@ target_include_directories(Horizon
     "${PROJECT_SOURCE_DIR}/include"
     PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_compile_definitions(Horizon
+    PUBLIC
+    HORIZON_ENABLE_VALIDATION=$<BOOL:${HORIZON_ENABLE_VALIDATION}>
 )
 
 # 链接库依赖

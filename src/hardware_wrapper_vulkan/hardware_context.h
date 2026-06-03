@@ -1,7 +1,18 @@
 #pragma once
 
-namespace Corona::Horizon::Vulkan
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include <volk.h>
+
+#include "hardware_wrapper_vulkan/hardware/device_manager.h"
+#include "hardware_wrapper_vulkan/hardware/resource_manager.h"
+
+namespace Corona::Horizon
 {
+    struct HardwareContextTestAccess;
+
     struct HardwareContext
     {
     public:
@@ -19,11 +30,13 @@ namespace Corona::Horizon::Vulkan
         HardwareContext(HardwareContext&&) = delete;
         HardwareContext& operator=(HardwareContext&&) = delete;
 
-        [[nodiscard]] VkInstance instance() const { return instance_; }
-        [[nodiscard]] const std::vector<std::shared_ptr<DeviceContext>>& devices() const { return devices_; }
-        [[nodiscard]] std::shared_ptr<DeviceContext> main_device() const { return main_device_; }
+        [[nodiscard]] VkInstance instance();
+        [[nodiscard]] std::vector<std::shared_ptr<DeviceContext>> devices();
+        [[nodiscard]] std::shared_ptr<DeviceContext> main_device();
 
     private:
+        friend struct HardwareContextTestAccess;
+
         void prepare_features();
         void create_instance();
         void create_devices();
@@ -32,9 +45,16 @@ namespace Corona::Horizon::Vulkan
         void setup_debug_messenger();
         void cleanup_debug_messenger();
 
-        VkInstance instance_{VK_NULL_HANDLE};
-        VkDebugUtilsMessengerEXT debug_messenger_{VK_NULL_HANDLE};
-        CreateCallback create_info_{};
+        void ensure_volk();
+        void ensure_instance();
+        void ensure_devices();
+
+        std::once_flag instance_once_;
+        std::once_flag devices_once_;
+
+        VkInstance instance_ { VK_NULL_HANDLE };
+        VkDebugUtilsMessengerEXT debug_messenger_ { VK_NULL_HANDLE };
+        HardwareCreateConfig create_config_ {};
 
         std::vector<std::shared_ptr<DeviceContext>> devices_;
         std::shared_ptr<DeviceContext> main_device_;
@@ -45,5 +65,6 @@ namespace Corona::Horizon::Vulkan
     ResourceManager& resource_manager();
     DeviceManager& device_manager();
     VkInstance vulkan_instance();
-    const std::vector<std::shared_ptr<HardwareContext::DeviceContext>>& all_devices();
+    std::vector<std::shared_ptr<HardwareContext::DeviceContext>> all_devices();
+    extern HardwareContext g_hardware_context;
 }

@@ -22,6 +22,7 @@ target_include_directories(HorizonExamples PRIVATE
     "${glfw_SOURCE_DIR}/include"
     "${stb_SOURCE_DIR}"
     "${tinyobjloader_SOURCE_DIR}"
+    "${PROJECT_SOURCE_DIR}/src"
 )
 
 target_link_libraries(HorizonExamples PRIVATE
@@ -29,21 +30,6 @@ target_link_libraries(HorizonExamples PRIVATE
     glfw
     Horizon)
 
-set(HORIZON_EXAMPLE_SPIRV_SHADERS
-    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/baseline_vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/baseline_frag.spv"
-)
-
-add_custom_command(TARGET HorizonExamples POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:HorizonExamples>/shaders"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${HORIZON_EXAMPLE_SPIRV_SHADERS}
-        "$<TARGET_FILE_DIR:HorizonExamples>/shaders"
-    COMMENT "Copying baseline shaders"
-    VERBATIM
-)
-
 helicon_install_runtime_deps(HorizonExamples)
 corona_copy_tbb_runtime_artifacts(HorizonExamples)
-
 helicon_compile_shaders(HorizonExamples)

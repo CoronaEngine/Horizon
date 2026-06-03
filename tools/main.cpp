@@ -128,7 +128,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 			if (info.bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
 				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
 				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
+				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+				    << ", " << info.set << ", " << info.binding << "};\n";
 		}
 		out << "};\n";
 	}
@@ -143,7 +144,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 			if (info.bindType == ShaderCodeModule::ShaderResources::uniformBufferMembers)
 				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
 				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
+				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+				    << ", " << info.set << ", " << info.binding << "};\n";
 		}
 		out << "};\n";
 	}
@@ -154,7 +156,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 		if (info.bindType == ShaderCodeModule::ShaderResources::stageInputs)
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+			    << ", " << info.set << ", " << info.binding << "};\n";
 	}
 
 	// Stage outputs
@@ -163,7 +166,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 		if (info.bindType == ShaderCodeModule::ShaderResources::stageOutputs)
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+			    << ", " << info.set << ", " << info.binding << "};\n";
 	}
 
 	// Descriptor resources (sampled/storage/buffer/sampler) for direct key binding.
@@ -172,7 +176,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 		if (isDirectResourceBindType(info.bindType))
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+			    << ", " << info.set << ", " << info.binding << "};\n";
 	}
 
 	return bindingBlockNames;
@@ -196,7 +201,8 @@ static std::string emitBlockProxy(std::stringstream& out,
 			out << "\t::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
 			ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << ")";
+			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+			   << ", " << info.set << ", " << info.binding << ")";
 			fieldInits.push_back(ss.str());
 		}
 	}
@@ -262,7 +268,8 @@ void generateBindings(std::stringstream& out, const std::vector<uint32_t>& spirv
 			out << "::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
 			ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding << ")";
+			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+			   << ", " << info.set << ", " << info.binding << ")";
 			initList.push_back(ss.str());
 		}
 
@@ -281,7 +288,8 @@ void generateBindings(std::stringstream& out, const std::vector<uint32_t>& spirv
 				out << "::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 				std::stringstream ss;
 				ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-				   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << ")";
+				   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+				   << ", " << info.set << ", " << info.binding << ")";
 				initList.push_back(ss.str());
 			}
 		}

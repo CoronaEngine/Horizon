@@ -33,7 +33,7 @@
 - `src/HardwareWrapperVulkan/`：Vulkan 设备、资源、执行与显示
 - `src/Helicon/`：DSL、AST、代码生成、编译与反射
 - `examples/`：示例程序与 shader 资源
-- `tools/`：`ShaderCompileScripts`、格式化脚本与统计工具
+- `tools/`：`ShaderCompileScripts`、`dev.ps1` 和 `code-format.ps1`
 - `modules/corona/`：已内嵌的 Corona Framework（当前 Horizon 的基础依赖之一）
 - `third-party/`：预置 `dxc` 二进制与头库；`slang` 在 CMake configure 阶段按需下载解压
 - `docs/`：项目文档
@@ -47,7 +47,7 @@
 
 ## 推荐构建方式（Windows）
 
-更完整的 CMake 使用说明见 [docs/cmake-usage.md](docs/cmake-usage.md)。
+构建、preset 和 Visual Studio 调试细节已收束到 [docs/agents/zh-CN/build.md](docs/agents/zh-CN/build.md)。
 
 当前仓库中的 Corona Framework 已直接纳入 `modules/corona/`，不再通过远程 `FetchContent` 拉取；Slang 二进制包与其余第三方依赖仍可能在 configure 阶段由 CMake 自动获取。
 
@@ -67,8 +67,10 @@ cmake --build --preset vs2022-debug --target HorizonExamples
 
 ### 重要注意
 
-- 所有 configure preset 共享同一个 `binaryDir=${sourceDir}/build`。
-- 在 `ninja-msvc` 和 `vs2022` 之间切换前，请清理/重建 `build/`，避免生成器冲突。
+- 每个 configure preset 使用独立构建目录，例如 `build/ninja-msvc`、`build/ninja-clang`、`build/vs2022`。
+- 在 Ninja 和 Visual Studio 之间切换时，不再共用同一个 CMake cache；如果某个 preset 缓存损坏，只清理对应的 `build/<preset>` 目录即可。
+- 命令行复现 MSVC 构建时，优先进入 Visual Studio Developer Command Prompt；普通 PowerShell 可能缺少 MSVC include/lib 环境。
+- FetchContent 源码缓存位于 `build/_deps`，各 preset 的第三方构建产物位于 `build/<preset>/deps`。
 
 ## 示例程序
 
@@ -87,7 +89,8 @@ executor << compute
 
 ## 文档索引
 
-- [docs/cmake-usage.md](docs/cmake-usage.md)：本项目 CMake 结构、preset、构建目标与常见问题说明
+- [docs/agents/zh-CN/build.md](docs/agents/zh-CN/build.md)：CMake、preset、构建验证和 Visual Studio 调试上下文
+- [docs/agents/zh-CN/index.md](docs/agents/zh-CN/index.md)：AI 上下文包索引
 
 ## 许可证
 

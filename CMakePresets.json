@@ -9,7 +9,6 @@
     {
       "name": "base",
       "hidden": true,
-      "binaryDir": "${sourceDir}/build",
       "installDir": "${sourceDir}/install",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
@@ -21,6 +20,7 @@
       "description": "Windows - Ninja Multi-Config + MSVC",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja-msvc",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -33,6 +33,7 @@
       "description": "Windows - Ninja Multi-Config + LLVM Clang (GNU style)",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja-clang",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -51,6 +52,7 @@
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "toolset": "host=x64",
+      "binaryDir": "${sourceDir}/build/vs2022",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -63,6 +65,7 @@
       "description": "Linux - Ninja Multi-Config + GCC",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja-linux-gcc",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -79,6 +82,7 @@
       "description": "Linux - Ninja Multi-Config + Clang",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja-linux-clang",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -95,6 +99,7 @@
       "description": "macOS - Ninja Multi-Config",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja-macos",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",

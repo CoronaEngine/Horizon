@@ -1,32 +1,32 @@
 include_guard(GLOBAL)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     stb
-    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/stb.git
     GIT_TAG master
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(stb)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/glfw.git
     GIT_TAG master
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(glfw)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     tinyobjloader
-    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/tinyobjloader.git
     GIT_TAG release
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(tinyobjloader)
 
-FetchContent_Declare(
+horizon_fetchcontent_declare(
     glm
-    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_REPOSITORY https://ckzgit.iepose.cn/michael/glm.git
     GIT_TAG master
     EXCLUDE_FROM_ALL
 )
