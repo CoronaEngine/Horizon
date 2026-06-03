@@ -58,7 +58,15 @@ namespace Corona::Horizon
         DeviceGroup
     };
 
-    
+    struct DeviceId
+    {
+        uint32_t value { 0 };
+
+        [[nodiscard]] friend bool operator==(DeviceId left, DeviceId right) noexcept
+        {
+            return left.value == right.value;
+        }
+    };
 
     struct DeviceMask
     {
@@ -346,7 +354,7 @@ namespace Corona::Horizon
 
     [[nodiscard]] CommitCommand commit() noexcept;
 
-    /*class StreamCommand
+    class StreamCommand
     {
     public:
         StreamCommand() = default;
@@ -357,7 +365,7 @@ namespace Corona::Horizon
 
     private:
         std::function<void(class CommandRecorder&)> recorder_ {};
-    };*/
+    };
 
     class CommandBatch
     {

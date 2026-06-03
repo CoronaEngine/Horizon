@@ -38,6 +38,118 @@ namespace Corona::Horizon
         }
     }
 
+    struct CopyBufferCommand
+    {
+        BufferRef src {};
+        BufferRef dst {};
+        CopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] BufferRef source() const noexcept { return src; }
+        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
+        [[nodiscard]] CopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyImageCommand
+    {
+        ImageRef src {};
+        ImageRef dst {};
+        ImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] ImageRef source() const noexcept { return src; }
+        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
+        [[nodiscard]] ImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_image(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyBufferToImageCommand
+    {
+        BufferRef src {};
+        ImageRef dst {};
+        BufferImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] BufferRef source() const noexcept { return src; }
+        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
+        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_to_image(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyImageToBufferCommand
+    {
+        ImageRef src {};
+        BufferRef dst {};
+        BufferImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] ImageRef source() const noexcept { return src; }
+        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
+        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_to_buffer(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
     struct ShaderDispatchCommand
     {
         ShaderRef shader {};
@@ -292,16 +404,16 @@ namespace Corona::Horizon
     }
 
     template <typename T>
-    requires(!std::is_void_v<T>)
+        requires(!std::is_void_v<T>)
     [[nodiscard]] KeepAliveCommand keep_alive(std::shared_ptr<T> object)
     {
         return keep_alive(std::static_pointer_cast<void>(std::move(object)));
     }
 
     template <typename... Args>
-    requires(sizeof...(Args) > 0u &&
-             (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...) &&
-             !CommandDetail::single_shared_ptr_v<Args...>)
+        requires(sizeof...(Args) > 0u &&
+                 (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...) &&
+                 !CommandDetail::single_shared_ptr_v<Args...>)
     [[nodiscard]] KeepAliveCommand keep_alive(Args&&... args)
     {
         using Storage = std::tuple<std::remove_cvref_t<Args>...>;
