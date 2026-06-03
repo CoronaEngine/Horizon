@@ -104,24 +104,28 @@ namespace Corona::Horizon
         return pipeline_impl(ResourceBridge::token(*this))->command_batch(*this);
     }
 
-    void ComputePipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type)
+    void ComputePipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
     {
-        pipeline_impl(ResourceBridge::token(*this))->set_push_constant_direct(byte_offset, data, size, bind_type);
+        pipeline_impl(ResourceBridge::token(*this))->set_push_constant_direct(byte_offset, data, size, bind_type, set, binding);
     }
 
     void ComputePipeline::set_resource_direct(uint64_t byte_offset,
                                               uint32_t type_size,
                                               const HardwareBuffer& buffer,
-                                              int32_t bind_type)
+                                              int32_t bind_type,
+                                              uint32_t set,
+                                              uint32_t binding)
     {
-        pipeline_impl(ResourceBridge::token(*this))->set_resource_direct(byte_offset, type_size, buffer, bind_type);
+        pipeline_impl(ResourceBridge::token(*this))->set_resource_direct(byte_offset, type_size, buffer, bind_type, set, binding);
     }
 
     void ComputePipeline::set_resource_direct(uint64_t byte_offset,
                                               uint32_t type_size,
                                               const HardwareImage& image,
-                                              int32_t bind_type)
+                                              int32_t bind_type,
+                                              uint32_t set,
+                                              uint32_t binding)
     {
-        pipeline_impl(ResourceBridge::token(*this))->set_resource_direct(byte_offset, type_size, image, bind_type);
+        pipeline_impl(ResourceBridge::token(*this))->set_resource_direct(byte_offset, type_size, image, bind_type, set, binding);
     }
 }

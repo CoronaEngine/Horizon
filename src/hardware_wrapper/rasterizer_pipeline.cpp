@@ -100,7 +100,9 @@ namespace Corona::Horizon
                                       entry.typeSize,
                                       *static_cast<HardwareImage*>(*entry.boundResourceRef),
                                       entry.bindType,
-                                      entry.location);
+                                      entry.location,
+                                      entry.set,
+                                      entry.binding);
         }
 
         impl->set_extent(width, height);
@@ -154,35 +156,39 @@ namespace Corona::Horizon
         return pipeline_impl(token)->command_batch();
     }
 
-    void RasterizerPipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type)
+    void RasterizerPipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
 
-        pipeline_impl(token)->set_push_constant_direct(byte_offset, data, size, bind_type);
+        pipeline_impl(token)->set_push_constant_direct(byte_offset, data, size, bind_type, set, binding);
     }
 
     void RasterizerPipeline::set_resource_direct(uint64_t byte_offset,
                                                  uint32_t type_size,
                                                  const HardwareBuffer& buffer,
-                                                 int32_t bind_type)
+                                                 int32_t bind_type,
+                                                 uint32_t set,
+                                                 uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
 
-        pipeline_impl(token)->set_resource_direct(byte_offset, type_size, buffer, bind_type);
+        pipeline_impl(token)->set_resource_direct(byte_offset, type_size, buffer, bind_type, set, binding);
     }
 
     void RasterizerPipeline::set_resource_direct(uint64_t byte_offset,
                                                  uint32_t type_size,
                                                  const HardwareImage& image,
                                                  int32_t bind_type,
-                                                 uint32_t location)
+                                                 uint32_t location,
+                                                 uint32_t set,
+                                                 uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
 
-        pipeline_impl(token)->set_resource_direct(byte_offset, type_size, image, bind_type, location);
+        pipeline_impl(token)->set_resource_direct(byte_offset, type_size, image, bind_type, location, set, binding);
     }
 
     void RasterizerPipeline::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)

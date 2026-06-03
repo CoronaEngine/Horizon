@@ -271,6 +271,7 @@ namespace Corona::Horizon
             features12.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
             features12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
             features12.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+            features12.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
             features12.descriptorBindingPartiallyBound = VK_TRUE;
             features12.runtimeDescriptorArray = VK_TRUE;
             features12.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;

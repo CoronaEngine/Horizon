@@ -1006,14 +1006,30 @@ namespace Corona::Horizon
                     throw std::logic_error("Dispatch resolved an invalid compute pipeline.");
 
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, prepared.pipeline);
-                if (prepared.descriptor_set != VK_NULL_HANDLE)
+                if (prepared.uses_bindless)
                 {
+                    auto bindless_sets = resource_manager().bindless_descriptor_sets();
                     vkCmdBindDescriptorSets(command_buffer,
                                             VK_PIPELINE_BIND_POINT_COMPUTE,
                                             prepared.layout,
                                             0,
+                                            static_cast<uint32_t>(bindless_sets.size()),
+                                            bindless_sets.data(),
+                                            0,
+                                            nullptr);
+                }
+
+                for (const VulkanComputePipeline::PreparedDispatch::DescriptorSet& descriptor_set : prepared.descriptor_sets)
+                {
+                    if (descriptor_set.descriptor_set == VK_NULL_HANDLE)
+                        continue;
+
+                    vkCmdBindDescriptorSets(command_buffer,
+                                            VK_PIPELINE_BIND_POINT_COMPUTE,
+                                            prepared.layout,
+                                            descriptor_set.set,
                                             1,
-                                            &prepared.descriptor_set,
+                                            &descriptor_set.descriptor_set,
                                             0,
                                             nullptr);
                 }
@@ -1154,15 +1170,43 @@ namespace Corona::Horizon
                     throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
 
                 std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
-                VulkanRasterizerPipeline::GraphicsPipeline graphics_pipeline =
-                    pipeline->graphics_pipeline(device_,
-                                                active_rendering.color_format,
-                                                active_rendering.depth_format,
-                                                static_cast<uint32_t>(vertex->desc.element_size));
-                if (graphics_pipeline.pipeline == VK_NULL_HANDLE || graphics_pipeline.layout == VK_NULL_HANDLE)
+                VulkanRasterizerPipeline::PreparedDraw prepared =
+                    pipeline->prepare_draw(device_,
+                                           active_rendering.color_format,
+                                           active_rendering.depth_format,
+                                           static_cast<uint32_t>(vertex->desc.element_size),
+                                           draw);
+                if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                     throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
 
-                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.pipeline);
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+                if (prepared.uses_bindless)
+                {
+                    auto bindless_sets = resource_manager().bindless_descriptor_sets();
+                    vkCmdBindDescriptorSets(command_buffer,
+                                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                            prepared.layout,
+                                            0,
+                                            static_cast<uint32_t>(bindless_sets.size()),
+                                            bindless_sets.data(),
+                                            0,
+                                            nullptr);
+                }
+
+                for (const VulkanRasterizerPipeline::PreparedDraw::DescriptorSet& descriptor_set : prepared.descriptor_sets)
+                {
+                    if (descriptor_set.descriptor_set == VK_NULL_HANDLE)
+                        continue;
+
+                    vkCmdBindDescriptorSets(command_buffer,
+                                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                            prepared.layout,
+                                            descriptor_set.set,
+                                            1,
+                                            &descriptor_set.descriptor_set,
+                                            0,
+                                            nullptr);
+                }
 
                 VkBuffer vertex_buffer = vertex->buffer_handle;
                 VkDeviceSize vertex_offset = 0;
@@ -1172,12 +1216,15 @@ namespace Corona::Horizon
                 if (!draw.push_constant_data.empty())
                 {
                     vkCmdPushConstants(command_buffer,
-                                       graphics_pipeline.layout,
+                                       prepared.layout,
                                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                        0,
                                        static_cast<uint32_t>(draw.push_constant_data.size()),
                                        draw.push_constant_data.data());
                 }
+
+                if (prepared.descriptor_set_lifetime)
+                    submission.keep_alive.add_object(prepared.descriptor_set_lifetime);
 
                 VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
                 if (scissor.extent.width == 0 || scissor.extent.height == 0)
@@ -1464,7 +1511,6 @@ namespace Corona::Horizon
 
                 compiled_submission.waits.push_back(prepared.wait);
                 compiled_submission.signals.push_back(prepared.signal);
-                compiled_submission.keep_alive.add_object(std::static_pointer_cast<void>(manager));
                 compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
                 prepared_presents.push_back({ std::move(manager), desc });
                 ++present_index;

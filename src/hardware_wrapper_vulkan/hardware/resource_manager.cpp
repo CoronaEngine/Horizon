@@ -11,6 +11,7 @@
 #include "resource_manager.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -657,6 +658,200 @@ namespace Corona::Horizon
         throw_if_failed(vmaCreateAllocator(&create_info, &allocator_), "vmaCreateAllocator");
     }
 
+    void ResourceManager::create_default_sampler()
+    {
+        if (default_sampler_ != VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager cannot create bindless sampler before initialize().");
+        }
+
+        VkSamplerCreateInfo sampler_info {};
+        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_info.magFilter = VK_FILTER_NEAREST;
+        sampler_info.minFilter = VK_FILTER_NEAREST;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.mipLodBias = 0.0f;
+        sampler_info.minLod = 0.0f;
+        sampler_info.maxLod = VK_LOD_CLAMP_NONE;
+        sampler_info.anisotropyEnable = VK_FALSE;
+        sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_info.compareEnable = VK_FALSE;
+        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+
+        throw_if_failed(vkCreateSampler(device_manager_->logical_device(),
+                                        &sampler_info,
+                                        nullptr,
+                                        &default_sampler_),
+                        "vkCreateSampler(bindless default)");
+    }
+
+    void ResourceManager::create_bindless_descriptor_array(DescriptorArray& descriptors,
+                                                           VkDescriptorType descriptor_type,
+                                                           uint32_t descriptor_limit,
+                                                           bool update_after_bind,
+                                                           const char* label)
+    {
+        if (descriptors.set != VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager cannot create bindless descriptors before initialize().");
+        }
+
+        if (!update_after_bind)
+        {
+            throw std::runtime_error(std::string(label) + " bindless descriptors require update-after-bind support.");
+        }
+
+        constexpr uint32_t preferred_descriptor_count = 4096;
+        const uint32_t descriptor_count = clamp_descriptor_capacity(preferred_descriptor_count, descriptor_limit);
+        if (descriptor_count == 0)
+        {
+            throw std::runtime_error(std::string(label) + " bindless descriptors are not supported by this Vulkan device.");
+        }
+
+        constexpr VkDescriptorBindingFlags binding_flags =
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+            VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
+            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+
+        VkDescriptorSetLayoutBinding binding {};
+        binding.binding = 0;
+        binding.descriptorType = descriptor_type;
+        binding.descriptorCount = descriptor_count;
+        binding.stageFlags = VK_SHADER_STAGE_ALL;
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_info {};
+        binding_flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        binding_flags_info.bindingCount = 1;
+        binding_flags_info.pBindingFlags = &binding_flags;
+
+        VkDescriptorSetLayoutCreateInfo layout_info {};
+        layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+        layout_info.bindingCount = 1;
+        layout_info.pBindings = &binding;
+        layout_info.pNext = &binding_flags_info;
+
+        throw_if_failed(vkCreateDescriptorSetLayout(device_manager_->logical_device(),
+                                                     &layout_info,
+                                                     nullptr,
+                                                     &descriptors.layout),
+                        (std::string("vkCreateDescriptorSetLayout(") + label + ")").c_str());
+
+        VkDescriptorPoolSize pool_size {};
+        pool_size.type = descriptor_type;
+        pool_size.descriptorCount = descriptor_count;
+
+        VkDescriptorPoolCreateInfo pool_info {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+        pool_info.maxSets = 1;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = &pool_size;
+
+        try
+        {
+            throw_if_failed(vkCreateDescriptorPool(device_manager_->logical_device(),
+                                                   &pool_info,
+                                                   nullptr,
+                                                   &descriptors.pool),
+                            (std::string("vkCreateDescriptorPool(") + label + ")").c_str());
+
+            VkDescriptorSetVariableDescriptorCountAllocateInfo variable_count_info {};
+            variable_count_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            variable_count_info.descriptorSetCount = 1;
+            variable_count_info.pDescriptorCounts = &descriptor_count;
+
+            VkDescriptorSetAllocateInfo alloc_info {};
+            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            alloc_info.pNext = &variable_count_info;
+            alloc_info.descriptorPool = descriptors.pool;
+            alloc_info.descriptorSetCount = 1;
+            alloc_info.pSetLayouts = &descriptors.layout;
+
+            throw_if_failed(vkAllocateDescriptorSets(device_manager_->logical_device(),
+                                                      &alloc_info,
+                                                     &descriptors.set),
+                            (std::string("vkAllocateDescriptorSets(") + label + ")").c_str());
+        }
+        catch (...)
+        {
+            destroy_descriptors_unlocked();
+            throw;
+        }
+
+        descriptors.capacity = descriptor_count;
+    }
+
+    void ResourceManager::create_combined_texture_descriptors()
+    {
+        if (combined_texture_descriptors_.set != VK_NULL_HANDLE)
+        {
+            return;
+        }
+
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::store_descriptor called before initialize().");
+        }
+
+        create_default_sampler();
+
+        VkPhysicalDeviceDescriptorIndexingProperties indexing_properties {};
+        indexing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+
+        VkPhysicalDeviceProperties2 properties {};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &indexing_properties;
+        vkGetPhysicalDeviceProperties2(device_manager_->physical_device(), &properties);
+
+        VkPhysicalDeviceVulkan12Features features12 {};
+        features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+        VkPhysicalDeviceFeatures2 features {};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        features.pNext = &features12;
+        vkGetPhysicalDeviceFeatures2(device_manager_->physical_device(), &features);
+
+        if (features12.descriptorIndexing != VK_TRUE ||
+            features12.runtimeDescriptorArray != VK_TRUE ||
+            features12.descriptorBindingPartiallyBound != VK_TRUE ||
+            features12.descriptorBindingVariableDescriptorCount != VK_TRUE ||
+            features12.shaderSampledImageArrayNonUniformIndexing != VK_TRUE)
+        {
+            throw std::runtime_error("Combined texture bindless descriptors require descriptor indexing, runtime arrays, partial binding, variable descriptor counts, and sampled-image non-uniform indexing.");
+        }
+
+        const uint32_t descriptor_limit = std::min({
+            indexing_properties.maxUpdateAfterBindDescriptorsInAllPools / bindless_descriptor_set_count,
+            indexing_properties.maxPerStageUpdateAfterBindResources / bindless_descriptor_set_count,
+            indexing_properties.maxPerStageDescriptorUpdateAfterBindSamplers,
+            indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages,
+            indexing_properties.maxDescriptorSetUpdateAfterBindSamplers,
+            indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages,
+        });
+
+        create_bindless_descriptor_array(combined_texture_descriptors_,
+                                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                         descriptor_limit,
+                                         features12.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE,
+                                         "combined texture");
+        next_combined_texture_descriptor_ = 0;
+    }
+
     void ResourceManager::create_storage_buffer_descriptors()
     {
         if (storage_buffer_descriptors_.set != VK_NULL_HANDLE)
@@ -685,93 +880,33 @@ namespace Corona::Horizon
         features.pNext = &features12;
         vkGetPhysicalDeviceFeatures2(device_manager_->physical_device(), &features);
 
-        VkDescriptorBindingFlags binding_flags = 0;
-        VkDescriptorSetLayoutCreateFlags layout_flags = 0;
-        VkDescriptorPoolCreateFlags pool_flags = 0;
-        uint32_t descriptor_limit = properties.properties.limits.maxDescriptorSetStorageBuffers;
-
-        if (features12.descriptorBindingStorageBufferUpdateAfterBind == VK_TRUE)
+        if (features12.descriptorIndexing != VK_TRUE ||
+            features12.runtimeDescriptorArray != VK_TRUE ||
+            features12.descriptorBindingPartiallyBound != VK_TRUE ||
+            features12.descriptorBindingVariableDescriptorCount != VK_TRUE ||
+            features12.shaderStorageBufferArrayNonUniformIndexing != VK_TRUE)
         {
-            binding_flags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
-            layout_flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-            pool_flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
-            descriptor_limit = indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers;
+            throw std::runtime_error("Storage buffer bindless descriptors require descriptor indexing, runtime arrays, partial binding, variable descriptor counts, and storage-buffer non-uniform indexing.");
         }
 
-        constexpr uint32_t preferred_descriptor_count = 4096;
-        const uint32_t descriptor_count = clamp_descriptor_capacity(preferred_descriptor_count, descriptor_limit);
-        if (descriptor_count == 0)
-        {
-            throw std::runtime_error("Storage buffer descriptors are not supported by this Vulkan device.");
-        }
+        const uint32_t descriptor_limit = std::min({
+            indexing_properties.maxUpdateAfterBindDescriptorsInAllPools / bindless_descriptor_set_count,
+            indexing_properties.maxPerStageUpdateAfterBindResources / bindless_descriptor_set_count,
+            indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageBuffers,
+            indexing_properties.maxDescriptorSetUpdateAfterBindStorageBuffers,
+        });
 
-        VkDescriptorSetLayoutBinding binding {};
-        binding.binding = 0;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        binding.descriptorCount = descriptor_count;
-        binding.stageFlags = VK_SHADER_STAGE_ALL;
-
-        VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_info {};
-        binding_flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-        binding_flags_info.bindingCount = 1;
-        binding_flags_info.pBindingFlags = &binding_flags;
-
-        VkDescriptorSetLayoutCreateInfo layout_info {};
-        layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layout_info.flags = layout_flags;
-        layout_info.bindingCount = 1;
-        layout_info.pBindings = &binding;
-        layout_info.pNext = binding_flags != 0 ? &binding_flags_info : nullptr;
-
-        throw_if_failed(vkCreateDescriptorSetLayout(device_manager_->logical_device(),
-                                                    &layout_info,
-                                                    nullptr,
-                                                    &storage_buffer_descriptors_.layout),
-                        "vkCreateDescriptorSetLayout");
-
-        VkDescriptorPoolSize pool_size {};
-        pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        pool_size.descriptorCount = descriptor_count;
-
-        VkDescriptorPoolCreateInfo pool_info {};
-        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        pool_info.flags = pool_flags;
-        pool_info.maxSets = 1;
-        pool_info.poolSizeCount = 1;
-        pool_info.pPoolSizes = &pool_size;
-
-        try
-        {
-            throw_if_failed(vkCreateDescriptorPool(device_manager_->logical_device(),
-                                                   &pool_info,
-                                                   nullptr,
-                                                   &storage_buffer_descriptors_.pool),
-                            "vkCreateDescriptorPool");
-
-            VkDescriptorSetAllocateInfo alloc_info {};
-            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            alloc_info.descriptorPool = storage_buffer_descriptors_.pool;
-            alloc_info.descriptorSetCount = 1;
-            alloc_info.pSetLayouts = &storage_buffer_descriptors_.layout;
-
-            throw_if_failed(vkAllocateDescriptorSets(device_manager_->logical_device(),
-                                                     &alloc_info,
-                                                     &storage_buffer_descriptors_.set),
-                            "vkAllocateDescriptorSets");
-        }
-        catch (...)
-        {
-            destroy_descriptors_unlocked();
-            throw;
-        }
-
-        storage_buffer_descriptors_.capacity = descriptor_count;
+        create_bindless_descriptor_array(storage_buffer_descriptors_,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                         descriptor_limit,
+                                         features12.descriptorBindingStorageBufferUpdateAfterBind == VK_TRUE,
+                                         "storage buffer");
         next_storage_buffer_descriptor_ = 0;
     }
 
-    void ResourceManager::create_sampled_image_descriptors()
+    void ResourceManager::create_storage_image_descriptors()
     {
-        if (sampled_image_descriptors_.set != VK_NULL_HANDLE)
+        if (storage_image_descriptors_.set != VK_NULL_HANDLE)
         {
             return;
         }
@@ -797,88 +932,35 @@ namespace Corona::Horizon
         features.pNext = &features12;
         vkGetPhysicalDeviceFeatures2(device_manager_->physical_device(), &features);
 
-        VkDescriptorBindingFlags binding_flags = 0;
-        VkDescriptorSetLayoutCreateFlags layout_flags = 0;
-        VkDescriptorPoolCreateFlags pool_flags = 0;
-        uint32_t descriptor_limit = properties.properties.limits.maxDescriptorSetSampledImages;
-
-        if (features12.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE)
+        if (features12.descriptorIndexing != VK_TRUE ||
+            features12.runtimeDescriptorArray != VK_TRUE ||
+            features12.descriptorBindingPartiallyBound != VK_TRUE ||
+            features12.descriptorBindingVariableDescriptorCount != VK_TRUE ||
+            features12.shaderStorageImageArrayNonUniformIndexing != VK_TRUE)
         {
-            binding_flags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
-            layout_flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-            pool_flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
-            descriptor_limit = indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages;
+            throw std::runtime_error("Storage image bindless descriptors require descriptor indexing, runtime arrays, partial binding, variable descriptor counts, and storage-image non-uniform indexing.");
         }
 
-        constexpr uint32_t preferred_descriptor_count = 4096;
-        const uint32_t descriptor_count = clamp_descriptor_capacity(preferred_descriptor_count, descriptor_limit);
-        if (descriptor_count == 0)
-        {
-            throw std::runtime_error("Sampled image descriptors are not supported by this Vulkan device.");
-        }
+        const uint32_t descriptor_limit = std::min({
+            indexing_properties.maxUpdateAfterBindDescriptorsInAllPools / bindless_descriptor_set_count,
+            indexing_properties.maxPerStageUpdateAfterBindResources / bindless_descriptor_set_count,
+            indexing_properties.maxPerStageDescriptorUpdateAfterBindStorageImages,
+            indexing_properties.maxDescriptorSetUpdateAfterBindStorageImages,
+        });
 
-        VkDescriptorSetLayoutBinding binding {};
-        binding.binding = 0;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        binding.descriptorCount = descriptor_count;
-        binding.stageFlags = VK_SHADER_STAGE_ALL;
+        create_bindless_descriptor_array(storage_image_descriptors_,
+                                         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                         descriptor_limit,
+                                         features12.descriptorBindingStorageImageUpdateAfterBind == VK_TRUE,
+                                         "storage image");
+        next_storage_image_descriptor_ = 0;
+    }
 
-        VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags_info {};
-        binding_flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-        binding_flags_info.bindingCount = 1;
-        binding_flags_info.pBindingFlags = &binding_flags;
-
-        VkDescriptorSetLayoutCreateInfo layout_info {};
-        layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layout_info.flags = layout_flags;
-        layout_info.bindingCount = 1;
-        layout_info.pBindings = &binding;
-        layout_info.pNext = binding_flags != 0 ? &binding_flags_info : nullptr;
-
-        throw_if_failed(vkCreateDescriptorSetLayout(device_manager_->logical_device(),
-                                                    &layout_info,
-                                                    nullptr,
-                                                    &sampled_image_descriptors_.layout),
-                        "vkCreateDescriptorSetLayout(sampled image)");
-
-        VkDescriptorPoolSize pool_size {};
-        pool_size.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        pool_size.descriptorCount = descriptor_count;
-
-        VkDescriptorPoolCreateInfo pool_info {};
-        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        pool_info.flags = pool_flags;
-        pool_info.maxSets = 1;
-        pool_info.poolSizeCount = 1;
-        pool_info.pPoolSizes = &pool_size;
-
-        try
-        {
-            throw_if_failed(vkCreateDescriptorPool(device_manager_->logical_device(),
-                                                   &pool_info,
-                                                   nullptr,
-                                                   &sampled_image_descriptors_.pool),
-                            "vkCreateDescriptorPool(sampled image)");
-
-            VkDescriptorSetAllocateInfo alloc_info {};
-            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            alloc_info.descriptorPool = sampled_image_descriptors_.pool;
-            alloc_info.descriptorSetCount = 1;
-            alloc_info.pSetLayouts = &sampled_image_descriptors_.layout;
-
-            throw_if_failed(vkAllocateDescriptorSets(device_manager_->logical_device(),
-                                                     &alloc_info,
-                                                     &sampled_image_descriptors_.set),
-                            "vkAllocateDescriptorSets(sampled image)");
-        }
-        catch (...)
-        {
-            destroy_descriptors_unlocked();
-            throw;
-        }
-
-        sampled_image_descriptors_.capacity = descriptor_count;
-        next_sampled_image_descriptor_ = 0;
+    void ResourceManager::ensure_bindless_descriptors_unlocked()
+    {
+        create_combined_texture_descriptors();
+        create_storage_buffer_descriptors();
+        create_storage_image_descriptors();
     }
 
     void ResourceManager::destroy_descriptors_unlocked() noexcept
@@ -895,21 +977,39 @@ namespace Corona::Horizon
                 vkDestroyDescriptorSetLayout(device_manager_->logical_device(), storage_buffer_descriptors_.layout, nullptr);
             }
 
-            if (sampled_image_descriptors_.pool != VK_NULL_HANDLE)
+            if (combined_texture_descriptors_.pool != VK_NULL_HANDLE)
             {
-                vkDestroyDescriptorPool(device_manager_->logical_device(), sampled_image_descriptors_.pool, nullptr);
+                vkDestroyDescriptorPool(device_manager_->logical_device(), combined_texture_descriptors_.pool, nullptr);
             }
 
-            if (sampled_image_descriptors_.layout != VK_NULL_HANDLE)
+            if (combined_texture_descriptors_.layout != VK_NULL_HANDLE)
             {
-                vkDestroyDescriptorSetLayout(device_manager_->logical_device(), sampled_image_descriptors_.layout, nullptr);
+                vkDestroyDescriptorSetLayout(device_manager_->logical_device(), combined_texture_descriptors_.layout, nullptr);
+            }
+
+            if (storage_image_descriptors_.pool != VK_NULL_HANDLE)
+            {
+                vkDestroyDescriptorPool(device_manager_->logical_device(), storage_image_descriptors_.pool, nullptr);
+            }
+
+            if (storage_image_descriptors_.layout != VK_NULL_HANDLE)
+            {
+                vkDestroyDescriptorSetLayout(device_manager_->logical_device(), storage_image_descriptors_.layout, nullptr);
+            }
+
+            if (default_sampler_ != VK_NULL_HANDLE)
+            {
+                vkDestroySampler(device_manager_->logical_device(), default_sampler_, nullptr);
             }
         }
 
+        default_sampler_ = VK_NULL_HANDLE;
+        combined_texture_descriptors_ = {};
         storage_buffer_descriptors_ = {};
-        sampled_image_descriptors_ = {};
+        storage_image_descriptors_ = {};
+        next_combined_texture_descriptor_ = 0;
         next_storage_buffer_descriptor_ = 0;
-        next_sampled_image_descriptor_ = 0;
+        next_storage_image_descriptor_ = 0;
     }
 
     BufferWrap ResourceManager::create_buffer(const HardwareBufferDesc& desc)
@@ -1645,6 +1745,11 @@ namespace Corona::Horizon
 
     uint32_t ResourceManager::store_descriptor(ImageWrap& image)
     {
+        return store_sampled_descriptor(image);
+    }
+
+    uint32_t ResourceManager::store_sampled_descriptor(ImageWrap& image)
+    {
         std::lock_guard lock(mutex_);
 
         if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
@@ -1659,28 +1764,29 @@ namespace Corona::Horizon
 
         if (!has_flag(image.desc.usage, ImageUsageFlags::Sampled))
         {
-            throw std::invalid_argument("HardwareImage::store_descriptor currently requires ImageUsageFlags::Sampled.");
+            throw std::invalid_argument("HardwareImage sampled bindless descriptor requires ImageUsageFlags::Sampled.");
         }
 
-        create_sampled_image_descriptors();
+        create_combined_texture_descriptors();
 
-        if (image.bindless_index < 0)
+        if (image.sampled_bindless_index < 0)
         {
-            if (next_sampled_image_descriptor_ >= sampled_image_descriptors_.capacity)
+            if (next_combined_texture_descriptor_ >= combined_texture_descriptors_.capacity)
             {
-                throw std::runtime_error("Sampled image descriptor array is full.");
+                throw std::runtime_error("Combined texture descriptor array is full.");
             }
 
-            image.bindless_index = static_cast<std::int32_t>(next_sampled_image_descriptor_++);
+            image.sampled_bindless_index = static_cast<std::int32_t>(next_combined_texture_descriptor_++);
         }
 
-        const uint32_t descriptor_index = static_cast<uint32_t>(image.bindless_index);
-        if (descriptor_index >= sampled_image_descriptors_.capacity)
+        const uint32_t descriptor_index = static_cast<uint32_t>(image.sampled_bindless_index);
+        if (descriptor_index >= combined_texture_descriptors_.capacity)
         {
-            throw std::runtime_error("HardwareImage descriptor index exceeds the sampled image descriptor array.");
+            throw std::runtime_error("HardwareImage descriptor index exceeds the combined texture descriptor array.");
         }
 
         VkDescriptorImageInfo image_info {};
+        image_info.sampler = default_sampler_;
         image_info.imageView = image.image_view;
         image_info.imageLayout = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
             ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -1688,15 +1794,93 @@ namespace Corona::Horizon
 
         VkWriteDescriptorSet write {};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = sampled_image_descriptors_.set;
+        write.dstSet = combined_texture_descriptors_.set;
         write.dstBinding = 0;
         write.dstArrayElement = descriptor_index;
         write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write.pImageInfo = &image_info;
 
         vkUpdateDescriptorSets(device_manager_->logical_device(), 1, &write, 0, nullptr);
         return descriptor_index;
+    }
+
+    uint32_t ResourceManager::store_storage_descriptor(ImageWrap& image)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::store_descriptor called before initialize().");
+        }
+
+        if (!image.valid() || image.image_view == VK_NULL_HANDLE)
+        {
+            throw std::invalid_argument("ResourceManager::store_descriptor requires a valid HardwareImage.");
+        }
+
+        if (!has_flag(image.desc.usage, ImageUsageFlags::Storage))
+        {
+            throw std::invalid_argument("HardwareImage storage bindless descriptor requires ImageUsageFlags::Storage.");
+        }
+
+        create_storage_image_descriptors();
+
+        if (image.storage_bindless_index < 0)
+        {
+            if (next_storage_image_descriptor_ >= storage_image_descriptors_.capacity)
+            {
+                throw std::runtime_error("Storage image descriptor array is full.");
+            }
+
+            image.storage_bindless_index = static_cast<std::int32_t>(next_storage_image_descriptor_++);
+        }
+
+        const uint32_t descriptor_index = static_cast<uint32_t>(image.storage_bindless_index);
+        if (descriptor_index >= storage_image_descriptors_.capacity)
+        {
+            throw std::runtime_error("HardwareImage descriptor index exceeds the storage image descriptor array.");
+        }
+
+        VkDescriptorImageInfo image_info {};
+        image_info.imageView = image.image_view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet write {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = storage_image_descriptors_.set;
+        write.dstBinding = 0;
+        write.dstArrayElement = descriptor_index;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &image_info;
+
+        vkUpdateDescriptorSets(device_manager_->logical_device(), 1, &write, 0, nullptr);
+        return descriptor_index;
+    }
+
+    std::array<VkDescriptorSetLayout, ResourceManager::bindless_descriptor_set_count> ResourceManager::bindless_descriptor_set_layouts()
+    {
+        std::lock_guard lock(mutex_);
+        ensure_bindless_descriptors_unlocked();
+
+        std::array<VkDescriptorSetLayout, bindless_descriptor_set_count> layouts {};
+        layouts[bindless_texture_set] = combined_texture_descriptors_.layout;
+        layouts[bindless_storage_buffer_set] = storage_buffer_descriptors_.layout;
+        layouts[bindless_storage_image_set] = storage_image_descriptors_.layout;
+        return layouts;
+    }
+
+    std::array<VkDescriptorSet, ResourceManager::bindless_descriptor_set_count> ResourceManager::bindless_descriptor_sets()
+    {
+        std::lock_guard lock(mutex_);
+        ensure_bindless_descriptors_unlocked();
+
+        std::array<VkDescriptorSet, bindless_descriptor_set_count> sets {};
+        sets[bindless_texture_set] = combined_texture_descriptors_.set;
+        sets[bindless_storage_buffer_set] = storage_buffer_descriptors_.set;
+        sets[bindless_storage_image_set] = storage_image_descriptors_.set;
+        return sets;
     }
 
     ImageSubresourceLayout ResourceManager::image_subresource_layout(const ImageWrap& image, uint32_t layer, uint32_t mip) const

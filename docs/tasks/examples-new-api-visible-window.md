@@ -1,5 +1,5 @@
 # Horizon Examples New API Visible Window Notes
-<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 391b0b8ced0aad3511939d0a27d692dfccc21f2d6617a9d41740d56b4827cbf4 -->
+<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 57496405b279d021cdbc60d57a76c04f7803432d41333dd0166715d2b6282d17 -->
 
 ## When To Use
 
@@ -60,7 +60,7 @@
 - Launch examples once from the repo root and once from the target output directory. Old baseline code may read `readFile("shaders/xxx.spv")` through a relative path; if only the output directory works, first check shader post-build copy, working directory, and source-directory fallback.
 - For `vector subscript out of range`, inspect CPU containers and loop bounds before deep Vulkan debugging: cube constants should have 36 vertices; aggregate initializer changes must not drift `vertices.size()`; draw loops should use stable object counts, not containers being changed by another thread.
 - In threaded default paths, first look for shared `std::vector` `push_back` / `resize` / read races. Per-window/per-object storage-buffer containers should be created to fixed size before threads start; threads should only update existing buffer contents.
-- For handwritten GLSL through the current pipeline API, if `bindless space index unavailable` appears or assertions happen near `ComputePipelineDesc::from_source(...)` / `RasterizerPipelineDesc::from_source(...)`, first pass an explicit `EmbeddedShader::CompilerOption` with `enableBindless = false`, then inspect reflection bindings.
+- For handwritten GLSL or EDSL through the current pipeline API, if `bindless space index unavailable` appears or assertions happen near `ComputePipelineDesc::from_source(...)` / `RasterizerPipelineDesc::from_source(...)`, do not use disabled bindless as a long-term workaround. First inspect whether shader-reflected set/binding metadata matches the backend bindless table ABI; UBOs and ordinary descriptors should be generated from reflected set/binding values.
 - After a fix, smoke all explicit entries: `baseline`, `default`, `edsl`, and `glsl`. For `default`, confirm both EDSL and GLSL windows exist and no CRT assertion window appears.
 
 ## Validation

@@ -138,10 +138,18 @@ namespace Corona::Horizon
 
     struct DispatchResourceBinding
     {
+        uint32_t set { 0 };
         uint32_t binding { 0 };
         ResourceHandle resource {};
         DispatchBindingKind kind { DispatchBindingKind::StorageBuffer };
         AccessKind access { AccessKind::ReadWrite };
+    };
+
+    struct UniformBufferBindingData
+    {
+        uint32_t set { 0 };
+        uint32_t binding { 0 };
+        std::vector<std::byte> data;
     };
 
     struct DispatchDesc
@@ -152,6 +160,7 @@ namespace Corona::Horizon
         std::vector<DispatchResourceBinding> bindings;
         std::vector<ResourceUse> resource_uses;
         std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
     };
 
     struct RenderingDesc
@@ -174,6 +183,7 @@ namespace Corona::Horizon
         bool enable_scissor { false };
         ScissorRect scissor {};
         std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
     };
 
     struct PresentDesc

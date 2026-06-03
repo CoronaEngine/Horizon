@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: b165ba3c151a7584c4b11950d6f42826b09694303839f97ce6dd9660da6c7ea2 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: a989460e69d7bbb0ef0d6f4899fb2d16315e3056fbbdf73253c923828d7e048b -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -29,6 +29,15 @@ Be careful with:
 - Queue family selection.
 - Image layouts and memory barriers.
 - Swapchain and display logic.
+
+## Bindless And Descriptor Layout
+
+- The lower-case Vulkan backend has only one fixed global bindless ABI: set 0 binding 0 is the combined image sampler runtime array, set 1 binding 0 is the storage buffer runtime array, and set 2 binding 0 is the storage image runtime array.
+- UBOs and ordinary descriptors are not part of a fixed set convention; create descriptor set layouts and write descriptors from shader-reflected set/binding values. Even if a shader generator emits UBOs at set 3 in bindless mode, the backend should consume that as reflection data, not as backend ABI.
+- Pipeline layouts must use exact Vulkan set indices. If there are gaps between bindless sets 0-2 and reflected descriptor sets, fill them with empty descriptor set layouts, and bind descriptor sets at their actual set indices.
+- Bindless resource binding writes global descriptor array indices into push-constant handle fields; non-bindless or ordinary reflected descriptors use per-dispatch / per-draw transient descriptor sets.
+- One `HardwareImage` may be used as both a sampled image and a storage image; sampled and storage bindless descriptor indices must be cached separately instead of sharing one image bindless index.
+- When enabling bindless, check the full descriptor indexing feature chain: runtime descriptor arrays, partially bound descriptors, variable descriptor count, update-after-bind, and the matching sampled image / storage buffer / storage image non-uniform indexing and update-after-bind support.
 
 ## Concurrency and Compute Direction
 
@@ -86,6 +95,13 @@ Be careful with:
 - Timeline semaphores are the default completion signal; use per-submit fences only when a backend or platform limitation needs a fallback.
 - `VK_KHR_deferred_host_operations` is only for splitting supported expensive host-side Vulkan operations across worker threads; it is not a GPU submission, resource lifetime, or delayed-destruction mechanism.
 - Prefer fake queue / fake timeline injection for no-GPU tests of submit, retirement, keep-alive release, cross-queue token dependencies, and failure paths; keep real Vulkan smoke tests in `HorizonTests`.
+
+## Swapchain / Display Lifetime
+
+- `DisplayManager` owns the native-window Vulkan surface, swapchain, swapchain image wrappers, and present sync objects; on window close, surface lost, or out-of-date, destroy the swapchain first, then release the surface.
+- Present submissions should put only GPU-used resource tokens into queue keep-alive. Do not let queue in-flight keep-alive strongly hold `DisplayManager` itself, because that can defer surface/swapchain destruction until after the native window is gone.
+- Before destroying a swapchain, wait for the device or relevant queue to become idle and retire completed queue keep-alives so swapchain image wrappers / image views release before semaphores and `VkSwapchainKHR` are destroyed.
+- GLFW example loops should re-check `glfwWindowShouldClose` after `glfwPollEvents()`; once a close event arrives, do not record or submit another frame containing present.
 
 ## Include Boundaries
 

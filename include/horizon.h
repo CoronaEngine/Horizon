@@ -1090,28 +1090,36 @@ namespace Corona::Horizon
         uint32_t type_size = 0;
         int32_t bind_type = -1;
         uint32_t location = 0;
+        uint32_t set = 0;
+        uint32_t binding = 0;
 
         template <ReflectedBindingKey T>
         static constexpr BindingSlot from(const T& key) noexcept
         {
+            BindingSlot slot;
             if constexpr (requires { key.byte_offset; key.type_size; key.bind_type; })
             {
-                return {
-                    key.byte_offset,
-                    key.type_size,
-                    key.bind_type,
-                    key.location
-                };
+                slot.byte_offset = key.byte_offset;
+                slot.type_size = key.type_size;
+                slot.bind_type = key.bind_type;
+                slot.location = key.location;
             }
             else
             {
-                return {
-                    key.byteOffset,
-                    key.typeSize,
-                    key.bindType,
-                    key.location
-                };
+                slot.byte_offset = key.byteOffset;
+                slot.type_size = key.typeSize;
+                slot.bind_type = key.bindType;
+                slot.location = key.location;
             }
+
+            if constexpr (requires { key.set; })
+                slot.set = key.set;
+            if constexpr (requires { key.binding; })
+                slot.binding = key.binding;
+            else
+                slot.binding = slot.location;
+
+            return slot;
         }
     };
 
@@ -1207,22 +1215,22 @@ namespace Corona::Horizon
     private:
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
-            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type);
+            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
         }
 
         void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
         {
-            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type);
+            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
         }
 
         void bind_image(const BindingSlot& slot, const HardwareImage& image) override
         {
-            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type);
+            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.set, slot.binding);
         }
 
-        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type);
+        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
     };
 
     class RasterizerPipeline : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipeline>
@@ -1271,22 +1279,22 @@ namespace Corona::Horizon
     private:
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
-            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type);
+            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
         }
 
         void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
         {
-            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type);
+            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
         }
 
         void bind_image(const BindingSlot& slot, const HardwareImage& image) override
         {
-            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location);
+            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location, slot.set, slot.binding);
         }
 
-        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0);
+        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
     };
 

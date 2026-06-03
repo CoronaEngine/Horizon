@@ -7,6 +7,7 @@
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
+#include <array>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -46,10 +47,19 @@ namespace Corona::Horizon
         [[nodiscard]] ImageWrap wrap_swapchain_image(VkImage image, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, std::string debug_name = {});
         [[nodiscard]] ExternalMemoryHandle export_image(ImageWrap& image);
         [[nodiscard]] uint32_t store_descriptor(ImageWrap& image);
+        [[nodiscard]] uint32_t store_sampled_descriptor(ImageWrap& image);
+        [[nodiscard]] uint32_t store_storage_descriptor(ImageWrap& image);
         [[nodiscard]] ImageSubresourceLayout image_subresource_layout(const ImageWrap& image, uint32_t layer, uint32_t mip) const;
         void flush_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size);
         void invalidate_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size);
         void destroy_image(ImageWrap& image) noexcept;
+
+        static constexpr uint32_t bindless_texture_set = 0;
+        static constexpr uint32_t bindless_storage_buffer_set = 1;
+        static constexpr uint32_t bindless_storage_image_set = 2;
+        static constexpr uint32_t bindless_descriptor_set_count = 3;
+        [[nodiscard]] std::array<VkDescriptorSetLayout, bindless_descriptor_set_count> bindless_descriptor_set_layouts();
+        [[nodiscard]] std::array<VkDescriptorSet, bindless_descriptor_set_count> bindless_descriptor_sets();
 
     private:
         struct DescriptorArray
@@ -66,17 +76,28 @@ namespace Corona::Horizon
         [[nodiscard]] VkImageCreateInfo image_info(const HardwareImageDesc& desc) const;
         [[nodiscard]] VkImageView create_image_view(const ImageWrap& image, ImageSubresourceRange range) const;
         void create_allocator();
+        void create_default_sampler();
+        void create_bindless_descriptor_array(DescriptorArray& descriptors,
+                                              VkDescriptorType descriptor_type,
+                                              uint32_t descriptor_limit,
+                                              bool update_after_bind,
+                                              const char* label);
+        void create_combined_texture_descriptors();
         void create_storage_buffer_descriptors();
-        void create_sampled_image_descriptors();
+        void create_storage_image_descriptors();
+        void ensure_bindless_descriptors_unlocked();
         void destroy_descriptors_unlocked() noexcept;
         void shutdown_unlocked() noexcept;
 
         mutable std::mutex mutex_;
         DeviceManager* device_manager_ { nullptr };
         VmaAllocator allocator_ { VK_NULL_HANDLE };
+        VkSampler default_sampler_ { VK_NULL_HANDLE };
+        DescriptorArray combined_texture_descriptors_ {};
         DescriptorArray storage_buffer_descriptors_ {};
-        DescriptorArray sampled_image_descriptors_ {};
+        DescriptorArray storage_image_descriptors_ {};
+        uint32_t next_combined_texture_descriptor_ { 0 };
         uint32_t next_storage_buffer_descriptor_ { 0 };
-        uint32_t next_sampled_image_descriptor_ { 0 };
+        uint32_t next_storage_image_descriptor_ { 0 };
     };
 }

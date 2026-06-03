@@ -223,6 +223,20 @@ namespace Corona::Horizon
         create_sync_objects();
     }
 
+    bool DisplayManager::native_window_available() const noexcept
+    {
+        if (native_window_ == nullptr)
+        {
+            return false;
+        }
+
+#if defined(_WIN32) || defined(_WIN64)
+        return IsWindow(static_cast<HWND>(native_window_)) != FALSE;
+#else
+        return true;
+#endif
+    }
+
     void DisplayManager::create_surface()
     {
         if (surface_ != VK_NULL_HANDLE)
@@ -431,7 +445,17 @@ namespace Corona::Horizon
 
         acquire.status = present_status(result);
         acquire.message = present_message(acquire.status);
-        if (result != VK_ERROR_OUT_OF_DATE_KHR)
+        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            destroy_swapchain();
+        }
+        else if (result == VK_ERROR_SURFACE_LOST_KHR)
+        {
+            acquire.message = "Display surface was lost.";
+            destroy_swapchain();
+            destroy_surface();
+        }
+        else
         {
             acquire.message = "vkAcquireNextImageKHR failed. VkResult=" + std::to_string(static_cast<int>(result));
         }
@@ -444,10 +468,11 @@ namespace Corona::Horizon
         prepared.immediate_result.displayer = desc.displayer;
         prepared.immediate_result.image = desc.image;
 
-        if (native_window_ == nullptr)
+        if (!native_window_available())
         {
+            shutdown();
             prepared.immediate_result.status = fake_status_;
-            prepared.immediate_result.message = fake_message_;
+            prepared.immediate_result.message = "Native display window is no longer available.";
             return prepared;
         }
 
@@ -536,6 +561,14 @@ namespace Corona::Horizon
             return result;
         }
 
+        if (vk_result == VK_ERROR_SURFACE_LOST_KHR)
+        {
+            destroy_swapchain();
+            destroy_surface();
+            result.message = "Display surface was lost.";
+            return result;
+        }
+
         if (vk_result != VK_SUCCESS && vk_result != VK_SUBOPTIMAL_KHR)
         {
             throw std::runtime_error("vkQueuePresentKHR failed. VkResult=" + std::to_string(static_cast<int>(vk_result)));
@@ -557,6 +590,17 @@ namespace Corona::Horizon
         if (device_ != VK_NULL_HANDLE)
         {
             (void)vkDeviceWaitIdle(device_);
+        }
+
+        if (present_queue_ != nullptr)
+        {
+            try
+            {
+                present_queue_->retire_completed();
+            }
+            catch (...)
+            {
+            }
         }
 
         swapchain_images_.clear();
@@ -609,6 +653,7 @@ namespace Corona::Horizon
         device_manager_ = nullptr;
         device_ = VK_NULL_HANDLE;
         instance_ = VK_NULL_HANDLE;
+        native_window_ = nullptr;
     }
 
     std::shared_ptr<DisplayManager> make_fake_display_manager(DisplayerRef displayer)

@@ -68,6 +68,7 @@ namespace Corona::Horizon
         void choose_present_queue();
         void create_swapchain();
         void create_sync_objects();
+        [[nodiscard]] bool native_window_available() const noexcept;
         void destroy_swapchain() noexcept;
         void destroy_surface() noexcept;
         void shutdown() noexcept;

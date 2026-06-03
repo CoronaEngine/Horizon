@@ -29,6 +29,15 @@
 - Image layout 和 memory barrier。
 - Swapchain 和 display 逻辑。
 
+## Bindless 和 Descriptor Layout
+
+- lower-case Vulkan 后端只固定全局 bindless 表 ABI：set 0 binding 0 是 combined image sampler runtime array，set 1 binding 0 是 storage buffer runtime array，set 2 binding 0 是 storage image runtime array。
+- UBO 和普通 descriptor 不属于固定 set 约定；必须按 shader reflection 里的 set/binding 创建 descriptor set layout 和写 descriptor。即使某个 shader generator 在 bindless 模式下把 UBO 生成为 set 3，后端也只能把它当作反射结果消费，不要把 set 3 写成后端 ABI。
+- Pipeline layout 必须使用真实 Vulkan set index；如果 bindless set 0-2 和反射 descriptor set 之间有空洞，用空 descriptor set layout 占位，descriptor bind 时也按实际 set index 绑定。
+- bindless 资源绑定把全局 descriptor array 的 index 写进 push constant handle 字段；非 bindless 或普通反射 descriptor 走 per-dispatch / per-draw transient descriptor set。
+- 同一个 `HardwareImage` 可能分别作为 sampled image 和 storage image 使用；sampled / storage bindless descriptor index 必须分开缓存，不要复用单个 image bindless index。
+- 开启 bindless 时检查完整 descriptor indexing 能力链：runtime descriptor array、partially bound、variable descriptor count、update-after-bind，以及对应 sampled image / storage buffer / storage image 的 non-uniform indexing 和 update-after-bind 支持。
+
 ## 并发和计算方向
 
 - 后端设计默认面对多线程并发调用；公共 API、backend facade、resource pool、descriptor / pipeline cache 和 execution 入口都不要依赖“只有一个调用线程”的隐含前提。
@@ -85,6 +94,13 @@
 - Timeline semaphore 是默认完成信号；只有后端或平台限制需要 fallback 时才使用 per-submit fence。
 - `VK_KHR_deferred_host_operations` 只用于把支持该扩展的昂贵 host-side Vulkan 操作拆到线程池，不能当作 GPU 提交、资源生命周期或延迟销毁机制。
 - 无 GPU 单测优先注入 fake queue / fake timeline，验证 submit、retire、keep-alive 释放、跨 queue token 依赖和失败路径；真实 Vulkan smoke 继续放在 `HorizonTests`。
+
+## Swapchain / Display 生命周期
+
+- `DisplayManager` 拥有 native window 对应的 Vulkan surface、swapchain、swapchain image wrapper 和 present sync object；窗口关闭、surface lost 或 out-of-date 时应先拆 swapchain，再释放 surface。
+- present 提交只应把 GPU 使用到的资源 token 放进 queue keep-alive；不要让 queue in-flight keep-alive 强持 `DisplayManager` 本身，否则窗口关闭后 surface/swapchain 销毁可能被推迟到 native window 销毁之后。
+- 销毁 swapchain 前先等待设备或相关队列空闲，并退休已完成的 queue keep-alive，保证 swapchain image wrapper / image view 先释放，再销毁 semaphore 和 `VkSwapchainKHR`。
+- GLFW 示例循环在 `glfwPollEvents()` 后应重新检查 `glfwWindowShouldClose`；关闭事件已经到达时不要再录制或提交包含 present 的新帧。
 
 ## Include 边界
 

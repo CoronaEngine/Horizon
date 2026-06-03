@@ -1,8 +1,11 @@
 #include "vulkan_rasterizer_pipeline.h"
 
 #include "hardware_wrapper/validation/hardware_validation.h"
+#include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -15,6 +18,8 @@ namespace Corona::Horizon
     namespace
     {
         using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
+        using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
+        using ImageStore = ResourceStore<ImageWrap, ImageReleaser>;
 
         [[nodiscard]] bool is_push_constant_member(int32_t bind_type) noexcept
         {
@@ -24,6 +29,36 @@ namespace Corona::Horizon
         [[nodiscard]] bool is_stage_output(int32_t bind_type) noexcept
         {
             return bind_type == static_cast<int32_t>(BindType::stageOutputs);
+        }
+
+        [[nodiscard]] bool is_storage_buffer_bind(int32_t bind_type) noexcept
+        {
+            return bind_type == static_cast<int32_t>(BindType::storageBuffer) ||
+                   bind_type == static_cast<int32_t>(BindType::rawBuffer);
+        }
+
+        [[nodiscard]] bool is_storage_image_bind(int32_t bind_type) noexcept
+        {
+            return bind_type == static_cast<int32_t>(BindType::storageTexture);
+        }
+
+        [[nodiscard]] bool is_sampled_image_bind(int32_t bind_type) noexcept
+        {
+            return bind_type == static_cast<int32_t>(BindType::sampledImages) ||
+                   bind_type == static_cast<int32_t>(BindType::texture) ||
+                   bind_type == static_cast<int32_t>(BindType::sampler);
+        }
+
+        [[nodiscard]] bool is_uniform_buffer_member(int32_t bind_type) noexcept
+        {
+            return bind_type == static_cast<int32_t>(BindType::uniformBufferMembers);
+        }
+
+        [[nodiscard]] bool is_direct_resource_bind(int32_t bind_type) noexcept
+        {
+            return is_storage_buffer_bind(bind_type) ||
+                   is_storage_image_bind(bind_type) ||
+                   is_sampled_image_bind(bind_type);
         }
 
         [[nodiscard]] VkPrimitiveTopology to_vk_topology(PrimitiveTopology topology) noexcept
@@ -234,6 +269,21 @@ namespace Corona::Horizon
             return { static_cast<const ResourceHandle&>(image) };
         }
 
+        [[nodiscard]] BufferStore::Read read_buffer_resource(const ResourceHandle& handle)
+        {
+            return read<BufferStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] BufferStore::Write write_buffer_resource(const ResourceHandle& handle)
+        {
+            return write<BufferStore>(ResourceBridge::token(handle));
+        }
+
+        [[nodiscard]] ImageStore::Write write_image_resource(const ResourceHandle& handle)
+        {
+            return write<ImageStore>(ResourceBridge::token(handle));
+        }
+
         [[nodiscard]] bool add_overflows(uint64_t lhs, size_t rhs) noexcept
         {
             if constexpr (sizeof(size_t) > sizeof(uint64_t))
@@ -243,6 +293,196 @@ namespace Corona::Horizon
             }
 
             return lhs > std::numeric_limits<uint64_t>::max() - static_cast<uint64_t>(rhs);
+        }
+
+        [[nodiscard]] uint32_t descriptor_write_size(uint32_t reflected_type_size) noexcept
+        {
+            constexpr uint32_t descriptor_handle32_size = sizeof(uint32_t);
+            constexpr uint32_t descriptor_handle64_size = sizeof(uint32_t) * 2;
+            if (reflected_type_size == 0)
+                return descriptor_handle64_size;
+
+            return reflected_type_size >= descriptor_handle64_size ? descriptor_handle64_size : descriptor_handle32_size;
+        }
+
+        void write_bytes(std::vector<std::byte>& target,
+                         uint32_t declared_size,
+                         uint64_t byte_offset,
+                         const void* data,
+                         size_t size,
+                         const char* label)
+        {
+            if (size == 0)
+                return;
+            if (data == nullptr)
+                throw std::invalid_argument(std::string(label) + " data must not be null.");
+            if (add_overflows(byte_offset, size))
+                throw std::overflow_error(std::string(label) + " range overflow.");
+
+            const uint64_t end = byte_offset + static_cast<uint64_t>(size);
+            if (end > std::numeric_limits<size_t>::max())
+                throw std::overflow_error(std::string(label) + " range is too large for host memory.");
+            if (declared_size != 0 && end > declared_size)
+                throw std::out_of_range(std::string(label) + " write exceeds reflected size.");
+
+            if (target.size() < static_cast<size_t>(end))
+                target.resize(static_cast<size_t>(end));
+
+            std::memcpy(target.data() + static_cast<size_t>(byte_offset), data, size);
+        }
+
+        void write_descriptor_handle(std::vector<std::byte>& target,
+                                     uint32_t declared_size,
+                                     uint64_t byte_offset,
+                                     uint32_t reflected_type_size,
+                                     uint32_t descriptor_index,
+                                     const char* label)
+        {
+            const uint32_t write_size = descriptor_write_size(reflected_type_size);
+            if (write_size >= sizeof(uint32_t) * 2)
+            {
+                const uint32_t handle_data[2] = { descriptor_index, 0 };
+                write_bytes(target, declared_size, byte_offset, handle_data, sizeof(handle_data), label);
+                return;
+            }
+
+            write_bytes(target, declared_size, byte_offset, &descriptor_index, sizeof(descriptor_index), label);
+        }
+
+        [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
+        {
+            if (info.binding != 0)
+                return false;
+
+            if (info.set == ResourceManager::bindless_texture_set)
+                return is_sampled_image_bind(static_cast<int32_t>(info.bindType));
+            if (info.set == ResourceManager::bindless_storage_buffer_set)
+                return info.bindType == BindType::rawBuffer || info.bindType == BindType::storageBuffer;
+            if (info.set == ResourceManager::bindless_storage_image_set)
+                return info.bindType == BindType::storageTexture;
+
+            return false;
+        }
+
+        [[nodiscard]] bool uses_bindless_descriptors(const EmbeddedShader::ShaderCodeModule& module) noexcept
+        {
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                if (is_bindless_table(info))
+                    return true;
+            }
+
+            return false;
+        }
+
+        [[nodiscard]] bool uses_bindless_descriptors(const RasterizerPipelineDesc& desc) noexcept
+        {
+            return uses_bindless_descriptors(desc.vertex_shader.module) ||
+                   uses_bindless_descriptors(desc.fragment_shader.module);
+        }
+
+        void add_uniform_buffer(std::vector<UniformBufferBindingData>& buffers, uint32_t set, uint32_t binding, uint32_t size)
+        {
+            if (size == 0)
+                return;
+
+            auto found = std::ranges::find_if(buffers, [&](const UniformBufferBindingData& item) {
+                return item.set == set && item.binding == binding;
+            });
+            if (found == buffers.end())
+            {
+                UniformBufferBindingData item;
+                item.set = set;
+                item.binding = binding;
+                item.data.resize(size);
+                buffers.push_back(std::move(item));
+                return;
+            }
+
+            if (found->data.size() < size)
+                found->data.resize(size);
+        }
+
+        void append_reflected_uniform_buffers(std::vector<UniformBufferBindingData>& buffers,
+                                              const EmbeddedShader::ShaderCodeModule& module)
+        {
+            bool found = false;
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                if (info.bindType != BindType::uniformBuffers)
+                    continue;
+
+                found = true;
+                const uint32_t size = info.typeSize != 0 ? info.typeSize : module.shaderResources.uniformBufferSize;
+                add_uniform_buffer(buffers, info.set, info.binding, size);
+            }
+
+            if (!found && module.shaderResources.uniformBufferSize != 0)
+                add_uniform_buffer(buffers, 0, 0, module.shaderResources.uniformBufferSize);
+        }
+
+        [[nodiscard]] std::vector<UniformBufferBindingData> reflected_uniform_buffers(const RasterizerPipelineDesc& desc)
+        {
+            std::vector<UniformBufferBindingData> buffers;
+            append_reflected_uniform_buffers(buffers, desc.vertex_shader.module);
+            append_reflected_uniform_buffers(buffers, desc.fragment_shader.module);
+            return buffers;
+        }
+
+        void write_uniform_member(std::vector<UniformBufferBindingData>& buffers,
+                                  uint32_t set,
+                                  uint32_t binding,
+                                  uint64_t byte_offset,
+                                  const void* data,
+                                  size_t size)
+        {
+            auto found = std::ranges::find_if(buffers, [&](const UniformBufferBindingData& item) {
+                return item.set == set && item.binding == binding;
+            });
+            if (found == buffers.end() && buffers.size() == 1)
+                found = buffers.begin();
+            if (found == buffers.end())
+                throw std::out_of_range("RasterizerPipeline uniform member does not match any reflected uniform buffer.");
+
+            if (found->data.size() > std::numeric_limits<uint32_t>::max())
+                throw std::overflow_error("RasterizerPipeline uniform buffer is too large.");
+
+            write_bytes(found->data,
+                        static_cast<uint32_t>(found->data.size()),
+                        byte_offset,
+                        data,
+                        size,
+                        "RasterizerPipeline uniform buffer");
+        }
+
+        [[nodiscard]] uint32_t store_storage_buffer_descriptor(const HardwareBuffer& buffer)
+        {
+            BufferStore::Write native = write_buffer_resource(static_cast<const ResourceHandle&>(buffer));
+            if (!native || native->buffer_handle == VK_NULL_HANDLE)
+                throw std::logic_error("RasterizerPipeline bindless storage buffer requires a valid HardwareBuffer.");
+
+            ResourceManager* manager = native->resource_manager != nullptr ? native->resource_manager : &resource_manager();
+            return manager->store_descriptor(*native);
+        }
+
+        [[nodiscard]] uint32_t store_sampled_image_descriptor(const HardwareImage& image)
+        {
+            ImageStore::Write native = write_image_resource(static_cast<const ResourceHandle&>(image));
+            if (!native || native->image_view == VK_NULL_HANDLE)
+                throw std::logic_error("RasterizerPipeline bindless sampled image requires a valid HardwareImage.");
+
+            ResourceManager* manager = native->resource_manager != nullptr ? native->resource_manager : &resource_manager();
+            return manager->store_sampled_descriptor(*native);
+        }
+
+        [[nodiscard]] uint32_t store_storage_image_descriptor(const HardwareImage& image)
+        {
+            ImageStore::Write native = write_image_resource(static_cast<const ResourceHandle&>(image));
+            if (!native || native->image_view == VK_NULL_HANDLE)
+                throw std::logic_error("RasterizerPipeline bindless storage image requires a valid HardwareImage.");
+
+            ResourceManager* manager = native->resource_manager != nullptr ? native->resource_manager : &resource_manager();
+            return manager->store_storage_descriptor(*native);
         }
 
         [[nodiscard]] DrawIndexedParams normalize_draw_params(const HardwareBuffer& index_buffer, DrawIndexedParams params)
@@ -303,6 +543,19 @@ namespace Corona::Horizon
 
             return shader;
         }
+
+        struct TransientDescriptorSet
+        {
+            VkDevice device { VK_NULL_HANDLE };
+            VkDescriptorPool pool { VK_NULL_HANDLE };
+            std::vector<HardwareBuffer> buffers;
+
+            ~TransientDescriptorSet()
+            {
+                if (device != VK_NULL_HANDLE && pool != VK_NULL_HANDLE)
+                    vkDestroyDescriptorPool(device, pool, nullptr);
+            }
+        };
     }
 
     VulkanRasterizerPipeline::VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
@@ -315,6 +568,7 @@ namespace Corona::Horizon
         const uint32_t constant_size = push_constant_size();
         if (constant_size != 0)
             push_constant_data_.resize(constant_size);
+        uniform_buffers_ = reflected_uniform_buffers(desc_);
     }
 
     VulkanRasterizerPipeline::~VulkanRasterizerPipeline()
@@ -351,6 +605,21 @@ namespace Corona::Horizon
                 {
                     vkDestroyPipelineLayout(state.key.device, state.layout, nullptr);
                     state.layout = VK_NULL_HANDLE;
+                }
+
+                for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
+                {
+                    if (set_layout.layout != VK_NULL_HANDLE)
+                    {
+                        vkDestroyDescriptorSetLayout(state.key.device, set_layout.layout, nullptr);
+                        set_layout.layout = VK_NULL_HANDLE;
+                    }
+                }
+
+                for (VkDescriptorSetLayout layout : state.empty_descriptor_set_layouts)
+                {
+                    if (layout != VK_NULL_HANDLE)
+                        vkDestroyDescriptorSetLayout(state.key.device, layout, nullptr);
                 }
             }
         }
@@ -500,13 +769,131 @@ namespace Corona::Horizon
                 push_constant_range.size = push_constant_bytes;
             }
 
-            VkPipelineLayoutCreateInfo layout_info {};
-            layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-            layout_info.pushConstantRangeCount = push_constant_bytes != 0 ? 1u : 0u;
-            layout_info.pPushConstantRanges = push_constant_bytes != 0 ? &push_constant_range : nullptr;
-
             PipelineState state;
             state.key = key;
+            state.uses_bindless = uses_bindless_descriptors(desc_);
+
+            auto add_descriptor_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType descriptor_type) {
+                if (state.uses_bindless && set < ResourceManager::bindless_descriptor_set_count)
+                {
+                    throw std::logic_error("RasterizerPipeline ordinary descriptors cannot use Horizon bindless reserved sets 0-2.");
+                }
+
+                auto set_found = std::ranges::find_if(state.descriptor_set_layouts, [set](const PipelineState::DescriptorSetLayout& layout) {
+                    return layout.set == set;
+                });
+                if (set_found == state.descriptor_set_layouts.end())
+                {
+                    PipelineState::DescriptorSetLayout layout;
+                    layout.set = set;
+                    state.descriptor_set_layouts.push_back(std::move(layout));
+                    set_found = std::prev(state.descriptor_set_layouts.end());
+                }
+
+                auto binding_found = std::ranges::find_if(set_found->bindings, [binding](const PipelineState::DescriptorBindingLayout& layout) {
+                    return layout.binding == binding;
+                });
+                if (binding_found != set_found->bindings.end())
+                {
+                    if (binding_found->descriptor_type != descriptor_type)
+                        throw std::logic_error("RasterizerPipeline reflection maps different descriptor types to the same set/binding.");
+                    return;
+                }
+
+                set_found->bindings.push_back({ set, binding, descriptor_type });
+            };
+
+            for (const UniformBufferBindingData& uniform_buffer : reflected_uniform_buffers(desc_))
+            {
+                add_descriptor_binding(uniform_buffer.set, uniform_buffer.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+            }
+
+            std::ranges::sort(state.descriptor_set_layouts, [](const auto& left, const auto& right) {
+                return left.set < right.set;
+            });
+            for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
+            {
+                std::ranges::sort(set_layout.bindings, [](const auto& left, const auto& right) {
+                    return left.binding < right.binding;
+                });
+            }
+
+            for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
+            {
+                std::vector<VkDescriptorSetLayoutBinding> descriptor_bindings;
+                descriptor_bindings.reserve(set_layout.bindings.size());
+                for (const PipelineState::DescriptorBindingLayout& binding_layout : set_layout.bindings)
+                {
+                    VkDescriptorSetLayoutBinding layout_binding {};
+                    layout_binding.binding = binding_layout.binding;
+                    layout_binding.descriptorType = binding_layout.descriptor_type;
+                    layout_binding.descriptorCount = 1;
+                    layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+                    descriptor_bindings.push_back(layout_binding);
+                }
+
+                VkDescriptorSetLayoutCreateInfo descriptor_layout_info {};
+                descriptor_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                descriptor_layout_info.bindingCount = static_cast<uint32_t>(descriptor_bindings.size());
+                descriptor_layout_info.pBindings = descriptor_bindings.data();
+
+                VkResult descriptor_result = vkCreateDescriptorSetLayout(key.device,
+                                                                         &descriptor_layout_info,
+                                                                         nullptr,
+                                                                         &set_layout.layout);
+                if (descriptor_result != VK_SUCCESS)
+                {
+                    throw std::runtime_error("vkCreateDescriptorSetLayout failed for RasterizerPipeline. VkResult=" +
+                                             std::to_string(static_cast<int>(descriptor_result)));
+                }
+            }
+
+            bool has_set_layouts = state.uses_bindless || !state.descriptor_set_layouts.empty();
+            uint32_t max_set = state.uses_bindless ? ResourceManager::bindless_descriptor_set_count - 1u : 0u;
+            for (const PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
+                max_set = std::max(max_set, set_layout.set);
+
+            std::array<VkDescriptorSetLayout, ResourceManager::bindless_descriptor_set_count> bindless_layouts {};
+            std::vector<VkDescriptorSetLayout> set_layouts;
+            if (has_set_layouts)
+            {
+                set_layouts.resize(static_cast<size_t>(max_set) + 1u, VK_NULL_HANDLE);
+                if (state.uses_bindless)
+                {
+                    bindless_layouts = resource_manager().bindless_descriptor_set_layouts();
+                    for (uint32_t set = 0; set < ResourceManager::bindless_descriptor_set_count; ++set)
+                        set_layouts[set] = bindless_layouts[set];
+                }
+
+                for (const PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
+                    set_layouts[set_layout.set] = set_layout.layout;
+
+                for (VkDescriptorSetLayout& set_layout : set_layouts)
+                {
+                    if (set_layout != VK_NULL_HANDLE)
+                        continue;
+
+                    VkDescriptorSetLayoutCreateInfo empty_layout_info {};
+                    empty_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                    VkDescriptorSetLayout empty_layout = VK_NULL_HANDLE;
+                    VkResult empty_result = vkCreateDescriptorSetLayout(key.device, &empty_layout_info, nullptr, &empty_layout);
+                    if (empty_result != VK_SUCCESS)
+                    {
+                        throw std::runtime_error("vkCreateDescriptorSetLayout(empty) failed for RasterizerPipeline. VkResult=" +
+                                                 std::to_string(static_cast<int>(empty_result)));
+                    }
+
+                    state.empty_descriptor_set_layouts.push_back(empty_layout);
+                    set_layout = empty_layout;
+                }
+            }
+
+            VkPipelineLayoutCreateInfo layout_info {};
+            layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            layout_info.setLayoutCount = static_cast<uint32_t>(set_layouts.size());
+            layout_info.pSetLayouts = set_layouts.empty() ? nullptr : set_layouts.data();
+            layout_info.pushConstantRangeCount = push_constant_bytes != 0 ? 1u : 0u;
+            layout_info.pPushConstantRanges = push_constant_bytes != 0 ? &push_constant_range : nullptr;
 
             VkResult result = vkCreatePipelineLayout(key.device, &layout_info, nullptr, &state.layout);
             if (result != VK_SUCCESS)
@@ -545,6 +932,19 @@ namespace Corona::Horizon
             {
                 vkDestroyPipelineLayout(key.device, state.layout, nullptr);
                 state.layout = VK_NULL_HANDLE;
+                for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
+                {
+                    if (set_layout.layout != VK_NULL_HANDLE)
+                    {
+                        vkDestroyDescriptorSetLayout(key.device, set_layout.layout, nullptr);
+                        set_layout.layout = VK_NULL_HANDLE;
+                    }
+                }
+                for (VkDescriptorSetLayout layout : state.empty_descriptor_set_layouts)
+                {
+                    if (layout != VK_NULL_HANDLE)
+                        vkDestroyDescriptorSetLayout(key.device, layout, nullptr);
+                }
                 throw std::runtime_error("vkCreateGraphicsPipelines failed for RasterizerPipeline. VkResult=" + std::to_string(static_cast<int>(result)));
             }
 
@@ -588,7 +988,154 @@ namespace Corona::Horizon
         return {
             .layout = found->layout,
             .pipeline = found->pipeline,
+            .uses_bindless = found->uses_bindless,
         };
+    }
+
+    VulkanRasterizerPipeline::PreparedDraw VulkanRasterizerPipeline::prepare_draw(VkDevice device,
+                                                                                  VkFormat color_format,
+                                                                                  VkFormat depth_format,
+                                                                                  uint32_t vertex_stride,
+                                                                                  const DrawIndexedDesc& draw)
+    {
+        PipelineKey key {
+            .device = device,
+            .color_format = color_format,
+            .depth_format = depth_format,
+            .vertex_stride = vertex_stride,
+        };
+
+        std::lock_guard lock(mutex_);
+        auto found = std::ranges::find_if(pipeline_cache_, [&](const PipelineState& state) {
+            return state.key == key;
+        });
+
+        if (found == pipeline_cache_.end())
+        {
+            pipeline_cache_.push_back(create_graphics_pipeline_unlocked(key));
+            found = std::prev(pipeline_cache_.end());
+        }
+
+        PreparedDraw prepared {
+            .layout = found->layout,
+            .pipeline = found->pipeline,
+            .uses_bindless = found->uses_bindless,
+        };
+
+        if (found->descriptor_set_layouts.empty())
+            return prepared;
+
+        auto descriptor_owner = std::make_shared<TransientDescriptorSet>();
+        descriptor_owner->device = device;
+
+        uint32_t uniform_buffer_count = 0;
+        for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
+        {
+            for (const PipelineState::DescriptorBindingLayout& binding : set_layout.bindings)
+            {
+                if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                    ++uniform_buffer_count;
+            }
+        }
+
+        if (uniform_buffer_count == 0)
+            return prepared;
+
+        VkDescriptorPoolSize pool_size { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniform_buffer_count };
+        VkDescriptorPoolCreateInfo pool_info {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.maxSets = static_cast<uint32_t>(found->descriptor_set_layouts.size());
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = &pool_size;
+
+        VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkCreateDescriptorPool failed for RasterizerPipeline draw. VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
+
+        std::vector<VkDescriptorSetLayout> layouts;
+        layouts.reserve(found->descriptor_set_layouts.size());
+        for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
+            layouts.push_back(set_layout.layout);
+
+        std::vector<VkDescriptorSet> descriptor_sets(layouts.size(), VK_NULL_HANDLE);
+
+        VkDescriptorSetAllocateInfo alloc_info {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = descriptor_owner->pool;
+        alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+        alloc_info.pSetLayouts = layouts.data();
+
+        result = vkAllocateDescriptorSets(device, &alloc_info, descriptor_sets.data());
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkAllocateDescriptorSets failed for RasterizerPipeline draw. VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
+
+        prepared.descriptor_sets.reserve(found->descriptor_set_layouts.size());
+        for (size_t index = 0; index < found->descriptor_set_layouts.size(); ++index)
+        {
+            prepared.descriptor_sets.push_back(
+                {
+                    .set = found->descriptor_set_layouts[index].set,
+                    .descriptor_set = descriptor_sets[index],
+                });
+        }
+
+        std::vector<VkDescriptorBufferInfo> buffer_infos;
+        std::vector<VkWriteDescriptorSet> writes;
+        buffer_infos.reserve(uniform_buffer_count);
+        writes.reserve(uniform_buffer_count);
+
+        for (size_t set_index = 0; set_index < found->descriptor_set_layouts.size(); ++set_index)
+        {
+            const PipelineState::DescriptorSetLayout& set_layout = found->descriptor_set_layouts[set_index];
+            VkDescriptorSet descriptor_set = descriptor_sets[set_index];
+            for (const PipelineState::DescriptorBindingLayout& binding_layout : set_layout.bindings)
+            {
+                if (binding_layout.descriptor_type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                    continue;
+
+                auto uniform = std::ranges::find_if(draw.uniform_buffers, [&](const UniformBufferBindingData& item) {
+                    return item.set == binding_layout.set && item.binding == binding_layout.binding;
+                });
+                if (uniform == draw.uniform_buffers.end() || uniform->data.empty())
+                    throw std::logic_error("RasterizerPipeline uniform buffer descriptor is missing reflected data.");
+
+                HardwareBuffer ubo = HardwareBuffer::from_bytes(uniform->data,
+                                                                1,
+                                                                BufferUsageFlags::Uniform,
+                                                                "RasterizerPipeline.uniform_buffer");
+                BufferStore::Read buffer = read_buffer_resource(static_cast<const ResourceHandle&>(ubo));
+                if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
+
+                VkDescriptorBufferInfo info {};
+                info.buffer = buffer->buffer_handle;
+                info.offset = 0;
+                info.range = buffer->logical_size();
+                buffer_infos.push_back(info);
+
+                VkWriteDescriptorSet write {};
+                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                write.dstSet = descriptor_set;
+                write.dstBinding = binding_layout.binding;
+                write.dstArrayElement = 0;
+                write.descriptorCount = 1;
+                write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                write.pBufferInfo = &buffer_infos.back();
+                writes.push_back(write);
+                descriptor_owner->buffers.push_back(std::move(ubo));
+            }
+        }
+
+        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+        prepared.descriptor_set_lifetime = std::move(descriptor_owner);
+        return prepared;
     }
 
     void VulkanRasterizerPipeline::set_extent(uint16_t width, uint16_t height)
@@ -601,49 +1148,63 @@ namespace Corona::Horizon
     void VulkanRasterizerPipeline::set_push_constant_direct(uint64_t byte_offset,
                                                             const void* data,
                                                             size_t size,
-                                                            int32_t bind_type)
+                                                            int32_t bind_type,
+                                                            uint32_t set,
+                                                            uint32_t binding)
     {
-        if (!is_push_constant_member(bind_type) || size == 0)
+        if (size == 0)
             return;
 
-        if (data == nullptr)
-            throw std::invalid_argument("RasterizerPipeline push constant data must not be null.");
-
-        if (add_overflows(byte_offset, size))
-            throw std::overflow_error("RasterizerPipeline push constant range overflow.");
-
-        const uint64_t end = byte_offset + static_cast<uint64_t>(size);
-        if (end > std::numeric_limits<size_t>::max())
-            throw std::overflow_error("RasterizerPipeline push constant range is too large for host memory.");
-
         std::lock_guard lock(mutex_);
-        const uint32_t declared_size = push_constant_size();
-        if (declared_size != 0 && end > declared_size)
-            throw std::out_of_range("RasterizerPipeline push constant write exceeds reflected push constant size.");
+        if (is_push_constant_member(bind_type))
+        {
+            write_bytes(push_constant_data_, push_constant_size(), byte_offset, data, size, "RasterizerPipeline push constant");
+            return;
+        }
 
-        if (push_constant_data_.size() < static_cast<size_t>(end))
-            push_constant_data_.resize(static_cast<size_t>(end));
-
-        std::memcpy(push_constant_data_.data() + static_cast<size_t>(byte_offset), data, size);
+        if (is_uniform_buffer_member(bind_type))
+        {
+            write_uniform_member(uniform_buffers_, set, binding, byte_offset, data, size);
+            return;
+        }
     }
 
     void VulkanRasterizerPipeline::set_resource_direct(uint64_t byte_offset,
                                                        uint32_t type_size,
                                                        const HardwareBuffer& buffer,
-                                                       int32_t bind_type)
+                                                       int32_t bind_type,
+                                                       uint32_t set,
+                                                       uint32_t binding_index)
     {
+        if (uses_bindless_descriptors(desc_) && is_storage_buffer_bind(bind_type))
+        {
+            const uint32_t descriptor_index = store_storage_buffer_descriptor(buffer);
+            std::lock_guard lock(mutex_);
+            write_descriptor_handle(push_constant_data_,
+                                    push_constant_size(),
+                                    byte_offset,
+                                    type_size,
+                                    descriptor_index,
+                                    "RasterizerPipeline bindless storage buffer");
+            return;
+        }
+
         std::lock_guard lock(mutex_);
 
         auto found = std::ranges::find_if(bound_buffers_, [&](const BoundBuffer& bound) {
             return bound.byte_offset == byte_offset &&
                    bound.type_size == type_size &&
-                   bound.bind_type == bind_type;
+                   bound.bind_type == bind_type &&
+                   bound.set == set &&
+                   bound.binding == binding_index;
         });
 
         BoundBuffer binding {
             .byte_offset = byte_offset,
             .type_size = type_size,
             .bind_type = bind_type,
+            .set = set,
+            .binding = binding_index,
             .buffer = buffer,
         };
 
@@ -657,8 +1218,30 @@ namespace Corona::Horizon
                                                        uint32_t type_size,
                                                        const HardwareImage& image,
                                                        int32_t bind_type,
-                                                       uint32_t location)
+                                                       uint32_t location,
+                                                       uint32_t set,
+                                                       uint32_t binding_index)
     {
+        if (uses_bindless_descriptors(desc_) && is_direct_resource_bind(bind_type) && !is_stage_output(bind_type))
+        {
+            uint32_t descriptor_index = 0;
+            if (is_storage_image_bind(bind_type))
+                descriptor_index = store_storage_image_descriptor(image);
+            else if (is_sampled_image_bind(bind_type))
+                descriptor_index = store_sampled_image_descriptor(image);
+            else
+                return;
+
+            std::lock_guard lock(mutex_);
+            write_descriptor_handle(push_constant_data_,
+                                    push_constant_size(),
+                                    byte_offset,
+                                    type_size,
+                                    descriptor_index,
+                                    "RasterizerPipeline bindless image");
+            return;
+        }
+
         std::lock_guard lock(mutex_);
 
         auto found = std::ranges::find_if(bound_images_, [&](const BoundImage& bound) {
@@ -668,7 +1251,9 @@ namespace Corona::Horizon
             return bound.byte_offset == byte_offset &&
                    bound.type_size == type_size &&
                    bound.bind_type == bind_type &&
-                   bound.location == location;
+                   bound.location == location &&
+                   bound.set == set &&
+                   bound.binding == binding_index;
         });
 
         BoundImage binding {
@@ -676,6 +1261,8 @@ namespace Corona::Horizon
             .type_size = type_size,
             .bind_type = bind_type,
             .location = location,
+            .set = set,
+            .binding = binding_index,
             .image = image,
         };
 
@@ -713,6 +1300,7 @@ namespace Corona::Horizon
 
         std::lock_guard lock(mutex_);
         draw.push_constant_data = push_constant_data_;
+        draw.uniform_buffers = uniform_buffers_;
         draws_.push_back(std::move(draw));
     }
 
@@ -774,6 +1362,7 @@ namespace Corona::Horizon
             DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
             ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
             draw_desc.push_constant_data = draw.push_constant_data;
+            draw_desc.uniform_buffers = draw.uniform_buffers;
 
             batch << draw_indexed(buffer_ref(draw.index_buffer),
                                   buffer_ref(draw.vertex_buffer),

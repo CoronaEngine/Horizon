@@ -20,6 +20,8 @@ namespace Corona::Horizon
             uint64_t byte_offset { 0 };
             uint32_t type_size { 0 };
             int32_t bind_type { -1 };
+            uint32_t set { 0 };
+            uint32_t binding { 0 };
             HardwareBuffer buffer {};
         };
 
@@ -29,6 +31,8 @@ namespace Corona::Horizon
             uint32_t type_size { 0 };
             int32_t bind_type { -1 };
             uint32_t location { 0 };
+            uint32_t set { 0 };
+            uint32_t binding { 0 };
             HardwareImage image {};
         };
 
@@ -39,6 +43,7 @@ namespace Corona::Horizon
             HardwareBuffer vertex_buffer {};
             DrawIndexedParams params {};
             std::vector<std::byte> push_constant_data;
+            std::vector<UniformBufferBindingData> uniform_buffers;
         };
 
         struct Snapshot
@@ -59,9 +64,9 @@ namespace Corona::Horizon
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void set_extent(uint16_t width, uint16_t height);
-        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type);
-        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0);
+        void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
         void record(const ResourceHandle& pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
@@ -72,12 +77,33 @@ namespace Corona::Horizon
         {
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
+            bool uses_bindless { false };
+        };
+
+        struct PreparedDraw
+        {
+            struct DescriptorSet
+            {
+                uint32_t set { 0 };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
+            };
+
+            VkPipelineLayout layout { VK_NULL_HANDLE };
+            VkPipeline pipeline { VK_NULL_HANDLE };
+            bool uses_bindless { false };
+            std::vector<DescriptorSet> descriptor_sets;
+            std::shared_ptr<void> descriptor_set_lifetime {};
         };
 
         [[nodiscard]] GraphicsPipeline graphics_pipeline(VkDevice device,
                                                          VkFormat color_format,
                                                          VkFormat depth_format,
                                                          uint32_t vertex_stride);
+        [[nodiscard]] PreparedDraw prepare_draw(VkDevice device,
+                                                VkFormat color_format,
+                                                VkFormat depth_format,
+                                                uint32_t vertex_stride,
+                                                const DrawIndexedDesc& draw);
 
         [[nodiscard]] Snapshot snapshot() const;
         [[nodiscard]] CommandBatch command_batch() const;
@@ -95,7 +121,24 @@ namespace Corona::Horizon
 
         struct PipelineState
         {
+            struct DescriptorBindingLayout
+            {
+                uint32_t set { 0 };
+                uint32_t binding { 0 };
+                VkDescriptorType descriptor_type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
+            };
+
+            struct DescriptorSetLayout
+            {
+                uint32_t set { 0 };
+                std::vector<DescriptorBindingLayout> bindings;
+                VkDescriptorSetLayout layout { VK_NULL_HANDLE };
+            };
+
             PipelineKey key {};
+            std::vector<DescriptorSetLayout> descriptor_set_layouts;
+            std::vector<VkDescriptorSetLayout> empty_descriptor_set_layouts;
+            bool uses_bindless { false };
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
         };
@@ -111,6 +154,7 @@ namespace Corona::Horizon
         uint32_t width_ { 0 };
         uint32_t height_ { 0 };
         std::vector<std::byte> push_constant_data_;
+        std::vector<UniformBufferBindingData> uniform_buffers_;
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         std::vector<RecordedDraw> draws_;

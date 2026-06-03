@@ -371,7 +371,8 @@ namespace Corona::Horizon
         bool imported { false };
         bool owns_native_image { true };
 
-        std::int32_t bindless_index { -1 };
+        std::int32_t sampled_bindless_index { -1 };
+        std::int32_t storage_bindless_index { -1 };
         VkClearValue clear_value {};
 
         DeviceManager* device_manager { nullptr };
@@ -412,7 +413,8 @@ namespace Corona::Horizon
             allocation_size = 0;
             imported = false;
             owns_native_image = true;
-            bindless_index = -1;
+            sampled_bindless_index = -1;
+            storage_bindless_index = -1;
             clear_value = {};
             device_manager = nullptr;
             resource_manager = nullptr;

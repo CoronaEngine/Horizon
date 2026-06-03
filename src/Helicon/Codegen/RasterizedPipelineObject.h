@@ -78,7 +78,9 @@ namespace EmbeddedShader
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
 								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location
+								bindInfo->location,
+								bindInfo->set,
+								bindInfo->binding
 							});
 						}
 						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
@@ -88,7 +90,9 @@ namespace EmbeddedShader
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
 								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location
+								bindInfo->location,
+								bindInfo->set,
+								bindInfo->binding
 							});
 						}
 					}
@@ -107,7 +111,9 @@ namespace EmbeddedShader
 							def->texture->boundResourceRef,
 							0, 0,
 							static_cast<int32_t>(ShaderCodeModule::ShaderResources::stageOutputs),
-							static_cast<uint32_t>(def->texture->renderTargetLocation)
+							static_cast<uint32_t>(def->texture->renderTargetLocation),
+							0,
+							0
 						});
 					}
 				}

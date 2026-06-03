@@ -446,6 +446,10 @@ void run_example_glsl()
         while (!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
+            if (glfwWindowShouldClose(window))
+            {
+                break;
+            }
 
             float time_seconds = std::chrono::duration<float, std::chrono::seconds::period>(
                                      std::chrono::high_resolution_clock::now() - start_time)
