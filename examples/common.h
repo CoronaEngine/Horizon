@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-#include "Horizon.h"
+#include "horizon.h"
 
 inline std::string resolveShaderPath()
 {

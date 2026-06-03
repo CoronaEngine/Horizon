@@ -8,7 +8,7 @@
 #include GLSL(shaders/baseline_vert.glsl)
 #include GLSL(shaders/baseline_frag.glsl)
 
-#include <Horizon.h>
+#include <horizon.h>
 
 #include <array>
 #include <chrono>

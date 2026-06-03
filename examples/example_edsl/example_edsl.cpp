@@ -7,7 +7,7 @@
 #include <Codegen/BuiltinVariate.h>
 #include <Codegen/CustomLibrary.h>
 #include <Codegen/TypeAlias.h>
-#include <Horizon.h>
+#include <horizon.h>
 
 #include <array>
 #include <chrono>

@@ -9,7 +9,7 @@
 #include <GLFW/glfw3native.h>
 #endif
 
-#include "Horizon.h"
+#include "horizon.h"
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/TypeAlias.h"
 #include "hardware_wrapper_vulkan/hardware/device_manager.h"
@@ -587,7 +587,8 @@ void main()
                 continue;
             }
 
-            if (token.timeline == VK_NULL_HANDLE)
+            VkSemaphore timeline = Corona::Horizon::native_timeline_from_handle(token.timeline_handle);
+            if (timeline == VK_NULL_HANDLE)
             {
                 queue->mark_completed_for_tests(token.value);
                 queue->retire_completed();
@@ -597,7 +598,7 @@ void main()
             VkSemaphoreWaitInfo wait_info {};
             wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
             wait_info.semaphoreCount = 1;
-            wait_info.pSemaphores = &token.timeline;
+            wait_info.pSemaphores = &timeline;
             wait_info.pValues = &token.value;
 
             const VkResult result = vkWaitSemaphores(queue->device(), &wait_info, 5'000'000'000ull);
