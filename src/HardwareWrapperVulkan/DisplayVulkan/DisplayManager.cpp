@@ -7,7 +7,7 @@
 #include "HardwareWrapperVulkan/ResourcePool.h"
 #include "corona/kernel/memory/cache_aligned_allocator.h"
 
-#define USE_SAME_DEVICE
+//#define USE_SAME_DEVICE
 
 DisplayManager::DisplayManager() = default;
 
