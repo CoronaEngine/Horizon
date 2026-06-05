@@ -29,6 +29,13 @@
 - Image layout 和 memory barrier。
 - Swapchain 和 display 逻辑。
 
+## Vulkan 验证层
+
+- lower-case Vulkan 后端的验证层启用由 `HORIZON_ENABLE_VALIDATION` 控制，不要再使用历史或错误的 `CORONA_ENGINE_DEBUG` 门控；CMake 调试配置定义的是 `CABBAGE_ENGINE_DEBUG`，用错宏会让验证层实际不编译或不生效。
+- 在 `HardwareContext::create_instance()` 启用 `VK_LAYER_KHRONOS_validation` 时，应同时请求 `VK_EXT_debug_utils` 和 `VK_EXT_validation_features`；为了尽量暴露错误，调试路径应启用 GPU-assisted、reserve binding slot、best practices、debug printf 和 synchronization validation。全开会明显变慢，这是预期代价。
+- 过滤 instance extension 时要同时枚举全局扩展和已请求 layer 暴露的扩展；`VK_EXT_validation_features` 可能由 `VK_LAYER_KHRONOS_validation` 暴露，不要只查全局扩展后误判为不可用。
+- 验证层是否真的打开时，优先运行 `HorizonTests.exe hardware_context.`，并在日志中确认 `Khronos Validation Layer Active` 的 `Current Enables` 列出了需要的 validation features。
+
 ## Bindless 和 Descriptor Layout
 
 - lower-case Vulkan 后端只固定全局 bindless 表 ABI：set 0 binding 0 是 combined image sampler runtime array，set 1 binding 0 是 storage buffer runtime array，set 2 binding 0 是 storage image runtime array。

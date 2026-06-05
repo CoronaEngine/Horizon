@@ -2,6 +2,7 @@
 
 #include <ktm/ktm.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -62,6 +63,19 @@ struct DefaultFrameSubmitState
     uint64_t last_presented_render_serial { 0 };
 };
 
+struct DefaultOutputImageFormat
+{
+    Format format;
+    const char* glsl_layout;
+    const char* name;
+};
+
+constexpr std::array defaultOutputImageFormats {
+    DefaultOutputImageFormat { Format::RGBA16_FLOAT, "rgba16f", "RGBA16_FLOAT" },
+    DefaultOutputImageFormat { Format::RGBA32_FLOAT, "rgba32f", "RGBA32_FLOAT" },
+    DefaultOutputImageFormat { Format::RGBA8_UNORM, "rgba8", "RGBA8_UNORM" },
+};
+
 // Vertex attribute proxy: 与 SimpleVertex 一一对应
 struct VertexAttributeProxy
 {
@@ -69,11 +83,13 @@ struct VertexAttributeProxy
     EmbeddedShader::Float3 color;
 };
 
-constexpr char defaultStorageImageComputeShader[] = R"GLSL(
+std::string make_default_storage_image_compute_shader(const char* layout)
+{
+    return std::string(R"GLSL(
 #version 450
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 0, binding = 0, rgba16f) uniform image2D inputImageRGBA16;
+layout(set = 0, binding = 0, )GLSL") + layout + R"GLSL() uniform image2D inputImageRGBA16;
 
 vec3 acesFilmicToneMapCurve(vec3 x)
 {
@@ -92,6 +108,7 @@ void main()
     imageStore(inputImageRGBA16, ivec2(gl_GlobalInvocationID.xy), vec4(acesFilmicToneMapCurve(color.xyz), 1.0));
 }
 )GLSL";
+}
 
 void run_example_default()
 {
@@ -134,23 +151,61 @@ void run_example_default()
     }
 
     {
-        std::vector<HardwareImage> finalOutputImages(windows.size());
+        std::vector<HardwareImage> finalOutputImages;
         std::vector<HardwareExecutor> executors(windows.size());
         std::vector<std::unique_ptr<DefaultFrameSubmitState>> submitStates(windows.size());
-        for (size_t i = 0; i < finalOutputImages.size(); i++)
+        DefaultOutputImageFormat outputImageFormat = defaultOutputImageFormats.front();
+        std::string outputImageError;
+        for (const DefaultOutputImageFormat& candidate : defaultOutputImageFormats)
+        {
+            std::vector<HardwareImage> candidateImages(windows.size());
+            try
+            {
+                for (size_t i = 0; i < candidateImages.size(); i++)
+                {
+                    HardwareImageDesc createInfo =
+                        HardwareImageDesc::texture_2d(1920,
+                                                      1080,
+                                                      candidate.format,
+                                                      ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
+                                                          ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
+                                                          ImageUsageFlags::TransferDst,
+                                                      std::string("example_default.output.") + candidate.name + "." + std::to_string(i));
+
+                    candidateImages[i] = HardwareImage(createInfo);
+                    candidateImages[i].set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                outputImageFormat = candidate;
+                finalOutputImages = std::move(candidateImages);
+                break;
+            }
+            catch (const std::exception& error)
+            {
+                outputImageError = std::string(candidate.name) + ": " + error.what();
+            }
+        }
+
+        if (finalOutputImages.empty())
+        {
+            std::cerr << "Failed to create Horizon default output images. " << outputImageError << "\n";
+            for (GLFWwindow* window : windows)
+            {
+                if (window != nullptr)
+                {
+                    glfwDestroyWindow(window);
+                }
+            }
+            glfwTerminate();
+            return;
+        }
+
+        const std::string storageImageComputeShader =
+            make_default_storage_image_compute_shader(outputImageFormat.glsl_layout);
+
+        for (size_t i = 0; i < windows.size(); i++)
         {
             submitStates[i] = std::make_unique<DefaultFrameSubmitState>();
-
-            HardwareImageDesc createInfo =
-                HardwareImageDesc::texture_2d(1920,
-                                              1080,
-                                              Format::RGBA16_FLOAT,
-                                              ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
-                                                  ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
-                                                  ImageUsageFlags::TransferDst);
-
-            finalOutputImages[i] = HardwareImage(createInfo);
-            finalOutputImages[i].set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
         }
 
         // HardwareBuffer normalBuffer = HardwareBuffer(normals, BufferUsage::VertexBuffer);
@@ -454,7 +509,7 @@ void run_example_default()
             glslCompilerOptions.compileHLSL = false;
             glslCompilerOptions.compileDXIL = false;
             glslCompilerOptions.compileDXBC = false;
-            ComputePipeline computer(ComputePipelineDesc::from_source(defaultStorageImageComputeShader,
+            ComputePipeline computer(ComputePipelineDesc::from_source(storageImageComputeShader,
                                                                       EmbeddedShader::ShaderLanguage::GLSL,
                                                                       glslCompilerOptions));
             computer.bind_storage_image(0, finalOutputImages[threadIndex]);

@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: b0f0bf85b8cb6dbbb779b797b1372d55b3f41bb36d92a68971f8542fa875ac51 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 3834f322084827bf6d7938636b769230d3ebc155f845c068307a34d37958bb75 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -29,6 +29,13 @@ Be careful with:
 - Queue family selection.
 - Image layouts and memory barriers.
 - Swapchain and display logic.
+
+## Vulkan Validation Layers
+
+- Lower-case Vulkan backend validation is controlled by `HORIZON_ENABLE_VALIDATION`; do not gate it on the historical or incorrect `CORONA_ENGINE_DEBUG`. CMake debug configurations define `CABBAGE_ENGINE_DEBUG`, so using the wrong macro can silently compile validation out or leave it inactive.
+- When `HardwareContext::create_instance()` enables `VK_LAYER_KHRONOS_validation`, also request `VK_EXT_debug_utils` and `VK_EXT_validation_features`; to expose as many errors as possible, the debug path should enable GPU-assisted validation, reserve binding slot, best practices, debug printf, and synchronization validation. This all-on mode is expected to be slow.
+- Filter instance extensions by enumerating both global extensions and extensions exposed by requested layers. `VK_EXT_validation_features` may be exposed by `VK_LAYER_KHRONOS_validation`, so a global-only filter can incorrectly disable extended validation.
+- To verify validation is actually active, run `HorizonTests.exe hardware_context.` and check the log for `Khronos Validation Layer Active` with `Current Enables` listing the required validation features.
 
 ## Bindless And Descriptor Layout
 

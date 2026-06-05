@@ -165,6 +165,48 @@ namespace Corona::Horizon
             return copy;
         }
 
+        struct ImageBarrierScope
+        {
+            VkPipelineStageFlags2 stage { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT };
+            VkAccessFlags2 access { VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT };
+        };
+
+        [[nodiscard]] ImageBarrierScope source_scope_for_layout(VkImageLayout layout, VkPipelineStageFlags2 fallback_stage) noexcept
+        {
+            switch (layout)
+            {
+            case VK_IMAGE_LAYOUT_UNDEFINED:
+                return { VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0 };
+            case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+                return { fallback_stage, 0 };
+            case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+                return { VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
+            case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+                return { VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT };
+            case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+                return { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT };
+            case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+            case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+            case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+                return {
+                    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                };
+            case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+                return { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT };
+            case VK_IMAGE_LAYOUT_GENERAL:
+                return {
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                };
+            default:
+                return {
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                };
+            }
+        }
+
         void transition_image(VkCommandBuffer command_buffer,
                               ImageWrap& image,
                               VkImageLayout new_layout,
@@ -174,17 +216,12 @@ namespace Corona::Horizon
             if (image.image_handle == VK_NULL_HANDLE || image.image_layout == new_layout)
                 return;
 
-            const VkPipelineStageFlags2 src_stage = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
-                ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
-                : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            const VkAccessFlags2 src_access = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
-                ? 0
-                : (VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+            const ImageBarrierScope source_scope = source_scope_for_layout(image.image_layout, dst_stage);
 
             VkImageMemoryBarrier2 barrier {};
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            barrier.srcStageMask = src_stage;
-            barrier.srcAccessMask = src_access;
+            barrier.srcStageMask = source_scope.stage;
+            barrier.srcAccessMask = source_scope.access;
             barrier.dstStageMask = dst_stage;
             barrier.dstAccessMask = dst_access;
             barrier.oldLayout = image.image_layout;
