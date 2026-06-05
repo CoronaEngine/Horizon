@@ -1,5 +1,5 @@
 # Horizon Examples New API Visible Window Notes
-<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 57496405b279d021cdbc60d57a76c04f7803432d41333dd0166715d2b6282d17 -->
+<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 099d514afed66fc385dd590f15a586db341ff57f7acfe70aaf38c1c577bed245 -->
 
 ## When To Use
 
@@ -58,8 +58,11 @@
 
 - Do not treat a still-running process as a successful smoke. MSVC Debug CRT assertions leave the process alive behind a `Microsoft Visual C++ Runtime Library` window; smoke scripts should enumerate visible process window titles and fail on that title.
 - Launch examples once from the repo root and once from the target output directory. Old baseline code may read `readFile("shaders/xxx.spv")` through a relative path; if only the output directory works, first check shader post-build copy, working directory, and source-directory fallback.
+- Before screenshot validation, bring the target window to the foreground/topmost and wait at least one or two frames. Record window title, exit code, stderr, and screenshot hash; if different modes produce identical screenshot hashes, or the title does not match the mode, that screenshot batch is not valid evidence that rendering is correct.
+- Resize / minimize / hide validation should cover `default`, `edsl`, and `glsl`, and should exercise both the EDSL and GLSL windows in `default`. Success means no early exit, empty stderr or no bad stderr patterns, no CRT assertion window, clean `WM_CLOSE`, and no leftover `HorizonExamples` process.
 - For `vector subscript out of range`, inspect CPU containers and loop bounds before deep Vulkan debugging: cube constants should have 36 vertices; aggregate initializer changes must not drift `vertices.size()`; draw loops should use stable object counts, not containers being changed by another thread.
 - In threaded default paths, first look for shared `std::vector` `push_back` / `resize` / read races. Per-window/per-object storage-buffer containers should be created to fixed size before threads start; threads should only update existing buffer contents.
+- If threaded `default` render and display paths share one output image, display present should explicitly wait for the latest render submission. Otherwise resize/minimize/hide can make image-layout, queue-submit, or binary-semaphore reuse bugs look like ordinary window bugs.
 - For handwritten GLSL or EDSL through the current pipeline API, if `bindless space index unavailable` appears or assertions happen near `ComputePipelineDesc::from_source(...)` / `RasterizerPipelineDesc::from_source(...)`, do not use disabled bindless as a long-term workaround. First inspect whether shader-reflected set/binding metadata matches the backend bindless table ABI; UBOs and ordinary descriptors should be generated from reflected set/binding values.
 - After a fix, smoke all explicit entries: `baseline`, `default`, `edsl`, and `glsl`. For `default`, confirm both EDSL and GLSL windows exist and no CRT assertion window appears.
 

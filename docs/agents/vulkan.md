@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: a989460e69d7bbb0ef0d6f4899fb2d16315e3056fbbdf73253c923828d7e048b -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: b0f0bf85b8cb6dbbb779b797b1372d55b3f41bb36d92a68971f8542fa875ac51 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -99,6 +99,8 @@ Be careful with:
 ## Swapchain / Display Lifetime
 
 - `DisplayManager` owns the native-window Vulkan surface, swapchain, swapchain image wrappers, and present sync objects; on window close, surface lost, or out-of-date, destroy the swapchain first, then release the surface.
+- Hidden, minimized, or temporary zero-client-area windows should report that present was `Skipped`; do not destroy the swapchain only because the window is temporarily non-drawable. In multi-window paths sharing one device / queue, tearing down a swapchain or waiting for full device idle at that moment can disturb other window threads' submissions.
+- Before reusing a swapchain frame's image-available / render-finished binary semaphores, prove the previous submission token for that frame has completed and retire it. Do not assume frame-index rotation means the GPU has finished with those semaphores.
 - Present submissions should put only GPU-used resource tokens into queue keep-alive. Do not let queue in-flight keep-alive strongly hold `DisplayManager` itself, because that can defer surface/swapchain destruction until after the native window is gone.
 - Before destroying a swapchain, wait for the device or relevant queue to become idle and retire completed queue keep-alives so swapchain image wrappers / image views release before semaphores and `VkSwapchainKHR` are destroyed.
 - GLFW example loops should re-check `glfwWindowShouldClose` after `glfwPollEvents()`; once a close event arrives, do not record or submit another frame containing present.

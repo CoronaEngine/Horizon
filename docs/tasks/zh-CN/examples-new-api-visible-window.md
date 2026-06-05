@@ -57,8 +57,11 @@
 
 - 示例运行时验证不要只看进程是否仍在运行。MSVC Debug CRT 断言会弹出 `Microsoft Visual C++ Runtime Library` 窗口并让进程停住；smoke 脚本应枚举进程可见窗口标题，并把这个窗口视为失败。
 - 从 repo root 和 target 输出目录各启动一次示例。旧 baseline 代码会用 `readFile("shaders/xxx.spv")` 这类相对路径；如果只在输出目录能跑，优先检查 shader post-build copy、working directory 和源码目录 fallback。
+- 截图验证要先把目标窗口置前/置顶并等待至少一两帧，记录窗口标题、退出码、stderr 和截图 hash；如果不同 mode 的截图 hash 完全相同，或窗口标题与 mode 不匹配，这批截图不能作为“画面正常”的证据。
+- resize / minimize / hide 验证要覆盖 `default`、`edsl`、`glsl`，并对 `default` 的 EDSL / GLSL 两个窗口都执行操作。成功条件包括：没有 early exit、stderr 为空或不含坏模式、没有 CRT 断言窗口、`WM_CLOSE` 后进程退出且不残留 `HorizonExamples`。
 - 遇到 `vector subscript out of range`，先检查 CPU 侧容器和循环边界，再进入 Vulkan 调试：cube 常量顶点数应为 36；aggregate 初始化改动后要确认 `vertices.size()` 没有漂移；draw loop 应遍历稳定的对象数量，不要依赖正在被其他线程修改的容器。
 - 多线程 default 路径优先查共享 `std::vector` 的 `push_back` / `resize` / 读取竞态。storage buffer 这类 per-window/per-object 容器应在线程启动前定长创建，线程内只更新已有 buffer 内容。
+- 多线程 default 的 render 和 display 若共享同一张输出 image，display present 应显式等待最近一次 render 提交；否则 resize/minimize/hide 时容易把 image layout / queue submit / binary semaphore 复用问题误判成单纯窗口问题。
 - 手写 GLSL 或 EDSL 走当前 pipeline API 时，如果出现 `bindless space index unavailable` 或在 `ComputePipelineDesc::from_source(...)` / `RasterizerPipelineDesc::from_source(...)` 附近断言，不要用关闭 bindless 长期规避；优先检查 shader 反射出的 set/binding 是否与后端 bindless 表约定一致，UBO 和普通 descriptor 应按反射 set/binding 生成。
 - 修复后至少覆盖 `baseline`、`default`、`edsl`、`glsl` 四个显式入口；`default` 要同时确认 EDSL / GLSL 两个窗口存在且没有 CRT 断言窗口。
 

@@ -98,6 +98,8 @@
 ## Swapchain / Display 生命周期
 
 - `DisplayManager` 拥有 native window 对应的 Vulkan surface、swapchain、swapchain image wrapper 和 present sync object；窗口关闭、surface lost 或 out-of-date 时应先拆 swapchain，再释放 surface。
+- 窗口隐藏、最小化或 client area 临时为 0 时，应把该次 present 视为 `Skipped`，不要仅因暂时不可绘制就销毁 swapchain。多窗口共享同一 device / queue 时，在这种瞬间拆 swapchain 或等待全设备 idle 可能干扰其他窗口线程的提交。
+- 复用 swapchain 每个 frame 的 image-available / render-finished binary semaphore 前，必须确认上一轮使用该 frame 的提交 token 已完成并 retire；不要只靠 frame index 轮转假设 GPU 已经用完这些 semaphore。
 - present 提交只应把 GPU 使用到的资源 token 放进 queue keep-alive；不要让 queue in-flight keep-alive 强持 `DisplayManager` 本身，否则窗口关闭后 surface/swapchain 销毁可能被推迟到 native window 销毁之后。
 - 销毁 swapchain 前先等待设备或相关队列空闲，并退休已完成的 queue keep-alive，保证 swapchain image wrapper / image view 先释放，再销毁 semaphore 和 `VkSwapchainKHR`。
 - GLFW 示例循环在 `glfwPollEvents()` 后应重新检查 `glfwWindowShouldClose`；关闭事件已经到达时不要再录制或提交包含 present 的新帧。
