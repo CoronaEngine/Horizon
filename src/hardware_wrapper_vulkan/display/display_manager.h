@@ -69,6 +69,7 @@ namespace Corona::Horizon
         void create_swapchain();
         void create_sync_objects();
         [[nodiscard]] bool native_window_available() const noexcept;
+        void wait_for_frame(uint32_t frame_index);
         void destroy_swapchain() noexcept;
         void destroy_surface() noexcept;
         void shutdown() noexcept;
@@ -87,6 +88,7 @@ namespace Corona::Horizon
         std::vector<HardwareImage> swapchain_images_;
         std::vector<VkSemaphore> image_available_;
         std::vector<VkSemaphore> render_finished_;
+        std::vector<std::optional<SubmissionToken>> submitted_frames_;
         uint32_t frame_index_ { 0 };
         std::optional<PendingFrame> pending_frame_;
         PresentStatus fake_status_ { PresentStatus::Skipped };

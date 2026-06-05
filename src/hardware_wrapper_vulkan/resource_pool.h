@@ -14,11 +14,13 @@
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -167,21 +169,47 @@ namespace Corona::Horizon
                 throw std::runtime_error("ResourceStore allocation returned an empty id.");
             }
 
+            std::uint64_t generation = 0;
             try
             {
-                auto entry = storage_.acquire_write(id);
-                entry->value = std::forward<Factory>(factory)();
-                entry->generation = next_generation_.fetch_add(1, std::memory_order_relaxed);
-                if (entry->generation == 0)
                 {
+                    auto entry = storage_.acquire_write(id);
+                    entry->value = std::forward<Factory>(factory)();
                     entry->generation = next_generation_.fetch_add(1, std::memory_order_relaxed);
+                    if (entry->generation == 0)
+                    {
+                        entry->generation = next_generation_.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    generation = entry->generation;
+                    entry->alive = true;
                 }
-                entry->alive = true;
-                return Handle(this, id, entry->generation);
+
+                {
+                    lock_live_handles();
+                    try
+                    {
+                        live_handles_.push_back({ id, generation });
+                    }
+                    catch (...)
+                    {
+                        unlock_live_handles();
+                        throw;
+                    }
+                    unlock_live_handles();
+                }
+
+                return Handle(this, id, generation);
             }
             catch (...)
             {
-                storage_.deallocate(id);
+                if (generation != 0)
+                {
+                    release(id, generation);
+                }
+                else
+                {
+                    storage_.deallocate(id);
+                }
                 throw;
             }
         }
@@ -202,6 +230,28 @@ namespace Corona::Horizon
                 return {};
             }
             return Write(storage_.try_acquire_write(handle.id()), handle.generation());
+        }
+
+        void release_all() noexcept
+        {
+            std::vector<std::pair<std::uintptr_t, std::uint64_t>> live_handles;
+
+            lock_live_handles();
+            try
+            {
+                live_handles = live_handles_;
+            }
+            catch (...)
+            {
+                unlock_live_handles();
+                return;
+            }
+            unlock_live_handles();
+
+            for (const auto& [id, generation] : live_handles)
+            {
+                release(id, generation);
+            }
         }
 
     private:
@@ -230,14 +280,45 @@ namespace Corona::Horizon
                 }
 
                 storage_.deallocate(id);
+                remove_live_handle(id, generation);
             }
             catch (...)
             {
             }
         }
 
+        void remove_live_handle(std::uintptr_t id, std::uint64_t generation) noexcept
+        {
+            lock_live_handles();
+            try
+            {
+                std::erase_if(live_handles_, [id, generation](const auto& handle) {
+                    return handle.first == id && handle.second == generation;
+                });
+            }
+            catch (...)
+            {
+            }
+            unlock_live_handles();
+        }
+
+        void lock_live_handles() const noexcept
+        {
+            while (live_lock_.test_and_set(std::memory_order_acquire))
+            {
+                std::this_thread::yield();
+            }
+        }
+
+        void unlock_live_handles() const noexcept
+        {
+            live_lock_.clear(std::memory_order_release);
+        }
+
         mutable Corona::Kernel::Utils::Storage<Slot> storage_ {};
         std::atomic<std::uint64_t> next_generation_ { 1 };
+        mutable std::atomic_flag live_lock_ = ATOMIC_FLAG_INIT;
+        std::vector<std::pair<std::uintptr_t, std::uint64_t>> live_handles_;
     };
 
     template <typename Store>
@@ -487,6 +568,17 @@ namespace Corona::Horizon
         ResourceStore<DisplayerWrap, NoopReleaser> displayers;
         ResourceStore<ExecutorWrap, NoopReleaser> executors;
         ResourceStore<PushConstantWrap, NoopReleaser> push_constants;
+
+        void release_all() noexcept
+        {
+            displayers.release_all();
+            executors.release_all();
+            rasterizer_pipelines.release_all();
+            compute_pipelines.release_all();
+            push_constants.release_all();
+            images.release_all();
+            buffers.release_all();
+        }
     };
 
     ResourcePool& resource_pool();

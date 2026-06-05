@@ -65,38 +65,81 @@ namespace EmbeddedShader
 			auto vsCodeModule = result.vertex->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
 			auto fsCodeModule = result.fragment->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
 			auto& globals = Ast::Parser::getGlobalStatements();
+			std::vector<void**> unmatchedTextureRefs;
+			auto isSampledImageBind = [](ShaderCodeModule::ShaderResources::BindType bindType) {
+				return bindType == ShaderCodeModule::ShaderResources::sampledImages ||
+					   bindType == ShaderCodeModule::ShaderResources::texture ||
+					   bindType == ShaderCodeModule::ShaderResources::sampler;
+			};
+			auto addAutoBindEntry = [&](void** boundResourceRef,
+										const ShaderCodeModule::ShaderResources::ShaderBindInfo& bindInfo) {
+				for (const AutoBindEntry& entry : result.autoBindEntries)
+				{
+					if (entry.boundResourceRef == boundResourceRef &&
+						entry.byteOffset == bindInfo.byteOffset &&
+						entry.typeSize == bindInfo.typeSize &&
+						entry.bindType == static_cast<int32_t>(bindInfo.bindType) &&
+						entry.location == bindInfo.location &&
+						entry.set == bindInfo.set &&
+						entry.binding == bindInfo.binding)
+					{
+						return;
+					}
+				}
+
+				result.autoBindEntries.push_back({
+					boundResourceRef,
+					bindInfo.byteOffset,
+					bindInfo.typeSize,
+					static_cast<int32_t>(bindInfo.bindType),
+					bindInfo.location,
+					bindInfo.set,
+					bindInfo.binding
+				});
+			};
+			auto findSingleSampledImageBind = [&](ShaderCodeModule& codeModule)
+				-> ShaderCodeModule::ShaderResources::ShaderBindInfo* {
+				ShaderCodeModule::ShaderResources::ShaderBindInfo* found = nullptr;
+				for (auto& bindInfo : codeModule.shaderResources.bindInfoPool)
+				{
+					if (!isSampledImageBind(bindInfo.bindType))
+						continue;
+
+					if (found != nullptr)
+						return nullptr;
+
+					found = &bindInfo;
+				}
+				return found;
+			};
 			for (auto& stmt : globals)
 			{
 				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
 				{
 					if (def->texture && def->texture->boundResourceRef)
 					{
+						bool matched = false;
 						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
 						{
-							result.autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								bindInfo->set,
-								bindInfo->binding
-							});
+							addAutoBindEntry(def->texture->boundResourceRef, *bindInfo);
+							matched = true;
 						}
 						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
 						{
-							result.autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								bindInfo->set,
-								bindInfo->binding
-							});
+							addAutoBindEntry(def->texture->boundResourceRef, *bindInfo);
+							matched = true;
 						}
+						if (!matched)
+							unmatchedTextureRefs.push_back(def->texture->boundResourceRef);
 					}
 				}
+			}
+			if (unmatchedTextureRefs.size() == 1)
+			{
+				if (auto* bindInfo = findSingleSampledImageBind(vsCodeModule))
+					addAutoBindEntry(unmatchedTextureRefs.front(), *bindInfo);
+				if (auto* bindInfo = findSingleSampledImageBind(fsCodeModule))
+					addAutoBindEntry(unmatchedTextureRefs.front(), *bindInfo);
 			}
 
 			// Collect render target auto-bind entries from operator() calls in FS.

@@ -219,6 +219,23 @@ namespace
         return image;
     }
 
+    [[nodiscard]] Corona::Horizon::HardwareImage test_depth_image(uint32_t width, uint32_t height)
+    {
+        Corona::Horizon::HardwareImage image;
+        auto resource = Corona::Horizon::resource_pool().images.create([=] {
+            Corona::Horizon::ImageWrap wrap;
+            wrap.desc = Corona::Horizon::HardwareImageDesc::depth_attachment(width, height, Corona::Horizon::Format::D32);
+            wrap.clear_value.depthStencil = { 1.0f, 0 };
+            return wrap;
+        });
+
+        Corona::Horizon::ResourceBridge::set(
+            image,
+            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
+                std::move(resource)));
+        return image;
+    }
+
     [[nodiscard]] Corona::Horizon::RasterizerPipelineDesc test_rasterizer_desc()
     {
         EmbeddedShader::ShaderCodeModule::ShaderResources vertex_resources;
@@ -288,26 +305,7 @@ void main()
 
     void wait_for_token(Corona::Horizon::Queue& queue, Corona::Horizon::SubmissionToken token)
     {
-        if (token.timeline == VK_NULL_HANDLE)
-        {
-            queue.mark_completed_for_tests(token.value);
-            queue.retire_completed();
-            return;
-        }
-
-        VkSemaphoreWaitInfo wait_info {};
-        wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-        wait_info.semaphoreCount = 1;
-        wait_info.pSemaphores = &token.timeline;
-        wait_info.pValues = &token.value;
-
-        const VkResult result = vkWaitSemaphores(queue.device(), &wait_info, 5'000'000'000ull);
-        if (result != VK_SUCCESS)
-        {
-            throw std::runtime_error("vkWaitSemaphores failed while waiting for RasterizerPipeline smoke test. VkResult=" +
-                                     std::to_string(static_cast<int>(result)));
-        }
-
+        queue.wait_for(token);
         queue.retire_completed();
     }
 
@@ -498,12 +496,18 @@ void main()
 
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_rasterizer_pipeline_records_graphics_ir()
     {
-        Corona::Horizon::VulkanRasterizerPipeline pipeline(test_rasterizer_desc());
+        Corona::Horizon::RasterizerPipelineDesc desc = test_rasterizer_desc();
+        desc.depth_stencil.depth_test_enabled = true;
+        desc.depth_stencil.depth_write_enabled = true;
+        desc.depth_stencil.depth_compare_op = Corona::Horizon::CompareOp::Less;
+        desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32);
+        Corona::Horizon::VulkanRasterizerPipeline pipeline(desc);
         Corona::Horizon::HardwareBuffer index =
             test_buffer(6, sizeof(uint16_t), Corona::Horizon::BufferUsageFlags::Index);
         Corona::Horizon::HardwareBuffer vertex =
             test_buffer(3, sizeof(float) * 5, Corona::Horizon::BufferUsageFlags::Vertex);
         Corona::Horizon::HardwareImage color = test_color_image(128, 64);
+        Corona::Horizon::HardwareImage depth = test_depth_image(128, 64);
 
         const uint32_t push_constant = 42;
         pipeline.set_extent(128, 64);
@@ -513,6 +517,7 @@ void main()
             color,
             static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
             0);
+        pipeline.set_depth_target(depth);
         pipeline.set_push_constant_direct(
             0,
             &push_constant,
@@ -548,6 +553,28 @@ void main()
         expect(task.commands[1].op == Corona::Horizon::CommandOp::DrawIndexed, "RasterizerPipeline should record DrawIndexed IR.");
         expect(task.commands[2].op == Corona::Horizon::CommandOp::EndRendering, "RasterizerPipeline should end rendering after drawing.");
         expect(task.commands[0].payload.rendering.width == 128, "Rendering IR should preserve width.");
+        std::shared_ptr<Corona::Horizon::IResourceRef> rendering_color_token =
+            Corona::Horizon::ResourceBridge::token(task.commands[0].payload.rendering.color.handle);
+        expect(rendering_color_token && rendering_color_token->id() == color.get_image_id(),
+               "Rendering IR should carry the bound color target handle.");
+        expect(!task.commands[0].resources.empty(), "Rendering IR should track the color target as a resource use.");
+        std::shared_ptr<Corona::Horizon::IResourceRef> rendering_resource_token =
+            Corona::Horizon::ResourceBridge::token(task.commands[0].resources[0].handle);
+        expect(rendering_resource_token && rendering_resource_token->id() == color.get_image_id(),
+               "Rendering resource uses should match the payload color target handle.");
+        auto begin_color =
+            Corona::Horizon::read<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
+                Corona::Horizon::ResourceBridge::token(task.commands[0].payload.rendering.color.handle));
+        expect(begin_color && begin_color->desc.extent.width == 128 && begin_color->desc.extent.height == 64,
+               "Rendering IR color target should resolve back to the image resource slot.");
+        std::shared_ptr<Corona::Horizon::IResourceRef> rendering_depth_token =
+            Corona::Horizon::ResourceBridge::token(task.commands[0].payload.rendering.depth.handle);
+        expect(rendering_depth_token && rendering_depth_token->id() == depth.get_image_id(),
+               "Rendering IR should carry the bound depth target handle.");
+        expect(task.commands[0].payload.rendering.clear_color,
+               "RasterizerPipeline rendering IR should request a per-frame color clear.");
+        expect(task.commands[0].payload.rendering.clear_depth,
+               "RasterizerPipeline rendering IR should request a per-frame depth clear.");
         expect(task.commands[1].payload.draw_indexed.first_index == 1, "DrawIndexed IR should preserve first_index.");
         expect(task.commands[1].payload.draw_indexed.vertex_offset == -2, "DrawIndexed IR should preserve vertex_offset.");
         std::shared_ptr<Corona::Horizon::IResourceRef> draw_pipeline_token =
@@ -656,6 +683,14 @@ void main()
                                                                  height,
                                                                  Corona::Horizon::Format::RGBA8_UNORM,
                                                                  "execution.rasterizer.real.color"));
+        expect(static_cast<bool>(color), "Real RasterizerPipeline smoke test should create a color target.");
+        {
+            auto color_resource =
+                Corona::Horizon::read<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
+                    Corona::Horizon::ResourceBridge::token(color));
+            expect(color_resource && color_resource->image_handle != VK_NULL_HANDLE && color_resource->image_view != VK_NULL_HANDLE,
+                   "Real RasterizerPipeline smoke test color target should own a Vulkan image and view.");
+        }
         color.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
         const std::array<uint16_t, 3> indices { 0, 1, 2 };
@@ -698,6 +733,23 @@ void main()
             std::static_pointer_cast<Corona::Horizon::VulkanRasterizerPipeline>(pipeline_resource->impl);
         Corona::Horizon::CommandBatch batch = impl->command_batch();
         batch << color.copy_to(readback);
+
+        {
+            Corona::Horizon::CommandRecorder recorder;
+            for (const Corona::Horizon::StreamCommand& command : batch.commands())
+            {
+                command.record(recorder);
+            }
+
+            Corona::Horizon::RecordedTask task = recorder.close();
+            expect(!task.commands.empty() && task.commands[0].op == Corona::Horizon::CommandOp::BeginRendering,
+                   "Real RasterizerPipeline smoke test should submit a BeginRendering command first.");
+            auto begin_color =
+                Corona::Horizon::read<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
+                    Corona::Horizon::ResourceBridge::token(task.commands[0].payload.rendering.color.handle));
+            expect(begin_color && begin_color->image_handle != VK_NULL_HANDLE && begin_color->image_view != VK_NULL_HANDLE,
+                   "BeginRendering payload should resolve the real Vulkan color target before submit.");
+        }
 
         Corona::Horizon::HardwareExecutor executor([&manager](Corona::Horizon::DeviceId, Corona::Horizon::QueueCapability capability) -> Corona::Horizon::Queue& {
             Corona::Horizon::Queue* queue = manager.queue_for(capability);

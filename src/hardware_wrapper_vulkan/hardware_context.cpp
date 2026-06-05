@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "corona/kernel/core/i_logger.h"
+#include "resource_pool.h"
 
 #define VOLK_IMPLEMENTATION
 #include <volk.h>
@@ -168,8 +169,23 @@ namespace Corona::Horizon
                 continue;
             }
 
-            //device->resource_manager.cleanUpResourceManager();
-            //device->device_manager.cleanUpDeviceManager();
+            if (device->device_manager.logical_device() != VK_NULL_HANDLE)
+            {
+                (void)vkDeviceWaitIdle(device->device_manager.logical_device());
+            }
+        }
+
+        resource_pool().release_all();
+
+        for (auto& device : devices_)
+        {
+            if (!device)
+            {
+                continue;
+            }
+
+            device->resource_manager.shutdown();
+            device->device_manager.shutdown();
         }
 
         devices_.clear();

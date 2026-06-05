@@ -1,6 +1,7 @@
 #include "test_registry.h"
 
 #include "hardware_wrapper_vulkan/hardware/command.h"
+#include "hardware_wrapper_vulkan/hardware/device_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
 
@@ -74,6 +75,12 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    void wait_for_token(Corona::Horizon::Queue& queue, const Corona::Horizon::SubmissionToken& token)
+    {
+        queue.wait_for(token);
+        queue.retire_completed();
     }
 
     void close_external_handle(Corona::Horizon::ExternalMemoryHandle handle) noexcept
@@ -386,19 +393,29 @@ namespace
         }
 
         Corona::Horizon::HardwareImageDesc desc =
-            Corona::Horizon::HardwareImageDesc::texture_2d_array(8, 8, 2, Corona::Horizon::Format::RGBA8_UNORM);
+            Corona::Horizon::HardwareImageDesc::texture_2d_array(8,
+                                                                 8,
+                                                                 2,
+                                                                 Corona::Horizon::Format::RGBA8_UNORM,
+                                                                 Corona::Horizon::ImageUsageFlags::Sampled |
+                                                                     Corona::Horizon::ImageUsageFlags::TransferSrc |
+                                                                     Corona::Horizon::ImageUsageFlags::TransferDst,
+                                                                 "hardware_image.copy");
         desc.mip_levels = 2;
 
         Corona::Horizon::HardwareImage src(desc);
         Corona::Horizon::HardwareImage dst(desc);
-        const std::array<uint32_t, 16> staging_data {};
+        const std::array<uint32_t, 32> staging_data {};
         Corona::Horizon::HardwareBufferDesc buffer_desc =
             Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(staging_data.size(), "hardware_image.copy.buffer");
         buffer_desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
         Corona::Horizon::HardwareBuffer buffer =
             Corona::Horizon::HardwareBuffer(buffer_desc, std::as_bytes(std::span<const uint32_t>(staging_data)));
 
-        Corona::Horizon::CopyImageCommand image_copy = src.copy_to(dst, 1, 0, 1, 0);
+        Corona::Horizon::HardwareImage src_view = src.layer(1).mip(1);
+        Corona::Horizon::HardwareImage dst_view = dst.layer(0).mip(0);
+
+        Corona::Horizon::CopyImageCommand image_copy = src_view.copy_to(dst_view);
         expect(image_copy.copy_region().src_layer == 1, "CopyImageCommand should preserve source layer.");
         expect(image_copy.copy_region().dst_layer == 0, "CopyImageCommand should preserve destination layer.");
         expect(image_copy.copy_region().src_mip == 1, "CopyImageCommand should preserve source mip.");
@@ -410,7 +427,7 @@ namespace
         expect(image_copy_task.commands.size() == 1, "CopyImageCommand should record one IR command.");
         expect(image_copy_task.commands[0].op == Corona::Horizon::CommandOp::CopyImage, "CopyImageCommand should record CopyImage IR.");
 
-        Corona::Horizon::CopyImageToBufferCommand image_to_buffer = src.copy_to(buffer, 1, 1, sizeof(uint32_t));
+        Corona::Horizon::CopyImageToBufferCommand image_to_buffer = src_view.copy_to(buffer, 0, 0, sizeof(uint32_t));
         expect(image_to_buffer.copy_region().image_layer == 1, "CopyImageToBufferCommand should preserve image layer.");
         expect(image_to_buffer.copy_region().image_mip == 1, "CopyImageToBufferCommand should preserve image mip.");
         expect(image_to_buffer.copy_region().buffer_offset == sizeof(uint32_t), "CopyImageToBufferCommand should preserve buffer offset.");
@@ -421,10 +438,91 @@ namespace
         expect(image_to_buffer_task.commands.size() == 1, "CopyImageToBufferCommand should record one IR command.");
         expect(image_to_buffer_task.commands[0].op == Corona::Horizon::CommandOp::CopyImageToBuffer, "CopyImageToBufferCommand should record CopyImageToBuffer IR.");
 
-        Corona::Horizon::CopyBufferToImageCommand buffer_to_image = dst.copy_from(buffer, sizeof(uint32_t), 1, 1);
+        Corona::Horizon::HardwareImage upload_view = dst.layer(1).mip(1);
+        Corona::Horizon::CopyBufferToImageCommand buffer_to_image = upload_view.copy_from(buffer, sizeof(uint32_t));
         expect(buffer_to_image.copy_region().image_layer == 1, "CopyBufferToImageCommand from HardwareImage should preserve image layer.");
         expect(buffer_to_image.copy_region().image_mip == 1, "CopyBufferToImageCommand from HardwareImage should preserve image mip.");
         expect(buffer_to_image.copy_region().buffer_offset == sizeof(uint32_t), "CopyBufferToImageCommand from HardwareImage should preserve buffer offset.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_device_local_upload_and_readback()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        Corona::Horizon::DeviceManager& manager = Corona::Horizon::device_manager();
+        if (manager.queue_for(Corona::Horizon::QueueCapability::Transfer) == nullptr)
+        {
+            return Corona::Horizon::Tests::TestResult::skip("No transfer-capable Vulkan queue was found.");
+        }
+
+        constexpr uint32_t width = 2;
+        constexpr uint32_t height = 2;
+        const std::array<uint32_t, width * height> pixels {
+            0xff0000ffu,
+            0xff00ff00u,
+            0xffff0000u,
+            0xffffffffu,
+        };
+
+        try
+        {
+            Corona::Horizon::HardwareImageDesc image_desc =
+                Corona::Horizon::HardwareImageDesc::texture_2d(width,
+                                                               height,
+                                                               Corona::Horizon::Format::RGBA8_UNORM,
+                                                               Corona::Horizon::ImageUsageFlags::TransferSrc |
+                                                                   Corona::Horizon::ImageUsageFlags::TransferDst,
+                                                               "hardware_image.upload_readback");
+            Corona::Horizon::HardwareImage image(image_desc);
+            expect(static_cast<bool>(image), "Device-local upload/readback test should create an image.");
+
+            const std::array<uint32_t, pixels.size()> zeros {};
+            Corona::Horizon::HardwareBufferDesc readback_desc =
+                Corona::Horizon::HardwareBufferDesc::storage<uint32_t>(zeros.size(), "hardware_image.upload_readback.buffer");
+            readback_desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
+            Corona::Horizon::HardwareBuffer readback(readback_desc, std::as_bytes(std::span<const uint32_t>(zeros)));
+            expect(static_cast<bool>(readback), "Device-local upload/readback test should create a readback buffer.");
+
+            Corona::Horizon::CommandBatch batch = image.upload<uint32_t>(std::span<const uint32_t>(pixels));
+            batch << image.copy_to(readback);
+
+            Corona::Horizon::HardwareExecutor executor([&manager](Corona::Horizon::DeviceId, Corona::Horizon::QueueCapability capability) -> Corona::Horizon::Queue& {
+                Corona::Horizon::Queue* queue = manager.queue_for(capability);
+                if (queue == nullptr)
+                {
+                    throw std::runtime_error("HardwareImage upload/readback test could not resolve a Vulkan queue.");
+                }
+                return *queue;
+            });
+
+            Corona::Horizon::SubmitReceipt receipt =
+                executor.stream()
+                << batch
+                << Corona::Horizon::commit();
+            expect(!receipt.tokens.empty(), "HardwareImage upload/readback should submit queue work.");
+
+            for (const Corona::Horizon::SubmissionToken& token : receipt.tokens)
+            {
+                Corona::Horizon::Queue* queue = manager.queue_for(token.queue.capability);
+                expect(queue != nullptr, "Submitted HardwareImage upload/readback token should resolve to a queue.");
+                wait_for_token(*queue, token);
+            }
+
+            std::array<uint32_t, pixels.size()> readback_pixels {};
+            expect(readback.read<uint32_t>(readback_pixels), "HardwareImage upload/readback should read copied pixels.");
+            expect(std::equal(readback_pixels.begin(), readback_pixels.end(), pixels.begin()),
+                   "HardwareImage device-local upload should round-trip through image-to-buffer readback.");
+        }
+        catch (const std::exception& error)
+        {
+            return Corona::Horizon::Tests::TestResult::skip(std::string("HardwareImage upload/readback is unavailable on this Vulkan device: ") + error.what());
+        }
 
         return Corona::Horizon::Tests::TestResult::pass();
     }
@@ -438,18 +536,38 @@ namespace
         }
 
         Corona::Horizon::HardwareImageDesc desc =
-            Corona::Horizon::HardwareImageDesc::texture_2d(8, 8, Corona::Horizon::Format::RGBA8_UNORM);
+            Corona::Horizon::HardwareImageDesc::texture_2d(8,
+                                                           8,
+                                                           Corona::Horizon::Format::RGBA8_UNORM,
+                                                           Corona::Horizon::ImageUsageFlags::Sampled |
+                                                               Corona::Horizon::ImageUsageFlags::Storage |
+                                                               Corona::Horizon::ImageUsageFlags::TransferSrc |
+                                                               Corona::Horizon::ImageUsageFlags::TransferDst,
+                                                           "hardware_image.descriptor");
         Corona::Horizon::HardwareImage image(desc);
 
         try
         {
             const uint32_t first = image.store_descriptor();
-            const uint32_t second = image.store_descriptor();
-            expect(first == second, "HardwareImage::store_descriptor should return a stable sampled-image descriptor index.");
+            const uint32_t second = image.store_sampled_descriptor();
+            expect(first == second, "HardwareImage::store_descriptor should return the stable sampled-image descriptor index.");
+
+            const uint32_t storage_first = image.store_storage_descriptor();
+            const uint32_t storage_second = image.store_storage_descriptor();
+            expect(storage_first == storage_second, "HardwareImage::store_storage_descriptor should return a stable storage-image descriptor index.");
+
+            Corona::Horizon::HardwareImage depth(
+                Corona::Horizon::HardwareImageDesc::depth_attachment(4,
+                                                                     4,
+                                                                     Corona::Horizon::Format::D32,
+                                                                     "hardware_image.depth_descriptor"));
+            const uint32_t depth_first = depth.store_sampled_descriptor();
+            const uint32_t depth_second = depth.store_descriptor();
+            expect(depth_first == depth_second, "Depth HardwareImage sampled descriptors should use the sampled bindless array.");
         }
         catch (const std::runtime_error& error)
         {
-            return Corona::Horizon::Tests::TestResult::skip(std::string("Sampled image descriptors are unavailable on this Vulkan device: ") + error.what());
+            return Corona::Horizon::Tests::TestResult::skip(std::string("Bindless image descriptors are unavailable on this Vulkan device: ") + error.what());
         }
 
         Corona::Horizon::HardwareImageDesc external_desc =
@@ -533,12 +651,17 @@ namespace Corona::Horizon::Tests
             },
             {
                 "hardware_image.copy_command_facades",
-                "HardwareImage copy facades return value commands that preserve image metadata and record typed IR.",
+                "HardwareImage copy facades translate view-local layer/mip parameters and record typed IR.",
                 test_copy_command_facades,
             },
             {
+                "hardware_image.device_local_upload_readback",
+                "HardwareImage::upload records a staging copy that can round-trip through image-to-buffer readback.",
+                test_device_local_upload_and_readback,
+            },
+            {
                 "hardware_image.descriptor_external",
-                "HardwareImage sampled descriptors are stable and external memory round-trips when supported.",
+                "HardwareImage sampled, storage, and depth-sampled descriptors are stable, and external memory round-trips when supported.",
                 test_descriptor_and_external_round_trip,
             },
         };

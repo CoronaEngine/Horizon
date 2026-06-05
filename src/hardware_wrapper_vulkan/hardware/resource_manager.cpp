@@ -672,16 +672,27 @@ namespace Corona::Horizon
 
         VkSamplerCreateInfo sampler_info {};
         sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_info.magFilter = VK_FILTER_NEAREST;
-        sampler_info.minFilter = VK_FILTER_NEAREST;
-        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_info.magFilter = VK_FILTER_LINEAR;
+        sampler_info.minFilter = VK_FILTER_LINEAR;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
         sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         sampler_info.mipLodBias = 0.0f;
         sampler_info.minLod = 0.0f;
         sampler_info.maxLod = VK_LOD_CLAMP_NONE;
-        sampler_info.anisotropyEnable = VK_FALSE;
+        VkPhysicalDeviceFeatures features {};
+        vkGetPhysicalDeviceFeatures(device_manager_->physical_device(), &features);
+        if (features.samplerAnisotropy == VK_TRUE)
+        {
+            sampler_info.anisotropyEnable = VK_TRUE;
+            sampler_info.maxAnisotropy = device_manager_->properties().properties.limits.maxSamplerAnisotropy;
+        }
+        else
+        {
+            sampler_info.anisotropyEnable = VK_FALSE;
+            sampler_info.maxAnisotropy = 1.0f;
+        }
         sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
         sampler_info.unnormalizedCoordinates = VK_FALSE;
         sampler_info.compareEnable = VK_FALSE;
@@ -692,6 +703,19 @@ namespace Corona::Horizon
                                         nullptr,
                                         &default_sampler_),
                         "vkCreateSampler(bindless default)");
+    }
+
+    VkSampler ResourceManager::default_sampler()
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::default_sampler called before initialize().");
+        }
+
+        create_default_sampler();
+        return default_sampler_;
     }
 
     void ResourceManager::create_bindless_descriptor_array(DescriptorArray& descriptors,
