@@ -67,6 +67,7 @@ namespace Corona::Horizon
         [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire();
         [[nodiscard]] SubmissionToken submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals);
         [[nodiscard]] VkResult present(const VkPresentInfoKHR& present_info);
+        void wait_for(const SubmissionToken& token) const;
         void retire_completed();
 
         [[nodiscard]] uint64_t completed_value() const;

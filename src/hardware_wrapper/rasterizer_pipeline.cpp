@@ -38,6 +38,25 @@ namespace Corona::Horizon
 
             return make_token<RasterizerPipelineStore>(std::move(handle));
         }
+
+        void bind_auto_resources(const std::shared_ptr<VulkanRasterizerPipeline>& impl)
+        {
+            std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries = impl->auto_bind_entries();
+
+            for (const EmbeddedShader::AutoBindEntry& entry : auto_bind_entries)
+            {
+                if (entry.boundResourceRef == nullptr || *entry.boundResourceRef == nullptr)
+                    continue;
+
+                impl->set_resource_direct(entry.byteOffset,
+                                          entry.typeSize,
+                                          *static_cast<HardwareImage*>(*entry.boundResourceRef),
+                                          entry.bindType,
+                                          entry.location,
+                                          entry.set,
+                                          entry.binding);
+            }
+        }
     }
 
     RasterizerPipeline::RasterizerPipeline() = default;
@@ -89,22 +108,8 @@ namespace Corona::Horizon
     {
         std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
-        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries = impl->auto_bind_entries();
 
-        for (const EmbeddedShader::AutoBindEntry& entry : auto_bind_entries)
-        {
-            if (entry.boundResourceRef == nullptr || *entry.boundResourceRef == nullptr)
-                continue;
-
-            impl->set_resource_direct(entry.byteOffset,
-                                      entry.typeSize,
-                                      *static_cast<HardwareImage*>(*entry.boundResourceRef),
-                                      entry.bindType,
-                                      entry.location,
-                                      entry.set,
-                                      entry.binding);
-        }
-
+        bind_auto_resources(impl);
         impl->set_extent(width, height);
         return *this;
     }
@@ -125,7 +130,9 @@ namespace Corona::Horizon
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
 
-        pipeline_impl(token)->record(*this, index_buffer, vertex_buffer, params);
+        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
+        bind_auto_resources(impl);
+        impl->record(*this, index_buffer, vertex_buffer, params);
         return *this;
     }
 
@@ -145,6 +152,14 @@ namespace Corona::Horizon
                             image,
                             static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
                             location);
+        return *this;
+    }
+
+    RasterizerPipeline& RasterizerPipeline::bind_depth_target(HardwareImage& image)
+    {
+        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
+
+        pipeline_impl(token)->set_depth_target(image);
         return *this;
     }
 

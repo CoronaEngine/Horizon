@@ -483,6 +483,38 @@ namespace
         return Corona::Horizon::Tests::TestResult::pass();
     }
 
+    [[nodiscard]] Corona::Horizon::Tests::TestResult test_combined_vertex_index_storage_usage()
+    {
+        const auto environment = require_vulkan_environment();
+        if (environment.status == Corona::Horizon::Tests::TestStatus::Skipped)
+        {
+            return environment;
+        }
+
+        const std::array<uint32_t, 6> initial { 0, 1, 2, 2, 3, 0 };
+        Corona::Horizon::HardwareBufferDesc desc =
+            Corona::Horizon::HardwareBufferDesc::typed<uint32_t>(
+                initial.size(),
+                Corona::Horizon::BufferUsageFlags::TransferSrc |
+                    Corona::Horizon::BufferUsageFlags::TransferDst |
+                    Corona::Horizon::BufferUsageFlags::Vertex |
+                    Corona::Horizon::BufferUsageFlags::Index |
+                    Corona::Horizon::BufferUsageFlags::Storage,
+                "hardware_buffer.combined_vertex_index_storage");
+        desc.cpu_access = Corona::Horizon::CpuAccessMode::ReadWrite;
+
+        Corona::Horizon::HardwareBuffer buffer(desc, std::as_bytes(std::span<const uint32_t>(initial)));
+        expect(static_cast<bool>(buffer), "Combined vertex/index/storage HardwareBuffer should be valid.");
+        expect(buffer.get_element_size() == sizeof(uint32_t), "Combined usage buffer should preserve element size.");
+        expect(buffer.get_element_count() == initial.size(), "Combined usage buffer should preserve element count.");
+
+        std::array<uint32_t, initial.size()> readback {};
+        expect(buffer.read<uint32_t>(readback), "Combined usage buffer should be host-readable when requested.");
+        expect_array_eq(readback, initial, "Combined usage buffer readback should match initial data.");
+
+        return Corona::Horizon::Tests::TestResult::pass();
+    }
+
     [[nodiscard]] Corona::Horizon::Tests::TestResult test_copy_to_image_command_facade()
     {
         const auto environment = require_vulkan_environment();
@@ -495,14 +527,15 @@ namespace
         Corona::Horizon::HardwareBuffer src =
             host_read_write_storage_buffer<uint32_t>(std::span<const uint32_t>(src_data), "hardware_buffer.copy_image.src");
 
-        Corona::Horizon::HardwareImage image;
-        auto image_resource = Corona::Horizon::resource_pool().images.create([] {
-            return Corona::Horizon::ImageWrap {};
-        });
-        Corona::Horizon::ResourceBridge::set(
-            image,
-            Corona::Horizon::make_token<Corona::Horizon::ResourceStore<Corona::Horizon::ImageWrap, Corona::Horizon::ImageReleaser>>(
-                std::move(image_resource)));
+        Corona::Horizon::HardwareImageDesc image_desc =
+            Corona::Horizon::HardwareImageDesc::texture_2d_array(8,
+                                                                 8,
+                                                                 3,
+                                                                 Corona::Horizon::Format::RGBA8_UNORM,
+                                                                 Corona::Horizon::ImageUsageFlags::TransferDst,
+                                                                 "hardware_buffer.copy_image.dst");
+        image_desc.mip_levels = 4;
+        Corona::Horizon::HardwareImage image(image_desc);
 
         Corona::Horizon::CopyBufferToImageCommand command = src.copy_to(image, sizeof(uint32_t), 2, 3);
 
@@ -639,6 +672,11 @@ namespace Corona::Horizon::Tests
                 "hardware_buffer.copy_to_buffer_command",
                 "HardwareBuffer::copy_to returns a value command that preserves ranges and records CopyBuffer IR.",
                 test_copy_to_buffer_command_facade,
+            },
+            {
+                "hardware_buffer.combined_vertex_index_storage_usage",
+                "One HardwareBuffer can combine Vertex, Index, and Storage usage flags without a mirror resource.",
+                test_combined_vertex_index_storage_usage,
             },
             {
                 "hardware_buffer.copy_to_image_command",

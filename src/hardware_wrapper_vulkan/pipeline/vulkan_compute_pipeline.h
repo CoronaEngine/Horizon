@@ -3,6 +3,8 @@
 #include "hardware_wrapper_vulkan/hardware/command.h"
 #include "horizon.h"
 
+#include <volk.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>

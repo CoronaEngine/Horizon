@@ -255,13 +255,7 @@ namespace Corona::Horizon
 
     CopyBufferToImageCommand HardwareBuffer::copy_to(const HardwareImage& dst, uint64_t buffer_offset, uint32_t image_layer, uint32_t image_mip) const
     {
-        if (!*this || !dst)
-            return {};
-
-        if (buffer_offset > get_byte_size())
-            return {};
-
-        return copy_to_image(buffer_ref(*this), image_ref(dst), { buffer_offset, image_layer, image_mip });
+        return dst.copy_from(*this, buffer_offset, image_layer, image_mip);
     }
 
     uint32_t HardwareBuffer::store_descriptor() const

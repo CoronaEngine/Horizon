@@ -60,6 +60,7 @@ namespace Corona::Horizon
         static constexpr uint32_t bindless_descriptor_set_count = 3;
         [[nodiscard]] std::array<VkDescriptorSetLayout, bindless_descriptor_set_count> bindless_descriptor_set_layouts();
         [[nodiscard]] std::array<VkDescriptorSet, bindless_descriptor_set_count> bindless_descriptor_sets();
+        [[nodiscard]] VkSampler default_sampler();
 
     private:
         struct DescriptorArray

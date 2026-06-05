@@ -4,9 +4,6 @@
 
 #include <tiny_obj_loader.h>
 
-#include <Codegen/BuiltinVariate.h>
-#include <Codegen/CustomLibrary.h>
-#include <Codegen/TypeAlias.h>
 #include <horizon.h>
 #include "hardware_wrapper_vulkan/hardware/execution.h"
 
@@ -14,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -23,21 +21,59 @@
 #include <vector>
 
 #include <stb_image.h>
-#include <Codegen/ControlFlows.h>
-#include GLSL(shaders/edsl_header.glsl)
 
 using namespace Corona::Horizon;
 
 namespace example_baseline_edsl_detail
 {
 
-constexpr uint32_t baseline_width = 800;
-constexpr uint32_t baseline_height = 600;
+constexpr uint32_t baseline_width = 1920;
+constexpr uint32_t baseline_height = 1080;
 constexpr float pi = 3.14159265358979323846f;
 
-constexpr BindingSlot model_binding{0, 64, 10, 0};
-constexpr BindingSlot view_binding{64, 64, 10, 0};
-constexpr BindingSlot proj_binding{128, 64, 10, 0};
+constexpr BindingSlot model_binding{0, 64, 0, 0};
+constexpr BindingSlot view_binding{64, 64, 0, 0};
+constexpr BindingSlot proj_binding{128, 64, 0, 0};
+constexpr BindingSlot texture_image_binding{0, 0, 4, 1, 0, 1};
+constexpr BindingSlot output_binding{0, 16, 2, 0};
+
+constexpr char baseline_model_vertex_shader[] = R"GLSL(
+#version 460
+
+layout(push_constant) uniform TransformPushConstant {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+} pc;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inColor;
+layout(location = 2) in vec2 inTexCoord;
+
+layout(location = 0) out vec3 fragColor;
+layout(location = 1) out vec2 fragTexCoord;
+
+void main()
+{
+    gl_Position = pc.proj * pc.view * pc.model * vec4(inPosition, 1.0);
+    fragColor = inColor;
+    fragTexCoord = inTexCoord;
+}
+)GLSL";
+
+constexpr char baseline_model_fragment_shader[] = R"GLSL(
+#version 460
+
+layout(set = 0, binding = 1) uniform sampler2D texSampler;
+layout(location = 0) in vec3 fragColor;
+layout(location = 1) in vec2 fragTexCoord;
+layout(location = 0) out vec4 outColor;
+
+void main()
+{
+    outColor = texture(texSampler, fragTexCoord);
+}
+)GLSL";
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
@@ -76,19 +112,6 @@ struct baseline_vertex
     {
         return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
     }
-};
-
-struct baseline_vertex_proxy
-{
-    EmbeddedShader::Float3 pos;
-    EmbeddedShader::Float3 color;
-    EmbeddedShader::Float2 tex_coord;
-};
-
-struct fragment_input_proxy
-{
-    EmbeddedShader::Float3 color;
-    EmbeddedShader::Float2 tex_coord;
 };
 
 struct baseline_vertex_hash
@@ -135,35 +158,6 @@ mat4 identity()
     result(1, 1) = 1.0f;
     result(2, 2) = 1.0f;
     result(3, 3) = 1.0f;
-    return result;
-}
-
-mat4 multiply(const mat4 &lhs, const mat4 &rhs)
-{
-    mat4 result{};
-    for (int row = 0; row < 4; ++row)
-    {
-        for (int col = 0; col < 4; ++col)
-        {
-            for (int k = 0; k < 4; ++k)
-            {
-                result(row, col) += lhs(row, k) * rhs(k, col);
-            }
-        }
-    }
-    return result;
-}
-
-std::array<float, 4> multiply(const mat4 &lhs, const std::array<float, 4> &rhs)
-{
-    std::array<float, 4> result{};
-    for (int row = 0; row < 4; ++row)
-    {
-        for (int col = 0; col < 4; ++col)
-        {
-            result[static_cast<size_t>(row)] += lhs(row, col) * rhs[static_cast<size_t>(col)];
-        }
-    }
     return result;
 }
 
@@ -354,9 +348,8 @@ HardwareImage create_render_target(uint32_t width, uint32_t height)
     HardwareImageDesc create_info =
         HardwareImageDesc::texture_2d(width,
                                       height,
-                                      Format::RGBA16_FLOAT,
-                                      ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
-                                          ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
+                                      Format::SBGRA8_UNORM,
+                                      ImageUsageFlags::ColorAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
                                           ImageUsageFlags::TransferDst);
 
     HardwareImage image(create_info);
@@ -364,15 +357,28 @@ HardwareImage create_render_target(uint32_t width, uint32_t height)
     return image;
 }
 
-mat4 make_mvp(float time_seconds)
+HardwareImage create_depth_target(uint32_t width, uint32_t height)
 {
-    mat4 model = rotate_z(time_seconds * pi * 0.5f);
-    mat4 view = look_at_rh({2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
-    mat4 proj = perspective_rh(pi * 0.25f,
-                               baseline_width / static_cast<float>(baseline_height),
-                               0.1f,
-                               10.0f);
-    return multiply(proj, multiply(view, model));
+    HardwareImage image(HardwareImageDesc::depth_attachment(width, height, Format::D32, "example_edsl.depth"));
+    image.set_clear_depth(1.0f, 0);
+    return image;
+}
+
+float example_time_seconds(std::chrono::high_resolution_clock::time_point start_time)
+{
+    if (const char *fixed_time = std::getenv("HORIZON_EXAMPLE_FIXED_TIME_SECONDS"))
+    {
+        char *end = nullptr;
+        const float value = std::strtof(fixed_time, &end);
+        if (end != fixed_time)
+        {
+            return value;
+        }
+    }
+
+    return std::chrono::duration<float, std::chrono::seconds::period>(
+               std::chrono::high_resolution_clock::now() - start_time)
+        .count();
 }
 
 uniform_buffer_object make_ubo(float time_seconds)
@@ -385,18 +391,6 @@ uniform_buffer_object make_ubo(float time_seconds)
                               0.1f,
                               10.0f);
     return ubo;
-}
-
-std::vector<baseline_vertex> transform_vertices(const std::vector<baseline_vertex> &vertices, const mat4 &mvp)
-{
-    std::vector<baseline_vertex> transformed = vertices;
-    for (auto &vertex : transformed)
-    {
-        std::array<float, 4> clip = multiply(mvp, std::array<float, 4>{vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.0f});
-        const float inv_w = 1.0f / clip[3];
-        vertex.pos = {clip[0] * inv_w, clip[1] * inv_w, clip[2] * inv_w};
-    }
-    return transformed;
 }
 
 } // namespace example_baseline_edsl_detail
@@ -430,45 +424,33 @@ void run_example_edsl()
         HardwareBuffer index_buffer = HardwareBuffer::index(mesh.indices);
         HardwareImage texture_image = load_texture_image();
         HardwareImage render_target = create_render_target(baseline_width, baseline_height);
+        HardwareImage depth_target = create_depth_target(baseline_width, baseline_height);
         HardwareExecutor render_executor;
         HardwareDisplayer displayer(glfwGetWin32Window(window));
 
-        using namespace EmbeddedShader;
-
-        Float4x4 model;
-        Float4x4 view;
-        Float4x4 proj;
-        Texture2D<ktm::fvec4> texture_proxy = texture_image;
-
-        auto vertex_shader = [&](Aggregate<baseline_vertex_proxy> vertex) -> Float4
-        {
-            // The aggregate varying version is kept for reference. The current
-            // backend path renders black with aggregate VS->FS payloads, so this
-            // baseline packs uv + a white color weight into one Float4 varying.
-            // Aggregate<fragment_input_proxy> output;
-            // output->color = vertex->color;
-            // output->tex_coord = vertex->tex_coord;
-            // return output;
-            position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-            // 原有 include 逻辑
-            //Float color_weight = edsl_header_glsl::get_color_weight(vertex->color);
-            Float color_weight = (vertex->color->x + vertex->color->y + vertex->color->z) * (1.0f / 3.0f);
-            return Float4(vertex->tex_coord, color_weight, 1.0f);
-        };
-
-        auto fragment_shader = [&](Float4 input) -> Float4
-        {
-            // Aggregate varying version kept for reference:
-            // return texture(texture_proxy, input->tex_coord) * Float4(input->color, 1.0f);
-            Float4 color = texture(texture_proxy, input->xy());
-            return color * Float4(input->z, input->z, input->z, 1.0f);
-        };
-
-        RasterizerPipeline rasterizer(RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader));
-        // Input texture is sampled by the fragment shader; it must not be registered as a render target.
-
-        Texture2D<ktm::fvec4> output_proxy = render_target;
-        rasterizer.bind_output_targets(output_proxy);
+        EmbeddedShader::CompilerOption rasterizer_options;
+        rasterizer_options.enableBindless = false;
+        rasterizer_options.compileGLSL = false;
+        rasterizer_options.compileHLSL = false;
+        rasterizer_options.compileDXIL = false;
+        rasterizer_options.compileDXBC = false;
+        RasterizerPipelineDesc rasterizer_desc =
+            RasterizerPipelineDesc::from_source(baseline_model_vertex_shader,
+                                                baseline_model_fragment_shader,
+                                                EmbeddedShader::ShaderLanguage::GLSL,
+                                                EmbeddedShader::ShaderLanguage::GLSL,
+                                                rasterizer_options);
+        DepthStencilStateDesc baseline_depth;
+        baseline_depth.depth_compare_op = CompareOp::Less;
+        rasterizer_desc.set_depth_stencil(baseline_depth);
+        rasterizer_desc.set_depth_attachment(DepthAttachmentDesc::with_format(Format::D32, "example_edsl.depth"));
+        BlendStateDesc baseline_blend;
+        baseline_blend.set_opaque();
+        rasterizer_desc.set_blend(baseline_blend);
+        RasterizerPipeline rasterizer(rasterizer_desc);
+        rasterizer[output_binding] = render_target;
+        rasterizer[texture_image_binding] = texture_image;
+        rasterizer.bind_depth_target(depth_target);
 
         auto start_time = std::chrono::high_resolution_clock::now();
         while (!glfwWindowShouldClose(window))
@@ -479,25 +461,16 @@ void run_example_edsl()
                 break;
             }
 
-            float time_seconds = std::chrono::duration<float, std::chrono::seconds::period>(
-                                     std::chrono::high_resolution_clock::now() - start_time)
-                                     .count();
+            float time_seconds = example_time_seconds(start_time);
             uniform_buffer_object ubo = make_ubo(time_seconds);
             rasterizer[model_binding] = ubo.model;
             rasterizer[view_binding] = ubo.view;
             rasterizer[proj_binding] = ubo.proj;
-            // CPU pre-transform path kept for reference, but disabled so the
-            // EDSL baseline remains comparable with GLSL/tutorial GPU MVP work.
-            // std::vector<baseline_vertex> transformed_vertices = transform_vertices(mesh.vertices, make_mvp(time_seconds));
-            // HardwareBuffer vertex_buffer(transformed_vertices, BufferUsage::VertexBuffer);
 
             DrawIndexedParams draw_params;
             draw_params.index_type = IndexType::UInt32;
             draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
-            // EDSL texture auto-binding writes the sampled image descriptor into
-            // the rasterizer push constant block. record() snapshots that block
-            // per draw, so bind before record just like the GLSL baseline does.
             rasterizer.clear_records();
             rasterizer(baseline_width, baseline_height);
             rasterizer.record(index_buffer, vertex_buffer, draw_params);

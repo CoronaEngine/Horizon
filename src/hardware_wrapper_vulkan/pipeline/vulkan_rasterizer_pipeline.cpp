@@ -279,6 +279,11 @@ namespace Corona::Horizon
             return write<BufferStore>(ResourceBridge::token(handle));
         }
 
+        [[nodiscard]] ImageStore::Read read_image_resource(const ResourceHandle& handle)
+        {
+            return read<ImageStore>(ResourceBridge::token(handle));
+        }
+
         [[nodiscard]] ImageStore::Write write_image_resource(const ResourceHandle& handle)
         {
             return write<ImageStore>(ResourceBridge::token(handle));
@@ -351,7 +356,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
         {
-            if (info.binding != 0)
+            if (info.binding != 0 || info.elementCount == 1)
                 return false;
 
             if (info.set == ResourceManager::bindless_texture_set)
@@ -427,6 +432,28 @@ namespace Corona::Horizon
             append_reflected_uniform_buffers(buffers, desc.vertex_shader.module);
             append_reflected_uniform_buffers(buffers, desc.fragment_shader.module);
             return buffers;
+        }
+
+        void append_reflected_sampled_images(std::vector<std::pair<uint32_t, uint32_t>>& bindings,
+                                             const EmbeddedShader::ShaderCodeModule& module)
+        {
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                if (!is_sampled_image_bind(static_cast<int32_t>(info.bindType)) || is_bindless_table(info))
+                    continue;
+
+                auto found = std::ranges::find(bindings, std::pair<uint32_t, uint32_t> { info.set, info.binding });
+                if (found == bindings.end())
+                    bindings.push_back({ info.set, info.binding });
+            }
+        }
+
+        [[nodiscard]] std::vector<std::pair<uint32_t, uint32_t>> reflected_sampled_images(const RasterizerPipelineDesc& desc)
+        {
+            std::vector<std::pair<uint32_t, uint32_t>> bindings;
+            append_reflected_sampled_images(bindings, desc.vertex_shader.module);
+            append_reflected_sampled_images(bindings, desc.fragment_shader.module);
+            return bindings;
         }
 
         void write_uniform_member(std::vector<UniformBufferBindingData>& buffers,
@@ -808,6 +835,11 @@ namespace Corona::Horizon
                 add_descriptor_binding(uniform_buffer.set, uniform_buffer.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
             }
 
+            for (const auto& [set, binding] : reflected_sampled_images(desc_))
+            {
+                add_descriptor_binding(set, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            }
+
             std::ranges::sort(state.descriptor_set_layouts, [](const auto& left, const auto& right) {
                 return left.set < right.set;
             });
@@ -1029,24 +1061,32 @@ namespace Corona::Horizon
         descriptor_owner->device = device;
 
         uint32_t uniform_buffer_count = 0;
+        uint32_t sampled_image_count = 0;
         for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
         {
             for (const PipelineState::DescriptorBindingLayout& binding : set_layout.bindings)
             {
                 if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                     ++uniform_buffer_count;
+                else if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    ++sampled_image_count;
             }
         }
 
-        if (uniform_buffer_count == 0)
+        if (uniform_buffer_count == 0 && sampled_image_count == 0)
             return prepared;
 
-        VkDescriptorPoolSize pool_size { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniform_buffer_count };
+        std::vector<VkDescriptorPoolSize> pool_sizes;
+        if (uniform_buffer_count != 0)
+            pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniform_buffer_count });
+        if (sampled_image_count != 0)
+            pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampled_image_count });
+
         VkDescriptorPoolCreateInfo pool_info {};
         pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pool_info.maxSets = static_cast<uint32_t>(found->descriptor_set_layouts.size());
-        pool_info.poolSizeCount = 1;
-        pool_info.pPoolSizes = &pool_size;
+        pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+        pool_info.pPoolSizes = pool_sizes.data();
 
         VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
         if (result != VK_SUCCESS)
@@ -1086,9 +1126,11 @@ namespace Corona::Horizon
         }
 
         std::vector<VkDescriptorBufferInfo> buffer_infos;
+        std::vector<VkDescriptorImageInfo> image_infos;
         std::vector<VkWriteDescriptorSet> writes;
         buffer_infos.reserve(uniform_buffer_count);
-        writes.reserve(uniform_buffer_count);
+        image_infos.reserve(sampled_image_count);
+        writes.reserve(uniform_buffer_count + sampled_image_count);
 
         for (size_t set_index = 0; set_index < found->descriptor_set_layouts.size(); ++set_index)
         {
@@ -1096,39 +1138,66 @@ namespace Corona::Horizon
             VkDescriptorSet descriptor_set = descriptor_sets[set_index];
             for (const PipelineState::DescriptorBindingLayout& binding_layout : set_layout.bindings)
             {
-                if (binding_layout.descriptor_type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    continue;
-
-                auto uniform = std::ranges::find_if(draw.uniform_buffers, [&](const UniformBufferBindingData& item) {
-                    return item.set == binding_layout.set && item.binding == binding_layout.binding;
-                });
-                if (uniform == draw.uniform_buffers.end() || uniform->data.empty())
-                    throw std::logic_error("RasterizerPipeline uniform buffer descriptor is missing reflected data.");
-
-                HardwareBuffer ubo = HardwareBuffer::from_bytes(uniform->data,
-                                                                1,
-                                                                BufferUsageFlags::Uniform,
-                                                                "RasterizerPipeline.uniform_buffer");
-                BufferStore::Read buffer = read_buffer_resource(static_cast<const ResourceHandle&>(ubo));
-                if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
-                    throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
-
-                VkDescriptorBufferInfo info {};
-                info.buffer = buffer->buffer_handle;
-                info.offset = 0;
-                info.range = buffer->logical_size();
-                buffer_infos.push_back(info);
-
                 VkWriteDescriptorSet write {};
                 write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 write.dstSet = descriptor_set;
                 write.dstBinding = binding_layout.binding;
                 write.dstArrayElement = 0;
                 write.descriptorCount = 1;
-                write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                write.pBufferInfo = &buffer_infos.back();
+                write.descriptorType = binding_layout.descriptor_type;
+
+                if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                {
+                    auto uniform = std::ranges::find_if(draw.uniform_buffers, [&](const UniformBufferBindingData& item) {
+                        return item.set == binding_layout.set && item.binding == binding_layout.binding;
+                    });
+                    if (uniform == draw.uniform_buffers.end() || uniform->data.empty())
+                        throw std::logic_error("RasterizerPipeline uniform buffer descriptor is missing reflected data.");
+
+                    HardwareBuffer ubo = HardwareBuffer::from_bytes(uniform->data,
+                                                                    1,
+                                                                    BufferUsageFlags::Uniform,
+                                                                    "RasterizerPipeline.uniform_buffer");
+                    BufferStore::Read buffer = read_buffer_resource(static_cast<const ResourceHandle&>(ubo));
+                    if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
+                        throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
+
+                    VkDescriptorBufferInfo info {};
+                    info.buffer = buffer->buffer_handle;
+                    info.offset = 0;
+                    info.range = buffer->logical_size();
+                    buffer_infos.push_back(info);
+                    write.pBufferInfo = &buffer_infos.back();
+                    descriptor_owner->buffers.push_back(std::move(ubo));
+                }
+                else if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                {
+                    auto resource = std::ranges::find_if(draw.bindings, [&](const DrawResourceBinding& item) {
+                        return item.kind == DrawBindingKind::SampledImage &&
+                               item.set == binding_layout.set &&
+                               item.binding == binding_layout.binding;
+                    });
+                    if (resource == draw.bindings.end())
+                        throw std::logic_error("RasterizerPipeline sampled image descriptor is missing a draw resource.");
+
+                    ImageStore::Read image = read_image_resource(resource->resource);
+                    if (!image || image->image_view == VK_NULL_HANDLE)
+                        throw std::logic_error("RasterizerPipeline sampled image binding requires a valid HardwareImage.");
+
+                    ResourceManager* manager = image->resource_manager != nullptr ? image->resource_manager : &resource_manager();
+                    VkDescriptorImageInfo info {};
+                    info.sampler = manager->default_sampler();
+                    info.imageView = image->image_view;
+                    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    image_infos.push_back(info);
+                    write.pImageInfo = &image_infos.back();
+                }
+                else
+                {
+                    continue;
+                }
+
                 writes.push_back(write);
-                descriptor_owner->buffers.push_back(std::move(ubo));
             }
         }
 
@@ -1272,6 +1341,12 @@ namespace Corona::Horizon
             *found = std::move(binding);
     }
 
+    void VulkanRasterizerPipeline::set_depth_target(const HardwareImage& image)
+    {
+        std::lock_guard lock(mutex_);
+        depth_target_ = image;
+    }
+
     void VulkanRasterizerPipeline::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
     {
         std::lock_guard lock(mutex_);
@@ -1299,6 +1374,11 @@ namespace Corona::Horizon
         draw.params = normalize_draw_params(index_buffer, params);
 
         std::lock_guard lock(mutex_);
+        for (const BoundImage& image : bound_images_)
+        {
+            if (is_sampled_image_bind(image.bind_type) && !is_stage_output(image.bind_type) && image.image)
+                draw.images.push_back(image);
+        }
         draw.push_constant_data = push_constant_data_;
         draw.uniform_buffers = uniform_buffers_;
         draws_.push_back(std::move(draw));
@@ -1326,6 +1406,7 @@ namespace Corona::Horizon
             .height = height_,
             .buffers = bound_buffers_,
             .images = bound_images_,
+            .depth_target = depth_target_,
             .draws = draws_,
         };
     }
@@ -1348,12 +1429,15 @@ namespace Corona::Horizon
         const bool has_rendering_scope = first_color != nullptr && state.width != 0 && state.height != 0;
         if (has_rendering_scope)
         {
+            const bool has_depth = state.depth_target && state.desc.depth_attachment.enabled;
             batch << begin_rendering(
                 {
                     .color = image_ref(first_color->image),
-                    .depth = {},
+                    .depth = has_depth ? image_ref(state.depth_target) : ImageRef {},
                     .width = state.width,
                     .height = state.height,
+                    .clear_color = true,
+                    .clear_depth = has_depth,
                 });
         }
 
@@ -1363,6 +1447,19 @@ namespace Corona::Horizon
             ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
             draw_desc.push_constant_data = draw.push_constant_data;
             draw_desc.uniform_buffers = draw.uniform_buffers;
+            for (const BoundImage& image : draw.images)
+            {
+                ResourceHandle handle = static_cast<const ResourceHandle&>(image.image);
+                draw_desc.bindings.push_back(
+                    {
+                        .set = image.set,
+                        .binding = image.binding,
+                        .resource = handle,
+                        .kind = DrawBindingKind::SampledImage,
+                        .access = AccessKind::Read,
+                    });
+                draw_desc.resource_uses.push_back({ handle, AccessKind::Read, 0 });
+            }
 
             batch << draw_indexed(buffer_ref(draw.index_buffer),
                                   buffer_ref(draw.vertex_buffer),

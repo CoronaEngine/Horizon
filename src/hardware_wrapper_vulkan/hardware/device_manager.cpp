@@ -330,7 +330,7 @@ namespace Corona::Horizon
         submission.command_buffer->mark_submitted(signal_value, std::move(submission.keep_alive));
         in_flight_.push_back(std::move(submission.command_buffer));
 
-        return { id_.device, id_, signal_value, timeline_ };
+        return { id_.device, id_, signal_value, SubmissionSync::make(timeline_) };
     }
 
     VkResult Queue::present(const VkPresentInfoKHR& present_info)
@@ -343,6 +343,34 @@ namespace Corona::Horizon
         }
 
         return vkQueuePresentKHR(queue_, &present_info);
+    }
+
+    void Queue::wait_for(const SubmissionToken& token) const
+    {
+        if (token.value == 0)
+        {
+            return;
+        }
+
+        const VkSemaphore timeline = token.sync ? token.sync->timeline() : VK_NULL_HANDLE;
+        if (device_ == VK_NULL_HANDLE || timeline == VK_NULL_HANDLE)
+        {
+            const_cast<Queue*>(this)->mark_completed_for_tests(token.value);
+            return;
+        }
+
+        VkSemaphoreWaitInfo wait_info {};
+        wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        wait_info.semaphoreCount = 1;
+        wait_info.pSemaphores = &timeline;
+        wait_info.pValues = &token.value;
+
+        const VkResult result = vkWaitSemaphores(device_, &wait_info, UINT64_MAX);
+        if (result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkWaitSemaphores failed. VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
     }
 
     uint64_t Queue::query_completed_value() const

@@ -59,14 +59,14 @@ namespace Corona::Horizon
 
             if (formats.size() == 1 && formats[0].format == VK_FORMAT_UNDEFINED)
             {
-                return { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+                return { VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
             }
 
             const VkFormat preferred_formats[] = {
-                VK_FORMAT_B8G8R8A8_UNORM,
-                VK_FORMAT_R8G8B8A8_UNORM,
                 VK_FORMAT_B8G8R8A8_SRGB,
                 VK_FORMAT_R8G8B8A8_SRGB,
+                VK_FORMAT_B8G8R8A8_UNORM,
+                VK_FORMAT_R8G8B8A8_UNORM,
             };
 
             for (VkFormat preferred : preferred_formats)
@@ -120,6 +120,27 @@ namespace Corona::Horizon
 #endif
 
             return extent;
+        }
+
+        [[nodiscard]] bool native_window_drawable(void* native_window) noexcept
+        {
+#if defined(_WIN32) || defined(_WIN64)
+            HWND window = static_cast<HWND>(native_window);
+            if (window == nullptr || IsWindow(window) == FALSE || IsWindowVisible(window) == FALSE || IsIconic(window) != FALSE)
+            {
+                return false;
+            }
+
+            RECT rect {};
+            if (GetClientRect(window, &rect) == FALSE)
+            {
+                return false;
+            }
+
+            return rect.right > rect.left && rect.bottom > rect.top;
+#else
+            return native_window != nullptr;
+#endif
         }
 
         [[nodiscard]] VkExtent2D choose_extent(const VkSurfaceCapabilitiesKHR& capabilities, void* native_window)
@@ -398,6 +419,8 @@ namespace Corona::Horizon
 
         image_available_.resize(swapchain_images_.size());
         render_finished_.resize(swapchain_images_.size());
+        submitted_frames_.clear();
+        submitted_frames_.resize(swapchain_images_.size());
 
         VkSemaphoreCreateInfo create_info {};
         create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -407,6 +430,24 @@ namespace Corona::Horizon
             throw_if_failed(vkCreateSemaphore(device_, &create_info, nullptr, &image_available_[index]), "vkCreateSemaphore(image_available)");
             throw_if_failed(vkCreateSemaphore(device_, &create_info, nullptr, &render_finished_[index]), "vkCreateSemaphore(render_finished)");
         }
+    }
+
+    void DisplayManager::wait_for_frame(uint32_t frame_index)
+    {
+        if (present_queue_ == nullptr || frame_index >= submitted_frames_.size())
+        {
+            return;
+        }
+
+        std::optional<SubmissionToken>& token = submitted_frames_[frame_index];
+        if (!token)
+        {
+            return;
+        }
+
+        present_queue_->wait_for(*token);
+        present_queue_->retire_completed();
+        token.reset();
     }
 
     SwapchainAcquire DisplayManager::acquire_next_image()
@@ -428,6 +469,8 @@ namespace Corona::Horizon
         }
 
         const uint32_t frame = frame_index_ % static_cast<uint32_t>(image_available_.size());
+        wait_for_frame(frame);
+
         const VkResult result = vkAcquireNextImageKHR(device_,
                                                       swapchain_,
                                                       std::numeric_limits<uint64_t>::max(),
@@ -476,6 +519,13 @@ namespace Corona::Horizon
             return prepared;
         }
 
+        if (!native_window_drawable(native_window_))
+        {
+            prepared.immediate_result.status = PresentStatus::Skipped;
+            prepared.immediate_result.message = "Native display window has no drawable client area.";
+            return prepared;
+        }
+
         ensure_swapchain();
 
         SwapchainAcquire acquire = acquire_next_image();
@@ -515,7 +565,7 @@ namespace Corona::Horizon
         return prepared;
     }
 
-    PresentResult DisplayManager::present(const PresentDesc& desc, const SubmissionToken&)
+    PresentResult DisplayManager::present(const PresentDesc& desc, const SubmissionToken& producer)
     {
         PresentResult result;
         result.displayer = desc.displayer;
@@ -537,6 +587,10 @@ namespace Corona::Horizon
 
         PendingFrame pending = *pending_frame_;
         VkSemaphore wait_semaphore = pending.render_finished;
+        if (pending.frame_index < submitted_frames_.size())
+        {
+            submitted_frames_[pending.frame_index] = producer;
+        }
 
         VkPresentInfoKHR present_info {};
         present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -622,6 +676,7 @@ namespace Corona::Horizon
             }
         }
         render_finished_.clear();
+        submitted_frames_.clear();
 
         if (device_ != VK_NULL_HANDLE && swapchain_ != VK_NULL_HANDLE)
         {

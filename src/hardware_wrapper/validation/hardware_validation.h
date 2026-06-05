@@ -22,6 +22,31 @@ namespace Corona::Horizon
     bool validate_buffer_host_write(const HardwareBuffer& buffer, std::span<const std::byte> data, uint64_t offset = 0);
     bool validate_buffer_host_read(const HardwareBuffer& buffer, std::span<std::byte> output, uint64_t offset = 0);
     bool validate_image_desc(const HardwareImageDesc& desc, std::span<const std::byte> upload_data = {});
+    bool validate_image_upload(const HardwareImageDesc& desc,
+                               ImageSubresourceRange range,
+                               uint32_t layer_index,
+                               uint32_t mip_index,
+                               std::span<const std::byte> data);
+    bool validate_image_copy(const HardwareImageDesc& src_desc,
+                             ImageSubresourceRange src_range,
+                             uint32_t src_layer,
+                             uint32_t src_mip,
+                             const HardwareImageDesc& dst_desc,
+                             ImageSubresourceRange dst_range,
+                             uint32_t dst_layer,
+                             uint32_t dst_mip);
+    bool validate_buffer_to_image_copy(const HardwareBuffer& src,
+                                       uint64_t buffer_offset,
+                                       const HardwareImageDesc& dst_desc,
+                                       ImageSubresourceRange dst_range,
+                                       uint32_t dst_layer,
+                                       uint32_t dst_mip);
+    bool validate_image_to_buffer_copy(const HardwareImageDesc& src_desc,
+                                       ImageSubresourceRange src_range,
+                                       uint32_t src_layer,
+                                       uint32_t src_mip,
+                                       const HardwareBuffer& dst,
+                                       uint64_t buffer_offset);
     bool validate_image_host_write(const HardwareImageDesc& desc,
                                    ImageSubresourceRange range,
                                    uint32_t layer_index,

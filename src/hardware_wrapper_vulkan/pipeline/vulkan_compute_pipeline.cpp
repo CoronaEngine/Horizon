@@ -154,7 +154,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
         {
-            if (info.binding != 0)
+            if (info.binding != 0 || info.elementCount == 1)
                 return false;
 
             if (info.set == ResourceManager::bindless_texture_set)

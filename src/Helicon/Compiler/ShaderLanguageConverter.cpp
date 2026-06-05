@@ -13,6 +13,8 @@
 
 #include "ShaderLanguageConverter.h"
 
+#include "Codegen/AST/Parser.hpp"
+
 #include "spirv-tools/linker.hpp"
 
 #include <array>
@@ -675,16 +677,12 @@ namespace EmbeddedShader
 	    sessionDesc.targets = targets.data();
 	    sessionDesc.targetCount = static_cast<SlangInt>(targets.size());
 
-	    std::array options =
+	    std::vector<slang::CompilerOptionEntry> options =
 	    {
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::EmitSpirvDirectly,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
 	        },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::BindlessSpaceIndex,
-                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-            },
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -694,8 +692,16 @@ namespace EmbeddedShader
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
 	        },
         };
+	    if (Ast::Parser::getBindless())
+	    {
+	        options.push_back(
+	            slang::CompilerOptionEntry{
+	                slang::CompilerOptionName::BindlessSpaceIndex,
+	                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+	            });
+	    }
 	    sessionDesc.compilerOptionEntries = options.data();
-	    sessionDesc.compilerOptionEntryCount = options.size();
+	    sessionDesc.compilerOptionEntryCount = static_cast<SlangInt>(options.size());
 
 	    Slang::ComPtr<slang::ISession> session;
 	    globalSession->createSession(sessionDesc, session.writeRef());
@@ -1142,6 +1148,12 @@ namespace EmbeddedShader
 
 			bindInfo.variateName = item.name.empty() ? compiler->get_name(item.id) : item.name;
 			bindInfo.typeName = spirTypeToString(*compiler, compiler->get_type(item.base_type_id));
+			bindInfo.elementCount = 1;
+			const spirv_cross::SPIRType& resourceType = compiler->get_type(item.type_id);
+			if (!resourceType.array.empty())
+			{
+				bindInfo.elementCount = resourceType.array.front();
+			}
 
 			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
 			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);

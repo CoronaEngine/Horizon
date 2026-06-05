@@ -30,6 +30,13 @@ target_link_libraries(HorizonExamples PRIVATE
     glfw
     Horizon)
 
+add_custom_command(TARGET HorizonExamples POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+            "$<TARGET_FILE_DIR:HorizonExamples>/shaders"
+    COMMENT "Copying example shaders to HorizonExamples output directory"
+    VERBATIM)
+
 helicon_install_runtime_deps(HorizonExamples)
 corona_copy_tbb_runtime_artifacts(HorizonExamples)
 helicon_compile_shaders(HorizonExamples)
