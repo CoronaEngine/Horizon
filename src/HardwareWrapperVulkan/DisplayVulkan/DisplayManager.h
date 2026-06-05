@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <numeric>
 #include <unordered_map>
 
@@ -33,6 +34,7 @@ class DisplayManager
     // 显示参数
     ktm::uvec2 displaySize{0, 0};
     void *displaySurface{nullptr};
+    uintptr_t sourceImageID{0};
     uint32_t currentFrame{0};
 
     // 交换链资源

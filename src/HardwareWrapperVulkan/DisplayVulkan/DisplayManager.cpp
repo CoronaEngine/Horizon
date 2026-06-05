@@ -7,7 +7,7 @@
 #include "HardwareWrapperVulkan/ResourcePool.h"
 #include "corona/kernel/memory/cache_aligned_allocator.h"
 
-//#define USE_SAME_DEVICE
+#define USE_SAME_DEVICE
 
 DisplayManager::DisplayManager() = default;
 
@@ -59,6 +59,7 @@ void DisplayManager::cleanUpDisplayManager()
     displayDeviceExecutor.reset();
     waitedExecutor.reset();
     displaySurface = nullptr;
+    sourceImageID = 0;
     displaySize = {0, 0};
     currentFrame = 0;
 }
@@ -456,6 +457,7 @@ void DisplayManager::recreateSwapChain()
 
     createSwapChain();
     createSyncObjects();
+    currentFrame = 0;
 }
 
 bool DisplayManager::needsSwapChainRecreation(const ktm::uvec2 &newSize) const
@@ -528,26 +530,40 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
 
     try
     {
-        // 检查是否需要重新初始化
-        if (auto const handle = globalImageStorages.acquire_read(displayImage.getImageID());
-            this->displaySurface != surface)
+        const uintptr_t incomingSourceImageID = displayImage.getImageID();
+        const bool surfaceChanged = this->displaySurface != surface;
+        const bool sourceImageChanged = sourceImageID != incomingSourceImageID;
+
+        // 检查是否需要重新初始化窗口资源或刷新输入图像缓存
+        if (surfaceChanged || sourceImageChanged)
         {
-            this->displaySurface = surface;
-
-            if (vkSurface != VK_NULL_HANDLE || swapChain != VK_NULL_HANDLE)
-            {
-                cleanUpDisplayManager();
-            }
-
-            if (!initDisplayManager(surface))
+            auto const handle = globalImageStorages.acquire_read(incomingSourceImageID);
+            if (!handle)
             {
                 return false;
+            }
+
+            if (surfaceChanged)
+            {
+                if (vkSurface != VK_NULL_HANDLE || swapChain != VK_NULL_HANDLE)
+                {
+                    cleanUpDisplayManager();
+                }
+
+                if (!initDisplayManager(surface))
+                {
+                    return false;
+                }
+
+                this->displaySurface = surface;
             }
 
             // 设置跨设备传输
             if (globalHardwareContext.getMainDevice() != displayDevice)
             // if (true)
             {
+                cleanupDisplayImage();
+                cleanupStagingBuffers();
                 this->displayImage = displayDevice->resourceManager.createImage(handle->imageSize, handle->imageFormat, handle->pixelSize, handle->imageUsage);
 
                 setupCrossDeviceTransfer(*handle);
@@ -556,6 +572,8 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
             {
                 this->displayImage = *handle;
             }
+
+            sourceImageID = incomingSourceImageID;
         }
 
         // 等待之前的执行器
@@ -616,10 +634,14 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         // 跨设备传输（如果需要）
         // copyCmd2 必须在 commit() 之前保持存活，提升到外层作用域
         std::optional<CopyBufferToImageCommand> copyCmd2;
-        if (auto const handle = globalImageStorages.acquire_write(displayImage.getImageID());
-            globalHardwareContext.getMainDevice() != displayDevice)
-        // if (true)
+        if (globalHardwareContext.getMainDevice() != displayDevice)
         {
+            auto const handle = globalImageStorages.acquire_write(incomingSourceImageID);
+            if (!handle)
+            {
+                return false;
+            }
+
             CopyImageToBufferCommand copyCmd(*handle, srcStaging);
             (*mainDeviceExecutor) << &copyCmd << mainDeviceExecutor->commit();
 
@@ -685,6 +707,7 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         // presentFenceInfo.pNext = const_cast<void *>(presentInfo.pNext);
         // presentInfo.pNext = &presentFenceInfo;
 
+        bool presentOutOfDate = false;
         auto commitToQueue = [&](DeviceManager::QueueUtils *currentRecordQueue) -> bool {
             // 让 pickQueueAndCommit 后续提交使用正确的 present 队列
             displayDeviceExecutor->currentRecordQueue = currentRecordQueue;
@@ -692,7 +715,11 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
             // 1. 先执行 Present（只依赖 binary semaphore）
             VkResult presentResult = vkQueuePresentKHR(currentRecordQueue->vkQueue, &presentInfo);
 
-            if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR)
+            if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR)
+            {
+                presentOutOfDate = true;
+            }
+            else if (presentResult != VK_SUCCESS)
             {
                 CFW_LOG_ERROR("vkQueuePresentKHR failed: {}", static_cast<int>(presentResult));
                 return false;
@@ -713,6 +740,12 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         };
 
         displayDeviceExecutor->pickQueueAndCommit(currentQueueIndex, presentQueues, commitToQueue);
+        if (presentOutOfDate)
+        {
+            recreateSwapChain();
+            return true;
+        }
+
         currentFrame = (currentFrame + 1) % swapChainImages.size();
         return true;
     }

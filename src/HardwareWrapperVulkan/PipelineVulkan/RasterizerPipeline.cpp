@@ -368,6 +368,47 @@ RasterizerPipelineVulkan::~RasterizerPipelineVulkan()
     }
 }
 
+void RasterizerPipelineVulkan::invalidateFramebufferResources()
+{
+    VkDevice device = VK_NULL_HANDLE;
+    if (const auto mainDevice = globalHardwareContext.getMainDevice())
+    {
+        device = mainDevice->deviceManager.getLogicalDevice();
+    }
+
+    if (device != VK_NULL_HANDLE)
+    {
+        vkDeviceWaitIdle(device);
+
+        if (frameBuffers != VK_NULL_HANDLE)
+        {
+            vkDestroyFramebuffer(device, frameBuffers, nullptr);
+            frameBuffers = VK_NULL_HANDLE;
+        }
+
+        if (graphicsPipeline != VK_NULL_HANDLE)
+        {
+            vkDestroyPipeline(device, graphicsPipeline, nullptr);
+            graphicsPipeline = VK_NULL_HANDLE;
+        }
+
+        if (pipelineLayout != VK_NULL_HANDLE)
+        {
+            vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+            pipelineLayout = VK_NULL_HANDLE;
+        }
+
+        if (renderPass != VK_NULL_HANDLE)
+        {
+            vkDestroyRenderPass(device, renderPass, nullptr);
+            renderPass = VK_NULL_HANDLE;
+        }
+    }
+
+    depthImage = HardwareImage();
+    graphicsPipelineDirty = false;
+}
+
 void RasterizerPipelineVulkan::createRenderPass(int multiviewCount)
 {
     const auto mainDevice = globalHardwareContext.getMainDevice();
@@ -768,7 +809,15 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
     if (typedBindType == BindType::stageOutputs)
     {
         if (location < renderTargets.size())
+        {
+            const uintptr_t oldImageID = renderTargets[location].getImageID();
+            const uintptr_t newImageID = const_cast<HardwareImage &>(image).getImageID();
+            if (oldImageID != 0 && oldImageID != newImageID)
+            {
+                invalidateFramebufferResources();
+            }
             renderTargets[location] = image;
+        }
         return;
     }
 
@@ -807,6 +856,11 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
 
 RasterizerPipelineVulkan *RasterizerPipelineVulkan::operator()(uint16_t width, uint16_t height)
 {
+    const ktm::uvec2 newImageSize{width, height};
+    if (imageSize.x != 0 && imageSize.y != 0 && imageSize != newImageSize)
+    {
+        invalidateFramebufferResources();
+    }
     imageSize = {width, height};
     return this;
 }

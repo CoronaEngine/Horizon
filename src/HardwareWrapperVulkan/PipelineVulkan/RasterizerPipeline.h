@@ -97,6 +97,7 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
     void createGraphicsPipeline(EmbeddedShader::ShaderCodeModule &vertShaderCode,
                                 EmbeddedShader::ShaderCodeModule &fragShaderCode);
     void createFramebuffers(ktm::uvec2 imageSize);
+    void invalidateFramebufferResources();
 
     [[nodiscard]] VkFormat getVkFormatFromType(const std::string &typeName, uint32_t elementCount) const;
 
