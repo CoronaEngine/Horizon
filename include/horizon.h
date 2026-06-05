@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -13,6 +14,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -63,6 +65,489 @@ namespace Corona::Horizon
     class HardwareDisplayer;
 
     struct BindingSlot;
+
+    // ================================================================
+    // Execution / Command Public Types
+    // ================================================================
+
+    class Queue;
+    class CommandRecorder;
+    class ExecutionCompiler;
+    struct ExecutionPlan;
+    class SubmissionSync;
+
+    enum class QueueCapability
+    {
+        Graphics,
+        Compute,
+        Transfer,
+        Present
+    };
+
+    enum class AccessKind
+    {
+        Read,
+        Write,
+        ReadWrite
+    };
+
+    enum class CommandOp
+    {
+        CopyBuffer,
+        CopyBufferToImage,
+        Dispatch,
+        BeginRendering,
+        EndRendering,
+        DrawIndexed,
+        Present,
+        HostCallback,
+        KeepAlive,
+        CopyImage,
+        CopyImageToBuffer
+    };
+
+    enum class FeatureRequirement
+    {
+        TimelineSemaphore,
+        Synchronization2,
+        DeferredHostOperations,
+        DeviceGroup
+    };
+
+    struct DeviceId
+    {
+        uint32_t value { 0 };
+
+        [[nodiscard]] friend bool operator==(DeviceId left, DeviceId right) noexcept
+        {
+            return left.value == right.value;
+        }
+    };
+
+    struct DeviceMask
+    {
+        uint32_t bits { 1 };
+    };
+
+    struct QueueId
+    {
+        DeviceId device {};
+        uint32_t family_index { 0 };
+        uint32_t queue_index { 0 };
+        QueueCapability capability { QueueCapability::Transfer };
+    };
+
+    struct BufferRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct ShaderRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct ImageRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct DisplayerRef
+    {
+        std::uintptr_t id { 0 };
+    };
+
+    struct CopyRegion
+    {
+        uint64_t src_offset { 0 };
+        uint64_t dst_offset { 0 };
+        uint64_t size { 0 };
+    };
+
+    struct BufferImageCopyRegion
+    {
+        uint64_t buffer_offset { 0 };
+        uint32_t image_layer { 0 };
+        uint32_t image_mip { 0 };
+    };
+
+    struct ImageCopyRegion
+    {
+        uint32_t src_layer { 0 };
+        uint32_t dst_layer { 0 };
+        uint32_t src_mip { 0 };
+        uint32_t dst_mip { 0 };
+    };
+
+    struct ResourceUse
+    {
+        ResourceHandle handle {};
+        AccessKind access { AccessKind::Read };
+        uint64_t stages { 0 };
+    };
+
+    enum class DispatchBindingKind
+    {
+        StorageBuffer,
+        StorageImage
+    };
+
+    struct DispatchResourceBinding
+    {
+        uint32_t set { 0 };
+        uint32_t binding { 0 };
+        ResourceHandle resource {};
+        DispatchBindingKind kind { DispatchBindingKind::StorageBuffer };
+        AccessKind access { AccessKind::ReadWrite };
+    };
+
+    struct UniformBufferBindingData
+    {
+        uint32_t set { 0 };
+        uint32_t binding { 0 };
+        std::vector<std::byte> data;
+    };
+
+    struct DispatchDesc
+    {
+        uint32_t groups_x { 1 };
+        uint32_t groups_y { 1 };
+        uint32_t groups_z { 1 };
+        std::vector<DispatchResourceBinding> bindings;
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+    };
+
+    enum class DrawBindingKind
+    {
+        SampledImage
+    };
+
+    struct DrawResourceBinding
+    {
+        uint32_t set { 0 };
+        uint32_t binding { 0 };
+        ResourceHandle resource {};
+        DrawBindingKind kind { DrawBindingKind::SampledImage };
+        AccessKind access { AccessKind::Read };
+    };
+
+    struct RenderingDesc
+    {
+        ImageRef color {};
+        ImageRef depth {};
+        uint32_t width { 0 };
+        uint32_t height { 0 };
+        bool clear_color { false };
+        bool clear_depth { false };
+    };
+
+    struct DrawIndexedDesc
+    {
+        ResourceHandle pipeline {};
+        uint32_t index_count { 0 };
+        uint32_t instance_count { 1 };
+        uint32_t first_index { 0 };
+        int32_t vertex_offset { 0 };
+        uint32_t first_instance { 0 };
+        IndexType index_type { IndexType::Auto };
+        bool enable_scissor { false };
+        ScissorRect scissor {};
+        std::vector<DrawResourceBinding> bindings;
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+    };
+
+    struct PresentDesc
+    {
+        DisplayerRef displayer {};
+        ImageRef image {};
+        ImageRef swapchain_image {};
+        DeviceId present_device {};
+        bool allow_cpu_bridge_fallback { true };
+    };
+
+    struct CommandPayload
+    {
+        CopyRegion copy {};
+        ImageCopyRegion image_copy {};
+        BufferImageCopyRegion buffer_image_copy {};
+        DispatchDesc dispatch {};
+        RenderingDesc rendering {};
+        DrawIndexedDesc draw_indexed {};
+        PresentDesc present {};
+    };
+
+    struct CommandIR
+    {
+        CommandOp op { CommandOp::CopyBuffer };
+        DeviceMask devices {};
+        QueueCapability queue { QueueCapability::Transfer };
+        std::vector<ResourceUse> resources;
+        std::vector<FeatureRequirement> features;
+        CommandPayload payload {};
+        std::function<void()> host_callback {};
+        std::shared_ptr<void> keep_alive {};
+        uint64_t sequence { 0 };
+    };
+
+    struct RequirementSet
+    {
+        bool graphics { false };
+        bool compute { false };
+        bool transfer { false };
+        bool timeline_semaphore { true };
+        bool synchronization_2 { true };
+        bool deferred_host_operations { false };
+        bool device_group { false };
+    };
+
+    struct RecordedTask
+    {
+        std::vector<CommandIR> commands;
+        RequirementSet requirements {};
+
+        [[nodiscard]] bool empty() const noexcept { return commands.empty(); }
+    };
+
+    struct ResourceBarrier
+    {
+        std::uintptr_t resource_id { 0 };
+        AccessKind before { AccessKind::Read };
+        AccessKind after { AccessKind::Read };
+    };
+
+    enum class PresentStatus
+    {
+        None,
+        Presented,
+        Suboptimal,
+        OutOfDate,
+        Skipped
+    };
+
+    struct PresentResult
+    {
+        PresentStatus status { PresentStatus::None };
+        DisplayerRef displayer {};
+        ImageRef image {};
+        std::string message;
+    };
+
+    struct CrossDeviceDependency
+    {
+        std::uintptr_t resource_id { 0 };
+        DeviceId producer {};
+        DeviceId consumer {};
+        bool present_cpu_bridge_fallback { false };
+        bool imported_timeline_required { false };
+    };
+
+    struct SubmissionDependency
+    {
+        size_t producer { 0 };
+        size_t consumer { 0 };
+        std::uintptr_t resource_id { 0 };
+    };
+
+    class SubmissionKeepAlive
+    {
+    public:
+        void add_resource(std::shared_ptr<const IResourceRef> resource);
+        void add_object(std::shared_ptr<void> object);
+        void merge(SubmissionKeepAlive&& other);
+        void clear() noexcept;
+
+        [[nodiscard]] size_t resource_count() const noexcept { return resources_.size(); }
+        [[nodiscard]] size_t object_count() const noexcept { return objects_.size(); }
+        [[nodiscard]] bool empty() const noexcept { return resources_.empty() && objects_.empty(); }
+
+    private:
+        std::vector<std::shared_ptr<const IResourceRef>> resources_;
+        std::vector<std::shared_ptr<void>> objects_;
+    };
+
+    struct SubmissionToken
+    {
+        DeviceId device {};
+        QueueId queue {};
+        uint64_t value { 0 };
+        std::shared_ptr<const SubmissionSync> sync {};
+
+        [[nodiscard]] bool has_sync() const noexcept { return sync != nullptr; }
+    };
+
+    struct QueueSubmission
+    {
+        std::shared_ptr<class TrackedCommandBuffer> command_buffer;
+        SubmissionKeepAlive keep_alive;
+    };
+
+    struct SubmitReceipt
+    {
+        uint64_t serial { 0 };
+        std::vector<SubmissionToken> tokens;
+        std::vector<PresentResult> presents;
+
+        [[nodiscard]] bool empty() const noexcept
+        {
+            return tokens.empty() && presents.empty();
+        }
+    };
+
+    struct CommitCommand
+    {
+    };
+
+    [[nodiscard]] CommitCommand commit() noexcept;
+
+    class StreamCommand
+    {
+    public:
+        StreamCommand() = default;
+        explicit StreamCommand(std::function<void(CommandRecorder&)> recorder);
+
+        void record(CommandRecorder& recorder) const;
+        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(recorder_); }
+
+    private:
+        std::function<void(CommandRecorder&)> recorder_ {};
+    };
+
+    class CommandBatch
+    {
+    public:
+        CommandBatch& operator<<(StreamCommand command);
+        [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
+        [[nodiscard]] bool empty() const noexcept { return commands_.empty(); }
+
+    private:
+        std::vector<StreamCommand> commands_;
+    };
+
+    class CommandRecorder
+    {
+    public:
+        CommandRecorder() = default;
+
+        void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
+        void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
+        void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
+        void copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
+        void dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
+        void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
+        void end_rendering(DeviceMask devices = {});
+        void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
+        void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
+        void host_callback(std::function<void()> callback);
+        void keep_alive(std::shared_ptr<void> object);
+        void require_feature(FeatureRequirement feature);
+        [[nodiscard]] RecordedTask close();
+
+    private:
+        void ensure_open() const;
+        void mark_requirement(QueueCapability capability);
+        void mark_requirement(FeatureRequirement feature);
+        [[nodiscard]] uint64_t next_sequence() noexcept;
+        void mark_device_requirements(DeviceMask devices);
+
+        bool closed_ { false };
+        uint64_t next_sequence_ { 0 };
+        std::vector<CommandIR> commands_;
+        RequirementSet requirements_ {};
+    };
+
+    class HardwareDisplayer
+    {
+    public:
+        HardwareDisplayer();
+        explicit HardwareDisplayer(void* native_window);
+        HardwareDisplayer(const HardwareDisplayer& other) noexcept = default;
+        HardwareDisplayer(HardwareDisplayer&& other) noexcept = default;
+        ~HardwareDisplayer();
+
+        HardwareDisplayer& operator=(const HardwareDisplayer& other) noexcept = default;
+        HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept = default;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return displayer_.id != 0 && manager_ != nullptr; }
+        [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer_; }
+        [[nodiscard]] std::uintptr_t get_displayer_id() const noexcept { return displayer_.id; }
+
+    private:
+        DisplayerRef displayer_ {};
+        std::shared_ptr<void> manager_ {};
+    };
+
+    class HardwareStream
+    {
+    public:
+        explicit HardwareStream(HardwareExecutor& executor);
+
+        HardwareStream(const HardwareStream&) = delete;
+        HardwareStream& operator=(const HardwareStream&) = delete;
+        HardwareStream(HardwareStream&&) noexcept = default;
+        HardwareStream& operator=(HardwareStream&&) noexcept = default;
+
+        HardwareStream& operator<<(const StreamCommand& command);
+        HardwareStream& operator<<(const CommandBatch& commands);
+        [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
+
+        [[nodiscard]] SubmitReceipt commit();
+        [[nodiscard]] RecordedTask close_for_tests();
+
+    private:
+        void ensure_open() const;
+
+        HardwareExecutor* executor_ {};
+        CommandRecorder recorder_ {};
+        bool committed_ { false };
+    };
+
+    class HardwareExecutor
+    {
+    public:
+        using QueueResolver = std::function<Queue&(DeviceId device, QueueCapability capability)>;
+
+        HardwareExecutor();
+        explicit HardwareExecutor(QueueResolver queue_resolver);
+
+        HardwareExecutor(const HardwareExecutor&) = delete;
+        HardwareExecutor& operator=(const HardwareExecutor&) = delete;
+        HardwareExecutor(HardwareExecutor&&) = delete;
+        HardwareExecutor& operator=(HardwareExecutor&&) = delete;
+
+        template <typename RecordFn>
+        [[nodiscard]] RecordedTask record(RecordFn&& fn) const
+        {
+            CommandRecorder recorder;
+            std::forward<RecordFn>(fn)(recorder);
+            return recorder.close();
+        }
+
+        [[nodiscard]] HardwareStream stream();
+        [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
+        [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
+        [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
+        HardwareExecutor& wait(const SubmitReceipt& receipt);
+        HardwareExecutor& wait(const HardwareExecutor& producer);
+        [[nodiscard]] SubmitReceipt last_receipt() const;
+
+    private:
+        [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan,
+                                                          std::vector<PresentResult>* present_results,
+                                                          std::span<const SubmissionToken> wait_tokens) const;
+        [[nodiscard]] std::vector<SubmissionToken> consume_pending_waits();
+        void remember_receipt(const SubmitReceipt& receipt);
+
+        std::shared_ptr<ExecutionCompiler> compiler_;
+        QueueResolver queue_resolver_ {};
+        mutable std::mutex mutex_;
+        uint64_t next_submit_serial_ { 0 };
+        SubmitReceipt last_receipt_ {};
+        std::vector<SubmissionToken> pending_waits_;
+    };
 
     // ================================================================
     // Validation
@@ -477,11 +962,22 @@ namespace Corona::Horizon
         }
 
         void set_clear_color(float r, float g, float b, float a);
+        void set_clear_depth(float depth, uint32_t stencil = 0);
+
+        [[nodiscard]] CommandBatch upload(std::span<const std::byte> data, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
+
+        template <HardwareTransferable T>
+        [[nodiscard]] CommandBatch upload(std::span<const T> data, uint32_t image_layer = 0, uint32_t image_mip = 0) const
+        {
+            return upload(std::as_bytes(data), image_layer, image_mip);
+        }
 
         [[nodiscard]] CopyImageCommand copy_to(const HardwareImage& dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
         [[nodiscard]] CopyImageToBufferCommand copy_to(const HardwareBuffer& dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer& src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
+        [[nodiscard]] uint32_t store_sampled_descriptor() const;
+        [[nodiscard]] uint32_t store_storage_descriptor() const;
         static HardwareImage import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
@@ -662,7 +1158,8 @@ namespace Corona::Horizon
                     object.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
                 numthreads);
 
-            desc.auto_bind_entries = std::move(object.autoBindEntries);
+            if (options.auto_bind)
+                desc.auto_bind_entries = std::move(object.autoBindEntries);
             return desc;
         }
 
@@ -1251,6 +1748,7 @@ namespace Corona::Horizon
         RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         RasterizerPipeline& clear_records();
         RasterizerPipeline& bind_render_target(uint32_t location, HardwareImage& image);
+        RasterizerPipeline& bind_depth_target(HardwareImage& image);
         [[nodiscard]] CommandBatch command_batch() const;
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_rasterizer_pipeline_id() const noexcept { return resource_id(); }
@@ -1301,5 +1799,422 @@ namespace Corona::Horizon
     class RayTracingPipeline : public PipelineBindingScope, public ReflectedPipelineBindings<RayTracingPipeline>
     {
     };
+
+    // ================================================================
+    // Value Command Facades
+    // ================================================================
+
+    namespace CommandDetail
+    {
+        template <typename T>
+        struct IsSharedPtr : std::false_type
+        {
+        };
+
+        template <typename T>
+        struct IsSharedPtr<std::shared_ptr<T>> : std::true_type
+        {
+        };
+
+        template <typename T>
+        inline constexpr bool is_shared_ptr_v = IsSharedPtr<std::remove_cvref_t<T>>::value;
+
+        template <typename...>
+        inline constexpr bool single_shared_ptr_v = false;
+
+        template <typename T>
+        inline constexpr bool single_shared_ptr_v<T> = is_shared_ptr_v<T>;
+
+        template <typename Command>
+        [[nodiscard]] StreamCommand make_stream_command(Command command)
+        {
+            return StreamCommand([command = std::move(command)](CommandRecorder& recorder) {
+                command.record(recorder);
+            });
+        }
+    }
+
+    struct CopyBufferCommand
+    {
+        BufferRef src {};
+        BufferRef dst {};
+        CopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] BufferRef source() const noexcept { return src; }
+        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
+        [[nodiscard]] CopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyImageCommand
+    {
+        ImageRef src {};
+        ImageRef dst {};
+        ImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] ImageRef source() const noexcept { return src; }
+        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
+        [[nodiscard]] ImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_image(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyBufferToImageCommand
+    {
+        BufferRef src {};
+        ImageRef dst {};
+        BufferImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] BufferRef source() const noexcept { return src; }
+        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
+        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_to_image(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct CopyImageToBufferCommand
+    {
+        ImageRef src {};
+        BufferRef dst {};
+        BufferImageCopyRegion region {};
+        DeviceMask devices {};
+
+        [[nodiscard]] ImageRef source() const noexcept { return src; }
+        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
+        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.copy_to_buffer(src, dst, region, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct ShaderDispatchCommand
+    {
+        ShaderRef shader {};
+        DispatchDesc dispatch {};
+        DeviceMask devices {};
+
+        [[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
+        [[nodiscard]] DispatchDesc dispatch_desc() const noexcept { return dispatch; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.dispatch(shader, dispatch, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct BeginRenderingCommand
+    {
+        RenderingDesc rendering {};
+        DeviceMask devices {};
+
+        [[nodiscard]] RenderingDesc rendering_desc() const noexcept { return rendering; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.begin_rendering(rendering, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct EndRenderingCommand
+    {
+        DeviceMask devices {};
+
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.end_rendering(devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct DrawIndexedCommand
+    {
+        BufferRef index {};
+        BufferRef vertex {};
+        DrawIndexedDesc draw {};
+        DeviceMask devices {};
+
+        [[nodiscard]] BufferRef index_buffer() const noexcept { return index; }
+        [[nodiscard]] BufferRef vertex_buffer() const noexcept { return vertex; }
+        [[nodiscard]] DrawIndexedDesc draw_desc() const noexcept { return draw; }
+        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.draw_indexed(index, vertex, draw, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct PresentCommand
+    {
+        DisplayerRef displayer {};
+        ImageRef image {};
+        DeviceId present_device {};
+        bool allow_cpu_bridge_fallback { true };
+
+        [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer; }
+        [[nodiscard]] ImageRef image_ref() const noexcept { return image; }
+        [[nodiscard]] DeviceId device() const noexcept { return present_device; }
+        [[nodiscard]] bool allow_fallback() const noexcept { return allow_cpu_bridge_fallback; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    class HostFunctionCommand
+    {
+    public:
+        HostFunctionCommand() = default;
+
+        explicit HostFunctionCommand(std::function<void()> callback)
+            : callback_(std::move(callback))
+        {
+        }
+
+        [[nodiscard]] const std::function<void()>& callback() const noexcept { return callback_; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.host_callback(callback_);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+
+    private:
+        std::function<void()> callback_ {};
+    };
+
+    class KeepAliveCommand
+    {
+    public:
+        KeepAliveCommand() = default;
+
+        explicit KeepAliveCommand(std::shared_ptr<void> object)
+            : object_(std::move(object))
+        {
+        }
+
+        [[nodiscard]] const std::shared_ptr<void>& object() const noexcept { return object_; }
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.keep_alive(object_);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+
+    private:
+        std::shared_ptr<void> object_ {};
+    };
+
+    [[nodiscard]] inline CopyBufferCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {})
+    {
+        return { src, dst, region, devices };
+    }
+
+    [[nodiscard]] inline CopyImageCommand copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {})
+    {
+        return { src, dst, region, devices };
+    }
+
+    [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
+    {
+        return { src, dst, region, devices };
+    }
+
+    [[nodiscard]] inline CopyImageToBufferCommand copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
+    {
+        return { src, dst, region, devices };
+    }
+
+    [[nodiscard]] inline ShaderDispatchCommand dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {})
+    {
+        return { shader, std::move(desc), devices };
+    }
+
+    [[nodiscard]] inline BeginRenderingCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {})
+    {
+        return { desc, devices };
+    }
+
+    [[nodiscard]] inline EndRenderingCommand end_rendering(DeviceMask devices = {})
+    {
+        return { devices };
+    }
+
+    [[nodiscard]] inline DrawIndexedCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {})
+    {
+        return { index, vertex, std::move(desc), devices };
+    }
+
+    [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
+    {
+        return { displayer, image, present_device, allow_cpu_bridge_fallback };
+    }
+
+    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer, const HardwareImage& image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
+    {
+        return present(displayer.displayer_ref(),
+                       { static_cast<const ResourceHandle&>(image) },
+                       present_device,
+                       allow_cpu_bridge_fallback);
+    }
+
+    [[nodiscard]] inline HostFunctionCommand host_callback(std::function<void()> callback)
+    {
+        return HostFunctionCommand(std::move(callback));
+    }
+
+    [[nodiscard]] inline KeepAliveCommand keep_alive(std::shared_ptr<void> object)
+    {
+        return KeepAliveCommand(std::move(object));
+    }
+
+    template <typename T>
+        requires(!std::is_void_v<T>)
+    [[nodiscard]] KeepAliveCommand keep_alive(std::shared_ptr<T> object)
+    {
+        return keep_alive(std::static_pointer_cast<void>(std::move(object)));
+    }
+
+    template <typename... Args>
+        requires(sizeof...(Args) > 0u &&
+                 (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...) &&
+                 !CommandDetail::single_shared_ptr_v<Args...>)
+    [[nodiscard]] KeepAliveCommand keep_alive(Args&&... args)
+    {
+        using Storage = std::tuple<std::remove_cvref_t<Args>...>;
+        return keep_alive(std::static_pointer_cast<void>(
+            std::make_shared<Storage>(std::forward<Args>(args)...)));
+    }
 
 }
