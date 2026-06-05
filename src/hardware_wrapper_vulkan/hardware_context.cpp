@@ -28,7 +28,7 @@ namespace Corona::Horizon
 
     HardwareContext g_hardware_context;
 
-    constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
+    constexpr uint32_t required_api_version = VK_API_VERSION_1_3;
 
 #if HORIZON_ENABLE_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
