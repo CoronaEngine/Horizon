@@ -1,0 +1,24 @@
+# Keep text files normalized to LF in the repository and in working trees.
+* text=auto eol=lf
+
+# Binary assets and generated payloads must not be line-ending normalized.
+*.bmp binary
+*.dds binary
+*.gif binary
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.png binary
+*.tga binary
+
+*.spv binary
+
+*.7z binary
+*.gz binary
+*.tar binary
+*.zip binary
+
+*.dll binary
+*.exe binary
+*.lib binary
+*.pdb binary
