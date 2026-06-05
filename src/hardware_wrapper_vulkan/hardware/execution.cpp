@@ -18,8 +18,26 @@
 
 namespace Corona::Horizon
 {
+    SubmissionSync::SubmissionSync(VkSemaphore timeline) noexcept
+        : timeline_(timeline)
+    {
+    }
+
+    std::shared_ptr<const SubmissionSync> SubmissionSync::make(VkSemaphore timeline)
+    {
+        if (timeline == VK_NULL_HANDLE)
+            return {};
+
+        return std::shared_ptr<const SubmissionSync>(new SubmissionSync(timeline));
+    }
+
     namespace
     {
+        [[nodiscard]] VkSemaphore timeline_semaphore(const SubmissionToken& token) noexcept
+        {
+            return token.sync ? token.sync->timeline() : VK_NULL_HANDLE;
+        }
+
         [[nodiscard]] bool is_write_access(AccessKind access) noexcept
         {
             return access == AccessKind::Write || access == AccessKind::ReadWrite;
@@ -543,6 +561,7 @@ namespace Corona::Horizon
         }
         command.resources.push_back({ index.handle, AccessKind::Read, 0 });
         command.resources.push_back({ vertex.handle, AccessKind::Read, 0 });
+        command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
         mark_device_requirements(devices);
         commands_.push_back(std::move(command));
     }
@@ -1076,7 +1095,7 @@ namespace Corona::Horizon
                     if (!color || color->image_handle == VK_NULL_HANDLE || color->image_view == VK_NULL_HANDLE)
                         throw std::logic_error("BeginRendering requires a valid color HardwareImage.");
 
-                    const bool clear_attachment = color->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    const bool clear_attachment = rendering.clear_color || color->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
                     transition_image(command_buffer,
                                      *color,
                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -1097,7 +1116,7 @@ namespace Corona::Horizon
                     if (!depth || depth->image_handle == VK_NULL_HANDLE || depth->image_view == VK_NULL_HANDLE)
                         throw std::logic_error("BeginRendering requires a valid depth HardwareImage.");
 
-                    const bool clear_attachment = depth->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    const bool clear_attachment = rendering.clear_depth || depth->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
                     transition_image(command_buffer,
                                      *depth,
                                      VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
@@ -1168,6 +1187,22 @@ namespace Corona::Horizon
                     throw std::logic_error("DrawIndexed requires a valid index HardwareBuffer.");
                 if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
                     throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
+
+                for (const DrawResourceBinding& binding : draw.bindings)
+                {
+                    if (binding.kind != DrawBindingKind::SampledImage)
+                        continue;
+
+                    ImageStore::Write image = write_image(binding.resource);
+                    if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
+                        throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
+
+                    transition_image(command_buffer,
+                                     *image,
+                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                }
 
                 std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
                 VulkanRasterizerPipeline::PreparedDraw prepared =
@@ -1412,8 +1447,14 @@ namespace Corona::Horizon
         }
     }
 
+    HardwareExecutor::HardwareExecutor()
+        : compiler_(std::make_shared<ExecutionCompiler>())
+    {
+    }
+
     HardwareExecutor::HardwareExecutor(QueueResolver queue_resolver)
-        : queue_resolver_(std::move(queue_resolver))
+        : compiler_(std::make_shared<ExecutionCompiler>()),
+          queue_resolver_(std::move(queue_resolver))
     {
     }
 
@@ -1424,10 +1465,17 @@ namespace Corona::Horizon
 
     ExecutionPlan HardwareExecutor::compile(const RecordedTask& task) const
     {
-        return compiler_.compile(task);
+        return compiler_->compile(task);
     }
 
     std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results) const
+    {
+        return submit(plan, present_results, {});
+    }
+
+    std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan,
+                                                          std::vector<PresentResult>* present_results,
+                                                          std::span<const SubmissionToken> wait_tokens) const
     {
         const auto resolve_queue = [this](DeviceId device, QueueCapability capability) -> Queue& {
             if (queue_resolver_)
@@ -1525,6 +1573,15 @@ namespace Corona::Horizon
             encoder.encode(compiled_submission);
 
             std::vector<SubmitWait> waits = compiled_submission.waits;
+            for (const SubmissionToken& token : wait_tokens)
+            {
+                const VkSemaphore timeline = timeline_semaphore(token);
+                if (timeline != VK_NULL_HANDLE && token.value != 0)
+                {
+                    waits.push_back({ timeline, token.value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                }
+            }
+
             for (const SubmissionDependency& dependency : plan.dependencies)
             {
                 if (dependency.consumer != submission_index)
@@ -1533,9 +1590,10 @@ namespace Corona::Horizon
                 }
 
                 const std::optional<SubmissionToken>& token = submitted_tokens[dependency.producer];
-                if (token && token->timeline != VK_NULL_HANDLE)
+                const VkSemaphore timeline = token ? timeline_semaphore(*token) : VK_NULL_HANDLE;
+                if (timeline != VK_NULL_HANDLE)
                 {
-                    waits.push_back({ token->timeline, token->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                    waits.push_back({ timeline, token->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
                 }
             }
 
@@ -1560,10 +1618,47 @@ namespace Corona::Horizon
     SubmitReceipt HardwareExecutor::commit(const RecordedTask& task)
     {
         ExecutionPlan plan = compile(task);
+        std::vector<SubmissionToken> wait_tokens = consume_pending_waits();
 
         SubmitReceipt receipt;
-        receipt.serial = ++next_submit_serial_;
-        receipt.tokens = submit(plan, &receipt.presents);
+        {
+            std::lock_guard lock(mutex_);
+            receipt.serial = ++next_submit_serial_;
+        }
+        receipt.tokens = submit(plan, &receipt.presents, wait_tokens);
+        remember_receipt(receipt);
         return receipt;
+    }
+
+    HardwareExecutor& HardwareExecutor::wait(const SubmitReceipt& receipt)
+    {
+        std::lock_guard lock(mutex_);
+        pending_waits_.insert(pending_waits_.end(), receipt.tokens.begin(), receipt.tokens.end());
+        return *this;
+    }
+
+    HardwareExecutor& HardwareExecutor::wait(const HardwareExecutor& producer)
+    {
+        return wait(producer.last_receipt());
+    }
+
+    SubmitReceipt HardwareExecutor::last_receipt() const
+    {
+        std::lock_guard lock(mutex_);
+        return last_receipt_;
+    }
+
+    std::vector<SubmissionToken> HardwareExecutor::consume_pending_waits()
+    {
+        std::lock_guard lock(mutex_);
+        std::vector<SubmissionToken> waits = std::move(pending_waits_);
+        pending_waits_.clear();
+        return waits;
+    }
+
+    void HardwareExecutor::remember_receipt(const SubmitReceipt& receipt)
+    {
+        std::lock_guard lock(mutex_);
+        last_receipt_ = receipt;
     }
 }

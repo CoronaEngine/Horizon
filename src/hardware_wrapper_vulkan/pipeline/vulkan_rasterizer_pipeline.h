@@ -3,6 +3,8 @@
 #include "hardware_wrapper_vulkan/hardware/command.h"
 #include "horizon.h"
 
+#include <volk.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -42,6 +44,7 @@ namespace Corona::Horizon
             HardwareBuffer index_buffer {};
             HardwareBuffer vertex_buffer {};
             DrawIndexedParams params {};
+            std::vector<BoundImage> images;
             std::vector<std::byte> push_constant_data;
             std::vector<UniformBufferBindingData> uniform_buffers;
         };
@@ -53,6 +56,7 @@ namespace Corona::Horizon
             uint32_t height { 0 };
             std::vector<BoundBuffer> buffers;
             std::vector<BoundImage> images;
+            HardwareImage depth_target {};
             std::vector<RecordedDraw> draws;
         };
 
@@ -67,6 +71,7 @@ namespace Corona::Horizon
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
+        void set_depth_target(const HardwareImage& image);
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
         void record(const ResourceHandle& pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
@@ -157,6 +162,7 @@ namespace Corona::Horizon
         std::vector<UniformBufferBindingData> uniform_buffers_;
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
+        HardwareImage depth_target_;
         std::vector<RecordedDraw> draws_;
         mutable std::vector<PipelineState> pipeline_cache_;
     };
