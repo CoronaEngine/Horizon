@@ -1,9 +1,13 @@
 #include "test_registry.h"
 
 #include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper/diagnostics.h"
 
 #include <array>
 #include <exception>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -56,6 +60,12 @@ namespace
         {
             throw std::runtime_error(message);
         }
+    }
+
+    [[nodiscard]] std::string read_text_file(const std::filesystem::path& path)
+    {
+        std::ifstream stream(path);
+        return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
     }
 
     [[nodiscard]] PrecheckResult check_vulkan_environment()
@@ -203,6 +213,16 @@ namespace
                    "DeviceManager should capture at least one queue family.");
             expect(device_manager.queue_for(Corona::Horizon::QueueCapability::Transfer) != nullptr,
                    "DeviceManager should expose a queue usable for transfer work.");
+        }
+
+        if (Corona::Horizon::Diagnostics::enabled())
+        {
+            const std::filesystem::path diagnostics_path = Corona::Horizon::Diagnostics::file_path();
+            expect(!diagnostics_path.empty(), "Debug diagnostics should expose the report path after Vulkan initialization.");
+            expect(std::filesystem::exists(diagnostics_path), "Debug diagnostics should create a text report after Vulkan initialization.");
+            const std::string diagnostics = read_text_file(diagnostics_path);
+            expect(diagnostics.find("VULKAN PROFILE") != std::string::npos, "Debug diagnostics should include the Vulkan profile section.");
+            expect(diagnostics.find("Physical device:") != std::string::npos, "Debug diagnostics should include physical device compatibility data.");
         }
 
         return Corona::Horizon::Tests::TestResult::pass();

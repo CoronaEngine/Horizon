@@ -25,6 +25,7 @@
 
 #include "corona/kernel/core/i_logger.h"
 #include "device_manager.h"
+#include "hardware_wrapper/diagnostics.h"
 
 namespace Corona::Horizon
 {
@@ -310,6 +311,9 @@ namespace Corona::Horizon
         {
             if (result != VK_SUCCESS)
             {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
                 throw std::runtime_error(std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
             }
         }
@@ -499,6 +503,21 @@ namespace Corona::Horizon
             (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
         }
 
+        void name_vulkan_object(VkDevice device, VkObjectType object_type, uint64_t object_handle, const std::string& name) noexcept
+        {
+            if (vkSetDebugUtilsObjectNameEXT == nullptr || object_handle == 0 || name.empty())
+            {
+                return;
+            }
+
+            VkDebugUtilsObjectNameInfoEXT name_info {};
+            name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            name_info.objectType = object_type;
+            name_info.objectHandle = object_handle;
+            name_info.pObjectName = name.c_str();
+            (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+        }
+
         void name_image(VkDevice device, VmaAllocator allocator, const ImageWrap& image) noexcept
         {
             if (image.desc.debug_name.empty())
@@ -522,6 +541,14 @@ namespace Corona::Horizon
             name_info.objectHandle = reinterpret_cast<uint64_t>(image.image_handle);
             name_info.pObjectName = image.desc.debug_name.c_str();
             (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                name_vulkan_object(device,
+                                   VK_OBJECT_TYPE_IMAGE_VIEW,
+                                   reinterpret_cast<uint64_t>(image.image_view),
+                                   image.desc.debug_name + ".view");
+            }
         }
     }
 
@@ -902,6 +929,20 @@ namespace Corona::Horizon
                                                       &alloc_info,
                                                      &descriptors.set),
                             (std::string("vkAllocateDescriptorSets(") + label + ")").c_str());
+
+            const std::string name_prefix = std::string("horizon.bindless.") + label;
+            name_vulkan_object(device_manager_->logical_device(),
+                               VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+                               reinterpret_cast<uint64_t>(descriptors.layout),
+                               name_prefix + ".layout");
+            name_vulkan_object(device_manager_->logical_device(),
+                               VK_OBJECT_TYPE_DESCRIPTOR_POOL,
+                               reinterpret_cast<uint64_t>(descriptors.pool),
+                               name_prefix + ".pool");
+            name_vulkan_object(device_manager_->logical_device(),
+                               VK_OBJECT_TYPE_DESCRIPTOR_SET,
+                               reinterpret_cast<uint64_t>(descriptors.set),
+                               name_prefix + ".set");
         }
         catch (...)
         {
@@ -1770,7 +1811,6 @@ namespace Corona::Horizon
         image.image_handle = native_image;
         image.image_usage = usage;
         image.image_format = format;
-        image.image_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         image.aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT;
         image.device_manager = device_manager_;
         image.resource_manager = this;

@@ -1,5 +1,5 @@
 # Horizon Examples New API Visible Window Notes
-<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 099d514afed66fc385dd590f15a586db341ff57f7acfe70aaf38c1c577bed245 -->
+<!-- TASK_DOCS_EXAMPLES_NEW_API_VISIBLE_WINDOW_ZH_CN_SHA256: 39dc1d686784ece86911cadeefda8ae73eff8bad4aafd3d40889206351bdedb0 -->
 
 ## When To Use
 
@@ -63,6 +63,7 @@
 - For `vector subscript out of range`, inspect CPU containers and loop bounds before deep Vulkan debugging: cube constants should have 36 vertices; aggregate initializer changes must not drift `vertices.size()`; draw loops should use stable object counts, not containers being changed by another thread.
 - In threaded default paths, first look for shared `std::vector` `push_back` / `resize` / read races. Per-window/per-object storage-buffer containers should be created to fixed size before threads start; threads should only update existing buffer contents.
 - If threaded `default` render and display paths share one output image, display present should explicitly wait for the latest render submission. Otherwise resize/minimize/hide can make image-layout, queue-submit, or binary-semaphore reuse bugs look like ordinary window bugs.
+- For `HardwareImage` / `ResourceStore` / `HorizonExamples.exe default` crashes, validation errors, or sync errors that reproduce only on AMD integrated GPUs or specific drivers, debug backend image layout, barriers, swapchain image/semaphore reuse, present-completion points, and queue serialization first. Unless the user explicitly asks for a shader-source fix, do not edit `examples/shaders/*.glsl` or use shader changes to mask backend issues.
 - For handwritten GLSL or EDSL through the current pipeline API, if `bindless space index unavailable` appears or assertions happen near `ComputePipelineDesc::from_source(...)` / `RasterizerPipelineDesc::from_source(...)`, do not use disabled bindless as a long-term workaround. First inspect whether shader-reflected set/binding metadata matches the backend bindless table ABI; UBOs and ordinary descriptors should be generated from reflected set/binding values.
 - After a fix, smoke all explicit entries: `baseline`, `default`, `edsl`, and `glsl`. For `default`, confirm both EDSL and GLSL windows exist and no CRT assertion window appears.
 

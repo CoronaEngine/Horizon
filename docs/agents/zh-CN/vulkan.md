@@ -35,6 +35,8 @@
 - 在 `HardwareContext::create_instance()` 启用 `VK_LAYER_KHRONOS_validation` 时，应同时请求 `VK_EXT_debug_utils` 和 `VK_EXT_validation_features`；为了尽量暴露错误，调试路径应启用 GPU-assisted、reserve binding slot、best practices、debug printf 和 synchronization validation。全开会明显变慢，这是预期代价。
 - 过滤 instance extension 时要同时枚举全局扩展和已请求 layer 暴露的扩展；`VK_EXT_validation_features` 可能由 `VK_LAYER_KHRONOS_validation` 暴露，不要只查全局扩展后误判为不可用。
 - 验证层是否真的打开时，优先运行 `HorizonTests.exe hardware_context.`，并在日志中确认 `Khronos Validation Layer Active` 的 `Current Enables` 列出了需要的 validation features。
+- 调试验证构建中的 Vulkan 兼容性或验证层问题，先看 `horizon-vulkan-diagnostics.txt`；路径可由 `HORIZON_VULKAN_DIAGNOSTICS_PATH` 覆盖。该文件应包含 loader/API 版本、validation feature 状态、请求/启用/缺失的 instance / device 能力、物理设备选择或跳过原因、`VULKAN VALIDATION` / `HORIZON VALIDATION` / `VK_ERROR` 记录和可读对象名。
+- 诊断系统保持后端内部所有权，不要把 Vulkan 诊断细节暴露到 `include/`。新增 Vulkan 对象或失败路径时，同步补 debug object name 和失败 `VkResult` 的调用点 / 资源上下文，让 txt 能直接定位兼容性、barrier / layout、descriptor、submit / present sync 或 lifetime 问题。
 
 ## Bindless 和 Descriptor Layout
 

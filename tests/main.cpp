@@ -19,6 +19,7 @@ namespace
     [[nodiscard]] std::vector<Corona::Horizon::Tests::TestCase> collect_tests()
     {
         std::vector<Corona::Horizon::Tests::TestCase> tests;
+        append_tests(tests, Corona::Horizon::Tests::diagnostics_tests());
         append_tests(tests, Corona::Horizon::Tests::hardware_context_tests());
         append_tests(tests, Corona::Horizon::Tests::hardware_buffer_tests());
         append_tests(tests, Corona::Horizon::Tests::hardware_image_tests());
