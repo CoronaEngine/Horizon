@@ -7,6 +7,7 @@
 
 #include "display_manager.h"
 
+#include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
@@ -46,8 +47,26 @@ namespace Corona::Horizon
         {
             if (result != VK_SUCCESS)
             {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
                 throw std::runtime_error(std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
             }
+        }
+
+        void name_vulkan_object(VkDevice device, VkObjectType object_type, uint64_t object_handle, const std::string& name) noexcept
+        {
+            if (vkSetDebugUtilsObjectNameEXT == nullptr || device == VK_NULL_HANDLE || object_handle == 0 || name.empty())
+            {
+                return;
+            }
+
+            VkDebugUtilsObjectNameInfoEXT name_info {};
+            name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            name_info.objectType = object_type;
+            name_info.objectHandle = object_handle;
+            name_info.pObjectName = name.c_str();
+            (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
         }
 
         [[nodiscard]] VkSurfaceFormatKHR choose_surface_format(std::span<const VkSurfaceFormatKHR> formats)
@@ -386,6 +405,10 @@ namespace Corona::Horizon
         create_info.oldSwapchain = VK_NULL_HANDLE;
 
         throw_if_failed(vkCreateSwapchainKHR(device_, &create_info, nullptr, &swapchain_), "vkCreateSwapchainKHR");
+        name_vulkan_object(device_,
+                           VK_OBJECT_TYPE_SWAPCHAIN_KHR,
+                           reinterpret_cast<uint64_t>(swapchain_),
+                           "horizon.swapchain");
 
         uint32_t native_image_count = 0;
         throw_if_failed(vkGetSwapchainImagesKHR(device_, swapchain_, &native_image_count, nullptr), "vkGetSwapchainImagesKHR");
@@ -421,6 +444,8 @@ namespace Corona::Horizon
         render_finished_.resize(swapchain_images_.size());
         submitted_frames_.clear();
         submitted_frames_.resize(swapchain_images_.size());
+        submitted_images_.clear();
+        submitted_images_.resize(swapchain_images_.size());
 
         VkSemaphoreCreateInfo create_info {};
         create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -428,7 +453,15 @@ namespace Corona::Horizon
         for (size_t index = 0; index < swapchain_images_.size(); ++index)
         {
             throw_if_failed(vkCreateSemaphore(device_, &create_info, nullptr, &image_available_[index]), "vkCreateSemaphore(image_available)");
+            name_vulkan_object(device_,
+                               VK_OBJECT_TYPE_SEMAPHORE,
+                               reinterpret_cast<uint64_t>(image_available_[index]),
+                               "horizon.swapchain.image_available." + std::to_string(index));
             throw_if_failed(vkCreateSemaphore(device_, &create_info, nullptr, &render_finished_[index]), "vkCreateSemaphore(render_finished)");
+            name_vulkan_object(device_,
+                               VK_OBJECT_TYPE_SEMAPHORE,
+                               reinterpret_cast<uint64_t>(render_finished_[index]),
+                               "horizon.swapchain.render_finished." + std::to_string(index));
         }
     }
 
@@ -440,6 +473,24 @@ namespace Corona::Horizon
         }
 
         std::optional<SubmissionToken>& token = submitted_frames_[frame_index];
+        if (!token)
+        {
+            return;
+        }
+
+        present_queue_->wait_for(*token);
+        present_queue_->retire_completed();
+        token.reset();
+    }
+
+    void DisplayManager::wait_for_image(uint32_t image_index)
+    {
+        if (present_queue_ == nullptr || image_index >= submitted_images_.size())
+        {
+            return;
+        }
+
+        std::optional<SubmissionToken>& token = submitted_images_[image_index];
         if (!token)
         {
             return;
@@ -542,6 +593,7 @@ namespace Corona::Horizon
             prepared.immediate_result.message = "vkAcquireNextImageKHR returned an out-of-range swapchain image index.";
             return prepared;
         }
+        wait_for_image(acquire.image_index);
 
         const uint32_t frame = frame_index_ % static_cast<uint32_t>(image_available_.size());
         desc.swapchain_image = { static_cast<const ResourceHandle&>(swapchain_images_[acquire.image_index]) };
@@ -553,14 +605,14 @@ namespace Corona::Horizon
             VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         };
         prepared.signal = {
-            render_finished_[frame],
+            render_finished_[acquire.image_index],
             0,
             VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         };
         pending_frame_ = PendingFrame {
             .image_index = acquire.image_index,
             .frame_index = frame,
-            .render_finished = render_finished_[frame],
+            .render_finished = render_finished_[acquire.image_index],
         };
         return prepared;
     }
@@ -590,6 +642,10 @@ namespace Corona::Horizon
         if (pending.frame_index < submitted_frames_.size())
         {
             submitted_frames_[pending.frame_index] = producer;
+        }
+        if (pending.image_index < submitted_images_.size())
+        {
+            submitted_images_[pending.image_index] = producer;
         }
 
         VkPresentInfoKHR present_info {};
@@ -677,6 +733,7 @@ namespace Corona::Horizon
         }
         render_finished_.clear();
         submitted_frames_.clear();
+        submitted_images_.clear();
 
         if (device_ != VK_NULL_HANDLE && swapchain_ != VK_NULL_HANDLE)
         {

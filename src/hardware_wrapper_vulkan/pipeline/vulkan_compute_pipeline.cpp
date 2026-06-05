@@ -12,6 +12,8 @@
 #include <utility>
 #include <variant>
 
+#include "hardware_wrapper/diagnostics.h"
+
 namespace Corona::Horizon
 {
     namespace
@@ -19,6 +21,21 @@ namespace Corona::Horizon
         using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
         using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
         using ImageStore = ResourceStore<ImageWrap, ImageReleaser>;
+
+        void name_vulkan_object(VkDevice device, VkObjectType object_type, uint64_t object_handle, const std::string& name) noexcept
+        {
+            if (vkSetDebugUtilsObjectNameEXT == nullptr || device == VK_NULL_HANDLE || object_handle == 0 || name.empty())
+            {
+                return;
+            }
+
+            VkDebugUtilsObjectNameInfoEXT name_info {};
+            name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            name_info.objectType = object_type;
+            name_info.objectHandle = object_handle;
+            name_info.pObjectName = name.c_str();
+            (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+        }
 
         [[nodiscard]] bool is_push_constant_member(int32_t bind_type) noexcept
         {
@@ -582,9 +599,19 @@ namespace Corona::Horizon
             VkResult result = vkCreatePipelineLayout(device, &layout_info, nullptr, &state.layout);
             if (result != VK_SUCCESS)
             {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   "vkCreatePipelineLayout failed for ComputePipeline. VkResult=" +
+                                       std::to_string(static_cast<int>(result)));
                 throw std::runtime_error("vkCreatePipelineLayout failed for ComputePipeline. VkResult=" +
                                          std::to_string(static_cast<int>(result)));
             }
+
+            const std::string pipeline_name = desc_.debug_name.empty() ? "horizon.compute_pipeline" : desc_.debug_name;
+            name_vulkan_object(device,
+                               VK_OBJECT_TYPE_PIPELINE_LAYOUT,
+                               reinterpret_cast<uint64_t>(state.layout),
+                               pipeline_name + ".layout");
 
             VkShaderModule shader = create_shader_module(device, desc_.compute_shader.module);
             try
@@ -603,9 +630,18 @@ namespace Corona::Horizon
                 result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &state.pipeline);
                 if (result != VK_SUCCESS)
                 {
+                    Diagnostics::write(Diagnostics::Level::Error,
+                                       "VK_ERROR",
+                                       "vkCreateComputePipelines failed for ComputePipeline. VkResult=" +
+                                           std::to_string(static_cast<int>(result)));
                     throw std::runtime_error("vkCreateComputePipelines failed for ComputePipeline. VkResult=" +
                                              std::to_string(static_cast<int>(result)));
                 }
+
+                name_vulkan_object(device,
+                                   VK_OBJECT_TYPE_PIPELINE,
+                                   reinterpret_cast<uint64_t>(state.pipeline),
+                                   pipeline_name + ".pipeline");
 
                 vkDestroyShaderModule(device, shader, nullptr);
             }

@@ -1,5 +1,6 @@
 #include "hardware_validation.h"
 #include "hardware_wrapper/image_format_layout.h"
+#include "hardware_wrapper/diagnostics.h"
 #include "horizon.h"
 
 #include <cmath>
@@ -86,6 +87,7 @@ namespace Corona::Horizon
         bool validation_error(std::string_view message, bool hard_error = false)
         {
             const HardwareValidationConfig config = read_validation_config();
+            Diagnostics::write(Diagnostics::Level::Error, "HORIZON VALIDATION", message);
 
             if (hard_error || (validation_compiled() && config.mode == HardwareValidationMode::Throw))
                 throw std::invalid_argument(std::string(message));
@@ -102,6 +104,8 @@ namespace Corona::Horizon
 
         void validation_warning(std::string_view message)
         {
+            Diagnostics::write(Diagnostics::Level::Warning, "HORIZON VALIDATION", message);
+
 #if HORIZON_ENABLE_VALIDATION
             if (read_validation_config().mode != HardwareValidationMode::Disabled)
                 CFW_LOG_WARNING("[Horizon validation] {}", message);

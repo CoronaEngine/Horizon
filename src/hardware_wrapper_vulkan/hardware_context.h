@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <volk.h>
@@ -12,6 +13,21 @@
 namespace Corona::Horizon
 {
     struct HardwareContextTestAccess;
+
+    struct VulkanValidationReport
+    {
+        bool compiled { false };
+        bool layer_available { false };
+        bool debug_utils_enabled { false };
+        bool validation_features_enabled { false };
+        std::vector<std::string> enabled_features;
+        std::vector<std::string> missing_requirements;
+
+        [[nodiscard]] bool full_profile_available() const noexcept
+        {
+            return compiled && layer_available && debug_utils_enabled && validation_features_enabled && missing_requirements.empty();
+        }
+    };
 
     struct HardwareContext
     {
@@ -66,5 +82,6 @@ namespace Corona::Horizon
     DeviceManager& device_manager();
     VkInstance vulkan_instance();
     std::vector<std::shared_ptr<HardwareContext::DeviceContext>> all_devices();
+    [[nodiscard]] VulkanValidationReport vulkan_validation_report();
     extern HardwareContext g_hardware_context;
 }

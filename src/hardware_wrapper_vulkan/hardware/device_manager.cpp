@@ -7,11 +7,45 @@
 #include <string>
 #include <utility>
 
+#include "hardware_wrapper/diagnostics.h"
+
 namespace Corona::Horizon
 {
     // ================================================================
     // Helper
     // ================================================================
+
+    void name_vulkan_object(VkDevice device, VkObjectType object_type, uint64_t object_handle, const std::string& name) noexcept
+    {
+        if (vkSetDebugUtilsObjectNameEXT == nullptr || device == VK_NULL_HANDLE || object_handle == 0 || name.empty())
+        {
+            return;
+        }
+
+        VkDebugUtilsObjectNameInfoEXT name_info {};
+        name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+        name_info.objectType = object_type;
+        name_info.objectHandle = object_handle;
+        name_info.pObjectName = name.c_str();
+        (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+    }
+
+    [[nodiscard]] const char* capability_name(QueueCapability capability) noexcept
+    {
+        switch (capability)
+        {
+        case QueueCapability::Graphics:
+            return "graphics";
+        case QueueCapability::Compute:
+            return "compute";
+        case QueueCapability::Transfer:
+            return "transfer";
+        case QueueCapability::Present:
+            return "present";
+        }
+
+        return "unknown";
+    }
 
     [[nodiscard]] std::vector<const char*> filter_supported_device_extensions(VkPhysicalDevice physical_device, const std::set<const char*>& requested)
     {
@@ -19,6 +53,9 @@ namespace Corona::Horizon
         VkResult result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, nullptr);
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkEnumerateDeviceExtensionProperties(count) failed. VkResult=" + std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkEnumerateDeviceExtensionProperties failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
@@ -26,6 +63,9 @@ namespace Corona::Horizon
         result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, available.data());
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkEnumerateDeviceExtensionProperties(data) failed. VkResult=" + std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkEnumerateDeviceExtensionProperties failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
@@ -92,6 +132,12 @@ namespace Corona::Horizon
         VkResult result = vkCreateCommandPool(device_, &pool_info, nullptr, &command_pool_);
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkCreateCommandPool failed. queue_family_index=" +
+                                   std::to_string(queue_family_index) +
+                                   ", VkResult=" +
+                                   std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkCreateCommandPool failed. queue_family_index=" +
                                      std::to_string(queue_family_index) +
                                      ", VkResult=" +
@@ -110,11 +156,27 @@ namespace Corona::Horizon
             vkDestroyCommandPool(device_, command_pool_, nullptr);
             command_pool_ = VK_NULL_HANDLE;
 
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkAllocateCommandBuffers failed. queue_family_index=" +
+                                   std::to_string(queue_family_index) +
+                                   ", VkResult=" +
+                                   std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkAllocateCommandBuffers failed. queue_family_index=" +
                                      std::to_string(queue_family_index) +
                                      ", VkResult=" +
                                      std::to_string(static_cast<int>(result)));
         }
+
+        const std::string name_prefix = "horizon.command.family." + std::to_string(queue_family_index);
+        name_vulkan_object(device_,
+                           VK_OBJECT_TYPE_COMMAND_POOL,
+                           reinterpret_cast<uint64_t>(command_pool_),
+                           name_prefix + ".pool");
+        name_vulkan_object(device_,
+                           VK_OBJECT_TYPE_COMMAND_BUFFER,
+                           reinterpret_cast<uint64_t>(command_buffer_),
+                           name_prefix + ".buffer");
     }
 
     TrackedCommandBuffer::~TrackedCommandBuffer()
@@ -138,6 +200,12 @@ namespace Corona::Horizon
             VkResult result = vkResetCommandBuffer(command_buffer_, 0);
             if (result != VK_SUCCESS)
             {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   "vkResetCommandBuffer failed. recording_id=" +
+                                       std::to_string(recording_id_) +
+                                       ", VkResult=" +
+                                       std::to_string(static_cast<int>(result)));
                 throw std::runtime_error("vkResetCommandBuffer failed. recording_id=" +
                                          std::to_string(recording_id_) +
                                          ", VkResult=" +
@@ -176,6 +244,13 @@ namespace Corona::Horizon
         id_.family_index = queue_family_index;
         id_.queue_index = queue_index;
         id_.capability = capability;
+        name_vulkan_object(device_,
+                           VK_OBJECT_TYPE_QUEUE,
+                           reinterpret_cast<uint64_t>(queue_),
+                           "horizon.queue.device." + std::to_string(device_id.value) +
+                               ".family." + std::to_string(queue_family_index) +
+                               ".index." + std::to_string(queue_index) +
+                               "." + capability_name(capability));
         create_timeline_semaphore();
     }
 
@@ -213,8 +288,18 @@ namespace Corona::Horizon
         VkResult result = vkCreateSemaphore(device_, &create_info, nullptr, &timeline_);
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkCreateSemaphore(timeline) failed. VkResult=" + std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkCreateSemaphore failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
+
+        name_vulkan_object(device_,
+                           VK_OBJECT_TYPE_SEMAPHORE,
+                           reinterpret_cast<uint64_t>(timeline_),
+                           "horizon.queue.timeline.device." + std::to_string(id_.device.value) +
+                               ".family." + std::to_string(id_.family_index) +
+                               ".index." + std::to_string(id_.queue_index));
     }
 
     std::shared_ptr<TrackedCommandBuffer> Queue::acquire()
@@ -317,6 +402,14 @@ namespace Corona::Horizon
             VkResult result = vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE);
             if (result != VK_SUCCESS)
             {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   "vkQueueSubmit2 failed. family_index=" +
+                                       std::to_string(id_.family_index) +
+                                       ", queue_index=" +
+                                       std::to_string(id_.queue_index) +
+                                       ", VkResult=" +
+                                       std::to_string(static_cast<int>(result)));
                 throw std::runtime_error("vkQueueSubmit2 failed. family_index=" +
                                          std::to_string(id_.family_index) +
                                          ", queue_index=" +
@@ -342,7 +435,27 @@ namespace Corona::Horizon
             return VK_SUCCESS;
         }
 
-        return vkQueuePresentKHR(queue_, &present_info);
+        // Present fences require optional WSI extensions; queue idle is the conservative completion point for present reuse.
+        /*const VkResult wait_result = vkQueueWaitIdle(queue_);
+        if (wait_result != VK_SUCCESS)
+        {
+            return wait_result;
+        }*/
+
+        const VkResult result = vkQueuePresentKHR(queue_, &present_info);
+        if (result != VK_SUCCESS)
+        {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkQueuePresentKHR failed. family_index=" +
+                                   std::to_string(id_.family_index) +
+                                   ", queue_index=" +
+                                   std::to_string(id_.queue_index) +
+                                   ", VkResult=" +
+                                   std::to_string(static_cast<int>(result)));
+        }
+
+        return result;
     }
 
     void Queue::wait_for(const SubmissionToken& token) const
@@ -368,6 +481,9 @@ namespace Corona::Horizon
         const VkResult result = vkWaitSemaphores(device_, &wait_info, UINT64_MAX);
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkWaitSemaphores failed. VkResult=" + std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkWaitSemaphores failed. VkResult=" +
                                      std::to_string(static_cast<int>(result)));
         }
@@ -384,6 +500,14 @@ namespace Corona::Horizon
         VkResult result = vkGetSemaphoreCounterValue(device_, timeline_, &value);
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkGetSemaphoreCounterValue failed. family_index=" +
+                                   std::to_string(id_.family_index) +
+                                   ", queue_index=" +
+                                   std::to_string(id_.queue_index) +
+                                   ", VkResult=" +
+                                   std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkGetSemaphoreCounterValue failed. family_index=" +
                                      std::to_string(id_.family_index) +
                                      ", queue_index=" +
@@ -554,6 +678,9 @@ namespace Corona::Horizon
         VkResult result = vkCreateDevice(physical_device_, &create_info, nullptr, &logical_device_);
         if (result != VK_SUCCESS)
         {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkCreateDevice failed. VkResult=" + std::to_string(static_cast<int>(result)));
             throw std::runtime_error("vkCreateDevice failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 

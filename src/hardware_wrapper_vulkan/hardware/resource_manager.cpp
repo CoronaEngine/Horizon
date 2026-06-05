@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@
 
 #include "corona/kernel/core/i_logger.h"
 #include "device_manager.h"
+#include "hardware_wrapper/diagnostics.h"
 
 namespace Corona::Horizon
 {
@@ -202,6 +204,27 @@ namespace Corona::Horizon
             return VK_IMAGE_VIEW_TYPE_2D;
         }
 
+        [[nodiscard]] bool image_usage_allows_view(VkImageUsageFlags usage) noexcept
+        {
+            constexpr VkImageUsageFlags view_usage =
+                VK_IMAGE_USAGE_SAMPLED_BIT |
+                VK_IMAGE_USAGE_STORAGE_BIT |
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+            return (usage & view_usage) != 0;
+        }
+
+        [[nodiscard]] VkImageLayout sampled_descriptor_layout(const ImageWrap& image) noexcept
+        {
+            if (has_flag(image.desc.usage, ImageUsageFlags::Storage))
+            {
+                return VK_IMAGE_LAYOUT_GENERAL;
+            }
+
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        }
+
         [[nodiscard]] VkSampleCountFlagBits to_vk_sample_count(uint32_t sample_count) noexcept
         {
             switch (sample_count)
@@ -288,6 +311,9 @@ namespace Corona::Horizon
         {
             if (result != VK_SUCCESS)
             {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
                 throw std::runtime_error(std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
             }
         }
@@ -373,6 +399,75 @@ namespace Corona::Horizon
             }
         }
 
+        [[nodiscard]] std::string image_create_context(const VkImageCreateInfo& create_info, const HardwareImageDesc& desc)
+        {
+            std::ostringstream message;
+            message << "format=" << static_cast<int>(create_info.format)
+                    << ", type=" << static_cast<int>(create_info.imageType)
+                    << ", tiling=" << static_cast<int>(create_info.tiling)
+                    << ", usage=0x" << std::hex << create_info.usage << std::dec
+                    << ", extent=" << create_info.extent.width << "x" << create_info.extent.height << "x" << create_info.extent.depth
+                    << ", mips=" << create_info.mipLevels
+                    << ", layers=" << create_info.arrayLayers
+                    << ", samples=" << static_cast<int>(create_info.samples);
+
+            if (!desc.debug_name.empty())
+            {
+                message << ", name=\"" << desc.debug_name << "\"";
+            }
+
+            return message.str();
+        }
+
+        void require_image_format_support(VkPhysicalDevice physical_device,
+                                          const VkImageCreateInfo& create_info,
+                                          const HardwareImageDesc& desc,
+                                          const char* operation)
+        {
+            VkPhysicalDeviceImageFormatInfo2 format_info {};
+            format_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+            format_info.format = create_info.format;
+            format_info.type = create_info.imageType;
+            format_info.tiling = create_info.tiling;
+            format_info.usage = create_info.usage;
+            format_info.flags = create_info.flags;
+
+            VkImageFormatProperties2 image_properties {};
+            image_properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+
+            const VkResult result = vkGetPhysicalDeviceImageFormatProperties2(physical_device, &format_info, &image_properties);
+            if (result == VK_ERROR_FORMAT_NOT_SUPPORTED)
+            {
+                throw std::runtime_error(std::string(operation) + " is not supported by this Vulkan device (" +
+                                         image_create_context(create_info, desc) + ").");
+            }
+            throw_if_failed(result, operation);
+
+            const VkImageFormatProperties& limits = image_properties.imageFormatProperties;
+            if (create_info.extent.width > limits.maxExtent.width ||
+                create_info.extent.height > limits.maxExtent.height ||
+                create_info.extent.depth > limits.maxExtent.depth)
+            {
+                throw std::runtime_error(std::string(operation) + " extent exceeds this Vulkan device limit (" +
+                                         image_create_context(create_info, desc) + ").");
+            }
+            if (create_info.mipLevels > limits.maxMipLevels)
+            {
+                throw std::runtime_error(std::string(operation) + " mip level count exceeds this Vulkan device limit (" +
+                                         image_create_context(create_info, desc) + ").");
+            }
+            if (create_info.arrayLayers > limits.maxArrayLayers)
+            {
+                throw std::runtime_error(std::string(operation) + " array layer count exceeds this Vulkan device limit (" +
+                                         image_create_context(create_info, desc) + ").");
+            }
+            if ((limits.sampleCounts & create_info.samples) == 0)
+            {
+                throw std::runtime_error(std::string(operation) + " sample count is not supported by this Vulkan device (" +
+                                         image_create_context(create_info, desc) + ").");
+            }
+        }
+
         [[nodiscard]] uint32_t clamp_descriptor_capacity(uint32_t preferred, uint32_t limit) noexcept
         {
             if (limit == 0)
@@ -408,6 +503,21 @@ namespace Corona::Horizon
             (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
         }
 
+        void name_vulkan_object(VkDevice device, VkObjectType object_type, uint64_t object_handle, const std::string& name) noexcept
+        {
+            if (vkSetDebugUtilsObjectNameEXT == nullptr || object_handle == 0 || name.empty())
+            {
+                return;
+            }
+
+            VkDebugUtilsObjectNameInfoEXT name_info {};
+            name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+            name_info.objectType = object_type;
+            name_info.objectHandle = object_handle;
+            name_info.pObjectName = name.c_str();
+            (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+        }
+
         void name_image(VkDevice device, VmaAllocator allocator, const ImageWrap& image) noexcept
         {
             if (image.desc.debug_name.empty())
@@ -431,6 +541,14 @@ namespace Corona::Horizon
             name_info.objectHandle = reinterpret_cast<uint64_t>(image.image_handle);
             name_info.pObjectName = image.desc.debug_name.c_str();
             (void)vkSetDebugUtilsObjectNameEXT(device, &name_info);
+
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                name_vulkan_object(device,
+                                   VK_OBJECT_TYPE_IMAGE_VIEW,
+                                   reinterpret_cast<uint64_t>(image.image_view),
+                                   image.desc.debug_name + ".view");
+            }
         }
     }
 
@@ -615,7 +733,8 @@ namespace Corona::Horizon
 
     VkImageView ResourceManager::create_image_view(const ImageWrap& image, ImageSubresourceRange range) const
     {
-        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE || image.image_handle == VK_NULL_HANDLE)
+        if (device_manager_ == nullptr || device_manager_->logical_device() == VK_NULL_HANDLE || image.image_handle == VK_NULL_HANDLE ||
+            !image_usage_allows_view(image.image_usage))
         {
             return VK_NULL_HANDLE;
         }
@@ -810,6 +929,20 @@ namespace Corona::Horizon
                                                       &alloc_info,
                                                      &descriptors.set),
                             (std::string("vkAllocateDescriptorSets(") + label + ")").c_str());
+
+            const std::string name_prefix = std::string("horizon.bindless.") + label;
+            name_vulkan_object(device_manager_->logical_device(),
+                               VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+                               reinterpret_cast<uint64_t>(descriptors.layout),
+                               name_prefix + ".layout");
+            name_vulkan_object(device_manager_->logical_device(),
+                               VK_OBJECT_TYPE_DESCRIPTOR_POOL,
+                               reinterpret_cast<uint64_t>(descriptors.pool),
+                               name_prefix + ".pool");
+            name_vulkan_object(device_manager_->logical_device(),
+                               VK_OBJECT_TYPE_DESCRIPTOR_SET,
+                               reinterpret_cast<uint64_t>(descriptors.set),
+                               name_prefix + ".set");
         }
         catch (...)
         {
@@ -1470,6 +1603,8 @@ namespace Corona::Horizon
                                            "Exportable HardwareImage");
         }
 
+        require_image_format_support(device_manager_->physical_device(), create_info, desc, "HardwareImage");
+
         VmaAllocationCreateInfo alloc_info = allocation_info(desc);
         VkResult result = VK_SUCCESS;
 
@@ -1586,6 +1721,7 @@ namespace Corona::Horizon
                                        handle_type,
                                        VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
                                        "Imported HardwareImage");
+        require_image_format_support(device_manager_->physical_device(), create_info, desc, "Imported HardwareImage");
 
         VmaAllocationCreateInfo alloc_info = allocation_info(desc);
         alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
@@ -1812,9 +1948,7 @@ namespace Corona::Horizon
         VkDescriptorImageInfo image_info {};
         image_info.sampler = default_sampler_;
         image_info.imageView = image.image_view;
-        image_info.imageLayout = image.image_layout == VK_IMAGE_LAYOUT_UNDEFINED
-            ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            : image.image_layout;
+        image_info.imageLayout = sampled_descriptor_layout(image);
 
         VkWriteDescriptorSet write {};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
