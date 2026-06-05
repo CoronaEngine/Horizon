@@ -4,10 +4,6 @@
 
 #include <tiny_obj_loader.h>
 
-#include "Codegen/ControlFlows.h"
-#include GLSL(shaders/baseline_vert.glsl)
-#include GLSL(shaders/baseline_frag.glsl)
-
 #include <horizon.h>
 #include "hardware_wrapper_vulkan/hardware/execution.h"
 
@@ -15,7 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -31,8 +27,8 @@ using namespace Corona::Horizon;
 namespace
 {
 
-constexpr uint32_t baseline_width = 800;
-constexpr uint32_t baseline_height = 600;
+constexpr uint32_t baseline_width = 1920;
+constexpr uint32_t baseline_height = 1080;
 constexpr float pi = 3.14159265358979323846f;
 
 const std::filesystem::path viking_room_model_path =
@@ -43,11 +39,11 @@ const std::filesystem::path viking_room_texture_path =
 constexpr char baseline_model_vertex_shader[] = R"GLSL(
 #version 460
 
-layout(set = 3, binding = 0) uniform UniformBufferObject {
+layout(push_constant) uniform TransformPushConstant {
     mat4 model;
     mat4 view;
     mat4 proj;
-} ubo;
+} pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
@@ -58,7 +54,7 @@ layout(location = 1) out vec2 fragTexCoord;
 
 void main()
 {
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
+    gl_Position = pc.proj * pc.view * pc.model * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragTexCoord = inTexCoord;
 }
@@ -66,28 +62,22 @@ void main()
 
 constexpr char baseline_model_fragment_shader[] = R"GLSL(
 #version 460
-#extension GL_EXT_nonuniform_qualifier : require
 
-layout(set = 0, binding = 0) uniform sampler2D texSamplers[];
+layout(set = 0, binding = 1) uniform sampler2D texSampler;
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
-layout(push_constant) uniform TexturePushConstant {
-    uint texSampler;
-} texturePushConstant;
-
 void main()
 {
-    outColor = texture(texSamplers[nonuniformEXT(texturePushConstant.texSampler)], fragTexCoord) *
-               vec4(fragColor, 1.0);
+    outColor = texture(texSampler, fragTexCoord);
 }
 )GLSL";
 
-constexpr BindingSlot model_binding{0, 64, 10, 0};
-constexpr BindingSlot view_binding{64, 64, 10, 0};
-constexpr BindingSlot proj_binding{128, 64, 10, 0};
-constexpr BindingSlot texture_binding{0, 4, 0, 0};
+constexpr BindingSlot model_binding{0, 64, 0, 0};
+constexpr BindingSlot view_binding{64, 64, 0, 0};
+constexpr BindingSlot proj_binding{128, 64, 0, 0};
+constexpr BindingSlot texture_image_binding{0, 0, 4, 1, 0, 1};
 constexpr BindingSlot output_binding{0, 16, 2, 0};
 
 struct vec3
@@ -358,9 +348,8 @@ HardwareImage create_render_target(uint32_t width, uint32_t height)
     HardwareImageDesc create_info =
         HardwareImageDesc::texture_2d(width,
                                       height,
-                                      Format::RGBA16_FLOAT,
-                                      ImageUsageFlags::Storage | ImageUsageFlags::ColorAttachment |
-                                          ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
+                                      Format::SBGRA8_UNORM,
+                                      ImageUsageFlags::ColorAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc |
                                           ImageUsageFlags::TransferDst);
 
     HardwareImage image(create_info);
@@ -368,20 +357,29 @@ HardwareImage create_render_target(uint32_t width, uint32_t height)
     return image;
 }
 
-// Old private Vulkan descriptor binding path kept for reference. Directly
-// assigning the reflected binding through RasterizerPipeline uses the same
-// descriptor path without requiring private backend headers here.
-// void bind_texture_to_reflected_slot(const HardwareImage &image, const EmbeddedShader::BindingKey &binding_key)
-// {
-//     auto main_device = globalHardwareContext.getMainDevice();
-//     if (!main_device)
-//     {
-//         return;
-//     }
-//
-//     auto image_handle = globalImageStorages.acquire_write(image.getImageID());
-//     main_device->resourceManager.storeDescriptorAt(image_handle, binding_key.location);
-// }
+HardwareImage create_depth_target(uint32_t width, uint32_t height)
+{
+    HardwareImage image(HardwareImageDesc::depth_attachment(width, height, Format::D32, "example_glsl.depth"));
+    image.set_clear_depth(1.0f, 0);
+    return image;
+}
+
+float example_time_seconds(std::chrono::high_resolution_clock::time_point start_time)
+{
+    if (const char *fixed_time = std::getenv("HORIZON_EXAMPLE_FIXED_TIME_SECONDS"))
+    {
+        char *end = nullptr;
+        const float value = std::strtof(fixed_time, &end);
+        if (end != fixed_time)
+        {
+            return value;
+        }
+    }
+
+    return std::chrono::duration<float, std::chrono::seconds::period>(
+               std::chrono::high_resolution_clock::now() - start_time)
+        .count();
+}
 
 uniform_buffer_object make_ubo(float time_seconds)
 {
@@ -424,23 +422,33 @@ void run_example_glsl()
         HardwareBuffer index_buffer = HardwareBuffer::index(mesh.indices);
         HardwareImage texture_image = load_texture_image();
         HardwareImage render_target = create_render_target(baseline_width, baseline_height);
+        HardwareImage depth_target = create_depth_target(baseline_width, baseline_height);
         HardwareExecutor render_executor;
         HardwareDisplayer displayer(glfwGetWin32Window(window));
 
         EmbeddedShader::CompilerOption glsl_compiler_options;
         glsl_compiler_options.enableBindless = false;
-        RasterizerPipeline rasterizer(
+        glsl_compiler_options.compileGLSL = false;
+        glsl_compiler_options.compileHLSL = false;
+        glsl_compiler_options.compileDXIL = false;
+        glsl_compiler_options.compileDXBC = false;
+        RasterizerPipelineDesc rasterizer_desc =
             RasterizerPipelineDesc::from_source(baseline_model_vertex_shader,
                                                 baseline_model_fragment_shader,
                                                 EmbeddedShader::ShaderLanguage::GLSL,
                                                 EmbeddedShader::ShaderLanguage::GLSL,
-                                                glsl_compiler_options));
-        // rasterizer[baseline_model_frag::outColor] = render_target;
+                                                glsl_compiler_options);
+        DepthStencilStateDesc baseline_depth;
+        baseline_depth.depth_compare_op = CompareOp::Less;
+        rasterizer_desc.set_depth_stencil(baseline_depth);
+        rasterizer_desc.set_depth_attachment(DepthAttachmentDesc::with_format(Format::D32, "example_glsl.depth"));
+        BlendStateDesc baseline_blend;
+        baseline_blend.set_opaque();
+        rasterizer_desc.set_blend(baseline_blend);
+        RasterizerPipeline rasterizer(rasterizer_desc);
         rasterizer[output_binding] = render_target;
-        // bind_texture_to_reflected_slot(texture_image, baseline_model_frag::texSampler);
-        // rasterizer[baseline_model_frag::texSampler] = texture_image;
-        uint32_t texture_descriptor = texture_image.store_descriptor();
-        rasterizer[texture_binding] = texture_descriptor;
+        rasterizer[texture_image_binding] = texture_image;
+        rasterizer.bind_depth_target(depth_target);
 
         auto start_time = std::chrono::high_resolution_clock::now();
         while (!glfwWindowShouldClose(window))
@@ -451,27 +459,19 @@ void run_example_glsl()
                 break;
             }
 
-            float time_seconds = std::chrono::duration<float, std::chrono::seconds::period>(
-                                     std::chrono::high_resolution_clock::now() - start_time)
-                                     .count();
+            float time_seconds = example_time_seconds(start_time);
             uniform_buffer_object ubo = make_ubo(time_seconds);
-            // rasterizer[baseline_model_vert::UniformBufferObject::model] = ubo.model;
-            // rasterizer[baseline_model_vert::UniformBufferObject::view] = ubo.view;
-            // rasterizer[baseline_model_vert::UniformBufferObject::proj] = ubo.proj;
             rasterizer[model_binding] = ubo.model;
             rasterizer[view_binding] = ubo.view;
             rasterizer[proj_binding] = ubo.proj;
-            // Texture handle is stored in push constants; record() consumes and
-            // resets that temporary block, so it must be refreshed per draw.
-            rasterizer[texture_binding] = texture_descriptor;
 
             DrawIndexedParams draw_params;
             draw_params.index_type = IndexType::UInt32;
             draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
             rasterizer.clear_records();
-            rasterizer.record(index_buffer, vertex_buffer, draw_params);
             rasterizer(baseline_width, baseline_height);
+            rasterizer.record(index_buffer, vertex_buffer, draw_params);
             auto receipt = render_executor.stream()
                 << rasterizer.command_batch()
                 << present(displayer, render_target)

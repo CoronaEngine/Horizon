@@ -4,9 +4,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -48,6 +53,13 @@ struct SimpleVertex
 {
     std::array<float, 3> position;
     std::array<float, 3> color;
+};
+
+struct DefaultFrameSubmitState
+{
+    std::mutex mutex;
+    SubmitReceipt last_render_receipt;
+    uint64_t last_presented_render_serial { 0 };
 };
 
 // Vertex attribute proxy: 与 SimpleVertex 一一对应
@@ -106,13 +118,29 @@ void run_example_default()
     {
         std::string title = (i % 2 == 0) ? "Cabbage Engine [EDSL]" : "Cabbage Engine [GLSL]";
         windows[i] = glfwCreateWindow(1920, 1080, title.c_str(), nullptr, nullptr);
+        if (windows[i] == nullptr)
+        {
+            std::cerr << "Failed to create Horizon default example window.\n";
+            for (GLFWwindow* window : windows)
+            {
+                if (window != nullptr)
+                {
+                    glfwDestroyWindow(window);
+                }
+            }
+            glfwTerminate();
+            return;
+        }
     }
 
     {
         std::vector<HardwareImage> finalOutputImages(windows.size());
         std::vector<HardwareExecutor> executors(windows.size());
+        std::vector<std::unique_ptr<DefaultFrameSubmitState>> submitStates(windows.size());
         for (size_t i = 0; i < finalOutputImages.size(); i++)
         {
+            submitStates[i] = std::make_unique<DefaultFrameSubmitState>();
+
             HardwareImageDesc createInfo =
                 HardwareImageDesc::texture_2d(1920,
                                               1080,
@@ -184,6 +212,49 @@ void run_example_default()
         //std::vector<HardwareBuffer> computeStorageBuffers(windows.size());
 
         std::atomic_bool running = true;
+        std::mutex errorMutex;
+        std::exception_ptr firstWorkerError;
+        std::string firstWorkerErrorMessage;
+
+        auto captureWorkerError = [&](const char* label, uint32_t threadIndex, std::exception_ptr errorPtr) {
+            std::string message;
+            try
+            {
+                if (errorPtr)
+                {
+                    std::rethrow_exception(errorPtr);
+                }
+            }
+            catch (const std::exception& error)
+            {
+                message = std::string(label) + "[" + std::to_string(threadIndex) + "]: " + error.what();
+            }
+            catch (...)
+            {
+                message = std::string(label) + "[" + std::to_string(threadIndex) + "]: unknown exception";
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(errorMutex);
+                if (!firstWorkerError)
+                {
+                    firstWorkerError = std::move(errorPtr);
+                    firstWorkerErrorMessage = std::move(message);
+                }
+            }
+            running.store(false);
+        };
+
+        auto runWorker = [&](const char* label, uint32_t threadIndex, auto& body) {
+            try
+            {
+                body(threadIndex);
+            }
+            catch (...)
+            {
+                captureWorkerError(label, threadIndex, std::current_exception());
+            }
+        };
 
         auto meshThread = [&](uint32_t threadIndex) {
             //CFW_LOG_INFO("Mesh thread {} started...", threadIndex);
@@ -271,6 +342,16 @@ void run_example_default()
             using namespace EmbeddedShader::Ast;
             using namespace ktm;
 
+            auto spirvOnlyOptions = [] {
+                EmbeddedShader::CompilerOption options;
+                options.enableBindless = false;
+                options.compileGLSL = false;
+                options.compileHLSL = false;
+                options.compileDXIL = false;
+                options.compileDXBC = false;
+                return options;
+            };
+
             // Texture2D proxy 声明时直接绑定已有 HardwareImage
             Texture2D<fvec4> inputImageRGBA16 = finalOutputImages[threadIndex];
 
@@ -302,11 +383,22 @@ void run_example_default()
             };
 
             // 从 lambda 创建管线，bindOutputTargets 自动绑定 render target
-            RasterizerPipeline rasterizer(RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda));
+            EdslPipelineOptions rasterizerOptions;
+            rasterizerOptions.compiler = spirvOnlyOptions();
+            RasterizerPipelineDesc rasterizerDesc =
+                RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda, rasterizerOptions);
+            DepthStencilStateDesc noDepth;
+            noDepth.depth_test_enabled = false;
+            noDepth.depth_write_enabled = false;
+            rasterizerDesc.set_depth_stencil(noDepth);
+            RasterizerPipeline rasterizer(std::move(rasterizerDesc));
             rasterizer.bind_output_targets(inputImageRGBA16);
 
-            // 从 lambda 创建 compute 管线，auto-bind 资源
-            ComputePipeline computer(ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1)));
+            // 从 lambda 创建 compute 管线；当前 ComputePipeline 使用显式 storage image binding。
+            EdslPipelineOptions computeOptions;
+            computeOptions.compiler = spirvOnlyOptions();
+            computeOptions.auto_bind = false;
+            ComputePipeline computer(ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1), computeOptions));
             computer.bind_storage_image(0, finalOutputImages[threadIndex]);
 
             auto startTime = std::chrono::high_resolution_clock::now();
@@ -330,11 +422,12 @@ void run_example_default()
 
                 rasterizer(1920, 1080);
                 computer(1920 / 8, 1080 / 8, 1);
-                auto receipt = executors[threadIndex].stream()
+                DefaultFrameSubmitState& submitState = *submitStates[threadIndex];
+                std::lock_guard submitLock(submitState.mutex);
+                submitState.last_render_receipt = executors[threadIndex].stream()
                     << rasterizer.command_batch()
                     << computer.command_batch()
                     << commit();
-                (void)receipt;
             }
         };
 
@@ -343,8 +436,13 @@ void run_example_default()
         // =====================================================================
         auto renderThreadGLSL = [&](uint32_t threadIndex) {
             // 简化后的 shader 无需 push constant / UBO，仅做 pass-through
-            RasterizerPipeline rasterizer(
-                RasterizerPipelineDesc::from_spirv(default_vert_glsl::spirv, default_frag_glsl::spirv));
+            RasterizerPipelineDesc rasterizerDesc =
+                RasterizerPipelineDesc::from_spirv(default_vert_glsl::spirv, default_frag_glsl::spirv);
+            DepthStencilStateDesc noDepth;
+            noDepth.depth_test_enabled = false;
+            noDepth.depth_write_enabled = false;
+            rasterizerDesc.set_depth_stencil(noDepth);
+            RasterizerPipeline rasterizer(std::move(rasterizerDesc));
 
             // 绑定 render target
             rasterizer[default_frag_glsl::outColor] = finalOutputImages[threadIndex];
@@ -352,6 +450,10 @@ void run_example_default()
             // compute 管线保持不变
             EmbeddedShader::CompilerOption glslCompilerOptions;
             glslCompilerOptions.enableBindless = false;
+            glslCompilerOptions.compileGLSL = false;
+            glslCompilerOptions.compileHLSL = false;
+            glslCompilerOptions.compileDXIL = false;
+            glslCompilerOptions.compileDXBC = false;
             ComputePipeline computer(ComputePipelineDesc::from_source(defaultStorageImageComputeShader,
                                                                       EmbeddedShader::ShaderLanguage::GLSL,
                                                                       glslCompilerOptions));
@@ -378,11 +480,12 @@ void run_example_default()
 
                 rasterizer(1920, 1080);
                 computer(1920 / 8, 1080 / 8, 1);
-                auto receipt = executors[threadIndex].stream()
+                DefaultFrameSubmitState& submitState = *submitStates[threadIndex];
+                std::lock_guard submitLock(submitState.mutex);
+                submitState.last_render_receipt = executors[threadIndex].stream()
                     << rasterizer.command_batch()
                     << computer.command_batch()
                     << commit();
-                (void)receipt;
             }
         };
 
@@ -404,10 +507,21 @@ void run_example_default()
                 float time = std::chrono::duration<float, std::chrono::seconds::period>(std::chrono::high_resolution_clock::now() - startTime).count();
                 // CFW_LOG_INFO("Display thread {} frame {} at {:.3f}s", threadIndex, frameCount, time);
 
-                auto receipt = displayExecutor.stream()
-                    << present(displayManager, finalOutputImages[threadIndex])
-                    << commit();
-                (void)receipt;
+                DefaultFrameSubmitState& submitState = *submitStates[threadIndex];
+                {
+                    std::lock_guard submitLock(submitState.mutex);
+                    if (submitState.last_render_receipt.serial != 0 &&
+                        submitState.last_render_receipt.serial != submitState.last_presented_render_serial)
+                    {
+                        displayExecutor.wait(submitState.last_render_receipt);
+                        submitState.last_presented_render_serial = submitState.last_render_receipt.serial;
+                    }
+
+                    auto receipt = displayExecutor.stream()
+                        << present(displayManager, finalOutputImages[threadIndex])
+                        << commit();
+                    (void)receipt;
+                }
                 ++frameCount;
 
                 // 通知 Mesh 线程开始下一帧
@@ -425,12 +539,20 @@ void run_example_default()
         for (size_t i = 0; i < windows.size(); i++)
         {
             const uint32_t threadIndex = static_cast<uint32_t>(i);
-            meshThreads.emplace_back(meshThread, threadIndex);
+            meshThreads.emplace_back([&, threadIndex] {
+                runWorker("mesh", threadIndex, meshThread);
+            });
             if (i % 2 == 0)
-                renderThreads.emplace_back(renderThreadEDSL, threadIndex);
+                renderThreads.emplace_back([&, threadIndex] {
+                    runWorker("render-edsl", threadIndex, renderThreadEDSL);
+                });
             else
-                renderThreads.emplace_back(renderThreadGLSL, threadIndex);
-            displayThreads.emplace_back(displayThread, threadIndex);
+                renderThreads.emplace_back([&, threadIndex] {
+                    runWorker("render-glsl", threadIndex, renderThreadGLSL);
+                });
+            displayThreads.emplace_back([&, threadIndex] {
+                runWorker("display", threadIndex, displayThread);
+            });
         }
 
         while (running.load())
@@ -454,6 +576,11 @@ void run_example_default()
                 renderThreads[i].join();
             if (displayThreads[i].joinable())
                 displayThreads[i].join();
+        }
+
+        if (firstWorkerError)
+        {
+            std::cerr << "Horizon default example stopped after worker error: " << firstWorkerErrorMessage << "\n";
         }
     }
 
