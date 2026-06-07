@@ -8,16 +8,21 @@
 #include "display_manager.h"
 
 #include "hardware_wrapper/diagnostics.h"
+#include "hardware_wrapper_vulkan/hardware/device_manager.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -102,6 +107,65 @@ namespace Corona::Horizon
             return formats.front();
         }
 
+        [[nodiscard]] std::string present_mode_name(VkPresentModeKHR mode)
+        {
+            switch (mode)
+            {
+            case VK_PRESENT_MODE_IMMEDIATE_KHR:
+                return "immediate";
+            case VK_PRESENT_MODE_MAILBOX_KHR:
+                return "mailbox";
+            case VK_PRESENT_MODE_FIFO_KHR:
+                return "fifo";
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+                return "fifo_relaxed";
+            default:
+                return "unknown(" + std::to_string(static_cast<int>(mode)) + ")";
+            }
+        }
+
+        [[nodiscard]] bool present_mode_supported(std::span<const VkPresentModeKHR> modes, VkPresentModeKHR mode) noexcept
+        {
+            return std::ranges::find(modes, mode) != modes.end();
+        }
+
+        [[nodiscard]] std::string requested_present_mode()
+        {
+            const char* raw = std::getenv("HORIZON_VULKAN_PRESENT_MODE");
+            if (raw == nullptr)
+            {
+                return {};
+            }
+
+            std::string value(raw);
+            std::ranges::transform(value, value.begin(), [](unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+            return value;
+        }
+
+        [[nodiscard]] std::optional<VkPresentModeKHR> parse_present_mode_request(std::string_view value)
+        {
+            if (value.empty() || value == "default" || value == "fifo")
+            {
+                return VK_PRESENT_MODE_FIFO_KHR;
+            }
+            if (value == "mailbox")
+            {
+                return VK_PRESENT_MODE_MAILBOX_KHR;
+            }
+            if (value == "immediate")
+            {
+                return VK_PRESENT_MODE_IMMEDIATE_KHR;
+            }
+            if (value == "fifo_relaxed" || value == "fifo-relaxed")
+            {
+                return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+            }
+
+            return std::nullopt;
+        }
+
         [[nodiscard]] VkPresentModeKHR choose_present_mode(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
         {
             uint32_t mode_count = 0;
@@ -115,11 +179,26 @@ namespace Corona::Horizon
                                 "vkGetPhysicalDeviceSurfacePresentModesKHR");
             }
 
-            if (std::ranges::find(modes, VK_PRESENT_MODE_MAILBOX_KHR) != modes.end())
+            const std::string requested = requested_present_mode();
+            if (!requested.empty())
             {
-                return VK_PRESENT_MODE_MAILBOX_KHR;
+                const std::optional<VkPresentModeKHR> parsed = parse_present_mode_request(requested);
+                if (parsed && present_mode_supported(modes, *parsed))
+                {
+                    Diagnostics::write(Diagnostics::Level::Info,
+                                       "HORIZON VALIDATION",
+                                       "Using requested Vulkan present mode: " + present_mode_name(*parsed) + ".");
+                    return *parsed;
+                }
+
+                Diagnostics::write(Diagnostics::Level::Warning,
+                                   "HORIZON VALIDATION",
+                                   "Ignoring unsupported HORIZON_VULKAN_PRESENT_MODE='" + requested + "'; using fifo.");
             }
 
+            Diagnostics::write(Diagnostics::Level::Info,
+                               "HORIZON VALIDATION",
+                               "Using default Vulkan present mode: fifo.");
             return VK_PRESENT_MODE_FIFO_KHR;
         }
 
@@ -227,6 +306,50 @@ namespace Corona::Horizon
                 return {};
             }
         }
+
+        [[nodiscard]] uint64_t completed_value_for_token(VkDevice device, const SubmissionToken& token)
+        {
+            if (!token.has_sync() || token.value == 0)
+            {
+                return token.value;
+            }
+
+            const VkSemaphore timeline = token.sync->timeline();
+            if (device == VK_NULL_HANDLE || timeline == VK_NULL_HANDLE)
+            {
+                return token.value;
+            }
+
+            uint64_t value = 0;
+            const VkResult result = vkGetSemaphoreCounterValue(device, timeline, &value);
+            if (result != VK_SUCCESS)
+            {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   "vkGetSemaphoreCounterValue(display frame token) failed. VkResult=" +
+                                       std::to_string(static_cast<int>(result)));
+                throw std::runtime_error("vkGetSemaphoreCounterValue(display frame token) failed. VkResult=" +
+                                         std::to_string(static_cast<int>(result)));
+            }
+
+            return value;
+        }
+
+        [[nodiscard]] constexpr VkPipelineStageFlags2 display_transfer_stages() noexcept
+        {
+            return VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT;
+        }
+
+        [[nodiscard]] constexpr VkPipelineStageFlags2 display_present_signal_stages() noexcept
+        {
+            return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        }
+
+        [[nodiscard]] constexpr uint64_t swapchain_acquire_timeout_ns() noexcept
+        {
+            return 1'000'000;
+        }
+
     }
 
     DisplayManager::DisplayManager(DisplayerRef displayer) noexcept
@@ -242,7 +365,20 @@ namespace Corona::Horizon
 
     DisplayManager::~DisplayManager()
     {
+        std::lock_guard lock(mutex_);
         shutdown();
+    }
+
+    bool DisplayManager::has_swapchain() const noexcept
+    {
+        std::lock_guard lock(mutex_);
+        return swapchain_ != VK_NULL_HANDLE;
+    }
+
+    Queue* DisplayManager::present_queue() const noexcept
+    {
+        std::lock_guard lock(mutex_);
+        return present_queue_;
     }
 
     void DisplayManager::ensure_swapchain()
@@ -320,25 +456,38 @@ namespace Corona::Horizon
             throw std::runtime_error("Cannot present before the main Vulkan device is initialized.");
         }
 
-        Queue* graphics_queue = device_manager_->queue_for(QueueCapability::Graphics);
+        const auto supports_present = [this](Queue& queue) {
+            VkBool32 present_supported = VK_FALSE;
+            throw_if_failed(vkGetPhysicalDeviceSurfaceSupportKHR(device_manager_->physical_device(),
+                                                                 queue.id().family_index,
+                                                                 surface_,
+                                                                 &present_supported),
+                            "vkGetPhysicalDeviceSurfaceSupportKHR");
+            return present_supported == VK_TRUE;
+        };
+
+        Queue* graphics_queue = device_manager_->queue_for(QueueCapability::Present);
+        if (graphics_queue != nullptr && supports_present(*graphics_queue))
+        {
+            present_queue_ = graphics_queue;
+            return;
+        }
+
+        for (Queue* queue : device_manager_->queues_for(QueueCapability::Graphics))
+        {
+            if (queue != nullptr && supports_present(*queue))
+            {
+                present_queue_ = queue;
+                return;
+            }
+        }
+
         if (graphics_queue == nullptr)
         {
             throw std::runtime_error("Main Vulkan device has no graphics queue for first-stage presentation.");
         }
 
-        VkBool32 present_supported = VK_FALSE;
-        throw_if_failed(vkGetPhysicalDeviceSurfaceSupportKHR(device_manager_->physical_device(),
-                                                             graphics_queue->id().family_index,
-                                                             surface_,
-                                                             &present_supported),
-                        "vkGetPhysicalDeviceSurfaceSupportKHR");
-
-        if (present_supported != VK_TRUE)
-        {
-            throw std::runtime_error("Main Vulkan graphics queue family does not support presentation for this Win32 surface.");
-        }
-
-        present_queue_ = graphics_queue;
+        throw std::runtime_error("Main Vulkan graphics queue family does not support presentation for this Win32 surface.");
     }
 
     void DisplayManager::create_swapchain()
@@ -444,8 +593,6 @@ namespace Corona::Horizon
         render_finished_.resize(swapchain_images_.size());
         submitted_frames_.clear();
         submitted_frames_.resize(swapchain_images_.size());
-        submitted_images_.clear();
-        submitted_images_.resize(swapchain_images_.size());
 
         VkSemaphoreCreateInfo create_info {};
         create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -465,43 +612,68 @@ namespace Corona::Horizon
         }
     }
 
-    void DisplayManager::wait_for_frame(uint32_t frame_index)
+    bool DisplayManager::reclaim_frame(uint32_t frame_index)
     {
         if (present_queue_ == nullptr || frame_index >= submitted_frames_.size())
         {
-            return;
+            return true;
         }
 
         std::optional<SubmissionToken>& token = submitted_frames_[frame_index];
         if (!token)
         {
-            return;
+            return true;
         }
 
-        present_queue_->wait_for(*token);
-        present_queue_->retire_completed();
+        if (!token->has_sync() || token->value == 0)
+        {
+            token.reset();
+            return true;
+        }
+
+        const uint64_t completed = completed_value_for_token(device_, *token);
+        if (completed < token->value)
+        {
+            return false;
+        }
+
+        Queue* submitted_queue = device_manager_ == nullptr ? nullptr : device_manager_->queue_by_id(token->queue);
+        if (submitted_queue != nullptr)
+        {
+            submitted_queue->retire_completed();
+        }
         token.reset();
+        return true;
     }
 
-    void DisplayManager::wait_for_image(uint32_t image_index)
+    std::optional<uint32_t> DisplayManager::find_reusable_frame()
     {
-        if (present_queue_ == nullptr || image_index >= submitted_images_.size())
+        if (image_available_.empty())
         {
-            return;
+            return std::nullopt;
         }
 
-        std::optional<SubmissionToken>& token = submitted_images_[image_index];
-        if (!token)
+        const uint32_t frame_count = static_cast<uint32_t>(image_available_.size());
+        for (uint32_t offset = 0; offset < frame_count; ++offset)
         {
-            return;
+            const uint32_t frame = (frame_index_ + offset) % frame_count;
+            if (reclaim_frame(frame))
+            {
+                frame_index_ = frame;
+                return frame;
+            }
         }
 
-        present_queue_->wait_for(*token);
-        present_queue_->retire_completed();
-        token.reset();
+        return std::nullopt;
     }
 
     SwapchainAcquire DisplayManager::acquire_next_image()
+    {
+        std::lock_guard lock(mutex_);
+        return acquire_next_image_unlocked();
+    }
+
+    SwapchainAcquire DisplayManager::acquire_next_image_unlocked()
     {
         SwapchainAcquire acquire;
 
@@ -519,12 +691,20 @@ namespace Corona::Horizon
             return acquire;
         }
 
-        const uint32_t frame = frame_index_ % static_cast<uint32_t>(image_available_.size());
-        wait_for_frame(frame);
+        std::optional<uint32_t> reusable_frame = find_reusable_frame();
+        if (!reusable_frame)
+        {
+            acquire.status = PresentStatus::Skipped;
+            acquire.message = "No reusable swapchain acquire semaphore is available yet.";
+            return acquire;
+        }
+
+        const uint32_t frame = *reusable_frame;
+        acquire.frame_index = frame;
 
         const VkResult result = vkAcquireNextImageKHR(device_,
                                                       swapchain_,
-                                                      std::numeric_limits<uint64_t>::max(),
+                                                      swapchain_acquire_timeout_ns(),
                                                       image_available_[frame],
                                                       VK_NULL_HANDLE,
                                                       &acquire.image_index);
@@ -543,6 +723,11 @@ namespace Corona::Horizon
         {
             destroy_swapchain();
         }
+        else if (result == VK_NOT_READY || result == VK_TIMEOUT)
+        {
+            acquire.status = PresentStatus::Skipped;
+            acquire.message = "No swapchain image is ready for nonblocking acquire.";
+        }
         else if (result == VK_ERROR_SURFACE_LOST_KHR)
         {
             acquire.message = "Display surface was lost.";
@@ -558,9 +743,18 @@ namespace Corona::Horizon
 
     PreparedPresent DisplayManager::prepare_present(PresentDesc& desc)
     {
+        std::lock_guard lock(mutex_);
+
         PreparedPresent prepared;
         prepared.immediate_result.displayer = desc.displayer;
         prepared.immediate_result.image = desc.image;
+
+        if (pending_frame_)
+        {
+            prepared.immediate_result.status = PresentStatus::Skipped;
+            prepared.immediate_result.message = "DisplayManager already has an acquired swapchain image pending presentation.";
+            return prepared;
+        }
 
         if (!native_window_available())
         {
@@ -579,7 +773,7 @@ namespace Corona::Horizon
 
         ensure_swapchain();
 
-        SwapchainAcquire acquire = acquire_next_image();
+        SwapchainAcquire acquire = acquire_next_image_unlocked();
         if (!acquire.acquired)
         {
             prepared.immediate_result.status = acquire.status == PresentStatus::None ? PresentStatus::Skipped : acquire.status;
@@ -593,21 +787,21 @@ namespace Corona::Horizon
             prepared.immediate_result.message = "vkAcquireNextImageKHR returned an out-of-range swapchain image index.";
             return prepared;
         }
-        wait_for_image(acquire.image_index);
 
-        const uint32_t frame = frame_index_ % static_cast<uint32_t>(image_available_.size());
+        const uint32_t frame = acquire.frame_index;
         desc.swapchain_image = { static_cast<const ResourceHandle&>(swapchain_images_[acquire.image_index]) };
 
         prepared.ready_for_submit = true;
+        prepared.present_queue = present_queue_;
         prepared.wait = {
             image_available_[frame],
             0,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            display_transfer_stages(),
         };
         prepared.signal = {
             render_finished_[acquire.image_index],
             0,
-            VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            display_present_signal_stages(),
         };
         pending_frame_ = PendingFrame {
             .image_index = acquire.image_index,
@@ -619,6 +813,8 @@ namespace Corona::Horizon
 
     PresentResult DisplayManager::present(const PresentDesc& desc, const SubmissionToken& producer)
     {
+        std::lock_guard lock(mutex_);
+
         PresentResult result;
         result.displayer = desc.displayer;
         result.image = desc.image;
@@ -637,15 +833,19 @@ namespace Corona::Horizon
             return result;
         }
 
+        if (present_queue_ == nullptr)
+        {
+            pending_frame_.reset();
+            result.status = PresentStatus::Skipped;
+            result.message = "DisplayManager has no present queue.";
+            return result;
+        }
+
         PendingFrame pending = *pending_frame_;
         VkSemaphore wait_semaphore = pending.render_finished;
         if (pending.frame_index < submitted_frames_.size())
         {
             submitted_frames_[pending.frame_index] = producer;
-        }
-        if (pending.image_index < submitted_images_.size())
-        {
-            submitted_images_[pending.image_index] = producer;
         }
 
         VkPresentInfoKHR present_info {};
@@ -687,8 +887,22 @@ namespace Corona::Horizon
         return result;
     }
 
+    void DisplayManager::cancel_prepared_present() noexcept
+    {
+        std::lock_guard lock(mutex_);
+
+        if (!pending_frame_)
+        {
+            return;
+        }
+
+        pending_frame_.reset();
+        destroy_swapchain();
+    }
+
     void DisplayManager::set_fake_present_status_for_tests(PresentStatus status, std::string message)
     {
+        std::lock_guard lock(mutex_);
         fake_status_ = status;
         fake_message_ = std::move(message);
     }
@@ -697,20 +911,20 @@ namespace Corona::Horizon
     {
         pending_frame_.reset();
 
-        if (device_ != VK_NULL_HANDLE)
-        {
-            (void)vkDeviceWaitIdle(device_);
-        }
-
         if (present_queue_ != nullptr)
         {
             try
             {
+                present_queue_->wait_idle();
                 present_queue_->retire_completed();
             }
             catch (...)
             {
             }
+        }
+        else if (device_ != VK_NULL_HANDLE)
+        {
+            (void)vkDeviceWaitIdle(device_);
         }
 
         swapchain_images_.clear();
@@ -733,7 +947,6 @@ namespace Corona::Horizon
         }
         render_finished_.clear();
         submitted_frames_.clear();
-        submitted_images_.clear();
 
         if (device_ != VK_NULL_HANDLE && swapchain_ != VK_NULL_HANDLE)
         {

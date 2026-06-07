@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@ namespace Corona::Horizon
     {
         bool acquired { false };
         uint32_t image_index { 0 };
+        uint32_t frame_index { 0 };
         SubmitWait wait {};
         PresentStatus status { PresentStatus::None };
         std::string message;
@@ -27,6 +29,7 @@ namespace Corona::Horizon
     struct PreparedPresent
     {
         bool ready_for_submit { false };
+        Queue* present_queue { nullptr };
         SubmitWait wait {};
         SubmitSignal signal {};
         PresentResult immediate_result {};
@@ -46,12 +49,13 @@ namespace Corona::Horizon
         DisplayManager& operator=(DisplayManager&&) = delete;
 
         [[nodiscard]] DisplayerRef displayer() const noexcept { return displayer_; }
-        [[nodiscard]] bool has_swapchain() const noexcept { return swapchain_ != VK_NULL_HANDLE; }
-        [[nodiscard]] Queue* present_queue() const noexcept { return present_queue_; }
+        [[nodiscard]] bool has_swapchain() const noexcept;
+        [[nodiscard]] Queue* present_queue() const noexcept;
 
         [[nodiscard]] SwapchainAcquire acquire_next_image();
         [[nodiscard]] PreparedPresent prepare_present(PresentDesc& desc);
         [[nodiscard]] PresentResult present(const PresentDesc& desc, const SubmissionToken& producer);
+        void cancel_prepared_present() noexcept;
 
         void set_fake_present_status_for_tests(PresentStatus status, std::string message = {});
 
@@ -69,13 +73,15 @@ namespace Corona::Horizon
         void create_swapchain();
         void create_sync_objects();
         [[nodiscard]] bool native_window_available() const noexcept;
-        void wait_for_frame(uint32_t frame_index);
-        void wait_for_image(uint32_t image_index);
+        [[nodiscard]] SwapchainAcquire acquire_next_image_unlocked();
+        [[nodiscard]] bool reclaim_frame(uint32_t frame_index);
+        [[nodiscard]] std::optional<uint32_t> find_reusable_frame();
         void destroy_swapchain() noexcept;
         void destroy_surface() noexcept;
         void shutdown() noexcept;
 
         DisplayerRef displayer_ {};
+        mutable std::mutex mutex_;
         void* native_window_ {};
         VkInstance instance_ { VK_NULL_HANDLE };
         VkDevice device_ { VK_NULL_HANDLE };
@@ -90,7 +96,6 @@ namespace Corona::Horizon
         std::vector<VkSemaphore> image_available_;
         std::vector<VkSemaphore> render_finished_;
         std::vector<std::optional<SubmissionToken>> submitted_frames_;
-        std::vector<std::optional<SubmissionToken>> submitted_images_;
         uint32_t frame_index_ { 0 };
         std::optional<PendingFrame> pending_frame_;
         PresentStatus fake_status_ { PresentStatus::Skipped };

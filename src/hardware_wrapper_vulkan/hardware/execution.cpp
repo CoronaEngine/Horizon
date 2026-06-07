@@ -1,6 +1,7 @@
 #include "execution.h"
 
 #include "device_manager.h"
+#include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/display/display_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/pipeline/vulkan_compute_pipeline.h"
@@ -12,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <cstdlib>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -171,6 +173,11 @@ namespace Corona::Horizon
             VkAccessFlags2 access { VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT };
         };
 
+        [[nodiscard]] constexpr VkPipelineStageFlags2 image_transfer_stages() noexcept
+        {
+            return VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT;
+        }
+
         [[nodiscard]] ImageBarrierScope source_scope_for_layout(VkImageLayout layout, VkPipelineStageFlags2 fallback_stage) noexcept
         {
             switch (layout)
@@ -180,9 +187,9 @@ namespace Corona::Horizon
             case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
                 return { fallback_stage, 0 };
             case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-                return { VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT };
+                return { image_transfer_stages(), VK_ACCESS_2_TRANSFER_WRITE_BIT };
             case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-                return { VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT };
+                return { image_transfer_stages(), VK_ACCESS_2_TRANSFER_READ_BIT };
             case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
                 return { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT };
             case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
@@ -235,6 +242,20 @@ namespace Corona::Horizon
             dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             dependency.imageMemoryBarrierCount = 1;
             dependency.pImageMemoryBarriers = &barrier;
+
+            if (std::getenv("HORIZON_DEBUG_SWAPCHAIN_BARRIERS") != nullptr &&
+                image.desc.debug_name.find("horizon.swapchain") != std::string::npos)
+            {
+                Diagnostics::write(Diagnostics::Level::Info,
+                                   "HORIZON BARRIER",
+                                   image.desc.debug_name +
+                                       " old=" + std::to_string(static_cast<int>(barrier.oldLayout)) +
+                                       " new=" + std::to_string(static_cast<int>(barrier.newLayout)) +
+                                       " srcStage=" + std::to_string(static_cast<unsigned long long>(barrier.srcStageMask)) +
+                                       " srcAccess=" + std::to_string(static_cast<unsigned long long>(barrier.srcAccessMask)) +
+                                       " dstStage=" + std::to_string(static_cast<unsigned long long>(barrier.dstStageMask)) +
+                                       " dstAccess=" + std::to_string(static_cast<unsigned long long>(barrier.dstAccessMask)));
+            }
 
             vkCmdPipelineBarrier2(command_buffer, &dependency);
             image.image_layout = new_layout;
@@ -900,8 +921,55 @@ namespace Corona::Horizon
 
         VkCommandBuffer command_buffer = submission.command_buffer->vk();
 
-        for (const CommandIR& command : submission.commands)
+        auto pre_transition_sampled_images_for_rendering = [&](size_t begin_index, const RenderingDesc& rendering) {
+            const std::uintptr_t color_id = resource_id(rendering.color.handle);
+            const std::uintptr_t depth_id = resource_id(rendering.depth.handle);
+            std::vector<std::uintptr_t> transitioned;
+
+            for (size_t lookahead = begin_index + 1; lookahead < submission.commands.size(); ++lookahead)
+            {
+                const CommandIR& scoped_command = submission.commands[lookahead];
+                if (scoped_command.op == CommandOp::EndRendering || scoped_command.op == CommandOp::BeginRendering)
+                    break;
+
+                if (scoped_command.op != CommandOp::DrawIndexed)
+                    continue;
+
+                const DrawIndexedDesc& draw = scoped_command.payload.draw_indexed;
+                for (const DrawResourceBinding& binding : draw.bindings)
+                {
+                    if (binding.kind != DrawBindingKind::SampledImage)
+                        continue;
+
+                    const std::uintptr_t id = resource_id(binding.resource);
+                    if (id == 0)
+                        continue;
+
+                    if ((color_id != 0 && id == color_id) || (depth_id != 0 && id == depth_id))
+                    {
+                        throw std::logic_error("DrawIndexed cannot sample from the active rendering attachment without local-read support.");
+                    }
+
+                    if (std::find(transitioned.begin(), transitioned.end(), id) != transitioned.end())
+                        continue;
+
+                    ImageStore::Write image = write_image(binding.resource);
+                    if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
+                        throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
+
+                    transition_image(command_buffer,
+                                     *image,
+                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                     VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                    transitioned.push_back(id);
+                }
+            }
+        };
+
+        for (size_t command_index = 0; command_index < submission.commands.size(); ++command_index)
         {
+            const CommandIR& command = submission.commands[command_index];
             switch (command.op)
             {
             case CommandOp::CopyBuffer:
@@ -977,12 +1045,12 @@ namespace Corona::Horizon
                 transition_image(command_buffer,
                                  *src,
                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 image_transfer_stages(),
                                  VK_ACCESS_2_TRANSFER_READ_BIT);
                 transition_image(command_buffer,
                                  *dst,
                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 image_transfer_stages(),
                                  VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
                 VkImageCopy copy {};
@@ -1120,6 +1188,8 @@ namespace Corona::Horizon
                 ImageStore::Write color;
                 ImageStore::Write depth;
 
+                pre_transition_sampled_images_for_rendering(command_index, rendering);
+
                 VkRenderingAttachmentInfo color_attachment {};
                 color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 
@@ -1233,12 +1303,6 @@ namespace Corona::Horizon
                     ImageStore::Write image = write_image(binding.resource);
                     if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
                         throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
-
-                    transition_image(command_buffer,
-                                     *image,
-                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
                 }
 
                 std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
@@ -1333,12 +1397,12 @@ namespace Corona::Horizon
                 transition_image(command_buffer,
                                  *src,
                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 image_transfer_stages(),
                                  VK_ACCESS_2_TRANSFER_READ_BIT);
                 transition_image(command_buffer,
                                  *dst,
                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                                 image_transfer_stages(),
                                  VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
                 if (src->image_format == dst->image_format &&
@@ -1555,9 +1619,9 @@ namespace Corona::Horizon
         for (size_t submission_index = 0; submission_index < plan.submissions.size(); ++submission_index)
         {
             CompiledSubmission& compiled_submission = plan.submissions[submission_index];
-            Queue& queue = resolve_queue(compiled_submission.device, compiled_submission.queue);
 
             std::vector<PreparedQueuePresent> prepared_presents;
+            Queue* present_queue = nullptr;
             size_t present_index = 0;
             for (CommandIR& command : compiled_submission.commands)
             {
@@ -1594,6 +1658,24 @@ namespace Corona::Horizon
                     continue;
                 }
 
+                Queue* manager_present_queue = prepared.present_queue;
+                if (manager_present_queue == nullptr)
+                {
+                    manager->cancel_prepared_present();
+                    if (present_results != nullptr)
+                    {
+                        present_results->push_back(skipped_present(desc, "DisplayManager has no present queue for this present."));
+                    }
+                    ++present_index;
+                    continue;
+                }
+                if (present_queue != nullptr && present_queue != manager_present_queue)
+                {
+                    manager->cancel_prepared_present();
+                    throw std::logic_error("A single Vulkan present submission cannot target multiple native present queues.");
+                }
+                present_queue = manager_present_queue;
+
                 compiled_submission.waits.push_back(prepared.wait);
                 compiled_submission.signals.push_back(prepared.signal);
                 compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
@@ -1601,50 +1683,85 @@ namespace Corona::Horizon
                 ++present_index;
             }
 
+            Queue& queue = present_queue != nullptr
+                ? *present_queue
+                : resolve_queue(compiled_submission.device, compiled_submission.queue);
+
             if (!compiled_submission.command_buffer)
             {
                 compiled_submission.command_buffer = queue.acquire();
             }
 
-            VulkanCommandEncoder encoder(queue.device());
-            encoder.encode(compiled_submission);
-
-            std::vector<SubmitWait> waits = compiled_submission.waits;
-            for (const SubmissionToken& token : wait_tokens)
+            try
             {
-                const VkSemaphore timeline = timeline_semaphore(token);
-                if (timeline != VK_NULL_HANDLE && token.value != 0)
+                VulkanCommandEncoder encoder(queue.device());
+                encoder.encode(compiled_submission);
+
+                std::vector<SubmitWait> waits = compiled_submission.waits;
+                for (const SubmissionToken& token : wait_tokens)
                 {
-                    waits.push_back({ timeline, token.value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                    const VkSemaphore timeline = timeline_semaphore(token);
+                    if (timeline != VK_NULL_HANDLE && token.value != 0)
+                    {
+                        waits.push_back({ timeline, token.value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                    }
                 }
+
+                for (const SubmissionDependency& dependency : plan.dependencies)
+                {
+                    if (dependency.consumer != submission_index)
+                    {
+                        continue;
+                    }
+
+                    const std::optional<SubmissionToken>& token = submitted_tokens[dependency.producer];
+                    const VkSemaphore timeline = token ? timeline_semaphore(*token) : VK_NULL_HANDLE;
+                    if (timeline != VK_NULL_HANDLE)
+                    {
+                        waits.push_back({ timeline, token->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                    }
+                }
+
+                QueueSubmission queue_submission;
+                queue_submission.command_buffer = std::move(compiled_submission.command_buffer);
+                queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
+                tokens.push_back(queue.submit(queue_submission, waits, compiled_submission.signals));
+                submitted_tokens[submission_index] = tokens.back();
             }
-
-            for (const SubmissionDependency& dependency : plan.dependencies)
-            {
-                if (dependency.consumer != submission_index)
-                {
-                    continue;
-                }
-
-                const std::optional<SubmissionToken>& token = submitted_tokens[dependency.producer];
-                const VkSemaphore timeline = token ? timeline_semaphore(*token) : VK_NULL_HANDLE;
-                if (timeline != VK_NULL_HANDLE)
-                {
-                    waits.push_back({ timeline, token->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
-                }
-            }
-
-            QueueSubmission queue_submission;
-            queue_submission.command_buffer = std::move(compiled_submission.command_buffer);
-            queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
-            tokens.push_back(queue.submit(queue_submission, waits, compiled_submission.signals));
-            submitted_tokens[submission_index] = tokens.back();
-
-            if (present_results != nullptr)
+            catch (...)
             {
                 for (PreparedQueuePresent& present : prepared_presents)
                 {
-                    present_results->push_back(present.manager->present(present.desc, tokens.back()));
+                    if (present.manager)
+                    {
+                        present.manager->cancel_prepared_present();
+                    }
+                }
+                throw;
+            }
+
+            for (size_t index = 0; index < prepared_presents.size(); ++index)
+            {
+                PresentResult result;
+                try
+                {
+                    result = prepared_presents[index].manager->present(prepared_presents[index].desc, tokens.back());
+                }
+                catch (...)
+                {
+                    for (size_t remaining = index + 1; remaining < prepared_presents.size(); ++remaining)
+                    {
+                        if (prepared_presents[remaining].manager)
+                        {
+                            prepared_presents[remaining].manager->cancel_prepared_present();
+                        }
+                    }
+                    throw;
+                }
+
+                if (present_results != nullptr)
+                {
+                    present_results->push_back(std::move(result));
                 }
             }
         }

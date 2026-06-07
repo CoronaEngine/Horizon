@@ -509,7 +509,7 @@ namespace
 
             for (const Corona::Horizon::SubmissionToken& token : receipt.tokens)
             {
-                Corona::Horizon::Queue* queue = manager.queue_for(token.queue.capability);
+                Corona::Horizon::Queue* queue = manager.queue_by_id(token.queue);
                 expect(queue != nullptr, "Submitted HardwareImage upload/readback token should resolve to a queue.");
                 wait_for_token(*queue, token);
             }

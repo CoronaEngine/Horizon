@@ -113,6 +113,39 @@ namespace Corona::Horizon
         }
     }
 
+    [[nodiscard]] uint64_t thread_queue_seed() noexcept
+    {
+        static std::atomic<uint64_t> next_seed { 0 };
+        thread_local const uint64_t seed = next_seed.fetch_add(1, std::memory_order_relaxed);
+        return seed;
+    }
+
+    [[nodiscard]] Queue* pick_thread_queue(const std::vector<Queue*>& queues) noexcept
+    {
+        if (queues.empty())
+        {
+            return nullptr;
+        }
+
+        const uint32_t family_index = queues.front()->id().family_index;
+        const auto family_end = std::find_if(queues.begin(), queues.end(), [family_index](const Queue* queue) {
+            return queue == nullptr || queue->id().family_index != family_index;
+        });
+        const size_t family_queue_count = static_cast<size_t>(std::distance(queues.begin(), family_end));
+        if (family_queue_count == 0)
+        {
+            return nullptr;
+        }
+
+        return queues[static_cast<size_t>(thread_queue_seed() % family_queue_count)];
+    }
+
+    [[nodiscard]] uint32_t requested_queue_count(const QueueFamilyInfo& family) noexcept
+    {
+        constexpr uint32_t max_queues_per_family = 4;
+        return std::max(1u, std::min(family.queue_count, max_queues_per_family));
+    }
+
     // ================================================================
     // TrackedCommandBuffer
     // ================================================================
@@ -256,10 +289,20 @@ namespace Corona::Horizon
 
     Queue::~Queue()
     {
+        std::deque<std::shared_ptr<TrackedCommandBuffer>> in_flight;
+        std::deque<std::shared_ptr<TrackedCommandBuffer>> pool;
         {
             std::lock_guard lock(mutex_);
-            in_flight_.clear();
-            pool_.clear();
+            in_flight.swap(in_flight_);
+            pool.swap(pool_);
+        }
+
+        for (std::shared_ptr<TrackedCommandBuffer>& command_buffer : in_flight)
+        {
+            if (command_buffer)
+            {
+                command_buffer->retire();
+            }
         }
 
         if (device_ != VK_NULL_HANDLE && timeline_ != VK_NULL_HANDLE)
@@ -304,6 +347,8 @@ namespace Corona::Horizon
 
     std::shared_ptr<TrackedCommandBuffer> Queue::acquire()
     {
+        retire_completed();
+
         std::lock_guard lock(mutex_);
         ++next_recording_id_;
 
@@ -324,8 +369,43 @@ namespace Corona::Horizon
 
     SubmissionToken Queue::submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals)
     {
-        std::lock_guard lock(mutex_);
+        std::vector<VkSemaphoreSubmitInfo> wait_infos;
+        wait_infos.reserve(waits.size());
+        for (const SubmitWait& wait : waits)
+        {
+            if (wait.semaphore == VK_NULL_HANDLE)
+            {
+                continue;
+            }
 
+            VkSemaphoreSubmitInfo info {};
+            info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            info.semaphore = wait.semaphore;
+            info.value = wait.value;
+            info.stageMask = wait.stages;
+            wait_infos.push_back(info);
+        }
+
+        std::vector<VkSemaphoreSubmitInfo> signal_infos;
+        signal_infos.reserve(signals.size() + 1);
+        for (const SubmitSignal& signal : signals)
+        {
+            if (signal.semaphore == VK_NULL_HANDLE)
+            {
+                continue;
+            }
+
+            VkSemaphoreSubmitInfo info {};
+            info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            info.semaphore = signal.semaphore;
+            info.value = signal.value;
+            info.stageMask = signal.stages;
+            signal_infos.push_back(info);
+        }
+
+        retire_completed();
+
+        std::lock_guard lock(mutex_);
         if (!submission.command_buffer)
         {
             submission.command_buffer = std::make_shared<TrackedCommandBuffer>(device_, id_.family_index);
@@ -342,40 +422,6 @@ namespace Corona::Horizon
 
         if (device_ != VK_NULL_HANDLE && queue_ != VK_NULL_HANDLE && submission.command_buffer->vk() != VK_NULL_HANDLE)
         {
-            std::vector<VkSemaphoreSubmitInfo> wait_infos;
-            wait_infos.reserve(waits.size());
-            for (const SubmitWait& wait : waits)
-            {
-                if (wait.semaphore == VK_NULL_HANDLE)
-                {
-                    continue;
-                }
-
-                VkSemaphoreSubmitInfo info {};
-                info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-                info.semaphore = wait.semaphore;
-                info.value = wait.value;
-                info.stageMask = wait.stages;
-                wait_infos.push_back(info);
-            }
-
-            std::vector<VkSemaphoreSubmitInfo> signal_infos;
-            signal_infos.reserve(signals.size() + 1);
-            for (const SubmitSignal& signal : signals)
-            {
-                if (signal.semaphore == VK_NULL_HANDLE)
-                {
-                    continue;
-                }
-
-                VkSemaphoreSubmitInfo info {};
-                info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-                info.semaphore = signal.semaphore;
-                info.value = signal.value;
-                info.stageMask = signal.stages;
-                signal_infos.push_back(info);
-            }
-
             if (timeline_ != VK_NULL_HANDLE)
             {
                 VkSemaphoreSubmitInfo timeline_signal {};
@@ -428,21 +474,17 @@ namespace Corona::Horizon
 
     VkResult Queue::present(const VkPresentInfoKHR& present_info)
     {
-        std::lock_guard lock(mutex_);
-
-        if (queue_ == VK_NULL_HANDLE)
+        VkResult result = VK_SUCCESS;
         {
-            return VK_SUCCESS;
+            std::lock_guard lock(mutex_);
+
+            if (queue_ == VK_NULL_HANDLE)
+            {
+                return VK_SUCCESS;
+            }
+
+            result = vkQueuePresentKHR(queue_, &present_info);
         }
-
-        // Present fences require optional WSI extensions; queue idle is the conservative completion point for present reuse.
-        /*const VkResult wait_result = vkQueueWaitIdle(queue_);
-        if (wait_result != VK_SUCCESS)
-        {
-            return wait_result;
-        }*/
-
-        const VkResult result = vkQueuePresentKHR(queue_, &present_info);
         if (result != VK_SUCCESS)
         {
             Diagnostics::write(Diagnostics::Level::Error,
@@ -456,6 +498,40 @@ namespace Corona::Horizon
         }
 
         return result;
+    }
+
+    void Queue::wait_idle()
+    {
+        VkResult result = VK_SUCCESS;
+        {
+            std::lock_guard lock(mutex_);
+            if (queue_ == VK_NULL_HANDLE)
+            {
+                return;
+            }
+
+            result = vkQueueWaitIdle(queue_);
+        }
+
+        if (result != VK_SUCCESS)
+        {
+            Diagnostics::write(Diagnostics::Level::Error,
+                               "VK_ERROR",
+                               "vkQueueWaitIdle failed. family_index=" +
+                                   std::to_string(id_.family_index) +
+                                   ", queue_index=" +
+                                   std::to_string(id_.queue_index) +
+                                   ", VkResult=" +
+                                   std::to_string(static_cast<int>(result)));
+            throw std::runtime_error("vkQueueWaitIdle failed. family_index=" +
+                                     std::to_string(id_.family_index) +
+                                     ", queue_index=" +
+                                     std::to_string(id_.queue_index) +
+                                     ", VkResult=" +
+                                     std::to_string(static_cast<int>(result)));
+        }
+
+        retire_completed();
     }
 
     void Queue::wait_for(const SubmissionToken& token) const
@@ -522,8 +598,36 @@ namespace Corona::Horizon
 
     void Queue::retire_completed()
     {
+        std::deque<std::shared_ptr<TrackedCommandBuffer>> completed;
+        {
+            std::lock_guard lock(mutex_);
+            collect_completed_unlocked(completed);
+        }
+
+        for (std::shared_ptr<TrackedCommandBuffer>& command_buffer : completed)
+        {
+            if (command_buffer)
+            {
+                command_buffer->retire();
+            }
+        }
+
+        if (completed.empty())
+        {
+            return;
+        }
+
         std::lock_guard lock(mutex_);
-        const uint64_t completed = query_completed_value();
+        while (!completed.empty())
+        {
+            pool_.push_back(std::move(completed.front()));
+            completed.pop_front();
+        }
+    }
+
+    void Queue::collect_completed_unlocked(std::deque<std::shared_ptr<TrackedCommandBuffer>>& completed)
+    {
+        const uint64_t completed_value = query_completed_value();
 
         std::deque<std::shared_ptr<TrackedCommandBuffer>> still_in_flight;
         while (!in_flight_.empty())
@@ -531,10 +635,9 @@ namespace Corona::Horizon
             std::shared_ptr<TrackedCommandBuffer> command_buffer = std::move(in_flight_.front());
             in_flight_.pop_front();
 
-            if (command_buffer->submission_id() <= completed)
+            if (command_buffer->submission_id() <= completed_value)
             {
-                command_buffer->retire();
-                pool_.push_back(std::move(command_buffer));
+                completed.push_back(std::move(command_buffer));
             }
             else
             {
@@ -652,18 +755,21 @@ namespace Corona::Horizon
         vkGetPhysicalDeviceFeatures2(physical_device_, supported_features.chain_head());
         enabled_features_ = supported_features & config.get_device_features(instance_, physical_device_);
 
-        std::vector<float> priorities(queue_families_.size(), 1.0f);
+        std::vector<std::vector<float>> queue_priorities;
+        queue_priorities.reserve(queue_families_.size());
         std::vector<VkDeviceQueueCreateInfo> queue_infos;
         queue_infos.reserve(queue_families_.size());
 
-        for (size_t index = 0; index < queue_families_.size(); ++index)
+        for (const QueueFamilyInfo& family : queue_families_)
         {
+            const uint32_t queue_count = requested_queue_count(family);
+            queue_priorities.emplace_back(queue_count, 1.0f);
+
             VkDeviceQueueCreateInfo queue_info {};
             queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            queue_info.queueFamilyIndex = queue_families_[index].family_index;
-            // TODO: 这里后面需要更改
-            queue_info.queueCount = 1;
-            queue_info.pQueuePriorities = &priorities[index];
+            queue_info.queueFamilyIndex = family.family_index;
+            queue_info.queueCount = queue_count;
+            queue_info.pQueuePriorities = queue_priorities.back().data();
             queue_infos.push_back(queue_info);
         }
 
@@ -689,14 +795,17 @@ namespace Corona::Horizon
 
     void DeviceManager::create_queues()
     {
-        queues_.reserve(queue_families_.size());
+        size_t total_queue_count = 0;
+        for (const QueueFamilyInfo& family : queue_families_)
+        {
+            total_queue_count += requested_queue_count(family);
+        }
+
+        queues_.reserve(total_queue_count);
         const DeviceId device_id { 0 };
 
         for (const QueueFamilyInfo& family : queue_families_)
         {
-            VkQueue queue = VK_NULL_HANDLE;
-            vkGetDeviceQueue(logical_device_, family.family_index, 0, &queue);
-
             QueueCapability primary_capability = QueueCapability::Transfer;
             if ((family.flags & VK_QUEUE_GRAPHICS_BIT) != 0)
             {
@@ -707,28 +816,93 @@ namespace Corona::Horizon
                 primary_capability = QueueCapability::Compute;
             }
 
-            auto owned_queue = std::make_unique<Queue>(logical_device_, queue, family.family_index, 0, device_id, primary_capability);
-            Queue& queue_ref = *owned_queue;
+            const uint32_t queue_count = requested_queue_count(family);
+            for (uint32_t queue_index = 0; queue_index < queue_count; ++queue_index)
+            {
+                VkQueue queue = VK_NULL_HANDLE;
+                vkGetDeviceQueue(logical_device_, family.family_index, queue_index, &queue);
 
-            add_queue_if_supported(graphics_queues_, queue_ref, family.flags, QueueCapability::Graphics);
-            add_queue_if_supported(compute_queues_, queue_ref, family.flags, QueueCapability::Compute);
-            add_queue_if_supported(transfer_queues_, queue_ref, family.flags, QueueCapability::Transfer);
-            //add_queue_if_supported(present_queues_, queue_ref, family.flags, QueueCapability::Present);
+                auto owned_queue = std::make_unique<Queue>(logical_device_, queue, family.family_index, queue_index, device_id, primary_capability);
+                Queue& queue_ref = *owned_queue;
 
-            queues_.push_back(std::move(owned_queue));
+                add_queue_if_supported(graphics_queues_, queue_ref, family.flags, QueueCapability::Graphics);
+                add_queue_if_supported(compute_queues_, queue_ref, family.flags, QueueCapability::Compute);
+                add_queue_if_supported(transfer_queues_, queue_ref, family.flags, QueueCapability::Transfer);
+                //add_queue_if_supported(present_queues_, queue_ref, family.flags, QueueCapability::Present);
+
+                queues_.push_back(std::move(owned_queue));
+            }
         }
     }
 
     Queue* DeviceManager::queue_for(QueueCapability capability) noexcept
     {
         const std::vector<Queue*>& queues = queues_for(capability);
-        return queues.empty() ? nullptr : queues.front();
+        switch (capability)
+        {
+        case QueueCapability::Graphics:
+            return pick_thread_queue(queues);
+        case QueueCapability::Compute:
+            return pick_thread_queue(queues);
+        case QueueCapability::Transfer:
+            return pick_thread_queue(queues);
+        case QueueCapability::Present:
+            return pick_thread_queue(queues);
+        }
+
+        return nullptr;
     }
 
     const Queue* DeviceManager::queue_for(QueueCapability capability) const noexcept
     {
         const std::vector<Queue*>& queues = queues_for(capability);
-        return queues.empty() ? nullptr : queues.front();
+        switch (capability)
+        {
+        case QueueCapability::Graphics:
+            return pick_thread_queue(queues);
+        case QueueCapability::Compute:
+            return pick_thread_queue(queues);
+        case QueueCapability::Transfer:
+            return pick_thread_queue(queues);
+        case QueueCapability::Present:
+            return pick_thread_queue(queues);
+        }
+
+        return nullptr;
+    }
+
+    Queue* DeviceManager::queue_by_id(const QueueId& id) noexcept
+    {
+        const auto found = std::find_if(queues_.begin(), queues_.end(), [&id](const std::unique_ptr<Queue>& queue) {
+            if (!queue)
+            {
+                return false;
+            }
+
+            const QueueId queue_id = queue->id();
+            return queue_id.device == id.device &&
+                   queue_id.family_index == id.family_index &&
+                   queue_id.queue_index == id.queue_index;
+        });
+
+        return found == queues_.end() ? nullptr : found->get();
+    }
+
+    const Queue* DeviceManager::queue_by_id(const QueueId& id) const noexcept
+    {
+        const auto found = std::find_if(queues_.begin(), queues_.end(), [&id](const std::unique_ptr<Queue>& queue) {
+            if (!queue)
+            {
+                return false;
+            }
+
+            const QueueId queue_id = queue->id();
+            return queue_id.device == id.device &&
+                   queue_id.family_index == id.family_index &&
+                   queue_id.queue_index == id.queue_index;
+        });
+
+        return found == queues_.end() ? nullptr : found->get();
     }
 
     const std::vector<Queue*>& DeviceManager::queues_for(QueueCapability capability) const noexcept

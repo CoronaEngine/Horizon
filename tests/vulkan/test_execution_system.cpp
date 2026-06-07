@@ -711,7 +711,8 @@ void main()
         Corona::Horizon::HardwareBuffer readback =
             host_read_write_buffer<uint32_t>(readback_desc, std::span<const uint32_t>(zeros));
 
-        Corona::Horizon::RasterizerPipeline pipeline(real_rasterizer_desc());
+        Corona::Horizon::RasterizerPipelineDesc desc = real_rasterizer_desc();
+        Corona::Horizon::RasterizerPipeline pipeline(std::move(desc));
         TestRenderTargetProxy target;
         target.boundResource_ = &color;
         pipeline.bind_render_target(0, target);
@@ -768,7 +769,7 @@ void main()
         expect(!receipt.tokens.empty(), "Real RasterizerPipeline smoke test should submit Vulkan queue work.");
         for (Corona::Horizon::SubmissionToken token : receipt.tokens)
         {
-            Corona::Horizon::Queue* queue = manager.queue_for(token.queue.capability);
+            Corona::Horizon::Queue* queue = manager.queue_by_id(token.queue);
             expect(queue != nullptr, "Submitted RasterizerPipeline token should resolve to a queue for retirement.");
             wait_for_token(*queue, token);
         }

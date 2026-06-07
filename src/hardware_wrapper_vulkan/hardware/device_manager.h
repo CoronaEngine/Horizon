@@ -67,6 +67,7 @@ namespace Corona::Horizon
         [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire();
         [[nodiscard]] SubmissionToken submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals);
         [[nodiscard]] VkResult present(const VkPresentInfoKHR& present_info);
+        void wait_idle();
         void wait_for(const SubmissionToken& token) const;
         void retire_completed();
 
@@ -85,6 +86,7 @@ namespace Corona::Horizon
 
     private:
         [[nodiscard]] uint64_t query_completed_value() const;
+        void collect_completed_unlocked(std::deque<std::shared_ptr<TrackedCommandBuffer>>& completed);
         void create_timeline_semaphore();
 
         mutable std::mutex mutex_;
@@ -125,6 +127,8 @@ namespace Corona::Horizon
 
         [[nodiscard]] Queue* queue_for(QueueCapability capability) noexcept;
         [[nodiscard]] const Queue* queue_for(QueueCapability capability) const noexcept;
+        [[nodiscard]] Queue* queue_by_id(const QueueId& id) noexcept;
+        [[nodiscard]] const Queue* queue_by_id(const QueueId& id) const noexcept;
         [[nodiscard]] const std::vector<Queue*>& queues_for(QueueCapability capability) const noexcept;
 
     private:
