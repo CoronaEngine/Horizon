@@ -1,5 +1,5 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: bc9d789e777db2bf6e8923308ed80a71709d1c180f68d0301881ca347453851c -->
+<!-- AGENTS_ZH_CN_SHA256: 561cf5cb0e3892acb7dee549dfa1060a52cdada8be657bafec3707f5790c3b98 -->
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.
 > Other Chinese sources live in `docs/agents/zh-CN/`, `docs/tasks/zh-CN/`, and `.agents/skills/*/SKILL.zh-CN.md`.
@@ -25,6 +25,7 @@ When working in this repository:
 Load only what the task needs:
 
 - Build, CMake, presets: `docs/agents/build.md`
+- Codegraph, symbol flow, call chains, refactor impact: `docs/agents/codegraph.md`
 - Local commits, GitHub publishing, commits, PRs: `docs/agents/git.md`
 - Formatting and clang-format: `docs/agents/formatting.md`
 - Vulkan backend, VOLK/VMA, descriptors, barriers: `docs/agents/vulkan.md`

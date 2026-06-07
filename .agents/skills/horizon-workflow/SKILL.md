@@ -2,7 +2,7 @@
 name: horizon-workflow
 description: Vendor-neutral workflow for AI agents working in the Horizon C++ Vulkan repository. Use when an agent edits this repo, handles =sa/=ca/=ai/=gc/=cm/=gh commands, or needs routing to build, GitHub, formatting, Vulkan, Helicon, or push-constant context.
 ---
-<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: 4a92115d92c8ad38f5ce60d7e1ad469649ef472e8f3cabffe9a328f2029257b1 -->
+<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: e3f4d4ce719a859797abe869aa1271f7bf54ced13d5c0f6cfab8ed415d13f43d -->
 
 # Horizon Workflow
 
@@ -45,6 +45,7 @@ For `=gc`, `=cm`, and `=gh`, read `docs/agents/git.md` before acting.
 ## Context Routing
 
 - Build or CMake: `docs/agents/build.md`
+- Codegraph / symbol flow / call chains / impact: `docs/agents/codegraph.md`
 - GitHub publish/PR/commit: `docs/agents/git.md`
 - Formatting/style: `docs/agents/formatting.md`
 - Vulkan backend: `docs/agents/vulkan.md`

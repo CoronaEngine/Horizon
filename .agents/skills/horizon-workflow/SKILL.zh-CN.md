@@ -44,6 +44,7 @@ description: Horizon C++ Vulkan 仓库的通用 Agent 工作流。Agent 修改�
 ## 上下文路由
 
 - 构建或 CMake：`docs/agents/build.md`
+- Codegraph / 符号流 / 调用链 / 影响面：`docs/agents/codegraph.md`
 - GitHub publish / PR / commit：`docs/agents/git.md`
 - 格式化 / 风格：`docs/agents/formatting.md`
 - Vulkan 后端：`docs/agents/vulkan.md`

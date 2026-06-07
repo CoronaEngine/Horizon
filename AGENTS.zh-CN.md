@@ -24,6 +24,7 @@ AI 在本仓库工作时必须：
 按任务只读需要的文件：
 
 - 构建、CMake、preset：`docs/agents/build.md`
+- codegraph、符号流、调用链、重构影响面：`docs/agents/codegraph.md`
 - 本地提交、GitHub 发布、commit、PR：`docs/agents/git.md`
 - 格式化、clang-format：`docs/agents/formatting.md`
 - Vulkan 后端、VOLK/VMA、descriptor、barrier：`docs/agents/vulkan.md`

@@ -12,6 +12,7 @@
 
 - `docs/agents/index.md`
 - `docs/agents/build.md`
+- `docs/agents/codegraph.md`
 - `docs/agents/git.md`
 - `docs/agents/formatting.md`
 - `docs/agents/vulkan.md`

@@ -46,6 +46,12 @@ $syncPairs = @(
         Label = "build context"
     },
     @{
+        Source = "docs/agents/zh-CN/codegraph.md"
+        Target = "docs/agents/codegraph.md"
+        Marker = "AGENT_DOCS_CODEGRAPH_ZH_CN_SHA256"
+        Label = "codegraph context"
+    },
+    @{
         Source = "docs/agents/zh-CN/git.md"
         Target = "docs/agents/git.md"
         Marker = "AGENT_DOCS_GIT_ZH_CN_SHA256"

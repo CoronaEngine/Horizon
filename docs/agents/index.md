@@ -1,5 +1,5 @@
 # Horizon Agent Context Index
-<!-- AGENT_DOCS_INDEX_ZH_CN_SHA256: a075847831247a53cd51b9596437ba29dc8b7284d0d3277d25b24cc8746699e2 -->
+<!-- AGENT_DOCS_INDEX_ZH_CN_SHA256: 7958b214fb1d4698c8917d644d57b8e9aa13d02b2d9487d6f0772353ebcd3b2a -->
 
 This directory contains vendor-neutral AI context packs. Any agent can read them; they are not Codex-specific.
 
@@ -13,6 +13,7 @@ Chinese sources are human-maintained:
 Start with root `AGENTS.md`, then load only the relevant context pack or task note:
 
 - `build.md`: CMake presets, build targets, validation commands.
+- `codegraph.md`: symbol flow, call chains, architecture tracing, and refactor impact.
 - `git.md`: `=gc` and `=gh` publication workflow, commit and PR conventions.
 - `formatting.md`: clang-format and style rules.
 - `vulkan.md`: Vulkan backend boundaries and safety rules.
