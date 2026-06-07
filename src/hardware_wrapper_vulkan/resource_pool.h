@@ -172,9 +172,11 @@ namespace Corona::Horizon
             std::uint64_t generation = 0;
             try
             {
+                Resource value = std::forward<Factory>(factory)();
+
                 {
                     auto entry = storage_.acquire_write(id);
-                    entry->value = std::forward<Factory>(factory)();
+                    entry->value = std::move(value);
                     entry->generation = next_generation_.fetch_add(1, std::memory_order_relaxed);
                     if (entry->generation == 0)
                     {
