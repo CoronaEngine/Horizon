@@ -112,6 +112,12 @@ $syncPairs = @(
         Label = "examples new API visible window task notes"
     },
     @{
+        Source = "docs/tasks/zh-CN/runtime-diagnostics-reporting.md"
+        Target = "docs/tasks/runtime-diagnostics-reporting.md"
+        Marker = "TASK_DOCS_RUNTIME_DIAGNOSTICS_REPORTING_ZH_CN_SHA256"
+        Label = "runtime diagnostics reporting task notes"
+    },
+    @{
         Source = ".agents/skills/horizon-workflow/SKILL.zh-CN.md"
         Target = ".agents/skills/horizon-workflow/SKILL.md"
         Marker = "HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256"
