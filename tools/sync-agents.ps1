@@ -124,6 +124,12 @@ $syncPairs = @(
         Label = "runtime diagnostics reporting task notes"
     },
     @{
+        Source = "docs/tasks/zh-CN/deadlock-freedom.md"
+        Target = "docs/tasks/deadlock-freedom.md"
+        Marker = "TASK_DOCS_DEADLOCK_FREEDOM_ZH_CN_SHA256"
+        Label = "deadlock freedom task notes"
+    },
+    @{
         Source = ".agents/skills/horizon-workflow/SKILL.zh-CN.md"
         Target = ".agents/skills/horizon-workflow/SKILL.md"
         Marker = "HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256"
