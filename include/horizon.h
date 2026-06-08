@@ -23,6 +23,7 @@
 
 #include "Codegen/ComputePipelineObject.h"
 #include "Codegen/RasterizedPipelineObject.h"
+#include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include "Compiler/ShaderLanguageConverter.h"
 #include "format.h"
@@ -1096,6 +1097,45 @@ namespace Corona::Horizon
             return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv), std::move(reflection)));
         }
 
+        static PipelineShaderDesc from_slang_module(PipelineShaderStage stage,
+                                                    EmbeddedShader::SlangModule& module,
+                                                    EmbeddedShader::CompilerOption compiler_option = {})
+        {
+            EmbeddedShader::SlangCompileArgs2 args;
+            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
+            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
+            args.stage = [&] {
+                switch (stage)
+                {
+                case PipelineShaderStage::Vertex:
+                    return EmbeddedShader::ShaderStage::VertexShader;
+                case PipelineShaderStage::Fragment:
+                    return EmbeddedShader::ShaderStage::FragmentShader;
+                case PipelineShaderStage::Compute:
+                    return EmbeddedShader::ShaderStage::ComputeShader;
+                default:
+                    throw std::invalid_argument("PipelineShaderDesc::from_slang_module only supports vertex, fragment, and compute stages.");
+                }
+            }();
+            args.module = &module;
+            args.deps = std::move(compiler_option.slangModules);
+            args.enableReflection = true;
+
+            EmbeddedShader::SlangCompileResult result = EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
+            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
+            if (spirv == result.binaryTargets.end())
+                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
+
+            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
+            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
+            if (reflection != result.reflections.end())
+                resources = std::move(reflection->second);
+            auto spirv_reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv->second, EmbeddedShader::ShaderLanguage::HLSL);
+            spirv_reflection.entryPointInfoPool = std::move(resources.entryPointInfoPool);
+
+            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(spirv_reflection)));
+        }
+
         [[nodiscard]] bool is_compute() const noexcept
         {
             return stage == PipelineShaderStage::Compute;
@@ -1612,9 +1652,13 @@ namespace Corona::Horizon
             if constexpr (requires { key.set; })
                 slot.set = key.set;
             if constexpr (requires { key.binding; })
+            {
                 slot.binding = key.binding;
+            }
             else
+            {
                 slot.binding = slot.location;
+            }
 
             return slot;
         }
@@ -1757,12 +1801,11 @@ namespace Corona::Horizon
             requires requires(TargetProxy& proxy) { proxy.boundResource_; }
         RasterizerPipeline& bind_render_target(uint32_t location, TargetProxy& proxy)
         {
-            add_auto_bind_entry(
-                { &proxy.boundResource_,
-                  0,
-                  0,
-                  static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
-                  location });
+            auto* image = static_cast<HardwareImage*>(proxy.boundResource_);
+            if (image == nullptr)
+                throw std::logic_error("RasterizerPipeline render target proxy is not bound to a HardwareImage.");
+
+            bind_render_target(location, *image);
             return *this;
         }
 
@@ -2217,4 +2260,20 @@ namespace Corona::Horizon
             std::make_shared<Storage>(std::forward<Args>(args)...)));
     }
 
+}
+
+template <typename PipelineType>
+template <typename T>
+EmbeddedShader::BoundField<PipelineType>& EmbeddedShader::BoundField<PipelineType>::operator=(const T& value)
+{
+    Corona::Horizon::BindingSlot slot;
+    slot.byte_offset = byteOffset;
+    slot.type_size = typeSize;
+    slot.bind_type = bindType;
+    slot.location = location;
+    slot.binding = location;
+
+    Corona::Horizon::ResourceProxy proxy(*pipeline_, slot);
+    proxy = value;
+    return *this;
 }
