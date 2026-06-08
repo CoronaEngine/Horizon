@@ -15,9 +15,11 @@
 
 #include "spirv-tools/linker.hpp"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <utility>
 
@@ -677,10 +679,6 @@ namespace EmbeddedShader
 	            slang::CompilerOptionName::EmitSpirvDirectly,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
 	        },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::BindlessSpaceIndex,
-                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-            },
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -918,10 +916,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    std::array options =
         {
             slang::CompilerOptionEntry{
-                slang::CompilerOptionName::BindlessSpaceIndex,
-                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-            },
-            slang::CompilerOptionEntry{
                 slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
             },
@@ -979,10 +973,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 
 	    std::array options =
         {
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::BindlessSpaceIndex,
-                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-            },
             slang::CompilerOptionEntry{
                 slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -1121,10 +1111,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 
 	    std::array options =
         {
-	        slang::CompilerOptionEntry{
-	            slang::CompilerOptionName::BindlessSpaceIndex,
-                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-	        },
             slang::CompilerOptionEntry{
                 slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -1177,10 +1163,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 		{
 			slang::CompilerOptionEntry{
 				slang::CompilerOptionName::EmitSpirvDirectly,
-				{slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-			},
-			slang::CompilerOptionEntry{
-				slang::CompilerOptionName::BindlessSpaceIndex,
 				{slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
 			}
 		};
@@ -1345,6 +1327,25 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 			}
 		}
 
+		auto isStorageImageResource = [&](const spirv_cross::Resource& item)
+		{
+			const spirv_cross::SPIRType& baseType = compiler->get_type(item.base_type_id);
+			if (baseType.basetype == spirv_cross::SPIRType::Image ||
+			    baseType.basetype == spirv_cross::SPIRType::SampledImage)
+			{
+				return baseType.image.sampled == 2;
+			}
+
+			const spirv_cross::SPIRType& descriptorType = compiler->get_type(item.type_id);
+			if (descriptorType.basetype == spirv_cross::SPIRType::Image ||
+			    descriptorType.basetype == spirv_cross::SPIRType::SampledImage)
+			{
+				return descriptorType.image.sampled == 2;
+			}
+
+			return false;
+		};
+
 		auto appendDescriptorBindInfo = [&](const spirv_cross::Resource& item,
 		                                    ShaderCodeModule::ShaderResources::BindType bindType)
 		{
@@ -1363,8 +1364,12 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
 			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
 			bindInfo.location = compiler->get_decoration(item.id, spv::DecorationLocation);
+			const spirv_cross::SPIRType& descriptorType = compiler->get_type(item.type_id);
+			bindInfo.elementCount = descriptorType.array.empty() ? 1u : descriptorType.array[0];
 
-			bindInfo.bindType = bindType;
+			bindInfo.bindType = isStorageImageResource(item)
+				? ShaderCodeModule::ShaderResources::storageTexture
+				: bindType;
 			result.bindInfoPool.push_back(bindInfo);
 		};
 
@@ -1612,7 +1617,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 		auto rangeCount = type->getDescriptorSetDescriptorRangeCount(set);
 		if (rangeCount > 0)
 		{
-			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo;
+			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo {};
 			bindInfo.set = set;
 			bindInfo.binding = type->getBindingRangeFirstDescriptorRangeIndex(0);
 			bindInfo.typeName = type->getName();
@@ -1649,7 +1654,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 			return;
 		}
 
-		ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo;
+		ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo {};
 		bindInfo.bindType = ShaderCodeModule::ShaderResources::none;
 		bindInfo.byteOffset = var->getOffset(var->getCategory()) + varBaseOffset;
 		bindInfo.typeName = type->getName();
@@ -1734,10 +1739,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::EmitSpirvDirectly,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-	        },
-	        slang::CompilerOptionEntry{
-	            slang::CompilerOptionName::BindlessSpaceIndex,
-                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
 	        },
             slang::CompilerOptionEntry{
                 slang::CompilerOptionName::NoMangle,
@@ -1882,6 +1883,12 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	            break;
 	        }
 	        auto targetLang = arg0.targetLanguages[i];
+	        if (arg0.enableReflection)
+	        {
+	            auto resource = slangReflectBindInfo(slangTarget->getLayout(static_cast<SlangInt>(i)));
+	            finalResult.reflections.insert({targetLang, std::move(resource)});
+	        }
+
 	        if (isBin)
 	        {
 	            SlangCompileResult::BinaryTarget target(targetCodeBlob->getBufferSize() / sizeof(uint32_t));
@@ -1895,14 +1902,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	        target.resize(targetCodeBlob->getBufferSize() / sizeof(char));
 	        memcpy(target.data(), targetCodeBlob->getBufferPointer(), targetCodeBlob->getBufferSize());
 	        finalResult.stringTargets.insert({targetLang, std::move(target)});
-
-	        //reflection
-	        if (arg0.enableReflection)
-	        {
-	            std::cout << "[Debug] Getting Reflection: " << enumToString(targetLang) << "\n";
-	            auto resource = slangReflectBindInfo(slangTarget->getLayout(i));
-	            finalResult.reflections.insert({targetLang, std::move(resource)});
-	        }
 	    }
 
         return finalResult;
@@ -1966,6 +1965,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
     }
 
     void ShaderLanguageConverter::collectSlangReflection(
+        slang::ProgramLayout* programLayout,
         slang::VariableLayoutReflection* varLayout,
         ShaderCodeModule::ShaderResources& resources,
         bool insidePushConstant,
@@ -2013,7 +2013,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                     if (et->getKind() == slang::TypeReflection::Kind::Struct)
                     {
                         for (int f = 0; f < et->getFieldCount(); ++f)
-                            collectSlangReflection(et->getFieldByIndex(f), resources, true, false, 0);
+                            collectSlangReflection(programLayout, et->getFieldByIndex(f), resources, true, false, 0);
                     }
                 }
             }
@@ -2082,7 +2082,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 }
             }
 
-            ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+            ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
             info.set = set;
             info.binding = binding;
             info.variateName = varName;
@@ -2097,16 +2097,23 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                     if (et->getKind() == slang::TypeReflection::Kind::Struct)
                     {
                         for (int f = 0; f < et->getFieldCount(); ++f)
-                            collectSlangReflection(et->getFieldByIndex(f), resources, false, true, 0);
+                            collectSlangReflection(programLayout, et->getFieldByIndex(f), resources, false, true, 0);
                     }
                 }
             }
             return;
         }
 
-        ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+        slang::TypeLayoutReflection* descriptorTypeLayout = typeLayout;
+        while (descriptorTypeLayout && descriptorTypeLayout->getKind() == slang::TypeReflection::Kind::Array)
+            descriptorTypeLayout = descriptorTypeLayout->getElementTypeLayout();
+        if (!descriptorTypeLayout)
+            descriptorTypeLayout = typeLayout;
+
+        const auto descriptorKind = descriptorTypeLayout->getKind();
+        ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
         info.variateName = varName;
-        info.typeName = typeLayout->getName() ? typeLayout->getName() : "";
+        info.typeName = descriptorTypeLayout->getName() ? descriptorTypeLayout->getName() : "";
 
         if (kind == slang::TypeReflection::Kind::Scalar)
         {
@@ -2135,13 +2142,13 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
             {
                 case slang::ParameterCategory::DescriptorTableSlot:
                 case slang::ParameterCategory::ShaderResource:
-                    if (kind == slang::TypeReflection::Kind::Resource)
+                    if (descriptorKind == slang::TypeReflection::Kind::Resource)
                     {
                         info.bindType = ShaderCodeModule::ShaderResources::BindType::sampledImages;
                         info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
                         info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
                     }
-                    else if (kind == slang::TypeReflection::Kind::SamplerState)
+                    else if (descriptorKind == slang::TypeReflection::Kind::SamplerState)
                     {
                         info.bindType = ShaderCodeModule::ShaderResources::BindType::sampler;
                         info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
@@ -2191,7 +2198,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         }
 
         if (info.bindType == ShaderCodeModule::ShaderResources::BindType::none &&
-            kind == slang::TypeReflection::Kind::Resource)
+            descriptorKind == slang::TypeReflection::Kind::Resource)
         {
             info.bindType = ShaderCodeModule::ShaderResources::BindType::sampledImages;
         }
@@ -2211,7 +2218,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 }
             }
             for (int f = 0; f < typeLayout->getFieldCount(); ++f)
-                collectSlangReflection(typeLayout->getFieldByIndex(f), resources, insidePushConstant, insideUniformBuffer, structBaseOffset);
+                collectSlangReflection(programLayout, typeLayout->getFieldByIndex(f), resources, insidePushConstant, insideUniformBuffer, structBaseOffset);
         }
     }
 
@@ -2228,11 +2235,37 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         if (globalType->getKind() == slang::TypeReflection::Kind::Struct)
         {
             for (int i = 0; i < globalType->getFieldCount(); ++i)
-                collectSlangReflection(globalType->getFieldByIndex(i), resources, false, false, 0);
+                collectSlangReflection(programLayout, globalType->getFieldByIndex(i), resources, false, false, 0);
         }
         else
         {
-            collectSlangReflection(globalVar, resources, false, false, 0);
+            collectSlangReflection(programLayout, globalVar, resources, false, false, 0);
+        }
+
+        for (uint32_t i = 0; i < programLayout->getParameterCount(); ++i)
+        {
+            slang::VariableLayoutReflection* parameter = programLayout->getParameterByIndex(i);
+            if (!parameter)
+                continue;
+
+            const auto beforeCount = resources.bindInfoPool.size();
+            collectSlangReflection(programLayout, parameter, resources, false, false, 0);
+            if (resources.bindInfoPool.size() <= beforeCount)
+                continue;
+
+            ShaderCodeModule::ShaderResources::ShaderBindInfo& added = resources.bindInfoPool.back();
+            const auto duplicate = std::find_if(resources.bindInfoPool.begin(),
+                                                std::prev(resources.bindInfoPool.end()),
+                                                [&](const ShaderCodeModule::ShaderResources::ShaderBindInfo& existing) {
+                                                    return existing.variateName == added.variateName &&
+                                                           existing.bindType == added.bindType &&
+                                                           existing.set == added.set &&
+                                                           existing.binding == added.binding &&
+                                                           existing.location == added.location &&
+                                                           existing.byteOffset == added.byteOffset;
+                                                });
+            if (duplicate != std::prev(resources.bindInfoPool.end()))
+                resources.bindInfoPool.pop_back();
         }
     }
 
