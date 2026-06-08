@@ -427,7 +427,7 @@ void procParam(std::stringstream& ss, slang::FunctionReflection* reflection)
         for (size_t i = 1; i < reflection->getParameterCount(); ++i)
         {
             auto param = reflection->getParameterByIndex(i);
-            ss << ", " << emitCppParamType(procType(param0->getType())) << " " << param0->getName();
+            ss << ", " << emitCppParamType(procType(param->getType())) << " " << param->getName();
         }
     }
     ss << ")";

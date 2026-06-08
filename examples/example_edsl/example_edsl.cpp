@@ -1,498 +1,441 @@
-//#define GLFW_EXPOSE_NATIVE_WIN32
-//#include <GLFW/glfw3.h>
-//#include <GLFW/glfw3native.h>
-//
-//#include <tiny_obj_loader.h>
-//
-//#include <Codegen/BuiltinVariate.h>
-//#include <Codegen/CustomLibrary.h>
-//#include <Codegen/TypeAlias.h>
-//#include <Horizon.h>
-//
-//#include <array>
-//#include <chrono>
-//#include <cmath>
-//#include <cstdint>
-//#include <filesystem>
-//#include <iostream>
-//#include <stdexcept>
-//#include <string>
-//#include <unordered_map>
-//#include <vector>
-//
-//#include <stb_image.h>
-//#include <Codegen/ControlFlows.h>
-//#include GLSL(shaders/edsl_header.glsl)
-//
-//namespace example_baseline_edsl_detail
-//{
-//
-//constexpr uint32_t baseline_width = 800;
-//constexpr uint32_t baseline_height = 600;
-//constexpr float pi = 3.14159265358979323846f;
-//
-//constexpr EmbeddedShader::BindingKey model_binding{0, 64, 10, 0};
-//constexpr EmbeddedShader::BindingKey view_binding{64, 64, 10, 0};
-//constexpr EmbeddedShader::BindingKey proj_binding{128, 64, 10, 0};
-//
-//const std::filesystem::path viking_room_model_path =
-//    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
-//const std::filesystem::path viking_room_texture_path =
-//    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
-//
-//struct vec3
-//{
-//    float x;
-//    float y;
-//    float z;
-//};
-//
-//struct mat4
-//{
-//    std::array<float, 16> value{};
-//
-//    float &operator()(int row, int col)
-//    {
-//        return value[static_cast<size_t>(col * 4 + row)];
-//    }
-//
-//    float operator()(int row, int col) const
-//    {
-//        return value[static_cast<size_t>(col * 4 + row)];
-//    }
-//};
-//
-//struct baseline_vertex
-//{
-//    std::array<float, 3> pos{};
-//    std::array<float, 3> color{};
-//    std::array<float, 2> tex_coord{};
-//
-//    bool operator==(const baseline_vertex &other) const
-//    {
-//        return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
-//    }
-//};
-//
-//struct baseline_vertex_proxy
-//{
-//    EmbeddedShader::Float3 pos;
-//    EmbeddedShader::Float3 color;
-//    EmbeddedShader::Float2 tex_coord;
-//};
-//
-//struct fragment_input_proxy
-//{
-//    EmbeddedShader::Float3 color;
-//    EmbeddedShader::Float2 tex_coord;
-//};
-//
-//struct baseline_vertex_hash
-//{
-//    size_t operator()(const baseline_vertex &vertex) const
-//    {
-//        size_t seed = 0;
-//        auto combine = [&seed](float value) {
-//            seed ^= std::hash<float>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-//        };
-//        for (float value : vertex.pos)
-//        {
-//            combine(value);
-//        }
-//        for (float value : vertex.color)
-//        {
-//            combine(value);
-//        }
-//        for (float value : vertex.tex_coord)
-//        {
-//            combine(value);
-//        }
-//        return seed;
-//    }
-//};
-//
-//struct baseline_mesh
-//{
-//    std::vector<baseline_vertex> vertices;
-//    std::vector<uint32_t> indices;
-//};
-//
-//struct uniform_buffer_object
-//{
-//    alignas(16) mat4 model;
-//    alignas(16) mat4 view;
-//    alignas(16) mat4 proj;
-//};
-//
-//mat4 identity()
-//{
-//    mat4 result{};
-//    result(0, 0) = 1.0f;
-//    result(1, 1) = 1.0f;
-//    result(2, 2) = 1.0f;
-//    result(3, 3) = 1.0f;
-//    return result;
-//}
-//
-//mat4 multiply(const mat4 &lhs, const mat4 &rhs)
-//{
-//    mat4 result{};
-//    for (int row = 0; row < 4; ++row)
-//    {
-//        for (int col = 0; col < 4; ++col)
-//        {
-//            for (int k = 0; k < 4; ++k)
-//            {
-//                result(row, col) += lhs(row, k) * rhs(k, col);
-//            }
-//        }
-//    }
-//    return result;
-//}
-//
-//std::array<float, 4> multiply(const mat4 &lhs, const std::array<float, 4> &rhs)
-//{
-//    std::array<float, 4> result{};
-//    for (int row = 0; row < 4; ++row)
-//    {
-//        for (int col = 0; col < 4; ++col)
-//        {
-//            result[static_cast<size_t>(row)] += lhs(row, col) * rhs[static_cast<size_t>(col)];
-//        }
-//    }
-//    return result;
-//}
-//
-//mat4 rotate_z(float radians)
-//{
-//    mat4 result = identity();
-//    float c = std::cos(radians);
-//    float s = std::sin(radians);
-//    result(0, 0) = c;
-//    result(0, 1) = -s;
-//    result(1, 0) = s;
-//    result(1, 1) = c;
-//    return result;
-//}
-//
-//vec3 operator-(const vec3 &lhs, const vec3 &rhs)
-//{
-//    return {lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z};
-//}
-//
-//float dot(const vec3 &lhs, const vec3 &rhs)
-//{
-//    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
-//}
-//
-//vec3 cross(const vec3 &lhs, const vec3 &rhs)
-//{
-//    return {
-//        lhs.y * rhs.z - lhs.z * rhs.y,
-//        lhs.z * rhs.x - lhs.x * rhs.z,
-//        lhs.x * rhs.y - lhs.y * rhs.x,
-//    };
-//}
-//
-//vec3 normalize(const vec3 &value)
-//{
-//    float length = std::sqrt(dot(value, value));
-//    return {value.x / length, value.y / length, value.z / length};
-//}
-//
-//mat4 look_at_rh(const vec3 &eye, const vec3 &center, const vec3 &up)
-//{
-//    vec3 f = normalize(center - eye);
-//    vec3 s = normalize(cross(f, up));
-//    vec3 u = cross(s, f);
-//
-//    mat4 result = identity();
-//    result(0, 0) = s.x;
-//    result(0, 1) = s.y;
-//    result(0, 2) = s.z;
-//    result(1, 0) = u.x;
-//    result(1, 1) = u.y;
-//    result(1, 2) = u.z;
-//    result(2, 0) = -f.x;
-//    result(2, 1) = -f.y;
-//    result(2, 2) = -f.z;
-//    result(0, 3) = -dot(s, eye);
-//    result(1, 3) = -dot(u, eye);
-//    result(2, 3) = dot(f, eye);
-//    return result;
-//}
-//
-//mat4 perspective_rh(float fovy_radians, float aspect, float near_plane, float far_plane)
-//{
-//    float f = 1.0f / std::tan(fovy_radians / 2.0f);
-//    mat4 result{};
-//    result(0, 0) = f / aspect;
-//    result(1, 1) = -f;
-//    result(2, 2) = far_plane / (near_plane - far_plane);
-//    result(3, 2) = -1.0f;
-//    result(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
-//    return result;
-//}
-//
-//bool check_assets()
-//{
-//    bool model_exists = std::filesystem::exists(viking_room_model_path);
-//    bool texture_exists = std::filesystem::exists(viking_room_texture_path);
-//    if (model_exists && texture_exists)
-//    {
-//        return true;
-//    }
-//
-//    std::cerr << "EDSL model baseline assets are missing.\n";
-//    if (!model_exists)
-//    {
-//        std::cerr << "  Missing model: " << viking_room_model_path << '\n';
-//    }
-//    if (!texture_exists)
-//    {
-//        std::cerr << "  Missing texture: " << viking_room_texture_path << '\n';
-//    }
-//    return false;
-//}
-//
-//baseline_mesh load_mesh()
-//{
-//    tinyobj::attrib_t attrib;
-//    std::vector<tinyobj::shape_t> shapes;
-//    std::vector<tinyobj::material_t> materials;
-//    std::string warn;
-//    std::string err;
-//
-//    const std::string model_path = viking_room_model_path.string();
-//    const std::string material_base_path =
-//        viking_room_model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator);
-//    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path.c_str(), material_base_path.c_str()))
-//    {
-//        throw std::runtime_error(warn + err);
-//    }
-//    if (!warn.empty())
-//    {
-//        std::cerr << warn << '\n';
-//    }
-//
-//    baseline_mesh mesh;
-//    std::unordered_map<baseline_vertex, uint32_t, baseline_vertex_hash> unique_vertices;
-//    for (const auto &shape : shapes)
-//    {
-//        for (const auto &index : shape.mesh.indices)
-//        {
-//            baseline_vertex vertex{};
-//            vertex.pos = {
-//                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 0],
-//                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
-//                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
-//            };
-//            vertex.color = {1.0f, 1.0f, 1.0f};
-//
-//            if (index.texcoord_index >= 0)
-//            {
-//                vertex.tex_coord = {
-//                    attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 0],
-//                    1.0f - attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 1],
-//                };
-//            }
-//
-//            if (!unique_vertices.contains(vertex))
-//            {
-//                unique_vertices[vertex] = static_cast<uint32_t>(mesh.vertices.size());
-//                mesh.vertices.push_back(vertex);
-//            }
-//            mesh.indices.push_back(unique_vertices[vertex]);
-//        }
-//    }
-//
-//    return mesh;
-//}
-//
-//HardwareImage load_texture_image()
-//{
-//    int width = 0;
-//    int height = 0;
-//    int channels = 0;
-//    const std::string texture_path = viking_room_texture_path.string();
-//    stbi_uc *pixels = stbi_load(texture_path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
-//    if (!pixels)
-//    {
-//        throw std::runtime_error("failed to load texture image: " + texture_path);
-//    }
-//
-//    HardwareImageCreateInfo create_info;
-//    create_info.width = static_cast<uint32_t>(width);
-//    create_info.height = static_cast<uint32_t>(height);
-//    create_info.format = ImageFormat::RGBA8_SRGB;
-//    create_info.usage = ImageUsage::SampledImage;
-//    create_info.arrayLayers = 1;
-//    create_info.mipLevels = 1;
-//
-//    HardwareImage texture_image(create_info);
-//    HardwareExecutor upload_executor;
-//    upload_executor << texture_image.copyFrom(pixels) << upload_executor.commit();
-//    stbi_image_free(pixels);
-//
-//    return texture_image;
-//}
-//
-//HardwareImage create_render_target(uint32_t width, uint32_t height)
-//{
-//    HardwareImageCreateInfo create_info;
-//    create_info.width = width;
-//    create_info.height = height;
-//    create_info.format = ImageFormat::RGBA16_FLOAT;
-//    create_info.usage = ImageUsage::StorageImage;
-//    create_info.arrayLayers = 1;
-//    create_info.mipLevels = 1;
-//
-//    HardwareImage image(create_info);
-//    image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-//    return image;
-//}
-//
-//mat4 make_mvp(float time_seconds)
-//{
-//    mat4 model = rotate_z(time_seconds * pi * 0.5f);
-//    mat4 view = look_at_rh({2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
-//    mat4 proj = perspective_rh(pi * 0.25f,
-//                               baseline_width / static_cast<float>(baseline_height),
-//                               0.1f,
-//                               10.0f);
-//    return multiply(proj, multiply(view, model));
-//}
-//
-//uniform_buffer_object make_ubo(float time_seconds)
-//{
-//    uniform_buffer_object ubo{};
-//    ubo.model = rotate_z(time_seconds * pi * 0.5f);
-//    ubo.view = look_at_rh({2.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
-//    ubo.proj = perspective_rh(pi * 0.25f,
-//                              baseline_width / static_cast<float>(baseline_height),
-//                              0.1f,
-//                              10.0f);
-//    return ubo;
-//}
-//
-//std::vector<baseline_vertex> transform_vertices(const std::vector<baseline_vertex> &vertices, const mat4 &mvp)
-//{
-//    std::vector<baseline_vertex> transformed = vertices;
-//    for (auto &vertex : transformed)
-//    {
-//        std::array<float, 4> clip = multiply(mvp, std::array<float, 4>{vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.0f});
-//        const float inv_w = 1.0f / clip[3];
-//        vertex.pos = {clip[0] * inv_w, clip[1] * inv_w, clip[2] * inv_w};
-//    }
-//    return transformed;
-//}
-//
-//} // namespace example_baseline_edsl_detail
-//
-//using namespace example_baseline_edsl_detail;
-//
-//void run_example_edsl()
-//{
-//    if (!check_assets())
-//    {
-//        return;
-//    }
-//
-//    if (glfwInit() < 0)
-//    {
-//        return;
-//    }
-//
-//    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-//    GLFWwindow *window = glfwCreateWindow(baseline_width, baseline_height, "Horizon Baseline [Backend EDSL]", nullptr, nullptr);
-//    if (!window)
-//    {
-//        glfwTerminate();
-//        return;
-//    }
-//
-//    try
-//    {
-//        baseline_mesh mesh = load_mesh();
-//        HardwareBuffer vertex_buffer(mesh.vertices, BufferUsage::VertexBuffer);
-//        HardwareBuffer index_buffer(mesh.indices, BufferUsage::IndexBuffer);
-//        HardwareImage texture_image = load_texture_image();
-//        HardwareImage render_target = create_render_target(baseline_width, baseline_height);
-//        HardwareExecutor render_executor;
-//        HardwareDisplayer displayer(glfwGetWin32Window(window));
-//
-//        using namespace EmbeddedShader;
-//
-//        Float4x4 model;
-//        Float4x4 view;
-//        Float4x4 proj;
-//        Texture2D<ktm::fvec4> texture_proxy = texture_image;
-//
-//        auto vertex_shader = [&](Aggregate<baseline_vertex_proxy> vertex) -> Float4
-//        {
-//            // The aggregate varying version is kept for reference. The current
-//            // backend path renders black with aggregate VS->FS payloads, so this
-//            // baseline packs uv + a white color weight into one Float4 varying.
-//            // Aggregate<fragment_input_proxy> output;
-//            // output->color = vertex->color;
-//            // output->tex_coord = vertex->tex_coord;
-//            // return output;
-//            position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-//            Float color_weight = edsl_header_glsl::get_color_weight(vertex->color);
-//            return Float4(vertex->tex_coord, color_weight, 1.0f);
-//        };
-//
-//        auto fragment_shader = [&](Float4 input) -> Float4
-//        {
-//            // Aggregate varying version kept for reference:
-//            // return texture(texture_proxy, input->tex_coord) * Float4(input->color, 1.0f);
-//            Float4 color = texture(texture_proxy, input->xy());
-//            return color * Float4(input->z, input->z, input->z, 1.0f);
-//        };
-//
-//        RasterizerPipeline rasterizer(vertex_shader, fragment_shader);
-//        // Input texture is sampled by the fragment shader; it must not be registered as a render target.
-//        texture_proxy = texture_image;
-//
-//        Texture2D<ktm::fvec4> output_proxy = render_target;
-//        rasterizer.bindOutputTargets(output_proxy);
-//
-//        auto start_time = std::chrono::high_resolution_clock::now();
-//        while (!glfwWindowShouldClose(window))
-//        {
-//            glfwPollEvents();
-//
-//            float time_seconds = std::chrono::duration<float, std::chrono::seconds::period>(
-//                                     std::chrono::high_resolution_clock::now() - start_time)
-//                                     .count();
-//            uniform_buffer_object ubo = make_ubo(time_seconds);
-//            rasterizer[model_binding] = ubo.model;
-//            rasterizer[view_binding] = ubo.view;
-//            rasterizer[proj_binding] = ubo.proj;
-//            // CPU pre-transform path kept for reference, but disabled so the
-//            // EDSL baseline remains comparable with GLSL/tutorial GPU MVP work.
-//            // std::vector<baseline_vertex> transformed_vertices = transform_vertices(mesh.vertices, make_mvp(time_seconds));
-//            // HardwareBuffer vertex_buffer(transformed_vertices, BufferUsage::VertexBuffer);
-//
-//            DrawIndexedParams draw_params;
-//            draw_params.indexType = IndexType::UInt32;
-//            draw_params.indexCount = static_cast<uint32_t>(mesh.indices.size());
-//
-//            // EDSL texture auto-binding writes the sampled image descriptor into
-//            // the rasterizer push constant block. record() snapshots that block
-//            // per draw, so bind before record just like the GLSL baseline does.
-//            rasterizer(baseline_width, baseline_height);
-//            rasterizer.record(index_buffer, vertex_buffer, draw_params);
-//            render_executor << rasterizer
-//                            << render_executor.commit();
-//            displayer.wait(render_executor) << render_target;
-//        }
-//    }
-//    catch (const std::exception &e)
-//    {
-//        std::cerr << e.what() << '\n';
-//    }
-//
-//    glfwDestroyWindow(window);
-//    glfwTerminate();
-//}
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+
+#define TINYOBJLOADER_DISABLE_FAST_FLOAT
+#include <tiny_obj_loader.h>
+
+#include "Codegen/BuiltinVariate.h"
+#include "Codegen/ControlFlows.h"
+#include "Codegen/CustomLibrary.h"
+#include "Codegen/TypeAlias.h"
+#include "common.h"
+#include "hardware_wrapper_vulkan/hardware_context.h"
+#include "horizon.h"
+#include GLSL(shaders/edsl_header.glsl)
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace H = Corona::Horizon;
+
+struct BaselineEdslVertexProxy
+{
+    EmbeddedShader::Float3 pos;
+    EmbeddedShader::Float3 color;
+    EmbeddedShader::Float2 tex_coord;
+};
+
+namespace
+{
+constexpr uint32_t edsl_width = 800;
+constexpr uint32_t edsl_height = 600;
+constexpr float pi = 3.14159265358979323846f;
+
+constexpr EmbeddedShader::BindingKey model_binding { 0, 64, 10, 0 };
+constexpr EmbeddedShader::BindingKey view_binding { 64, 64, 10, 0 };
+constexpr EmbeddedShader::BindingKey proj_binding { 128, 64, 10, 0 };
+
+struct ReflectedBindingSlot
+{
+    uint64_t byte_offset = 0;
+    uint32_t type_size = 0;
+    int32_t bind_type = -1;
+    uint32_t location = 0;
+    uint32_t set = 0;
+    uint32_t binding = 0;
+};
+
+constexpr ReflectedBindingSlot texture_binding {
+    0,
+    0,
+    static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::sampledImages),
+    0,
+    1,
+    0,
+};
+
+const std::filesystem::path viking_room_model_path =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
+const std::filesystem::path viking_room_texture_path =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
+
+struct Vec3
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
+struct Mat4
+{
+    std::array<float, 16> value {};
+
+    float& operator()(int row, int col)
+    {
+        return value[static_cast<size_t>(col * 4 + row)];
+    }
+
+    float operator()(int row, int col) const
+    {
+        return value[static_cast<size_t>(col * 4 + row)];
+    }
+};
+
+struct BaselineEdslVertex
+{
+    std::array<float, 3> pos {};
+    std::array<float, 3> color {};
+    std::array<float, 2> tex_coord {};
+
+    bool operator==(const BaselineEdslVertex& other) const
+    {
+        return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
+    }
+};
+
+struct BaselineEdslVertexHash
+{
+    size_t operator()(const BaselineEdslVertex& vertex) const
+    {
+        size_t seed = 0;
+        auto combine = [&seed](float value) {
+            seed ^= std::hash<float> {}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        };
+
+        for (float value : vertex.pos)
+            combine(value);
+        for (float value : vertex.color)
+            combine(value);
+        for (float value : vertex.tex_coord)
+            combine(value);
+
+        return seed;
+    }
+};
+
+struct BaselineEdslMesh
+{
+    std::vector<BaselineEdslVertex> vertices;
+    std::vector<uint32_t> indices;
+};
+
+struct UniformBufferObject
+{
+    alignas(16) Mat4 model;
+    alignas(16) Mat4 view;
+    alignas(16) Mat4 proj;
+};
+
+Mat4 identity()
+{
+    Mat4 result;
+    result(0, 0) = 1.0f;
+    result(1, 1) = 1.0f;
+    result(2, 2) = 1.0f;
+    result(3, 3) = 1.0f;
+    return result;
+}
+
+Mat4 rotate_z(float radians)
+{
+    Mat4 result = identity();
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    result(0, 0) = c;
+    result(0, 1) = -s;
+    result(1, 0) = s;
+    result(1, 1) = c;
+    return result;
+}
+
+Vec3 operator-(const Vec3& lhs, const Vec3& rhs)
+{
+    return { lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z };
+}
+
+float dot(const Vec3& lhs, const Vec3& rhs)
+{
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+Vec3 cross(const Vec3& lhs, const Vec3& rhs)
+{
+    return {
+        lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.x * rhs.y - lhs.y * rhs.x,
+    };
+}
+
+Vec3 normalize(const Vec3& value)
+{
+    const float length = std::sqrt(dot(value, value));
+    return { value.x / length, value.y / length, value.z / length };
+}
+
+Mat4 look_at_rh(const Vec3& eye, const Vec3& center, const Vec3& up)
+{
+    const Vec3 f = normalize(center - eye);
+    const Vec3 s = normalize(cross(f, up));
+    const Vec3 u = cross(s, f);
+
+    Mat4 result = identity();
+    result(0, 0) = s.x;
+    result(0, 1) = s.y;
+    result(0, 2) = s.z;
+    result(1, 0) = u.x;
+    result(1, 1) = u.y;
+    result(1, 2) = u.z;
+    result(2, 0) = -f.x;
+    result(2, 1) = -f.y;
+    result(2, 2) = -f.z;
+    result(0, 3) = -dot(s, eye);
+    result(1, 3) = -dot(u, eye);
+    result(2, 3) = dot(f, eye);
+    return result;
+}
+
+Mat4 perspective_rh(float fovy_radians, float aspect, float near_plane, float far_plane)
+{
+    const float f = 1.0f / std::tan(fovy_radians / 2.0f);
+    Mat4 result;
+    result(0, 0) = f / aspect;
+    result(1, 1) = -f;
+    result(2, 2) = far_plane / (near_plane - far_plane);
+    result(3, 2) = -1.0f;
+    result(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
+    return result;
+}
+
+Mat4 transpose(const Mat4& matrix)
+{
+    Mat4 result;
+    for (int row = 0; row < 4; ++row)
+    {
+        for (int col = 0; col < 4; ++col)
+            result(row, col) = matrix(col, row);
+    }
+    return result;
+}
+
+void check_assets()
+{
+    if (std::filesystem::exists(viking_room_model_path) && std::filesystem::exists(viking_room_texture_path))
+        return;
+
+    std::string message = "EDSL baseline assets are missing.";
+    if (!std::filesystem::exists(viking_room_model_path))
+        message += "\n  Missing model: " + viking_room_model_path.string();
+    if (!std::filesystem::exists(viking_room_texture_path))
+        message += "\n  Missing texture: " + viking_room_texture_path.string();
+    throw std::runtime_error(message);
+}
+
+BaselineEdslMesh load_mesh()
+{
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn;
+    std::string err;
+
+    const std::string model_path = viking_room_model_path.string();
+    const std::string material_base_path =
+        viking_room_model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator);
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path.c_str(), material_base_path.c_str()))
+        throw std::runtime_error(warn + err);
+    if (!warn.empty())
+        std::cerr << warn << '\n';
+
+    BaselineEdslMesh mesh;
+    std::unordered_map<BaselineEdslVertex, uint32_t, BaselineEdslVertexHash> unique_vertices;
+    for (const tinyobj::shape_t& shape : shapes)
+    {
+        for (const tinyobj::index_t& index : shape.mesh.indices)
+        {
+            BaselineEdslVertex vertex;
+            vertex.pos = {
+                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 0],
+                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
+                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
+            };
+            vertex.color = { 1.0f, 1.0f, 1.0f };
+
+            if (index.texcoord_index >= 0)
+            {
+                vertex.tex_coord = {
+                    attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 0],
+                    1.0f - attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 1],
+                };
+            }
+
+            auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(mesh.vertices.size()));
+            if (inserted)
+                mesh.vertices.push_back(vertex);
+            mesh.indices.push_back(found->second);
+        }
+    }
+
+    return mesh;
+}
+
+UniformBufferObject make_ubo(float time_seconds)
+{
+    UniformBufferObject ubo;
+    ubo.model = transpose(rotate_z(time_seconds * pi * 0.5f));
+    ubo.view = transpose(look_at_rh({ 2.0f, 2.0f, 2.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }));
+    ubo.proj = transpose(perspective_rh(pi * 0.25f, edsl_width / static_cast<float>(edsl_height), 0.1f, 10.0f));
+    return ubo;
+}
+
+H::HardwareImage create_output_image()
+{
+    H::HardwareImage image(
+        H::HardwareImageDesc::texture_2d(edsl_width,
+                                         edsl_height,
+                                         H::Format::RGBA16_FLOAT,
+                                         H::ImageUsageFlags::Storage | H::ImageUsageFlags::ColorAttachment |
+                                             H::ImageUsageFlags::Sampled | H::ImageUsageFlags::TransferSrc |
+                                             H::ImageUsageFlags::TransferDst,
+                                         "example_edsl.output"));
+    image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    return image;
+}
+
+H::HardwareImage create_depth_image()
+{
+    H::HardwareImage image(
+        H::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, H::Format::D32, "example_edsl.depth"));
+    image.set_clear_depth(1.0f, 0);
+    return image;
+}
+
+H::Queue& resolve_fixed_graphics_queue(H::DeviceId device, H::QueueCapability)
+{
+    if (device.value != 0)
+        throw std::logic_error("example_edsl fixed queue resolver supports only the main device.");
+
+    const std::vector<H::Queue*>& queues = H::device_manager().queues_for(H::QueueCapability::Graphics);
+    const auto found = std::find_if(queues.begin(), queues.end(), [](const H::Queue* queue) {
+        return queue != nullptr;
+    });
+    if (found == queues.end())
+        throw std::runtime_error("example_edsl could not resolve a graphics queue.");
+
+    return **found;
+}
+} // namespace
+
+void run_example_edsl()
+{
+    check_assets();
+
+    if (glfwInit() < 0)
+        return;
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    GLFWwindow* window = glfwCreateWindow(edsl_width, edsl_height, "Horizon Baseline [EDSL]", nullptr, nullptr);
+    if (!window)
+    {
+        glfwTerminate();
+        return;
+    }
+
+    try
+    {
+        BaselineEdslMesh mesh = load_mesh();
+        TextureLoadResult texture_result = loadTexture(viking_room_texture_path.string());
+        if (!texture_result.success)
+            throw std::runtime_error("failed to load EDSL baseline texture: " + viking_room_texture_path.string());
+
+        H::HardwareImage texture_image = texture_result.texture;
+        H::HardwareImage final_output_image = create_output_image();
+        H::HardwareImage depth_image = create_depth_image();
+        H::HardwareBuffer vertex_buffer = H::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
+        H::HardwareBuffer index_buffer = H::HardwareBuffer::index(mesh.indices, "example_edsl.index");
+        H::HardwareExecutor render_executor(resolve_fixed_graphics_queue);
+        H::HardwareExecutor display_executor;
+        H::HardwareDisplayer display(glfwGetWin32Window(window));
+
+        using namespace EmbeddedShader;
+        using namespace ktm;
+
+        Texture2D<fvec4> texture_proxy = texture_image;
+        Float4x4 model;
+        Float4x4 view;
+        Float4x4 proj;
+
+        auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
+            position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
+            Float color_weight = edsl_header_glsl::get_color_weight(vertex->color);
+            return Float4(vertex->tex_coord, color_weight, 1.0f);
+        };
+
+        auto fragment_shader = [&](Float4 input) -> Float4 {
+            Float4 color = texture(texture_proxy, input->xy());
+            return color * Float4(input->z, input->z, input->z, 1.0f);
+        };
+
+        H::RasterizerPipelineDesc rasterizer_desc =
+            H::RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader);
+        rasterizer_desc.set_depth_attachment(H::DepthAttachmentDesc::with_format(H::Format::D32, "example_edsl.depth"));
+        rasterizer_desc.set_debug_name("example_edsl.baseline_rasterizer");
+
+        H::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
+        rasterizer.bind_render_target(0, final_output_image);
+        rasterizer.bind_depth_target(depth_image);
+        rasterizer[texture_binding] = texture_image;
+
+        H::DrawIndexedParams draw_params;
+        draw_params.index_type = H::IndexType::UInt32;
+        draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
+
+        const auto start_time = std::chrono::high_resolution_clock::now();
+        while (!glfwWindowShouldClose(window))
+        {
+            glfwPollEvents();
+
+            const float time_seconds =
+                std::chrono::duration<float, std::chrono::seconds::period>(
+                    std::chrono::high_resolution_clock::now() - start_time)
+                    .count();
+            UniformBufferObject ubo = make_ubo(time_seconds);
+            rasterizer[model_binding] = ubo.model;
+            rasterizer[view_binding] = ubo.view;
+            rasterizer[proj_binding] = ubo.proj;
+
+            rasterizer.clear_records();
+            rasterizer.record(index_buffer, vertex_buffer, draw_params);
+
+            H::SubmitReceipt render_receipt = render_executor.stream()
+                << rasterizer(edsl_width, edsl_height).command_batch()
+                << H::commit();
+
+            display_executor.wait(render_receipt);
+            (void)(display_executor.stream()
+                << H::present(display, final_output_image)
+                << H::commit());
+        }
+    }
+    catch (...)
+    {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        throw;
+    }
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+}
