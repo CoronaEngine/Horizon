@@ -42,6 +42,7 @@
 
 - lower-case Vulkan 后端只固定全局 bindless 表 ABI：set 0 binding 0 是 combined image sampler runtime array，set 1 binding 0 是 storage buffer runtime array，set 2 binding 0 是 storage image runtime array。
 - UBO 和普通 descriptor 不属于固定 set 约定；必须按 shader reflection 里的 set/binding 创建 descriptor set layout 和写 descriptor。即使某个 shader generator 在 bindless 模式下把 UBO 生成为 set 3，后端也只能把它当作反射结果消费，不要把 set 3 写成后端 ABI。
+- Helicon generated binding / EDSL auto-bind 的兼容 metadata 可能只有 `byteOffset`、`typeSize`、`bindType`、`location`，没有 `set` / `binding`。Vulkan consumer 不要为了读取这些旧 metadata 反向要求 `BindingKey` 或 `AutoBindEntry` 增字段；按旧约定把 `location` 当作 descriptor binding，并在 consumer 侧补默认 set，除非完整 reflection 和 runtime 链路已经显式携带 set/binding。
 - Pipeline layout 必须使用真实 Vulkan set index；如果 bindless set 0-2 和反射 descriptor set 之间有空洞，用空 descriptor set layout 占位，descriptor bind 时也按实际 set index 绑定。
 - bindless 资源绑定把全局 descriptor array 的 index 写进 push constant handle 字段；非 bindless 或普通反射 descriptor 走 per-dispatch / per-draw transient descriptor set。
 - 同一个 `HardwareImage` 可能分别作为 sampled image 和 storage image 使用；sampled / storage bindless descriptor index 必须分开缓存，不要复用单个 image bindless index。

@@ -1,5 +1,5 @@
 # Horizon Codegraph Context
-<!-- AGENT_DOCS_CODEGRAPH_ZH_CN_SHA256: 6215df764b0fdd41eae36e1290174aa35da1dc87092799e58156efc7211d6123 -->
+<!-- AGENT_DOCS_CODEGRAPH_ZH_CN_SHA256: 1039cbe3c186f28e632ea45ccddc0ea875b99f8b405fe313345ab6052b5c781d -->
 
 Load this file only when codegraph tooling is available and the task involves code location, symbol flow, call chains, architecture tracing, bug localization, or refactor impact.
 
@@ -12,6 +12,7 @@ Load this file only when codegraph tooling is available and the task involves co
 - Codegraph is for orientation and impact analysis, not final authority. If the index conflicts with source, CMake, or build results, current repository facts win.
 - Codegraph is optional local enhancement tooling. Its absence must not block ordinary repository work; agents should mention the fallback and continue with `rg`, source reading, CMake ownership checks, and targeted validation.
 - If codegraph is unavailable or the index is missing, fall back to `rg`, source reading, and the smallest relevant build validation.
+- When the user only asks whether codegraph needs updating, asks to inspect the current dirty diff, or says to confirm again, stay read-only by default: answer from `git status`, `git diff`, codegraph status/search/explore, and source checks. This is not a request for compile validation unless the user explicitly asks for validation, publication readiness, a commit, or post-implementation acceptance.
 
 ## Horizon Notes
 

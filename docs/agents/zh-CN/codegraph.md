@@ -11,6 +11,7 @@
 - codegraph 是定位和影响面分析工具，不是最终事实来源；如果索引结果与源码、CMake 或构建结果冲突，以当前仓库事实为准。
 - codegraph 是可选本地增强工具；缺失时不能阻塞普通仓库工作，Agent 应说明正在降级处理并继续使用 `rg`、源码阅读、CMake 归属确认和针对性验证。
 - 如果 codegraph 不可用或索引缺失，退回 `rg`、源码阅读和最小相关构建验证。
+- 当用户只是询问 codegraph 是否需要更新、查看当前 dirty diff、或要求“再确认一遍”时，默认保持只读：用 `git status`、`git diff`、codegraph status/search/explore 和源码核对回答；这不等于请求编译验证，除非用户明确要求验证、发布检查、提交，或任务已经进入实现后的验收阶段。
 
 ## Horizon 注意点
 

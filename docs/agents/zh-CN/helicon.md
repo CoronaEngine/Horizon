@@ -21,6 +21,11 @@
 4. `include/Horizon.h` 如何把用户赋值转为 runtime 写入。
 5. Vulkan pipeline 如何使用这些数据创建 layout 或写入 push constant。
 
+## Generated Binding 兼容性
+
+- `src/Helicon/Codegen/VariateProxy.h` 中的 `BindingKey`、`BoundField`，以及 `ComputePipelineObject.h` / `RasterizedPipelineObject.h` 中的 `AutoBindEntry`，当前保持四字段兼容形态：`byteOffset`、`typeSize`、`bindType`、`location`。不要为了适配 Vulkan 后端临时给这些 Helicon metadata 结构添加 `set` / `binding`。
+- 旧 generated direct-resource 约定把 descriptor binding 存在第四个 `location` 槽位。runtime 桥接类型可以把缺失的 `binding` 默认映射为 `location`，Vulkan 消费端也可以在消费旧 metadata 时补默认 set；只有在 shader reflection、generator、public runtime 和 Vulkan consumer 全链路一起迁移时，才修改 Helicon metadata 结构。
+
 ## 验证
 
 修改 shader compiler、reflection 或 generated binding 时：

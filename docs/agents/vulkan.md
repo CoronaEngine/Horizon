@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 34a2788b68a5c4f4aa221c6f5c74ecc08be81416822a0b5ddd1ea74c08aeed11 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 30ce94423b11655d5d5ee8def20f3da605175f1a75ebfe4558458c4224dc7926 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -43,6 +43,7 @@ Be careful with:
 
 - The lower-case Vulkan backend has only one fixed global bindless ABI: set 0 binding 0 is the combined image sampler runtime array, set 1 binding 0 is the storage buffer runtime array, and set 2 binding 0 is the storage image runtime array.
 - UBOs and ordinary descriptors are not part of a fixed set convention; create descriptor set layouts and write descriptors from shader-reflected set/binding values. Even if a shader generator emits UBOs at set 3 in bindless mode, the backend should consume that as reflection data, not as backend ABI.
+- Helicon generated binding / EDSL auto-bind compatibility metadata may only contain `byteOffset`, `typeSize`, `bindType`, and `location`, with no `set` / `binding`. Vulkan consumers must not force `BindingKey` or `AutoBindEntry` to grow fields just to read that old metadata. Treat `location` as the descriptor binding and fill the default set on the consumer side unless the full reflection and runtime chain already carries explicit set/binding data.
 - Pipeline layouts must use exact Vulkan set indices. If there are gaps between bindless sets 0-2 and reflected descriptor sets, fill them with empty descriptor set layouts, and bind descriptor sets at their actual set indices.
 - Bindless resource binding writes global descriptor array indices into push-constant handle fields; non-bindless or ordinary reflected descriptors use per-dispatch / per-draw transient descriptor sets.
 - One `HardwareImage` may be used as both a sampled image and a storage image; sampled and storage bindless descriptor indices must be cached separately instead of sharing one image bindless index.
