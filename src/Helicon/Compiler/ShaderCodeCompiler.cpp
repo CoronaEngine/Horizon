@@ -16,6 +16,32 @@ namespace EmbeddedShader
 {
     std::shared_mutex threadMutex;
 
+    namespace
+    {
+        ShaderCodeModule::ShaderResources reflectionForTarget(
+            ShaderLanguage targetLanguage,
+            const std::vector<uint32_t>* spirv,
+            const std::unordered_map<ShaderLanguage, ShaderCodeModule::ShaderResources>& slangReflections)
+        {
+            auto slangReflection = slangReflections.find(targetLanguage);
+            if (targetLanguage == ShaderLanguage::SpirV && spirv != nullptr && !spirv->empty())
+            {
+                auto reflection = ShaderLanguageConverter::spirvCrossReflectedBindInfo(*spirv, ShaderLanguage::HLSL);
+                if (slangReflection != slangReflections.end())
+                    reflection.entryPointInfoPool = slangReflection->second.entryPointInfoPool;
+                return reflection;
+            }
+
+            if (slangReflection != slangReflections.end())
+                return slangReflection->second;
+
+            if (spirv != nullptr && !spirv->empty())
+                return ShaderLanguageConverter::spirvCrossReflectedBindInfo(*spirv, ShaderLanguage::HLSL);
+
+            return {};
+        }
+    }
+
     std::string enumToString(ShaderLanguage language) {
         switch (language)
         {
@@ -308,12 +334,17 @@ namespace EmbeddedShader
         if (option.compileDXBC && !Ast::Parser::getBindless())
             compileArgs.targetLanguages.push_back(ShaderLanguage::DXBC);
         auto result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs);
+        const std::vector<uint32_t>* spirvTarget = nullptr;
+        if (auto spirv = result.binaryTargets.find(ShaderLanguage::SpirV); spirv != result.binaryTargets.end())
+            spirvTarget = &spirv->second;
+
         //string targets
         for (auto& stringTarget : result.stringTargets)
         {
             auto languageStr = enumToString(stringTarget.first);
             storeCode(stringTarget.second,ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr));
-            storeReflection(result.reflections[stringTarget.first], ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
+            storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections),
+                            ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
         }
 
         //binary targets
@@ -321,7 +352,8 @@ namespace EmbeddedShader
         {
             auto languageStr = enumToString(binaryTargets.first);
             storeCode(binaryTargets.second,ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr));
-            storeReflection(result.reflections[binaryTargets.first], ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
+            storeReflection(reflectionForTarget(binaryTargets.first, spirvTarget, result.reflections),
+                            ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
         }
     }
 }
