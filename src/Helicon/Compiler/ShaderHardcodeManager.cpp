@@ -1,3 +1,5 @@
+#include "ShaderCommon.h"
+
 #include <regex>
 #include <fstream>
 #include <sstream>

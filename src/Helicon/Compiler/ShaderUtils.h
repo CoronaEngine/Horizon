@@ -24,6 +24,9 @@ namespace EmbeddedShader
 	// 将 SPIR-V 二进制输出为逗号分隔的 uint32_t 序列（不含外围大括号）
 	void emitSpirVLiteral(std::ostream& out, const std::vector<uint32_t>& spirv);
 
+    // 将 slang-module 二进制输出为逗号分隔的 uint32_t 序列（不含外围大括号）
+    void emitSlangModuleLiteral(std::ostream& out, const std::vector<uint8_t>& slangModule);
+
 	// ---- ShaderResources 序列化 ----
 
 	// 将 ShaderResources 序列化为 C++ 聚合初始化表达式

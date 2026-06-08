@@ -7,6 +7,7 @@
 #include <set>
 #include <Compiler/ShaderUtils.h>
 #include <Compiler/ShaderTypeMapping.h>
+#include "Compiler/ShaderCodeCompiler.h"
 using namespace EmbeddedShader;
 
 void generateBinary(std::stringstream& out, std::string_view name, const std::vector<uint32_t>& shaderCode)
@@ -14,6 +15,13 @@ void generateBinary(std::stringstream& out, std::string_view name, const std::ve
 	out << "static inline std::vector<uint32_t> " << name <<" {";
 	emitSpirVLiteral(out, shaderCode);
 	out << "};\n";
+}
+
+void generateBinary(std::stringstream& out, std::string_view name, const SlangModule& slangModule)
+{
+    out << "static inline ::EmbeddedShader::SlangModule " << name <<" {{\"" << slangModule.name << "\"}," << " {\"" << slangModule.path << "\"},"  << "{";
+    emitSlangModuleLiteral(out, slangModule.binData);
+    out << "}};\n";
 }
 
 void buildFunctionParameter(FunctionSignature& signature, std::stringstream& out)
@@ -113,9 +121,8 @@ static bool isDirectResourceBindType(ShaderCodeModule::ShaderResources::BindType
 	}
 }
 
-std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vector<uint32_t>& spirv, ShaderLanguage lang)
+std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCodeModule::ShaderResources& resources)
 {
-	auto resources = ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv, lang);
 	std::set<std::string> bindingBlockNames;
 
 	// Push constant block -> struct with static inline BindingKey members
@@ -128,8 +135,7 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 			if (info.bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
 				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
 				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-				    << ", " << info.set << ", " << info.binding << "};\n";
+				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
 		}
 		out << "};\n";
 	}
@@ -144,8 +150,7 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 			if (info.bindType == ShaderCodeModule::ShaderResources::uniformBufferMembers)
 				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
 				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-				    << ", " << info.set << ", " << info.binding << "};\n";
+				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
 		}
 		out << "};\n";
 	}
@@ -156,8 +161,7 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 		if (info.bindType == ShaderCodeModule::ShaderResources::stageInputs)
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-			    << ", " << info.set << ", " << info.binding << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
 	}
 
 	// Stage outputs
@@ -166,8 +170,7 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 		if (info.bindType == ShaderCodeModule::ShaderResources::stageOutputs)
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-			    << ", " << info.set << ", " << info.binding << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
 	}
 
 	// Descriptor resources (sampled/storage/buffer/sampler) for direct key binding.
@@ -176,8 +179,7 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const std::vec
 		if (isDirectResourceBindType(info.bindType))
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-			    << ", " << info.set << ", " << info.binding << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding << "};\n";
 	}
 
 	return bindingBlockNames;
@@ -201,8 +203,7 @@ static std::string emitBlockProxy(std::stringstream& out,
 			out << "\t::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
 			ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-			   << ", " << info.set << ", " << info.binding << ")";
+			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << ")";
 			fieldInits.push_back(ss.str());
 		}
 	}
@@ -240,10 +241,8 @@ static void emitCtorBody(std::stringstream& out, const std::string& className,
 	}
 }
 
-void generateBindings(std::stringstream& out, const std::vector<uint32_t>& spirv, ShaderLanguage lang)
+void generateBindings(std::stringstream& out, const ShaderCodeModule::ShaderResources& resources)
 {
-	auto resources = ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv, lang);
-
 	// Size metadata for cross-stage validation in TypedRasterizerPipeline
 	out << "static constexpr size_t pushConstantBlockSize = " << resources.pushConstantSize << ";\n";
 	out << "static constexpr size_t uniformBufferBlockSize = " << resources.uniformBufferSize << ";\n";
@@ -268,8 +267,7 @@ void generateBindings(std::stringstream& out, const std::vector<uint32_t>& spirv
 			out << "::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
 			ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-			   << ", " << info.set << ", " << info.binding << ")";
+			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding << ")";
 			initList.push_back(ss.str());
 		}
 
@@ -288,8 +286,7 @@ void generateBindings(std::stringstream& out, const std::vector<uint32_t>& spirv
 				out << "::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 				std::stringstream ss;
 				ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-				   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
-				   << ", " << info.set << ", " << info.binding << ")";
+				   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << ")";
 				initList.push_back(ss.str());
 			}
 		}
@@ -301,6 +298,210 @@ void generateBindings(std::stringstream& out, const std::vector<uint32_t>& spirv
 	out << "template<typename P>\nstruct Bindings : ResourceBindings<P>, OutputBindings<P> {\n";
 	out << "Bindings(P* p) : ResourceBindings<P>(p), OutputBindings<P>(p) {}\n";
 	out << "};\n";
+}
+
+std::string procType(slang::TypeReflection* reflection);
+
+std::string procVecType(slang::TypeReflection* reflection)
+{
+    return procType(reflection->getElementType()) + std::to_string(reflection->getElementCount());
+}
+
+std::string procMatType(slang::TypeReflection* reflection)
+{
+    return procType(reflection->getElementType()) + std::to_string(reflection->getColumnCount()) + "x" + std::to_string(reflection->getRowCount());
+}
+
+std::string procScalarType(slang::TypeReflection* reflection)
+{
+    switch (reflection->getScalarType())
+    {
+    case slang::TypeReflection::None:
+        break;
+    case slang::TypeReflection::Void:
+        return "void";
+    case slang::TypeReflection::Bool:
+        return "bool";
+    case slang::TypeReflection::Int32:
+        return "int";
+    case slang::TypeReflection::UInt32:
+        return "uint";
+    case slang::TypeReflection::Int64:
+        return "int64_t";
+    case slang::TypeReflection::UInt64:
+        return "uint64_t";
+    case slang::TypeReflection::Float16:
+        return "half";
+    case slang::TypeReflection::Float32:
+        return "float";
+    case slang::TypeReflection::Float64:
+        return "double";
+    case slang::TypeReflection::Int8:
+        return "int8_t";
+    case slang::TypeReflection::UInt8:
+        return "uint8_t";
+    case slang::TypeReflection::Int16:
+        return "int16_t";
+    case slang::TypeReflection::UInt16:
+        return "uint16_t";
+    case slang::TypeReflection::IntPtr:
+        return "intptr_t";
+    case slang::TypeReflection::UIntPtr:
+        return "uintptr_t";
+    case slang::TypeReflection::BFloat16:
+        return "half";
+    case slang::TypeReflection::FloatE4M3:
+        return "float";
+    case slang::TypeReflection::FloatE5M2:
+        return "float";
+    }
+    return "unknown";
+}
+
+std::string procType(slang::TypeReflection* reflection)
+{
+    switch (reflection->getKind())
+    {
+    case slang::TypeReflection::Kind::None:
+        break;
+    case slang::TypeReflection::Kind::Struct:
+        return reflection->getName();
+    case slang::TypeReflection::Kind::Array:
+        break;
+    case slang::TypeReflection::Kind::Matrix:
+        return procMatType(reflection);
+    case slang::TypeReflection::Kind::Vector:
+        return procVecType(reflection);
+    case slang::TypeReflection::Kind::Scalar:
+        return procScalarType(reflection);
+    case slang::TypeReflection::Kind::ConstantBuffer:
+        break;
+    case slang::TypeReflection::Kind::Resource:
+        break;
+    case slang::TypeReflection::Kind::SamplerState:
+        break;
+    case slang::TypeReflection::Kind::TextureBuffer:
+        break;
+    case slang::TypeReflection::Kind::ShaderStorageBuffer:
+        break;
+    case slang::TypeReflection::Kind::ParameterBlock:
+        break;
+    case slang::TypeReflection::Kind::GenericTypeParameter:
+        break;
+    case slang::TypeReflection::Kind::Interface:
+        break;
+    case slang::TypeReflection::Kind::OutputStream:
+        break;
+    case slang::TypeReflection::Kind::Specialized:
+        break;
+    case slang::TypeReflection::Kind::Feedback:
+        break;
+    case slang::TypeReflection::Kind::Pointer:
+        break;
+    case slang::TypeReflection::Kind::DynamicResource:
+        break;
+    case slang::TypeReflection::Kind::MeshOutput:
+        break;
+    case slang::TypeReflection::Kind::Enum:
+        break;
+    }
+    if (auto name = reflection->getName(); name)
+    {
+        return name;
+    }
+    return "";
+}
+
+std::string procVarDefinition(slang::VariableReflection* reflection)
+{
+    return EmbeddedShader::typeNameToCpp(procType(reflection->getType())) + " " + reflection->getName();
+}
+
+void procParam(std::stringstream& ss, slang::FunctionReflection* reflection)
+{
+    ss << "(";
+    if (reflection->getParameterCount() != 0)
+    {
+        auto param0 = reflection->getParameterByIndex(0);
+        ss << emitCppParamType(procType(param0->getType())) << " " << param0->getName();
+        for (size_t i = 1; i < reflection->getParameterCount(); ++i)
+        {
+            auto param = reflection->getParameterByIndex(i);
+            ss << ", " << emitCppParamType(procType(param0->getType())) << " " << param0->getName();
+        }
+    }
+    ss << ")";
+}
+
+void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection,std::string sourceModule)
+{
+    ss << "static inline ::EmbeddedShader::FunctionProxy<";
+    auto retType = procType(reflection->getReturnType());
+    if (retType == "void")
+    {
+        ss << "void";
+        procParam(ss,reflection);
+    }
+    else
+    {
+        auto retCppType = typeNameToCpp(retType);
+        if (isOpaqueProxyType(retCppType))
+        {
+            // Opaque type: emit as full proxy type directly (e.g. Texture2DProxy<fvec4>)
+            ss << "::EmbeddedShader::" << retCppType.substr(1);
+        }
+        else
+        {
+            ss << "::EmbeddedShader::VariateProxy<" << retCppType;
+        }
+        procParam(ss,reflection);
+        if (!isOpaqueProxyType(retCppType))
+            ss << ">";
+    }
+
+    ss << "> " << reflection->getName() << "{";
+    ss << "\""<< reflection->getName() << "\",\""<< typeNameToSlang(retType) << "\",{";
+    for (int i = 0; i < reflection->getParameterCount(); ++i)
+    {
+        auto child = reflection->getParameterByIndex(i);
+        ss << "{\"" << typeNameToSlang(procType(child->getType())) << "\",\"" << child->getName() << "\"},";
+    }
+    ss << "},&" << sourceModule << "};";
+}
+
+void procStruct(std::stringstream& ss, slang::DeclReflection* reflection)
+{
+    ss << "struct " << reflection->getName() << "\n{\n";
+    for (auto member : reflection->getChildren())
+    {
+        if (member->getKind() == slang::DeclReflection::Kind::Variable)
+        {
+            auto var = member->asVariable();
+            ss << "\t" << emitCppParamType(procType(var->getType())) << " " << var->getName() << ";\n";
+        }
+    }
+    ss << "};";
+}
+
+void procStructInstance(std::stringstream& ss, slang::DeclReflection* reflection)
+{
+    auto var = reflection->asVariable();
+    auto type = var->getType();
+    auto kind = type->getKind();
+
+    if (kind != slang::TypeReflection::Kind::ConstantBuffer &&
+        kind != slang::TypeReflection::Kind::ParameterBlock)
+    {
+        return;
+    }
+    auto elementType = type->getElementType();
+    ss << "struct " << reflection->getName() << "\n{\n";
+    for (int i = 0; i < elementType->getFieldCount(); ++i)
+    {
+        auto member = elementType->getFieldByIndex(i);
+        ss << "\t" << emitCppParamType(procType(member->getType())) << " " << member->getName() << ";\n";
+    }
+    ss << "};\n";
 }
 
 int main(int argc, char** argv)
@@ -442,92 +643,98 @@ int main(int argc, char** argv)
 		std::cout << "INFO:Auto-detected shader stage: " << static_cast<int>(inputStage) << "\n";
 	}
 
-	auto spirv = ShaderLanguageConverter::glslangSpirvCompiler(code,inputLanguage,inputStage,{ path.parent_path() }, false);
-	if (spirv.empty())
-	{
-		std::cout << "ERROR:Cannot compile SPIR-V.\n";
-		return 1;
-	}
-	std::cout << "SUCCESS:SPIR-V compiled.\n";
+    SlangModuleCompileArgs args;
+    args.moduleName = path.stem().string();
+    args.modulePath = path.string();
+    args.shaderCode = code;
+    args.sourceLanguage = inputLanguage;
+    auto slangModule = ShaderLanguageConverter::slangModuleCompiler(args);
 
-	auto irReflections = ShaderLanguageConverter::spirvCrossGetIRReflection(spirv);
+    SlangModuleReflectShaderResourceArgs shaderResourceArgs;
+    shaderResourceArgs.module = &slangModule;
+    shaderResourceArgs.stage = inputStage;
+    ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
+
 	std::cout << "SUCCESS:Obtain reflection information from SPIR-V IR through SPIRV-CROSS.\n";
-
-	// for (auto& irReflection: irReflections)
-	// {
-	// 	if (irReflection.type == IRReflection::Type::FunctionSignature)
-	// 	{
-	// 		auto& signature = std::get<FunctionSignature>(irReflection.info);
-	// 		std::cout << "Function:" << signature.name.substr(0, signature.name.find('(')) << "\n";
-	// 		std::cout << "Return Type:" << signature.returnTypeName << "\n";
-	// 		std::cout << "Parameter List:\n";
-	// 		for (auto& parameter: signature.parameters)
-	// 		{
-	// 			std::cout << "\t""Name:" << parameter.name << "\n";
-	// 			std::cout << "\t""Type:" << parameter.typeName << "\n\n";
-	// 		}
-	// 	}
-	//
-	// 	if (irReflection.type == IRReflection::Type::Struct)
-	// 	{
-	// 		auto& structInfo = std::get<StructInfo>(irReflection.info);
-	// 		std::cout << "Struct: " << structInfo.name << "\n";
-	// 		std::cout << "Members:\n";
-	// 		for (auto& member: structInfo.members)
-	// 		{
-	// 			std::cout << "\t""Name:" << member.name << "\n";
-	// 			std::cout << "\t""Type:" << member.typeName << "\n\n";
-	// 		}
-	// 	}
-	// }
 
 	std::cout << "INFO:Generate the final C++ shader...\n";
 	std::stringstream out;
 	out << "#pragma once\n#include <Codegen/VariateProxy.h>\n";
 
-	auto fileName = path.string();
-	std::ranges::replace(fileName, '\\', '_');
-	std::ranges::replace(fileName, '/', '_');
-	std::ranges::replace(fileName, '.', '_');
-	std::ranges::replace(fileName, ':', '_');
+    // Wrap everything in a per-shader struct to avoid redefinition across .hpp files
+    auto nsName = sanitizeToIdentifier(path);
+    out << "struct " << nsName << " {\n";
 
-	// Wrap everything in a per-shader struct to avoid redefinition across .hpp files
-	auto nsName = sanitizeToIdentifier(path);
-	out << "struct " << nsName << " {\n";
+    auto fileName = path.string();
+    std::ranges::replace(fileName, '\\', '_');
+    std::ranges::replace(fileName, '/', '_');
+    std::ranges::replace(fileName, '.', '_');
+    std::ranges::replace(fileName, ':', '_');
 
-	generateBinary(out, fileName, spirv);
+    auto smName = "slang_module_" + fileName;
 
-	// 稳定别名：用户可通过 vert_glsl::spirv 引用预编译 SPIR-V 二进制
-	out << "static inline auto& spirv = " << fileName << ";\n";
+	generateBinary(out, smName, slangModule);
 
-	// Generate BindingKey struct declarations first, collect binding block names
+    // 稳定别名：用户可通过 vert_glsl::spirv 引用预编译 SPIR-V 二进制
+    out << "static inline auto& slangModule = " << smName << ";\n";
+
+    // Generate BindingKey struct declarations first, collect binding block names
 	std::cout << "INFO:Generate binding keys for struct '" << nsName << "'...\n";
-	auto bindingBlockNames = generateBindingKeys(out, spirv, inputLanguage);
+	auto bindingBlockNames = generateBindingKeys(out, resources);
 
-	// Generate IR reflection (skip structs that overlap with BindingKey structs)
-	for (auto& irReflection : irReflections)
-	{
-		if (irReflection.type == IRReflection::Type::FunctionSignature)
-		{
-			auto& signature = std::get<FunctionSignature>(irReflection.info);
-			if (signature.isEntryPoint) continue;
-			buildFunctionSignature(signature, out, fileName);
-			out << "\n";
-		}
-
-		if (irReflection.type == IRReflection::Type::Struct)
-		{
-			auto& structInfo = std::get<StructInfo>(irReflection.info);
-			// Skip structs already generated as BindingKey structs
-			if (bindingBlockNames.contains(structInfo.name)) continue;
-			buildStruct(structInfo,out);
-			out << "\n";
-		}
-	}
+    SlangModuleReflectionArgs reflectionArgs;
+    reflectionArgs.stage = inputStage;
+    reflectionArgs.module = &slangModule;
+    reflectionArgs.layoutCallback = [&](slang::ProgramLayout*) {};
+    reflectionArgs.reflectionCallback = [&](slang::DeclReflection* reflection) {
+        for (int i = 0; i < reflection->getChildren().count; ++i)
+        {
+            auto child = reflection->getChild(i);
+            switch (child->getKind())
+            {
+            case slang::DeclReflection::Kind::Unsupported:
+                break;
+            case slang::DeclReflection::Kind::Struct:
+                if (bindingBlockNames.contains(reflection->getName())) break;
+                procStruct(out,child);
+                out << "\n";
+                break;
+            case slang::DeclReflection::Kind::Func:
+            {
+                bool isEntryPoint = false;
+                for (const auto& ep : resources.entryPointInfoPool)
+                {
+                    if (ep.name == child->getName())
+                    {
+                        isEntryPoint = true;
+                        break;
+                    }
+                }
+                if (isEntryPoint) break;
+                procFunc(out, child->asFunction(), smName);
+                out << "\n";
+            }
+                break;
+            case slang::DeclReflection::Kind::Module:
+                break;
+            case slang::DeclReflection::Kind::Generic:
+                break;
+            case slang::DeclReflection::Kind::Variable:
+                if (bindingBlockNames.contains(child->getName())) break;
+                procStructInstance(out,child);
+                break;
+            case slang::DeclReflection::Kind::Namespace:
+                break;
+            case slang::DeclReflection::Kind::Enum:
+                break;
+            }
+        }
+    };
+    ShaderLanguageConverter::slangModuleReflection(reflectionArgs);
 
 	// Generate Bindings<P> template for direct member access (TypedRasterizerPipeline / TypedComputePipeline)
 	std::cout << "INFO:Generate Bindings<P> for struct '" << nsName << "'...\n";
-	generateBindings(out, spirv, inputLanguage);
+	generateBindings(out, resources);
 
 	out << "}; // struct " << nsName << "\n";
 

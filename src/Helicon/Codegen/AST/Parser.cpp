@@ -9,7 +9,7 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::parse
 	std::vector<ParseOutput> outputs;
 	for (const auto& parameter: parameters)
 	{
-		outputs.emplace_back(parse(parameter.shaderCode,parameter.stage),currentParser->structure.spvSource,parameter.stage);
+		outputs.emplace_back(parse(parameter.shaderCode,parameter.stage),currentParser->structure.slangModuleSource,parameter.stage);
 	}
 
 	auto globalOutput = Generator::SlangGenerator::getGlobalOutput(currentParser->structure);
@@ -26,7 +26,7 @@ void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage)
 {
 	if (currentParser->isInShaderParse)
 	{
-		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.spvSource,currentParser->structure.stage);
+		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage);
 		currentParser->reset();
 		currentParser->localStatementStack.pop();
 		currentParser->isInShaderParse = false;
@@ -40,7 +40,7 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
 {
 	if (currentParser->isInShaderParse)
 	{
-		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.spvSource,currentParser->structure.stage);
+		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage);
 		currentParser->reset();
 		currentParser->localStatementStack.pop();
 		currentParser->isInShaderParse = false;
@@ -90,7 +90,7 @@ void EmbeddedShader::Ast::Parser::reset()
 	nextRenderTargetLocation = 0;
 	positionOutput.reset();
 	dispatchThreadIDInput.reset();
-    structure.spvSource.clear();
+    structure.slangModuleSource.clear();
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()

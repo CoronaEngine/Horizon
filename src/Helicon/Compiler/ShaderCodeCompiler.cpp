@@ -9,6 +9,7 @@
 
 #include "ShaderHardcodeManager.h"
 #include "ShaderLanguageConverter.h"
+#include <Compiler/ShaderCommon.h>
 #include <shared_mutex>
 
 namespace EmbeddedShader
@@ -94,130 +95,187 @@ namespace EmbeddedShader
     void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language,
         CompilerOption option) const
     {
-        std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
-        bool isNeedLinkLib = option.spvLinkBinary && !option.spvLinkBinary->empty();
-        std::vector<uint32_t> codeSpirV = {};
-#ifdef WIN32
-        std::vector<uint32_t> codeDXIL = {};
-        std::vector<uint32_t> codeDXBC = {};
-#endif
-
-        if (Ast::Parser::getBindless())
-            option.compileDXBC = false; // DXBC不支持sm6.6 bindless
-
-        if (language != ShaderLanguage::Slang && language != ShaderLanguage::HLSL && !option.compileHLSL)
-        {
-            //slang可以直接编译到dxil和dxbc，但其他情况需要依赖HLSL，所以如果不需要HLSL就直接跳过
-            option.compileDXIL = false;
-            option.compileDXBC = false;
-        }
-
-        std::string codeGLSL;
-        std::string codeHLSL;
-        std::string codeSlang;
-        std::vector<ShaderCodeModule::ShaderResources> reflections;
-
-        switch (language)
-        {
-            case ShaderLanguage::Slang:
-            {
-                codeSlang = shaderCode;
-
-                std::vector<std::string> outputs;
-                std::vector<std::vector<uint32_t>> binaryOutputs;
-                std::vector<ShaderLanguage> binaryLanguages;
-                std::vector<ShaderLanguage> languages;
-                if (option.compileSpirV)
-                    binaryLanguages.push_back(ShaderLanguage::SpirV);
-                if (!isNeedLinkLib)
-                {
-#ifdef WIN32
-                    if (option.compileDXIL)
-                        binaryLanguages.push_back(ShaderLanguage::DXIL);
-                    if (option.compileDXBC)
-                        binaryLanguages.push_back(ShaderLanguage::DXBC);
-#endif
-                    if (option.compileGLSL)
-                        languages.push_back(ShaderLanguage::GLSL);
-                    if (option.compileHLSL)
-                        languages.push_back(ShaderLanguage::HLSL);
-                }
-
-
-                reflections = ShaderLanguageConverter::slangCompiler(codeSlang, binaryLanguages, languages, binaryOutputs, outputs, true,!isNeedLinkLib);
-                size_t index = 0;
-                if (option.compileSpirV)
-                    codeSpirV = binaryOutputs[index++];
-                if (!isNeedLinkLib)
-                {
-#ifdef WIN32
-                    if (option.compileDXIL)
-                        codeDXIL = binaryOutputs[index++];
-                    if (option.compileDXBC)
-                        codeDXBC = binaryOutputs[index++];
-#endif
-
-                    index = 0;
-                    if (option.compileGLSL)
-                        codeGLSL = outputs[index++];
-                    if (option.compileHLSL)
-                        codeHLSL = outputs[index++];
-                }
-                break;
-            }
-            case ShaderLanguage::GLSL:
-                codeGLSL = shaderCode;
-                if (option.compileSpirV)
-                    codeSpirV = ShaderLanguageConverter::glslangSpirvCompiler(codeGLSL, language, inputStage);
-                if (option.compileGLSL)
-                    codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
-                if (option.compileHLSL)
-                    codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-                break;
-            case ShaderLanguage::HLSL:
-                codeHLSL = shaderCode;
-                if (option.compileSpirV)
-                    codeSpirV = ShaderLanguageConverter::glslangSpirvCompiler(codeHLSL, language, inputStage);
-                if (option.compileGLSL)
-                    codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
-                if (option.compileHLSL)
-                    codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-                break;
-                //case ShaderLanguage::SpirV:
-                //    codeSpirV = shaderCode;
-                //    codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
-                //    codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-                //    break;
-            default:
-                break;
-        }
-
-        if (isNeedLinkLib && !codeSpirV.empty())
-        {
-            std::vector<std::vector<uint32_t>> src = *option.spvLinkBinary;
-            src.push_back(codeSpirV);
-            codeSpirV = ShaderLanguageConverter::spirvLinker(src);
-        }
-
-        if (isNeedLinkLib && !codeSpirV.empty())
-        {
-            if (option.compileGLSL)
-                codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
-            if (option.compileHLSL)
-                codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
-        }
-        
-        //auto functionSignatures = ShaderLanguageConverter::spirvCrossGetFunctionSignatures(codeSpirV);
-
-
-        // support mutil-thread
-        {
-            std::unique_lock<std::shared_mutex> lock(threadMutex);
-
-        // Pre-compute spirv-cross reflection once for all formats that need it
-        ShaderCodeModule::ShaderResources spirvCrossReflection;
-        if (!codeSpirV.empty())
-            spirvCrossReflection = ShaderLanguageConverter::spirvCrossReflectedBindInfo(codeSpirV, ShaderLanguage::HLSL);
+//         std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
+//         bool isNeedLinkLib = option.slangModules && !option.slangModules->empty();
+//         std::vector<uint32_t> codeSpirV = {};
+// #ifdef WIN32
+//         std::vector<uint32_t> codeDXIL = {};
+//         std::vector<uint32_t> codeDXBC = {};
+// #endif
+//
+//         if (Ast::Parser::getBindless())
+//             option.compileDXBC = false; // DXBC不支持sm6.6 bindless
+//
+//         if (language != ShaderLanguage::Slang && language != ShaderLanguage::HLSL && !option.compileHLSL)
+//         {
+//             //slang可以直接编译到dxil和dxbc，但其他情况需要依赖HLSL，所以如果不需要HLSL就直接跳过
+//             option.compileDXIL = false;
+//             option.compileDXBC = false;
+//         }
+//
+//         std::string codeGLSL;
+//         std::string codeHLSL;
+//         std::string codeSlang;
+//         std::vector<ShaderCodeModule::ShaderResources> reflections;
+//
+//         switch (language)
+//         {
+//             case ShaderLanguage::Slang:
+//             {
+//                 codeSlang = shaderCode;
+//
+//                 std::vector<std::string> outputs;
+//                 std::vector<std::vector<uint32_t>> binaryOutputs;
+//                 std::vector<ShaderLanguage> binaryLanguages;
+//                 std::vector<ShaderLanguage> languages;
+//                 if (option.compileSpirV)
+//                     binaryLanguages.push_back(ShaderLanguage::SpirV);
+//                 if (!isNeedLinkLib)
+//                 {
+// #ifdef WIN32
+//                     if (option.compileDXIL)
+//                         binaryLanguages.push_back(ShaderLanguage::DXIL);
+//                     if (option.compileDXBC)
+//                         binaryLanguages.push_back(ShaderLanguage::DXBC);
+// #endif
+//                     if (option.compileGLSL)
+//                         languages.push_back(ShaderLanguage::GLSL);
+//                     if (option.compileHLSL)
+//                         languages.push_back(ShaderLanguage::HLSL);
+//                 }
+//
+//
+//                 reflections = ShaderLanguageConverter::slangCompiler(codeSlang, binaryLanguages, languages, binaryOutputs, outputs, true,!isNeedLinkLib);
+//                 size_t index = 0;
+//                 if (option.compileSpirV)
+//                     codeSpirV = binaryOutputs[index++];
+//                 if (!isNeedLinkLib)
+//                 {
+// #ifdef WIN32
+//                     if (option.compileDXIL)
+//                         codeDXIL = binaryOutputs[index++];
+//                     if (option.compileDXBC)
+//                         codeDXBC = binaryOutputs[index++];
+// #endif
+//
+//                     index = 0;
+//                     if (option.compileGLSL)
+//                         codeGLSL = outputs[index++];
+//                     if (option.compileHLSL)
+//                         codeHLSL = outputs[index++];
+//                 }
+//                 break;
+//             }
+//             case ShaderLanguage::GLSL:
+//                 codeGLSL = shaderCode;
+//                 if (option.compileSpirV)
+//                     codeSpirV = ShaderLanguageConverter::glslangSpirvCompiler(codeGLSL, language, inputStage);
+//                 if (option.compileGLSL)
+//                     codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
+//                 if (option.compileHLSL)
+//                     codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
+//                 break;
+//             case ShaderLanguage::HLSL:
+//                 codeHLSL = shaderCode;
+//                 if (option.compileSpirV)
+//                     codeSpirV = ShaderLanguageConverter::glslangSpirvCompiler(codeHLSL, language, inputStage);
+//                 if (option.compileGLSL)
+//                     codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
+//                 if (option.compileHLSL)
+//                     codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
+//                 break;
+//                 //case ShaderLanguage::SpirV:
+//                 //    codeSpirV = shaderCode;
+//                 //    codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
+//                 //    codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
+//                 //    break;
+//             default:
+//                 break;
+//         }
+//
+//         if (isNeedLinkLib && !codeSpirV.empty())
+//         {
+//             std::vector<std::vector<uint32_t>> src = *option.slangModules;
+//             src.push_back(codeSpirV);
+//             codeSpirV = ShaderLanguageConverter::spirvLinker(src);
+//         }
+//
+//         if (isNeedLinkLib && !codeSpirV.empty())
+//         {
+//             if (option.compileGLSL)
+//                 codeGLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::GLSL);
+//             if (option.compileHLSL)
+//                 codeHLSL = ShaderLanguageConverter::spirvCrossConverter(codeSpirV, ShaderLanguage::HLSL);
+//         }
+//
+//         //auto functionSignatures = ShaderLanguageConverter::spirvCrossGetFunctionSignatures(codeSpirV);
+//
+//
+//         // support mutil-thread
+//         {
+//             std::unique_lock<std::shared_mutex> lock(threadMutex);
+//
+//         // Pre-compute spirv-cross reflection once for all formats that need it
+//         ShaderCodeModule::ShaderResources spirvCrossReflection;
+//         if (!codeSpirV.empty())
+//             spirvCrossReflection = ShaderLanguageConverter::spirvCrossReflectedBindInfo(codeSpirV, ShaderLanguage::HLSL);
+//
+//         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
+//         auto storeCode = [&](const auto& code, const std::string& itemName) {
+//             compiledOutputs_[itemName] = code;
+// #ifdef CABBAGE_ENGINE_DEBUG
+//             ShaderHardcodeManager::addTarget(code, stage, itemName);
+// #endif
+//         };
+//         auto storeReflection = [&](const ShaderCodeModule::ShaderResources& res, const std::string& itemName) {
+//             compiledOutputs_[itemName] = res;
+// #ifdef CABBAGE_ENGINE_DEBUG
+//             ShaderHardcodeManager::addTarget(res, stage, itemName);
+// #endif
+//         };
+//
+//         size_t index = 0;
+//         if (!codeSpirV.empty())
+//         {
+//             storeCode(codeSpirV, ShaderHardcodeManager::getItemName(sourceLocationStr, "SpirV" + bindlessStr));
+//             // SpirV 目标始终使用 spirv-cross 反射：Slang 反射不处理 push_constant_buffers，
+//             // 导致 pushConstantSize/pushConstantName/pushConstantMembers 全部缺失
+//             storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "SpirV_Reflection" + bindlessStr));
+//             if (!reflections.empty() && !isNeedLinkLib) index++;
+//         }
+//         if (!codeGLSL.empty())
+//         {
+//             storeCode(codeGLSL, ShaderHardcodeManager::getItemName(sourceLocationStr, "GLSL" + bindlessStr));
+//             if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "GLSL_Reflection" + bindlessStr));
+//             else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "GLSL_Reflection" + bindlessStr));
+//         }
+//         if (!codeHLSL.empty())
+//         {
+//             storeCode(codeHLSL, ShaderHardcodeManager::getItemName(sourceLocationStr, "HLSL" + bindlessStr));
+//             if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "HLSL_Reflection" + bindlessStr));
+//             else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "HLSL_Reflection" + bindlessStr));
+//         }
+//         if (!codeSlang.empty())
+//         {
+//             storeCode(codeSlang, ShaderHardcodeManager::getItemName(sourceLocationStr, "Slang" + bindlessStr));
+//             if (!reflections.empty()) storeReflection(reflections[0], ShaderHardcodeManager::getItemName(sourceLocationStr, "Slang_Reflection" + bindlessStr));
+//             else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "Slang_Reflection" + bindlessStr));
+//         }
+// #ifdef WIN32
+//         if (!codeDXIL.empty())
+//         {
+//             storeCode(codeDXIL, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXIL" + bindlessStr));
+//             if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "DXIL_Reflection" + bindlessStr));
+//             else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXIL_Reflection" + bindlessStr));
+//         }
+//         if (!codeDXBC.empty())
+//         {
+//             storeCode(codeDXBC, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXBC"));
+//             if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "DXBC_Reflection" + bindlessStr));
+//             else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXBC_Reflection" + bindlessStr));
+//         }
+// #endif
+//        }
 
         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
@@ -232,48 +290,38 @@ namespace EmbeddedShader
             ShaderHardcodeManager::addTarget(res, stage, itemName);
 #endif
         };
+        std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
+        SlangCompileArgs compileArgs;
+        compileArgs.source = shaderCode;
+        compileArgs.stage = inputStage;
+        compileArgs.sourceLanguage = language;
+        compileArgs.deps = std::move(option.slangModules);
+        compileArgs.enableReflection = true;
+        if (option.compileGLSL)
+            compileArgs.targetLanguages.push_back(ShaderLanguage::GLSL);
+        if (option.compileHLSL)
+            compileArgs.targetLanguages.push_back(ShaderLanguage::HLSL);
+        if (option.compileSpirV)
+            compileArgs.targetLanguages.push_back(ShaderLanguage::SpirV);
+        if (option.compileDXIL)
+            compileArgs.targetLanguages.push_back(ShaderLanguage::DXIL);
+        if (option.compileDXBC && !Ast::Parser::getBindless())
+            compileArgs.targetLanguages.push_back(ShaderLanguage::DXBC);
+        auto result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs);
+        //string targets
+        for (auto& stringTarget : result.stringTargets)
+        {
+            auto languageStr = enumToString(stringTarget.first);
+            storeCode(stringTarget.second,ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr));
+            storeReflection(result.reflections[stringTarget.first], ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
+        }
 
-        size_t index = 0;
-        if (!codeSpirV.empty())
+        //binary targets
+        for (auto& binaryTargets : result.binaryTargets)
         {
-            storeCode(codeSpirV, ShaderHardcodeManager::getItemName(sourceLocationStr, "SpirV" + bindlessStr));
-            // SpirV 目标始终使用 spirv-cross 反射：Slang 反射不处理 push_constant_buffers，
-            // 导致 pushConstantSize/pushConstantName/pushConstantMembers 全部缺失
-            storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "SpirV_Reflection" + bindlessStr));
-            if (!reflections.empty() && !isNeedLinkLib) index++;
-        }
-        if (!codeGLSL.empty())
-        {
-            storeCode(codeGLSL, ShaderHardcodeManager::getItemName(sourceLocationStr, "GLSL" + bindlessStr));
-            if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "GLSL_Reflection" + bindlessStr));
-            else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "GLSL_Reflection" + bindlessStr));
-        }
-        if (!codeHLSL.empty())
-        {
-            storeCode(codeHLSL, ShaderHardcodeManager::getItemName(sourceLocationStr, "HLSL" + bindlessStr));
-            if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "HLSL_Reflection" + bindlessStr));
-            else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "HLSL_Reflection" + bindlessStr));
-        }
-        if (!codeSlang.empty())
-        {
-            storeCode(codeSlang, ShaderHardcodeManager::getItemName(sourceLocationStr, "Slang" + bindlessStr));
-            if (!reflections.empty()) storeReflection(reflections[0], ShaderHardcodeManager::getItemName(sourceLocationStr, "Slang_Reflection" + bindlessStr));
-            else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "Slang_Reflection" + bindlessStr));
-        }
-#ifdef WIN32
-        if (!codeDXIL.empty())
-        {
-            storeCode(codeDXIL, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXIL" + bindlessStr));
-            if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "DXIL_Reflection" + bindlessStr));
-            else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXIL_Reflection" + bindlessStr));
-        }
-        if (!codeDXBC.empty())
-        {
-            storeCode(codeDXBC, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXBC"));
-            if (!reflections.empty()) storeReflection(reflections[!isNeedLinkLib ? index++ : index], ShaderHardcodeManager::getItemName(sourceLocationStr, "DXBC_Reflection" + bindlessStr));
-            else storeReflection(spirvCrossReflection, ShaderHardcodeManager::getItemName(sourceLocationStr, "DXBC_Reflection" + bindlessStr));
-        }
-#endif
+            auto languageStr = enumToString(binaryTargets.first);
+            storeCode(binaryTargets.second,ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr));
+            storeReflection(result.reflections[binaryTargets.first], ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
         }
     }
 }

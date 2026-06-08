@@ -13,8 +13,6 @@
 
 #include "ShaderLanguageConverter.h"
 
-#include "Codegen/AST/Parser.hpp"
-
 #include "spirv-tools/linker.hpp"
 
 #include <array>
@@ -611,10 +609,6 @@ namespace EmbeddedShader
 
 		initSlangGlobalSession();
 		Slang::ComPtr<slang::IGlobalSession> globalSession = slangGlobalSession;
-		if (!globalSession)
-		{
-			throw std::runtime_error("Failed to create Slang global session.");
-		}
 
 		slang::SessionDesc sessionDesc = {};
 
@@ -677,12 +671,16 @@ namespace EmbeddedShader
 	    sessionDesc.targets = targets.data();
 	    sessionDesc.targetCount = static_cast<SlangInt>(targets.size());
 
-	    std::vector<slang::CompilerOptionEntry> options =
+	    std::array options =
 	    {
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::EmitSpirvDirectly,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
 	        },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+            },
 	        slang::CompilerOptionEntry{
 	            slang::CompilerOptionName::NoMangle,
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
@@ -692,16 +690,8 @@ namespace EmbeddedShader
                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
 	        },
         };
-	    if (Ast::Parser::getBindless())
-	    {
-	        options.push_back(
-	            slang::CompilerOptionEntry{
-	                slang::CompilerOptionName::BindlessSpaceIndex,
-	                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
-	            });
-	    }
 	    sessionDesc.compilerOptionEntries = options.data();
-	    sessionDesc.compilerOptionEntryCount = static_cast<SlangInt>(options.size());
+	    sessionDesc.compilerOptionEntryCount = options.size();
 
 	    Slang::ComPtr<slang::ISession> session;
 	    globalSession->createSession(sessionDesc, session.writeRef());
@@ -832,7 +822,72 @@ namespace EmbeddedShader
 		return reflectedResources;
 	}
 
-    std::vector<uint8_t> ShaderLanguageConverter::slangModuleCompiler(std::string_view shaderCode, ShaderLanguage srcLanguage)
+void printFunc(slang::DeclReflection* decl, int indent = 0)
+	{
+	    std::string prefix(indent * 2, ' ');
+	    auto func = decl->asFunction();
+	    std::cout << prefix << "func_return_type: " << func->getReturnType()->getName() << std::endl;
+	}
+
+void printVar(slang::DeclReflection* decl, int indent = 0)
+	{
+	    std::string prefix(indent * 2, ' ');
+	    auto func = decl->asVariable();
+	    std::cout << prefix << "var_type: " << func->getType()->getName() << std::endl;
+	}
+
+void printDecl(slang::DeclReflection* decl, int indent = 0)
+	{
+	    std::string prefix(indent * 2, ' ');
+
+	    // 获取声明名称和类型
+	    const char* name = decl->getName();
+	    auto kind = decl->getKind();
+
+	    std::cout << prefix;
+
+	    switch (kind)
+	    {
+	    case slang::DeclReflection::Kind::Module:
+	        std::cout << "module ";
+	        break;
+	    case slang::DeclReflection::Kind::Struct:
+	        std::cout << "struct ";
+	        break;
+	    case slang::DeclReflection::Kind::Enum:
+	        std::cout << "enum ";
+	        break;
+	    case slang::DeclReflection::Kind::Variable:
+	        std::cout << "var ";
+	        printVar(decl, indent + 1);
+	        break;
+	    case slang::DeclReflection::Kind::Func:
+	        std::cout << "func ";
+	        printFunc(decl, indent + 1);
+	        break;
+        case slang::DeclReflection::Kind::Unsupported:
+	        std::cout << "unsupported ";
+            break;
+        case slang::DeclReflection::Kind::Generic:
+	        std::cout << "generic ";
+            break;
+        case slang::DeclReflection::Kind::Namespace:
+	        std::cout << "namespace ";
+            break;
+	    }
+
+	    if (name)
+	        std::cout << name;
+	    std::cout << std::endl;
+
+	    // 递归遍历子声明
+	    unsigned childCount = decl->getChildren().count;
+	    for (unsigned i = 0; i < childCount; ++i)
+	    {
+	        printDecl(decl->getChild(i), indent + 1);
+	    }
+	}
+    SlangModule ShaderLanguageConverter::slangModuleCompiler(SlangModuleCompileArgs arg)
     {
 	    initSlangGlobalSession();
 
@@ -843,7 +898,7 @@ namespace EmbeddedShader
 	    sessionDesc.targetCount = 1;
 
 	    std::string_view srcStr = "slang";
-	    switch (srcLanguage)
+	    switch (arg.sourceLanguage)
 	    {
 
         case ShaderLanguage::GLSL:
@@ -886,10 +941,9 @@ namespace EmbeddedShader
         slangGlobalSession->createSession(sessionDesc, session.writeRef());
         Slang::ComPtr<slang::IModule> slangModule;
 	    {
-            auto hashStr = std::to_string(std::hash<std::string_view>()(shaderCode));
             Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            slangModule = session->loadModuleFromSourceString(hashStr.c_str(), hashStr.c_str(),
-                                                              shaderCode.data(),
+            slangModule = session->loadModuleFromSourceString(arg.moduleName.c_str(), arg.modulePath.has_value()? arg.modulePath.value().c_str() : nullptr,
+                                                              arg.shaderCode.c_str(),
                                                               diagnosticsBlob.writeRef());
             diagnoseIfNeeded(diagnosticsBlob);
             if (!slangModule)
@@ -906,8 +960,153 @@ namespace EmbeddedShader
 	            throw std::runtime_error("Failed to serialize Slang module.");
 	        }
 	    }
-	    std::vector result(static_cast<uint8_t const*>(moduleBlob->getBufferPointer()),static_cast<uint8_t const*>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
-	    return result;
+	    SlangModule module;
+	    module.name = arg.moduleName;
+	    module.path = arg.modulePath.has_value()? arg.modulePath.value() : "";
+	    module.binData = std::vector(static_cast<uint8_t const*>(moduleBlob->getBufferPointer()),static_cast<uint8_t const*>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
+	    return module;
+    }
+
+    void ShaderLanguageConverter::slangModuleReflection(SlangModuleReflectionArgs arg)
+    {
+	    initSlangGlobalSession();
+
+        slang::SessionDesc sessionDesc{};
+	    slang::TargetDesc targetDesc{};
+	    targetDesc.format = SLANG_SPIRV;
+	    sessionDesc.targets = &targetDesc;
+	    sessionDesc.targetCount = 1;
+
+	    std::array options =
+        {
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+        };
+
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+	    Slang::ComPtr<slang::ISession> session;
+        slangGlobalSession->createSession(sessionDesc, session.writeRef());
+	    Slang::ComPtr<slang::IModule> srcModule;
+	    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	    auto dataBlob = slang_createBlob(arg.module->binData.data(), arg.module->binData.size());
+	    srcModule = session->loadModuleFromIRBlob(arg.module->name.c_str(),arg.module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
+	    diagnoseIfNeeded(diagnosticsBlob);
+	    if (!srcModule)
+	    {
+	        std::cout << "Load Module From IR Blob failed: " << arg.module->name << std::endl;
+	    }
+        diagnoseIfNeeded(diagnosticsBlob);
+	    arg.reflectionCallback(srcModule->getModuleReflection());
+
+	    Slang::ComPtr<slang::IComponentType> slangTarget;
+	    Slang::ComPtr<slang::IEntryPoint> entryPoint;
+	    bool isLibrary = false;
+	    {
+	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        srcModule->findEntryPointByName(arg.entrypointName.c_str(), entryPoint.writeRef());
+	        if (!entryPoint)
+	        {
+	            //针对非shader attr标注的入口点查找
+                srcModule->findAndCheckEntryPoint(arg.entrypointName.c_str(),
+                                                  toSlangStage(arg.stage),
+                                                  entryPoint.writeRef(),
+                                                  diagnosticsBlob.writeRef());
+	            if (!entryPoint)
+	            {
+	                //切换到库模式
+	                isLibrary = true;
+	            }
+            }
+	    }
+	    if (!isLibrary)
+	    {
+	        // 5. Compose Modules + Entry Points
+	        std::array<slang::IComponentType *, 2> componentTypes =
+            {
+	            srcModule,
+                entryPoint
+            };
+
+	        Slang::ComPtr<slang::IComponentType> composedProgram;
+	        {
+	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	            SlangResult result = session->createCompositeComponentType(
+                    componentTypes.data(),
+                    componentTypes.size(),
+                    composedProgram.writeRef(),
+                    diagnosticsBlob.writeRef());
+	            diagnoseIfNeeded(diagnosticsBlob);
+	            if (SLANG_FAILED(result))
+	                throw std::runtime_error("Failed to create composite component type in Slang.");
+	        }
+
+	        {
+	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	            SlangResult result = composedProgram->link(
+                    slangTarget.writeRef(),
+                    diagnosticsBlob.writeRef());
+	            diagnoseIfNeeded(diagnosticsBlob);
+	            if (SLANG_FAILED(result))
+	                throw std::runtime_error("Failed to link Slang program.");
+	        }
+	    }
+        else
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            auto result = srcModule->link(slangTarget.writeRef(), diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to link Slang program.");
+        }
+
+	    arg.layoutCallback(slangTarget->getLayout(0));
+    }
+
+    SlangCompileResult ShaderLanguageConverter::slangCompilerWithModules(SlangCompileArgs arg)
+    {
+	    return compileBySlangModule([&](Slang::ComPtr<slang::ISession> session)
+        {
+            Slang::ComPtr<slang::IModule> srcModule;
+            auto hashStr = std::to_string(std::hash<std::string>()(arg.source));
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            srcModule = session->loadModuleFromSourceString(hashStr.c_str(), (hashStr + ".slang").c_str(),
+                                                            arg.source.c_str(),
+                                                            diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (!srcModule)
+            {
+                throw std::runtime_error("Failed to load Slang module.");
+            }
+            return srcModule;
+        },arg);
+    }
+
+    SlangCompileResult ShaderLanguageConverter::slangCompilerWithModules(SlangCompileArgs2 arg)
+    {
+	    return compileBySlangModule([&](Slang::ComPtr<slang::ISession> session)
+        {
+	        Slang::ComPtr<slang::IModule> srcModule;
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        auto dataBlob = slang_createBlob(arg.module->binData.data(), arg.module->binData.size());
+            srcModule = session->loadModuleFromIRBlob(arg.module->name.c_str(),arg.module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (!srcModule)
+            {
+                std::cout << "Load Module From IR Blob failed: " << arg.module->name << std::endl;
+            }
+            return srcModule;
+        },arg);
     }
 
     void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
@@ -1110,7 +1309,12 @@ namespace EmbeddedShader
 		{
 			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
 
-			bindInfo.variateName = item.name;
+		    std::string name = item.name;
+		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
+		    {
+		        name = item.name.substr(pos + 1);
+		    }
+		    bindInfo.variateName = name;
 			bindInfo.typeName = "uniform";
 			bindInfo.elementCount = compiler->get_type((uint64_t) item.base_type_id).member_types.size();
 			bindInfo.typeSize = (uint32_t) compiler->get_declared_struct_size(compiler->get_type(item.base_type_id));
@@ -1146,14 +1350,15 @@ namespace EmbeddedShader
 		{
 			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
 
-			bindInfo.variateName = item.name.empty() ? compiler->get_name(item.id) : item.name;
+		    std::string name = item.name;
+		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
+		    {
+		        name = item.name.substr(pos + 1);
+		    }
+		    bindInfo.variateName = name;
+
+			bindInfo.variateName = item.name.empty() ? compiler->get_name(item.id) : name;
 			bindInfo.typeName = spirTypeToString(*compiler, compiler->get_type(item.base_type_id));
-			bindInfo.elementCount = 1;
-			const spirv_cross::SPIRType& resourceType = compiler->get_type(item.type_id);
-			if (!resourceType.array.empty())
-			{
-				bindInfo.elementCount = resourceType.array.front();
-			}
 
 			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
 			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
@@ -1192,7 +1397,12 @@ namespace EmbeddedShader
 		{
 			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
 
-			bindInfo.variateName = item.name;
+		    std::string name = item.name;
+		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
+		    {
+		        name = item.name.substr(pos + 1);
+		    }
+		    bindInfo.variateName = name;
 
 			const spirv_cross::SPIRType& base_type = compiler->get_type(item.base_type_id);
 			bindInfo.elementCount = base_type.vecsize * base_type.columns;
@@ -1226,7 +1436,12 @@ namespace EmbeddedShader
 		{
 			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
 
-			bindInfo.variateName = item.name;
+		    std::string name = item.name;
+		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
+		    {
+                name = item.name.substr(pos + 1);
+		    }
+			bindInfo.variateName = name;
 
 			const spirv_cross::SPIRType& base_type = compiler->get_type(item.base_type_id);
 			bindInfo.elementCount = base_type.vecsize * base_type.columns;
@@ -1258,7 +1473,12 @@ namespace EmbeddedShader
 
 		for (auto& item: res.push_constant_buffers)
 		{
-			result.pushConstantName = item.name;
+		    std::string name = item.name;
+		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
+		    {
+		        name = item.name.substr(pos + 1);
+		    }
+			result.pushConstantName = name;
 			result.pushConstantSize = (uint32_t) compiler->get_declared_struct_size(
 				compiler->get_type((uint64_t) item.base_type_id));
 
@@ -1269,7 +1489,13 @@ namespace EmbeddedShader
 				ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
 				bindInfo.typeSize = (uint32_t) range.range;
 				bindInfo.byteOffset = (uint32_t) range.offset;
-				bindInfo.variateName = compiler->get_member_name(item.base_type_id, range.index);
+
+			    std::string memberName = compiler->get_member_name(item.base_type_id, range.index);
+			    if (auto pos = memberName.find_last_of('.'); pos != std::string::npos)
+			    {
+			        memberName = memberName.substr(pos + 1);
+			    }
+			    bindInfo.variateName = memberName;
 
 				bindInfo.bindType = ShaderCodeModule::ShaderResources::pushConstantMembers;
 
@@ -1441,6 +1667,634 @@ namespace EmbeddedShader
 	        SlangGlobalSessionDesc desc{};
 	        desc.enableGLSL = true;
 	        createGlobalSession(&desc,slangGlobalSession.writeRef());
+	        if (!slangGlobalSession)
+	        {
+	            throw std::runtime_error("Failed to create Slang global session.");
+	        }
 	    }
     }
-}
+
+    SlangCompileResult ShaderLanguageConverter::compileBySlangModule(const std::function<Slang::ComPtr<slang::IModule>(Slang::ComPtr<slang::ISession>)>& callback, SlangCompileArgs0& arg0)
+    {
+	    initSlangGlobalSession();
+        slang::SessionDesc sessionDesc{};
+        std::vector<slang::TargetDesc> targetDescs;
+        for (auto it = arg0.targetLanguages.begin(); it != arg0.targetLanguages.end();)
+        {
+            auto lang = *it;
+            slang::TargetDesc target{};
+            switch (lang)
+            {
+            case ShaderLanguage::GLSL:
+                target.format = SLANG_GLSL;
+                break;
+            case ShaderLanguage::HLSL:
+                target.format = SLANG_HLSL;
+                break;
+            case ShaderLanguage::DXIL:
+                target.format = SLANG_DXIL;
+                target.profile = slangGlobalSession->findProfile("sm_6_6");
+                break;
+            case ShaderLanguage::DXBC:
+                target.format = SLANG_DXBC;
+                break;
+            case ShaderLanguage::SpirV:
+                target.format = SLANG_SPIRV;
+                target.flags |= SLANG_EMIT_SPIRV_DIRECTLY;
+                break;
+            case ShaderLanguage::Slang:
+                it = arg0.targetLanguages.erase(it);
+                continue;
+            }
+            targetDescs.push_back(target);
+            ++it;
+        }
+	    sessionDesc.targets = targetDescs.data();
+	    sessionDesc.targetCount = static_cast<SlangInt>(targetDescs.size());
+
+	    std::string_view srcStr = "slang";
+	    switch (arg0.sourceLanguage)
+	    {
+	    case ShaderLanguage::GLSL:
+	        srcStr = "glsl";
+	        break;
+	    case ShaderLanguage::HLSL:
+	        srcStr = "hlsl";
+	        break;
+	    case ShaderLanguage::Slang:
+	        break;
+	    case ShaderLanguage::DXIL:
+	    case ShaderLanguage::DXBC:
+	    case ShaderLanguage::SpirV:
+	        throw std::runtime_error("Unsupported source language for Slang module compilation.");
+	    }
+
+	    std::array options =
+	    {
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::EmitSpirvDirectly,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+	        },
+	        slang::CompilerOptionEntry{
+	            slang::CompilerOptionName::BindlessSpaceIndex,
+                {slang::CompilerOptionValueKind::Int, 0, 0, nullptr, nullptr}
+	        },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::Language,
+                {slang::CompilerOptionValueKind::String, 0, 0, srcStr.data(), nullptr}
+            },
+        };
+
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+
+	    Slang::ComPtr<slang::ISession> session;
+	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
+
+	    //load modules
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            for (auto module : arg0.deps)
+            {
+                auto dataBlob = slang_createBlob(module->binData.data(), module->binData.size());
+                auto mod = session->loadModuleFromIRBlob(module->name.c_str(),module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
+                diagnoseIfNeeded(diagnosticsBlob);
+                if (!mod)
+                {
+                    std::cout << "Load Module From IR Blob failed: " << module->name << std::endl;
+                }
+            }
+        }
+
+	    Slang::ComPtr<slang::IModule> srcModule = callback(session);
+
+	    Slang::ComPtr<slang::IComponentType> slangTarget;
+	    Slang::ComPtr<slang::IEntryPoint> entryPoint;
+	    bool isLibrary = false;
+	    {
+	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        srcModule->findEntryPointByName(arg0.entrypointName.c_str(), entryPoint.writeRef());
+	        if (!entryPoint)
+	        {
+	            //针对非shader attr标注的入口点查找
+                srcModule->findAndCheckEntryPoint(arg0.entrypointName.c_str(),
+                                                  toSlangStage(arg0.stage),
+                                                  entryPoint.writeRef(),
+                                                  diagnosticsBlob.writeRef());
+	            if (!entryPoint)
+	            {
+	                //切换到库模式编译
+	                isLibrary = true;
+	            }
+            }
+	    }
+	    if (!isLibrary)
+	    {
+	        // 5. Compose Modules + Entry Points
+	        std::array<slang::IComponentType *, 2> componentTypes =
+            {
+	            srcModule,
+                entryPoint
+            };
+
+	        Slang::ComPtr<slang::IComponentType> composedProgram;
+	        {
+	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	            SlangResult result = session->createCompositeComponentType(
+                    componentTypes.data(),
+                    componentTypes.size(),
+                    composedProgram.writeRef(),
+                    diagnosticsBlob.writeRef());
+	            diagnoseIfNeeded(diagnosticsBlob);
+	            if (SLANG_FAILED(result))
+	                throw std::runtime_error("Failed to create composite component type in Slang.");
+	        }
+
+	        {
+	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	            SlangResult result = composedProgram->link(
+                    slangTarget.writeRef(),
+                    diagnosticsBlob.writeRef());
+	            diagnoseIfNeeded(diagnosticsBlob);
+	            if (SLANG_FAILED(result))
+	                throw std::runtime_error("Failed to link Slang program.");
+	        }
+	    }
+        else
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            auto result = srcModule->link(slangTarget.writeRef(), diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to link Slang program.");
+        }
+
+        return getCompileResult(targetDescs, slangTarget, arg0, isLibrary);
+    }
+
+    SlangCompileResult ShaderLanguageConverter::getCompileResult(std::vector<slang::TargetDesc> targetDescs, Slang::ComPtr<slang::IComponentType> slangTarget,SlangCompileArgs0& arg0,bool isLibrary)
+    {
+	    SlangCompileResult finalResult;
+	    for (size_t i = 0; i < targetDescs.size(); ++i)
+	    {
+	        Slang::ComPtr<slang::IBlob> targetCodeBlob;
+            if (!isLibrary)
+            {
+                Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+                SlangResult result = slangTarget->getEntryPointCode(
+                    0,
+                    static_cast<SlangInt>(i),
+                    targetCodeBlob.writeRef(),
+                    diagnosticsBlob.writeRef());
+                diagnoseIfNeeded(diagnosticsBlob);
+                if (SLANG_FAILED(result))
+                    throw std::runtime_error("Failed to get target code from Slang program.");
+            }
+            else
+            {
+                Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+                SlangResult result = slangTarget->getTargetCode(
+                    static_cast<SlangInt>(i),
+                    targetCodeBlob.writeRef(),
+                    diagnosticsBlob.writeRef());
+                diagnoseIfNeeded(diagnosticsBlob);
+                if (SLANG_FAILED(result))
+                    throw std::runtime_error("Failed to get target code from Slang program.");
+            }
+
+	        bool isBin = false;
+	        switch (targetDescs[i].format)
+	        {
+	        case SLANG_SPIRV:
+	        case SLANG_DXBC:
+	        case SLANG_DXIL:
+	            isBin = true;
+	            break;
+	        default:
+	            break;
+	        }
+	        auto targetLang = arg0.targetLanguages[i];
+	        if (isBin)
+	        {
+	            SlangCompileResult::BinaryTarget target(targetCodeBlob->getBufferSize() / sizeof(uint32_t));
+	            memcpy(target.data(), targetCodeBlob->getBufferPointer(),
+                       targetCodeBlob->getBufferSize());
+	            finalResult.binaryTargets.insert({targetLang, std::move(target)});
+	            continue;
+	        }
+
+	        SlangCompileResult::StringTarget target;
+	        target.resize(targetCodeBlob->getBufferSize() / sizeof(char));
+	        memcpy(target.data(), targetCodeBlob->getBufferPointer(), targetCodeBlob->getBufferSize());
+	        finalResult.stringTargets.insert({targetLang, std::move(target)});
+
+	        //reflection
+	        if (arg0.enableReflection)
+	        {
+	            std::cout << "[Debug] Getting Reflection: " << enumToString(targetLang) << "\n";
+	            auto resource = slangReflectBindInfo(slangTarget->getLayout(i));
+	            finalResult.reflections.insert({targetLang, std::move(resource)});
+	        }
+	    }
+
+        return finalResult;
+    }
+
+    SlangStage ShaderLanguageConverter::toSlangStage(ShaderStage stage)
+    {
+	    switch (stage)
+	    {
+	    case ShaderStage::VertexShader:
+	        return SLANG_STAGE_VERTEX;
+	    case ShaderStage::FragmentShader:
+	        return SLANG_STAGE_PIXEL;
+	    case ShaderStage::ComputeShader:
+	        return SLANG_STAGE_COMPUTE;
+	    default:
+	        throw std::logic_error("Unsupported shader stage.");
+	    }
+    }
+
+    ShaderStage ShaderLanguageConverter::slangStageToShaderStage(SlangStage stage)
+    {
+        switch (stage)
+        {
+            //! 后续需要补全ShaderStage
+            case SLANG_STAGE_VERTEX:     return ShaderStage::VertexShader;
+            case SLANG_STAGE_FRAGMENT:   return ShaderStage::FragmentShader;
+            case SLANG_STAGE_COMPUTE:    return ShaderStage::ComputeShader;
+            case SLANG_STAGE_HULL:       return ShaderStage::VertexShader;
+            case SLANG_STAGE_DOMAIN:     return ShaderStage::VertexShader;
+            case SLANG_STAGE_GEOMETRY:   return ShaderStage::VertexShader;
+            case SLANG_STAGE_RAY_GENERATION: return ShaderStage::ComputeShader;
+            case SLANG_STAGE_INTERSECTION:   return ShaderStage::ComputeShader;
+            case SLANG_STAGE_ANY_HIT:        return ShaderStage::ComputeShader;
+            case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ComputeShader;
+            case SLANG_STAGE_MISS:           return ShaderStage::ComputeShader;
+            case SLANG_STAGE_CALLABLE:       return ShaderStage::ComputeShader;
+            case SLANG_STAGE_MESH:           return ShaderStage::VertexShader;
+            case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::VertexShader;
+            default:                         return ShaderStage::VertexShader;
+        }
+    }
+
+    uint32_t ShaderLanguageConverter::getScalarSizeInBytes(slang::TypeReflection::ScalarType st)
+    {
+        switch (st)
+        {
+            case slang::TypeReflection::ScalarType::Float32:
+            case slang::TypeReflection::ScalarType::Int32:
+            case slang::TypeReflection::ScalarType::UInt32: return 4;
+            case slang::TypeReflection::ScalarType::Float64:
+            case slang::TypeReflection::ScalarType::Int64:
+            case slang::TypeReflection::ScalarType::UInt64: return 8;
+            case slang::TypeReflection::ScalarType::Float16:
+            case slang::TypeReflection::ScalarType::Int16:
+            case slang::TypeReflection::ScalarType::UInt16: return 2;
+            case slang::TypeReflection::ScalarType::Int8:
+            case slang::TypeReflection::ScalarType::UInt8:   return 1;
+            default:                                         return 4;
+        }
+    }
+
+    void ShaderLanguageConverter::collectSlangReflection(
+        slang::VariableLayoutReflection* varLayout,
+        ShaderCodeModule::ShaderResources& resources,
+        bool insidePushConstant,
+        bool insideUniformBuffer,
+        uint64_t baseByteOffset)
+    {
+        if (!varLayout) return;
+        auto typeLayout = varLayout->getTypeLayout();
+        if (!typeLayout) return;
+
+        const char* varName = varLayout->getName();
+        if (!varName) varName = "";
+
+        auto kind = typeLayout->getKind();
+        bool isBufferWrapper = (kind == slang::TypeReflection::Kind::ConstantBuffer ||
+                                kind == slang::TypeReflection::Kind::ParameterBlock);
+
+        bool isPushConstant = false;
+        int catCount = varLayout->getCategoryCount();
+        for (int i = 0; i < catCount; ++i)
+        {
+            if (varLayout->getCategoryByIndex(i) == slang::ParameterCategory::PushConstantBuffer)
+            {
+                isPushConstant = true;
+                break;
+            }
+        }
+
+        if (isBufferWrapper && isPushConstant)
+        {
+            resources.pushConstantName = varName;
+            size_t pcSize = typeLayout->getSize(slang::ParameterCategory::Uniform);
+            if (pcSize == 0)
+            {
+                if (auto ev = typeLayout->getElementVarLayout())
+                    if (auto et = ev->getTypeLayout())
+                        pcSize = et->getSize(slang::ParameterCategory::Uniform);
+            }
+            resources.pushConstantSize = static_cast<uint32_t>(pcSize);
+
+            if (auto elementVar = typeLayout->getElementVarLayout())
+            {
+                if (auto et = elementVar->getTypeLayout())
+                {
+                    if (et->getKind() == slang::TypeReflection::Kind::Struct)
+                    {
+                        for (int f = 0; f < et->getFieldCount(); ++f)
+                            collectSlangReflection(et->getFieldByIndex(f), resources, true, false, 0);
+                    }
+                }
+            }
+            return;
+        }
+
+        if (isBufferWrapper && !isPushConstant)
+        {
+            const char* instanceName = varName;
+
+            resources.uniformBufferName = instanceName;
+            size_t uboSize = typeLayout->getSize(slang::ParameterCategory::Uniform);
+            if (uboSize == 0)
+            {
+                if (auto ev = typeLayout->getElementVarLayout())
+                    if (auto et = ev->getTypeLayout())
+                        uboSize = et->getSize(slang::ParameterCategory::Uniform);
+            }
+            resources.uniformBufferSize = static_cast<uint32_t>(uboSize);
+
+            uint32_t set = 0, binding = 0;
+            for (int i = 0; i < catCount; ++i)
+            {
+                auto cat = varLayout->getCategoryByIndex(i);
+                if (cat == slang::ParameterCategory::ConstantBuffer ||
+                    cat == slang::ParameterCategory::DescriptorTableSlot)
+                {
+                    set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
+                    binding = static_cast<uint32_t>(varLayout->getOffset(cat));
+                    break;
+                }
+            }
+
+            //Debug
+            if (kind == slang::TypeReflection::Kind::ParameterBlock)
+            {
+                // ParameterBlock 整体信息
+                uint32_t blockSet = varLayout->getBindingSpace();
+                uint32_t blockBinding = varLayout->getBindingIndex();
+
+                printf("ParameterBlock '%s': Set=%u, Binding=%u\n",
+                       varLayout->getName(), blockSet, blockBinding);
+
+                // 获取内部元素布局
+                slang::TypeLayoutReflection* elementTypeLayout =
+                    varLayout->getTypeLayout()->getElementTypeLayout();
+
+                // 遍历内部字段
+                for (int f = 0; f < elementTypeLayout->getFieldCount(); f++) {
+                    slang::VariableLayoutReflection* field = elementTypeLayout->getFieldByIndex(f);
+
+                    printf("  Field '%s': Binding=%u (in Set %u)\n",
+                           field->getName(),
+                           field->getBindingIndex(),
+                           field->getBindingSpace());
+                }
+
+                // 或使用 Binding Ranges
+                int rangeCount = elementTypeLayout->getBindingRangeCount();
+                for (int r = 0; r < rangeCount; r++) {
+                    printf("  BindingRange[%d]: Type=%d, Count=%u, FirstIndex=%u\n",
+                           r,
+                           (int)elementTypeLayout->getBindingRangeType(r),
+                           elementTypeLayout->getBindingRangeBindingCount(r),
+                           elementTypeLayout->getBindingRangeFirstDescriptorRangeIndex(r));
+                }
+            }
+
+            ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+            info.set = set;
+            info.binding = binding;
+            info.variateName = varName;
+            info.typeName = typeLayout->getName() ? typeLayout->getName() : "ConstantBuffer";
+            info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBuffers;
+            resources.bindInfoPool.push_back(info);
+
+            if (auto elementVar = typeLayout->getElementVarLayout())
+            {
+                if (auto et = elementVar->getTypeLayout())
+                {
+                    if (et->getKind() == slang::TypeReflection::Kind::Struct)
+                    {
+                        for (int f = 0; f < et->getFieldCount(); ++f)
+                            collectSlangReflection(et->getFieldByIndex(f), resources, false, true, 0);
+                    }
+                }
+            }
+            return;
+        }
+
+        ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+        info.variateName = varName;
+        info.typeName = typeLayout->getName() ? typeLayout->getName() : "";
+
+        if (kind == slang::TypeReflection::Kind::Scalar)
+        {
+            info.elementCount = 1;
+            info.typeSize = getScalarSizeInBytes(typeLayout->getScalarType());
+        }
+        else if (kind == slang::TypeReflection::Kind::Vector)
+        {
+            info.elementCount = static_cast<uint64_t>(typeLayout->getElementCount());
+            info.typeSize = info.elementCount * getScalarSizeInBytes(typeLayout->getScalarType());
+        }
+        else if (kind == slang::TypeReflection::Kind::Matrix)
+        {
+            info.elementCount = static_cast<uint64_t>(typeLayout->getRowCount() * typeLayout->getColumnCount());
+            info.typeSize = info.elementCount * getScalarSizeInBytes(typeLayout->getScalarType());
+        }
+        else if (kind == slang::TypeReflection::Kind::Array)
+        {
+            info.elementCount = static_cast<uint64_t>(typeLayout->getElementCount());
+        }
+
+        for (int i = 0; i < catCount; ++i)
+        {
+            auto cat = varLayout->getCategoryByIndex(i);
+            switch (cat)
+            {
+                case slang::ParameterCategory::DescriptorTableSlot:
+                case slang::ParameterCategory::ShaderResource:
+                    if (kind == slang::TypeReflection::Kind::Resource)
+                    {
+                        info.bindType = ShaderCodeModule::ShaderResources::BindType::sampledImages;
+                        info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
+                        info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
+                    }
+                    else if (kind == slang::TypeReflection::Kind::SamplerState)
+                    {
+                        info.bindType = ShaderCodeModule::ShaderResources::BindType::sampler;
+                        info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
+                        info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
+                    }
+                    break;
+                case slang::ParameterCategory::VaryingInput:
+                    info.bindType = ShaderCodeModule::ShaderResources::BindType::stageInputs;
+                    info.location = static_cast<uint32_t>(varLayout->getOffset(cat));
+                    if (varLayout->getSemanticName())
+                    {
+                        info.semantic = varLayout->getSemanticName();
+                        info.location = static_cast<uint32_t>(varLayout->getSemanticIndex());
+                    }
+                    break;
+                case slang::ParameterCategory::VaryingOutput:
+                    info.bindType = ShaderCodeModule::ShaderResources::BindType::stageOutputs;
+                    info.location = static_cast<uint32_t>(varLayout->getOffset(cat));
+                    if (varLayout->getSemanticName())
+                    {
+                        info.semantic = varLayout->getSemanticName();
+                        info.location = static_cast<uint32_t>(varLayout->getSemanticIndex());
+                    }
+                    break;
+                case slang::ParameterCategory::Uniform:
+                    info.byteOffset = baseByteOffset + static_cast<uint64_t>(varLayout->getOffset(cat));
+                    info.typeSize = static_cast<uint32_t>(typeLayout->getSize(cat));
+                    if (insidePushConstant)
+                        info.bindType = ShaderCodeModule::ShaderResources::BindType::pushConstantMembers;
+                    else if (insideUniformBuffer)
+                        info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBufferMembers;
+                    break;
+                case slang::ParameterCategory::UnorderedAccess:
+                    info.bindType = ShaderCodeModule::ShaderResources::BindType::storageTexture;
+                    info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
+                    info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (info.bindType == ShaderCodeModule::ShaderResources::BindType::none)
+        {
+            if (insidePushConstant) info.bindType = ShaderCodeModule::ShaderResources::BindType::pushConstantMembers;
+            else if (insideUniformBuffer) info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBufferMembers;
+        }
+
+        if (info.bindType == ShaderCodeModule::ShaderResources::BindType::none &&
+            kind == slang::TypeReflection::Kind::Resource)
+        {
+            info.bindType = ShaderCodeModule::ShaderResources::BindType::sampledImages;
+        }
+
+        if (info.bindType != ShaderCodeModule::ShaderResources::BindType::none)
+            resources.bindInfoPool.push_back(info);
+
+        if (kind == slang::TypeReflection::Kind::Struct)
+        {
+            uint64_t structBaseOffset = baseByteOffset;
+            for (int c = 0; c < varLayout->getCategoryCount(); ++c)
+            {
+                if (varLayout->getCategoryByIndex(c) == slang::ParameterCategory::Uniform)
+                {
+                    structBaseOffset += static_cast<uint64_t>(varLayout->getOffset(slang::ParameterCategory::Uniform));
+                    break;
+                }
+            }
+            for (int f = 0; f < typeLayout->getFieldCount(); ++f)
+                collectSlangReflection(typeLayout->getFieldByIndex(f), resources, insidePushConstant, insideUniformBuffer, structBaseOffset);
+        }
+    }
+
+    void ShaderLanguageConverter::slangReflectGlobalScope(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources)
+    {
+        if (!programLayout) return;
+
+        slang::VariableLayoutReflection* globalVar = programLayout->getGlobalParamsVarLayout();
+        if (!globalVar) return;
+
+        slang::TypeLayoutReflection* globalType = globalVar->getTypeLayout();
+        if (!globalType) return;
+
+        if (globalType->getKind() == slang::TypeReflection::Kind::Struct)
+        {
+            for (int i = 0; i < globalType->getFieldCount(); ++i)
+                collectSlangReflection(globalType->getFieldByIndex(i), resources, false, false, 0);
+        }
+        else
+        {
+            collectSlangReflection(globalVar, resources, false, false, 0);
+        }
+    }
+
+    void ShaderLanguageConverter::slangReflectEntryPoints(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources)
+    {
+        if (!programLayout) return;
+
+        int epCount = programLayout->getEntryPointCount();
+        for (int i = 0; i < epCount; ++i)
+        {
+            slang::EntryPointReflection* ep = programLayout->getEntryPointByIndex(i);
+            if (!ep) continue;
+
+            ShaderCodeModule::ShaderResources::EntryPointInfo info;
+            info.name = ep->getName() ? ep->getName() : "";
+            info.stage = slangStageToShaderStage(ep->getStage());
+
+            if (ep->getStage() == SLANG_STAGE_COMPUTE)
+            {
+                SlangUInt sizes[3] = { 1, 1, 1 };
+                ep->getComputeThreadGroupSize(3, sizes);
+                info.numthreads = ktm::uvec3(
+                    static_cast<unsigned>(sizes[0]),
+                    static_cast<unsigned>(sizes[1]),
+                    static_cast<unsigned>(sizes[2])
+                );
+            }
+            else
+            {
+                info.numthreads = ktm::uvec3(1, 1, 1);
+            }
+
+            resources.entryPointInfoPool.push_back(info);
+        }
+    }
+
+    ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangReflectBindInfo(slang::ProgramLayout* programLayout)
+    {
+        ShaderCodeModule::ShaderResources resources;
+        resources.bindInfoPool.clear();
+        resources.entryPointInfoPool.clear();
+        resources.pushConstantSize = 0;
+        resources.pushConstantName.clear();
+        resources.uniformBufferSize = 0;
+        resources.uniformBufferName.clear();
+
+        slangReflectGlobalScope(programLayout, resources);
+        slangReflectEntryPoints(programLayout, resources);
+
+        return resources;
+    }
+
+    ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg)
+    {
+	    SlangModuleReflectionArgs reflectArgs;
+	    static_cast<SlangModuleReflectionArgs0&>(reflectArgs) = std::move(arg);
+	    ShaderCodeModule::ShaderResources resources;
+	    reflectArgs.layoutCallback = [&](slang::ProgramLayout* programLayout)
+        {
+            resources = slangReflectBindInfo(programLayout);
+        };
+	    slangModuleReflection(reflectArgs);
+	    return resources;
+    }
+} // namespace EmbeddedShader

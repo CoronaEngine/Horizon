@@ -6,6 +6,7 @@
 #include <source_location>
 #include <Compiler/ShaderCodeCompiler.h>
 #include <spirv-tools/linker.hpp>
+#include <Compiler/ShaderCommon.h>
 
 namespace EmbeddedShader
 {
@@ -25,26 +26,17 @@ namespace EmbeddedShader
 	{
 		Ast::Parser::setBindless(false);
 		auto outputs = parse(vertexShaderCode,fragmentShaderCode);
-		std::vector<std::vector<uint32_t>> link[2];
-		if (compilerOption.spvLinkBinary)
-		{
-			link[0] = *compilerOption.spvLinkBinary;
-			link[1] = *compilerOption.spvLinkBinary;
-		}
-		for (auto spvSourcePtr : outputs[0].sourceSpv)
-		{
-			if (spvSourcePtr)
-				link[0].push_back(*spvSourcePtr);
-		}
-		for (auto spvSourcePtr : outputs[1].sourceSpv)
-		{
-			if (spvSourcePtr)
-				link[1].push_back(*spvSourcePtr);
-		}
-		RasterizedPipelineObject result;
-		compilerOption.spvLinkBinary = &link[0];
+
+        auto& vertSlangModules = compilerOption.slangModules;
+        vertSlangModules.insert(vertSlangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
+
+        auto fraqSlangModules = compilerOption.slangModules;
+        fraqSlangModules.insert(fraqSlangModules.end(),outputs[1].sourceModule.begin(), outputs[1].sourceModule.end());
+
+        RasterizedPipelineObject result;
+	    compilerOption.slangModules.swap(vertSlangModules);
 		result.vertex = std::make_unique<ShaderCodeCompiler>(outputs[0].output,ShaderStage::VertexShader, ShaderLanguage::Slang,compilerOption, sourceLocation);
-		compilerOption.spvLinkBinary = &link[1];
+	    compilerOption.slangModules.swap(fraqSlangModules);
 		result.fragment = std::make_unique<ShaderCodeCompiler>(outputs[1].output,ShaderStage::FragmentShader, ShaderLanguage::Slang,compilerOption, sourceLocation);
 
 		if (compilerOption.enableBindless)
@@ -52,9 +44,9 @@ namespace EmbeddedShader
 			Ast::Parser::setBindless(true);
 			outputs = parse(std::forward<decltype(vertexShaderCode)>(vertexShaderCode),
 							std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode));
-			compilerOption.spvLinkBinary = &link[0];
+		    compilerOption.slangModules.swap(vertSlangModules);
 			result.vertex->compile(outputs[0].output, ShaderStage::VertexShader, ShaderLanguage::Slang, compilerOption);
-			compilerOption.spvLinkBinary = &link[1];
+		    compilerOption.slangModules.swap(fraqSlangModules);
 			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, ShaderLanguage::Slang, compilerOption);
 		}
 
@@ -65,81 +57,34 @@ namespace EmbeddedShader
 			auto vsCodeModule = result.vertex->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
 			auto fsCodeModule = result.fragment->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
 			auto& globals = Ast::Parser::getGlobalStatements();
-			std::vector<void**> unmatchedTextureRefs;
-			auto isSampledImageBind = [](ShaderCodeModule::ShaderResources::BindType bindType) {
-				return bindType == ShaderCodeModule::ShaderResources::sampledImages ||
-					   bindType == ShaderCodeModule::ShaderResources::texture ||
-					   bindType == ShaderCodeModule::ShaderResources::sampler;
-			};
-			auto addAutoBindEntry = [&](void** boundResourceRef,
-										const ShaderCodeModule::ShaderResources::ShaderBindInfo& bindInfo) {
-				for (const AutoBindEntry& entry : result.autoBindEntries)
-				{
-					if (entry.boundResourceRef == boundResourceRef &&
-						entry.byteOffset == bindInfo.byteOffset &&
-						entry.typeSize == bindInfo.typeSize &&
-						entry.bindType == static_cast<int32_t>(bindInfo.bindType) &&
-						entry.location == bindInfo.location &&
-						entry.set == bindInfo.set &&
-						entry.binding == bindInfo.binding)
-					{
-						return;
-					}
-				}
-
-				result.autoBindEntries.push_back({
-					boundResourceRef,
-					bindInfo.byteOffset,
-					bindInfo.typeSize,
-					static_cast<int32_t>(bindInfo.bindType),
-					bindInfo.location,
-					bindInfo.set,
-					bindInfo.binding
-				});
-			};
-			auto findSingleSampledImageBind = [&](ShaderCodeModule& codeModule)
-				-> ShaderCodeModule::ShaderResources::ShaderBindInfo* {
-				ShaderCodeModule::ShaderResources::ShaderBindInfo* found = nullptr;
-				for (auto& bindInfo : codeModule.shaderResources.bindInfoPool)
-				{
-					if (!isSampledImageBind(bindInfo.bindType))
-						continue;
-
-					if (found != nullptr)
-						return nullptr;
-
-					found = &bindInfo;
-				}
-				return found;
-			};
 			for (auto& stmt : globals)
 			{
 				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
 				{
 					if (def->texture && def->texture->boundResourceRef)
 					{
-						bool matched = false;
 						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
 						{
-							addAutoBindEntry(def->texture->boundResourceRef, *bindInfo);
-							matched = true;
+							result.autoBindEntries.push_back({
+								def->texture->boundResourceRef,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location
+							});
 						}
 						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
 						{
-							addAutoBindEntry(def->texture->boundResourceRef, *bindInfo);
-							matched = true;
+							result.autoBindEntries.push_back({
+								def->texture->boundResourceRef,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location
+							});
 						}
-						if (!matched)
-							unmatchedTextureRefs.push_back(def->texture->boundResourceRef);
 					}
 				}
-			}
-			if (unmatchedTextureRefs.size() == 1)
-			{
-				if (auto* bindInfo = findSingleSampledImageBind(vsCodeModule))
-					addAutoBindEntry(unmatchedTextureRefs.front(), *bindInfo);
-				if (auto* bindInfo = findSingleSampledImageBind(fsCodeModule))
-					addAutoBindEntry(unmatchedTextureRefs.front(), *bindInfo);
 			}
 
 			// Collect render target auto-bind entries from operator() calls in FS.
@@ -154,9 +99,7 @@ namespace EmbeddedShader
 							def->texture->boundResourceRef,
 							0, 0,
 							static_cast<int32_t>(ShaderCodeModule::ShaderResources::stageOutputs),
-							static_cast<uint32_t>(def->texture->renderTargetLocation),
-							0,
-							0
+							static_cast<uint32_t>(def->texture->renderTargetLocation)
 						});
 					}
 				}

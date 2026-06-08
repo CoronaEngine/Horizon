@@ -19,7 +19,7 @@ namespace EmbeddedShader::Ast
 	struct ParseOutput
 	{
 		std::string output;
-	    std::unordered_set<std::vector<uint32_t>*> sourceSpv;
+	    std::unordered_set<SlangModule*> sourceModule;
 		ShaderStage stage;
 	};
 

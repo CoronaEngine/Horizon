@@ -9,44 +9,11 @@
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang.h>
+#include <variant>
+#include <Compiler/ShaderCommon.h>
 
 namespace EmbeddedShader
 {
-	// 函数参数信息
-	struct VariableInfo
-	{
-		std::string name;
-		std::string typeName;
-		uint32_t typeId = 0;
-	};
-
-	// 函数签名信息
-	struct FunctionSignature
-	{
-		std::string name;
-		std::string returnTypeName;
-		uint32_t returnTypeId = 0;
-		std::vector<VariableInfo> parameters;
-		bool isEntryPoint = false;
-	};
-
-	struct StructInfo
-	{
-		std::string name;
-		std::vector<VariableInfo> members;
-	};
-
-	struct IRReflection
-	{
-		enum class Type
-		{
-			Unknown = -1,
-			FunctionSignature,
-			Struct,
-		};
-		std::variant<FunctionSignature, StructInfo> info;
-		Type type = Type::Unknown;
-	};
 
 	struct ShaderLanguageConverter
 	{
@@ -69,7 +36,10 @@ namespace EmbeddedShader
             std::vector<std::string> &targetsOutput,
             bool isEnabledReflection, bool isEnabledLink = true);
 
-	    static std::vector<uint8_t> slangModuleCompiler(std::string_view shaderCode,ShaderLanguage srcLanguage);
+	    static SlangModule slangModuleCompiler(SlangModuleCompileArgs arg);
+	    static void slangModuleReflection(SlangModuleReflectionArgs arg);
+	    static SlangCompileResult slangCompilerWithModules(SlangCompileArgs arg);
+	    static SlangCompileResult slangCompilerWithModules(SlangCompileArgs2 arg);
 	    static void testSlangModule(const std::vector<uint8_t>& moduleData);
 
 		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
@@ -87,5 +57,20 @@ namespace EmbeddedShader
 		static void slangReflectParameterBlock(slang::ProgramLayout* program, std::string_view uboName, ShaderCodeModule::ShaderResources& reflection);
 		static void slangReflectDescriptor(slang::VariableLayoutReflection* var, int set, std::string_view name, size_t varBaseOffset, ShaderCodeModule::ShaderResources& resource);
 	    static void initSlangGlobalSession();
-	};
+
+	    static SlangCompileResult compileBySlangModule(
+            const std::function<Slang::ComPtr<slang::IModule>(Slang::ComPtr<slang::ISession>)>& callback,SlangCompileArgs0& arg0);
+	    static SlangCompileResult getCompileResult(std::vector<slang::TargetDesc> targetDescs, Slang::ComPtr<slang::IComponentType> slangTarget,SlangCompileArgs0& arg0, bool isLibrary);
+	    static SlangStage toSlangStage(ShaderStage stage);
+	//slang resource layout reflection//
+
+	    static void slangReflectGlobalScope(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
+	    static void slangReflectEntryPoints(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
+	    static ShaderStage slangStageToShaderStage(SlangStage stage);
+	    static uint32_t getScalarSizeInBytes(slang::TypeReflection::ScalarType st);
+	    static void collectSlangReflection(slang::VariableLayoutReflection* varLayout, ShaderCodeModule::ShaderResources& resources, bool insidePushConstant, bool insideUniformBuffer, uint64_t baseByteOffset);
+        static ShaderCodeModule::ShaderResources slangReflectBindInfo(slang::ProgramLayout* programLayout);
+    public:
+        static ShaderCodeModule::ShaderResources slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg);
+    };
 }

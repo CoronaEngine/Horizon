@@ -1,4 +1,5 @@
 #include "ShaderUtils.h"
+#include <Compiler/ShaderCommon.h>
 
 #include <algorithm>
 #include <cctype>
@@ -39,6 +40,14 @@ namespace EmbeddedShader
 		{
 			out << code << ",";
 		}
+	}
+
+    void emitSlangModuleLiteral(std::ostream& out, const std::vector<uint8_t>& slangModule)
+	{
+	    for (auto code : slangModule)
+	    {
+	        out << std::to_string(code) << ",";
+	    }
 	}
 
 	// ---- ShaderResources 序列化 ----

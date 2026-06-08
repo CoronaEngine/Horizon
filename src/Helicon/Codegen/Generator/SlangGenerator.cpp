@@ -1,3 +1,4 @@
+#include <Compiler/ShaderCommon.h>
 #include <Codegen/AST/AST.hpp>
 #include <Codegen/AST/Parser.hpp>
 #include <Codegen/Generator/SlangGenerator.hpp>
@@ -5,6 +6,12 @@ std::string EmbeddedShader::Generator::SlangGenerator::getShaderOutput(const Ast
 {
 	currentStage = structure.stage;
 	std::string output;
+    //import
+    for (auto slangModule : structure.slangModuleSource)
+    {
+        if (!slangModule) continue;
+        output += "import " + slangModule->name + ";\n";
+    }
 
 	if (Ast::Parser::getBindless())
 	{

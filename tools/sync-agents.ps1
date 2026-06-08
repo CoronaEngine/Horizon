@@ -106,6 +106,12 @@ $syncPairs = @(
         Label = "shader reflection task notes"
     },
     @{
+        Source = "docs/tasks/zh-CN/helicon-slang-module-transition.md"
+        Target = "docs/tasks/helicon-slang-module-transition.md"
+        Marker = "TASK_DOCS_HELICON_SLANG_MODULE_TRANSITION_ZH_CN_SHA256"
+        Label = "helicon slang module transition task notes"
+    },
+    @{
         Source = "docs/tasks/zh-CN/vulkan-backend.md"
         Target = "docs/tasks/vulkan-backend.md"
         Marker = "TASK_DOCS_VULKAN_BACKEND_ZH_CN_SHA256"

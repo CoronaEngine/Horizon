@@ -1,4 +1,6 @@
 #pragma once
+#include <Compiler/ShaderCommon.h>
+
 #include <functional>
 #include <Codegen/ParseHelper.h>
 #include <Codegen/AST/AST.hpp>
@@ -18,8 +20,6 @@ namespace EmbeddedShader
 		uint32_t typeSize = 0;
 		int32_t  bindType = -1;    // -1 = no metadata
 		uint32_t location = 0;
-		uint32_t set = 0;
-		uint32_t binding = 0;
 	};
 
 	class ComputePipelineObject
@@ -37,17 +37,8 @@ namespace EmbeddedShader
 		Generator::SlangGenerator::numthreads = numthreads;
 		Ast::Parser::setBindless(false);
 		auto outputs = parse(computeShaderCode);
-		std::vector<std::vector<uint32_t>> link;
-		if (compilerOption.spvLinkBinary)
-		{
-			link = *compilerOption.spvLinkBinary;
-		}
-		for (auto spvSourcePtr : outputs[0].sourceSpv)
-		{
-			if (spvSourcePtr)
-				link.push_back(*spvSourcePtr);
-		}
-		compilerOption.spvLinkBinary = &link;
+	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
+
 		ComputePipelineObject result;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption,sourceLocation);
 
@@ -77,9 +68,7 @@ namespace EmbeddedShader
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
 								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								bindInfo->set,
-								bindInfo->binding
+								bindInfo->location
 							});
 						}
 					}

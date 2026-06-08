@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "ktm/type_vec.h"
 #include "spirv-tools/libspirv.hpp"
 
 #include <cstdint>
@@ -12,33 +13,11 @@
 
 namespace EmbeddedShader
 {
-    enum class ShaderLanguage : uint16_t
-    {
-        GLSL,
-        HLSL,
-        DXIL,
-        DXBC,
-        SpirV,
-        Slang,
-    };
+enum class ShaderLanguage : uint16_t;
+enum class ShaderStage : uint16_t;
+struct SlangModule;
 
-    std::string enumToString(ShaderLanguage language);
-
-    enum class ShaderStage : uint16_t
-    {
-        VertexShader = 0,
-        FragmentShader = 1,
-        ComputeShader = 2,
-        // RayGenShader = 3,
-        // IntersectShader = 4,
-        // AnyHitShader = 5,
-        // ClosestHitShader = 6,
-        // MissShader = 7,
-    };
-
-    std::string enumToString(ShaderStage stage);
-
-    struct ShaderCodeModule
+struct ShaderCodeModule
     {
         struct ShaderResources
         {
@@ -74,6 +53,13 @@ namespace EmbeddedShader
                 BindType bindType;
             };
 
+            struct EntryPointInfo
+            {
+                std::string name;
+                ShaderStage stage;
+                ktm::uvec3 numthreads;
+            };
+
             uint32_t pushConstantSize = 0;
             std::string pushConstantName;
 
@@ -81,6 +67,7 @@ namespace EmbeddedShader
             std::string uniformBufferName;
 
             std::vector<ShaderBindInfo> bindInfoPool;
+            std::vector<EntryPointInfo> entryPointInfoPool;
 
             // 按 bindType 分组遍历
             template<typename Fn>
@@ -112,6 +99,10 @@ namespace EmbeddedShader
             : shaderCode(std::move(shaderCode))
         {
         }
+        ShaderCodeModule(SlangModule* shaderCode)
+            : shaderCode(shaderCode)
+        {
+        }
 
         ShaderCodeModule(std::string shaderCode,ShaderResources shaderResources)
             : shaderResources(std::move(shaderResources)),shaderCode(std::move(shaderCode))
@@ -120,6 +111,11 @@ namespace EmbeddedShader
 
         ShaderCodeModule(std::vector<uint32_t> shaderCode,ShaderResources shaderResources)
             : shaderResources(std::move(shaderResources)),shaderCode(std::move(shaderCode))
+        {
+        }
+
+        ShaderCodeModule(SlangModule* shaderCode,ShaderResources shaderResources)
+            : shaderResources(std::move(shaderResources)),shaderCode(shaderCode)
         {
         }
 
@@ -133,7 +129,12 @@ namespace EmbeddedShader
             return std::get<std::vector<uint32_t>>(shaderCode);
         }
 
-        std::variant<std::vector<uint32_t>, std::string> shaderCode;
+        operator SlangModule*() const
+        {
+            return std::get<SlangModule*>(shaderCode);
+        }
+
+        std::variant<std::vector<uint32_t>, std::string, SlangModule*> shaderCode;
     };
 
     struct CompilerOption
@@ -144,7 +145,7 @@ namespace EmbeddedShader
         bool compileDXBC = true;
         bool compileSpirV = true;
         bool enableBindless = true;
-        std::vector<std::vector<uint32_t>> *spvLinkBinary = nullptr;
+        std::vector<SlangModule*> slangModules;
     };
 
     struct ShaderCodeCompiler
@@ -155,17 +156,17 @@ namespace EmbeddedShader
 
 
 
-        ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = ShaderLanguage::GLSL, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
+        ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
         ~ShaderCodeCompiler() = default;
 
         [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false) const;
-        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = ShaderLanguage::GLSL, CompilerOption option = {}) const;
+        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}) const;
     private:
         std::string sourceLocationStr;
         std::string stage;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
-        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string>>;
+        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule*>>;
         mutable std::unordered_map<std::string, CompiledVariant> compiledOutputs_;
     };
 }
