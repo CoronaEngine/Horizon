@@ -16,6 +16,20 @@ namespace EmbeddedShader
 {
 	bool ShaderHardcodeManager::hardcodeFileOpened = false;
 
+	namespace
+	{
+		bool fileContains(const std::filesystem::path& path, const std::string& needle)
+		{
+			std::ifstream file(path);
+			if (!file.is_open())
+				return false;
+
+			std::stringstream buffer;
+			buffer << file.rdbuf();
+			return buffer.str().find(needle) != std::string::npos;
+		}
+	}
+
 	std::string ShaderHardcodeManager::getItemName(const std::source_location& sourceLocation, ShaderStage inputStage)
 	{
 		return getItemName(getSourceLocationString(sourceLocation),enumToString(inputStage));
@@ -127,7 +141,10 @@ std::unordered_map<std::string,std::unordered_map<std::string, std::variant<Embe
 		}
 
 		//Declare
-		if (auto& ti = targetInfos[name]; !ti.isExistTargetItem)
+		if (auto& ti = targetInfos[name];
+			!ti.isExistTargetItem &&
+			(!fileContains(hardcodePath / "HardcodeShaders.h", "hardcodeShaders" + name + ";") ||
+			 !fileContains(hardcodePath / "HardcodeShaders.cpp", "{\"" + name + "\",&hardcodeShaders" + name + "}")))
 		{
 			// 如果没有声明，添加声明
 			hardcodeShaderFile.open(hardcodePath / "HardcodeShaders.h", std::ios::in | std::ios::out);
@@ -144,10 +161,17 @@ std::unordered_map<std::string,std::unordered_map<std::string, std::variant<Embe
 
 			ti.isExistTargetItem = true;
 		}
+		else
+		{
+			targetInfos[name].isExistTargetItem = true;
+		}
 
 		auto& exist = targetInfos[name];
-		if (exist.isExistTargetFile)
+		if (exist.isExistTargetFile || std::filesystem::exists(hardcodePath / ("HardcodeShaders" + name + ".cpp")))
+		{
+			exist.isExistTargetFile = true;
 			return;
+		}
 
 		hardcodeShaderFile.open(hardcodePath / ("HardcodeShaders" + name + ".cpp"), std::ios::out | std::ios::trunc);
 		hardcodeShaderFile << R"(#include"HardcodeShaders.h"
