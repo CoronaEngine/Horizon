@@ -2054,8 +2054,8 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 uint32_t blockSet = varLayout->getBindingSpace();
                 uint32_t blockBinding = varLayout->getBindingIndex();
 
-                printf("ParameterBlock '%s': Set=%u, Binding=%u\n",
-                       varLayout->getName(), blockSet, blockBinding);
+                (void)blockSet;
+                (void)blockBinding;
 
                 // 获取内部元素布局
                 slang::TypeLayoutReflection* elementTypeLayout =
@@ -2065,20 +2065,13 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 for (int f = 0; f < elementTypeLayout->getFieldCount(); f++) {
                     slang::VariableLayoutReflection* field = elementTypeLayout->getFieldByIndex(f);
 
-                    printf("  Field '%s': Binding=%u (in Set %u)\n",
-                           field->getName(),
-                           field->getBindingIndex(),
-                           field->getBindingSpace());
+                    (void)field;
                 }
 
                 // 或使用 Binding Ranges
                 int rangeCount = elementTypeLayout->getBindingRangeCount();
                 for (int r = 0; r < rangeCount; r++) {
-                    printf("  BindingRange[%d]: Type=%d, Count=%u, FirstIndex=%u\n",
-                           r,
-                           (int)elementTypeLayout->getBindingRangeType(r),
-                           elementTypeLayout->getBindingRangeBindingCount(r),
-                           elementTypeLayout->getBindingRangeFirstDescriptorRangeIndex(r));
+                    (void)r;
                 }
             }
 
@@ -2132,7 +2125,10 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         }
         else if (kind == slang::TypeReflection::Kind::Array)
         {
-            info.elementCount = static_cast<uint64_t>(typeLayout->getElementCount());
+            size_t elementCount = typeLayout->getElementCount(programLayout);
+            if (elementCount == SLANG_UNBOUNDED_SIZE || elementCount == SLANG_UNKNOWN_SIZE)
+                elementCount = 0;
+            info.elementCount = static_cast<uint64_t>(elementCount);
         }
 
         for (int i = 0; i < catCount; ++i)
