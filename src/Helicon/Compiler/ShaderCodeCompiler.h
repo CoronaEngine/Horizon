@@ -50,7 +50,7 @@ struct ShaderCodeModule
                 uint32_t typeSize = 0;
                 uint64_t byteOffset = 0;
 
-                BindType bindType;
+                BindType bindType = none;
             };
 
             struct EntryPointInfo
@@ -141,8 +141,8 @@ struct ShaderCodeModule
     {
         bool compileGLSL = true;
         bool compileHLSL = true;
-        bool compileDXIL = true;
-        bool compileDXBC = true;
+        bool compileDXIL = false;
+        bool compileDXBC = false;
         bool compileSpirV = true;
         bool enableBindless = true;
         std::vector<SlangModule*> slangModules;
