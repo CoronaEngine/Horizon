@@ -37,6 +37,11 @@ namespace Corona::Horizon
 
             return make_token<ComputePipelineStore>(std::move(handle));
         }
+
+        void bind_auto_resources(const std::shared_ptr<VulkanComputePipeline>& impl)
+        {
+            impl->bind_auto_resources();
+        }
     }
 
     ComputePipeline::ComputePipeline() = default;
@@ -83,7 +88,9 @@ namespace Corona::Horizon
 
     ComputePipeline& ComputePipeline::operator()(uint16_t x, uint16_t y, uint16_t z)
     {
-        pipeline_impl(ResourceBridge::token(*this))->set_dispatch(x, y, z);
+        std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
+        bind_auto_resources(impl);
+        impl->set_dispatch(x, y, z);
         return *this;
     }
 
@@ -101,7 +108,9 @@ namespace Corona::Horizon
 
     CommandBatch ComputePipeline::command_batch() const
     {
-        return pipeline_impl(ResourceBridge::token(*this))->command_batch(*this);
+        std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
+        bind_auto_resources(impl);
+        return impl->command_batch(*this);
     }
 
     void ComputePipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

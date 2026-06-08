@@ -371,13 +371,13 @@ namespace Corona::Horizon
             write_bytes(target, declared_size, byte_offset, &descriptor_index, sizeof(descriptor_index), label);
         }
 
-        [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
+        [[nodiscard]] bool is_bindless_reserved_binding(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
         {
-            if (info.binding != 0 || info.elementCount == 1)
+            if (info.binding != 0)
                 return false;
 
             if (info.set == ResourceManager::bindless_texture_set)
-                return is_sampled_image_bind(static_cast<int32_t>(info.bindType));
+                return is_sampled_image_bind(static_cast<int32_t>(info.bindType)) && info.elementCount != 1;
             if (info.set == ResourceManager::bindless_storage_buffer_set)
                 return info.bindType == BindType::rawBuffer || info.bindType == BindType::storageBuffer;
             if (info.set == ResourceManager::bindless_storage_image_set)
@@ -386,11 +386,16 @@ namespace Corona::Horizon
             return false;
         }
 
+        [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
+        {
+            return is_bindless_reserved_binding(info) && info.elementCount != 1;
+        }
+
         [[nodiscard]] bool uses_bindless_descriptors(const EmbeddedShader::ShaderCodeModule& module) noexcept
         {
             for (const auto& info : module.shaderResources.bindInfoPool)
             {
-                if (is_bindless_table(info))
+                if (is_bindless_reserved_binding(info))
                     return true;
             }
 
@@ -456,7 +461,7 @@ namespace Corona::Horizon
         {
             for (const auto& info : module.shaderResources.bindInfoPool)
             {
-                if (!is_sampled_image_bind(static_cast<int32_t>(info.bindType)) || is_bindless_table(info))
+                if (!is_sampled_image_bind(static_cast<int32_t>(info.bindType)) || is_bindless_reserved_binding(info))
                     continue;
 
                 auto found = std::ranges::find(bindings, std::pair<uint32_t, uint32_t> { info.set, info.binding });
@@ -1291,6 +1296,28 @@ namespace Corona::Horizon
                                     type_size,
                                     descriptor_index,
                                     "RasterizerPipeline bindless storage buffer");
+
+            auto found = std::ranges::find_if(bound_buffers_, [&](const BoundBuffer& bound) {
+                return bound.byte_offset == byte_offset &&
+                       bound.type_size == type_size &&
+                       bound.bind_type == bind_type &&
+                       bound.set == set &&
+                       bound.binding == binding_index;
+            });
+
+            BoundBuffer binding {
+                .byte_offset = byte_offset,
+                .type_size = type_size,
+                .bind_type = bind_type,
+                .set = set,
+                .binding = binding_index,
+                .buffer = buffer,
+            };
+
+            if (found == bound_buffers_.end())
+                bound_buffers_.push_back(std::move(binding));
+            else
+                *found = std::move(binding);
             return;
         }
 
@@ -1344,6 +1371,33 @@ namespace Corona::Horizon
                                     type_size,
                                     descriptor_index,
                                     "RasterizerPipeline bindless image");
+
+            auto found = std::ranges::find_if(bound_images_, [&](const BoundImage& bound) {
+                if (is_stage_output(bind_type) || is_stage_output(bound.bind_type))
+                    return bound.bind_type == bind_type && bound.location == location;
+
+                return bound.byte_offset == byte_offset &&
+                       bound.type_size == type_size &&
+                       bound.bind_type == bind_type &&
+                       bound.location == location &&
+                       bound.set == set &&
+                       bound.binding == binding_index;
+            });
+
+            BoundImage binding {
+                .byte_offset = byte_offset,
+                .type_size = type_size,
+                .bind_type = bind_type,
+                .location = location,
+                .set = set,
+                .binding = binding_index,
+                .image = image,
+            };
+
+            if (found == bound_images_.end())
+                bound_images_.push_back(std::move(binding));
+            else
+                *found = std::move(binding);
             return;
         }
 
@@ -1386,7 +1440,16 @@ namespace Corona::Horizon
     void VulkanRasterizerPipeline::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
     {
         std::lock_guard lock(mutex_);
-        desc_.auto_bind_entries.push_back(std::move(entry));
+        auto found = std::ranges::find_if(desc_.auto_bind_entries, [&](const EmbeddedShader::AutoBindEntry& existing) {
+            return existing.boundResourceRef == entry.boundResourceRef &&
+                   existing.bindType == entry.bindType &&
+                   existing.location == entry.location;
+        });
+
+        if (found == desc_.auto_bind_entries.end())
+            desc_.auto_bind_entries.push_back(std::move(entry));
+        else
+            *found = std::move(entry);
     }
 
     std::vector<EmbeddedShader::AutoBindEntry> VulkanRasterizerPipeline::auto_bind_entries() const

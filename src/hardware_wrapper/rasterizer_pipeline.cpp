@@ -53,8 +53,8 @@ namespace Corona::Horizon
                                           *static_cast<HardwareImage*>(*entry.boundResourceRef),
                                           entry.bindType,
                                           entry.location,
-                                          entry.set,
-                                          entry.binding);
+                                          0,
+                                          entry.location);
             }
         }
     }

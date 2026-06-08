@@ -7,6 +7,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -169,13 +170,13 @@ namespace Corona::Horizon
             return write<ImageStore>(ResourceBridge::token(handle));
         }
 
-        [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
+        [[nodiscard]] bool is_bindless_reserved_binding(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
         {
-            if (info.binding != 0 || info.elementCount == 1)
+            if (info.binding != 0)
                 return false;
 
             if (info.set == ResourceManager::bindless_texture_set)
-                return is_sampled_image_bind(static_cast<int32_t>(info.bindType));
+                return is_sampled_image_bind(static_cast<int32_t>(info.bindType)) && info.elementCount != 1;
             if (info.set == ResourceManager::bindless_storage_buffer_set)
                 return info.bindType == BindType::rawBuffer || info.bindType == BindType::storageBuffer;
             if (info.set == ResourceManager::bindless_storage_image_set)
@@ -184,15 +185,75 @@ namespace Corona::Horizon
             return false;
         }
 
+        [[nodiscard]] bool is_bindless_table(const EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) noexcept
+        {
+            return is_bindless_reserved_binding(info) && info.elementCount != 1;
+        }
+
         [[nodiscard]] bool uses_bindless_descriptors(const EmbeddedShader::ShaderCodeModule& module) noexcept
         {
             for (const auto& info : module.shaderResources.bindInfoPool)
             {
-                if (is_bindless_table(info))
+                if (is_bindless_reserved_binding(info))
                     return true;
             }
 
             return false;
+        }
+
+        void diagnose_bindless_reflection(const EmbeddedShader::ShaderCodeModule& module, bool uses_bindless)
+        {
+            bool relevant = !uses_bindless;
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                if (info.variateName == "inputImageRGBA16" ||
+                    (info.set == ResourceManager::bindless_storage_image_set && info.binding == 0))
+                {
+                    relevant = true;
+                    break;
+                }
+            }
+
+            if (!relevant)
+                return;
+
+            std::ostringstream out;
+            out << "ComputePipeline reflection uses_bindless=" << (uses_bindless ? "true" : "false")
+                << " bind_count=" << module.shaderResources.bindInfoPool.size();
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                out << "\n  name=" << info.variateName
+                    << " type=" << info.typeName
+                    << " set=" << info.set
+                    << " binding=" << info.binding
+                    << " location=" << info.location
+                    << " bindType=" << static_cast<int32_t>(info.bindType)
+                    << " elementCount=" << info.elementCount
+                    << " typeSize=" << info.typeSize
+                    << " byteOffset=" << info.byteOffset;
+            }
+            Diagnostics::write(Diagnostics::Level::Info, "HORIZON VALIDATION", out.str());
+        }
+
+        void add_resource_use(std::vector<ResourceUse>& uses, ResourceHandle handle, AccessKind access)
+        {
+            if (!handle)
+                return;
+
+            const auto id = ResourceBridge::token(handle) ? ResourceBridge::token(handle)->id() : 0;
+            auto found = std::ranges::find_if(uses, [id](const ResourceUse& item) {
+                auto token = ResourceBridge::token(item.handle);
+                return token && token->id() == id;
+            });
+
+            if (found == uses.end())
+            {
+                uses.push_back({ std::move(handle), access, 0 });
+                return;
+            }
+
+            if (found->access != access)
+                found->access = AccessKind::ReadWrite;
         }
 
         void add_uniform_buffer(std::vector<UniformBufferBindingData>& buffers, uint32_t set, uint32_t binding, uint32_t size)
@@ -371,9 +432,12 @@ namespace Corona::Horizon
 
     VulkanComputePipeline::VulkanComputePipeline(ComputePipelineDesc desc,
                                                  std::source_location source_location)
-        : desc_(std::move(desc)),
+        : auto_bind_entries_(std::move(desc.auto_bind_entries)),
+          desc_(std::move(desc)),
           source_location_(source_location)
     {
+        desc_.auto_bind_entries.clear();
+
         if (desc_.compute_shader.stage != PipelineShaderStage::Compute)
         {
             throw std::invalid_argument("VulkanComputePipeline requires a compute shader.");
@@ -399,6 +463,42 @@ namespace Corona::Horizon
     {
         std::lock_guard lock(mutex_);
         return desc_;
+    }
+
+    void VulkanComputePipeline::bind_auto_resources()
+    {
+        std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareImage>> images;
+        {
+            std::lock_guard lock(mutex_);
+            images.reserve(auto_bind_entries_.size());
+            for (const EmbeddedShader::AutoBindEntry& entry : auto_bind_entries_)
+            {
+                if (entry.boundResourceRef == nullptr || *entry.boundResourceRef == nullptr)
+                    continue;
+
+                images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
+            }
+        }
+
+        for (const auto& [entry, image] : images)
+        {
+            set_resource_direct(entry.byteOffset,
+                                entry.typeSize,
+                                image,
+                                entry.bindType,
+                                0,
+                                entry.location);
+        }
+    }
+
+    void VulkanComputePipeline::bind_auto_image(EmbeddedShader::AutoBindEntry entry, const HardwareImage& image)
+    {
+        set_resource_direct(entry.byteOffset,
+                            entry.typeSize,
+                            image,
+                            entry.bindType,
+                            0,
+                            entry.location);
     }
 
     uint32_t VulkanComputePipeline::push_constant_size() const noexcept
@@ -456,6 +556,7 @@ namespace Corona::Horizon
         state.device = device;
         state.bindings = std::move(bindings);
         state.uses_bindless = uses_bindless_descriptors(desc_.compute_shader.module);
+        diagnose_bindless_reflection(desc_.compute_shader.module, state.uses_bindless);
 
         auto add_descriptor_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType descriptor_type) {
             if (state.uses_bindless && set < ResourceManager::bindless_descriptor_set_count)
@@ -494,6 +595,9 @@ namespace Corona::Horizon
 
         for (const BindingLayout& binding : state.bindings)
         {
+            if (state.uses_bindless && binding.set < ResourceManager::bindless_descriptor_set_count)
+                continue;
+
             add_descriptor_binding(binding.set, binding.binding, descriptor_type(binding.kind));
         }
 
@@ -742,6 +846,22 @@ namespace Corona::Horizon
                                     type_size,
                                     descriptor_index,
                                     "ComputePipeline bindless storage buffer");
+
+            auto found = std::ranges::find_if(bound_buffers_, [set, binding](const BoundBuffer& item) {
+                return item.set == set && item.binding == binding;
+            });
+
+            BoundBuffer value {
+                .set = set,
+                .binding = binding,
+                .buffer = buffer,
+                .access = AccessKind::ReadWrite,
+            };
+
+            if (found == bound_buffers_.end())
+                bound_buffers_.push_back(std::move(value));
+            else
+                *found = std::move(value);
             return;
         }
 
@@ -790,6 +910,22 @@ namespace Corona::Horizon
                                     type_size,
                                     descriptor_index,
                                     "ComputePipeline bindless image");
+
+            auto found = std::ranges::find_if(bound_images_, [set, binding](const BoundImage& item) {
+                return item.set == set && item.binding == binding;
+            });
+
+            BoundImage value {
+                .set = set,
+                .binding = binding,
+                .image = image,
+                .access = AccessKind::ReadWrite,
+            };
+
+            if (found == bound_images_.end())
+                bound_images_.push_back(std::move(value));
+            else
+                *found = std::move(value);
             return;
         }
 
@@ -862,7 +998,6 @@ namespace Corona::Horizon
         dispatch.uniform_buffers = uniform_buffers_;
 
         return {
-            .desc = desc_,
             .dispatch = std::move(dispatch),
             .buffers = bound_buffers_,
             .images = bound_images_,
@@ -887,7 +1022,7 @@ namespace Corona::Horizon
                     .kind = DispatchBindingKind::StorageBuffer,
                     .access = buffer.access,
                 });
-            state.dispatch.resource_uses.push_back({ handle, buffer.access, 0 });
+            add_resource_use(state.dispatch.resource_uses, handle, buffer.access);
         }
 
         for (const BoundImage& image : state.images)
@@ -904,7 +1039,7 @@ namespace Corona::Horizon
                     .kind = DispatchBindingKind::StorageImage,
                     .access = image.access,
                 });
-            state.dispatch.resource_uses.push_back({ handle, image.access, 0 });
+            add_resource_use(state.dispatch.resource_uses, handle, image.access);
         }
 
         CommandBatch batch;
