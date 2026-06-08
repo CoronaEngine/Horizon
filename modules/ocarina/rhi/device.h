@@ -146,6 +146,15 @@ public:
         return Buffer<T>(impl_.get(), size, name);
     }
 
+    // Allocate a buffer whose device memory is exportable as an OS-level shareable
+    // handle (CUDA: cuMemCreate + CU_MEM_HANDLE_TYPE_WIN32). Required before
+    // export_handle()/get_aligned_memory_size() will succeed on the result; a
+    // normally-allocated buffer is NOT exportable. Used for CUDA<->Vulkan zero-copy.
+    template<typename T = std::byte>
+    [[nodiscard]] Buffer<T> create_exported_buffer(size_t size, const string &name = "") const noexcept {
+        return Buffer<T>(impl_.get(), size, name, /*exported=*/true);
+    }
+
     template<typename T = std::byte>
     [[nodiscard]] Buffer<T> create_buffer(size_t size, handle_ty handle) const noexcept {
         return Buffer<T>(impl_.get(), size, handle);
