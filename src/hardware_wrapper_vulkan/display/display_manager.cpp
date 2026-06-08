@@ -466,15 +466,13 @@ namespace Corona::Horizon
             return present_supported == VK_TRUE;
         };
 
-        Queue* graphics_queue = device_manager_->queue_for(QueueCapability::Present);
-        if (graphics_queue != nullptr && supports_present(*graphics_queue))
-        {
-            present_queue_ = graphics_queue;
-            return;
-        }
-
+        Queue* graphics_queue = nullptr;
         for (Queue* queue : device_manager_->queues_for(QueueCapability::Graphics))
         {
+            if (graphics_queue == nullptr)
+            {
+                graphics_queue = queue;
+            }
             if (queue != nullptr && supports_present(*queue))
             {
                 present_queue_ = queue;

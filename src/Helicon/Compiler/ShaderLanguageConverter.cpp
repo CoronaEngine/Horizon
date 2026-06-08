@@ -342,6 +342,130 @@ namespace EmbeddedShader
 		return result;
 	}
 
+	static uint64_t normalizeReflectedElementCount(size_t elementCount)
+	{
+		if (elementCount == SLANG_UNBOUNDED_SIZE || elementCount == SLANG_UNKNOWN_SIZE ||
+		    elementCount == static_cast<size_t>(std::numeric_limits<int32_t>::max()) ||
+		    elementCount == static_cast<size_t>(std::numeric_limits<uint32_t>::max()))
+		{
+			return 0;
+		}
+
+		return static_cast<uint64_t>(elementCount);
+	}
+
+	static bool spirvTypeContainsStorageImage(const spirv_cross::Compiler& compiler,
+	                                          const spirv_cross::SPIRType& type,
+	                                          uint32_t depth = 0)
+	{
+		if (depth > 16)
+			return false;
+
+		if ((type.basetype == spirv_cross::SPIRType::Image ||
+		     type.basetype == spirv_cross::SPIRType::SampledImage) &&
+		    type.image.sampled == 2)
+		{
+			return true;
+		}
+
+		if (type.basetype == spirv_cross::SPIRType::Struct)
+		{
+			for (uint32_t memberTypeId : type.member_types)
+			{
+				if (spirvTypeContainsStorageImage(compiler, compiler.get_type(memberTypeId), depth + 1))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
+	static ShaderCodeModule::ShaderResources::BindType bindTypeFromSlangBinding(slang::BindingType bindingType)
+	{
+		switch (bindingType)
+		{
+			case slang::BindingType::ConstantBuffer:
+				return ShaderCodeModule::ShaderResources::uniformBuffers;
+			case slang::BindingType::Texture:
+				return ShaderCodeModule::ShaderResources::texture;
+			case slang::BindingType::Sampler:
+				return ShaderCodeModule::ShaderResources::sampler;
+			case slang::BindingType::MutableTexture:
+				return ShaderCodeModule::ShaderResources::storageTexture;
+			case slang::BindingType::MutableRawBuffer:
+			case slang::BindingType::MutableTypedBuffer:
+				return ShaderCodeModule::ShaderResources::storageBuffer;
+			case slang::BindingType::RawBuffer:
+				return ShaderCodeModule::ShaderResources::rawBuffer;
+			case slang::BindingType::CombinedTextureSampler:
+				return ShaderCodeModule::ShaderResources::sampledImages;
+			default:
+				return ShaderCodeModule::ShaderResources::none;
+		}
+	}
+
+	static bool isMutableResourceAccess(SlangResourceAccess access)
+	{
+		switch (access)
+		{
+			case SLANG_RESOURCE_ACCESS_READ_WRITE:
+			case SLANG_RESOURCE_ACCESS_RASTER_ORDERED:
+			case SLANG_RESOURCE_ACCESS_APPEND:
+			case SLANG_RESOURCE_ACCESS_CONSUME:
+			case SLANG_RESOURCE_ACCESS_WRITE:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	static ShaderCodeModule::ShaderResources::BindType bindTypeFromSlangResourceAccess(
+		slang::TypeLayoutReflection* descriptorTypeLayout)
+	{
+		if (!descriptorTypeLayout ||
+		    descriptorTypeLayout->getKind() != slang::TypeReflection::Kind::Resource)
+		{
+			return ShaderCodeModule::ShaderResources::none;
+		}
+
+		const SlangResourceShape shape = descriptorTypeLayout->getResourceShape();
+		const SlangResourceShape baseShape = static_cast<SlangResourceShape>(shape & SLANG_RESOURCE_BASE_SHAPE_MASK);
+		if (!isMutableResourceAccess(descriptorTypeLayout->getResourceAccess()))
+			return ShaderCodeModule::ShaderResources::none;
+
+		if (baseShape == SLANG_STRUCTURED_BUFFER || baseShape == SLANG_BYTE_ADDRESS_BUFFER)
+			return ShaderCodeModule::ShaderResources::storageBuffer;
+
+		return ShaderCodeModule::ShaderResources::storageTexture;
+	}
+
+	static ShaderCodeModule::ShaderResources::BindType bindTypeFromSlangLayout(
+		slang::TypeLayoutReflection* typeLayout,
+		slang::TypeLayoutReflection* descriptorTypeLayout)
+	{
+		for (slang::TypeLayoutReflection* layout : { typeLayout, descriptorTypeLayout })
+		{
+			if (!layout)
+				continue;
+
+			const SlangInt bindingRangeCount = layout->getBindingRangeCount();
+			for (SlangInt i = 0; i < bindingRangeCount; ++i)
+			{
+				auto bindType = bindTypeFromSlangBinding(layout->getBindingRangeType(i));
+				if (bindType == ShaderCodeModule::ShaderResources::texture)
+				{
+					auto accessBindType = bindTypeFromSlangResourceAccess(descriptorTypeLayout);
+					if (accessBindType != ShaderCodeModule::ShaderResources::none)
+						return accessBindType;
+				}
+				if (bindType != ShaderCodeModule::ShaderResources::none)
+					return bindType;
+			}
+		}
+
+		return bindTypeFromSlangResourceAccess(descriptorTypeLayout);
+	}
+
 	std::vector<IRReflection> ShaderLanguageConverter::spirvCrossGetIRReflection(
 		const std::vector<uint32_t>& spirv_file)
 	{
@@ -1330,20 +1454,11 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 		auto isStorageImageResource = [&](const spirv_cross::Resource& item)
 		{
 			const spirv_cross::SPIRType& baseType = compiler->get_type(item.base_type_id);
-			if (baseType.basetype == spirv_cross::SPIRType::Image ||
-			    baseType.basetype == spirv_cross::SPIRType::SampledImage)
-			{
-				return baseType.image.sampled == 2;
-			}
+			if (spirvTypeContainsStorageImage(*compiler, baseType))
+				return true;
 
 			const spirv_cross::SPIRType& descriptorType = compiler->get_type(item.type_id);
-			if (descriptorType.basetype == spirv_cross::SPIRType::Image ||
-			    descriptorType.basetype == spirv_cross::SPIRType::SampledImage)
-			{
-				return descriptorType.image.sampled == 2;
-			}
-
-			return false;
+			return spirvTypeContainsStorageImage(*compiler, descriptorType);
 		};
 
 		auto appendDescriptorBindInfo = [&](const spirv_cross::Resource& item,
@@ -1365,7 +1480,9 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
 			bindInfo.location = compiler->get_decoration(item.id, spv::DecorationLocation);
 			const spirv_cross::SPIRType& descriptorType = compiler->get_type(item.type_id);
-			bindInfo.elementCount = descriptorType.array.empty() ? 1u : descriptorType.array[0];
+			bindInfo.elementCount = descriptorType.array.empty()
+				? 1u
+				: normalizeReflectedElementCount(descriptorType.array[0]);
 
 			bindInfo.bindType = isStorageImageResource(item)
 				? ShaderCodeModule::ShaderResources::storageTexture
@@ -2104,6 +2221,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
             descriptorTypeLayout = typeLayout;
 
         const auto descriptorKind = descriptorTypeLayout->getKind();
+        const auto descriptorBindType = bindTypeFromSlangLayout(typeLayout, descriptorTypeLayout);
         ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
         info.variateName = varName;
         info.typeName = descriptorTypeLayout->getName() ? descriptorTypeLayout->getName() : "";
@@ -2126,9 +2244,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         else if (kind == slang::TypeReflection::Kind::Array)
         {
             size_t elementCount = typeLayout->getElementCount(programLayout);
-            if (elementCount == SLANG_UNBOUNDED_SIZE || elementCount == SLANG_UNKNOWN_SIZE)
-                elementCount = 0;
-            info.elementCount = static_cast<uint64_t>(elementCount);
+            info.elementCount = normalizeReflectedElementCount(elementCount);
         }
 
         for (int i = 0; i < catCount; ++i)
@@ -2140,7 +2256,9 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 case slang::ParameterCategory::ShaderResource:
                     if (descriptorKind == slang::TypeReflection::Kind::Resource)
                     {
-                        info.bindType = ShaderCodeModule::ShaderResources::BindType::sampledImages;
+                        info.bindType = descriptorBindType != ShaderCodeModule::ShaderResources::BindType::none
+                            ? descriptorBindType
+                            : ShaderCodeModule::ShaderResources::BindType::sampledImages;
                         info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
                         info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
                     }
@@ -2178,7 +2296,9 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                         info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBufferMembers;
                     break;
                 case slang::ParameterCategory::UnorderedAccess:
-                    info.bindType = ShaderCodeModule::ShaderResources::BindType::storageTexture;
+                    info.bindType = descriptorBindType != ShaderCodeModule::ShaderResources::BindType::none
+                        ? descriptorBindType
+                        : ShaderCodeModule::ShaderResources::BindType::storageTexture;
                     info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
                     info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
                     break;

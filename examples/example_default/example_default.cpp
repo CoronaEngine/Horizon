@@ -2,12 +2,15 @@
 
 #include <ktm/ktm.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -18,6 +21,7 @@
 #include <GLFW/glfw3native.h>
 
 #include "horizon.h"
+#include "hardware_wrapper_vulkan/hardware_context.h"
 #include "common.h"
 #include "corona/kernel/core/i_logger.h"
 
@@ -97,10 +101,27 @@ void run_example_default()
 
     {
         std::vector<H::HardwareImage> finalOutputImages(windows.size());
-        std::vector<H::HardwareExecutor> renderExecutors(windows.size());
+        auto fixedGraphicsQueueResolver = [](H::DeviceId device, H::QueueCapability) -> H::Queue& {
+            if (device.value != 0)
+                throw std::logic_error("example_default fixed queue resolver supports only the main device.");
+
+            const std::vector<H::Queue*>& queues = H::device_manager().queues_for(H::QueueCapability::Graphics);
+            const auto found = std::find_if(queues.begin(), queues.end(), [](const H::Queue* queue) {
+                return queue != nullptr;
+            });
+            if (found == queues.end())
+                throw std::runtime_error("example_default could not resolve a graphics queue.");
+
+            return **found;
+        };
+
+        std::vector<std::unique_ptr<H::HardwareExecutor>> renderExecutors;
+        renderExecutors.reserve(windows.size());
+        for (size_t i = 0; i < windows.size(); ++i)
+            renderExecutors.push_back(std::make_unique<H::HardwareExecutor>(fixedGraphicsQueueResolver));
         std::vector<H::HardwareExecutor> displayExecutors(windows.size());
-        std::vector<H::SubmitReceipt> latestRenderReceipts(windows.size());
-        std::mutex renderReceiptMutex;
+        std::array<H::SubmitReceipt, TOTAL_WINDOWS> latestRenderReceipts;
+        std::array<std::mutex, TOTAL_WINDOWS> frameSubmitMutexes;
         for (size_t i = 0; i < finalOutputImages.size(); i++)
         {
             finalOutputImages[i] = H::HardwareImage(
@@ -322,7 +343,7 @@ void run_example_default()
             auto rasterizerDesc = H::RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda);
             rasterizerDesc.set_depth_stencil(colorOnlyDepthStencil());
             H::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
-            rasterizer.bind_output_targets(inputImageRGBA16);
+            rasterizer.bind_output_targets(finalOutputImages[threadIndex]);
 
             // 从 lambda 创建 compute 管线，auto-bind 资源
             H::ComputePipeline computer(H::ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1)));
@@ -350,13 +371,12 @@ void run_example_default()
                     rasterizer.record(indexBuffer, vertexBuffers[i]);
                 }
 
-                auto receipt = renderExecutors[threadIndex].stream()
-                    << rasterizer(1920, 1080).command_batch()
-                    << computer(1920 / 8, 1080 / 8, 1).command_batch()
-                    << H::commit();
                 {
-                    std::lock_guard lock(renderReceiptMutex);
-                    latestRenderReceipts[threadIndex] = std::move(receipt);
+                    std::lock_guard lock(frameSubmitMutexes[threadIndex]);
+                    latestRenderReceipts[threadIndex] = renderExecutors[threadIndex]->stream()
+                        << rasterizer(1920, 1080).command_batch()
+                        << computer(1920 / 8, 1080 / 8, 1).command_batch()
+                        << H::commit();
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
@@ -413,13 +433,12 @@ void run_example_default()
                     rasterizer.record(indexBuffer, vertexBuffers[i]);
                 }
 
-                auto receipt = renderExecutors[threadIndex].stream()
-                    << rasterizer(1920, 1080).command_batch()
-                    << computer(1920 / 8, 1080 / 8, 1).command_batch()
-                    << H::commit();
                 {
-                    std::lock_guard lock(renderReceiptMutex);
-                    latestRenderReceipts[threadIndex] = std::move(receipt);
+                    std::lock_guard lock(frameSubmitMutexes[threadIndex]);
+                    latestRenderReceipts[threadIndex] = renderExecutors[threadIndex]->stream()
+                        << rasterizer(1920, 1080).command_batch()
+                        << computer(1920 / 8, 1080 / 8, 1).command_batch()
+                        << H::commit();
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
@@ -445,17 +464,15 @@ void run_example_default()
                 float time = std::chrono::duration<float, std::chrono::seconds::period>(std::chrono::high_resolution_clock::now() - startTime).count();
                 // CFW_LOG_INFO("Display thread {} frame {} at {:.3f}s", threadIndex, frameCount, time);
 
-                H::SubmitReceipt renderReceipt;
                 {
-                    std::lock_guard lock(renderReceiptMutex);
-                    renderReceipt = latestRenderReceipts[threadIndex];
+                    std::lock_guard lock(frameSubmitMutexes[threadIndex]);
+                    displayExecutors[threadIndex].wait(latestRenderReceipts[threadIndex]);
+                    // DLSS-style insertion point: display consumes the rendered image,
+                    // then present copies it into the swapchain.
+                    (void)(displayExecutors[threadIndex].stream()
+                        << H::present(displayManager, finalOutputImages[threadIndex])
+                        << H::commit());
                 }
-
-                displayExecutors[threadIndex].wait(renderReceipt);
-                auto receipt = displayExecutors[threadIndex].stream()
-                    << H::present(displayManager, finalOutputImages[threadIndex])
-                    << H::commit();
-                (void)receipt;
                 ++frameCount;
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
 
