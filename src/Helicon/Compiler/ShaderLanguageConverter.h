@@ -68,7 +68,7 @@ namespace EmbeddedShader
 	    static void slangReflectEntryPoints(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
 	    static ShaderStage slangStageToShaderStage(SlangStage stage);
 	    static uint32_t getScalarSizeInBytes(slang::TypeReflection::ScalarType st);
-	    static void collectSlangReflection(slang::VariableLayoutReflection* varLayout, ShaderCodeModule::ShaderResources& resources, bool insidePushConstant, bool insideUniformBuffer, uint64_t baseByteOffset);
+	    static void collectSlangReflection(slang::ProgramLayout* programLayout, slang::VariableLayoutReflection* varLayout, ShaderCodeModule::ShaderResources& resources, bool insidePushConstant, bool insideUniformBuffer, uint64_t baseByteOffset);
         static ShaderCodeModule::ShaderResources slangReflectBindInfo(slang::ProgramLayout* programLayout);
     public:
         static ShaderCodeModule::ShaderResources slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg);
