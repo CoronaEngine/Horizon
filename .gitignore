@@ -7,6 +7,7 @@
 
 # 本地代码索引/工具运行态
 .codegraph/
+.understand-anything/
 
 # 构建目录
 build/
