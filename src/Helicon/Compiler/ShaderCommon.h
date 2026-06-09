@@ -124,6 +124,7 @@ namespace EmbeddedShader
         ShaderStage stage{};
 
         bool enableReflection = false;
+        std::function<void(slang::ShaderReflection*)> layoutCallback = [](slang::ProgramLayout*){};
     };
 
     struct SlangCompileArgs : SlangCompileArgs0

@@ -60,6 +60,357 @@ namespace EmbeddedShader
 		std::vector<std::filesystem::path> includePaths;
 	};
 
+    ShaderStage slangStageToShaderStage(SlangStage stage)
+    {
+        switch (stage)
+        {
+        case SLANG_STAGE_VERTEX:     return ShaderStage::VertexShader;
+        case SLANG_STAGE_FRAGMENT:   return ShaderStage::FragmentShader;
+        case SLANG_STAGE_COMPUTE:    return ShaderStage::ComputeShader;
+        case SLANG_STAGE_HULL:       return ShaderStage::VertexShader;
+        case SLANG_STAGE_DOMAIN:     return ShaderStage::VertexShader;
+        case SLANG_STAGE_GEOMETRY:   return ShaderStage::VertexShader;
+        case SLANG_STAGE_RAY_GENERATION: return ShaderStage::ComputeShader;
+        case SLANG_STAGE_INTERSECTION:   return ShaderStage::ComputeShader;
+        case SLANG_STAGE_ANY_HIT:        return ShaderStage::ComputeShader;
+        case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ComputeShader;
+        case SLANG_STAGE_MISS:           return ShaderStage::ComputeShader;
+        case SLANG_STAGE_CALLABLE:       return ShaderStage::ComputeShader;
+        case SLANG_STAGE_MESH:           return ShaderStage::VertexShader;
+        case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::VertexShader;
+        default:                         return ShaderStage::VertexShader;
+        }
+    }
+
+    ShaderCursor ShaderCursor::field(int index) const
+    {
+        slang::VariableLayoutReflection* field = m_typeLayout->getFieldByIndex(index);
+
+        ShaderCursor result = *this;
+        result.m_varLayout = field;  // 关键：保存字段的 VariableLayout
+        result.m_typeLayout = field->getTypeLayout();
+        result.m_offset.byteOffset += field->getOffset();
+        result.m_offset.bindingRangeIndex += m_typeLayout->getFieldBindingRangeOffset(index);
+
+        // 关键修正：对 DescriptorTableSlot 类别，offset 用 getOffset，space 用 getBindingSpace
+        result.m_offset.binding += field->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+        result.m_offset.set += field->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+
+        result.m_indent = m_indent + 1;
+        return result;
+    }
+
+    ShaderCursor ShaderCursor::element(int index) const
+    {
+        slang::TypeLayoutReflection* elementTypeLayout = m_typeLayout->getElementTypeLayout();
+
+        ShaderCursor result = *this;
+        result.m_typeLayout = elementTypeLayout;
+        result.m_offset.byteOffset += index * elementTypeLayout->getStride();
+        result.m_offset.arrayIndexInBindingRange *= m_typeLayout->getElementCount();
+        result.m_offset.arrayIndexInBindingRange += index;
+        // 数组元素共享父级的 set/binding，不额外累加
+        return result;
+    }
+
+    void ShaderCursor::collectBindings(EmbeddedShader::ShaderCodeModule::ShaderResources& resources, const std::string& namePrefix) const
+    {
+        auto kind = m_typeLayout->getKind();
+
+        // === ConstantBuffer ===
+        // 本身生成 uniformBuffers 条目，内部字段生成 uniformBufferMembers
+        if (kind == slang::TypeReflection::Kind::ConstantBuffer && m_typeLayout->getParameterCategory() != slang::ParameterCategory::PushConstantBuffer)
+        {
+            // 先获取元素布局（用于后续递归，也用于取正确的大小）
+            auto elementVarLayout = m_typeLayout->getElementVarLayout();
+            auto elementTypeLayout = elementVarLayout->getTypeLayout();  // 这是 global_ubo_struct
+
+            EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+            info.variateName = namePrefix;
+            info.typeName = m_typeLayout->getName() ? m_typeLayout->getName() : "ConstantBuffer";
+            info.set = m_offset.set;
+            info.binding = m_offset.binding;
+            info.byteOffset = m_offset.byteOffset;
+
+            // 修正：取元素类型的大小，而不是 ConstantBuffer 包装器的大小
+            info.typeSize = static_cast<uint32_t>(elementTypeLayout->getSize());
+
+            info.elementCount = 1;
+            info.bindType = EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBuffers;
+            fillSemanticAndLocation(info);
+            resources.bindInfoPool.push_back(info);
+
+            // 记录全局 UBO 元数据
+            if (resources.uniformBufferSize == 0)
+            {
+                resources.uniformBufferSize = info.typeSize;  // 现在正确了：192
+                resources.uniformBufferName = info.variateName;
+            }
+
+            // 递归收集内部字段（使用 elementTypeLayout）
+            ShaderCursor inner = *this;
+            inner.m_varLayout = elementVarLayout;
+            inner.m_typeLayout = elementTypeLayout;
+            inner.m_offset.byteOffset += elementVarLayout->getOffset(slang::ParameterCategory::Uniform);
+            inner.m_offset.binding += elementVarLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+            inner.m_offset.set += elementVarLayout->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+            inner.collectUniformBufferMembers(resources, namePrefix);
+            return;
+        }
+
+        // === ParameterBlock ===
+        // 不单独生成条目，展开内部元素（内部资源继承 ParameterBlock 的 set）
+        if (kind == slang::TypeReflection::Kind::ParameterBlock)
+        {
+            auto elementVarLayout = m_typeLayout->getElementVarLayout();
+            ShaderCursor inner = *this;
+            inner.m_varLayout = elementVarLayout;
+            inner.m_typeLayout = elementVarLayout->getTypeLayout();
+            inner.m_offset.byteOffset += elementVarLayout->getOffset(slang::ParameterCategory::Uniform);
+            inner.m_offset.binding += elementVarLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+            inner.m_offset.set += elementVarLayout->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+            inner.collectBindings(resources, namePrefix);
+            return;
+        }
+
+        // === PushConstantBuffer ===
+        if (m_typeLayout->getParameterCategory() == slang::ParameterCategory::PushConstantBuffer)
+        {
+            // 先获取元素布局（PushConstant 内部是 struct，需要取元素大小）
+            auto elementVarLayout = m_typeLayout->getElementVarLayout();
+            auto elementTypeLayout = elementVarLayout->getTypeLayout();
+
+            EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+            info.variateName = namePrefix;
+            info.typeName = m_typeLayout->getName() ? m_typeLayout->getName() : "PushConstant";
+            info.set = m_offset.set;
+            info.binding = m_offset.binding;
+            info.byteOffset = m_offset.byteOffset;
+
+            // 修正：取元素类型的大小（和 ConstantBuffer 一样）
+            info.typeSize = static_cast<uint32_t>(elementTypeLayout->getSize());
+
+            info.elementCount = 1;
+            info.bindType = EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers;
+            fillSemanticAndLocation(info);
+            resources.bindInfoPool.push_back(info);
+
+            // 记录 Push Constant 元数据（不是 UBO！）
+            if (resources.pushConstantSize == 0)
+            {
+                resources.pushConstantSize = info.typeSize;
+                resources.pushConstantName = info.variateName;
+            }
+
+            // 递归收集内部字段
+            ShaderCursor inner = *this;
+            inner.m_varLayout = elementVarLayout;
+            inner.m_typeLayout = elementTypeLayout;
+            inner.m_offset.byteOffset += elementVarLayout->getOffset(slang::ParameterCategory::Uniform);
+            inner.m_offset.binding += elementVarLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+            inner.m_offset.set += elementVarLayout->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+
+            // Push Constant 内部字段也标记为 pushConstantMembers
+            inner.collectPushConstantMembers(resources, namePrefix);
+            return;
+        }
+
+        // === Struct ===
+        if (kind == slang::TypeReflection::Kind::Struct)
+        {
+            for (int i = 0; i < m_typeLayout->getFieldCount(); ++i)
+            {
+                auto fieldVar = m_typeLayout->getFieldByIndex(i);
+                std::string fieldName = fieldVar->getName() ? fieldVar->getName() : ("field_" + std::to_string(i));
+                std::string fullName = namePrefix.empty() ? fieldName : (namePrefix + "." + fieldName);
+                field(i).collectBindings(resources, fullName);
+            }
+            return;
+        }
+
+        // === Array ===
+        if (kind == slang::TypeReflection::Kind::Array)
+        {
+            uint64_t elemCount = m_typeLayout->getElementCount();
+            auto elemTypeLayout = m_typeLayout->getElementTypeLayout();
+
+            // 如果元素是叶子资源，合并为一个条目，记录 elementCount
+            auto elemBindType = deduceLeafBindType(elemTypeLayout);
+            if (elemBindType != EmbeddedShader::ShaderCodeModule::ShaderResources::none)
+            {
+                EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+                info.variateName = namePrefix;
+                info.typeName = elemTypeLayout->getName() ? elemTypeLayout->getName() : "unknown";
+                info.set = m_offset.set;
+                info.binding = m_offset.binding;
+                info.byteOffset = m_offset.byteOffset;
+                info.typeSize = static_cast<uint32_t>(elemTypeLayout->getSize());
+                info.elementCount = elemCount;
+                info.bindType = elemBindType;
+                fillSemanticAndLocation(info);
+                resources.bindInfoPool.push_back(info);
+                return;
+            }
+
+            // 否则递归每个元素（Struct 数组等）
+            for (int i = 0; i < static_cast<int>(elemCount); ++i)
+            {
+                std::string elemName = namePrefix + "[" + std::to_string(i) + "]";
+                element(i).collectBindings(resources, elemName);
+            }
+            return;
+        }
+
+        // === 叶子节点（Texture, Sampler, Buffer, Varying 等）===
+        auto bindType = deduceLeafBindType(m_typeLayout);
+        if (bindType != EmbeddedShader::ShaderCodeModule::ShaderResources::none)
+        {
+            EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+            info.variateName = namePrefix;
+            info.typeName = m_typeLayout->getName() ? m_typeLayout->getName() : "unknown";
+            info.set = m_offset.set;
+            info.binding = m_offset.binding;
+            info.byteOffset = m_offset.byteOffset;
+            info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
+            info.elementCount = 1;
+            info.bindType = bindType;
+            fillSemanticAndLocation(info);
+            resources.bindInfoPool.push_back(info);
+            return;
+        }
+    }
+
+    void ShaderCursor::collectUniformBufferMembers(EmbeddedShader::ShaderCodeModule::ShaderResources& resources, const std::string& namePrefix) const
+    {
+        auto kind = m_typeLayout->getKind();
+
+        if (kind == slang::TypeReflection::Kind::Struct)
+        {
+            for (int i = 0; i < m_typeLayout->getFieldCount(); ++i)
+            {
+                auto fieldVar = m_typeLayout->getFieldByIndex(i);
+                std::string fieldName = fieldVar->getName() ? fieldVar->getName() : ("field_" + std::to_string(i));
+                std::string fullName = namePrefix.empty() ? fieldName : (namePrefix + "." + fieldName);
+                field(i).collectUniformBufferMembers(resources, fullName);
+            }
+            return;
+        }
+
+        if (kind == slang::TypeReflection::Kind::Array)
+        {
+            uint64_t elemCount = m_typeLayout->getElementCount();
+            for (int i = 0; i < static_cast<int>(elemCount); ++i)
+            {
+                std::string elemName = namePrefix + "[" + std::to_string(i) + "]";
+                element(i).collectUniformBufferMembers(resources, elemName);
+            }
+            return;
+        }
+
+        // 普通数据成员
+        EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+        info.variateName = namePrefix;
+        info.typeName = m_typeLayout->getName() ? m_typeLayout->getName() : "unknown";
+        info.byteOffset = m_offset.byteOffset;
+        info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
+        info.elementCount = 1;
+        info.bindType = EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBufferMembers;
+        info.set = m_offset.set;
+        info.binding = m_offset.binding;
+        fillSemanticAndLocation(info);
+        resources.bindInfoPool.push_back(info);
+    }
+
+    void ShaderCursor::fillSemanticAndLocation(EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) const
+    {
+        if (!m_varLayout) return;
+
+        const char* sem = m_varLayout->getSemanticName();
+        if (sem)
+        {
+            info.semantic = sem;
+            info.location = m_varLayout->getSemanticIndex();
+        }
+
+        if (info.bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageInputs)
+            info.location = m_varLayout->getOffset(slang::ParameterCategory::VaryingInput);
+        else if (info.bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
+            info.location = m_varLayout->getOffset(slang::ParameterCategory::VaryingOutput);
+    }
+
+    EmbeddedShader::ShaderCodeModule::ShaderResources::BindType ShaderCursor::deduceLeafBindType(slang::TypeLayoutReflection* typeLayout)
+    {
+        int rangeCount = typeLayout->getBindingRangeCount();
+        if (rangeCount > 0)
+        {
+            auto rangeType = typeLayout->getBindingRangeType(0);
+            switch (rangeType)
+            {
+            case slang::BindingType::Texture: return EmbeddedShader::ShaderCodeModule::ShaderResources::texture;
+            case slang::BindingType::Sampler: return EmbeddedShader::ShaderCodeModule::ShaderResources::sampler;
+            case slang::BindingType::CombinedTextureSampler: return EmbeddedShader::ShaderCodeModule::ShaderResources::sampledImages;
+            case slang::BindingType::ConstantBuffer: return EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBuffers;
+            case slang::BindingType::TypedBuffer: return EmbeddedShader::ShaderCodeModule::ShaderResources::rawBuffer;
+            case slang::BindingType::RawBuffer: return EmbeddedShader::ShaderCodeModule::ShaderResources::rawBuffer;
+            case slang::BindingType::MutableTexture: return EmbeddedShader::ShaderCodeModule::ShaderResources::storageTexture;
+            case slang::BindingType::MutableTypedBuffer:
+            case slang::BindingType::MutableRawBuffer: return EmbeddedShader::ShaderCodeModule::ShaderResources::storageBuffer;
+            default: break;
+            }
+        }
+
+        auto cat = typeLayout->getParameterCategory();
+        if (cat == slang::ParameterCategory::VaryingInput)
+            return EmbeddedShader::ShaderCodeModule::ShaderResources::stageInputs;
+        if (cat == slang::ParameterCategory::VaryingOutput)
+            return EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs;
+        if (cat == slang::ParameterCategory::PushConstantBuffer)
+            return EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers;
+
+        return EmbeddedShader::ShaderCodeModule::ShaderResources::none;
+    }
+
+    void ShaderCursor::collectPushConstantMembers(EmbeddedShader::ShaderCodeModule::ShaderResources& resources, const std::string& namePrefix) const
+    {
+        auto kind = m_typeLayout->getKind();
+
+        if (kind == slang::TypeReflection::Kind::Struct)
+        {
+            for (int i = 0; i < m_typeLayout->getFieldCount(); ++i)
+            {
+                auto fieldVar = m_typeLayout->getFieldByIndex(i);
+                std::string fieldName = fieldVar->getName() ? fieldVar->getName() : ("field_" + std::to_string(i));
+                std::string fullName = namePrefix.empty() ? fieldName : (namePrefix + "." + fieldName);
+                field(i).collectPushConstantMembers(resources, fullName);
+            }
+            return;
+        }
+
+        if (kind == slang::TypeReflection::Kind::Array)
+        {
+            uint64_t elemCount = m_typeLayout->getElementCount();
+            for (int i = 0; i < static_cast<int>(elemCount); ++i)
+            {
+                std::string elemName = namePrefix + "[" + std::to_string(i) + "]";
+                element(i).collectPushConstantMembers(resources, elemName);
+            }
+            return;
+        }
+
+        // 普通数据成员
+        EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
+        info.variateName = namePrefix;
+        info.typeName = m_typeLayout->getName() ? m_typeLayout->getName() : "unknown";
+        info.byteOffset = m_offset.byteOffset;
+        info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
+        info.elementCount = 1;
+        info.bindType = EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers;
+        info.set = m_offset.set;
+        info.binding = m_offset.binding;
+        fillSemanticAndLocation(info);
+        resources.bindInfoPool.push_back(info);
+    }
+
 	std::vector<uint32_t> ShaderLanguageConverter::glslangSpirvCompiler(
 		const std::string& shaderCode, ShaderLanguage inputLanguage, ShaderStage inputStage, const std::vector<std::filesystem::
 		path>& includePaths, bool isLink)
@@ -2002,9 +2353,10 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	        auto targetLang = arg0.targetLanguages[i];
 	        if (arg0.enableReflection)
 	        {
-	            auto resource = slangReflectBindInfo(slangTarget->getLayout(static_cast<SlangInt>(i)));
+	            auto resource = slangReflection(slangTarget->getLayout(static_cast<SlangInt>(i)));
 	            finalResult.reflections.insert({targetLang, std::move(resource)});
 	        }
+	        arg0.layoutCallback(slangTarget->getLayout(static_cast<SlangInt>(i)));
 
 	        if (isBin)
 	        {
@@ -2037,29 +2389,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    default:
 	        throw std::logic_error("Unsupported shader stage.");
 	    }
-    }
-
-    ShaderStage ShaderLanguageConverter::slangStageToShaderStage(SlangStage stage)
-    {
-        switch (stage)
-        {
-            //! 后续需要补全ShaderStage
-            case SLANG_STAGE_VERTEX:     return ShaderStage::VertexShader;
-            case SLANG_STAGE_FRAGMENT:   return ShaderStage::FragmentShader;
-            case SLANG_STAGE_COMPUTE:    return ShaderStage::ComputeShader;
-            case SLANG_STAGE_HULL:       return ShaderStage::VertexShader;
-            case SLANG_STAGE_DOMAIN:     return ShaderStage::VertexShader;
-            case SLANG_STAGE_GEOMETRY:   return ShaderStage::VertexShader;
-            case SLANG_STAGE_RAY_GENERATION: return ShaderStage::ComputeShader;
-            case SLANG_STAGE_INTERSECTION:   return ShaderStage::ComputeShader;
-            case SLANG_STAGE_ANY_HIT:        return ShaderStage::ComputeShader;
-            case SLANG_STAGE_CLOSEST_HIT:    return ShaderStage::ComputeShader;
-            case SLANG_STAGE_MISS:           return ShaderStage::ComputeShader;
-            case SLANG_STAGE_CALLABLE:       return ShaderStage::ComputeShader;
-            case SLANG_STAGE_MESH:           return ShaderStage::VertexShader;
-            case SLANG_STAGE_AMPLIFICATION:  return ShaderStage::VertexShader;
-            default:                         return ShaderStage::VertexShader;
-        }
     }
 
     uint32_t ShaderLanguageConverter::getScalarSizeInBytes(slang::TypeReflection::ScalarType st)
@@ -2141,7 +2470,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         {
             const char* instanceName = varName;
 
-            resources.uniformBufferName = instanceName;
+            //resources.uniformBufferName = instanceName;
             size_t uboSize = typeLayout->getSize(slang::ParameterCategory::Uniform);
             if (uboSize == 0)
             {
@@ -2149,56 +2478,70 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                     if (auto et = ev->getTypeLayout())
                         uboSize = et->getSize(slang::ParameterCategory::Uniform);
             }
-            resources.uniformBufferSize = static_cast<uint32_t>(uboSize);
-
-            uint32_t set = 0, binding = 0;
-            for (int i = 0; i < catCount; ++i)
+            //resources.uniformBufferSize = static_cast<uint32_t>(uboSize);
+            if (uboSize != 0)
             {
-                auto cat = varLayout->getCategoryByIndex(i);
-                if (cat == slang::ParameterCategory::ConstantBuffer ||
-                    cat == slang::ParameterCategory::DescriptorTableSlot)
+                resources.uniformBufferName = instanceName;
+                resources.uniformBufferSize = static_cast<uint32_t>(uboSize);
+
+                uint32_t set = 0, binding = 0;
+                for (int i = 0; i < catCount; ++i)
                 {
-                    set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
-                    binding = static_cast<uint32_t>(varLayout->getOffset(cat));
-                    break;
+                    auto cat = varLayout->getCategoryByIndex(i);
+                    if (cat == slang::ParameterCategory::ConstantBuffer ||
+                        cat == slang::ParameterCategory::DescriptorTableSlot)
+                    {
+                        set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
+                        binding = static_cast<uint32_t>(varLayout->getOffset(cat));
+                        break;
+                    }
                 }
+
+                auto bindType = ShaderCodeModule::ShaderResources::uniformBuffers;
+
+                ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
+                info.set = set;
+                info.binding = binding;
+                info.variateName = varName;
+                info.typeName = typeLayout->getName() ? typeLayout->getName() : "ConstantBuffer";
+                info.bindType = bindType;
+                info.typeSize = static_cast<uint32_t>(uboSize);
+                resources.bindInfoPool.push_back(info);
             }
 
-            //Debug
             if (kind == slang::TypeReflection::Kind::ParameterBlock)
             {
-                // ParameterBlock 整体信息
-                uint32_t blockSet = varLayout->getBindingSpace();
-                uint32_t blockBinding = varLayout->getBindingIndex();
+                //collectSlangParameterBlock(typeLayout, binding, bindType,uboSize);
+                std::cout << "Parameter Block: " << instanceName << std::endl;
+                auto containerVarLayout = typeLayout->getContainerVarLayout();
+                uint32_t setIndex = containerVarLayout->getOffset(slang::ParameterCategory::RegisterSpace);
+                std::cout << "Descriptor Set: " << setIndex << std::endl;
 
-                (void)blockSet;
-                (void)blockBinding;
 
-                // 获取内部元素布局
-                slang::TypeLayoutReflection* elementTypeLayout =
-                    varLayout->getTypeLayout()->getElementTypeLayout();
+                std::cout << "binding:" << (uint32_t)varLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot)<< std::endl;
+                std::cout << "space:" << (uint32_t)varLayout->getOffset(slang::ParameterCategory::RegisterSpace)<< std::endl;
+                std::cout << "child space:" << (uint32_t)varLayout->getOffset(slang::ParameterCategory::SubElementRegisterSpace)<< std::endl;
 
-                // 遍历内部字段
-                for (int f = 0; f < elementTypeLayout->getFieldCount(); f++) {
-                    slang::VariableLayoutReflection* field = elementTypeLayout->getFieldByIndex(f);
+                // === 元素信息（Material 结构体内部）===
+                auto elementVarLayout = typeLayout->getElementVarLayout();
+                auto elementTypeLayout = elementVarLayout->getTypeLayout();
 
-                    (void)field;
+                // 遍历 Material 的字段
+                uint32_t fieldCount = elementTypeLayout->getFieldCount();
+                for (uint32_t i = 0; i < fieldCount; i++) {
+                    auto field = elementTypeLayout->getFieldByIndex(i);
+                    auto fieldType = field->getType();
+
+                    std::cout << "Field: " << field->getName()
+                              << " Type: " << fieldType->getName()
+                              << " Binding: " << field->getBindingIndex()
+                              << std::endl;
                 }
 
-                // 或使用 Binding Ranges
-                int rangeCount = elementTypeLayout->getBindingRangeCount();
-                for (int r = 0; r < rangeCount; r++) {
-                    (void)r;
-                }
+                // === 获取普通数据大小（用于分配 Uniform Buffer）===
+                size_t ordinaryDataSize = elementTypeLayout->getSize();
+                std::cout << "Ordinary data size: " << ordinaryDataSize << " bytes" << std::endl;
             }
-
-            ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
-            info.set = set;
-            info.binding = binding;
-            info.variateName = varName;
-            info.typeName = typeLayout->getName() ? typeLayout->getName() : "ConstantBuffer";
-            info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBuffers;
-            resources.bindInfoPool.push_back(info);
 
             if (auto elementVar = typeLayout->getElementVarLayout())
             {
@@ -2338,6 +2681,43 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         }
     }
 
+    void ShaderLanguageConverter::collectSlangParameterBlock(slang::TypeLayoutReflection* typeLayout, uint32_t& binding, ShaderCodeModule::ShaderResources::BindType& bindType, size_t& uboSize)
+    {
+	    int set = 0;
+	    auto rangeCount = typeLayout->getDescriptorSetDescriptorRangeCount(set);
+	    if (rangeCount > 0)
+	    {
+	        binding = typeLayout->getBindingRangeFirstDescriptorRangeIndex(0);
+	        switch (typeLayout->getDescriptorSetDescriptorRangeType(set, 0))
+	        {
+	        case slang::BindingType::ConstantBuffer:
+	            bindType = ShaderCodeModule::ShaderResources::uniformBuffers;
+	            uboSize = typeLayout->getElementTypeLayout()->getSize();
+	            break;
+	        case slang::BindingType::Texture:
+	            bindType = ShaderCodeModule::ShaderResources::texture;
+	            break;
+	        case slang::BindingType::Sampler:
+	            bindType = ShaderCodeModule::ShaderResources::sampler;
+	            break;
+	        case slang::BindingType::MutableTexture:
+	            bindType = ShaderCodeModule::ShaderResources::storageTexture;
+	            break;
+	        case slang::BindingType::MutableRawBuffer:
+	            bindType = ShaderCodeModule::ShaderResources::storageBuffer;
+	            break;
+	        case slang::BindingType::RawBuffer:
+	            bindType = ShaderCodeModule::ShaderResources::rawBuffer;
+	            break;
+	        case slang::BindingType::CombinedTextureSampler:
+	            bindType = ShaderCodeModule::ShaderResources::sampledImages;
+	            break;
+	        case slang::BindingType::Unknown:
+	        default: break;
+	        }
+	    }
+    }
+
     void ShaderLanguageConverter::slangReflectGlobalScope(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources)
     {
         if (!programLayout) return;
@@ -2415,6 +2795,32 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
             }
 
             resources.entryPointInfoPool.push_back(info);
+
+            for (uint32_t i = 0; i < ep->getParameterCount(); ++i)
+            {
+                slang::VariableLayoutReflection* parameter = ep->getParameterByIndex(i);
+                if (!parameter)
+                    continue;
+
+                const auto beforeCount = resources.bindInfoPool.size();
+                collectSlangReflection(programLayout, parameter, resources, false, false, 0);
+                if (resources.bindInfoPool.size() <= beforeCount)
+                    continue;
+
+                ShaderCodeModule::ShaderResources::ShaderBindInfo& added = resources.bindInfoPool.back();
+                const auto duplicate = std::find_if(resources.bindInfoPool.begin(),
+                                                    std::prev(resources.bindInfoPool.end()),
+                                                    [&](const ShaderCodeModule::ShaderResources::ShaderBindInfo& existing) {
+                                                        return existing.variateName == added.variateName &&
+                                                               existing.bindType == added.bindType &&
+                                                               existing.set == added.set &&
+                                                               existing.binding == added.binding &&
+                                                               existing.location == added.location &&
+                                                               existing.byteOffset == added.byteOffset;
+                                                    });
+                if (duplicate != std::prev(resources.bindInfoPool.end()))
+                    resources.bindInfoPool.pop_back();
+            }
         }
     }
 
@@ -2434,6 +2840,63 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         return resources;
     }
 
+    ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangReflection(slang::ProgramLayout* programLayout)
+    {
+	    ShaderCodeModule::ShaderResources resources;
+
+        // ---- 1. 全局参数（UniformBuffers, ParameterBlocks, Textures 等） ----
+        for (int i = 0; i < programLayout->getParameterCount(); ++i)
+        {
+            auto param = programLayout->getParameterByIndex(i);
+            ShaderCursor cursor;
+            cursor.m_varLayout = param;
+            cursor.m_typeLayout = param->getTypeLayout();
+
+            if (param->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ParameterBlock)
+                cursor.m_offset.set = param->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+            else
+                cursor.m_offset.set = param->getOffset(slang::ParameterCategory::RegisterSpace);
+            cursor.m_offset.binding = param->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+
+            cursor.collectBindings(resources, param->getName());
+        }
+
+        // ---- 2. Entry Point（Varying Input / Output） ----
+        for (int i = 0; i < programLayout->getEntryPointCount(); ++i)
+        {
+            auto entryPoint = programLayout->getEntryPointByIndex(i);
+            if (entryPoint)
+            {
+                EmbeddedShader::ShaderCodeModule::ShaderResources::EntryPointInfo epInfo;
+                epInfo.name = entryPoint->getName();
+                // 注意：需要确保 ShaderStage 枚举与 slang::Stage 兼容，或自行映射
+                epInfo.stage = slangStageToShaderStage(entryPoint->getStage());
+                resources.entryPointInfoPool.push_back(epInfo);
+
+                // Varying Inputs
+                for (int i = 0; i < entryPoint->getParameterCount(); ++i)
+                {
+                    auto param = entryPoint->getParameterByIndex(i);
+                    ShaderCursor cursor;
+                    cursor.m_varLayout = param;
+                    cursor.m_typeLayout = param->getTypeLayout();
+                    cursor.collectBindings(resources, param->getName());
+                }
+
+                // Varying Output
+                auto resultVar = entryPoint->getResultVarLayout();
+                if (resultVar)
+                {
+                    ShaderCursor cursor;
+                    cursor.m_varLayout = resultVar;
+                    cursor.m_typeLayout = resultVar->getTypeLayout();
+                    cursor.collectBindings(resources, "return");
+                }
+            }
+        }
+	    return resources;
+    }
+
     ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg)
     {
 	    SlangModuleReflectionArgs reflectArgs;
@@ -2441,7 +2904,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    ShaderCodeModule::ShaderResources resources;
 	    reflectArgs.layoutCallback = [&](slang::ProgramLayout* programLayout)
         {
-            resources = slangReflectBindInfo(programLayout);
+            resources = slangReflection(programLayout);
         };
 	    slangModuleReflection(reflectArgs);
 	    return resources;

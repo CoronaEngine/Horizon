@@ -5,6 +5,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_glsl/example_glsl.cpp
     example_edsl/example_edsl.cpp
     example_default/example_default.cpp
+    example_include/example_include.cpp
 )
 
 set(HORIZON_EXAMPLE_HEADERS
@@ -13,6 +14,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_glsl/example_glsl.h
     example_edsl/example_edsl.h
     example_default/example_default.h
+    example_include/example_include.h
 )
 
 add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})

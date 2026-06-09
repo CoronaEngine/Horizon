@@ -654,6 +654,13 @@ int main(int argc, char** argv)
     shaderResourceArgs.module = &slangModule;
     shaderResourceArgs.stage = inputStage;
     ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
+    //提取成员名，删去路径前缀
+    for (auto& info : resources.bindInfoPool)
+    {
+        auto i = info.variateName.find_last_of('.');
+        if (i != std::string::npos)
+            info.variateName = info.variateName.substr(i + 1);
+    }
 
 	std::cout << "SUCCESS:Obtain reflection information from SPIR-V IR through SPIRV-CROSS.\n";
 

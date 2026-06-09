@@ -14,6 +14,46 @@
 
 namespace EmbeddedShader
 {
+    //! 后续需要补全ShaderStage
+    ShaderStage slangStageToShaderStage(SlangStage stage);
+
+    struct ShaderOffset
+    {
+        size_t			byteOffset = 0;
+        uint32_t 		arrayIndexInBindingRange = 0;
+        uint32_t        bindingRangeIndex = 0;
+        uint32_t        set = 0;        // RegisterSpace
+        uint32_t        binding = 0;    // DescriptorTableSlot
+    };
+    struct ShaderCursor
+    {
+        ShaderOffset m_offset;
+        slang::TypeLayoutReflection* m_typeLayout = nullptr;
+        slang::VariableLayoutReflection* m_varLayout = nullptr;  // 必须正确传递
+        size_t m_indent = 0;
+
+        ShaderCursor field(int index) const;
+
+        ShaderCursor element(int index) const;
+
+        void collectBindings(EmbeddedShader::ShaderCodeModule::ShaderResources& resources,
+                             const std::string& namePrefix = "") const;
+
+        // 辅助：收集 UBO 内部字段（uniformBufferMembers）
+        void collectUniformBufferMembers(EmbeddedShader::ShaderCodeModule::ShaderResources& resources,
+                                         const std::string& namePrefix) const;
+
+    private:
+        // 填充语义和 location（主要用于 Varying Input/Output）
+        void fillSemanticAndLocation(EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info) const;
+
+        // 判断叶子节点的 BindType
+        static EmbeddedShader::ShaderCodeModule::ShaderResources::BindType
+        deduceLeafBindType(slang::TypeLayoutReflection* typeLayout);
+
+        void collectPushConstantMembers(EmbeddedShader::ShaderCodeModule::ShaderResources& resources,
+                                        const std::string& namePrefix) const;
+    };
 
 	struct ShaderLanguageConverter
 	{
@@ -66,10 +106,11 @@ namespace EmbeddedShader
 
 	    static void slangReflectGlobalScope(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
 	    static void slangReflectEntryPoints(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
-	    static ShaderStage slangStageToShaderStage(SlangStage stage);
 	    static uint32_t getScalarSizeInBytes(slang::TypeReflection::ScalarType st);
 	    static void collectSlangReflection(slang::ProgramLayout* programLayout, slang::VariableLayoutReflection* varLayout, ShaderCodeModule::ShaderResources& resources, bool insidePushConstant, bool insideUniformBuffer, uint64_t baseByteOffset);
+	    static void collectSlangParameterBlock(slang::TypeLayoutReflection* typeLayout, uint32_t& binding, ShaderCodeModule::ShaderResources::BindType& bindType, size_t& uboSize);
         static ShaderCodeModule::ShaderResources slangReflectBindInfo(slang::ProgramLayout* programLayout);
+        static ShaderCodeModule::ShaderResources slangReflection(slang::ProgramLayout* programLayout);
     public:
         static ShaderCodeModule::ShaderResources slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg);
     };

@@ -1,7 +1,7 @@
 #include "example_baseline/example_baseline.h"
 #include "example_default/example_default.h"
 #include "example_edsl/example_edsl.h"
-//#include "example_glsl/example_glsl.h"
+#include "example_include/example_include.h"
 
 #include <iostream>
 #include <string_view>
@@ -30,6 +30,11 @@ int main(int argc, char **argv)
         run_example_glsl();
         return 0;
     }*/
+    if (mode == "include")
+    {
+        run_example_include();
+        return 0;
+    }
 
     std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl]\n";
     return 0;
