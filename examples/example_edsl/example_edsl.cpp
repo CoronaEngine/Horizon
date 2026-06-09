@@ -18,6 +18,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -42,33 +43,58 @@ constexpr uint32_t edsl_width = 800;
 constexpr uint32_t edsl_height = 600;
 constexpr float pi = 3.14159265358979323846f;
 
-constexpr EmbeddedShader::BindingKey model_binding { 0, 64, 10, 0 };
-constexpr EmbeddedShader::BindingKey view_binding { 64, 64, 10, 0 };
-constexpr EmbeddedShader::BindingKey proj_binding { 128, 64, 10, 0 };
-
-struct ReflectedBindingSlot
-{
-    uint64_t byte_offset = 0;
-    uint32_t type_size = 0;
-    int32_t bind_type = -1;
-    uint32_t location = 0;
-    uint32_t set = 0;
-    uint32_t binding = 0;
-};
-
-constexpr ReflectedBindingSlot texture_binding {
-    0,
-    0,
-    static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::sampledImages),
-    0,
-    1,
-    0,
-};
-
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
 const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
+
+using ShaderResources = EmbeddedShader::ShaderCodeModule::ShaderResources;
+
+H::BindingSlot make_binding_slot(const ShaderResources::ShaderBindInfo& info) noexcept
+{
+    H::BindingSlot slot;
+    slot.byte_offset = info.byteOffset;
+    slot.type_size = info.typeSize;
+    slot.bind_type = static_cast<int32_t>(info.bindType);
+    slot.location = info.location;
+    slot.set = info.set;
+    slot.binding = info.binding;
+    return slot;
+}
+
+template <size_t Count>
+std::array<H::BindingSlot, Count> reflected_uniform_member_slots(const ShaderResources& resources, uint32_t type_size)
+{
+    std::vector<ShaderResources::ShaderBindInfo> members;
+    for (const auto& info : resources.bindInfoPool)
+    {
+        if (info.bindType == ShaderResources::uniformBufferMembers &&
+            (info.typeSize == 0 || info.typeSize == type_size))
+        {
+            members.push_back(info);
+        }
+    }
+
+    std::ranges::sort(members, [](const auto& lhs, const auto& rhs) {
+        if (lhs.set != rhs.set)
+            return lhs.set < rhs.set;
+        if (lhs.binding != rhs.binding)
+            return lhs.binding < rhs.binding;
+        return lhs.byteOffset < rhs.byteOffset;
+    });
+
+    if (members.size() < Count)
+    {
+        throw std::runtime_error("example_edsl expected " + std::to_string(Count) +
+                                 " reflected UBO members, got " + std::to_string(members.size()) + ".");
+    }
+
+    std::array<H::BindingSlot, Count> slots {};
+    for (size_t i = 0; i < Count; ++i)
+        slots[i] = make_binding_slot(members[i]);
+
+    return slots;
+}
 
 struct Vec3
 {
@@ -373,6 +399,7 @@ void run_example_edsl()
         using namespace ktm;
 
         Texture2D<fvec4> texture_proxy = texture_image;
+        Texture2D<fvec4> final_output_proxy = final_output_image;
         Float4x4 model;
         Float4x4 view;
         Float4x4 proj;
@@ -383,9 +410,9 @@ void run_example_edsl()
             return Float4(vertex->tex_coord, color_weight, 1.0f);
         };
 
-        auto fragment_shader = [&](Float4 input) -> Float4 {
+        auto fragment_shader = [&](Float4 input) {
             Float4 color = texture(texture_proxy, input->xy());
-            return color * Float4(input->z, input->z, input->z, 1.0f);
+            final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
         };
 
         H::RasterizerPipelineDesc rasterizer_desc =
@@ -393,10 +420,15 @@ void run_example_edsl()
         rasterizer_desc.set_depth_attachment(H::DepthAttachmentDesc::with_format(H::Format::D32, "example_edsl.depth"));
         rasterizer_desc.set_debug_name("example_edsl.baseline_rasterizer");
 
+        const auto uniform_bindings =
+            reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources,
+                                              static_cast<uint32_t>(sizeof(Mat4)));
+        const H::BindingSlot& model_binding = uniform_bindings[0];
+        const H::BindingSlot& view_binding = uniform_bindings[1];
+        const H::BindingSlot& proj_binding = uniform_bindings[2];
+
         H::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
-        rasterizer.bind_render_target(0, final_output_image);
         rasterizer.bind_depth_target(depth_image);
-        rasterizer[texture_binding] = texture_image;
 
         H::DrawIndexedParams draw_params;
         draw_params.index_type = H::IndexType::UInt32;
