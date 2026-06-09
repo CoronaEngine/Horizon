@@ -15,6 +15,12 @@ description: Horizon C++ Vulkan 仓库的通用 Agent 工作流。Agent 修改�
 4. 改动范围保持贴合用户请求。
 5. 汇报验证结果。
 
+## 停住 / Crash Stack 排查入口
+
+- 当用户说程序在 VS 里报错并停住、疑似断言、异常或卡住时，先用调试工具确认当前调用栈和线程栈，再决定修改代码。VS 中打开 `Debug > Windows > Call Stack` 和 `Threads`；如果程序从命令行启动，则先附加到目标进程，或生成 dump 后用 VS / WinDbg 打开。
+- 记录线程名或线程入口、最顶层项目栈帧、异常/断言类型、相关对象名或错误号，以及能对应上的日志/diagnostics 行。多线程任务至少检查 main/event 线程和相关 worker 线程；如果停在 validation callback、queue submit、present、descriptor 写入或 layout transition 附近，先把调用栈与 backend diagnostics 关联起来。
+- 只有在调用栈和 diagnostics 指向具体层后再选择修复入口：公共 API、Helicon/reflection、Vulkan descriptor/layout、executor/present 同步，或示例调用点。不要只凭历史日志先改 shader、元数据或同步逻辑。
+
 ## 口令路由
 
 - `=sa`：根据所有中文源同步英文 Agent 文件。

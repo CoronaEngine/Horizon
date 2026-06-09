@@ -2,7 +2,7 @@
 name: horizon-workflow
 description: Vendor-neutral workflow for AI agents working in the Horizon C++ Vulkan repository. Use when an agent edits this repo, handles =sa/=ca/=ai/=gc/=cm/=gh commands, or needs routing to build, GitHub, formatting, Vulkan, Helicon, or push-constant context.
 ---
-<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: e3f4d4ce719a859797abe869aa1271f7bf54ced13d5c0f6cfab8ed415d13f43d -->
+<!-- HORIZON_WORKFLOW_SKILL_ZH_CN_SHA256: 03c3ba136420bb0693cd87562d9586334d3403005aae09eb01cc490c84eadba2 -->
 
 # Horizon Workflow
 
@@ -15,6 +15,12 @@ This skill is plain Markdown so Codex, Claude, Cursor, Gemini CLI, or other agen
 3. Load only the relevant file from `docs/agents/`.
 4. Keep changes scoped to the user request.
 5. Report validation results.
+
+## Stop / Crash Stack Triage
+
+- When the user says a program errors and stops in VS, or appears stuck on an assertion, exception, or hang, use debugger tools to confirm the current call stack and thread stacks before changing code. In VS, open `Debug > Windows > Call Stack` and `Threads`; if the program was launched from the command line, attach to the target process, or capture a dump and open it in VS / WinDbg.
+- Record the thread name or thread entrypoint, the top project stack frame, exception/assertion type, relevant object name or error code, and the matching log/diagnostics line. For threaded tasks, inspect at least the main/event thread and relevant worker threads. If the stop is near a validation callback, queue submit, present, descriptor write, or layout transition, correlate the stack with backend diagnostics first.
+- Choose the fix entrypoint only after the stack and diagnostics identify the layer: public API, Helicon/reflection, Vulkan descriptor/layout, executor/present synchronization, or example call site. Do not patch shader code, metadata, or synchronization logic from old logs alone.
 
 ## Command Routing
 
