@@ -6,7 +6,6 @@
 #include "Codegen/ControlFlows.h"
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
-#include "baseline_common.h"
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
@@ -103,13 +102,13 @@ void check_assets()
     throw std::runtime_error(message);
 }
 
+// EDSL 路径按行主序喂入 shader，故对 glm（列主序）结果转置。
 baseline::UniformBufferObject make_ubo(float time_seconds)
 {
-    using namespace baseline;
-    UniformBufferObject ubo;
-    ubo.model = transpose(rotate_z(time_seconds * pi * 0.5f));
-    ubo.view = transpose(look_at_rh({ 2.0f, 2.0f, 2.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }));
-    ubo.proj = transpose(perspective_rh(pi * 0.25f, edsl_width / static_cast<float>(edsl_height), 0.1f, 10.0f));
+    baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
+    ubo.model = glm::transpose(ubo.model);
+    ubo.view = glm::transpose(ubo.view);
+    ubo.proj = glm::transpose(ubo.proj);
     return ubo;
 }
 
@@ -194,7 +193,7 @@ void run_example_edsl()
 
         const auto uniform_bindings =
             reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources,
-                                              static_cast<uint32_t>(sizeof(baseline::Mat4)));
+                                              static_cast<uint32_t>(sizeof(glm::mat4)));
         const H::BindingSlot& model_binding = uniform_bindings[0];
         const H::BindingSlot& view_binding = uniform_bindings[1];
         const H::BindingSlot& proj_binding = uniform_bindings[2];

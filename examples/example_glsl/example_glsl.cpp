@@ -3,7 +3,6 @@
 #include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
-#include "baseline_common.h"
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
@@ -53,12 +52,7 @@ void check_assets()
 
 baseline::UniformBufferObject make_ubo(float time_seconds)
 {
-    using namespace baseline;
-    UniformBufferObject ubo;
-    ubo.model = rotate_z(time_seconds * pi * 0.5f);
-    ubo.view = look_at_rh({ 2.0f, 2.0f, 2.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f });
-    ubo.proj = perspective_rh(pi * 0.25f, glsl_width / static_cast<float>(glsl_height), 0.1f, 10.0f);
-    return ubo;
+    return baseline::make_ubo(time_seconds, glsl_width / static_cast<float>(glsl_height));
 }
 
 H::HardwareImage create_output_image()

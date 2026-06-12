@@ -10,7 +10,6 @@ set(HORIZON_EXAMPLE_SOURCES
 
 set(HORIZON_EXAMPLE_HEADERS
     common.h
-    baseline_common.h
     example_baseline/example_baseline.h
     example_glsl/example_glsl.h
     example_edsl/example_edsl.h
