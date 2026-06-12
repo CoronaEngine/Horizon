@@ -33,9 +33,7 @@ namespace Corona::Horizon
 #if HORIZON_ENABLE_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
 
-    constexpr std::array<VkValidationFeatureEnableEXT, 5> enabled_validation_features {
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+    constexpr std::array<VkValidationFeatureEnableEXT, 3> enabled_validation_features {
         VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
         VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
@@ -1145,7 +1143,7 @@ namespace Corona::Horizon
             try
             {
                 setup_debug_messenger();
-                CFW_LOG_INFO("Khronos Validation Layer Active. Current Enables: {}", validation_feature_list());
+                // CFW_LOG_INFO("Khronos Validation Layer Active. Current Enables: {}", validation_feature_list());
             }
             catch (...)
             {

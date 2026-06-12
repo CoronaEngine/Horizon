@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 30ce94423b11655d5d5ee8def20f3da605175f1a75ebfe4558458c4224dc7926 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 6322743c95e3c9d089e31b0744d9b43e1bedc708a3254653564f55dbd40d0061 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -33,7 +33,7 @@ Be careful with:
 ## Vulkan Validation Layers
 
 - Lower-case Vulkan backend validation is controlled by `HORIZON_ENABLE_VALIDATION`; do not gate it on the historical or incorrect `CORONA_ENGINE_DEBUG`. CMake debug configurations define `CABBAGE_ENGINE_DEBUG`, so using the wrong macro can silently compile validation out or leave it inactive.
-- When `HardwareContext::create_instance()` enables `VK_LAYER_KHRONOS_validation`, also request `VK_EXT_debug_utils` and `VK_EXT_validation_features`; to expose as many errors as possible, the debug path should enable GPU-assisted validation, reserve binding slot, best practices, debug printf, and synchronization validation. This all-on mode is expected to be slow.
+- When `HardwareContext::create_instance()` enables `VK_LAYER_KHRONOS_validation`, also request `VK_EXT_debug_utils` and `VK_EXT_validation_features`. The default debug validation path enables best practices, debug printf, and synchronization validation; do not enable GPU-assisted validation or reserve binding slot by default because GPU-AV and normal core checks together emit a slow validation-settings warning. Only enable GPU-AV temporarily when specifically investigating GPU-side issues.
 - Filter instance extensions by enumerating both global extensions and extensions exposed by requested layers. `VK_EXT_validation_features` may be exposed by `VK_LAYER_KHRONOS_validation`, so a global-only filter can incorrectly disable extended validation.
 - To verify validation is actually active, run `HorizonTests.exe hardware_context.` and check the log for `Khronos Validation Layer Active` with `Current Enables` listing the required validation features.
 - For Vulkan compatibility or validation-layer issues in debug validation builds, inspect `horizon-vulkan-diagnostics.txt` first; `HORIZON_VULKAN_DIAGNOSTICS_PATH` may override the path. It should report the loader/API version, validation feature status, requested/enabled/missing instance / device capabilities, selected or skipped physical devices, `VULKAN VALIDATION` / `HORIZON VALIDATION` / `VK_ERROR` records, and readable object names.
