@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 6322743c95e3c9d089e31b0744d9b43e1bedc708a3254653564f55dbd40d0061 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 2e3463c227237d5c5da64e67756b60df8a35e6a7a0c2201c0e60e7b26857e3d4 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -37,6 +37,7 @@ Be careful with:
 - Filter instance extensions by enumerating both global extensions and extensions exposed by requested layers. `VK_EXT_validation_features` may be exposed by `VK_LAYER_KHRONOS_validation`, so a global-only filter can incorrectly disable extended validation.
 - To verify validation is actually active, run `HorizonTests.exe hardware_context.` and check the log for `Khronos Validation Layer Active` with `Current Enables` listing the required validation features.
 - For Vulkan compatibility or validation-layer issues in debug validation builds, inspect `horizon-vulkan-diagnostics.txt` first; `HORIZON_VULKAN_DIAGNOSTICS_PATH` may override the path. It should report the loader/API version, validation feature status, requested/enabled/missing instance / device capabilities, selected or skipped physical devices, `VULKAN VALIDATION` / `HORIZON VALIDATION` / `VK_ERROR` records, and readable object names.
+- Keep Vulkan startup logs concise: console output should retain the loader API, validation-layer enabled status, main GPU model / API / driver, device-local / host-visible memory, system memory when available, queue-family count, and `Hardware Context initialized with N device(s)`. Memory heap/type details belong in diagnostics. Filter low-severity `Loader Message` / ICD or layer loading noise from both console and diagnostics; keep warning/error loader or validation records.
 - Keep the diagnostics system internally owned by the backend; do not expose Vulkan diagnostic details through `include/`. When adding Vulkan objects or failure paths, add debug object names and failing `VkResult` call-site / resource context so the txt can identify compatibility, barrier / layout, descriptor, submit / present sync, or lifetime issues directly.
 
 ## Bindless And Descriptor Layout

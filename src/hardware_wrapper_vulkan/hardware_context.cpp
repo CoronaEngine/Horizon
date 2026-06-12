@@ -1,20 +1,32 @@
 #if defined(_WIN32)
 #define VK_USE_PLATFORM_WIN32_KHR
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #endif
 
 #include "hardware_context.h"
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <iomanip>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
-#include "hardware_wrapper/diagnostics.h"
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include "corona/kernel/core/i_logger.h"
+#include "hardware_wrapper/diagnostics.h"
 #include "resource_pool.h"
 
 #define VOLK_IMPLEMENTATION
@@ -33,9 +45,9 @@ namespace Corona::Horizon
 #if HORIZON_ENABLE_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
 
-    constexpr std::array<VkValidationFeatureEnableEXT, 3> enabled_validation_features {
+    constexpr std::array<VkValidationFeatureEnableEXT, 2> enabled_validation_features {
         VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
+        //VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
     };
 
@@ -101,7 +113,7 @@ namespace Corona::Horizon
     }
 
     std::vector<const char*> supported_instance_extensions(std::set<const char*> requested_extensions,
-                                                          const std::vector<const char*>& requested_layers)
+                                                           const std::vector<const char*>& requested_layers)
     {
         std::vector<VkExtensionProperties> available_extensions;
         collect_instance_extensions(available_extensions, nullptr);
@@ -133,6 +145,15 @@ namespace Corona::Horizon
         return enabled_extensions;
     }
 
+    [[nodiscard]] std::string api_version_string(uint32_t version)
+    {
+        std::ostringstream stream;
+        stream << VK_VERSION_MAJOR(version) << '.'
+               << VK_VERSION_MINOR(version) << '.'
+               << VK_VERSION_PATCH(version);
+        return stream.str();
+    }
+
     bool supports_required_api(VkPhysicalDevice physical_device)
     {
         VkPhysicalDeviceProperties properties {};
@@ -143,11 +164,10 @@ namespace Corona::Horizon
             return true;
         }
 
-        CFW_LOG_WARNING("Skipping device '{}' due to Vulkan API {}.{}.{} (< 1.4)",
+        CFW_LOG_WARNING("Skipping device '{}' due to Vulkan API {} (< {})",
                         properties.deviceName,
-                        VK_VERSION_MAJOR(properties.apiVersion),
-                        VK_VERSION_MINOR(properties.apiVersion),
-                        VK_VERSION_PATCH(properties.apiVersion));
+                        api_version_string(properties.apiVersion),
+                        api_version_string(required_api_version));
 
         return false;
     }
@@ -171,20 +191,194 @@ namespace Corona::Horizon
         }
     }
 
-    [[nodiscard]] std::string api_version_string(uint32_t version)
-    {
-        std::ostringstream stream;
-        stream << VK_VERSION_MAJOR(version) << '.'
-               << VK_VERSION_MINOR(version) << '.'
-               << VK_VERSION_PATCH(version);
-        return stream.str();
-    }
-
     [[nodiscard]] std::string hex_u32(uint32_t value)
     {
         std::ostringstream stream;
         stream << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
         return stream.str();
+    }
+
+    [[nodiscard]] std::string byte_size_string(uint64_t bytes)
+    {
+        constexpr double kib = 1024.0;
+        constexpr double mib = kib * 1024.0;
+        constexpr double gib = mib * 1024.0;
+
+        std::ostringstream stream;
+        stream << std::fixed << std::setprecision(2);
+        if (bytes >= static_cast<uint64_t>(gib))
+        {
+            stream << static_cast<double>(bytes) / gib << " GiB";
+        }
+        else if (bytes >= static_cast<uint64_t>(mib))
+        {
+            stream << static_cast<double>(bytes) / mib << " MiB";
+        }
+        else if (bytes >= static_cast<uint64_t>(kib))
+        {
+            stream << static_cast<double>(bytes) / kib << " KiB";
+        }
+        else
+        {
+            stream << bytes << " B";
+        }
+        return stream.str();
+    }
+
+    [[nodiscard]] std::string memory_heap_flags_string(VkMemoryHeapFlags flags)
+    {
+        std::string text;
+        const auto append = [&text](const char* name) {
+            if (!text.empty())
+            {
+                text += '|';
+            }
+            text += name;
+        };
+
+        if ((flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0)
+        {
+            append("device_local");
+        }
+        if ((flags & VK_MEMORY_HEAP_MULTI_INSTANCE_BIT) != 0)
+        {
+            append("multi_instance");
+        }
+
+        return text.empty() ? "none" : text;
+    }
+
+    [[nodiscard]] std::string memory_property_flags_string(VkMemoryPropertyFlags flags)
+    {
+        std::string text;
+        const auto append = [&text](const char* name) {
+            if (!text.empty())
+            {
+                text += '|';
+            }
+            text += name;
+        };
+
+        if ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0)
+        {
+            append("device_local");
+        }
+        if ((flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
+        {
+            append("host_visible");
+        }
+        if ((flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0)
+        {
+            append("host_coherent");
+        }
+        if ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0)
+        {
+            append("host_cached");
+        }
+        if ((flags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) != 0)
+        {
+            append("lazily_allocated");
+        }
+        if ((flags & VK_MEMORY_PROPERTY_PROTECTED_BIT) != 0)
+        {
+            append("protected");
+        }
+#ifdef VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD
+        if ((flags & VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD) != 0)
+        {
+            append("device_coherent_amd");
+        }
+#endif
+#ifdef VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD
+        if ((flags & VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD) != 0)
+        {
+            append("device_uncached_amd");
+        }
+#endif
+#ifdef VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV
+        if ((flags & VK_MEMORY_PROPERTY_RDMA_CAPABLE_BIT_NV) != 0)
+        {
+            append("rdma_capable_nv");
+        }
+#endif
+
+        return text.empty() ? "none" : text;
+    }
+
+    struct DeviceMemorySummary
+    {
+        uint64_t device_local_bytes { 0 };
+        uint64_t host_visible_bytes { 0 };
+    };
+
+    [[nodiscard]] DeviceMemorySummary summarize_device_memory(const VkPhysicalDeviceMemoryProperties& memory_properties)
+    {
+        std::array<bool, VK_MAX_MEMORY_HEAPS> host_visible_heaps {};
+        for (uint32_t type_index = 0; type_index < memory_properties.memoryTypeCount; ++type_index)
+        {
+            const VkMemoryType& type = memory_properties.memoryTypes[type_index];
+            if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0 && type.heapIndex < host_visible_heaps.size())
+            {
+                host_visible_heaps[type.heapIndex] = true;
+            }
+        }
+
+        DeviceMemorySummary summary;
+        for (uint32_t heap_index = 0; heap_index < memory_properties.memoryHeapCount; ++heap_index)
+        {
+            const VkMemoryHeap& heap = memory_properties.memoryHeaps[heap_index];
+            if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0)
+            {
+                summary.device_local_bytes += heap.size;
+            }
+            if (heap_index < host_visible_heaps.size() && host_visible_heaps[heap_index])
+            {
+                summary.host_visible_bytes += heap.size;
+            }
+        }
+        return summary;
+    }
+
+    [[nodiscard]] VkPhysicalDeviceMemoryProperties query_device_memory_properties(VkPhysicalDevice physical_device)
+    {
+        VkPhysicalDeviceMemoryProperties memory_properties {};
+        vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+        return memory_properties;
+    }
+
+    [[nodiscard]] VkPhysicalDeviceDriverProperties query_device_driver_properties(VkPhysicalDevice physical_device)
+    {
+        VkPhysicalDeviceDriverProperties driver_properties {};
+        driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+
+        VkPhysicalDeviceProperties2 properties {};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &driver_properties;
+        vkGetPhysicalDeviceProperties2(physical_device, &properties);
+        return driver_properties;
+    }
+
+    struct SystemMemorySummary
+    {
+        bool available { false };
+        uint64_t total_physical_bytes { 0 };
+        uint64_t available_physical_bytes { 0 };
+    };
+
+    [[nodiscard]] SystemMemorySummary query_system_memory() noexcept
+    {
+        SystemMemorySummary summary;
+#if defined(_WIN32)
+        MEMORYSTATUSEX status {};
+        status.dwLength = sizeof(status);
+        if (GlobalMemoryStatusEx(&status) != 0)
+        {
+            summary.available = true;
+            summary.total_physical_bytes = static_cast<uint64_t>(status.ullTotalPhys);
+            summary.available_physical_bytes = static_cast<uint64_t>(status.ullAvailPhys);
+        }
+#endif
+        return summary;
     }
 
     [[nodiscard]] const char* device_type_name(VkPhysicalDeviceType type) noexcept
@@ -275,6 +469,9 @@ namespace Corona::Horizon
     struct DeviceCompatibilityReport
     {
         VkPhysicalDeviceProperties properties {};
+        VkPhysicalDeviceDriverProperties driver_properties {};
+        VkPhysicalDeviceMemoryProperties memory_properties {};
+        DeviceMemorySummary memory_summary {};
         std::vector<QueueFamilyInfo> queue_families;
         std::vector<std::string> requested_extensions;
         std::vector<std::string> missing_extensions;
@@ -357,8 +554,15 @@ namespace Corona::Horizon
                                                                          VkInstance instance)
     {
         DeviceCompatibilityReport report;
-        vkGetPhysicalDeviceProperties(physical_device, &report.properties);
+        report.driver_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+        VkPhysicalDeviceProperties2 properties {};
+        properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties.pNext = &report.driver_properties;
+        vkGetPhysicalDeviceProperties2(physical_device, &properties);
+        report.properties = properties.properties;
         report.api_supported = report.properties.apiVersion >= required_api_version;
+        report.memory_properties = query_device_memory_properties(physical_device);
+        report.memory_summary = summarize_device_memory(report.memory_properties);
 
         uint32_t queue_family_count = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, nullptr);
@@ -425,7 +629,36 @@ namespace Corona::Horizon
                << "  vendor_id: " << hex_u32(report.properties.vendorID) << '\n'
                << "  device_id: " << hex_u32(report.properties.deviceID) << '\n'
                << "  api_version: " << api_version_string(report.properties.apiVersion) << '\n'
-               << "  driver_version_raw: " << report.properties.driverVersion << '\n';
+               << "  driver_version_raw: " << report.properties.driverVersion << '\n'
+               << "  driver_name: " << (report.driver_properties.driverName[0] == '\0' ? "unknown" : report.driver_properties.driverName) << '\n'
+               << "  driver_info: " << (report.driver_properties.driverInfo[0] == '\0' ? "unknown" : report.driver_properties.driverInfo) << '\n'
+               << "  driver_id: " << static_cast<uint32_t>(report.driver_properties.driverID) << '\n'
+               << "  conformance_version: "
+               << static_cast<uint32_t>(report.driver_properties.conformanceVersion.major) << '.'
+               << static_cast<uint32_t>(report.driver_properties.conformanceVersion.minor) << '.'
+               << static_cast<uint32_t>(report.driver_properties.conformanceVersion.subminor) << '.'
+               << static_cast<uint32_t>(report.driver_properties.conformanceVersion.patch) << '\n'
+               << "  memory:\n"
+               << "    device_local: " << byte_size_string(report.memory_summary.device_local_bytes) << '\n'
+               << "    host_visible: " << byte_size_string(report.memory_summary.host_visible_bytes) << '\n'
+               << "    heaps:\n";
+
+        for (uint32_t heap_index = 0; heap_index < report.memory_properties.memoryHeapCount; ++heap_index)
+        {
+            const VkMemoryHeap& heap = report.memory_properties.memoryHeaps[heap_index];
+            stream << "      heap " << heap_index
+                   << ": size=" << byte_size_string(heap.size)
+                   << ", flags=" << memory_heap_flags_string(heap.flags) << '\n';
+        }
+
+        stream << "    types:\n";
+        for (uint32_t type_index = 0; type_index < report.memory_properties.memoryTypeCount; ++type_index)
+        {
+            const VkMemoryType& type = report.memory_properties.memoryTypes[type_index];
+            stream << "      type " << type_index
+                   << ": heap=" << type.heapIndex
+                   << ", flags=" << memory_property_flags_string(type.propertyFlags) << '\n';
+        }
 
         if (!report.api_supported)
         {
@@ -584,6 +817,13 @@ namespace Corona::Horizon
         });
     }
 
+    bool is_low_severity_loader_message(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity, const char* message_id) noexcept
+    {
+        const bool warning_or_error = (message_severity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                                           VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)) != 0;
+        return !warning_or_error && std::strcmp(message_id, "Loader Message") == 0;
+    }
+
     VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
                                                          VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                          const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
@@ -594,6 +834,11 @@ namespace Corona::Horizon
         const char* message = callback_data != nullptr && callback_data->pMessage != nullptr ? callback_data->pMessage : "<no message>";
         const char* message_id = callback_data != nullptr && callback_data->pMessageIdName != nullptr ? callback_data->pMessageIdName : "<no id>";
         const int32_t message_id_number = callback_data != nullptr ? callback_data->messageIdNumber : 0;
+
+        if (is_low_severity_loader_message(message_severity, message_id))
+        {
+            return VK_FALSE;
+        }
 
         std::ostringstream diagnostic;
         diagnostic << "severity=" << severity_name(message_severity)
@@ -1023,6 +1268,10 @@ namespace Corona::Horizon
             Diagnostics::write(loader_version >= required_api_version ? Diagnostics::Level::Info : Diagnostics::Level::Error,
                                "VULKAN PROFILE",
                                stream.str());
+
+            CFW_LOG_INFO("Vulkan loader API: {} (required {})",
+                         api_version_string(loader_version),
+                         api_version_string(required_api_version));
         });
     }
 
@@ -1143,7 +1392,7 @@ namespace Corona::Horizon
             try
             {
                 setup_debug_messenger();
-                // CFW_LOG_INFO("Khronos Validation Layer Active. Current Enables: {}", validation_feature_list());
+                CFW_LOG_INFO("Khronos Validation Layer Active. Current Enables: {}", validation_feature_list());
             }
             catch (...)
             {
@@ -1212,10 +1461,12 @@ namespace Corona::Horizon
 
         if (devices.empty())
         {
+            const std::string required_version = api_version_string(required_api_version);
             Diagnostics::write(Diagnostics::Level::Error,
                                "VULKAN PROFILE",
-                               "COMPATIBILITY FAIL: no Vulkan 1.4-capable GPU satisfied Horizon's required queue and feature profile.");
-            throw std::runtime_error("No compatible Vulkan 1.4-capable GPU found. See horizon-vulkan-diagnostics.txt.");
+                               "COMPATIBILITY FAIL: no Vulkan " + required_version +
+                                   "-capable GPU satisfied Horizon's required queue and feature profile.");
+            throw std::runtime_error("No compatible Vulkan " + required_version + "-capable GPU found. See horizon-vulkan-diagnostics.txt.");
         }
 
         devices_ = std::move(devices);
@@ -1286,9 +1537,48 @@ namespace Corona::Horizon
             return device_type_priority(left_type) < device_type_priority(right_type);
         });
 
-        CFW_LOG_DEBUG("Selected main device: {}", main_device_->device_manager.properties().properties.deviceName);
-        Diagnostics::write(Diagnostics::Level::Info,
-                           "VULKAN PROFILE",
-                           std::string("Selected main device: ") + main_device_->device_manager.properties().properties.deviceName);
+        const DeviceManager& device_manager = main_device_->device_manager;
+        const VkPhysicalDevice physical_device = device_manager.physical_device();
+        const VkPhysicalDeviceProperties& properties = device_manager.properties().properties;
+        const VkPhysicalDeviceMemoryProperties memory_properties = query_device_memory_properties(physical_device);
+        const DeviceMemorySummary memory_summary = summarize_device_memory(memory_properties);
+        const VkPhysicalDeviceDriverProperties driver_properties = query_device_driver_properties(physical_device);
+        const SystemMemorySummary system_memory = query_system_memory();
+        const char* driver_name = driver_properties.driverName[0] == '\0' ? "unknown" : driver_properties.driverName;
+        const char* driver_info = driver_properties.driverInfo[0] == '\0' ? "unknown" : driver_properties.driverInfo;
+
+        CFW_LOG_INFO("Vulkan GPU: {} ({}, API {}, driver: {} - {})",
+                     properties.deviceName,
+                     device_type_name(properties.deviceType),
+                     api_version_string(properties.apiVersion),
+                     driver_name,
+                     driver_info);
+        CFW_LOG_INFO("Vulkan device memory: VRAM={}, host-visible={}",
+                     byte_size_string(memory_summary.device_local_bytes),
+                     byte_size_string(memory_summary.host_visible_bytes));
+        if (system_memory.available)
+        {
+            CFW_LOG_INFO("System memory: total={}, available={}",
+                         byte_size_string(system_memory.total_physical_bytes),
+                         byte_size_string(system_memory.available_physical_bytes));
+        }
+        CFW_LOG_INFO("Vulkan queue families: {}", device_manager.queue_families().size());
+
+        std::ostringstream stream;
+        stream << "Selected main device: " << properties.deviceName << '\n'
+               << "  type: " << device_type_name(properties.deviceType) << '\n'
+               << "  api_version: " << api_version_string(properties.apiVersion) << '\n'
+               << "  driver_name: " << driver_name << '\n'
+               << "  driver_info: " << driver_info << '\n'
+               << "  device_local_memory: " << byte_size_string(memory_summary.device_local_bytes) << '\n'
+               << "  host_visible_memory: " << byte_size_string(memory_summary.host_visible_bytes) << '\n';
+        if (system_memory.available)
+        {
+            stream << "  system_memory_total: " << byte_size_string(system_memory.total_physical_bytes) << '\n'
+                   << "  system_memory_available: " << byte_size_string(system_memory.available_physical_bytes) << '\n';
+        }
+        stream << "  queue_families: " << device_manager.queue_families().size() << '\n';
+
+        Diagnostics::write(Diagnostics::Level::Info, "VULKAN PROFILE", stream.str());
     }
 }
