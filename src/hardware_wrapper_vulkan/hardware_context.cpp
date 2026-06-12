@@ -28,14 +28,12 @@ namespace Corona::Horizon
 
     HardwareContext g_hardware_context;
 
-    constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
+    constexpr uint32_t required_api_version = VK_API_VERSION_1_3;
 
 #if HORIZON_ENABLE_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
 
-    constexpr std::array<VkValidationFeatureEnableEXT, 5> enabled_validation_features {
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-        VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+    constexpr std::array<VkValidationFeatureEnableEXT, 3> enabled_validation_features {
         VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
         VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
@@ -634,7 +632,7 @@ namespace Corona::Horizon
         }
         else if ((message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) != 0)
         {
-            CFW_LOG_INFO("[Vulkan validation] {} ({}): {}", message_id, message_id_number, message);
+            // CFW_LOG_INFO("[Vulkan validation] {} ({}): {}", message_id, message_id_number, message);
         }
         else
         {
@@ -1145,7 +1143,7 @@ namespace Corona::Horizon
             try
             {
                 setup_debug_messenger();
-                CFW_LOG_INFO("Khronos Validation Layer Active. Current Enables: {}", validation_feature_list());
+                // CFW_LOG_INFO("Khronos Validation Layer Active. Current Enables: {}", validation_feature_list());
             }
             catch (...)
             {
