@@ -26,6 +26,7 @@ namespace EmbeddedShader
 
     // 将 slang-module 二进制输出为逗号分隔的 uint32_t 序列（不含外围大括号）
     void emitSlangModuleLiteral(std::ostream& out, const std::vector<uint8_t>& slangModule);
+	void emitCppStringLiteral(std::ostream& out, std::string_view text);
 
 	// ---- ShaderResources 序列化 ----
 

@@ -50,6 +50,48 @@ namespace EmbeddedShader
 	    }
 	}
 
+	// ---- C++ string literal serialization ----
+
+	void emitCppStringLiteral(std::ostream& out, std::string_view text)
+	{
+		out << '"';
+		for (unsigned char ch : text)
+		{
+			switch (ch)
+			{
+			case '\\':
+				out << "\\\\";
+				break;
+			case '"':
+				out << "\\\"";
+				break;
+			case '\n':
+				out << "\\n\"\n\"";
+				break;
+			case '\r':
+				out << "\\r";
+				break;
+			case '\t':
+				out << "\\t";
+				break;
+			default:
+				if (ch < 0x20)
+				{
+					out << '\\'
+						<< static_cast<char>('0' + ((ch >> 6) & 0x7))
+						<< static_cast<char>('0' + ((ch >> 3) & 0x7))
+						<< static_cast<char>('0' + (ch & 0x7));
+				}
+				else
+				{
+					out << static_cast<char>(ch);
+				}
+				break;
+			}
+		}
+		out << '"';
+	}
+
 	// ---- ShaderResources 序列化 ----
 
 	std::string serializeShaderResources(const ShaderCodeModule::ShaderResources& shaderResources)
