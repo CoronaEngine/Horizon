@@ -61,7 +61,7 @@ void run_example_default()
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    constexpr std::size_t TOTAL_WINDOWS = 2;
+    constexpr std::size_t TOTAL_WINDOWS = 16;
     std::vector<GLFWwindow*> windows(TOTAL_WINDOWS);
     for (size_t i = 0; i < windows.size(); i++)
     {

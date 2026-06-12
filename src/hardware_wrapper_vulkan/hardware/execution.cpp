@@ -12,6 +12,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <cstdlib>
 #include <string>
@@ -54,6 +55,46 @@ namespace Corona::Horizon
         {
             std::shared_ptr<IResourceRef> token = ResourceBridge::token(handle);
             return token ? token->id() : 0;
+        }
+
+        [[nodiscard]] bool same_queue(const QueueId& left, const QueueId& right) noexcept
+        {
+            return left.device == right.device &&
+                   left.family_index == right.family_index &&
+                   left.queue_index == right.queue_index;
+        }
+
+        void add_wait_once(std::vector<SubmitWait>& waits, SubmitWait wait)
+        {
+            if (wait.semaphore == VK_NULL_HANDLE)
+            {
+                return;
+            }
+
+            auto found = std::find_if(waits.begin(), waits.end(), [wait](const SubmitWait& item) {
+                return item.semaphore == wait.semaphore;
+            });
+            if (found != waits.end())
+            {
+                found->value = std::max(found->value, wait.value);
+                found->stages |= wait.stages;
+                return;
+            }
+
+            waits.push_back(wait);
+        }
+
+        [[nodiscard]] AccessKind merge_access(AccessKind left, AccessKind right) noexcept
+        {
+            if (left == right)
+            {
+                return left;
+            }
+            if (left == AccessKind::ReadWrite || right == AccessKind::ReadWrite)
+            {
+                return AccessKind::ReadWrite;
+            }
+            return AccessKind::ReadWrite;
         }
 
         using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
@@ -185,7 +226,7 @@ namespace Corona::Horizon
             case VK_IMAGE_LAYOUT_UNDEFINED:
                 return { fallback_stage, 0 };
             case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-                return { fallback_stage, 0 };
+                return { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
             case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
                 return { image_transfer_stages(), VK_ACCESS_2_TRANSFER_WRITE_BIT };
             case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
@@ -218,12 +259,14 @@ namespace Corona::Horizon
                               ImageWrap& image,
                               VkImageLayout new_layout,
                               VkPipelineStageFlags2 dst_stage,
-                              VkAccessFlags2 dst_access)
+                              VkAccessFlags2 dst_access,
+                              VkPipelineStageFlags2 source_fallback_stage = VK_PIPELINE_STAGE_2_NONE)
         {
             if (image.image_handle == VK_NULL_HANDLE || image.image_layout == new_layout)
                 return;
 
-            const ImageBarrierScope source_scope = source_scope_for_layout(image.image_layout, dst_stage);
+            const VkPipelineStageFlags2 fallback_stage = source_fallback_stage != VK_PIPELINE_STAGE_2_NONE ? source_fallback_stage : dst_stage;
+            const ImageBarrierScope source_scope = source_scope_for_layout(image.image_layout, fallback_stage);
 
             VkImageMemoryBarrier2 barrier {};
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -389,6 +432,145 @@ namespace Corona::Horizon
             AccessKind access { AccessKind::Read };
             size_t submission { 0 };
         };
+
+        struct SubmittedResourceUse
+        {
+            AccessKind access { AccessKind::Read };
+            SubmissionToken token {};
+        };
+
+        class ResourceSubmissionTracker
+        {
+        public:
+            class Guard
+            {
+            public:
+                Guard(ResourceSubmissionTracker& tracker,
+                      const CompiledSubmission& submission,
+                      const QueueId& queue,
+                      std::vector<SubmitWait>& waits)
+                    : tracker_(tracker),
+                      lock_(tracker_.mutex_),
+                      access_(collect_access(submission))
+                {
+                    tracker_.append_waits_locked(access_, queue, waits);
+                }
+
+                Guard(const Guard&) = delete;
+                Guard& operator=(const Guard&) = delete;
+
+                void remember(const SubmissionToken& token)
+                {
+                    tracker_.remember_locked(access_, token);
+                }
+
+            private:
+                ResourceSubmissionTracker& tracker_;
+                std::unique_lock<std::mutex> lock_;
+                std::unordered_map<std::uintptr_t, AccessKind> access_;
+            };
+
+            [[nodiscard]] Guard lock_submission(const CompiledSubmission& submission,
+                                                const QueueId& queue,
+                                                std::vector<SubmitWait>& waits)
+            {
+                return Guard(*this, submission, queue, waits);
+            }
+
+        private:
+            static void add_access(std::unordered_map<std::uintptr_t, AccessKind>& access,
+                                   const ResourceHandle& handle,
+                                   AccessKind kind)
+            {
+                const std::uintptr_t id = resource_id(handle);
+                if (id == 0)
+                {
+                    return;
+                }
+
+                auto [position, inserted] = access.emplace(id, kind);
+                if (!inserted)
+                {
+                    position->second = merge_access(position->second, kind);
+                }
+            }
+
+            [[nodiscard]] static std::unordered_map<std::uintptr_t, AccessKind> collect_access(const CompiledSubmission& submission)
+            {
+                std::unordered_map<std::uintptr_t, AccessKind> access;
+
+                for (const CommandIR& command : submission.commands)
+                {
+                    if (command.op == CommandOp::Present && !command.payload.present.swapchain_image.handle)
+                    {
+                        continue;
+                    }
+
+                    for (const ResourceUse& use : command.resources)
+                    {
+                        add_access(access, use.handle, use.access);
+                    }
+
+                    if (command.op == CommandOp::Present)
+                    {
+                        add_access(access, command.payload.present.swapchain_image.handle, AccessKind::Write);
+                    }
+                }
+
+                return access;
+            }
+
+            void append_waits_locked(const std::unordered_map<std::uintptr_t, AccessKind>& access,
+                                     const QueueId& queue,
+                                     std::vector<SubmitWait>& waits) const
+            {
+                for (const auto& [id, current_access] : access)
+                {
+                    const auto found = last_uses_.find(id);
+                    if (found == last_uses_.end())
+                    {
+                        continue;
+                    }
+
+                    const SubmittedResourceUse& last_use = found->second;
+                    if (!has_hazard(last_use.access, current_access) || same_queue(last_use.token.queue, queue))
+                    {
+                        continue;
+                    }
+
+                    const VkSemaphore timeline = timeline_semaphore(last_use.token);
+                    if (timeline == VK_NULL_HANDLE || last_use.token.value == 0)
+                    {
+                        continue;
+                    }
+
+                    add_wait_once(waits, { timeline, last_use.token.value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                }
+            }
+
+            void remember_locked(const std::unordered_map<std::uintptr_t, AccessKind>& access,
+                                 const SubmissionToken& token)
+            {
+                if (timeline_semaphore(token) == VK_NULL_HANDLE || token.value == 0)
+                {
+                    return;
+                }
+
+                for (const auto& [id, current_access] : access)
+                {
+                    last_uses_[id] = { current_access, token };
+                }
+            }
+
+            std::mutex mutex_;
+            std::unordered_map<std::uintptr_t, SubmittedResourceUse> last_uses_;
+        };
+
+        ResourceSubmissionTracker& resource_submission_tracker()
+        {
+            static ResourceSubmissionTracker tracker;
+            return tracker;
+        }
 
         struct RetireCallback
         {
@@ -1403,7 +1585,8 @@ namespace Corona::Horizon
                                  *dst,
                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                  image_transfer_stages(),
-                                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
+                                 VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
                 if (src->image_format == dst->image_format &&
                     src_extent.width == dst_extent.width &&
@@ -1727,7 +1910,7 @@ namespace Corona::Horizon
                     const VkSemaphore timeline = timeline_semaphore(token);
                     if (timeline != VK_NULL_HANDLE && token.value != 0)
                     {
-                        waits.push_back({ timeline, token.value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                        add_wait_once(waits, { timeline, token.value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
                     }
                 }
 
@@ -1740,17 +1923,20 @@ namespace Corona::Horizon
 
                     const std::optional<SubmissionToken>& token = submitted_tokens[dependency.producer];
                     const VkSemaphore timeline = token ? timeline_semaphore(*token) : VK_NULL_HANDLE;
-                    if (timeline != VK_NULL_HANDLE)
+                    if (timeline != VK_NULL_HANDLE && token->value != 0)
                     {
-                        waits.push_back({ timeline, token->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
+                        add_wait_once(waits, { timeline, token->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT });
                     }
                 }
+
+                auto tracked_submission = resource_submission_tracker().lock_submission(compiled_submission, queue.id(), waits);
 
                 QueueSubmission queue_submission;
                 queue_submission.command_buffer = std::move(compiled_submission.command_buffer);
                 queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
                 tokens.push_back(queue.submit(queue_submission, waits, compiled_submission.signals));
                 submitted_tokens[submission_index] = tokens.back();
+                tracked_submission.remember(tokens.back());
             }
             catch (...)
             {
