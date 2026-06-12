@@ -23,26 +23,6 @@ const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
 const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
-
-Corona::Horizon::HardwareImage create_output_image()
-{
-    Corona::Horizon::HardwareImage image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        glsl_width, glsl_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
-        "example_glsl.output"));
-    image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
-    return image;
-}
-
-Corona::Horizon::HardwareImage create_depth_image()
-{
-    Corona::Horizon::HardwareImage image(
-        Corona::Horizon::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, Corona::Horizon::Format::D32, "example_glsl.depth"));
-    image.set_clear_depth(1.0f, 0);
-    return image;
-}
 } // namespace
 
 void run_example_glsl()
@@ -53,8 +33,19 @@ void run_example_glsl()
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
     Corona::Horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
-    Corona::Horizon::HardwareImage final_output_image = create_output_image();
-    Corona::Horizon::HardwareImage depth_image = create_depth_image();
+
+    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
+        glsl_width, glsl_height, Corona::Horizon::Format::RGBA16_FLOAT,
+        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
+            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
+            Corona::Horizon::ImageUsageFlags::TransferDst,
+        "example_glsl.output"));
+    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+
+    Corona::Horizon::HardwareImage depth_image(
+        Corona::Horizon::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, Corona::Horizon::Format::D32, "example_glsl.depth"));
+    depth_image.set_clear_depth(1.0f, 0);
+
     Corona::Horizon::HardwareBuffer vertex_buffer = Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, "example_glsl.vertex");
     Corona::Horizon::HardwareBuffer index_buffer = Corona::Horizon::HardwareBuffer::index(mesh.indices, "example_glsl.index");
     Corona::Horizon::HardwareExecutor render_executor;

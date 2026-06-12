@@ -69,36 +69,6 @@ std::array<Corona::Horizon::BindingSlot, Count> reflected_uniform_member_slots(c
     }
     return slots;
 }
-
-// EDSL 按行主序喂入 shader，故对 glm（列主序）结果转置。
-baseline::UniformBufferObject make_ubo(float time_seconds)
-{
-    baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
-    ubo.model = glm::transpose(ubo.model);
-    ubo.view = glm::transpose(ubo.view);
-    ubo.proj = glm::transpose(ubo.proj);
-    return ubo;
-}
-
-Corona::Horizon::HardwareImage create_output_image()
-{
-    Corona::Horizon::HardwareImage image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        edsl_width, edsl_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
-        "example_edsl.output"));
-    image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
-    return image;
-}
-
-Corona::Horizon::HardwareImage create_depth_image()
-{
-    Corona::Horizon::HardwareImage image(
-        Corona::Horizon::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, Corona::Horizon::Format::D32, "example_edsl.depth"));
-    image.set_clear_depth(1.0f, 0);
-    return image;
-}
 } // namespace
 
 void run_example_edsl()
@@ -109,8 +79,19 @@ void run_example_edsl()
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
     Corona::Horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
-    Corona::Horizon::HardwareImage final_output_image = create_output_image();
-    Corona::Horizon::HardwareImage depth_image = create_depth_image();
+
+    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
+        edsl_width, edsl_height, Corona::Horizon::Format::RGBA16_FLOAT,
+        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
+            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
+            Corona::Horizon::ImageUsageFlags::TransferDst,
+        "example_edsl.output"));
+    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+
+    Corona::Horizon::HardwareImage depth_image(
+        Corona::Horizon::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, Corona::Horizon::Format::D32, "example_edsl.depth"));
+    depth_image.set_clear_depth(1.0f, 0);
+
     Corona::Horizon::HardwareBuffer vertex_buffer = Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
     Corona::Horizon::HardwareBuffer index_buffer = Corona::Horizon::HardwareBuffer::index(mesh.indices, "example_edsl.index");
     Corona::Horizon::HardwareExecutor render_executor;
@@ -158,10 +139,11 @@ void run_example_edsl()
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
-        baseline::UniformBufferObject ubo = make_ubo(time_seconds);
-        rasterizer[uniform_bindings[0]] = ubo.model;
-        rasterizer[uniform_bindings[1]] = ubo.view;
-        rasterizer[uniform_bindings[2]] = ubo.proj;
+        // EDSL 按行主序喂入 shader，故对 glm（列主序）结果转置。
+        baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
+        rasterizer[uniform_bindings[0]] = glm::transpose(ubo.model);
+        rasterizer[uniform_bindings[1]] = glm::transpose(ubo.view);
+        rasterizer[uniform_bindings[2]] = glm::transpose(ubo.proj);
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
