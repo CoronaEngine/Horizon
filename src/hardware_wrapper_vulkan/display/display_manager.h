@@ -35,6 +35,11 @@ namespace Corona::Horizon
         PresentResult immediate_result {};
     };
 
+    [[nodiscard]] constexpr VkPipelineStageFlags2 display_acquire_wait_stages() noexcept
+    {
+        return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    }
+
     class DisplayManager
     {
     public:
