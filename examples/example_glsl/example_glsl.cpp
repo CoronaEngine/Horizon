@@ -21,8 +21,6 @@
 #include <utility>
 #include <vector>
 
-namespace H = Corona::Horizon;
-
 namespace
 {
 constexpr uint32_t glsl_width = 800;
@@ -55,24 +53,24 @@ baseline::UniformBufferObject make_ubo(float time_seconds)
     return baseline::make_ubo(time_seconds, glsl_width / static_cast<float>(glsl_height));
 }
 
-H::HardwareImage create_output_image()
+Corona::Horizon::HardwareImage create_output_image()
 {
-    H::HardwareImage image(
-        H::HardwareImageDesc::texture_2d(glsl_width,
+    Corona::Horizon::HardwareImage image(
+        Corona::Horizon::HardwareImageDesc::texture_2d(glsl_width,
                                          glsl_height,
-                                         H::Format::RGBA16_FLOAT,
-                                         H::ImageUsageFlags::Storage | H::ImageUsageFlags::ColorAttachment |
-                                             H::ImageUsageFlags::Sampled | H::ImageUsageFlags::TransferSrc |
-                                             H::ImageUsageFlags::TransferDst,
+                                         Corona::Horizon::Format::RGBA16_FLOAT,
+                                         Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
+                                             Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
+                                             Corona::Horizon::ImageUsageFlags::TransferDst,
                                          "example_glsl.output"));
     image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
     return image;
 }
 
-H::HardwareImage create_depth_image()
+Corona::Horizon::HardwareImage create_depth_image()
 {
-    H::HardwareImage image(
-        H::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, H::Format::D32, "example_glsl.depth"));
+    Corona::Horizon::HardwareImage image(
+        Corona::Horizon::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, Corona::Horizon::Format::D32, "example_glsl.depth"));
     image.set_clear_depth(1.0f, 0);
     return image;
 }
@@ -100,29 +98,29 @@ void run_example_glsl()
         if (!texture_result.success)
             throw std::runtime_error("failed to load GLSL baseline texture: " + viking_room_texture_path.string());
 
-        H::HardwareImage texture_image = texture_result.texture;
-        H::HardwareImage final_output_image = create_output_image();
-        H::HardwareImage depth_image = create_depth_image();
-        H::HardwareBuffer vertex_buffer = H::HardwareBuffer::vertex(mesh.vertices, "example_glsl.vertex");
-        H::HardwareBuffer index_buffer = H::HardwareBuffer::index(mesh.indices, "example_glsl.index");
-        H::HardwareExecutor render_executor;
-        H::HardwareExecutor display_executor;
-        H::HardwareDisplayer display(glfwGetWin32Window(window));
+        Corona::Horizon::HardwareImage texture_image = texture_result.texture;
+        Corona::Horizon::HardwareImage final_output_image = create_output_image();
+        Corona::Horizon::HardwareImage depth_image = create_depth_image();
+        Corona::Horizon::HardwareBuffer vertex_buffer = Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, "example_glsl.vertex");
+        Corona::Horizon::HardwareBuffer index_buffer = Corona::Horizon::HardwareBuffer::index(mesh.indices, "example_glsl.index");
+        Corona::Horizon::HardwareExecutor render_executor;
+        Corona::Horizon::HardwareExecutor display_executor;
+        Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
         // 复用自动生成的反射模块创建管线，对齐 example_default 的 GLSL 路径。
-        H::RasterizerPipelineDesc rasterizer_desc(
-            H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Vertex, baseline_vert_glsl::slangModule),
-            H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Fragment, baseline_frag_glsl::slangModule));
-        rasterizer_desc.set_depth_attachment(H::DepthAttachmentDesc::with_format(H::Format::D32, "example_glsl.depth"));
+        Corona::Horizon::RasterizerPipelineDesc rasterizer_desc(
+            Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Vertex, baseline_vert_glsl::slangModule),
+            Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Fragment, baseline_frag_glsl::slangModule));
+        rasterizer_desc.set_depth_attachment(Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth"));
         rasterizer_desc.set_debug_name("example_glsl.baseline_rasterizer");
 
-        H::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
+        Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
         rasterizer[baseline_frag_glsl::outColor] = final_output_image;
         rasterizer.bind_depth_target(depth_image);
         rasterizer[baseline_frag_glsl::texSampler] = texture_image;
 
-        H::DrawIndexedParams draw_params;
-        draw_params.index_type = H::IndexType::UInt32;
+        Corona::Horizon::DrawIndexedParams draw_params;
+        draw_params.index_type = Corona::Horizon::IndexType::UInt32;
         draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
         const auto start_time = std::chrono::high_resolution_clock::now();
@@ -143,14 +141,14 @@ void run_example_glsl()
             rasterizer.clear_records();
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-            H::SubmitReceipt render_receipt = render_executor
+            Corona::Horizon::SubmitReceipt render_receipt = render_executor
                 << rasterizer(glsl_width, glsl_height)
-                << H::submit;
+                << Corona::Horizon::submit;
 
             display_executor.wait(render_receipt);
             (void)(display_executor.stream()
-                << H::present(display, final_output_image)
-                << H::commit());
+                << Corona::Horizon::present(display, final_output_image)
+                << Corona::Horizon::commit());
         }
     }
     catch (...)

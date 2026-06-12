@@ -22,8 +22,6 @@
 #include <utility>
 #include <vector>
 
-namespace H = Corona::Horizon;
-
 struct BaselineEdslVertexProxy
 {
     EmbeddedShader::Float3 pos;
@@ -43,9 +41,9 @@ const std::filesystem::path viking_room_texture_path =
 
 using ShaderResources = EmbeddedShader::ShaderCodeModule::ShaderResources;
 
-H::BindingSlot make_binding_slot(const ShaderResources::ShaderBindInfo& info) noexcept
+Corona::Horizon::BindingSlot make_binding_slot(const ShaderResources::ShaderBindInfo& info) noexcept
 {
-    H::BindingSlot slot;
+    Corona::Horizon::BindingSlot slot;
     slot.byte_offset = info.byteOffset;
     slot.type_size = info.typeSize;
     slot.bind_type = static_cast<int32_t>(info.bindType);
@@ -56,7 +54,7 @@ H::BindingSlot make_binding_slot(const ShaderResources::ShaderBindInfo& info) no
 }
 
 template <size_t Count>
-std::array<H::BindingSlot, Count> reflected_uniform_member_slots(const ShaderResources& resources, uint32_t type_size)
+std::array<Corona::Horizon::BindingSlot, Count> reflected_uniform_member_slots(const ShaderResources& resources, uint32_t type_size)
 {
     std::vector<ShaderResources::ShaderBindInfo> members;
     for (const auto& info : resources.bindInfoPool)
@@ -82,7 +80,7 @@ std::array<H::BindingSlot, Count> reflected_uniform_member_slots(const ShaderRes
                                  " reflected UBO members, got " + std::to_string(members.size()) + ".");
     }
 
-    std::array<H::BindingSlot, Count> slots {};
+    std::array<Corona::Horizon::BindingSlot, Count> slots {};
     for (size_t i = 0; i < Count; ++i)
         slots[i] = make_binding_slot(members[i]);
 
@@ -112,24 +110,24 @@ baseline::UniformBufferObject make_ubo(float time_seconds)
     return ubo;
 }
 
-H::HardwareImage create_output_image()
+Corona::Horizon::HardwareImage create_output_image()
 {
-    H::HardwareImage image(
-        H::HardwareImageDesc::texture_2d(edsl_width,
+    Corona::Horizon::HardwareImage image(
+        Corona::Horizon::HardwareImageDesc::texture_2d(edsl_width,
                                          edsl_height,
-                                         H::Format::RGBA16_FLOAT,
-                                         H::ImageUsageFlags::Storage | H::ImageUsageFlags::ColorAttachment |
-                                             H::ImageUsageFlags::Sampled | H::ImageUsageFlags::TransferSrc |
-                                             H::ImageUsageFlags::TransferDst,
+                                         Corona::Horizon::Format::RGBA16_FLOAT,
+                                         Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
+                                             Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
+                                             Corona::Horizon::ImageUsageFlags::TransferDst,
                                          "example_edsl.output"));
     image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
     return image;
 }
 
-H::HardwareImage create_depth_image()
+Corona::Horizon::HardwareImage create_depth_image()
 {
-    H::HardwareImage image(
-        H::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, H::Format::D32, "example_edsl.depth"));
+    Corona::Horizon::HardwareImage image(
+        Corona::Horizon::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, Corona::Horizon::Format::D32, "example_edsl.depth"));
     image.set_clear_depth(1.0f, 0);
     return image;
 }
@@ -157,14 +155,14 @@ void run_example_edsl()
         if (!texture_result.success)
             throw std::runtime_error("failed to load EDSL baseline texture: " + viking_room_texture_path.string());
 
-        H::HardwareImage texture_image = texture_result.texture;
-        H::HardwareImage final_output_image = create_output_image();
-        H::HardwareImage depth_image = create_depth_image();
-        H::HardwareBuffer vertex_buffer = H::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
-        H::HardwareBuffer index_buffer = H::HardwareBuffer::index(mesh.indices, "example_edsl.index");
-        H::HardwareExecutor render_executor;
-        H::HardwareExecutor display_executor;
-        H::HardwareDisplayer display(glfwGetWin32Window(window));
+        Corona::Horizon::HardwareImage texture_image = texture_result.texture;
+        Corona::Horizon::HardwareImage final_output_image = create_output_image();
+        Corona::Horizon::HardwareImage depth_image = create_depth_image();
+        Corona::Horizon::HardwareBuffer vertex_buffer = Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
+        Corona::Horizon::HardwareBuffer index_buffer = Corona::Horizon::HardwareBuffer::index(mesh.indices, "example_edsl.index");
+        Corona::Horizon::HardwareExecutor render_executor;
+        Corona::Horizon::HardwareExecutor display_executor;
+        Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
         using namespace EmbeddedShader;
         using namespace ktm;
@@ -186,23 +184,23 @@ void run_example_edsl()
             final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
         };
 
-        H::RasterizerPipelineDesc rasterizer_desc =
-            H::RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader);
-        rasterizer_desc.set_depth_attachment(H::DepthAttachmentDesc::with_format(H::Format::D32, "example_edsl.depth"));
+        Corona::Horizon::RasterizerPipelineDesc rasterizer_desc =
+            Corona::Horizon::RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader);
+        rasterizer_desc.set_depth_attachment(Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth"));
         rasterizer_desc.set_debug_name("example_edsl.baseline_rasterizer");
 
         const auto uniform_bindings =
             reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources,
                                               static_cast<uint32_t>(sizeof(glm::mat4)));
-        const H::BindingSlot& model_binding = uniform_bindings[0];
-        const H::BindingSlot& view_binding = uniform_bindings[1];
-        const H::BindingSlot& proj_binding = uniform_bindings[2];
+        const Corona::Horizon::BindingSlot& model_binding = uniform_bindings[0];
+        const Corona::Horizon::BindingSlot& view_binding = uniform_bindings[1];
+        const Corona::Horizon::BindingSlot& proj_binding = uniform_bindings[2];
 
-        H::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
+        Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
         rasterizer.bind_depth_target(depth_image);
 
-        H::DrawIndexedParams draw_params;
-        draw_params.index_type = H::IndexType::UInt32;
+        Corona::Horizon::DrawIndexedParams draw_params;
+        draw_params.index_type = Corona::Horizon::IndexType::UInt32;
         draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
         const auto start_time = std::chrono::high_resolution_clock::now();
@@ -222,14 +220,14 @@ void run_example_edsl()
             rasterizer.clear_records();
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-            H::SubmitReceipt render_receipt = render_executor
+            Corona::Horizon::SubmitReceipt render_receipt = render_executor
                 << rasterizer(edsl_width, edsl_height)
-                << H::submit;
+                << Corona::Horizon::submit;
 
             display_executor.wait(render_receipt);
             (void)(display_executor.stream()
-                << H::present(display, final_output_image)
-                << H::commit());
+                << Corona::Horizon::present(display, final_output_image)
+                << Corona::Horizon::commit());
         }
     }
     catch (...)

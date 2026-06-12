@@ -30,8 +30,6 @@
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
 
-namespace H = Corona::Horizon;
-
 // 通过 CMake helicon_compile_shaders 自动编译生成的 shader 反射头文件
 // eDSL 路径不再依赖 GLSL 反射头文件，render target 通过 bindRenderTarget 自动绑定
 #include GLSL(shaders/default_vert.glsl)
@@ -91,25 +89,25 @@ void run_example_default()
     std::exception_ptr workerException;
 
     {
-        std::vector<H::HardwareImage> finalOutputImages(windows.size());
+        std::vector<Corona::Horizon::HardwareImage> finalOutputImages(windows.size());
         // 默认构造的 HardwareExecutor 已自动解析主设备上对应能力的队列，
         // 无需手写 QueueResolver。仅在需要固定/自定义队列调度时才传入 resolver。
-        std::vector<std::unique_ptr<H::HardwareExecutor>> renderExecutors;
+        std::vector<std::unique_ptr<Corona::Horizon::HardwareExecutor>> renderExecutors;
         renderExecutors.reserve(windows.size());
         for (size_t i = 0; i < windows.size(); ++i)
-            renderExecutors.push_back(std::make_unique<H::HardwareExecutor>());
-        std::vector<H::HardwareExecutor> displayExecutors(windows.size());
-        std::array<H::SubmitReceipt, TOTAL_WINDOWS> latestRenderReceipts;
+            renderExecutors.push_back(std::make_unique<Corona::Horizon::HardwareExecutor>());
+        std::vector<Corona::Horizon::HardwareExecutor> displayExecutors(windows.size());
+        std::array<Corona::Horizon::SubmitReceipt, TOTAL_WINDOWS> latestRenderReceipts;
         std::array<std::mutex, TOTAL_WINDOWS> frameSubmitMutexes;
         for (size_t i = 0; i < finalOutputImages.size(); i++)
         {
-            finalOutputImages[i] = H::HardwareImage(
-                H::HardwareImageDesc::texture_2d(1920,
+            finalOutputImages[i] = Corona::Horizon::HardwareImage(
+                Corona::Horizon::HardwareImageDesc::texture_2d(1920,
                                                  1080,
-                                                 H::Format::RGBA16_FLOAT,
-                                                 H::ImageUsageFlags::Storage | H::ImageUsageFlags::ColorAttachment |
-                                                     H::ImageUsageFlags::Sampled | H::ImageUsageFlags::TransferSrc |
-                                                     H::ImageUsageFlags::TransferDst,
+                                                 Corona::Horizon::Format::RGBA16_FLOAT,
+                                                 Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
+                                                     Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
+                                                     Corona::Horizon::ImageUsageFlags::TransferDst,
                                                  "example_default.output"));
             finalOutputImages[i].set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
         }
@@ -140,9 +138,9 @@ void run_example_default()
         }
 
         uint32_t textureID = textureResult.descriptorID;
-        H::HardwareImage texture = textureResult.texture;
+        Corona::Horizon::HardwareImage texture = textureResult.texture;
 
-        std::vector<std::vector<H::HardwareBuffer>> rasterizerStorageBuffers(windows.size());
+        std::vector<std::vector<Corona::Horizon::HardwareBuffer>> rasterizerStorageBuffers(windows.size());
 
         std::atomic_bool running = true;
 
@@ -158,7 +156,7 @@ void run_example_default()
         };
 
         auto colorOnlyDepthStencil = []() {
-            H::DepthStencilStateDesc depthStencil;
+            Corona::Horizon::DepthStencilStateDesc depthStencil;
             depthStencil.depth_test_enabled = false;
             depthStencil.depth_write_enabled = false;
             depthStencil.stencil_test_enabled = false;
@@ -177,9 +175,9 @@ void run_example_default()
                 initialData.textureIndex = textureID;
                 initialData.model = modelMat[i];
                 rasterizerStorageBuffers[threadIndex].push_back(
-                    H::HardwareBuffer::from_bytes(as_storage_bytes(initialData),
+                    Corona::Horizon::HardwareBuffer::from_bytes(as_storage_bytes(initialData),
                                                   sizeof(RasterizerStorageBufferObject),
-                                                  H::BufferUsageFlags::TransferSrc | H::BufferUsageFlags::TransferDst | H::BufferUsageFlags::Storage));
+                                                  Corona::Horizon::BufferUsageFlags::TransferSrc | Corona::Horizon::BufferUsageFlags::TransferDst | Corona::Horizon::BufferUsageFlags::Storage));
             }
 
             auto startTime = std::chrono::high_resolution_clock::now();
@@ -298,21 +296,21 @@ void run_example_default()
             };
 
             // 从 lambda 创建管线，bindOutputTargets 自动绑定 render target
-            auto rasterizerDesc = H::RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda);
+            auto rasterizerDesc = Corona::Horizon::RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda);
             rasterizerDesc.set_depth_stencil(colorOnlyDepthStencil());
-            H::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
+            Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
             rasterizer.bind_output_targets(finalOutputImages[threadIndex]);
 
             // 从 lambda 创建 compute 管线，auto-bind 资源
-            H::ComputePipeline computer(H::ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1)));
+            Corona::Horizon::ComputePipeline computer(Corona::Horizon::ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1)));
 
             auto startTime = std::chrono::high_resolution_clock::now();
-            H::HardwareBuffer indexBuffer = H::HardwareBuffer::index(indices);
-            std::vector<H::HardwareBuffer> vertexBuffers;
+            Corona::Horizon::HardwareBuffer indexBuffer = Corona::Horizon::HardwareBuffer::index(indices);
+            std::vector<Corona::Horizon::HardwareBuffer> vertexBuffers;
             std::vector<std::vector<SimpleVertex>> transformedVertices(OBJECT_COUNT, simpleVertices);
             vertexBuffers.reserve(OBJECT_COUNT);
             for (size_t i = 0; i < OBJECT_COUNT; i++)
-                vertexBuffers.push_back(H::HardwareBuffer::vertex(transformedVertices[i]));
+                vertexBuffers.push_back(Corona::Horizon::HardwareBuffer::vertex(transformedVertices[i]));
 
             while (running.load())
             {
@@ -334,7 +332,7 @@ void run_example_default()
                     latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex]
                         << rasterizer(1920, 1080)
                         << computer(1920 / 8, 1080 / 8, 1)
-                        << H::submit;
+                        << Corona::Horizon::submit;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
@@ -352,29 +350,29 @@ void run_example_default()
             try
             {
             // 简化后的 shader 无需 push constant / UBO，仅做 pass-through
-            H::RasterizerPipelineDesc rasterizerDesc(
-                H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Vertex, default_vert_glsl::slangModule),
-                H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Fragment, default_frag_glsl::slangModule));
+            Corona::Horizon::RasterizerPipelineDesc rasterizerDesc(
+                Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Vertex, default_vert_glsl::slangModule),
+                Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Fragment, default_frag_glsl::slangModule));
             rasterizerDesc.set_depth_stencil(colorOnlyDepthStencil());
-            H::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
+            Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
 
             // 绑定 render target
             rasterizer[default_frag_glsl::outColor] = finalOutputImages[threadIndex];
 
             // compute 管线保持不变
-            H::ComputePipeline computer(H::ComputePipelineDesc(
-                H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Compute, default_compute_glsl::slangModule),
+            Corona::Horizon::ComputePipeline computer(Corona::Horizon::ComputePipelineDesc(
+                Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Compute, default_compute_glsl::slangModule),
                 ktm::uvec3(8, 8, 1)));
             uint32_t computeImageDescriptorID = finalOutputImages[threadIndex].store_storage_descriptor();
             computer[default_compute_glsl::globalParams::imageID] = computeImageDescriptorID;
 
             auto startTime = std::chrono::high_resolution_clock::now();
-            H::HardwareBuffer indexBuffer = H::HardwareBuffer::index(indices);
-            std::vector<H::HardwareBuffer> vertexBuffers;
+            Corona::Horizon::HardwareBuffer indexBuffer = Corona::Horizon::HardwareBuffer::index(indices);
+            std::vector<Corona::Horizon::HardwareBuffer> vertexBuffers;
             std::vector<std::vector<SimpleVertex>> transformedVertices(OBJECT_COUNT, simpleVertices);
             vertexBuffers.reserve(OBJECT_COUNT);
             for (size_t i = 0; i < OBJECT_COUNT; i++)
-                vertexBuffers.push_back(H::HardwareBuffer::vertex(transformedVertices[i]));
+                vertexBuffers.push_back(Corona::Horizon::HardwareBuffer::vertex(transformedVertices[i]));
 
             while (running.load())
             {
@@ -396,7 +394,7 @@ void run_example_default()
                     latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex]
                         << rasterizer(1920, 1080)
                         << computer(1920 / 8, 1080 / 8, 1)
-                        << H::submit;
+                        << Corona::Horizon::submit;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
@@ -410,7 +408,7 @@ void run_example_default()
         auto displayThread = [&](uint32_t threadIndex) {
             try
             {
-            H::HardwareDisplayer displayManager = H::HardwareDisplayer(glfwGetWin32Window(windows[threadIndex]));
+            Corona::Horizon::HardwareDisplayer displayManager = Corona::Horizon::HardwareDisplayer(glfwGetWin32Window(windows[threadIndex]));
 
             while (running.load())
             {
@@ -420,8 +418,8 @@ void run_example_default()
                     // DLSS-style insertion point: display consumes the rendered image,
                     // then present copies it into the swapchain.
                     (void)(displayExecutors[threadIndex].stream()
-                        << H::present(displayManager, finalOutputImages[threadIndex])
-                        << H::commit());
+                        << Corona::Horizon::present(displayManager, finalOutputImages[threadIndex])
+                        << Corona::Horizon::commit());
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
