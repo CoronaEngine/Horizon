@@ -7,6 +7,7 @@
         .\tools\dev.ps1 status
         .\tools\dev.ps1 configure
         .\tools\dev.ps1 build Horizon
+        .\tools\dev.ps1 build Horizon -Configuration Release
         .\tools\dev.ps1 format-check
         .\tools\dev.ps1 format
         .\tools\dev.ps1 format src/hardware_wrapper_vulkan
@@ -16,6 +17,10 @@ Param(
     [Parameter(Position = 0)]
     [ValidateSet("status", "configure", "build", "format-check", "format")]
     [string]$Command = "status",
+
+    [Parameter()]
+    [ValidateSet("Debug", "Release", "RelWithDebInfo", "MinSizeRel")]
+    [string]$Configuration = "Debug",
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [ValidateNotNullOrEmpty()]
@@ -38,6 +43,22 @@ function Invoke-NativeCommand {
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
+    }
+}
+
+function Assert-MsvcDeveloperEnvironment {
+    $compiler = Get-Command "cl.exe" -ErrorAction SilentlyContinue
+    if ($null -eq $compiler -or [string]::IsNullOrWhiteSpace($env:INCLUDE)) {
+        throw "MSVC developer environment is not initialized. Run this command from a Visual Studio Developer PowerShell or Developer Command Prompt. Plain PowerShell may fail to find standard library headers."
+    }
+}
+
+function Get-MsvcBuildPreset {
+    switch ($Configuration) {
+        "Debug" { return "msvc-debug" }
+        "Release" { return "msvc-release" }
+        "RelWithDebInfo" { return "msvc-relwithdebinfo" }
+        "MinSizeRel" { return "msvc-minsizerel" }
     }
 }
 
@@ -74,10 +95,12 @@ try {
             Invoke-NativeCommand -FilePath "cmake" -Arguments @("--list-presets")
         }
         "configure" {
+            Assert-MsvcDeveloperEnvironment
             Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "ninja-msvc")
         }
         "build" {
-            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", "--preset", "msvc-debug", "--target", $Target[0])
+            Assert-MsvcDeveloperEnvironment
+            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", "--preset", (Get-MsvcBuildPreset), "--target", $Target[0])
         }
         "format-check" {
             Invoke-FormatScript -CheckOnly $true

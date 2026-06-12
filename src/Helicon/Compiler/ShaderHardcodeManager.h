@@ -5,7 +5,7 @@
 
 // 非 Debug 模式下，且编译器支持 __has_include，
 // 并且能找到生成的 HardcodeShaders.h 时，才启用 hardcode shader
-#if !defined(CABBAGE_ENGINE_DEBUG) && defined(__has_include) && __has_include(<Compiler/HardcodeShaders/HardcodeShaders.h>)
+#if defined(HELICON_ENABLE_HARDCODE_SHADERS) && !defined(CABBAGE_ENGINE_DEBUG) && defined(__has_include) && __has_include(<Compiler/HardcodeShaders/HardcodeShaders.h>)
 #include <Compiler/HardcodeShaders/HardcodeShaders.h>
 #define HELICON_HAS_HARDCODE_SHADERS 1
 #else
@@ -27,7 +27,7 @@ namespace EmbeddedShader
 		static void addTarget(const ShaderCodeModule::ShaderResources& shaderResource, const std::string& targetName, const std::string& itemName);
 #endif
 
-		static std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>> getHardcodeShader(const std::string& targetName, const std::string& itemName);
+		static std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string,SlangModule*>> getHardcodeShader(const std::string& targetName, const std::string& itemName);
 		static std::string getSourceLocationString(const std::source_location& sourceLocation);
 	private:
 		static bool hardcodeFileOpened;

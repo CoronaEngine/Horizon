@@ -18,6 +18,9 @@ namespace EmbeddedShader
 
 	namespace
 	{
+		constexpr std::string_view hardcodeEntryType = "std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string,SlangModule*>>";
+		constexpr std::string_view embeddedHardcodeEntryType = "std::variant<EmbeddedShader::ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string,EmbeddedShader::SlangModule*>>";
+
 		bool fileContains(const std::filesystem::path& path, const std::string& needle)
 		{
 			std::ifstream file(path);
@@ -27,6 +30,11 @@ namespace EmbeddedShader
 			std::stringstream buffer;
 			buffer << file.rdbuf();
 			return buffer.str().find(needle) != std::string::npos;
+		}
+
+		void seekBeforeTail(std::fstream& file, std::string_view tail)
+		{
+			file.seekp(-static_cast<std::streamoff>(tail.size()), std::ios::end);
 		}
 	}
 
@@ -54,8 +62,10 @@ namespace EmbeddedShader
 		createTarget(targetName);
 
 		std::fstream hardcodeShaderFile(hardcodePath / ("HardcodeShaders" + targetName + ".cpp"), std::ios::out | std::ios::in);
-		hardcodeShaderFile.seekg(-static_cast<int>(sizeof("};")), std::ios::end);
-		hardcodeShaderFile << "{\"" + itemName + "\", R\"(" + shaderCode + ")\"}," << std::endl;
+		seekBeforeTail(hardcodeShaderFile, "};");
+		hardcodeShaderFile << "{\"" + itemName + "\", ";
+		emitCppStringLiteral(hardcodeShaderFile, shaderCode);
+		hardcodeShaderFile << "}," << std::endl;
 		hardcodeShaderFile << "};";
 
 	}
@@ -65,7 +75,7 @@ namespace EmbeddedShader
 		createTarget(targetName);
 
 		std::fstream hardcodeShaderFile(hardcodePath / ("HardcodeShaders" + targetName + ".cpp"), std::ios::out | std::ios::in);
-		hardcodeShaderFile.seekg(-static_cast<int>(sizeof("};")), std::ios::end);
+		seekBeforeTail(hardcodeShaderFile, "};");
 		hardcodeShaderFile << "{\"" + itemName + "\", std::vector<uint32_t>{";
 		emitSpirVLiteral(hardcodeShaderFile, shaderCode);
 		hardcodeShaderFile << "}}," << std::endl;
@@ -79,13 +89,13 @@ namespace EmbeddedShader
 		createTarget(targetName);
 
 		std::fstream hardcodeShaderFile(hardcodePath / ("HardcodeShaders" + targetName + ".cpp"), std::ios::out | std::ios::in);
-		hardcodeShaderFile.seekg(-static_cast<int>(sizeof("};")), std::ios::end);
+		seekBeforeTail(hardcodeShaderFile, "};");
 		hardcodeShaderFile << "{\"" + itemName + "\", " + serializeShaderResources(shaderResource) + "}," << std::endl;
 		hardcodeShaderFile << "};";
 	}
 #endif
 
-	std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>> ShaderHardcodeManager::getHardcodeShader(const std::string& targetName, const std::string& itemName)
+	std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string,SlangModule*>> ShaderHardcodeManager::getHardcodeShader(const std::string& targetName, const std::string& itemName)
 	{
 #if defined(CABBAGE_ENGINE_DEBUG)
 		throw std::runtime_error("getHardcodeShader should not be called in debug mode - use ShaderCodeCompiler's per-instance storage");
@@ -127,14 +137,14 @@ namespace EmbeddedShader
 	class HardcodeShaders
 	{
 		friend class ShaderHardcodeManager;
-		static std::unordered_map<std::string,std::unordered_map<std::string, std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>>>*> hardcodeShaders;
+		static std::unordered_map<std::string,std::unordered_map<std::string, )" << hardcodeEntryType << R"(>*> hardcodeShaders;
 	};
 })";
 			hardcodeShaderFile.close();
 
 			hardcodeShaderFile.open(hardcodePath / "HardcodeShaders.cpp", std::ios::out | std::ios::trunc);
 			hardcodeShaderFile << R"(#include"HardcodeShaders.h"
-std::unordered_map<std::string,std::unordered_map<std::string, std::variant<EmbeddedShader::ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>>>*> EmbeddedShader::HardcodeShaders::hardcodeShaders = {
+std::unordered_map<std::string,std::unordered_map<std::string, )" << embeddedHardcodeEntryType << R"(>*> EmbeddedShader::HardcodeShaders::hardcodeShaders = {
 };)";
 			hardcodeShaderFile.close();
 			hardcodeFileOpened = true;
@@ -148,13 +158,13 @@ std::unordered_map<std::string,std::unordered_map<std::string, std::variant<Embe
 		{
 			// 如果没有声明，添加声明
 			hardcodeShaderFile.open(hardcodePath / "HardcodeShaders.h", std::ios::in | std::ios::out);
-			hardcodeShaderFile.seekg(-static_cast<int>(sizeof("\t};\n}")), std::ios::end);
-			hardcodeShaderFile << "\t\t""static std::unordered_map<std::string, std::variant<ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>>> hardcodeShaders" + name + ";" << std::endl;
+			seekBeforeTail(hardcodeShaderFile, "\t};\n}");
+			hardcodeShaderFile << "\t\tstatic std::unordered_map<std::string, " << hardcodeEntryType << "> hardcodeShaders" + name + ";" << std::endl;
 			hardcodeShaderFile << "\t};\n}";
 			hardcodeShaderFile.close();
 
 			hardcodeShaderFile.open(hardcodePath / "HardcodeShaders.cpp", std::ios::in | std::ios::out);
-			hardcodeShaderFile.seekg(-static_cast<int>(sizeof("};")), std::ios::end);
+			seekBeforeTail(hardcodeShaderFile, "};");
 			hardcodeShaderFile << "{\"" + name + "\",&hardcodeShaders" + name + "}," << std::endl;
 			hardcodeShaderFile << "};";
 			hardcodeShaderFile.close();
@@ -175,7 +185,7 @@ std::unordered_map<std::string,std::unordered_map<std::string, std::variant<Embe
 
 		hardcodeShaderFile.open(hardcodePath / ("HardcodeShaders" + name + ".cpp"), std::ios::out | std::ios::trunc);
 		hardcodeShaderFile << R"(#include"HardcodeShaders.h"
-std::unordered_map<std::string, std::variant<EmbeddedShader::ShaderCodeModule::ShaderResources,std::variant<std::vector<uint32_t>,std::string>>> EmbeddedShader::HardcodeShaders::hardcodeShaders)" + name + R"( = {
+std::unordered_map<std::string, )" << embeddedHardcodeEntryType << R"(> EmbeddedShader::HardcodeShaders::hardcodeShaders)" + name + R"( = {
 };)";
 		exist.isExistTargetFile = true;
 	}

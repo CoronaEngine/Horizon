@@ -335,11 +335,6 @@ namespace Corona::Horizon
             return value;
         }
 
-        [[nodiscard]] constexpr VkPipelineStageFlags2 display_transfer_stages() noexcept
-        {
-            return VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT;
-        }
-
         [[nodiscard]] constexpr VkPipelineStageFlags2 display_present_signal_stages() noexcept
         {
             return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
@@ -794,7 +789,7 @@ namespace Corona::Horizon
         prepared.wait = {
             image_available_[frame],
             0,
-            display_transfer_stages(),
+            display_acquire_wait_stages(),
         };
         prepared.signal = {
             render_finished_[acquire.image_index],

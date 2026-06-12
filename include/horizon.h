@@ -1423,6 +1423,13 @@ namespace Corona::Horizon
             if (image == nullptr)
                 throw std::logic_error("RasterizerPipeline render target proxy is not bound to a HardwareImage.");
 
+            add_auto_bind_entry({
+                &proxy.boundResource_,
+                0,
+                0,
+                static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
+                location,
+            });
             bind_render_target(location, *image);
             return *this;
         }
