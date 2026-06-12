@@ -634,7 +634,7 @@ namespace Corona::Horizon
         }
         else if ((message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) != 0)
         {
-            CFW_LOG_INFO("[Vulkan validation] {} ({}): {}", message_id, message_id_number, message);
+            // CFW_LOG_INFO("[Vulkan validation] {} ({}): {}", message_id, message_id_number, message);
         }
         else
         {
