@@ -2,23 +2,23 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#define TINYOBJLOADER_DISABLE_FAST_FLOAT
-#include <tiny_obj_loader.h>
-
+#include "Codegen/ControlFlows.h"
+#include "baseline_common.h"
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
 
-#include <algorithm>
+// 经 CMake helicon_compile_shaders 自动生成的反射头：提供 baseline_vert_glsl /
+// baseline_frag_glsl 命名空间下的 slangModule 与绑定符号，免去手写 BindingSlot。
+#include GLSL(shaders/baseline_vert.glsl)
+#include GLSL(shaders/baseline_frag.glsl)
+
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <filesystem>
-#include <iostream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -28,217 +28,17 @@ namespace
 {
 constexpr uint32_t glsl_width = 800;
 constexpr uint32_t glsl_height = 600;
-constexpr float pi = 3.14159265358979323846f;
-
-struct ReflectedBindingSlot
-{
-    uint64_t byte_offset = 0;
-    uint32_t type_size = 0;
-    int32_t bind_type = -1;
-    uint32_t location = 0;
-    uint32_t set = 0;
-    uint32_t binding = 0;
-};
-
-constexpr ReflectedBindingSlot model_binding {
-    0,
-    64,
-    static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBufferMembers),
-    0,
-    0,
-    0,
-};
-
-constexpr ReflectedBindingSlot view_binding {
-    64,
-    64,
-    static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBufferMembers),
-    0,
-    0,
-    0,
-};
-
-constexpr ReflectedBindingSlot proj_binding {
-    128,
-    64,
-    static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBufferMembers),
-    0,
-    0,
-    0,
-};
-
-constexpr ReflectedBindingSlot texture_binding {
-    0,
-    0,
-    static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::sampledImages),
-    1,
-    0,
-    1,
-};
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
 const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
-const std::filesystem::path baseline_vertex_shader_path =
-    std::filesystem::path(__FILE__).parent_path().parent_path() / "shaders" / "baseline_vert.glsl";
-const std::filesystem::path baseline_fragment_shader_path =
-    std::filesystem::path(__FILE__).parent_path().parent_path() / "shaders" / "baseline_frag.glsl";
-
-struct Vec3
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-};
-
-struct Mat4
-{
-    std::array<float, 16> value {};
-
-    float& operator()(int row, int col)
-    {
-        return value[static_cast<size_t>(col * 4 + row)];
-    }
-
-    float operator()(int row, int col) const
-    {
-        return value[static_cast<size_t>(col * 4 + row)];
-    }
-};
-
-struct BaselineGlslVertex
-{
-    std::array<float, 3> pos {};
-    std::array<float, 3> color {};
-    std::array<float, 2> tex_coord {};
-
-    bool operator==(const BaselineGlslVertex& other) const
-    {
-        return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
-    }
-};
-
-struct BaselineGlslVertexHash
-{
-    size_t operator()(const BaselineGlslVertex& vertex) const
-    {
-        size_t seed = 0;
-        auto combine = [&seed](float value) {
-            seed ^= std::hash<float> {}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        };
-
-        for (float value : vertex.pos)
-            combine(value);
-        for (float value : vertex.color)
-            combine(value);
-        for (float value : vertex.tex_coord)
-            combine(value);
-
-        return seed;
-    }
-};
-
-struct BaselineGlslMesh
-{
-    std::vector<BaselineGlslVertex> vertices;
-    std::vector<uint32_t> indices;
-};
-
-struct UniformBufferObject
-{
-    alignas(16) Mat4 model;
-    alignas(16) Mat4 view;
-    alignas(16) Mat4 proj;
-};
-
-Mat4 identity()
-{
-    Mat4 result;
-    result(0, 0) = 1.0f;
-    result(1, 1) = 1.0f;
-    result(2, 2) = 1.0f;
-    result(3, 3) = 1.0f;
-    return result;
-}
-
-Mat4 rotate_z(float radians)
-{
-    Mat4 result = identity();
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
-    result(0, 0) = c;
-    result(0, 1) = -s;
-    result(1, 0) = s;
-    result(1, 1) = c;
-    return result;
-}
-
-Vec3 operator-(const Vec3& lhs, const Vec3& rhs)
-{
-    return { lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z };
-}
-
-float dot(const Vec3& lhs, const Vec3& rhs)
-{
-    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
-}
-
-Vec3 cross(const Vec3& lhs, const Vec3& rhs)
-{
-    return {
-        lhs.y * rhs.z - lhs.z * rhs.y,
-        lhs.z * rhs.x - lhs.x * rhs.z,
-        lhs.x * rhs.y - lhs.y * rhs.x,
-    };
-}
-
-Vec3 normalize(const Vec3& value)
-{
-    const float length = std::sqrt(dot(value, value));
-    return { value.x / length, value.y / length, value.z / length };
-}
-
-Mat4 look_at_rh(const Vec3& eye, const Vec3& center, const Vec3& up)
-{
-    const Vec3 f = normalize(center - eye);
-    const Vec3 s = normalize(cross(f, up));
-    const Vec3 u = cross(s, f);
-
-    Mat4 result = identity();
-    result(0, 0) = s.x;
-    result(0, 1) = s.y;
-    result(0, 2) = s.z;
-    result(1, 0) = u.x;
-    result(1, 1) = u.y;
-    result(1, 2) = u.z;
-    result(2, 0) = -f.x;
-    result(2, 1) = -f.y;
-    result(2, 2) = -f.z;
-    result(0, 3) = -dot(s, eye);
-    result(1, 3) = -dot(u, eye);
-    result(2, 3) = dot(f, eye);
-    return result;
-}
-
-Mat4 perspective_rh(float fovy_radians, float aspect, float near_plane, float far_plane)
-{
-    const float f = 1.0f / std::tan(fovy_radians / 2.0f);
-    Mat4 result;
-    result(0, 0) = f / aspect;
-    result(1, 1) = -f;
-    result(2, 2) = far_plane / (near_plane - far_plane);
-    result(3, 2) = -1.0f;
-    result(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
-    return result;
-}
 
 void check_assets()
 {
+    // shader 已在构建期经 helicon_compile_shaders 编入二进制，运行期只需校验模型 / 纹理。
     if (std::filesystem::exists(viking_room_model_path) &&
-        std::filesystem::exists(viking_room_texture_path) &&
-        std::filesystem::exists(baseline_vertex_shader_path) &&
-        std::filesystem::exists(baseline_fragment_shader_path))
+        std::filesystem::exists(viking_room_texture_path))
     {
         return;
     }
@@ -248,64 +48,12 @@ void check_assets()
         message += "\n  Missing model: " + viking_room_model_path.string();
     if (!std::filesystem::exists(viking_room_texture_path))
         message += "\n  Missing texture: " + viking_room_texture_path.string();
-    if (!std::filesystem::exists(baseline_vertex_shader_path))
-        message += "\n  Missing vertex shader: " + baseline_vertex_shader_path.string();
-    if (!std::filesystem::exists(baseline_fragment_shader_path))
-        message += "\n  Missing fragment shader: " + baseline_fragment_shader_path.string();
     throw std::runtime_error(message);
 }
 
-BaselineGlslMesh load_mesh()
+baseline::UniformBufferObject make_ubo(float time_seconds)
 {
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn;
-    std::string err;
-
-    const std::string model_path = viking_room_model_path.string();
-    const std::string material_base_path =
-        viking_room_model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator);
-
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path.c_str(), material_base_path.c_str()))
-        throw std::runtime_error(warn + err);
-    if (!warn.empty())
-        std::cerr << warn << '\n';
-
-    BaselineGlslMesh mesh;
-    std::unordered_map<BaselineGlslVertex, uint32_t, BaselineGlslVertexHash> unique_vertices;
-    for (const tinyobj::shape_t& shape : shapes)
-    {
-        for (const tinyobj::index_t& index : shape.mesh.indices)
-        {
-            BaselineGlslVertex vertex;
-            vertex.pos = {
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 0],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
-            };
-            vertex.color = { 1.0f, 1.0f, 1.0f };
-
-            if (index.texcoord_index >= 0)
-            {
-                vertex.tex_coord = {
-                    attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 0],
-                    1.0f - attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 1],
-                };
-            }
-
-            auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(mesh.vertices.size()));
-            if (inserted)
-                mesh.vertices.push_back(vertex);
-            mesh.indices.push_back(found->second);
-        }
-    }
-
-    return mesh;
-}
-
-UniformBufferObject make_ubo(float time_seconds)
-{
+    using namespace baseline;
     UniformBufferObject ubo;
     ubo.model = rotate_z(time_seconds * pi * 0.5f);
     ubo.view = look_at_rh({ 2.0f, 2.0f, 2.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f });
@@ -353,7 +101,7 @@ void run_example_glsl()
 
     try
     {
-        BaselineGlslMesh mesh = load_mesh();
+        baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
         TextureLoadResult texture_result = loadTexture(viking_room_texture_path.string());
         if (!texture_result.success)
             throw std::runtime_error("failed to load GLSL baseline texture: " + viking_room_texture_path.string());
@@ -367,24 +115,17 @@ void run_example_glsl()
         H::HardwareExecutor display_executor;
         H::HardwareDisplayer display(glfwGetWin32Window(window));
 
-        EmbeddedShader::CompilerOption compiler_options;
-        compiler_options.compileGLSL = false;
-        compiler_options.compileHLSL = false;
-        compiler_options.enableBindless = false;
-
-        H::RasterizerPipelineDesc rasterizer_desc =
-            H::RasterizerPipelineDesc::from_source(readStringFile(baseline_vertex_shader_path.string()),
-                                                   readStringFile(baseline_fragment_shader_path.string()),
-                                                   EmbeddedShader::ShaderLanguage::GLSL,
-                                                   EmbeddedShader::ShaderLanguage::GLSL,
-                                                   compiler_options);
+        // 复用自动生成的反射模块创建管线，对齐 example_default 的 GLSL 路径。
+        H::RasterizerPipelineDesc rasterizer_desc(
+            H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Vertex, baseline_vert_glsl::slangModule),
+            H::PipelineShaderDesc::from_slang_module(H::PipelineShaderStage::Fragment, baseline_frag_glsl::slangModule));
         rasterizer_desc.set_depth_attachment(H::DepthAttachmentDesc::with_format(H::Format::D32, "example_glsl.depth"));
         rasterizer_desc.set_debug_name("example_glsl.baseline_rasterizer");
 
         H::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
-        rasterizer.bind_render_target(0, final_output_image);
+        rasterizer[baseline_frag_glsl::outColor] = final_output_image;
         rasterizer.bind_depth_target(depth_image);
-        rasterizer[texture_binding] = texture_image;
+        rasterizer[baseline_frag_glsl::texSampler] = texture_image;
 
         H::DrawIndexedParams draw_params;
         draw_params.index_type = H::IndexType::UInt32;
@@ -399,17 +140,18 @@ void run_example_glsl()
                 std::chrono::duration<float, std::chrono::seconds::period>(
                     std::chrono::high_resolution_clock::now() - start_time)
                     .count();
-            UniformBufferObject ubo = make_ubo(time_seconds);
-            rasterizer[model_binding] = ubo.model;
-            rasterizer[view_binding] = ubo.view;
-            rasterizer[proj_binding] = ubo.proj;
+            baseline::UniformBufferObject ubo = make_ubo(time_seconds);
+            // UBO 成员通过反射符号绑定（块实例名 ubo），无需手写 byte_offset/type_size。
+            rasterizer[baseline_vert_glsl::ubo::model] = ubo.model;
+            rasterizer[baseline_vert_glsl::ubo::view] = ubo.view;
+            rasterizer[baseline_vert_glsl::ubo::proj] = ubo.proj;
 
             rasterizer.clear_records();
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-            H::SubmitReceipt render_receipt = render_executor.stream()
-                << rasterizer(glsl_width, glsl_height).command_batch()
-                << H::commit();
+            H::SubmitReceipt render_receipt = render_executor
+                << rasterizer(glsl_width, glsl_height)
+                << H::submit;
 
             display_executor.wait(render_receipt);
             (void)(display_executor.stream()

@@ -71,20 +71,11 @@ struct VertexAttributeProxy
 
 void run_example_default()
 {
-    // Corona::Kernel::CoronaLogger::get_logger()->set_log_level(quill::LogLevel::TraceL3);
-    //  setupSignalHandlers();
-
-    // 运行压缩纹理测试（可选）
-    // testCompressedTextures();
-
-    //CFW_LOG_INFO("Starting main application...");
-
     if (glfwInit() < 0)
     {
         return;
     }
 
-    //CFW_LOG_INFO("Main thread started...");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
     // 每个 pair 创建 2 个窗口: 偶数索引 = EDSL, 奇数索引 = GLSL
@@ -137,9 +128,9 @@ void run_example_default()
         // 方式3: 加载带有 mipmap 和 array layers 的纹理
         // auto textureResult = loadTextureWithMipmapAndLayers(defaultTexturePath, 2, 5, 1, 0);
 
+
         if (!textureResult.success)
         {
-            //CFW_LOG_ERROR("Failed to load texture, exiting...");
             for (size_t i = 0; i < windows.size(); i++)
             {
                 glfwDestroyWindow(windows[i]);
@@ -152,7 +143,6 @@ void run_example_default()
         H::HardwareImage texture = textureResult.texture;
 
         std::vector<std::vector<H::HardwareBuffer>> rasterizerStorageBuffers(windows.size());
-        //std::vector<HardwareBuffer> computeStorageBuffers(windows.size());
 
         std::atomic_bool running = true;
 
@@ -178,11 +168,6 @@ void run_example_default()
         auto meshThread = [&](uint32_t threadIndex) {
             try
             {
-            //CFW_LOG_INFO("Mesh thread {} started...", threadIndex);
-
-            //ComputeStorageBufferObject computeUniformData(windows.size());
-            //computeStorageBuffers[threadIndex] = HardwareBuffer(sizeof(ComputeStorageBufferObject), BufferUsage::StorageBuffer);
-
             std::vector<ktm::fmat4x4> modelMat(20);
             std::vector<RasterizerStorageBufferObject> rasterizerStorageBufferObjects(modelMat.size());
             for (size_t i = 0; i < modelMat.size(); i++)
@@ -202,32 +187,17 @@ void run_example_default()
 
             while (running.load())
             {
-                // 等待上一帧显示完成（或初始状态）
-                /*meshSemaphores[threadIndex]->acquire();
-                if (!running.load()) break;*/
-
                 float currentTime = std::chrono::duration<float, std::chrono::seconds::period>(std::chrono::high_resolution_clock::now() - startTime).count();
 
                 for (size_t i = 0; i < rasterizerStorageBuffers[threadIndex].size(); i++)
                 {
-                    // rasterizerUniformBufferObject[i].textureIndex = texture[0][0].storeDescriptor();
                     rasterizerStorageBufferObjects[i].textureIndex = textureID;
                     rasterizerStorageBufferObjects[i].model = modelMat[i] * ktm::rotate3d_axis(currentTime * ktm::radians(90.0f), ktm::fvec3(0.0f, 0.0f, 1.0f));
                     (void)rasterizerStorageBuffers[threadIndex][i].write_bytes(as_storage_bytes(rasterizerStorageBufferObjects[i]));
                 }
 
-                //computeUniformData.imageID = finalOutputImages[threadIndex].storeDescriptor();
-                //computeStorageBuffers[threadIndex].copyFromData(&computeUniformData, sizeof(computeUniformData));
-
                 ++frameCount;
-
-                // 通知渲染线程可以开始
-                // renderSemaphores[threadIndex]->release();
             }
-            // 退出时释放后续信号量，防止死锁
-            // renderSemaphores[threadIndex]->release();
-
-            //CFW_LOG_INFO("Mesh thread {} ended.", threadIndex);
             }
             catch (...)
             {
@@ -361,10 +331,10 @@ void run_example_default()
 
                 {
                     std::lock_guard lock(frameSubmitMutexes[threadIndex]);
-                    latestRenderReceipts[threadIndex] = renderExecutors[threadIndex]->stream()
-                        << rasterizer(1920, 1080).command_batch()
-                        << computer(1920 / 8, 1080 / 8, 1).command_batch()
-                        << H::commit();
+                    latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex]
+                        << rasterizer(1920, 1080)
+                        << computer(1920 / 8, 1080 / 8, 1)
+                        << H::submit;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
@@ -423,10 +393,10 @@ void run_example_default()
 
                 {
                     std::lock_guard lock(frameSubmitMutexes[threadIndex]);
-                    latestRenderReceipts[threadIndex] = renderExecutors[threadIndex]->stream()
-                        << rasterizer(1920, 1080).command_batch()
-                        << computer(1920 / 8, 1080 / 8, 1).command_batch()
-                        << H::commit();
+                    latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex]
+                        << rasterizer(1920, 1080)
+                        << computer(1920 / 8, 1080 / 8, 1)
+                        << H::submit;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
@@ -440,18 +410,10 @@ void run_example_default()
         auto displayThread = [&](uint32_t threadIndex) {
             try
             {
-            //CFW_LOG_INFO("Display thread {} started...", threadIndex);
-
             H::HardwareDisplayer displayManager = H::HardwareDisplayer(glfwGetWin32Window(windows[threadIndex]));
-
-            auto startTime = std::chrono::high_resolution_clock::now();
-            uint64_t frameCount = 0;
 
             while (running.load())
             {
-                float time = std::chrono::duration<float, std::chrono::seconds::period>(std::chrono::high_resolution_clock::now() - startTime).count();
-                // CFW_LOG_INFO("Display thread {} frame {} at {:.3f}s", threadIndex, frameCount, time);
-
                 {
                     std::lock_guard lock(frameSubmitMutexes[threadIndex]);
                     displayExecutors[threadIndex].wait(latestRenderReceipts[threadIndex]);
@@ -461,15 +423,8 @@ void run_example_default()
                         << H::present(displayManager, finalOutputImages[threadIndex])
                         << H::commit());
                 }
-                ++frameCount;
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
-
-                // 通知 Mesh 线程开始下一帧
-                // meshSemaphores[threadIndex]->release();
             }
-            // meshSemaphores[threadIndex]->release();
-
-            //CFW_LOG_INFO("Display thread {} ended.", threadIndex);
             }
             catch (...)
             {

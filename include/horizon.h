@@ -111,6 +111,10 @@ namespace Corona::Horizon
 
         HardwareStream& operator<<(const StreamCommand& command);
         HardwareStream& operator<<(const CommandBatch& commands);
+        // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
+        // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
+        HardwareStream& operator<<(const ComputePipeline& pipeline);
+        HardwareStream& operator<<(const RasterizerPipeline& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 
         [[nodiscard]] SubmitReceipt commit();
@@ -146,6 +150,9 @@ namespace Corona::Horizon
         }
 
         [[nodiscard]] HardwareStream stream();
+        // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
+        [[nodiscard]] HardwareStream operator<<(const ComputePipeline& pipeline);
+        [[nodiscard]] HardwareStream operator<<(const RasterizerPipeline& pipeline);
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
@@ -167,6 +174,10 @@ namespace Corona::Horizon
         SubmitReceipt last_receipt_ {};
         std::vector<SubmissionToken> pending_waits_;
     };
+
+    // 隐式提交标记：`stream << pipeline << H::submit` 等价于 `<< H::commit()`。
+    // 复用既有的 `operator<<(CommitCommand)`，不引入新算子。
+    inline constexpr CommitCommand submit {};
 
     // ================================================================
     // Validation

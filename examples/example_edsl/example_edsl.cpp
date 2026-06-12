@@ -2,13 +2,11 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#define TINYOBJLOADER_DISABLE_FAST_FLOAT
-#include <tiny_obj_loader.h>
-
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
+#include "baseline_common.h"
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
@@ -17,14 +15,11 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <iostream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -41,7 +36,6 @@ namespace
 {
 constexpr uint32_t edsl_width = 800;
 constexpr uint32_t edsl_height = 600;
-constexpr float pi = 3.14159265358979323846f;
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";
@@ -96,165 +90,6 @@ std::array<H::BindingSlot, Count> reflected_uniform_member_slots(const ShaderRes
     return slots;
 }
 
-struct Vec3
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-};
-
-struct Mat4
-{
-    std::array<float, 16> value {};
-
-    float& operator()(int row, int col)
-    {
-        return value[static_cast<size_t>(col * 4 + row)];
-    }
-
-    float operator()(int row, int col) const
-    {
-        return value[static_cast<size_t>(col * 4 + row)];
-    }
-};
-
-struct BaselineEdslVertex
-{
-    std::array<float, 3> pos {};
-    std::array<float, 3> color {};
-    std::array<float, 2> tex_coord {};
-
-    bool operator==(const BaselineEdslVertex& other) const
-    {
-        return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
-    }
-};
-
-struct BaselineEdslVertexHash
-{
-    size_t operator()(const BaselineEdslVertex& vertex) const
-    {
-        size_t seed = 0;
-        auto combine = [&seed](float value) {
-            seed ^= std::hash<float> {}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        };
-
-        for (float value : vertex.pos)
-            combine(value);
-        for (float value : vertex.color)
-            combine(value);
-        for (float value : vertex.tex_coord)
-            combine(value);
-
-        return seed;
-    }
-};
-
-struct BaselineEdslMesh
-{
-    std::vector<BaselineEdslVertex> vertices;
-    std::vector<uint32_t> indices;
-};
-
-struct UniformBufferObject
-{
-    alignas(16) Mat4 model;
-    alignas(16) Mat4 view;
-    alignas(16) Mat4 proj;
-};
-
-Mat4 identity()
-{
-    Mat4 result;
-    result(0, 0) = 1.0f;
-    result(1, 1) = 1.0f;
-    result(2, 2) = 1.0f;
-    result(3, 3) = 1.0f;
-    return result;
-}
-
-Mat4 rotate_z(float radians)
-{
-    Mat4 result = identity();
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
-    result(0, 0) = c;
-    result(0, 1) = -s;
-    result(1, 0) = s;
-    result(1, 1) = c;
-    return result;
-}
-
-Vec3 operator-(const Vec3& lhs, const Vec3& rhs)
-{
-    return { lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z };
-}
-
-float dot(const Vec3& lhs, const Vec3& rhs)
-{
-    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
-}
-
-Vec3 cross(const Vec3& lhs, const Vec3& rhs)
-{
-    return {
-        lhs.y * rhs.z - lhs.z * rhs.y,
-        lhs.z * rhs.x - lhs.x * rhs.z,
-        lhs.x * rhs.y - lhs.y * rhs.x,
-    };
-}
-
-Vec3 normalize(const Vec3& value)
-{
-    const float length = std::sqrt(dot(value, value));
-    return { value.x / length, value.y / length, value.z / length };
-}
-
-Mat4 look_at_rh(const Vec3& eye, const Vec3& center, const Vec3& up)
-{
-    const Vec3 f = normalize(center - eye);
-    const Vec3 s = normalize(cross(f, up));
-    const Vec3 u = cross(s, f);
-
-    Mat4 result = identity();
-    result(0, 0) = s.x;
-    result(0, 1) = s.y;
-    result(0, 2) = s.z;
-    result(1, 0) = u.x;
-    result(1, 1) = u.y;
-    result(1, 2) = u.z;
-    result(2, 0) = -f.x;
-    result(2, 1) = -f.y;
-    result(2, 2) = -f.z;
-    result(0, 3) = -dot(s, eye);
-    result(1, 3) = -dot(u, eye);
-    result(2, 3) = dot(f, eye);
-    return result;
-}
-
-Mat4 perspective_rh(float fovy_radians, float aspect, float near_plane, float far_plane)
-{
-    const float f = 1.0f / std::tan(fovy_radians / 2.0f);
-    Mat4 result;
-    result(0, 0) = f / aspect;
-    result(1, 1) = -f;
-    result(2, 2) = far_plane / (near_plane - far_plane);
-    result(3, 2) = -1.0f;
-    result(2, 3) = (far_plane * near_plane) / (near_plane - far_plane);
-    return result;
-}
-
-Mat4 transpose(const Mat4& matrix)
-{
-    Mat4 result;
-    for (int row = 0; row < 4; ++row)
-    {
-        for (int col = 0; col < 4; ++col)
-            result(row, col) = matrix(col, row);
-    }
-    return result;
-}
-
 void check_assets()
 {
     if (std::filesystem::exists(viking_room_model_path) && std::filesystem::exists(viking_room_texture_path))
@@ -268,57 +103,9 @@ void check_assets()
     throw std::runtime_error(message);
 }
 
-BaselineEdslMesh load_mesh()
+baseline::UniformBufferObject make_ubo(float time_seconds)
 {
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn;
-    std::string err;
-
-    const std::string model_path = viking_room_model_path.string();
-    const std::string material_base_path =
-        viking_room_model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator);
-
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path.c_str(), material_base_path.c_str()))
-        throw std::runtime_error(warn + err);
-    if (!warn.empty())
-        std::cerr << warn << '\n';
-
-    BaselineEdslMesh mesh;
-    std::unordered_map<BaselineEdslVertex, uint32_t, BaselineEdslVertexHash> unique_vertices;
-    for (const tinyobj::shape_t& shape : shapes)
-    {
-        for (const tinyobj::index_t& index : shape.mesh.indices)
-        {
-            BaselineEdslVertex vertex;
-            vertex.pos = {
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 0],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
-            };
-            vertex.color = { 1.0f, 1.0f, 1.0f };
-
-            if (index.texcoord_index >= 0)
-            {
-                vertex.tex_coord = {
-                    attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 0],
-                    1.0f - attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 1],
-                };
-            }
-
-            auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(mesh.vertices.size()));
-            if (inserted)
-                mesh.vertices.push_back(vertex);
-            mesh.indices.push_back(found->second);
-        }
-    }
-
-    return mesh;
-}
-
-UniformBufferObject make_ubo(float time_seconds)
-{
+    using namespace baseline;
     UniformBufferObject ubo;
     ubo.model = transpose(rotate_z(time_seconds * pi * 0.5f));
     ubo.view = transpose(look_at_rh({ 2.0f, 2.0f, 2.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }));
@@ -366,7 +153,7 @@ void run_example_edsl()
 
     try
     {
-        BaselineEdslMesh mesh = load_mesh();
+        baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
         TextureLoadResult texture_result = loadTexture(viking_room_texture_path.string());
         if (!texture_result.success)
             throw std::runtime_error("failed to load EDSL baseline texture: " + viking_room_texture_path.string());
@@ -407,7 +194,7 @@ void run_example_edsl()
 
         const auto uniform_bindings =
             reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources,
-                                              static_cast<uint32_t>(sizeof(Mat4)));
+                                              static_cast<uint32_t>(sizeof(baseline::Mat4)));
         const H::BindingSlot& model_binding = uniform_bindings[0];
         const H::BindingSlot& view_binding = uniform_bindings[1];
         const H::BindingSlot& proj_binding = uniform_bindings[2];
@@ -428,7 +215,7 @@ void run_example_edsl()
                 std::chrono::duration<float, std::chrono::seconds::period>(
                     std::chrono::high_resolution_clock::now() - start_time)
                     .count();
-            UniformBufferObject ubo = make_ubo(time_seconds);
+            baseline::UniformBufferObject ubo = make_ubo(time_seconds);
             rasterizer[model_binding] = ubo.model;
             rasterizer[view_binding] = ubo.view;
             rasterizer[proj_binding] = ubo.proj;
@@ -436,9 +223,9 @@ void run_example_edsl()
             rasterizer.clear_records();
             rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-            H::SubmitReceipt render_receipt = render_executor.stream()
-                << rasterizer(edsl_width, edsl_height).command_batch()
-                << H::commit();
+            H::SubmitReceipt render_receipt = render_executor
+                << rasterizer(edsl_width, edsl_height)
+                << H::submit;
 
             display_executor.wait(render_receipt);
             (void)(display_executor.stream()

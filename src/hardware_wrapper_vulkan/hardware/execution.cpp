@@ -1521,6 +1521,16 @@ namespace Corona::Horizon
         return *this;
     }
 
+    HardwareStream& HardwareStream::operator<<(const ComputePipeline& pipeline)
+    {
+        return *this << pipeline.command_batch();
+    }
+
+    HardwareStream& HardwareStream::operator<<(const RasterizerPipeline& pipeline)
+    {
+        return *this << pipeline.command_batch();
+    }
+
     SubmitReceipt HardwareStream::operator<<(CommitCommand)
     {
         return commit();
@@ -1562,6 +1572,20 @@ namespace Corona::Horizon
     HardwareStream HardwareExecutor::stream()
     {
         return HardwareStream(*this);
+    }
+
+    HardwareStream HardwareExecutor::operator<<(const ComputePipeline& pipeline)
+    {
+        HardwareStream s(*this);
+        s << pipeline.command_batch();
+        return s;
+    }
+
+    HardwareStream HardwareExecutor::operator<<(const RasterizerPipeline& pipeline)
+    {
+        HardwareStream s(*this);
+        s << pipeline.command_batch();
+        return s;
     }
 
     ExecutionPlan HardwareExecutor::compile(const RecordedTask& task) const
