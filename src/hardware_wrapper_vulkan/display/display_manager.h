@@ -101,6 +101,7 @@ namespace Corona::Horizon
         std::vector<VkSemaphore> image_available_;
         std::vector<VkSemaphore> render_finished_;
         std::vector<std::optional<SubmissionToken>> submitted_frames_;
+        std::vector<std::optional<SubmissionToken>> present_tokens_;
         uint32_t frame_index_ { 0 };
         std::optional<PendingFrame> pending_frame_;
         PresentStatus fake_status_ { PresentStatus::Skipped };

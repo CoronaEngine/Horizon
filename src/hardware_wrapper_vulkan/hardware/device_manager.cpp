@@ -472,20 +472,65 @@ namespace Corona::Horizon
         return { id_.device, id_, signal_value, SubmissionSync::make(timeline_) };
     }
 
-    VkResult Queue::present(const VkPresentInfoKHR& present_info)
+    SubmissionToken Queue::signal_timeline_locked()
     {
-        VkResult result = VK_SUCCESS;
+        const uint64_t signal_value = last_submitted_value_ + 1;
+
+        if (device_ != VK_NULL_HANDLE && queue_ != VK_NULL_HANDLE && timeline_ != VK_NULL_HANDLE)
+        {
+            VkSemaphoreSubmitInfo timeline_signal {};
+            timeline_signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            timeline_signal.semaphore = timeline_;
+            timeline_signal.value = signal_value;
+            timeline_signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+            VkSubmitInfo2 submit_info {};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+            submit_info.signalSemaphoreInfoCount = 1;
+            submit_info.pSignalSemaphoreInfos = &timeline_signal;
+
+            const VkResult result = vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE);
+            if (result != VK_SUCCESS)
+            {
+                Diagnostics::write(Diagnostics::Level::Error,
+                                   "VK_ERROR",
+                                   "vkQueueSubmit2(present timeline signal) failed. family_index=" +
+                                       std::to_string(id_.family_index) +
+                                       ", queue_index=" +
+                                       std::to_string(id_.queue_index) +
+                                       ", VkResult=" +
+                                       std::to_string(static_cast<int>(result)));
+                throw std::runtime_error("vkQueueSubmit2(present timeline signal) failed. family_index=" +
+                                         std::to_string(id_.family_index) +
+                                         ", queue_index=" +
+                                         std::to_string(id_.queue_index) +
+                                         ", VkResult=" +
+                                         std::to_string(static_cast<int>(result)));
+            }
+        }
+
+        last_submitted_value_ = signal_value;
+        return { id_.device, id_, signal_value, SubmissionSync::make(timeline_) };
+    }
+
+    QueuePresentResult Queue::present(const VkPresentInfoKHR& present_info)
+    {
+        QueuePresentResult present_result;
         {
             std::lock_guard lock(mutex_);
 
             if (queue_ == VK_NULL_HANDLE)
             {
-                return VK_SUCCESS;
+                return present_result;
             }
 
-            result = vkQueuePresentKHR(queue_, &present_info);
+            present_result.result = vkQueuePresentKHR(queue_, &present_info);
+            if (present_result.result == VK_SUCCESS || present_result.result == VK_SUBOPTIMAL_KHR)
+            {
+                present_result.completion = signal_timeline_locked();
+            }
         }
-        if (result != VK_SUCCESS)
+        if (present_result.result != VK_SUCCESS)
         {
             Diagnostics::write(Diagnostics::Level::Error,
                                "VK_ERROR",
@@ -494,10 +539,10 @@ namespace Corona::Horizon
                                    ", queue_index=" +
                                    std::to_string(id_.queue_index) +
                                    ", VkResult=" +
-                                   std::to_string(static_cast<int>(result)));
+                                   std::to_string(static_cast<int>(present_result.result)));
         }
 
-        return result;
+        return present_result;
     }
 
     void Queue::wait_idle()

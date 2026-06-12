@@ -21,6 +21,12 @@ namespace Corona::Horizon
         VkQueueFlags flags { 0 };
     };
 
+    struct QueuePresentResult
+    {
+        VkResult result { VK_SUCCESS };
+        SubmissionToken completion {};
+    };
+
     class TrackedCommandBuffer
     {
     public:
@@ -66,7 +72,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire();
         [[nodiscard]] SubmissionToken submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals);
-        [[nodiscard]] VkResult present(const VkPresentInfoKHR& present_info);
+        [[nodiscard]] QueuePresentResult present(const VkPresentInfoKHR& present_info);
         void wait_idle();
         void wait_for(const SubmissionToken& token) const;
         void retire_completed();
@@ -86,6 +92,7 @@ namespace Corona::Horizon
 
     private:
         [[nodiscard]] uint64_t query_completed_value() const;
+        [[nodiscard]] SubmissionToken signal_timeline_locked();
         void collect_completed_unlocked(std::deque<std::shared_ptr<TrackedCommandBuffer>>& completed);
         void create_timeline_semaphore();
 

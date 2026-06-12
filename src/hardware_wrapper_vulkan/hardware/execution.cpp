@@ -84,6 +84,26 @@ namespace Corona::Horizon
             waits.push_back(wait);
         }
 
+        void add_signal_once(std::vector<SubmitSignal>& signals, SubmitSignal signal)
+        {
+            if (signal.semaphore == VK_NULL_HANDLE)
+            {
+                return;
+            }
+
+            auto found = std::find_if(signals.begin(), signals.end(), [signal](const SubmitSignal& item) {
+                return item.semaphore == signal.semaphore;
+            });
+            if (found != signals.end())
+            {
+                found->value = std::max(found->value, signal.value);
+                found->stages |= signal.stages;
+                return;
+            }
+
+            signals.push_back(signal);
+        }
+
         [[nodiscard]] AccessKind merge_access(AccessKind left, AccessKind right) noexcept
         {
             if (left == right)
@@ -1828,6 +1848,8 @@ namespace Corona::Horizon
             CompiledSubmission& compiled_submission = plan.submissions[submission_index];
 
             std::vector<PreparedQueuePresent> prepared_presents;
+            std::vector<SubmitWait> present_waits;
+            std::vector<SubmitSignal> present_signals;
             Queue* present_queue = nullptr;
             size_t present_index = 0;
             for (CommandIR& command : compiled_submission.commands)
@@ -1838,9 +1860,14 @@ namespace Corona::Horizon
                 }
 
                 PresentDesc& desc = command.payload.present;
+                desc.swapchain_image = {};
                 std::shared_ptr<DisplayManager> manager = display_manager_for(desc.displayer);
                 if (!manager)
                 {
+                    if (present_index < compiled_submission.presents.size())
+                    {
+                        compiled_submission.presents[present_index] = desc;
+                    }
                     if (present_results != nullptr)
                     {
                         present_results->push_back(skipped_present(desc, "Present node has no registered DisplayManager."));
@@ -1869,6 +1896,11 @@ namespace Corona::Horizon
                 if (manager_present_queue == nullptr)
                 {
                     manager->cancel_prepared_present();
+                    desc.swapchain_image = {};
+                    if (present_index < compiled_submission.presents.size())
+                    {
+                        compiled_submission.presents[present_index] = desc;
+                    }
                     if (present_results != nullptr)
                     {
                         present_results->push_back(skipped_present(desc, "DisplayManager has no present queue for this present."));
@@ -1883,8 +1915,8 @@ namespace Corona::Horizon
                 }
                 present_queue = manager_present_queue;
 
-                compiled_submission.waits.push_back(prepared.wait);
-                compiled_submission.signals.push_back(prepared.signal);
+                add_wait_once(present_waits, prepared.wait);
+                add_signal_once(present_signals, prepared.signal);
                 compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
                 prepared_presents.push_back({ std::move(manager), desc });
                 ++present_index;
@@ -1905,6 +1937,10 @@ namespace Corona::Horizon
                 encoder.encode(compiled_submission);
 
                 std::vector<SubmitWait> waits = compiled_submission.waits;
+                for (const SubmitWait& wait : present_waits)
+                {
+                    add_wait_once(waits, wait);
+                }
                 for (const SubmissionToken& token : wait_tokens)
                 {
                     const VkSemaphore timeline = timeline_semaphore(token);
@@ -1929,12 +1965,18 @@ namespace Corona::Horizon
                     }
                 }
 
+                std::vector<SubmitSignal> signals = compiled_submission.signals;
+                for (const SubmitSignal& signal : present_signals)
+                {
+                    add_signal_once(signals, signal);
+                }
+
                 auto tracked_submission = resource_submission_tracker().lock_submission(compiled_submission, queue.id(), waits);
 
                 QueueSubmission queue_submission;
                 queue_submission.command_buffer = std::move(compiled_submission.command_buffer);
                 queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
-                tokens.push_back(queue.submit(queue_submission, waits, compiled_submission.signals));
+                tokens.push_back(queue.submit(queue_submission, waits, signals));
                 submitted_tokens[submission_index] = tokens.back();
                 tracked_submission.remember(tokens.back());
             }

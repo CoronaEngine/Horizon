@@ -586,6 +586,8 @@ namespace Corona::Horizon
         render_finished_.resize(swapchain_images_.size());
         submitted_frames_.clear();
         submitted_frames_.resize(swapchain_images_.size());
+        present_tokens_.clear();
+        present_tokens_.resize(swapchain_images_.size());
 
         VkSemaphoreCreateInfo create_info {};
         create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -781,6 +783,13 @@ namespace Corona::Horizon
             return prepared;
         }
 
+        if (acquire.image_index < present_tokens_.size() && present_tokens_[acquire.image_index] && present_queue_ != nullptr)
+        {
+            present_queue_->wait_for(*present_tokens_[acquire.image_index]);
+            present_queue_->retire_completed();
+            present_tokens_[acquire.image_index].reset();
+        }
+
         const uint32_t frame = acquire.frame_index;
         desc.swapchain_image = { static_cast<const ResourceHandle&>(swapchain_images_[acquire.image_index]) };
 
@@ -849,7 +858,8 @@ namespace Corona::Horizon
         present_info.pSwapchains = &swapchain_;
         present_info.pImageIndices = &pending.image_index;
 
-        const VkResult vk_result = present_queue_->present(present_info);
+        const QueuePresentResult queue_present = present_queue_->present(present_info);
+        const VkResult vk_result = queue_present.result;
         result.status = present_status(vk_result);
         result.message = present_message(result.status);
 
@@ -875,6 +885,11 @@ namespace Corona::Horizon
         if (vk_result != VK_SUCCESS && vk_result != VK_SUBOPTIMAL_KHR)
         {
             throw std::runtime_error("vkQueuePresentKHR failed. VkResult=" + std::to_string(static_cast<int>(vk_result)));
+        }
+
+        if (pending.image_index < present_tokens_.size() && queue_present.completion.value != 0)
+        {
+            present_tokens_[pending.image_index] = queue_present.completion;
         }
 
         return result;
@@ -940,6 +955,7 @@ namespace Corona::Horizon
         }
         render_finished_.clear();
         submitted_frames_.clear();
+        present_tokens_.clear();
 
         if (device_ != VK_NULL_HANDLE && swapchain_ != VK_NULL_HANDLE)
         {
