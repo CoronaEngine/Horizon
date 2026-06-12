@@ -82,6 +82,12 @@ $syncPairs = @(
         Label = "push constant context"
     },
     @{
+        Source = "docs/agents/zh-CN/api-layering.md"
+        Target = "docs/agents/api-layering.md"
+        Marker = "AGENT_DOCS_API_LAYERING_ZH_CN_SHA256"
+        Label = "api layering context"
+    },
+    @{
         Source = "docs/tasks/zh-CN/formatting.md"
         Target = "docs/tasks/formatting.md"
         Marker = "TASK_DOCS_FORMATTING_ZH_CN_SHA256"

@@ -1,5 +1,7 @@
 # Horizon Agent Context Index
-<!-- AGENT_DOCS_INDEX_ZH_CN_SHA256: 7958b214fb1d4698c8917d644d57b8e9aa13d02b2d9487d6f0772353ebcd3b2a -->
+<!-- AGENT_DOCS_INDEX_ZH_CN_SHA256: PENDING_SYNC -->
+<!-- 上面 SHA256 待用 `.\tools\sync-agents.ps1` 重新生成；index 中文源已更新 -->
+
 
 This directory contains vendor-neutral AI context packs. Any agent can read them; they are not Codex-specific.
 
@@ -19,6 +21,7 @@ Start with root `AGENTS.md`, then load only the relevant context pack or task no
 - `vulkan.md`: Vulkan backend boundaries and safety rules.
 - `helicon.md`: shader DSL, codegen, compiler, and reflection context.
 - `push-constants.md`: push constant reflection and runtime consumer path.
+- `api-layering.md`: public API layering, execution IR internal header, and the API simplification philosophy.
 - `docs/tasks/*.md`: short task checklists, reproduction steps, and validation recipes.
 
 Shared project skills:

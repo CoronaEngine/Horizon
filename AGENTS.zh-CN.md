@@ -8,6 +8,14 @@
 
 Horizon 是一个 C++20 Vulkan 图形硬件抽象层，包含公共 API、Vulkan 后端、Helicon shader/codegen/reflection、示例和工具脚本。项目要求面向多线程并发使用环境，并会逐步迭代为计算框架。
 
+**API 设计核心理念**：每一层的 API 都应尽可能简化，减少重复，降低用户的认知负担，并降低维护成本。具体落实为：
+
+- 默认路径要短：常见用法零样板，能用默认行为完成的就不要求用户显式传参或手写胶水代码。
+- 不要泄漏实现细节：用户从不构造的内部类型（命令 IR、执行计划、提交令牌、队列调度）不应出现在主公共头里，下沉到内部/高级头。
+- 不要暴露未兑现的能力：后端尚未实现的特性（多设备、光追/网格管线）不要在公共 API 表面承诺。
+- 同一概念只表达一次：理念、规则、抽象都应在其归属层写一次，避免跨文件/跨层重复。
+- 高级能力保留但不挡路：自定义调度、显式三段式（record/compile/submit）等高级入口保留，但绝不作为默认姿势。
+
 AI 在本仓库工作时必须：
 
 - 先读本文件，再按任务读取 `docs/agents/*.md`。
@@ -16,6 +24,7 @@ AI 在本仓库工作时必须：
 - 不要回滚用户已有改动。
 - 不要无关修改 `third-party/`、`modules/` 或历史镜像目录。
 - 新增公共 API、后端对象或共享状态时，默认考虑多线程并发调用；不要引入隐式单线程假设，必须明确所有权、同步边界或不可变快照策略。
+- 新增或修改公共 API 时，遵循上述 API 设计核心理念：默认路径最短、不泄漏内部类型、不暴露未实现能力。
 - 保留 compute / dispatch 为一等执行路径；不要把 graphics / present 特例沉入通用资源、执行或公共抽象。
 - 每次实质改动都给出验证命令和结果。
 
@@ -30,6 +39,7 @@ AI 在本仓库工作时必须：
 - Vulkan 后端、VOLK/VMA、descriptor、barrier：`docs/agents/vulkan.md`
 - Helicon、shader DSL、codegen、reflection：`docs/agents/helicon.md`
 - push constant layout、绑定字段、runtime 消费链：`docs/agents/push-constants.md`
+- 公共 API 分层、执行 IR 内部头、API 简化理念：`docs/agents/api-layering.md`
 
 项目内共享 Agent skill：
 
@@ -41,6 +51,8 @@ AI 在本仓库工作时必须：
 ## 3. 关键目录
 
 - `include/`：公共 API，改动必须谨慎。
+- `include/horizon.h`：公共主入口（资源、管线、命令门面）。
+- `include/horizon_execution.h`：执行 / 命令 IR 层（内部 / 高级 API）；普通用户无需直接接触，由 `horizon.h` 自动包含。
 - `src/`：Horizon 主实现。
 - `src/hardware_wrapper_vulkan/`：当前 CMake 实际编译的 Vulkan 后端。
 - `src/HardwareWrapperVulkan/`：历史/并行 Vulkan 后端；只有任务明确指定时才改。

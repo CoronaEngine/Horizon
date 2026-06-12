@@ -1,5 +1,7 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: 561cf5cb0e3892acb7dee549dfa1060a52cdada8be657bafec3707f5790c3b98 -->
+<!-- AGENTS_ZH_CN_SHA256: PENDING_SYNC -->
+<!-- 上面 SHA256 待用 `.\tools\sync-agents.ps1` 重新生成；AGENTS.zh-CN.md 已更新但 marker 未刷新 -->
+
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.
 > Other Chinese sources live in `docs/agents/zh-CN/`, `docs/tasks/zh-CN/`, and `.agents/skills/*/SKILL.zh-CN.md`.
@@ -9,6 +11,14 @@
 
 Horizon is a C++20 Vulkan graphics hardware abstraction layer with public APIs, a Vulkan backend, Helicon shader/codegen/reflection, examples, and tooling. The project must support multithreaded concurrent use and is expected to evolve toward a compute framework.
 
+**Core API design philosophy:** every layer's API should be as simple as possible, minimize duplication, lower the user's cognitive load, and reduce maintenance cost. Concretely:
+
+- Keep the default path short: zero boilerplate for common usage; if a default behavior can do the job, do not force users to pass arguments explicitly or hand-write glue code.
+- Do not leak implementation details: internal types users never construct (command IR, execution plan, submission tokens, queue scheduling) should not appear in the main public header; push them down into an internal/advanced header.
+- Do not expose unfulfilled capabilities: features the backend has not implemented (multi-device, ray-tracing/mesh pipelines) should not be promised on the public API surface.
+- Express each concept once: philosophy, rules, and abstractions belong in their owning layer and should be written once, avoiding cross-file/cross-layer duplication.
+- Keep advanced power available but out of the way: advanced entry points (custom scheduling, explicit record/compile/submit) remain, but are never the default posture.
+
 When working in this repository:
 
 - Read this file first, then load only the relevant `docs/agents/*.md` file.
@@ -17,6 +27,7 @@ When working in this repository:
 - Never revert user changes unless explicitly asked.
 - Avoid unrelated edits under `third-party/`, `modules/`, or historical mirror trees.
 - When adding public APIs, backend objects, or shared state, assume multithreaded callers; do not introduce implicit single-thread assumptions, and make ownership, synchronization boundaries, or immutable snapshot strategy explicit.
+- When adding or changing public APIs, follow the core API design philosophy above: shortest default path, no leaked internal types, no unimplemented capabilities exposed.
 - Keep compute / dispatch as first-class execution paths; do not bury graphics / present special cases inside generic resource, execution, or public abstractions.
 - Report verification commands and results for meaningful changes.
 
@@ -31,6 +42,7 @@ Load only what the task needs:
 - Vulkan backend, VOLK/VMA, descriptors, barriers: `docs/agents/vulkan.md`
 - Helicon, shader DSL, codegen, reflection: `docs/agents/helicon.md`
 - Push constant layout, binding fields, runtime consumer chain: `docs/agents/push-constants.md`
+- Public API layering, execution IR internal header, API simplification philosophy: `docs/agents/api-layering.md`
 
 Shared project agent skills:
 
@@ -42,6 +54,8 @@ The skill is plain Markdown and vendor-neutral; it is not Codex-specific.
 ## 3. Key Paths
 
 - `include/`: public API; edit carefully.
+- `include/horizon.h`: main public entry (resources, pipelines, command facades).
+- `include/horizon_execution.h`: execution / command IR layer (internal / advanced API); regular users do not touch it directly, and it is included automatically by `horizon.h`.
 - `src/`: main Horizon implementation.
 - `src/hardware_wrapper_vulkan/`: Vulkan backend currently compiled by CMake.
 - `src/HardwareWrapperVulkan/`: historical/parallel Vulkan backend; edit only when explicitly requested.

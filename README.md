@@ -2,10 +2,20 @@
 
 一个基于 Vulkan 的图形硬件抽象层，提供面向资源与管线的 C++ API，并集成 Helicon Shader DSL（AST + 代码生成 + 编译反射）。
 
+## 设计理念
+
+每一层的 API 都应尽可能简化，减少重复，降低用户的认知负担，并降低维护成本：
+
+- 默认路径最短：常见用法零样板，能用默认行为完成就不要求用户手写胶水代码（如默认构造的 `HardwareExecutor` 已自动解析队列，无需手写 `QueueResolver`）。
+- 不泄漏内部类型：用户从不构造的执行 / 命令 IR 类型集中在 `include/horizon_execution.h`（内部 / 高级），主入口 `include/horizon.h` 只保留资源、管线与命令门面。
+- 不暴露未实现能力，同一概念只表达一次，高级能力保留但不作为默认姿势。
+
+详见 `docs/agents/api-layering.md` 与 `docs/design/api-simplification.md`。
+
 ## 当前状态
 
-- 核心 API：`include/Horizon.h`、`include/HardwareCommands.h`
-- 后端实现：`src/HardwareWrapperVulkan`
+- 核心 API：`include/horizon.h`（主入口）、`include/horizon_execution.h`（执行 / 命令 IR，内部 / 高级）
+- 后端实现：`src/hardware_wrapper_vulkan`（当前 CMake 实际编译的后端）
 - 着色器工具链：`src/Helicon` + `tools/ShaderCompileScripts`
 - 构建系统：CMake + CMake Presets + 内嵌模块/第三方依赖混合管理
 - 现状：可开发，但仍处于稳定性迭代期
@@ -28,9 +38,10 @@
 
 ## 目录速览
 
-- `include/`：对外 API
-- `src/HardwareWrapper/`：对外对象包装层（RAII、引用计数与存储池）
-- `src/HardwareWrapperVulkan/`：Vulkan 设备、资源、执行与显示
+- `include/`：对外 API（`horizon.h` 主入口；`horizon_execution.h` 执行 / 命令 IR 内部头）
+- `src/hardware_wrapper/`：后端无关的对外对象包装层（句柄门面、校验层）
+- `src/hardware_wrapper_vulkan/`：当前编译的 Vulkan 后端（设备、资源、执行编译器与显示）
+- `src/HardwareWrapper/`、`src/HardwareWrapperVulkan/`：历史 / 并行实现，已在 CMake 中注释停用，仅作参考
 - `src/Helicon/`：DSL、AST、代码生成、编译与反射
 - `examples/`：示例程序与 shader 资源
 - `tools/`：`ShaderCompileScripts`、`dev.ps1` 和 `code-format.ps1`

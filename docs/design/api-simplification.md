@@ -1,8 +1,19 @@
 # Horizon 公共 API 复杂度收口设计
 
-> 状态:设计提案(未实现)
+> 状态:方案 A 已落地(A1+A2 完成,A3 随 A2 达成),待构建验证
 > 范围:`include/horizon.h` 公共表面 + `examples/` 使用姿势
 > 目标:在**不损失底层声明式执行模型能力**的前提下,把被无意暴露给用户的实现细节屏蔽掉,降低上手心智负担。
+
+## 核心理念
+
+每一层的 API 都应尽可能简化,减少重复,降低用户的认知负担,并降低维护成本。本设计的一切取舍都服从这条理念:
+
+- **默认路径最短**:常见用法零样板,能用默认行为完成的不要求用户显式传参或手写胶水代码。
+- **不泄漏内部类型**:用户从不构造的类型(命令 IR、执行计划、提交令牌、队列调度)不出现在主公共头。
+- **不暴露未实现能力**:后端尚未落地的特性不在公共 API 表面承诺。
+- **同一概念只表达一次**:抽象、规则、理念在归属层写一次,避免跨文件 / 跨层重复。
+
+高级能力(自定义调度、显式 record/compile/submit)保留,但绝不作为默认姿势。
 
 ---
 
@@ -304,5 +315,19 @@ A3(DeviceMask 下沉)比设计预估的**爆炸半径更大**:除 `CommandRecord
 
 ### 11.5 本轮净交付
 
-- ✅ **A1 已实施**(3 文件),待用户构建验证。
-- 📋 **A2/A3 转为精确实施计划**(本节),因(a)PImpl 排除使 A2 符号屏蔽目标不可达、(b)A3 爆炸半径需编译在环,均不宜盲改公共头。
+- ✅ **A1 已实施**(3 文件):examples 去除冗余 `QueueResolver`,改默认构造。
+- ✅ **A2 已实施**:执行 / 命令 IR 类型抽离到 `include/horizon_execution.h`,`horizon.h` 改为 `#include` 该头并保留一段指向内部头的说明注释。采用"内部头拆分"(用户决策),非 PImpl;在用户删除白盒测试后,符号搬迁不再被测试套件阻塞。
+- ✅ **A3 随 A2 达成**:`CommandRecorder` 的 `DeviceMask` 签名已进入内部头;剩余命令门面 / 工厂函数的 `DeviceMask` 为带默认值尾参,不强制暴露,按用户决策暂不再动。
+- ✅ **测试删除善后**:`CMakeLists.txt` 的 `HORIZON_BUILD_TESTS` 默认改 `OFF`,`add_subdirectory(tests)` 加 `EXISTS` 守卫,避免 `tests/` 已删后 configure 失败。
+- ⏳ **待构建验证**:`cmake --build` / `dev.ps1 build HorizonExamples` 在本环境被自动审批拦截,需用户本地构建确认。
+
+### 11.6 文档同步(本轮一并完成)
+
+按 `AGENTS.md` 同步契约,核心理念写入归属层并同步:
+
+- `AGENTS.zh-CN.md` §1 加"API 设计核心理念",§2 路由表与 §3 关键目录加 `horizon_execution.h` / `api-layering.md`;同步英文 `AGENTS.md`。
+- 新增上下文包 `docs/agents/zh-CN/api-layering.md`(中文源)+ `docs/agents/api-layering.md`(英文),并注册进 `tools/sync-agents.ps1` 与 `docs/agents/index.md`。
+- `README.md` 加"设计理念"段,修正"核心 API / 目录速览"指向 `horizon.h` / `horizon_execution.h` 与活跃后端。
+- 本设计文档开篇加"核心理念"段。
+
+> **同步 marker 待刷新**:本环境无法运行 SHA256 / `sync-agents.ps1`,已把改动的英文 sync 文件 marker 临时置为 `PENDING_SYNC`。用户需运行 `=sa` 或手动执行 `.\tools\sync-agents.ps1`(按其输出更新各英文文件顶部 marker),再 `.\tools\sync-agents.ps1 -Check` 确认全部 in sync。

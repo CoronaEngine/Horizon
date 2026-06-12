@@ -18,6 +18,7 @@
 - `docs/agents/vulkan.md`
 - `docs/agents/helicon.md`
 - `docs/agents/push-constants.md`
+- `docs/agents/api-layering.md`
 - `docs/tasks/*.md`
 
 共享项目 skill：
