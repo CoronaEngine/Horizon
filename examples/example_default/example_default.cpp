@@ -101,24 +101,12 @@ void run_example_default()
 
     {
         std::vector<H::HardwareImage> finalOutputImages(windows.size());
-        auto fixedGraphicsQueueResolver = [](H::DeviceId device, H::QueueCapability) -> H::Queue& {
-            if (device.value != 0)
-                throw std::logic_error("example_default fixed queue resolver supports only the main device.");
-
-            const std::vector<H::Queue*>& queues = H::device_manager().queues_for(H::QueueCapability::Graphics);
-            const auto found = std::find_if(queues.begin(), queues.end(), [](const H::Queue* queue) {
-                return queue != nullptr;
-            });
-            if (found == queues.end())
-                throw std::runtime_error("example_default could not resolve a graphics queue.");
-
-            return **found;
-        };
-
+        // 默认构造的 HardwareExecutor 已自动解析主设备上对应能力的队列，
+        // 无需手写 QueueResolver。仅在需要固定/自定义队列调度时才传入 resolver。
         std::vector<std::unique_ptr<H::HardwareExecutor>> renderExecutors;
         renderExecutors.reserve(windows.size());
         for (size_t i = 0; i < windows.size(); ++i)
-            renderExecutors.push_back(std::make_unique<H::HardwareExecutor>(fixedGraphicsQueueResolver));
+            renderExecutors.push_back(std::make_unique<H::HardwareExecutor>());
         std::vector<H::HardwareExecutor> displayExecutors(windows.size());
         std::array<H::SubmitReceipt, TOTAL_WINDOWS> latestRenderReceipts;
         std::array<std::mutex, TOTAL_WINDOWS> frameSubmitMutexes;

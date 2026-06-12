@@ -254,3 +254,55 @@ display.after(receipt).present(disp, img);                   // C
 1. A2 的内部化手段:**移到内部头** vs **PImpl**?前者简单但要确认无外部直接依赖(测试 `close_for_tests`);后者彻底但有一次性改造成本。
 2. B 的隐式 commit 触发物:`H::submit` 标记 vs `executor.run(...)` 可变参函数?二选一统一风格。
 3. C 的 `after()` 接受 `SubmitReceipt` 还是直接接受生产者 `HardwareExecutor&`?后者更省一个中间对象,但耦合更紧。
+
+---
+
+## 11. 实施记录与实测约束(2026-06,执行方案 A 时补充)
+
+### 11.1 A1 已完成 ✅
+
+去掉示例中冗余的 `QueueResolver`,改为默认构造 `HardwareExecutor`。改动文件:
+
+- `examples/example_default/example_default.cpp`:删除 12 行 `fixedGraphicsQueueResolver` lambda,`make_unique<HardwareExecutor>()` 默认构造。
+- `examples/example_edsl/example_edsl.cpp`:删除 free function `resolve_fixed_graphics_queue`,`render_executor` 默认构造。
+- `examples/example_glsl/example_glsl.cpp`:同上。
+
+已核验三文件无残留 `device_manager()/queues_for()/find_if` 引用。**待用户本地构建 `HorizonExamples` 验证。**
+
+零功能损失:默认 executor 在 `execution.cpp:1581-1598` 的 `resolve_queue` 行为与被删 resolver 逐字等价。
+
+### 11.2 执行 A2 时发现的三个硬约束
+
+实施 A2/A3 前的代码勘察推翻了设计阶段的乐观假设:
+
+**约束 1 — 测试白盒耦合内部类型。** `tests/vulkan/test_execution_system.cpp` 直接构造并断言 `RecordedTask`、`ExecutionPlan`、`CommandIR`、`CommandOp`、`SubmissionToken`、`Queue`、`QueueCapability`(如 `task.commands[0].op == CommandOp::BeginRendering`,481-801 行)。物理移除这些类型出公共可见域 → **直接打断测试套件**。
+
+**约束 2 — 公共 by-value 类强制类型可见。** 无法在"不引入 PImpl"前提下隐藏符号:
+  - `CommandRecorder`(公共)有成员 `std::vector<CommandIR> commands_;` → `CommandIR` 必须完整可见。
+  - `SubmitReceipt`(公共,用户按值持有并遍历 `tokens`)有成员 `std::vector<SubmissionToken> tokens;` → `SubmissionToken`→`QueueId`→`QueueCapability` 必须完整可见。
+  - `HardwareStream`/`record()` 模板同理依赖 `RecordedTask`/`CommandIR`。
+  - 结论:**真正的符号隐藏只能靠 PImpl**;而 §10 待决策项 1 倾向"移内部头不用 PImpl"。二者矛盾——单纯移到 `horizon_internal.h` 再被 `horizon.h` `#include`,符号仍在命名空间内,并未屏蔽。
+
+**约束 3 — 部分目标已自动达成。** `ExecutionPlan`(L77)、`SubmissionSync`(L78)、`ExecutionCompiler`、`CompiledSubmission` 在 `horizon.h` 里**已经只是前向声明**,定义在 `src/.../hardware/execution.h`。即 A2 想隐藏的"编译产物"一类**已经隐藏**。剩余暴露的只是被 by-value 公共类结构性需要的 IR/Token 族。
+
+### 11.3 修正后的 A2 结论
+
+在"不引入 PImpl"约束下,A2 的"符号屏蔽"目标**无法实质达成**,只能做文本搬迁(`horizon.h` 仍 `#include` 内部头),收益限于人/AI 阅读主头时更清爽,但伴随 include 顺序风险(`CommandPayload` 引用其上方的 `DispatchDesc/DrawIndexedDesc/PresentDesc`,且头尾有 `BoundField` 模板定义),且**我无法本地编译验证**。
+
+**建议**:A2 改为二选一,留待用户决策后再执行:
+  - **A2-PImpl(彻底)**:`CommandRecorder`/`SubmitReceipt` 改 PImpl,IR/Token 进 `src/`,重写白盒测试为黑盒。改造量大,需编译在环。
+  - **A2-文本拆分(保守)**:仅把已前向声明之外、纯内部的枚举/结构集中注释为"高级/内部",不移动定义,零编译风险,零符号屏蔽——本质是文档化边界。
+
+### 11.4 修正后的 A3 结论
+
+A3(DeviceMask 下沉)比设计预估的**爆炸半径更大**:除 `CommandRecorder` 的 ~8 个声明(`horizon.h:436-443`)与其 `execution.cpp` 定义外,还需改:
+  - ~15 个值命令门面结构体(各自存 `DeviceMask devices{}` 成员并在 `record()` 里透传)。
+  - ~8 个自由工厂函数(`horizon.h:2182-2225`)。
+  - 且为不丢能力,需按设计补一个 `on_devices()` 高级入口(非纯删除)。
+
+属"宽机械改动",任一遗漏调用点即编译失败,**必须编译在环**。建议在用户本地构建可用后,作为独立一轮执行。
+
+### 11.5 本轮净交付
+
+- ✅ **A1 已实施**(3 文件),待用户构建验证。
+- 📋 **A2/A3 转为精确实施计划**(本节),因(a)PImpl 排除使 A2 符号屏蔽目标不可达、(b)A3 爆炸半径需编译在环,均不宜盲改公共头。

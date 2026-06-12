@@ -347,21 +347,6 @@ H::HardwareImage create_depth_image()
     image.set_clear_depth(1.0f, 0);
     return image;
 }
-
-H::Queue& resolve_fixed_graphics_queue(H::DeviceId device, H::QueueCapability)
-{
-    if (device.value != 0)
-        throw std::logic_error("example_edsl fixed queue resolver supports only the main device.");
-
-    const std::vector<H::Queue*>& queues = H::device_manager().queues_for(H::QueueCapability::Graphics);
-    const auto found = std::find_if(queues.begin(), queues.end(), [](const H::Queue* queue) {
-        return queue != nullptr;
-    });
-    if (found == queues.end())
-        throw std::runtime_error("example_edsl could not resolve a graphics queue.");
-
-    return **found;
-}
 } // namespace
 
 void run_example_edsl()
@@ -391,7 +376,7 @@ void run_example_edsl()
         H::HardwareImage depth_image = create_depth_image();
         H::HardwareBuffer vertex_buffer = H::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
         H::HardwareBuffer index_buffer = H::HardwareBuffer::index(mesh.indices, "example_edsl.index");
-        H::HardwareExecutor render_executor(resolve_fixed_graphics_queue);
+        H::HardwareExecutor render_executor;
         H::HardwareExecutor display_executor;
         H::HardwareDisplayer display(glfwGetWin32Window(window));
 
