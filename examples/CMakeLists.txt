@@ -40,5 +40,7 @@ add_custom_command(TARGET HorizonExamples POST_BUILD
     VERBATIM)
 
 helicon_install_runtime_deps(HorizonExamples)
-corona_copy_tbb_runtime_artifacts(HorizonExamples)
+if(COMMAND corona_copy_tbb_runtime_artifacts)
+    corona_copy_tbb_runtime_artifacts(HorizonExamples)
+endif()
 helicon_compile_shaders(HorizonExamples)
