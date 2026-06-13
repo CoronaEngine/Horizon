@@ -697,37 +697,6 @@ namespace Corona::Horizon
 
             return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(spirv_reflection)));
         }
-
-        [[nodiscard]] bool is_compute() const noexcept
-        {
-            return stage == PipelineShaderStage::Compute;
-        }
-
-        [[nodiscard]] bool is_vertex() const noexcept
-        {
-            return stage == PipelineShaderStage::Vertex;
-        }
-
-        [[nodiscard]] bool is_fragment() const noexcept
-        {
-            return stage == PipelineShaderStage::Fragment;
-        }
-
-        [[nodiscard]] bool is_ray_tracing() const noexcept
-        {
-            switch (stage)
-            {
-            case PipelineShaderStage::RayGeneration:
-            case PipelineShaderStage::Miss:
-            case PipelineShaderStage::ClosestHit:
-            case PipelineShaderStage::AnyHit:
-            case PipelineShaderStage::Intersection:
-            case PipelineShaderStage::Callable:
-                return true;
-            default:
-                return false;
-            }
-        }
     };
 
     struct EdslPipelineOptions
@@ -786,18 +755,6 @@ namespace Corona::Horizon
                     PipelineShaderStage::Compute,
                     compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) });
         }
-
-        ComputePipelineDesc& set_thread_group_size(ktm::uvec3 value) noexcept
-        {
-            thread_group_size = value;
-            return *this;
-        }
-
-        ComputePipelineDesc& set_debug_name(std::string value)
-        {
-            debug_name = std::move(value);
-            return *this;
-        }
     };
 
     struct BlendStateDesc
@@ -818,71 +775,6 @@ namespace Corona::Horizon
 
         bool logic_op_enabled = false;
         std::vector<BlendAttachmentDesc> attachments = { alpha_blend_attachment() };
-
-        BlendStateDesc& set_attachment(uint32_t index, BlendAttachmentDesc desc)
-        {
-            if (attachments.size() <= index)
-                attachments.resize(size_t(index) + 1, alpha_blend_attachment());
-
-            attachments[index] = std::move(desc);
-            return *this;
-        }
-
-        BlendStateDesc& set_attachment_count(uint32_t count)
-        {
-            attachments.resize(count, alpha_blend_attachment());
-            return *this;
-        }
-
-        BlendStateDesc& set_opaque()
-        {
-            for (auto& attachment : attachments)
-                attachment = opaque_attachment();
-
-            return *this;
-        }
-
-        BlendStateDesc& set_alpha_blend()
-        {
-            for (auto& attachment : attachments)
-                attachment = alpha_blend_attachment();
-
-            return *this;
-        }
-    };
-
-    struct RenderTargetLayoutDesc
-    {
-        std::vector<Format> color_formats;
-        Format depth_stencil_format = Format::UNKNOWN;
-        uint32_t multiview_count = 1;
-
-        RenderTargetLayoutDesc& add_color_format(Format format)
-        {
-            color_formats.push_back(format);
-            return *this;
-        }
-
-        RenderTargetLayoutDesc& set_color_format(uint32_t index, Format format)
-        {
-            if (color_formats.size() <= index)
-                color_formats.resize(size_t(index) + 1, Format::UNKNOWN);
-
-            color_formats[index] = format;
-            return *this;
-        }
-
-        RenderTargetLayoutDesc& set_depth_stencil_format(Format format) noexcept
-        {
-            depth_stencil_format = format;
-            return *this;
-        }
-
-        RenderTargetLayoutDesc& set_multiview_count(uint32_t value) noexcept
-        {
-            multiview_count = value;
-            return *this;
-        }
     };
 
     struct DepthAttachmentDesc
@@ -900,24 +792,6 @@ namespace Corona::Horizon
             return desc;
         }
 
-        DepthAttachmentDesc& set_enabled(bool value) noexcept
-        {
-            enabled = value;
-            return *this;
-        }
-
-        DepthAttachmentDesc& set_format(Format value) noexcept
-        {
-            format = value;
-            enabled = value != Format::UNKNOWN;
-            return *this;
-        }
-
-        DepthAttachmentDesc& set_debug_name(std::string value)
-        {
-            debug_name = std::move(value);
-            return *this;
-        }
     };
 
     struct RasterizerPipelineDesc
@@ -1006,161 +880,6 @@ namespace Corona::Horizon
                     fragment_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) });
         }
 
-        RasterizerPipelineDesc& set_rasterizer(RasterizerStateDesc value) noexcept
-        {
-            rasterizer = value;
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_depth_stencil(DepthStencilStateDesc value) noexcept
-        {
-            depth_stencil = value;
-            if (!value.depth_test_enabled && !value.stencil_test_enabled)
-                depth_attachment.enabled = false;
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_blend(BlendStateDesc value)
-        {
-            blend = std::move(value);
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_multisample(MultisampleStateDesc value) noexcept
-        {
-            multisample = value;
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_depth_attachment(DepthAttachmentDesc value) noexcept
-        {
-            depth_attachment = value;
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_multiview_count(uint32_t value) noexcept
-        {
-            multiview_count = std::max(1u, value);
-            return *this;
-        }
-
-        RasterizerPipelineDesc& set_debug_name(std::string value)
-        {
-            debug_name = std::move(value);
-            return *this;
-        }
-    };
-
-    struct RayTracingHitGroupDesc
-    {
-        RayTracingHitGroupKind kind = RayTracingHitGroupKind::Triangles;
-        int32_t closest_hit_shader = -1;
-        int32_t any_hit_shader = -1;
-        int32_t intersection_shader = -1;
-        std::string debug_name;
-
-        static RayTracingHitGroupDesc triangles(int32_t closest_hit_shader,
-                                                int32_t any_hit_shader = -1)
-        {
-            RayTracingHitGroupDesc desc;
-            desc.kind = RayTracingHitGroupKind::Triangles;
-            desc.closest_hit_shader = closest_hit_shader;
-            desc.any_hit_shader = any_hit_shader;
-            return desc;
-        }
-
-        static RayTracingHitGroupDesc procedural(int32_t intersection_shader,
-                                                 int32_t closest_hit_shader = -1,
-                                                 int32_t any_hit_shader = -1)
-        {
-            RayTracingHitGroupDesc desc;
-            desc.kind = RayTracingHitGroupKind::Procedural;
-            desc.intersection_shader = intersection_shader;
-            desc.closest_hit_shader = closest_hit_shader;
-            desc.any_hit_shader = any_hit_shader;
-            return desc;
-        }
-    };
-
-    struct RayTracingPipelineDesc
-    {
-        std::vector<PipelineShaderDesc> shaders;
-        std::vector<RayTracingHitGroupDesc> hit_groups;
-
-        uint32_t max_recursion_depth = 1;
-        uint32_t max_payload_size = 0;
-        uint32_t max_attribute_size = 8;
-
-        std::string debug_name;
-
-        uint32_t add_shader(PipelineShaderDesc shader)
-        {
-            if (!shader.is_ray_tracing())
-                throw std::invalid_argument("RayTracingPipelineDesc only accepts ray tracing shader stages.");
-
-            shaders.push_back(std::move(shader));
-            return static_cast<uint32_t>(shaders.size() - 1);
-        }
-
-        uint32_t add_ray_generation_shader(std::vector<uint32_t> spirv)
-        {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::RayGeneration, std::move(spirv)));
-        }
-
-        uint32_t add_miss_shader(std::vector<uint32_t> spirv)
-        {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Miss, std::move(spirv)));
-        }
-
-        uint32_t add_closest_hit_shader(std::vector<uint32_t> spirv)
-        {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::ClosestHit, std::move(spirv)));
-        }
-
-        uint32_t add_any_hit_shader(std::vector<uint32_t> spirv)
-        {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::AnyHit, std::move(spirv)));
-        }
-
-        uint32_t add_intersection_shader(std::vector<uint32_t> spirv)
-        {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Intersection, std::move(spirv)));
-        }
-
-        uint32_t add_callable_shader(std::vector<uint32_t> spirv)
-        {
-            return add_shader(PipelineShaderDesc::from_spirv(PipelineShaderStage::Callable, std::move(spirv)));
-        }
-
-        RayTracingPipelineDesc& add_hit_group(RayTracingHitGroupDesc hit_group)
-        {
-            hit_groups.push_back(std::move(hit_group));
-            return *this;
-        }
-
-        RayTracingPipelineDesc& set_max_recursion_depth(uint32_t value) noexcept
-        {
-            max_recursion_depth = value == 0 ? 1 : value;
-            return *this;
-        }
-
-        RayTracingPipelineDesc& set_max_payload_size(uint32_t value) noexcept
-        {
-            max_payload_size = value;
-            return *this;
-        }
-
-        RayTracingPipelineDesc& set_max_attribute_size(uint32_t value) noexcept
-        {
-            max_attribute_size = value;
-            return *this;
-        }
-
-        RayTracingPipelineDesc& set_debug_name(std::string value)
-        {
-            debug_name = std::move(value);
-            return *this;
-        }
     };
 
     // ================================================================
@@ -1406,10 +1125,6 @@ namespace Corona::Horizon
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
-    };
-
-    class RayTracingPipeline : public PipelineBindingScope, public ReflectedPipelineBindings<RayTracingPipeline>
-    {
     };
 
     // ================================================================

@@ -187,7 +187,7 @@ void run_example_default()
         };
 
         auto rasterizerDesc = Corona::Horizon::RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda);
-        rasterizerDesc.set_depth_stencil(colorOnlyDepthStencil());
+        rasterizerDesc.depth_stencil = colorOnlyDepthStencil();
         Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
         rasterizer.bind_output_targets(finalOutputImages[threadIndex]);
 
@@ -226,7 +226,7 @@ void run_example_default()
         Corona::Horizon::RasterizerPipelineDesc rasterizerDesc(
             Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Vertex, default_vert_glsl::slangModule),
             Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Fragment, default_frag_glsl::slangModule));
-        rasterizerDesc.set_depth_stencil(colorOnlyDepthStencil());
+        rasterizerDesc.depth_stencil = colorOnlyDepthStencil();
         Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
         rasterizer[default_frag_glsl::outColor] = finalOutputImages[threadIndex];
 

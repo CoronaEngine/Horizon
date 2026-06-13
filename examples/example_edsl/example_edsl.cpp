@@ -120,7 +120,7 @@ void run_example_edsl()
 
     Corona::Horizon::RasterizerPipelineDesc rasterizer_desc =
         Corona::Horizon::RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader);
-    rasterizer_desc.set_depth_attachment(Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth"));
+    rasterizer_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth");
 
     const auto uniform_bindings =
         reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources, static_cast<uint32_t>(sizeof(glm::mat4)));

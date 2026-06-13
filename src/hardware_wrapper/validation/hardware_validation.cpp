@@ -614,10 +614,10 @@ namespace Corona::Horizon
 
     bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc)
     {
-        if (!desc.vertex_shader.is_vertex())
+        if (desc.vertex_shader.stage != PipelineShaderStage::Vertex)
             return validation_error("RasterizerPipelineDesc requires a vertex shader.", true);
 
-        if (!desc.fragment_shader.is_fragment())
+        if (desc.fragment_shader.stage != PipelineShaderStage::Fragment)
             return validation_error("RasterizerPipelineDesc requires a fragment shader.", true);
 
         if (!shader_has_spirv(desc.vertex_shader))

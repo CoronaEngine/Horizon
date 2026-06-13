@@ -55,7 +55,7 @@ void run_example_glsl()
     Corona::Horizon::RasterizerPipelineDesc rasterizer_desc(
         Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Vertex, baseline_vert_glsl::slangModule),
         Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Fragment, baseline_frag_glsl::slangModule));
-    rasterizer_desc.set_depth_attachment(Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth"));
+    rasterizer_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth");
 
     Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
     rasterizer[baseline_frag_glsl::outColor] = final_output_image;
