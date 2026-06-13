@@ -1,5 +1,5 @@
 # Horizon Vulkan Context
-<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: 2e3463c227237d5c5da64e67756b60df8a35e6a7a0c2201c0e60e7b26857e3d4 -->
+<!-- AGENT_DOCS_VULKAN_ZH_CN_SHA256: b36041c542a315815e79e0966ab08a1122ab0c7eae6162900045899215344009 -->
 
 Load this file only for Vulkan backend, resource manager, pipeline, queue, descriptor, barrier, or platform include work.
 
@@ -102,6 +102,7 @@ Be careful with:
 - `ExecutionCompiler` turns IR into a per `{device, queue}` submission DAG / plan, and owns barrier planning, MGPU partitioning, present expansion, and cross-device sync decisions; descriptor/pipeline lookup, rendering info, and actual `VkCommandBuffer` filling belong to the Vulkan encoder.
 - `Queue` should only wrap one `VkQueue`: serialize queue-level host access such as submit / present, maintain the timeline semaphore, command buffer pool, in-flight tracked buffers, and retirement; do not put scheduling policy, cross-GPU sync policy, or resource allocation policy inside Queue.
 - `TrackedCommandBuffer` holds `SubmissionKeepAlive` and strong references to resource control blocks until the Queue timeline reaches the submitted value; retirement clears keep-alives and returns the command buffer to the pool.
+- The `ResourceSubmissionTracker` guard must cover Vulkan command encoding through `Queue::submit()` and token recording for a submission. The encoder updates CPU-side resource state such as `ImageWrap::image_layout`; multithreaded render / display paths must not race those state writes ahead of the actual submit order.
 - `HardwareExecutor` orchestrates record/compile/submit, DAG order, error policy, and `CrossDeviceSync`; do not maintain another delayed-release queue inside the executor.
 - Timeline semaphores are the default completion signal; use per-submit fences only when a backend or platform limitation needs a fallback.
 - `VK_KHR_deferred_host_operations` is only for splitting supported expensive host-side Vulkan operations across worker threads; it is not a GPU submission, resource lifetime, or delayed-destruction mechanism.
@@ -112,6 +113,7 @@ Be careful with:
 - `DisplayManager` owns the native-window Vulkan surface, swapchain, swapchain image wrappers, and present sync objects; on window close, surface lost, or out-of-date, destroy the swapchain first, then release the surface.
 - Hidden, minimized, or temporary zero-client-area windows should report that present was `Skipped`; do not destroy the swapchain only because the window is temporarily non-drawable. In multi-window paths sharing one device / queue, tearing down a swapchain or waiting for full device idle at that moment can disturb other window threads' submissions.
 - Before reusing a swapchain frame's image-available / render-finished binary semaphores, prove the previous submission token for that frame has completed and retire it. Do not assume frame-index rotation means the GPU has finished with those semaphores.
+- Before reusing the same swapchain image, turn the previous present token into a timeline wait on the next submit. Do not call `Queue::wait_for()` or any unbounded CPU/GPU wait while holding the `DisplayManager` mutex.
 - Present submissions should put only GPU-used resource tokens into queue keep-alive. Do not let queue in-flight keep-alive strongly hold `DisplayManager` itself, because that can defer surface/swapchain destruction until after the native window is gone.
 - Before destroying a swapchain, wait for the device or relevant queue to become idle and retire completed queue keep-alives so swapchain image wrappers / image views release before semaphores and `VkSwapchainKHR` are destroyed.
 - GLFW example loops should re-check `glfwWindowShouldClose` after `glfwPollEvents()`; once a close event arrives, do not record or submit another frame containing present.

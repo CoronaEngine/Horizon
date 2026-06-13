@@ -1915,7 +1915,10 @@ namespace Corona::Horizon
                 }
                 present_queue = manager_present_queue;
 
-                add_wait_once(present_waits, prepared.wait);
+                for (const SubmitWait& wait : prepared.waits)
+                {
+                    add_wait_once(present_waits, wait);
+                }
                 add_signal_once(present_signals, prepared.signal);
                 compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
                 prepared_presents.push_back({ std::move(manager), desc });
@@ -1933,9 +1936,6 @@ namespace Corona::Horizon
 
             try
             {
-                VulkanCommandEncoder encoder(queue.device());
-                encoder.encode(compiled_submission);
-
                 std::vector<SubmitWait> waits = compiled_submission.waits;
                 for (const SubmitWait& wait : present_waits)
                 {
@@ -1972,6 +1972,9 @@ namespace Corona::Horizon
                 }
 
                 auto tracked_submission = resource_submission_tracker().lock_submission(compiled_submission, queue.id(), waits);
+
+                VulkanCommandEncoder encoder(queue.device());
+                encoder.encode(compiled_submission);
 
                 QueueSubmission queue_submission;
                 queue_submission.command_buffer = std::move(compiled_submission.command_buffer);

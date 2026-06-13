@@ -783,10 +783,21 @@ namespace Corona::Horizon
             return prepared;
         }
 
-        if (acquire.image_index < present_tokens_.size() && present_tokens_[acquire.image_index] && present_queue_ != nullptr)
+        if (acquire.image_index < present_tokens_.size() && present_tokens_[acquire.image_index])
         {
-            present_queue_->wait_for(*present_tokens_[acquire.image_index]);
-            present_queue_->retire_completed();
+            const SubmissionToken previous_present = *present_tokens_[acquire.image_index];
+            if (previous_present.has_sync() && previous_present.value != 0)
+            {
+                const VkSemaphore timeline = previous_present.sync->timeline();
+                if (timeline != VK_NULL_HANDLE)
+                {
+                    prepared.waits.push_back({
+                        timeline,
+                        previous_present.value,
+                        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    });
+                }
+            }
             present_tokens_[acquire.image_index].reset();
         }
 
@@ -795,11 +806,11 @@ namespace Corona::Horizon
 
         prepared.ready_for_submit = true;
         prepared.present_queue = present_queue_;
-        prepared.wait = {
+        prepared.waits.push_back({
             image_available_[frame],
             0,
             display_acquire_wait_stages(),
-        };
+        });
         prepared.signal = {
             render_finished_[acquire.image_index],
             0,

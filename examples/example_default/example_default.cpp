@@ -219,9 +219,11 @@ void run_example_default()
                 rasterizer.record(indexBuffer, vertexBuffers[i]);
             }
 
+            Corona::Horizon::SubmitReceipt receipt =
+                *renderExecutors[threadIndex] << rasterizer(1920, 1080) << computer(1920 / 8, 1080 / 8, 1) << Corona::Horizon::submit;
             {
                 std::lock_guard lock(frameSubmitMutexes[threadIndex]);
-                latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex] << rasterizer(1920, 1080) << computer(1920 / 8, 1080 / 8, 1) << Corona::Horizon::submit;
+                latestRenderReceipts[threadIndex] = std::move(receipt);
             }
             hasRenderReceipt[threadIndex].store(true, std::memory_order_release);
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -259,9 +261,11 @@ void run_example_default()
                 rasterizer.record(indexBuffer, vertexBuffers[i]);
             }
 
+            Corona::Horizon::SubmitReceipt receipt =
+                *renderExecutors[threadIndex] << rasterizer(1920, 1080) << computer(1920 / 8, 1080 / 8, 1) << Corona::Horizon::submit;
             {
                 std::lock_guard lock(frameSubmitMutexes[threadIndex]);
-                latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex] << rasterizer(1920, 1080) << computer(1920 / 8, 1080 / 8, 1) << Corona::Horizon::submit;
+                latestRenderReceipts[threadIndex] = std::move(receipt);
             }
             hasRenderReceipt[threadIndex].store(true, std::memory_order_release);
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -291,10 +295,7 @@ void run_example_default()
             }
 
             displayExecutors[threadIndex].wait(renderReceipt);
-            {
-                std::lock_guard lock(frameSubmitMutexes[threadIndex]);
-                (void)(displayExecutors[threadIndex].stream() << Corona::Horizon::present(displayManager, finalOutputImages[threadIndex]) << Corona::Horizon::commit());
-            }
+            (void)(displayExecutors[threadIndex].stream() << Corona::Horizon::present(displayManager, finalOutputImages[threadIndex]) << Corona::Horizon::commit());
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     };

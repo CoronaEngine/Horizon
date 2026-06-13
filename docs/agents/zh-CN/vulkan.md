@@ -101,6 +101,7 @@
 - `ExecutionCompiler` 负责把 IR 编译为 per `{device, queue}` 的提交 DAG / plan，并在这里做 barrier 规划、MGPU 分区、present 展开和跨设备同步决策；descriptor/pipeline 查找、rendering info 和实际 `VkCommandBuffer` 填充属于 Vulkan encoder。
 - `Queue` 只封装单个 `VkQueue` 的职责：串行化 submit / present 等 queue-level host access、维护 timeline semaphore、command buffer pool、in-flight tracked buffers 和 retire；不要把调度策略、跨 GPU 同步策略或资源分配策略放进 Queue。
 - `TrackedCommandBuffer` 持有 `SubmissionKeepAlive` 和资源 control block 强引用，直到 Queue 的 timeline 到达提交值；retire 时清空 keep-alive 并把 command buffer 归还到池。
+- `ResourceSubmissionTracker` 的 guard 必须覆盖同一提交的 Vulkan command encode 到 `Queue::submit()` 和 token 记录；encoder 会更新 `ImageWrap::image_layout` 这类 CPU 侧资源状态，不能让多线程 render/display 在 encode 阶段互相抢写，导致 CPU layout 顺序和实际 submit 顺序不一致。
 - `HardwareExecutor` 编排 record/compile/submit、DAG 顺序、错误策略和 `CrossDeviceSync`；不要在 executor 内部再维护一套延迟释放队列。
 - Timeline semaphore 是默认完成信号；只有后端或平台限制需要 fallback 时才使用 per-submit fence。
 - `VK_KHR_deferred_host_operations` 只用于把支持该扩展的昂贵 host-side Vulkan 操作拆到线程池，不能当作 GPU 提交、资源生命周期或延迟销毁机制。
@@ -111,6 +112,7 @@
 - `DisplayManager` 拥有 native window 对应的 Vulkan surface、swapchain、swapchain image wrapper 和 present sync object；窗口关闭、surface lost 或 out-of-date 时应先拆 swapchain，再释放 surface。
 - 窗口隐藏、最小化或 client area 临时为 0 时，应把该次 present 视为 `Skipped`，不要仅因暂时不可绘制就销毁 swapchain。多窗口共享同一 device / queue 时，在这种瞬间拆 swapchain 或等待全设备 idle 可能干扰其他窗口线程的提交。
 - 复用 swapchain 每个 frame 的 image-available / render-finished binary semaphore 前，必须确认上一轮使用该 frame 的提交 token 已完成并 retire；不要只靠 frame index 轮转假设 GPU 已经用完这些 semaphore。
+- 复用同一个 swapchain image 时，上一轮 present token 应转成下一次提交的 timeline wait；不要在持有 `DisplayManager` mutex 时调用 `Queue::wait_for()` 或其他无界 CPU/GPU wait。
 - present 提交只应把 GPU 使用到的资源 token 放进 queue keep-alive；不要让 queue in-flight keep-alive 强持 `DisplayManager` 本身，否则窗口关闭后 surface/swapchain 销毁可能被推迟到 native window 销毁之后。
 - 销毁 swapchain 前先等待设备或相关队列空闲，并退休已完成的 queue keep-alive，保证 swapchain image wrapper / image view 先释放，再销毁 semaphore 和 `VkSwapchainKHR`。
 - GLFW 示例循环在 `glfwPollEvents()` 后应重新检查 `glfwWindowShouldClose`；关闭事件已经到达时不要再录制或提交包含 present 的新帧。

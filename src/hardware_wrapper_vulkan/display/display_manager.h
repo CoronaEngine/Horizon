@@ -30,7 +30,7 @@ namespace Corona::Horizon
     {
         bool ready_for_submit { false };
         Queue* present_queue { nullptr };
-        SubmitWait wait {};
+        std::vector<SubmitWait> waits;
         SubmitSignal signal {};
         PresentResult immediate_result {};
     };
