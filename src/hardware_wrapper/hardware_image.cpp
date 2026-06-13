@@ -611,7 +611,11 @@ namespace Corona::Horizon
 
     uint32_t HardwareImage::store_descriptor() const
     {
-        return store_sampled_descriptor();
+        const auto image = write_image(*this);
+        if (!image)
+            throw std::invalid_argument("HardwareImage::store_descriptor requires a valid image.");
+
+        return resource_manager().store_descriptor(*image);
     }
 
     uint32_t HardwareImage::store_sampled_descriptor() const

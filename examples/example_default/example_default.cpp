@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -87,10 +88,14 @@ void run_example_default()
         finalOutputImages[i].set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
     }
 
-    uint32_t textureID = loadTexture(defaultTexturePath).descriptorID;
+    TextureLoadResult texture = loadTexture(defaultTexturePath);
+    if (!texture.success)
+        throw std::runtime_error("Failed to load default example texture.");
+    uint32_t textureID = texture.descriptorID;
 
     std::vector<std::vector<Corona::Horizon::HardwareBuffer>> rasterizerStorageBuffers(windows.size());
     std::atomic_bool running = true;
+    std::array<std::atomic_bool, TOTAL_WINDOWS> hasRenderReceipt {};
 
     auto colorOnlyDepthStencil = []() {
         Corona::Horizon::DepthStencilStateDesc depthStencil;
@@ -186,12 +191,13 @@ void run_example_default()
             return interpolatedColor;
         };
 
-        auto rasterizerDesc = Corona::Horizon::RasterizerPipelineDesc::from_edsl(vsLambda, fsLambda);
-        rasterizerDesc.depth_stencil = colorOnlyDepthStencil();
-        Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
+        Corona::Horizon::RasterizerPipelineDesc desc;
+        desc.depth_stencil = colorOnlyDepthStencil();
+
+        Corona::Horizon::RasterizerPipeline rasterizer(vsLambda, fsLambda, desc);
         rasterizer.bind_output_targets(finalOutputImages[threadIndex]);
 
-        Corona::Horizon::ComputePipeline computer(Corona::Horizon::ComputePipelineDesc::from_edsl(compute, uvec3(8, 8, 1)));
+        Corona::Horizon::ComputePipeline computer(compute, uvec3(8, 8, 1));
 
         auto startTime = std::chrono::high_resolution_clock::now();
         Corona::Horizon::HardwareBuffer indexBuffer = Corona::Horizon::HardwareBuffer::index(indices);
@@ -217,23 +223,21 @@ void run_example_default()
                 std::lock_guard lock(frameSubmitMutexes[threadIndex]);
                 latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex] << rasterizer(1920, 1080) << computer(1920 / 8, 1080 / 8, 1) << Corona::Horizon::submit;
             }
+            hasRenderReceipt[threadIndex].store(true, std::memory_order_release);
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     };
 
     // GLSL 路径：预编译 SPIR-V + CPU 端 MVP 预变换
     auto renderThreadGLSL = [&](uint32_t threadIndex) {
-        Corona::Horizon::RasterizerPipelineDesc rasterizerDesc(
-            Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Vertex, default_vert_glsl::slangModule),
-            Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Fragment, default_frag_glsl::slangModule));
-        rasterizerDesc.depth_stencil = colorOnlyDepthStencil();
-        Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizerDesc));
-        rasterizer[default_frag_glsl::outColor] = finalOutputImages[threadIndex];
+        Corona::Horizon::RasterizerPipelineDesc desc;
+        desc.depth_stencil = colorOnlyDepthStencil();
 
-        Corona::Horizon::ComputePipeline computer(Corona::Horizon::ComputePipelineDesc(
-            Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Compute, default_compute_glsl::slangModule),
-            ktm::uvec3(8, 8, 1)));
-        computer[default_compute_glsl::globalParams::imageID] = finalOutputImages[threadIndex].store_storage_descriptor();
+        Corona::Horizon::RasterizerPipeline rasterizer(default_vert_glsl, default_frag_glsl, desc);
+        rasterizer.outColor = finalOutputImages[threadIndex];
+
+        Corona::Horizon::ComputePipeline computer(default_compute_glsl, ktm::uvec3(8, 8, 1));
+        computer.pushConsts.imageID = finalOutputImages[threadIndex].storeDescriptor();
 
         auto startTime = std::chrono::high_resolution_clock::now();
         Corona::Horizon::HardwareBuffer indexBuffer = Corona::Horizon::HardwareBuffer::index(indices);
@@ -259,6 +263,7 @@ void run_example_default()
                 std::lock_guard lock(frameSubmitMutexes[threadIndex]);
                 latestRenderReceipts[threadIndex] = *renderExecutors[threadIndex] << rasterizer(1920, 1080) << computer(1920 / 8, 1080 / 8, 1) << Corona::Horizon::submit;
             }
+            hasRenderReceipt[threadIndex].store(true, std::memory_order_release);
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     };
@@ -267,9 +272,27 @@ void run_example_default()
         Corona::Horizon::HardwareDisplayer displayManager(glfwGetWin32Window(windows[threadIndex]));
         while (running.load())
         {
+            if (!hasRenderReceipt[threadIndex].load(std::memory_order_acquire))
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            Corona::Horizon::SubmitReceipt renderReceipt;
             {
                 std::lock_guard lock(frameSubmitMutexes[threadIndex]);
-                displayExecutors[threadIndex].wait(latestRenderReceipts[threadIndex]);
+                renderReceipt = latestRenderReceipts[threadIndex];
+            }
+
+            if (renderReceipt.empty())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            displayExecutors[threadIndex].wait(renderReceipt);
+            {
+                std::lock_guard lock(frameSubmitMutexes[threadIndex]);
                 (void)(displayExecutors[threadIndex].stream() << Corona::Horizon::present(displayManager, finalOutputImages[threadIndex]) << Corona::Horizon::commit());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(16));

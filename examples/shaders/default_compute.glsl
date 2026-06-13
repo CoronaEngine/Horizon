@@ -6,10 +6,10 @@ layout(local_size_x = 8, local_size_y = 8) in;
 
 layout(set = 2, binding = 0, rgba16f) uniform image2D inputImageRGBA16[];
 
-layout(set = 3, binding = 0) uniform GlobalUniformParam
+layout(push_constant) uniform PushConsts
 {
     uint imageID;
-} globalParams;
+} pushConsts;
 
 vec3 acesFilmicToneMapCurve(vec3 x)
 {
@@ -32,7 +32,7 @@ vec3 acesFilmicToneMapInverse(vec3 x)
 
 void main()
 {
-    uint imageID = globalParams.imageID;
+    uint imageID = pushConsts.imageID;
     vec4 color = imageLoad(inputImageRGBA16[imageID], ivec2(gl_GlobalInvocationID.xy));
 
     imageStore(inputImageRGBA16[imageID], ivec2(gl_GlobalInvocationID.xy), vec4(acesFilmicToneMapCurve(color.xyz), 1.0));

@@ -121,6 +121,15 @@ static bool isDirectResourceBindType(ShaderCodeModule::ShaderResources::BindType
 	}
 }
 
+static bool isPushConstantBlockRecord(const ShaderCodeModule::ShaderResources::ShaderBindInfo& info,
+                                      const ShaderCodeModule::ShaderResources& resources)
+{
+	return info.bindType == ShaderCodeModule::ShaderResources::pushConstantMembers &&
+	       info.variateName == resources.pushConstantName &&
+	       info.byteOffset == 0 &&
+	       info.typeSize == resources.pushConstantSize;
+}
+
 std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCodeModule::ShaderResources& resources)
 {
 	std::set<std::string> bindingBlockNames;
@@ -132,7 +141,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCo
 		out << "struct " << resources.pushConstantName << "\n{\n";
 		for (auto& info : resources.bindInfoPool)
 		{
-			if (info.bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
+			if (info.bindType == ShaderCodeModule::ShaderResources::pushConstantMembers &&
+			    !isPushConstantBlockRecord(info, resources))
 				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
 				    << "{" << info.byteOffset << ", " << info.typeSize
 				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
@@ -198,7 +208,7 @@ static std::string emitBlockProxy(std::stringstream& out,
 	std::vector<std::string> fieldInits;
 	for (auto& info : resources.bindInfoPool)
 	{
-		if (info.bindType == bindType)
+		if (info.bindType == bindType && !isPushConstantBlockRecord(info, resources))
 		{
 			out << "\t::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
@@ -668,9 +678,10 @@ int main(int argc, char** argv)
 	std::stringstream out;
 	out << "#pragma once\n#include <Codegen/VariateProxy.h>\n";
 
-    // Wrap everything in a per-shader struct to avoid redefinition across .hpp files
+    // Wrap everything in a per-shader type and expose an object with the shader name.
     auto nsName = sanitizeToIdentifier(path);
-    out << "struct " << nsName << " {\n";
+    auto nsTypeName = nsName + "_t";
+    out << "struct " << nsTypeName << " {\n";
 
     auto fileName = path.string();
     std::ranges::replace(fileName, '\\', '_');
@@ -686,7 +697,7 @@ int main(int argc, char** argv)
     out << "static inline auto& slangModule = " << smName << ";\n";
 
     // Generate BindingKey struct declarations first, collect binding block names
-	std::cout << "INFO:Generate binding keys for struct '" << nsName << "'...\n";
+	std::cout << "INFO:Generate binding keys for struct '" << nsTypeName << "'...\n";
 	auto bindingBlockNames = generateBindingKeys(out, resources);
 
     SlangModuleReflectionArgs reflectionArgs;
@@ -740,10 +751,11 @@ int main(int argc, char** argv)
     ShaderLanguageConverter::slangModuleReflection(reflectionArgs);
 
 	// Generate Bindings<P> template for direct member access (TypedRasterizerPipeline / TypedComputePipeline)
-	std::cout << "INFO:Generate Bindings<P> for struct '" << nsName << "'...\n";
+	std::cout << "INFO:Generate Bindings<P> for struct '" << nsTypeName << "'...\n";
 	generateBindings(out, resources);
 
-	out << "}; // struct " << nsName << "\n";
+	out << "}; // struct " << nsTypeName << "\n";
+	out << "inline constexpr " << nsTypeName << " " << nsName << "{};\n";
 
 	//std::cout << out.str();
 

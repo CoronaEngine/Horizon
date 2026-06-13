@@ -1905,7 +1905,84 @@ namespace Corona::Horizon
 
     uint32_t ResourceManager::store_descriptor(ImageWrap& image)
     {
-        return store_sampled_descriptor(image);
+        const bool supports_sampled = has_flag(image.desc.usage, ImageUsageFlags::Sampled);
+        const bool supports_storage = has_flag(image.desc.usage, ImageUsageFlags::Storage);
+
+        if (supports_sampled && !supports_storage)
+            return store_sampled_descriptor(image);
+        if (supports_storage && !supports_sampled)
+            return store_storage_descriptor(image);
+
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::store_descriptor called before initialize().");
+        }
+
+        if (!image.valid() || image.image_view == VK_NULL_HANDLE)
+        {
+            throw std::invalid_argument("ResourceManager::store_descriptor requires a valid HardwareImage.");
+        }
+
+        if (!supports_sampled && !supports_storage)
+        {
+            throw std::invalid_argument("HardwareImage bindless descriptor requires ImageUsageFlags::Sampled or ImageUsageFlags::Storage.");
+        }
+
+        create_combined_texture_descriptors();
+        create_storage_image_descriptors();
+
+        const bool has_shared_index = image.sampled_bindless_index >= 0 &&
+                                      image.sampled_bindless_index == image.storage_bindless_index;
+        uint32_t descriptor_index = has_shared_index
+                                        ? static_cast<uint32_t>(image.sampled_bindless_index)
+                                        : std::max(next_combined_texture_descriptor_, next_storage_image_descriptor_);
+
+        if (descriptor_index >= combined_texture_descriptors_.capacity)
+        {
+            throw std::runtime_error("HardwareImage descriptor index exceeds the combined texture descriptor array.");
+        }
+        if (descriptor_index >= storage_image_descriptors_.capacity)
+        {
+            throw std::runtime_error("HardwareImage descriptor index exceeds the storage image descriptor array.");
+        }
+
+        image.sampled_bindless_index = static_cast<std::int32_t>(descriptor_index);
+        image.storage_bindless_index = static_cast<std::int32_t>(descriptor_index);
+        next_combined_texture_descriptor_ = std::max(next_combined_texture_descriptor_, descriptor_index + 1);
+        next_storage_image_descriptor_ = std::max(next_storage_image_descriptor_, descriptor_index + 1);
+
+        VkDescriptorImageInfo sampled_info {};
+        sampled_info.sampler = default_sampler_;
+        sampled_info.imageView = image.image_view;
+        sampled_info.imageLayout = sampled_descriptor_layout(image);
+
+        VkWriteDescriptorSet sampled_write {};
+        sampled_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        sampled_write.dstSet = combined_texture_descriptors_.set;
+        sampled_write.dstBinding = 0;
+        sampled_write.dstArrayElement = descriptor_index;
+        sampled_write.descriptorCount = 1;
+        sampled_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sampled_write.pImageInfo = &sampled_info;
+
+        VkDescriptorImageInfo storage_info {};
+        storage_info.imageView = image.image_view;
+        storage_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet storage_write {};
+        storage_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        storage_write.dstSet = storage_image_descriptors_.set;
+        storage_write.dstBinding = 0;
+        storage_write.dstArrayElement = descriptor_index;
+        storage_write.descriptorCount = 1;
+        storage_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        storage_write.pImageInfo = &storage_info;
+
+        const VkWriteDescriptorSet writes[] = { sampled_write, storage_write };
+        vkUpdateDescriptorSets(device_manager_->logical_device(), 2, writes, 0, nullptr);
+        return descriptor_index;
     }
 
     uint32_t ResourceManager::store_sampled_descriptor(ImageWrap& image)

@@ -44,26 +44,26 @@ namespace Corona::Horizon
         }
     }
 
-    ComputePipeline::ComputePipeline() = default;
+    ComputePipelineBase::ComputePipelineBase() = default;
 
-    ComputePipeline::ComputePipeline(ComputePipelineDesc desc, const std::source_location& source_location)
+    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location)
     {
         ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
     }
 
-    ComputePipeline::ComputePipeline(const ComputePipeline& other)
+    ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
         : ResourceHandle(other)
     {
     }
 
-    ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
+    ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&& other) noexcept
         : ResourceHandle(std::move(other))
     {
     }
 
-    ComputePipeline::~ComputePipeline() = default;
+    ComputePipelineBase::~ComputePipelineBase() = default;
 
-    ComputePipeline& ComputePipeline::operator=(const ComputePipeline& other)
+    ComputePipelineBase& ComputePipelineBase::operator=(const ComputePipelineBase& other)
     {
         if (this == &other)
             return *this;
@@ -72,7 +72,7 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
+    ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other) noexcept
     {
         if (this == &other)
             return *this;
@@ -81,12 +81,12 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipeline::operator bool() const noexcept
+    ComputePipelineBase::operator bool() const noexcept
     {
         return ResourceHandle::operator bool();
     }
 
-    ComputePipeline& ComputePipeline::operator()(uint16_t x, uint16_t y, uint16_t z)
+    ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);
@@ -94,46 +94,51 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipeline& ComputePipeline::bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer)
+    ComputePipelineBase& ComputePipelineBase::bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer)
     {
         pipeline_impl(ResourceBridge::token(*this))->bind_storage_buffer(binding, buffer);
         return *this;
     }
 
-    ComputePipeline& ComputePipeline::bind_storage_image(uint32_t binding, const HardwareImage& image)
+    ComputePipelineBase& ComputePipelineBase::bind_storage_image(uint32_t binding, const HardwareImage& image)
     {
         pipeline_impl(ResourceBridge::token(*this))->bind_storage_image(binding, image);
         return *this;
     }
 
-    CommandBatch ComputePipeline::command_batch() const
+    ComputePipelineDesc ComputePipelineBase::desc() const
+    {
+        return pipeline_impl(ResourceBridge::token(*this))->desc();
+    }
+
+    CommandBatch ComputePipelineBase::command_batch() const
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);
         return impl->command_batch(*this);
     }
 
-    void ComputePipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
+    void ComputePipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
     {
         pipeline_impl(ResourceBridge::token(*this))->set_push_constant_direct(byte_offset, data, size, bind_type, set, binding);
     }
 
-    void ComputePipeline::set_resource_direct(uint64_t byte_offset,
-                                              uint32_t type_size,
-                                              const HardwareBuffer& buffer,
-                                              int32_t bind_type,
-                                              uint32_t set,
-                                              uint32_t binding)
+    void ComputePipelineBase::set_resource_direct(uint64_t byte_offset,
+                                                  uint32_t type_size,
+                                                  const HardwareBuffer& buffer,
+                                                  int32_t bind_type,
+                                                  uint32_t set,
+                                                  uint32_t binding)
     {
         pipeline_impl(ResourceBridge::token(*this))->set_resource_direct(byte_offset, type_size, buffer, bind_type, set, binding);
     }
 
-    void ComputePipeline::set_resource_direct(uint64_t byte_offset,
-                                              uint32_t type_size,
-                                              const HardwareImage& image,
-                                              int32_t bind_type,
-                                              uint32_t set,
-                                              uint32_t binding)
+    void ComputePipelineBase::set_resource_direct(uint64_t byte_offset,
+                                                  uint32_t type_size,
+                                                  const HardwareImage& image,
+                                                  int32_t bind_type,
+                                                  uint32_t set,
+                                                  uint32_t binding)
     {
         pipeline_impl(ResourceBridge::token(*this))->set_resource_direct(byte_offset, type_size, image, bind_type, set, binding);
     }

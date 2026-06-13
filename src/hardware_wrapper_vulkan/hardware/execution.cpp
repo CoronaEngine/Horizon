@@ -1724,12 +1724,12 @@ namespace Corona::Horizon
         return *this;
     }
 
-    HardwareStream& HardwareStream::operator<<(const ComputePipeline& pipeline)
+    HardwareStream& HardwareStream::operator<<(const ComputePipelineBase& pipeline)
     {
         return *this << pipeline.command_batch();
     }
 
-    HardwareStream& HardwareStream::operator<<(const RasterizerPipeline& pipeline)
+    HardwareStream& HardwareStream::operator<<(const RasterizerPipelineBase& pipeline)
     {
         return *this << pipeline.command_batch();
     }
@@ -1777,14 +1777,14 @@ namespace Corona::Horizon
         return HardwareStream(*this);
     }
 
-    HardwareStream HardwareExecutor::operator<<(const ComputePipeline& pipeline)
+    HardwareStream HardwareExecutor::operator<<(const ComputePipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();
         return s;
     }
 
-    HardwareStream HardwareExecutor::operator<<(const RasterizerPipeline& pipeline)
+    HardwareStream HardwareExecutor::operator<<(const RasterizerPipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();

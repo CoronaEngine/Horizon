@@ -109,7 +109,7 @@ void run_example_edsl()
 
     auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
         position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-        Float color_weight = edsl_header_glsl::get_color_weight(vertex->color);
+        Float color_weight = edsl_header_glsl.get_color_weight(vertex->color);
         return Float4(vertex->tex_coord, color_weight, 1.0f);
     };
 
@@ -118,14 +118,13 @@ void run_example_edsl()
         final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
     };
 
-    Corona::Horizon::RasterizerPipelineDesc rasterizer_desc =
-        Corona::Horizon::RasterizerPipelineDesc::from_edsl(vertex_shader, fragment_shader);
-    rasterizer_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth");
+    Corona::Horizon::RasterizerPipelineDesc desc;
+    desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth");
 
+    Corona::Horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
+    const auto rasterizer_desc = rasterizer.desc();
     const auto uniform_bindings =
         reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources, static_cast<uint32_t>(sizeof(glm::mat4)));
-
-    Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
     rasterizer.bind_depth_target(depth_image);
 
     Corona::Horizon::DrawIndexedParams draw_params;

@@ -59,7 +59,11 @@ namespace Corona::Horizon
     class PipelineBindingScope;
     class ResourceProxy;
 
+    class ComputePipelineBase;
+    class RasterizerPipelineBase;
+    template <typename CS = void>
     class ComputePipeline;
+    template <typename VS = void, typename FS = void>
     class RasterizerPipeline;
     class RayTracingPipeline;
 
@@ -113,8 +117,8 @@ namespace Corona::Horizon
         HardwareStream& operator<<(const CommandBatch& commands);
         // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
         // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
-        HardwareStream& operator<<(const ComputePipeline& pipeline);
-        HardwareStream& operator<<(const RasterizerPipeline& pipeline);
+        HardwareStream& operator<<(const ComputePipelineBase& pipeline);
+        HardwareStream& operator<<(const RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 
         [[nodiscard]] SubmitReceipt commit();
@@ -151,8 +155,8 @@ namespace Corona::Horizon
 
         [[nodiscard]] HardwareStream stream();
         // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
-        [[nodiscard]] HardwareStream operator<<(const ComputePipeline& pipeline);
-        [[nodiscard]] HardwareStream operator<<(const RasterizerPipeline& pipeline);
+        [[nodiscard]] HardwareStream operator<<(const ComputePipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(const RasterizerPipelineBase& pipeline);
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
@@ -411,6 +415,7 @@ namespace Corona::Horizon
         [[nodiscard]] CopyBufferCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
+        [[nodiscard]] uint32_t storeDescriptor() const { return store_descriptor(); }
         [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
@@ -614,6 +619,9 @@ namespace Corona::Horizon
         [[nodiscard]] uint32_t store_descriptor() const;
         [[nodiscard]] uint32_t store_sampled_descriptor() const;
         [[nodiscard]] uint32_t store_storage_descriptor() const;
+        [[nodiscard]] uint32_t storeDescriptor() const { return store_descriptor(); }
+        [[nodiscard]] uint32_t storeSampledDescriptor() const { return store_sampled_descriptor(); }
+        [[nodiscard]] uint32_t storeStorageDescriptor() const { return store_storage_descriptor(); }
         static HardwareImage import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
@@ -796,8 +804,8 @@ namespace Corona::Horizon
 
     struct RasterizerPipelineDesc
     {
-        PipelineShaderDesc vertex_shader;
-        PipelineShaderDesc fragment_shader;
+        PipelineShaderDesc vertex_shader { PipelineShaderStage::Vertex, EmbeddedShader::ShaderCodeModule {} };
+        PipelineShaderDesc fragment_shader { PipelineShaderStage::Fragment, EmbeddedShader::ShaderCodeModule {} };
 
         RasterizerStateDesc rasterizer;
         DepthStencilStateDesc depth_stencil;
@@ -810,13 +818,34 @@ namespace Corona::Horizon
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
 
-        RasterizerPipelineDesc(PipelineShaderDesc vertex, PipelineShaderDesc fragment) : vertex_shader(std::move(vertex)), fragment_shader(std::move(fragment))
+        RasterizerPipelineDesc() = default;
+
+        RasterizerPipelineDesc(PipelineShaderDesc vertex, PipelineShaderDesc fragment)
         {
-            if (vertex_shader.stage != PipelineShaderStage::Vertex)
+            set_shaders(std::move(vertex), std::move(fragment));
+        }
+
+        void set_shaders(PipelineShaderDesc vertex, PipelineShaderDesc fragment)
+        {
+            if (vertex.stage != PipelineShaderStage::Vertex)
                 throw std::invalid_argument("RasterizerPipelineDesc requires a vertex shader.");
 
-            if (fragment_shader.stage != PipelineShaderStage::Fragment)
+            if (fragment.stage != PipelineShaderStage::Fragment)
                 throw std::invalid_argument("RasterizerPipelineDesc requires a fragment shader.");
+
+            vertex_shader = std::move(vertex);
+            fragment_shader = std::move(fragment);
+        }
+
+        void apply_state(RasterizerPipelineDesc state)
+        {
+            rasterizer = std::move(state.rasterizer);
+            depth_stencil = std::move(state.depth_stencil);
+            blend = std::move(state.blend);
+            multisample = std::move(state.multisample);
+            depth_attachment = std::move(state.depth_attachment);
+            multiview_count = state.multiview_count;
+            debug_name = std::move(state.debug_name);
         }
 
         template <typename VS, typename FS>
@@ -1015,24 +1044,26 @@ namespace Corona::Horizon
     // Pipeline Runtime
     // ================================================================
 
-    class ComputePipeline : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipeline>
+    class ComputePipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipelineBase>
     {
     public:
-        ComputePipeline();
-        explicit ComputePipeline(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
+        ComputePipelineBase();
+        explicit ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
 
-        ComputePipeline(const ComputePipeline& other);
-        ComputePipeline(ComputePipeline&& other) noexcept;
-        ~ComputePipeline();
+        ComputePipelineBase(const ComputePipelineBase& other);
+        ComputePipelineBase(ComputePipelineBase&& other) noexcept;
+        ~ComputePipelineBase();
 
-        ComputePipeline& operator=(const ComputePipeline& other);
-        ComputePipeline& operator=(ComputePipeline&& other) noexcept;
-        ComputePipeline& operator()(uint16_t x, uint16_t y, uint16_t z);
-        ComputePipeline& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
-        ComputePipeline& bind_storage_image(uint32_t binding, const HardwareImage& image);
+        ComputePipelineBase& operator=(const ComputePipelineBase& other);
+        ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
+        ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
+        ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
+        ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
+        [[nodiscard]] ComputePipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
+        [[nodiscard]] std::uintptr_t getComputePipelineID() const noexcept { return get_compute_pipeline_id(); }
 
     private:
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
@@ -1055,32 +1086,34 @@ namespace Corona::Horizon
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
     };
 
-    class RasterizerPipeline : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipeline>
+    class RasterizerPipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipelineBase>
     {
     public:
-        RasterizerPipeline();
-        explicit RasterizerPipeline(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
+        RasterizerPipelineBase();
+        explicit RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
 
-        RasterizerPipeline(const RasterizerPipeline& other);
-        RasterizerPipeline(RasterizerPipeline&& other) noexcept;
-        ~RasterizerPipeline();
+        RasterizerPipelineBase(const RasterizerPipelineBase& other);
+        RasterizerPipelineBase(RasterizerPipelineBase&& other) noexcept;
+        ~RasterizerPipelineBase();
 
-        RasterizerPipeline& operator=(const RasterizerPipeline& other);
-        RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept;
+        RasterizerPipelineBase& operator=(const RasterizerPipelineBase& other);
+        RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
-        RasterizerPipeline& operator()(uint16_t width, uint16_t height);
-        RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
-        RasterizerPipeline& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
-        RasterizerPipeline& clear_records();
-        RasterizerPipeline& bind_render_target(uint32_t location, HardwareImage& image);
-        RasterizerPipeline& bind_depth_target(HardwareImage& image);
+        RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
+        RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
+        RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        RasterizerPipelineBase& clear_records();
+        RasterizerPipelineBase& bind_render_target(uint32_t location, HardwareImage& image);
+        RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
+        [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_rasterizer_pipeline_id() const noexcept { return resource_id(); }
+        [[nodiscard]] std::uintptr_t getRasterizerPipelineID() const noexcept { return get_rasterizer_pipeline_id(); }
 
         template <typename TargetProxy>
             requires requires(TargetProxy& proxy) { proxy.boundResource_; }
-        RasterizerPipeline& bind_render_target(uint32_t location, TargetProxy& proxy)
+        RasterizerPipelineBase& bind_render_target(uint32_t location, TargetProxy& proxy)
         {
             auto* image = static_cast<HardwareImage*>(proxy.boundResource_);
             if (image == nullptr)
@@ -1098,7 +1131,7 @@ namespace Corona::Horizon
         }
 
         template <typename... TargetProxies>
-        RasterizerPipeline& bind_output_targets(TargetProxies&... targets)
+        RasterizerPipelineBase& bind_output_targets(TargetProxies&... targets)
         {
             uint32_t location = 0;
             (bind_render_target(location++, targets), ...);
@@ -1126,6 +1159,290 @@ namespace Corona::Horizon
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
     };
+
+    namespace PipelineDetail
+    {
+        template <typename CS>
+        concept GeneratedComputeShaderObject =
+            requires {
+                std::remove_cvref_t<CS>::slangModule;
+            } &&
+            requires {
+                typename std::remove_cvref_t<CS>::template Bindings<ComputePipelineBase>;
+            };
+
+        template <typename VS, typename FS>
+        concept GeneratedRasterizerShaderObjects =
+            requires {
+                std::remove_cvref_t<VS>::slangModule;
+                std::remove_cvref_t<FS>::slangModule;
+            } &&
+            requires {
+                typename std::remove_cvref_t<VS>::template ResourceBindings<RasterizerPipelineBase>;
+                typename std::remove_cvref_t<FS>::template ResourceBindings<RasterizerPipelineBase>;
+                typename std::remove_cvref_t<FS>::template OutputBindings<RasterizerPipelineBase>;
+            };
+
+        template <typename F>
+        concept EdslComputeShaderCode =
+            !GeneratedComputeShaderObject<F> &&
+            !std::same_as<std::remove_cvref_t<F>, ComputePipelineDesc>;
+
+        template <typename VS, typename FS>
+        concept EdslRasterizerShaderCode =
+            !GeneratedRasterizerShaderObjects<VS, FS>;
+    }
+
+
+    template <>
+    class ComputePipeline<void> : public ComputePipelineBase
+    {
+    public:
+        using ComputePipelineBase::ComputePipelineBase;
+        ComputePipeline() = default;
+
+        template <PipelineDetail::EdslComputeShaderCode F>
+        explicit ComputePipeline(F&& compute_shader_code,
+                                 ktm::uvec3 numthreads = { 1, 1, 1 },
+                                 EdslPipelineOptions options = {},
+                                 const std::source_location& source_location = std::source_location::current())
+            : ComputePipelineBase(
+                  ComputePipelineDesc::from_edsl(std::forward<F>(compute_shader_code),
+                                                 numthreads,
+                                                 std::move(options),
+                                                 source_location),
+                  source_location)
+        {
+        }
+
+        template <PipelineDetail::EdslComputeShaderCode F>
+        explicit ComputePipeline(F&& compute_shader_code,
+                                 ktm::uvec3 numthreads,
+                                 const std::source_location& source_location)
+            : ComputePipeline(std::forward<F>(compute_shader_code), numthreads, {}, source_location)
+        {
+        }
+    };
+
+    template <typename CS>
+    class ComputePipeline : public ComputePipelineBase, public CS::template Bindings<ComputePipelineBase>
+    {
+    public:
+        using ShaderBindings = typename CS::template Bindings<ComputePipelineBase>;
+
+        static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
+        {
+            return ComputePipelineDesc(
+                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
+                numthreads);
+        }
+
+        explicit ComputePipeline(CS, ktm::uvec3 numthreads = { 1, 1, 1 },
+                                 const std::source_location& source_location = std::source_location::current())
+            : ComputePipelineBase(make_desc(numthreads), source_location),
+              ShaderBindings(static_cast<ComputePipelineBase*>(this))
+        {
+        }
+
+        explicit ComputePipeline(ktm::uvec3 numthreads = { 1, 1, 1 },
+                                 const std::source_location& source_location = std::source_location::current())
+            : ComputePipelineBase(make_desc(numthreads), source_location),
+              ShaderBindings(static_cast<ComputePipelineBase*>(this))
+        {
+        }
+
+        explicit ComputePipeline(ComputePipelineDesc desc,
+                                 const std::source_location& source_location = std::source_location::current())
+            : ComputePipelineBase(std::move(desc), source_location),
+              ShaderBindings(static_cast<ComputePipelineBase*>(this))
+        {
+        }
+
+        ComputePipeline(const ComputePipeline& other)
+            : ComputePipelineBase(other),
+              ShaderBindings(static_cast<ComputePipelineBase*>(this))
+        {
+        }
+
+        ComputePipeline(ComputePipeline&& other) noexcept
+            : ComputePipelineBase(std::move(other)),
+              ShaderBindings(static_cast<ComputePipelineBase*>(this))
+        {
+        }
+
+        ComputePipeline& operator=(const ComputePipeline& other)
+        {
+            ComputePipelineBase::operator=(other);
+            return *this;
+        }
+
+        ComputePipeline& operator=(ComputePipeline&& other) noexcept
+        {
+            ComputePipelineBase::operator=(std::move(other));
+            return *this;
+        }
+    };
+
+    ComputePipeline() -> ComputePipeline<>;
+    ComputePipeline(ComputePipelineDesc) -> ComputePipeline<>;
+    ComputePipeline(ComputePipelineDesc, const std::source_location&) -> ComputePipeline<>;
+    template <PipelineDetail::GeneratedComputeShaderObject CS>
+    ComputePipeline(CS) -> ComputePipeline<std::remove_cvref_t<CS>>;
+    template <PipelineDetail::GeneratedComputeShaderObject CS>
+    ComputePipeline(CS, ktm::uvec3) -> ComputePipeline<std::remove_cvref_t<CS>>;
+    template <PipelineDetail::GeneratedComputeShaderObject CS>
+    ComputePipeline(CS, ktm::uvec3, const std::source_location&) -> ComputePipeline<std::remove_cvref_t<CS>>;
+    template <PipelineDetail::EdslComputeShaderCode F>
+    ComputePipeline(F) -> ComputePipeline<>;
+    template <PipelineDetail::EdslComputeShaderCode F>
+    ComputePipeline(F, ktm::uvec3) -> ComputePipeline<>;
+    template <PipelineDetail::EdslComputeShaderCode F>
+    ComputePipeline(F, ktm::uvec3, EdslPipelineOptions) -> ComputePipeline<>;
+    template <PipelineDetail::EdslComputeShaderCode F>
+    ComputePipeline(F, ktm::uvec3, const std::source_location&) -> ComputePipeline<>;
+    template <PipelineDetail::EdslComputeShaderCode F>
+    ComputePipeline(F, ktm::uvec3, EdslPipelineOptions, const std::source_location&) -> ComputePipeline<>;
+
+    template <>
+    class RasterizerPipeline<void, void> : public RasterizerPipelineBase
+    {
+    public:
+        using RasterizerPipelineBase::RasterizerPipelineBase;
+        RasterizerPipeline() = default;
+
+        template <typename VS, typename FS>
+            requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
+        static RasterizerPipelineDesc make_desc(VS&& vertex_shader_code,
+                                                FS&& fragment_shader_code,
+                                                RasterizerPipelineDesc state = {},
+                                                EdslPipelineOptions options = {},
+                                                std::source_location source_location = std::source_location::current())
+        {
+            RasterizerPipelineDesc desc =
+                RasterizerPipelineDesc::from_edsl(std::forward<VS>(vertex_shader_code),
+                                                  std::forward<FS>(fragment_shader_code),
+                                                  std::move(options),
+                                                  source_location);
+            desc.apply_state(std::move(state));
+            return desc;
+        }
+
+        template <typename VS, typename FS>
+            requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
+        explicit RasterizerPipeline(VS&& vertex_shader_code,
+                                    FS&& fragment_shader_code,
+                                    RasterizerPipelineDesc desc = {},
+                                    EdslPipelineOptions options = {},
+                                    const std::source_location& source_location = std::source_location::current())
+            : RasterizerPipelineBase(
+                  make_desc(std::forward<VS>(vertex_shader_code),
+                            std::forward<FS>(fragment_shader_code),
+                            std::move(desc),
+                            std::move(options),
+                            source_location),
+                  source_location)
+        {
+        }
+    };
+
+    template <typename VS, typename FS>
+    class RasterizerPipeline : public RasterizerPipelineBase,
+                               public VS::template ResourceBindings<RasterizerPipelineBase>,
+                               public FS::template ResourceBindings<RasterizerPipelineBase>,
+                               public FS::template OutputBindings<RasterizerPipelineBase>
+    {
+    public:
+        using VertexResourceBindings = typename VS::template ResourceBindings<RasterizerPipelineBase>;
+        using FragmentResourceBindings = typename FS::template ResourceBindings<RasterizerPipelineBase>;
+        using FragmentOutputBindings = typename FS::template OutputBindings<RasterizerPipelineBase>;
+
+        static RasterizerPipelineDesc make_desc(RasterizerPipelineDesc desc = {})
+        {
+            desc.set_shaders(
+                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Vertex, VS::slangModule),
+                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Fragment, FS::slangModule));
+            return desc;
+        }
+
+        explicit RasterizerPipeline(const std::source_location& source_location = std::source_location::current())
+            : RasterizerPipelineBase(make_desc(), source_location),
+              VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
+        {
+        }
+
+        explicit RasterizerPipeline(VS, FS, RasterizerPipelineDesc desc = {},
+                                    const std::source_location& source_location = std::source_location::current())
+            : RasterizerPipelineBase(make_desc(std::move(desc)), source_location),
+              VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
+        {
+        }
+
+        explicit RasterizerPipeline(RasterizerPipelineDesc desc,
+                                    const std::source_location& source_location = std::source_location::current())
+            : RasterizerPipelineBase(std::move(desc), source_location),
+              VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
+        {
+        }
+
+        RasterizerPipeline(const RasterizerPipeline& other)
+            : RasterizerPipelineBase(other),
+              VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
+        {
+        }
+
+        RasterizerPipeline(RasterizerPipeline&& other) noexcept
+            : RasterizerPipelineBase(std::move(other)),
+              VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
+              FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
+        {
+        }
+
+        RasterizerPipeline& operator=(const RasterizerPipeline& other)
+        {
+            RasterizerPipelineBase::operator=(other);
+            return *this;
+        }
+
+        RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept
+        {
+            RasterizerPipelineBase::operator=(std::move(other));
+            return *this;
+        }
+    };
+
+    RasterizerPipeline() -> RasterizerPipeline<>;
+    RasterizerPipeline(RasterizerPipelineDesc) -> RasterizerPipeline<>;
+    RasterizerPipeline(RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::GeneratedRasterizerShaderObjects<VS, FS>
+    RasterizerPipeline(VS, FS) -> RasterizerPipeline<std::remove_cvref_t<VS>, std::remove_cvref_t<FS>>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::GeneratedRasterizerShaderObjects<VS, FS>
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc) -> RasterizerPipeline<std::remove_cvref_t<VS>, std::remove_cvref_t<FS>>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::GeneratedRasterizerShaderObjects<VS, FS>
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<std::remove_cvref_t<VS>, std::remove_cvref_t<FS>>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
+    RasterizerPipeline(VS, FS) -> RasterizerPipeline<>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc) -> RasterizerPipeline<>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, EdslPipelineOptions) -> RasterizerPipeline<>;
+    template <typename VS, typename FS>
+        requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, EdslPipelineOptions, const std::source_location&) -> RasterizerPipeline<>;
 
     // ================================================================
     // Value Command Facades

@@ -59,9 +59,9 @@ namespace Corona::Horizon
         }
     }
 
-    RasterizerPipeline::RasterizerPipeline() = default;
+    RasterizerPipelineBase::RasterizerPipelineBase() = default;
 
-    RasterizerPipeline::RasterizerPipeline(RasterizerPipelineDesc desc, const std::source_location& source_location)
+    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location)
     {
         if (!validate_rasterizer_pipeline_desc(desc))
             return;
@@ -69,19 +69,19 @@ namespace Corona::Horizon
         ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
     }
 
-    RasterizerPipeline::RasterizerPipeline(const RasterizerPipeline& other)
+    RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
         : ResourceHandle(other)
     {
     }
 
-    RasterizerPipeline::RasterizerPipeline(RasterizerPipeline&& other) noexcept
+    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineBase&& other) noexcept
         : ResourceHandle(std::move(other))
     {
     }
 
-    RasterizerPipeline::~RasterizerPipeline() = default;
+    RasterizerPipelineBase::~RasterizerPipelineBase() = default;
 
-    RasterizerPipeline& RasterizerPipeline::operator=(const RasterizerPipeline& other)
+    RasterizerPipelineBase& RasterizerPipelineBase::operator=(const RasterizerPipelineBase& other)
     {
         if (this == &other)
             return *this;
@@ -90,7 +90,7 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipeline& RasterizerPipeline::operator=(RasterizerPipeline&& other) noexcept
+    RasterizerPipelineBase& RasterizerPipelineBase::operator=(RasterizerPipelineBase&& other) noexcept
     {
         if (this == &other)
             return *this;
@@ -99,12 +99,12 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipeline::operator bool() const noexcept
+    RasterizerPipelineBase::operator bool() const noexcept
     {
         return ResourceHandle::operator bool();
     }
 
-    RasterizerPipeline& RasterizerPipeline::operator()(uint16_t width, uint16_t height)
+    RasterizerPipelineBase& RasterizerPipelineBase::operator()(uint16_t width, uint16_t height)
     {
         std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
@@ -114,15 +114,15 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipeline& RasterizerPipeline::record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer)
+    RasterizerPipelineBase& RasterizerPipelineBase::record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer)
     {
         DrawIndexedParams params;
         return record(index_buffer, vertex_buffer, params);
     }
 
-    RasterizerPipeline& RasterizerPipeline::record(const HardwareBuffer& index_buffer,
-                                                   const HardwareBuffer& vertex_buffer,
-                                                   const DrawIndexedParams& params)
+    RasterizerPipelineBase& RasterizerPipelineBase::record(const HardwareBuffer& index_buffer,
+                                                           const HardwareBuffer& vertex_buffer,
+                                                           const DrawIndexedParams& params)
     {
         if (!validate_rasterizer_pipeline_record(index_buffer, vertex_buffer, params))
             return *this;
@@ -136,7 +136,7 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipeline& RasterizerPipeline::clear_records()
+    RasterizerPipelineBase& RasterizerPipelineBase::clear_records()
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
@@ -145,7 +145,7 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipeline& RasterizerPipeline::bind_render_target(uint32_t location, HardwareImage& image)
+    RasterizerPipelineBase& RasterizerPipelineBase::bind_render_target(uint32_t location, HardwareImage& image)
     {
         set_resource_direct(0,
                             0,
@@ -155,7 +155,7 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipeline& RasterizerPipeline::bind_depth_target(HardwareImage& image)
+    RasterizerPipelineBase& RasterizerPipelineBase::bind_depth_target(HardwareImage& image)
     {
         std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
 
@@ -163,7 +163,12 @@ namespace Corona::Horizon
         return *this;
     }
 
-    CommandBatch RasterizerPipeline::command_batch() const
+    RasterizerPipelineDesc RasterizerPipelineBase::desc() const
+    {
+        return pipeline_impl(ResourceBridge::token(*this))->desc();
+    }
+
+    CommandBatch RasterizerPipelineBase::command_batch() const
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
@@ -171,7 +176,7 @@ namespace Corona::Horizon
         return pipeline_impl(token)->command_batch();
     }
 
-    void RasterizerPipeline::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
+    void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
@@ -179,12 +184,12 @@ namespace Corona::Horizon
         pipeline_impl(token)->set_push_constant_direct(byte_offset, data, size, bind_type, set, binding);
     }
 
-    void RasterizerPipeline::set_resource_direct(uint64_t byte_offset,
-                                                 uint32_t type_size,
-                                                 const HardwareBuffer& buffer,
-                                                 int32_t bind_type,
-                                                 uint32_t set,
-                                                 uint32_t binding)
+    void RasterizerPipelineBase::set_resource_direct(uint64_t byte_offset,
+                                                     uint32_t type_size,
+                                                     const HardwareBuffer& buffer,
+                                                     int32_t bind_type,
+                                                     uint32_t set,
+                                                     uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
@@ -192,13 +197,13 @@ namespace Corona::Horizon
         pipeline_impl(token)->set_resource_direct(byte_offset, type_size, buffer, bind_type, set, binding);
     }
 
-    void RasterizerPipeline::set_resource_direct(uint64_t byte_offset,
-                                                 uint32_t type_size,
-                                                 const HardwareImage& image,
-                                                 int32_t bind_type,
-                                                 uint32_t location,
-                                                 uint32_t set,
-                                                 uint32_t binding)
+    void RasterizerPipelineBase::set_resource_direct(uint64_t byte_offset,
+                                                     uint32_t type_size,
+                                                     const HardwareImage& image,
+                                                     int32_t bind_type,
+                                                     uint32_t location,
+                                                     uint32_t set,
+                                                     uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);
@@ -206,7 +211,7 @@ namespace Corona::Horizon
         pipeline_impl(token)->set_resource_direct(byte_offset, type_size, image, bind_type, location, set, binding);
     }
 
-    void RasterizerPipeline::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
+    void RasterizerPipelineBase::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
     {
         std::shared_ptr<IResourceRef> token;
         token = ResourceBridge::token(*this);

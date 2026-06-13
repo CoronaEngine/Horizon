@@ -597,7 +597,7 @@ void run_example_include()
 {
     EmbeddedShader::SlangCompileArgs arg{};
     arg.source = code2;
-    //arg.deps = {&edsl_header_glsl::slangModule};
+    //arg.deps = {&edsl_header_glsl.slangModule};
     arg.targetLanguages = {EmbeddedShader::ShaderLanguage::SpirV};
     arg.layoutCallback = [&](slang::ProgramLayout* layout) {
     EmbeddedShader::ShaderCodeModule::ShaderResources resources;

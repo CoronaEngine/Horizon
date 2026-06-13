@@ -52,15 +52,13 @@ void run_example_glsl()
     Corona::Horizon::HardwareExecutor display_executor;
     Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::RasterizerPipelineDesc rasterizer_desc(
-        Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Vertex, baseline_vert_glsl::slangModule),
-        Corona::Horizon::PipelineShaderDesc::from_slang_module(Corona::Horizon::PipelineShaderStage::Fragment, baseline_frag_glsl::slangModule));
-    rasterizer_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth");
+    Corona::Horizon::RasterizerPipelineDesc desc;
+    desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth");
 
-    Corona::Horizon::RasterizerPipeline rasterizer(std::move(rasterizer_desc));
-    rasterizer[baseline_frag_glsl::outColor] = final_output_image;
+    Corona::Horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
+    rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
-    rasterizer[baseline_frag_glsl::texSampler] = texture_image;
+    rasterizer.texSampler = texture_image;
 
     Corona::Horizon::DrawIndexedParams draw_params;
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
@@ -74,9 +72,9 @@ void run_example_glsl()
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, glsl_width / static_cast<float>(glsl_height));
-        rasterizer[baseline_vert_glsl::ubo::model] = ubo.model;
-        rasterizer[baseline_vert_glsl::ubo::view] = ubo.view;
-        rasterizer[baseline_vert_glsl::ubo::proj] = ubo.proj;
+        rasterizer.ubo.model = ubo.model;
+        rasterizer.ubo.view = ubo.view;
+        rasterizer.ubo.proj = ubo.proj;
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
