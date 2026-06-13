@@ -26,6 +26,13 @@ target_include_directories(corona_kernel PUBLIC
 
 target_compile_features(corona_kernel PUBLIC cxx_std_20)
 
+if(MSVC)
+    target_compile_options(corona_kernel PUBLIC
+        /source-charset:utf-8
+        /execution-charset:utf-8
+    )
+endif()
+
 target_link_libraries(corona_kernel PUBLIC
     quill::quill
 )
