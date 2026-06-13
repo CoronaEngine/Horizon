@@ -24,15 +24,38 @@
 
 默认构造的 `HardwareExecutor` 已自动解析主设备上对应能力的队列（见 `src/hardware_wrapper_vulkan/hardware/execution.cpp` 的 `resolve_queue`）。示例和用户代码默认直接 `HardwareExecutor executor;`，**不要**手写与默认行为等价的 `QueueResolver`。仅在需要固定 / 自定义队列调度时才传入 resolver。
 
-## 4. 已落地的简化（方案 A）
+## 4. Pipeline Desc 与自动绑定姿势
+
+`ComputePipelineDesc` / `RasterizerPipelineDesc` 是公共 API 中唯一的默认状态 / create-info 容器。不要再为了“可选覆盖默认状态”引入并行的 `*Config` 类型；用户只需要默认构造 desc，并改动确实需要覆盖的字段。
+
+Typed shader 和生成代码路径的默认写法应保持短路径：
+
+```cpp
+Corona::Horizon::RasterizerPipelineDesc desc;
+desc.depth_stencil = colorOnlyDepthStencil();
+
+Corona::Horizon::RasterizerPipeline rasterizer(default_vert_glsl, default_frag_glsl, desc);
+rasterizer.outColor = finalOutputImages[threadIndex];
+```
+
+EDSL 路径也使用同一个姿势：
+
+```cpp
+Corona::Horizon::RasterizerPipeline rasterizer(vsLambda, fsLambda, desc);
+```
+
+管线构造函数内部负责根据 shader / EDSL 编译结果填充 shader module、反射资源、自动绑定元数据和 generated binding 成员。`Desc` 可以在内部携带 shader 字段，但普通用户默认不手写 `PipelineShaderDesc::from_slang_module`、`from_edsl` 或索引式绑定；只有低级 / 高级路径才显式构造完整 desc。
+
+## 5. 已落地的简化（方案 A）
 
 - **A1**：示例去掉冗余 `QueueResolver`，改默认构造（`example_default` / `example_edsl` / `example_glsl`）。
 - **A2**：执行 / 命令 IR 类型从 `horizon.h` 抽离到 `horizon_execution.h`，主头从 IR 噪音中解脱。
 - **A3**：`CommandRecorder` 的 `DeviceMask` 签名随 A2 进入内部头，主要目标顺带达成；剩余命令门面 / 工厂函数的 `DeviceMask` 均为带默认值尾参，不强制暴露，暂不再动。
+- **A4**：typed pipeline wrapper 保留 generated binding 成员访问，runtime base 承载公共执行 / 资源绑定逻辑；示例使用 `RasterizerPipeline(shader, shader, desc)` 和成员字段绑定，避免手写 shader desc 或索引绑定。
 
 设计全文与决策记录见 `docs/design/api-simplification.md`。
 
-## 5. 验证
+## 6. 验证
 
 ```powershell
 .\tools\dev.ps1 build HorizonExamples
