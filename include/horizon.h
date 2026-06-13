@@ -179,6 +179,8 @@ namespace Corona::Horizon
     // 复用既有的 `operator<<(CommitCommand)`，不引入新算子。
     inline constexpr CommitCommand submit {};
 
+
+
     // ================================================================
     // Validation
     // ================================================================
@@ -191,6 +193,8 @@ namespace Corona::Horizon
     void set_hardware_validation_config(HardwareValidationConfig config);
     [[nodiscard]] HardwareValidationConfig get_hardware_validation_config();
     [[nodiscard]] bool is_hardware_validation_enabled();
+
+
 
     // ================================================================
     // HardwareBuffer
@@ -414,6 +418,8 @@ namespace Corona::Horizon
         friend class HardwareImage;
     };
 
+
+
     // ================================================================
     // HardwareImage
     // ================================================================
@@ -634,80 +640,7 @@ namespace Corona::Horizon
         return HardwareImageLayerSelector(*this, layer_index);
     }
 
-    // ================================================================
-    // HardwarePushConstant
-    // ================================================================
-
-    /*inline constexpr uint32_t kPortablePushConstantByteSize = 128;
-
-    template <typename T>
-    concept HardwarePushConstantValue = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && 
-                                        !std::is_pointer_v<std::remove_cvref_t<T>> &&
-                                        !std::is_same_v<std::remove_cvref_t<T>, HardwarePushConstant>;
-
-    struct HardwarePushConstantDesc
-    {
-        uint64_t byte_size = 0;
-        std::string debug_name;
-    };
-
-    struct HardwarePushConstant
-    {
-    public:
-        static constexpr uint64_t max_byte_size = kPortablePushConstantByteSize;
-        static constexpr uint64_t whole_size = std::numeric_limits<uint64_t>::max();
-
-        HardwarePushConstant() = default;
-        explicit HardwarePushConstant(HardwarePushConstantDesc desc);
-        explicit HardwarePushConstant(uint64_t byte_size);
-        ~HardwarePushConstant();
-
-        template <HardwarePushConstantValue T>
-        explicit HardwarePushConstant(const T& value)
-        {
-            assign(value);
-        }
-
-        template <HardwarePushConstantValue T>
-        HardwarePushConstant& operator=(const T& value)
-        {
-            assign(value);
-            return *this;
-        }
-
-        bool write_bytes(std::span<const std::byte> data, uint64_t offset = 0) noexcept;
-        bool read_bytes(std::span<std::byte> output, uint64_t offset = 0) const noexcept;
-
-        [[nodiscard]] std::vector<std::byte> snapshot_bytes(uint64_t offset = 0, uint64_t byte_size = whole_size) const;
-
-        template <HardwarePushConstantValue T>
-        bool write_value(uint64_t offset, const T &value) noexcept
-        {
-            return write_bytes(&value, sizeof(T), offset);
-        }
-
-        template <HardwarePushConstantValue T>
-        bool assign(const T& value)
-        {
-            if (!reset(sizeof(T)))
-                return false;
-
-            return write_value(0, value);
-        }
-
-        template <HardwarePushConstantValue T>
-        bool assign(const T &value) noexcept
-        {
-            if (!reset(sizeof(T)))
-                return false;
-
-            return write_value(0, value);
-        }
-
-    private:
-        HardwarePushConstantDesc desc_;
-        std::array<std::byte, max_byte_size> storage_{};
-    };*/
+    
 
     // ================================================================
     // Pipeline Descriptors
