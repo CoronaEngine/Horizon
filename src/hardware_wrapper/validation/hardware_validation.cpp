@@ -22,7 +22,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] bool validation_compiled() noexcept
         {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_HARDWARE_VALIDATION
             return true;
 #else
             return false;
@@ -92,7 +92,7 @@ namespace Corona::Horizon
             if (hard_error || (validation_compiled() && config.mode == HardwareValidationMode::Throw))
                 throw std::invalid_argument(std::string(message));
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_HARDWARE_VALIDATION
             if (config.mode == HardwareValidationMode::Log)
                 CFW_LOG_ERROR("[Horizon validation] {}", message);
 #else
@@ -106,7 +106,7 @@ namespace Corona::Horizon
         {
             Diagnostics::write(Diagnostics::Level::Warning, "HORIZON VALIDATION", message);
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_HARDWARE_VALIDATION
             if (read_validation_config().mode != HardwareValidationMode::Disabled)
                 CFW_LOG_WARNING("[Horizon validation] {}", message);
 #else

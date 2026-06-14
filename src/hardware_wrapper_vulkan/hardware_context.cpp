@@ -34,15 +34,19 @@
 
 namespace Corona::Horizon
 {
-#ifndef HORIZON_ENABLE_VALIDATION
-#define HORIZON_ENABLE_VALIDATION 1
+#ifndef HORIZON_ENABLE_VULKAN_VALIDATION
+#if defined(NDEBUG)
+#define HORIZON_ENABLE_VULKAN_VALIDATION 0
+#else
+#define HORIZON_ENABLE_VULKAN_VALIDATION 1
+#endif
 #endif
 
     HardwareContext g_hardware_context;
 
     constexpr uint32_t required_api_version = VK_API_VERSION_1_3;
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
 
     constexpr std::array<VkValidationFeatureEnableEXT, 2> enabled_validation_features {
@@ -705,7 +709,7 @@ namespace Corona::Horizon
                            stream.str());
     }
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
     bool contains_name(const std::vector<const char*>& names, const char* target)
     {
         return std::any_of(names.begin(), names.end(), [target](const char* name) {
@@ -1029,12 +1033,12 @@ namespace Corona::Horizon
 
     VulkanValidationReport vulkan_validation_report()
     {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         return make_validation_report();
 #else
         VulkanValidationReport report;
         report.compiled = false;
-        report.missing_requirements.emplace_back("HORIZON_ENABLE_VALIDATION is disabled at compile time.");
+        report.missing_requirements.emplace_back("HORIZON_ENABLE_VULKAN_VALIDATION is disabled at compile time.");
         return report;
 #endif
     }
@@ -1301,7 +1305,7 @@ namespace Corona::Horizon
         auto requested_extensions = create_config_.get_instance_extensions(instance_, nullptr);
         std::vector<const char*> requested_layers;
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         const bool enable_validation = validation_layer_available();
         if (enable_validation)
         {
@@ -1318,7 +1322,7 @@ namespace Corona::Horizon
 
         const std::set<const char*> requested_extensions_report = requested_extensions;
         const auto enabled_extensions = supported_instance_extensions(std::move(requested_extensions), requested_layers);
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         const bool debug_utils_enabled = contains_name(enabled_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         const bool validation_features_enabled = contains_name(enabled_extensions, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
         write_instance_extension_report(requested_extensions_report,
@@ -1341,7 +1345,7 @@ namespace Corona::Horizon
         instance_info.enabledLayerCount = static_cast<uint32_t>(requested_layers.size());
         instance_info.ppEnabledLayerNames = requested_layers.data();
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         VkDebugUtilsMessengerCreateInfoEXT debug_info {};
         VkValidationFeaturesEXT validation_features {};
         if (!requested_layers.empty())
@@ -1386,7 +1390,7 @@ namespace Corona::Horizon
 
         instance_ = instance;
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         if (!requested_layers.empty() && debug_utils_enabled)
         {
             try
@@ -1474,7 +1478,7 @@ namespace Corona::Horizon
 
     void HardwareContext::setup_debug_messenger()
     {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         VkDebugUtilsMessengerCreateInfoEXT create_info = debug_messenger_create_info();
         const VkResult result = create_debug_utils_messenger_ext(instance_, &create_info, nullptr, &debug_messenger_);
         if (result != VK_SUCCESS)
@@ -1489,7 +1493,7 @@ namespace Corona::Horizon
 
     void HardwareContext::cleanup_debug_messenger()
     {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         if (debug_messenger_ != VK_NULL_HANDLE && instance_ != VK_NULL_HANDLE)
         {
             destroy_debug_utils_messenger_ext(instance_, debug_messenger_, nullptr);

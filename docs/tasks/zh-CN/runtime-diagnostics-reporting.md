@@ -20,7 +20,7 @@
 
 - Report envelope：`schema_version`、`report_id`、时间戳、会话 ID、匿名安装 ID、Horizon 版本、git commit/build id、编译配置、目标程序名、示例 mode、命令行 allowlist。
 - 机器信息：OS 版本、CPU 架构/核心数、内存容量、显卡列表、驱动版本、Vulkan loader/API 版本、可用 layer/extension、已选/跳过设备和跳过原因。
-- Horizon 运行信息：启用的 feature flags、`HORIZON_ENABLE_VALIDATION`、关键环境变量 allowlist、resource/pipeline/queue 统计、最近提交 token、窗口/swapchain 状态。
+- Horizon 运行信息：启用的 feature flags、`HORIZON_ENABLE_HARDWARE_VALIDATION`、`HORIZON_ENABLE_VULKAN_VALIDATION`、关键环境变量 allowlist、resource/pipeline/queue 统计、最近提交 token、窗口/swapchain 状态。
 - 诊断附件：`horizon-vulkan-diagnostics.txt`、stdout/stderr 摘要、Horizon validation 记录、Vulkan validation 记录、最近 breadcrumbs 环形日志、必要的配置快照。
 - 崩溃附件：异常码/signal、崩溃线程、线程列表、调用栈、loaded modules、符号文件标识、minidump/crash dump、最后一次未处理错误和当前 report package 路径。
 - 上传元数据：压缩格式、内容 hash、附件列表、采集模式、采样原因、脱敏版本、上传尝试次数、服务器响应 ID。

@@ -31,7 +31,7 @@
 
 ## Vulkan 验证层
 
-- lower-case Vulkan 后端的验证层启用由 `HORIZON_ENABLE_VALIDATION` 控制，不要再使用历史或错误的 `CORONA_ENGINE_DEBUG` 门控；CMake 调试配置定义的是 `CABBAGE_ENGINE_DEBUG`，用错宏会让验证层实际不编译或不生效。
+- lower-case Vulkan 后端的验证层启用由 `HORIZON_ENABLE_VULKAN_VALIDATION` 控制，Horizon 自身运行时校验由 `HORIZON_ENABLE_HARDWARE_VALIDATION` 控制；不要使用历史或错误的 `CORONA_ENGINE_DEBUG` 门控。
 - 在 `HardwareContext::create_instance()` 启用 `VK_LAYER_KHRONOS_validation` 时，应同时请求 `VK_EXT_debug_utils` 和 `VK_EXT_validation_features`；默认调试验证启用 best practices、debug printf 和 synchronization validation，不要默认启用 GPU-assisted 或 reserve binding slot，因为它会和普通 Core Check 同时启用并产生很慢的配置 warning。只有专项排查 GPU 侧问题时才临时打开 GPU-assisted。
 - 过滤 instance extension 时要同时枚举全局扩展和已请求 layer 暴露的扩展；`VK_EXT_validation_features` 可能由 `VK_LAYER_KHRONOS_validation` 暴露，不要只查全局扩展后误判为不可用。
 - 验证层是否真的打开时，优先运行 `HorizonTests.exe hardware_context.`，并在日志中确认 `Khronos Validation Layer Active` 的 `Current Enables` 列出了需要的 validation features。

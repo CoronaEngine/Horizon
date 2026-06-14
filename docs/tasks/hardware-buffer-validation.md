@@ -1,5 +1,5 @@
 # Hardware Buffer Validation Task Notes
-<!-- TASK_DOCS_HARDWARE_BUFFER_VALIDATION_ZH_CN_SHA256: 1721f47eb51d53f5c832caaa3e07743abf40c4f5af9ce6946dd1bd1e539e1a92 -->
+<!-- TASK_DOCS_HARDWARE_BUFFER_VALIDATION_ZH_CN_SHA256: 65f79c0b30ec611ff67273120d71b1303a7cac059548172dbc913761c7081b9e -->
 
 ## Boundary
 
@@ -7,7 +7,7 @@
 - Do not add `HardwareBufferDesc::validate()`; keep policy checks in `src/hardware_wrapper/validation`.
 - Keep hard safety invariants always on: zero element size, byte-size overflow, and upload data exceeding buffer byte size must not depend on optional validation.
 - Constructor `upload_data` with a null pointer, or non-empty `upload_data` with `CpuAccessMode::None`, is also a hard error; upload device-local buffer data through an explicit `HardwareBuffer::upload(...)` command batch.
-- `HORIZON_ENABLE_VALIDATION` is the compile-time switch for optional validation diagnostics and should be exported with `target_compile_definitions(... PUBLIC ...)`.
+- `HORIZON_ENABLE_HARDWARE_VALIDATION` is the compile-time switch for Horizon's own optional validation diagnostics and should be exported with `target_compile_definitions(... PUBLIC ...)`.
 - `HardwareValidationMode` is the runtime policy switch: `Disabled`, `Log`, or `Throw`.
 
 ## Placement

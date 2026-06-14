@@ -30,8 +30,12 @@
 #include "resource.h"
 #include "horizon_execution.h"
 
-#ifndef HORIZON_ENABLE_VALIDATION
-#define HORIZON_ENABLE_VALIDATION 1
+#ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
+#if defined(NDEBUG)
+#define HORIZON_ENABLE_HARDWARE_VALIDATION 0
+#else
+#define HORIZON_ENABLE_HARDWARE_VALIDATION 1
+#endif
 #endif
 
 namespace Corona::Horizon
