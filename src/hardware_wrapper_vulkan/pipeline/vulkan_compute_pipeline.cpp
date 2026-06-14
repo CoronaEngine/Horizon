@@ -73,6 +73,29 @@ namespace Corona::Horizon
                    is_sampled_image_bind(bind_type);
         }
 
+        struct BindingCoordinates
+        {
+            uint32_t set { 0 };
+            uint32_t binding { 0 };
+        };
+
+        [[nodiscard]] BindingCoordinates reflected_binding_coordinates(const EmbeddedShader::ShaderCodeModule& module,
+                                                                       const EmbeddedShader::AutoBindEntry& entry) noexcept
+        {
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                if (static_cast<int32_t>(info.bindType) != entry.bindType)
+                    continue;
+                if (info.byteOffset != entry.byteOffset)
+                    continue;
+                if (entry.typeSize != 0 && info.typeSize != 0 && info.typeSize != entry.typeSize)
+                    continue;
+                return { info.set, info.binding };
+            }
+
+            return {};
+        }
+
         [[nodiscard]] bool add_overflows(uint64_t lhs, size_t rhs) noexcept
         {
             if constexpr (sizeof(size_t) > sizeof(uint64_t))
@@ -467,16 +490,33 @@ namespace Corona::Horizon
 
     void VulkanComputePipeline::bind_auto_resources()
     {
+        struct AutoValue
+        {
+            EmbeddedShader::AutoBindEntry entry;
+            BindingCoordinates coordinates;
+        };
+
         std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareImage>> images;
+        std::vector<AutoValue> values;
         {
             std::lock_guard lock(mutex_);
             images.reserve(auto_bind_entries_.size());
+            values.reserve(auto_bind_entries_.size());
             for (const EmbeddedShader::AutoBindEntry& entry : auto_bind_entries_)
             {
-                if (entry.boundResourceRef == nullptr || *entry.boundResourceRef == nullptr)
+                if (entry.boundResourceRef != nullptr && *entry.boundResourceRef != nullptr)
+                {
+                    images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
                     continue;
+                }
 
-                images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
+                if (entry.boundValueRef != nullptr && entry.boundValueSize != 0)
+                {
+                    values.push_back({
+                        entry,
+                        reflected_binding_coordinates(desc_.compute_shader.module, entry),
+                    });
+                }
             }
         }
 
@@ -488,6 +528,16 @@ namespace Corona::Horizon
                                 entry.bindType,
                                 0,
                                 entry.location);
+        }
+
+        for (const AutoValue& value : values)
+        {
+            set_push_constant_direct(value.entry.byteOffset,
+                                     value.entry.boundValueRef,
+                                     value.entry.boundValueSize,
+                                     value.entry.bindType,
+                                     value.coordinates.set,
+                                     value.coordinates.binding);
         }
     }
 

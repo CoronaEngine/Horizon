@@ -20,6 +20,8 @@ namespace EmbeddedShader
 		uint32_t typeSize = 0;
 		int32_t  bindType = -1;    // -1 = no metadata
 		uint32_t location = 0;
+		const void* boundValueRef = nullptr;
+		uint32_t boundValueSize = 0;
 	};
 
 	class ComputePipelineObject
@@ -57,6 +59,25 @@ namespace EmbeddedShader
 			auto& globals = Ast::Parser::getGlobalStatements();
 			for (auto& stmt : globals)
 			{
+				if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
+				{
+					if (def->variate && def->variate->boundValueRef)
+					{
+						if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->variate->name))
+						{
+							result.autoBindEntries.push_back({
+								nullptr,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location,
+								def->variate->boundValueRef,
+								def->variate->boundValueSize
+							});
+						}
+					}
+				}
+
 				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
 				{
 					if (def->texture && def->texture->boundResourceRef)

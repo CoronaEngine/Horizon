@@ -41,21 +41,7 @@ namespace Corona::Horizon
 
         void bind_auto_resources(const std::shared_ptr<VulkanRasterizerPipeline>& impl)
         {
-            std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries = impl->auto_bind_entries();
-
-            for (const EmbeddedShader::AutoBindEntry& entry : auto_bind_entries)
-            {
-                if (entry.boundResourceRef == nullptr || *entry.boundResourceRef == nullptr)
-                    continue;
-
-                impl->set_resource_direct(entry.byteOffset,
-                                          entry.typeSize,
-                                          *static_cast<HardwareImage*>(*entry.boundResourceRef),
-                                          entry.bindType,
-                                          entry.location,
-                                          0,
-                                          entry.location);
-            }
+            impl->bind_auto_resources();
         }
     }
 

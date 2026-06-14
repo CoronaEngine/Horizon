@@ -90,6 +90,33 @@ namespace EmbeddedShader
 		{
 			return VecArgProcessor<std::remove_cvref_t<decltype(arg)>>::valueOrNode(std::forward<decltype(arg)>(arg));
 		}
+
+		void bindUniformValue()
+		{
+			auto uniform = std::dynamic_pointer_cast<Ast::UniformVariate>(node);
+			if (!uniform)
+				return;
+			if (!value)
+				value = std::make_unique<Type>();
+			uniform->boundValueRef = value.get();
+			uniform->boundValueSize = static_cast<uint32_t>(sizeof(Type));
+		}
+
+		void storeRuntimeValue(const Type& rhs)
+		{
+			if (!value)
+				value = std::make_unique<Type>();
+			*value = rhs;
+			bindUniformValue();
+		}
+
+		void storeRuntimeValue(Type&& rhs)
+		{
+			if (!value)
+				value = std::make_unique<Type>();
+			*value = std::move(rhs);
+			bindUniformValue();
+		}
 	public:
 		template<typename T>
 		friend struct ArrayProxy;
@@ -147,6 +174,7 @@ namespace EmbeddedShader
 				return;
 			}
 			node = Ast::AST::defineUniformVariate<Type>();
+			bindUniformValue();
 		}
 
 	    VariateProxy() requires std::is_aggregate_v<Type>
@@ -196,6 +224,7 @@ namespace EmbeddedShader
 		    else
 		    {
 		        node = Ast::AST::defineUniformVariate<Type>();
+		        bindUniformValue();
 		    }
 		    ParseHelper::endNotInitNode();
 
@@ -215,9 +244,9 @@ namespace EmbeddedShader
 
 		VariateProxy(const Type& value) requires (!std::is_aggregate_v<Type>)
 		{
+		    this->value = std::make_unique<Type>(value);
 		    if (ParseHelper::notInitNode())
 		    {
-		        this->value = std::make_unique<Type>(value);
 		        return;
 		    }
 
@@ -229,6 +258,7 @@ namespace EmbeddedShader
 			}
 
 			node = Ast::AST::defineUniformVariate<Type>();
+			bindUniformValue();
 		}
 
 		VariateProxy(const VariateProxy& value)
@@ -264,6 +294,12 @@ namespace EmbeddedShader
 		{
 			if (this == &rhs)
 				return *this;
+			if (!ParseHelper::isInShaderCodeLambda())
+			{
+				if (rhs.value)
+					storeRuntimeValue(*rhs.value);
+				return *this;
+			}
 			if (!std::dynamic_pointer_cast<Ast::Variate>(node))
 			{
 				node = Ast::AST::defineLocalVariate(node->type, rhs.node);
@@ -275,12 +311,22 @@ namespace EmbeddedShader
 
 		VariateProxy& operator=(const Type& rhs)
 		{
+			if (!ParseHelper::isInShaderCodeLambda())
+			{
+				storeRuntimeValue(rhs);
+				return *this;
+			}
 			Ast::AST::assign(node,Ast::AST::createValue(rhs));
 			return *this;
 		}
 
 		VariateProxy& operator=(Type&& rhs)
 		{
+			if (!ParseHelper::isInShaderCodeLambda())
+			{
+				storeRuntimeValue(std::move(rhs));
+				return *this;
+			}
 			Ast::AST::assign(node,Ast::AST::createValue(std::forward<Type>(rhs)));
 			return *this;
 		}

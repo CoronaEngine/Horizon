@@ -11,14 +11,11 @@
 #include "horizon.h"
 #include GLSL(shaders/edsl_header.glsl)
 
-#include <algorithm>
-#include <array>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <utility>
-#include <vector>
 
 struct BaselineEdslVertexProxy
 {
@@ -37,37 +34,13 @@ const std::filesystem::path viking_room_model_path =
 const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
 
-using ShaderResources = EmbeddedShader::ShaderCodeModule::ShaderResources;
-
-template <size_t Count>
-std::array<Corona::Horizon::BindingSlot, Count> reflected_uniform_member_slots(const ShaderResources& resources, uint32_t type_size)
+ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
 {
-    std::vector<ShaderResources::ShaderBindInfo> members;
-    for (const auto& info : resources.bindInfoPool)
-    {
-        if (info.bindType == ShaderResources::uniformBufferMembers && (info.typeSize == 0 || info.typeSize == type_size))
-            members.push_back(info);
-    }
+    static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
 
-    std::ranges::sort(members, [](const auto& lhs, const auto& rhs) {
-        if (lhs.set != rhs.set)
-            return lhs.set < rhs.set;
-        if (lhs.binding != rhs.binding)
-            return lhs.binding < rhs.binding;
-        return lhs.byteOffset < rhs.byteOffset;
-    });
-
-    std::array<Corona::Horizon::BindingSlot, Count> slots {};
-    for (size_t i = 0; i < Count; ++i)
-    {
-        slots[i].byte_offset = members[i].byteOffset;
-        slots[i].type_size = members[i].typeSize;
-        slots[i].bind_type = static_cast<int32_t>(members[i].bindType);
-        slots[i].location = members[i].location;
-        slots[i].set = members[i].set;
-        slots[i].binding = members[i].binding;
-    }
-    return slots;
+    ktm::fmat4x4 result;
+    std::memcpy(&result, &matrix, sizeof(result));
+    return result;
 }
 } // namespace
 
@@ -122,9 +95,6 @@ void run_example_edsl()
     desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth");
 
     Corona::Horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
-    const auto rasterizer_desc = rasterizer.desc();
-    const auto uniform_bindings =
-        reflected_uniform_member_slots<3>(rasterizer_desc.vertex_shader.module.shaderResources, static_cast<uint32_t>(sizeof(glm::mat4)));
     rasterizer.bind_depth_target(depth_image);
 
     Corona::Horizon::DrawIndexedParams draw_params;
@@ -138,11 +108,10 @@ void run_example_edsl()
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
-        // EDSL 按行主序喂入 shader，故对 glm（列主序）结果转置。
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
-        rasterizer[uniform_bindings[0]] = glm::transpose(ubo.model);
-        rasterizer[uniform_bindings[1]] = glm::transpose(ubo.view);
-        rasterizer[uniform_bindings[2]] = glm::transpose(ubo.proj);
+        model = to_edsl_matrix(glm::transpose(ubo.model));
+        view = to_edsl_matrix(glm::transpose(ubo.view));
+        proj = to_edsl_matrix(glm::transpose(ubo.proj));
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);

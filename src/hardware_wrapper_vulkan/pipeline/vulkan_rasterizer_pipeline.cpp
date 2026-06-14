@@ -78,6 +78,39 @@ namespace Corona::Horizon
                    is_sampled_image_bind(bind_type);
         }
 
+        struct BindingCoordinates
+        {
+            uint32_t set { 0 };
+            uint32_t binding { 0 };
+        };
+
+        [[nodiscard]] BindingCoordinates reflected_binding_coordinates(const EmbeddedShader::ShaderCodeModule& module,
+                                                                       const EmbeddedShader::AutoBindEntry& entry) noexcept
+        {
+            for (const auto& info : module.shaderResources.bindInfoPool)
+            {
+                if (static_cast<int32_t>(info.bindType) != entry.bindType)
+                    continue;
+                if (info.byteOffset != entry.byteOffset)
+                    continue;
+                if (entry.typeSize != 0 && info.typeSize != 0 && info.typeSize != entry.typeSize)
+                    continue;
+                return { info.set, info.binding };
+            }
+
+            return {};
+        }
+
+        [[nodiscard]] BindingCoordinates reflected_binding_coordinates(const RasterizerPipelineDesc& desc,
+                                                                       const EmbeddedShader::AutoBindEntry& entry) noexcept
+        {
+            BindingCoordinates coordinates = reflected_binding_coordinates(desc.vertex_shader.module, entry);
+            if (coordinates.set != 0 || coordinates.binding != 0)
+                return coordinates;
+
+            return reflected_binding_coordinates(desc.fragment_shader.module, entry);
+        }
+
         [[nodiscard]] VkPrimitiveTopology to_vk_topology(PrimitiveTopology topology) noexcept
         {
             switch (topology)
@@ -1450,6 +1483,60 @@ namespace Corona::Horizon
             desc_.auto_bind_entries.push_back(std::move(entry));
         else
             *found = std::move(entry);
+    }
+
+    void VulkanRasterizerPipeline::bind_auto_resources()
+    {
+        struct AutoValue
+        {
+            EmbeddedShader::AutoBindEntry entry;
+            BindingCoordinates coordinates;
+        };
+
+        std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareImage>> images;
+        std::vector<AutoValue> values;
+        {
+            std::lock_guard lock(mutex_);
+            images.reserve(desc_.auto_bind_entries.size());
+            values.reserve(desc_.auto_bind_entries.size());
+            for (const EmbeddedShader::AutoBindEntry& entry : desc_.auto_bind_entries)
+            {
+                if (entry.boundResourceRef != nullptr && *entry.boundResourceRef != nullptr)
+                {
+                    images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
+                    continue;
+                }
+
+                if (entry.boundValueRef != nullptr && entry.boundValueSize != 0)
+                {
+                    values.push_back({
+                        entry,
+                        reflected_binding_coordinates(desc_, entry),
+                    });
+                }
+            }
+        }
+
+        for (const auto& [entry, image] : images)
+        {
+            set_resource_direct(entry.byteOffset,
+                                entry.typeSize,
+                                image,
+                                entry.bindType,
+                                entry.location,
+                                0,
+                                entry.location);
+        }
+
+        for (const AutoValue& value : values)
+        {
+            set_push_constant_direct(value.entry.byteOffset,
+                                     value.entry.boundValueRef,
+                                     value.entry.boundValueSize,
+                                     value.entry.bindType,
+                                     value.coordinates.set,
+                                     value.coordinates.binding);
+        }
     }
 
     std::vector<EmbeddedShader::AutoBindEntry> VulkanRasterizerPipeline::auto_bind_entries() const

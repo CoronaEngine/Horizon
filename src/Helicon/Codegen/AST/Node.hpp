@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <memory>
 
@@ -177,6 +178,8 @@ namespace EmbeddedShader::Ast
 	{
 		AccessPermissions permissions = AccessPermissions::None;
 		bool pushConstant = false;
+		const void* boundValueRef = nullptr;
+		uint32_t boundValueSize = 0;
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
 	};

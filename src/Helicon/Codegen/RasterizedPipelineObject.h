@@ -59,6 +59,37 @@ namespace EmbeddedShader
 			auto& globals = Ast::Parser::getGlobalStatements();
 			for (auto& stmt : globals)
 			{
+				if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
+				{
+					if (def->variate && def->variate->boundValueRef)
+					{
+						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
+						{
+							result.autoBindEntries.push_back({
+								nullptr,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location,
+								def->variate->boundValueRef,
+								def->variate->boundValueSize
+							});
+						}
+						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
+						{
+							result.autoBindEntries.push_back({
+								nullptr,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location,
+								def->variate->boundValueRef,
+								def->variate->boundValueSize
+							});
+						}
+					}
+				}
+
 				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
 				{
 					if (def->texture && def->texture->boundResourceRef)
