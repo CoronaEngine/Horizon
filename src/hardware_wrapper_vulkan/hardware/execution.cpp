@@ -26,12 +26,12 @@ namespace Corona::Horizon
     {
     }
 
-    std::shared_ptr<const SubmissionSync> SubmissionSync::make(VkSemaphore timeline)
+    std::shared_ptr<SubmissionSync> SubmissionSync::make(VkSemaphore timeline)
     {
         if (timeline == VK_NULL_HANDLE)
             return {};
 
-        return std::shared_ptr<const SubmissionSync>(new SubmissionSync(timeline));
+        return std::shared_ptr<SubmissionSync>(new SubmissionSync(timeline));
     }
 
     namespace

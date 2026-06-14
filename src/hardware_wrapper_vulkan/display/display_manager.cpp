@@ -20,9 +20,11 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -307,7 +309,62 @@ namespace Corona::Horizon
             }
         }
 
-        [[nodiscard]] uint64_t completed_value_for_token(VkDevice device, const SubmissionToken& token)
+        [[nodiscard]] bool trace_timeline_enabled() noexcept
+        {
+            static const bool enabled = [] {
+                const char* value = std::getenv("HORIZON_TRACE_TIMELINE");
+                return value != nullptr && value[0] != '\0' && value[0] != '0';
+            }();
+            return enabled;
+        }
+
+        [[nodiscard]] bool trace_timeline_full() noexcept
+        {
+            static const bool full = [] {
+                const char* value = std::getenv("HORIZON_TRACE_TIMELINE");
+                return value != nullptr && (std::string_view(value) == "full" || std::string_view(value) == "2");
+            }();
+            return full;
+        }
+
+        [[nodiscard]] std::string hex_handle(uint64_t value)
+        {
+            std::ostringstream stream;
+            stream << "0x" << std::hex << value;
+            return stream.str();
+        }
+
+        void trace_display_token_query(const char* event,
+                                       VkDevice device,
+                                       const SubmissionToken& token,
+                                       VkSemaphore timeline,
+                                       uint64_t value) noexcept
+        {
+            if (!trace_timeline_enabled())
+            {
+                return;
+            }
+
+            try
+            {
+                std::ostringstream stream;
+                stream << event
+                       << " thread=" << std::this_thread::get_id()
+                       << " token_device=" << token.device.value
+                       << " token_family=" << token.queue.family_index
+                       << " token_queue_index=" << token.queue.queue_index
+                       << " device=" << hex_handle(reinterpret_cast<uint64_t>(device))
+                       << " timeline=" << hex_handle(reinterpret_cast<uint64_t>(timeline))
+                       << " token_value=" << token.value
+                       << " completed_value=" << value;
+                Diagnostics::write(Diagnostics::Level::Info, "HORIZON TIMELINE", stream.str());
+            }
+            catch (...)
+            {
+            }
+        }
+
+        [[nodiscard]] uint64_t completed_value_for_token(Queue& queue, const SubmissionToken& token)
         {
             if (!token.has_sync() || token.value == 0)
             {
@@ -315,23 +372,21 @@ namespace Corona::Horizon
             }
 
             const VkSemaphore timeline = token.sync->timeline();
-            if (device == VK_NULL_HANDLE || timeline == VK_NULL_HANDLE)
+            if (timeline == VK_NULL_HANDLE)
             {
                 return token.value;
             }
 
-            uint64_t value = 0;
-            const VkResult result = vkGetSemaphoreCounterValue(device, timeline, &value);
-            if (result != VK_SUCCESS)
+            if (trace_timeline_full())
             {
-                Diagnostics::write(Diagnostics::Level::Error,
-                                   "VK_ERROR",
-                                   "vkGetSemaphoreCounterValue(display frame token) failed. VkResult=" +
-                                       std::to_string(static_cast<int>(result)));
-                throw std::runtime_error("vkGetSemaphoreCounterValue(display frame token) failed. VkResult=" +
-                                         std::to_string(static_cast<int>(result)));
+                trace_display_token_query("display.token.query.begin", queue.device(), token, timeline, 0);
             }
 
+            const uint64_t value = queue.completed_value();
+            if (trace_timeline_full())
+            {
+                trace_display_token_query("display.token.query.end", queue.device(), token, timeline, value);
+            }
             return value;
         }
 
@@ -626,17 +681,20 @@ namespace Corona::Horizon
             return true;
         }
 
-        const uint64_t completed = completed_value_for_token(device_, *token);
+        Queue* submitted_queue = device_manager_ == nullptr ? nullptr : device_manager_->queue_by_id(token->queue);
+        if (submitted_queue == nullptr)
+        {
+            token.reset();
+            return true;
+        }
+
+        const uint64_t completed = completed_value_for_token(*submitted_queue, *token);
         if (completed < token->value)
         {
             return false;
         }
 
-        Queue* submitted_queue = device_manager_ == nullptr ? nullptr : device_manager_->queue_by_id(token->queue);
-        if (submitted_queue != nullptr)
-        {
-            submitted_queue->retire_completed();
-        }
+        submitted_queue->retire_completed();
         token.reset();
         return true;
     }

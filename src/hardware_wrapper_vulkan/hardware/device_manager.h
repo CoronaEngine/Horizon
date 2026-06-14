@@ -100,6 +100,7 @@ namespace Corona::Horizon
         VkDevice device_ { VK_NULL_HANDLE };
         VkQueue queue_ { VK_NULL_HANDLE };
         VkSemaphore timeline_ { VK_NULL_HANDLE };
+        std::shared_ptr<SubmissionSync> timeline_sync_;
         QueueId id_ {};
 
         uint64_t next_recording_id_ { 0 };

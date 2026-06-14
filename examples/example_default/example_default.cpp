@@ -62,7 +62,7 @@ void run_example_default()
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-    constexpr std::size_t TOTAL_WINDOWS = 16;
+    constexpr std::size_t TOTAL_WINDOWS = 32;
     std::vector<GLFWwindow*> windows(TOTAL_WINDOWS);
     for (size_t i = 0; i < windows.size(); i++)
     {
@@ -226,7 +226,6 @@ void run_example_default()
                 latestRenderReceipts[threadIndex] = std::move(receipt);
             }
             hasRenderReceipt[threadIndex].store(true, std::memory_order_release);
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     };
 
@@ -268,7 +267,6 @@ void run_example_default()
                 latestRenderReceipts[threadIndex] = std::move(receipt);
             }
             hasRenderReceipt[threadIndex].store(true, std::memory_order_release);
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     };
 
@@ -296,7 +294,6 @@ void run_example_default()
 
             displayExecutors[threadIndex].wait(renderReceipt);
             (void)(displayExecutors[threadIndex].stream() << Corona::Horizon::present(displayManager, finalOutputImages[threadIndex]) << Corona::Horizon::commit());
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     };
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -16,15 +17,16 @@ namespace Corona::Horizon
     class SubmissionSync
     {
     public:
-        [[nodiscard]] VkSemaphore timeline() const noexcept { return timeline_; }
+        [[nodiscard]] VkSemaphore timeline() const noexcept { return timeline_.load(std::memory_order_acquire); }
 
     private:
         friend class Queue;
 
         explicit SubmissionSync(VkSemaphore timeline) noexcept;
-        [[nodiscard]] static std::shared_ptr<const SubmissionSync> make(VkSemaphore timeline);
+        [[nodiscard]] static std::shared_ptr<SubmissionSync> make(VkSemaphore timeline);
+        void invalidate() noexcept { timeline_.store(VK_NULL_HANDLE, std::memory_order_release); }
 
-        VkSemaphore timeline_ { VK_NULL_HANDLE };
+        std::atomic<VkSemaphore> timeline_ { VK_NULL_HANDLE };
     };
 
     struct SubmitWait
