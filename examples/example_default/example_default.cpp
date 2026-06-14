@@ -276,7 +276,6 @@ void run_example_default()
         {
             if (!hasRenderReceipt[threadIndex].load(std::memory_order_acquire))
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
 
@@ -288,7 +287,6 @@ void run_example_default()
 
             if (renderReceipt.empty())
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
 
