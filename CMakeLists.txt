@@ -9,6 +9,8 @@ project(
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
+option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module when CUDA is available" OFF)
+option(HORIZON_BUILD_VISION_HOTFIX "Build Vision hotfix support targets" OFF)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -51,12 +53,21 @@ if (MSVC)
     target_compile_options(Helicon PUBLIC /source-charset:utf-8 /execution-charset:utf-8)
 endif()
 
-find_package(Python)
+if(HORIZON_BUILD_OCARINA OR HORIZON_BUILD_VISION_HOTFIX)
+    find_package(Python)
 
-if(Python_FOUND)
-    set(PYTHON_PATH ${Python_EXECUTABLE})
-else()
-    message(WARNING "Python not found. Please install Python or set the Python_ROOT_DIR to proceed.")
+    if(Python_FOUND)
+        set(PYTHON_PATH ${Python_EXECUTABLE})
+    else()
+        message(WARNING "Python not found. Please install Python or set the Python_ROOT_DIR to proceed.")
+    endif()
+
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonOcarina.cmake)
 endif()
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonOcarina.cmake)
+if(HORIZON_BUILD_VISION_HOTFIX)
+    if(NOT TARGET ocarina OR NOT TARGET ocarina-include)
+        message(FATAL_ERROR "HORIZON_BUILD_VISION_HOTFIX requires HORIZON_BUILD_OCARINA=ON")
+    endif()
+    add_subdirectory(src/hotfix)
+endif()
