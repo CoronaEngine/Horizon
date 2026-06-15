@@ -46,7 +46,7 @@ namespace Corona::Horizon
 
     HardwareContext g_hardware_context;
 
-    constexpr uint32_t required_api_version = VK_API_VERSION_1_3;
+    constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
 
     namespace
     {
