@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <set>
@@ -20,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -45,6 +47,117 @@ namespace Corona::Horizon
     HardwareContext g_hardware_context;
 
     constexpr uint32_t required_api_version = VK_API_VERSION_1_3;
+
+    namespace
+    {
+        constexpr std::array<const char*, 6> blocked_overlay_layers = {{
+            "VK_LAYER_OBS_HOOK",
+            "VK_LAYER_RTSS",
+            "VK_LAYER_EOS_Overlay",
+            "VK_LAYER_VALVE_steam_fossilize",
+            "VK_LAYER_VALVE_steam_overlay",
+            "VK_LAYER_TENCENT_wegame_cross_overlay",
+        }};
+
+        bool environment_flag_enabled(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return value != nullptr && std::strcmp(value, "1") == 0;
+        }
+
+        void set_process_environment(const char* name, const std::string& value)
+        {
+#if defined(_WIN32)
+            if (SetEnvironmentVariableA(name, value.c_str()) == 0)
+            {
+                throw std::runtime_error(std::string("Failed to set process environment variable: ") + name);
+            }
+#else
+            if (setenv(name, value.c_str(), 1) != 0)
+            {
+                throw std::runtime_error(std::string("Failed to set process environment variable: ") + name);
+            }
+#endif
+        }
+
+        std::vector<std::string> parse_layer_filters(const char* value)
+        {
+            std::vector<std::string> filters;
+            if (value == nullptr)
+            {
+                return filters;
+            }
+
+            std::string input(value);
+            size_t begin = 0;
+            while (begin <= input.size())
+            {
+                const size_t end = input.find(',', begin);
+                const size_t token_end = end == std::string::npos ? input.size() : end;
+                const size_t first = input.find_first_not_of(" \t", begin);
+                if (first != std::string::npos && first < token_end)
+                {
+                    const size_t last = input.find_last_not_of(" \t", token_end - 1);
+                    filters.emplace_back(input.substr(first, last - first + 1));
+                }
+
+                if (end == std::string::npos)
+                {
+                    break;
+                }
+                begin = end + 1;
+            }
+            return filters;
+        }
+
+        std::string join_layer_filters(const std::vector<std::string>& filters)
+        {
+            std::ostringstream stream;
+            for (size_t index = 0; index < filters.size(); ++index)
+            {
+                if (index != 0)
+                {
+                    stream << ',';
+                }
+                stream << filters[index];
+            }
+            return stream.str();
+        }
+
+        void configure_vulkan_layer_isolation()
+        {
+            static std::once_flag isolation_once;
+
+            std::call_once(isolation_once, [] {
+                if (environment_flag_enabled("HORIZON_ALLOW_VULKAN_OVERLAYS"))
+                {
+                    Diagnostics::write(Diagnostics::Level::Info,
+                                       "VULKAN PROFILE",
+                                       "Vulkan overlay isolation: disabled by HORIZON_ALLOW_VULKAN_OVERLAYS");
+                    return;
+                }
+
+                std::vector<std::string> disabled_layers =
+                    parse_layer_filters(std::getenv("VK_LOADER_LAYERS_DISABLE"));
+                for (const char* layer_name : blocked_overlay_layers)
+                {
+                    if (std::find(disabled_layers.begin(), disabled_layers.end(), layer_name) == disabled_layers.end())
+                    {
+                        disabled_layers.emplace_back(layer_name);
+                    }
+                }
+
+                const std::string merged_disabled_layers = join_layer_filters(disabled_layers);
+                set_process_environment("VK_LOADER_LAYERS_DISABLE", merged_disabled_layers);
+
+                std::ostringstream report;
+                report << "Vulkan overlay isolation: enabled\n"
+                       << "  scope: current process\n"
+                       << "  VK_LOADER_LAYERS_DISABLE: " << merged_disabled_layers;
+                Diagnostics::write(Diagnostics::Level::Info, "VULKAN PROFILE", report.str());
+            });
+        }
+    }
 
 #if HORIZON_ENABLE_VULKAN_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
@@ -995,6 +1108,7 @@ namespace Corona::Horizon
         VulkanValidationReport report;
         report.compiled = true;
 
+        configure_vulkan_layer_isolation();
         if (volkInitialize() != VK_SUCCESS)
         {
             report.missing_requirements.emplace_back("Vulkan loader is not available.");
@@ -1241,6 +1355,7 @@ namespace Corona::Horizon
         static std::once_flag volk_once;
 
         std::call_once(volk_once, [] {
+            configure_vulkan_layer_isolation();
             if (volkInitialize() != VK_SUCCESS)
             {
                 Diagnostics::write(Diagnostics::Level::Error, "VULKAN PROFILE", "COMPATIBILITY FAIL: failed to initialize Volk/Vulkan loader.");
