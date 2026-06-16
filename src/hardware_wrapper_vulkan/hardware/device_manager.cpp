@@ -985,7 +985,8 @@ namespace Corona::Horizon
             throw std::runtime_error("vkCreateDevice failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
-        volkLoadDevice(logical_device_);
+        // this is shit
+        //volkLoadDevice(logical_device_);
     }
 
     void DeviceManager::create_queues()
