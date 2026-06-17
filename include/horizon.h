@@ -166,6 +166,7 @@ namespace Corona::Horizon
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait(const HardwareExecutor& producer);
+        HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
         [[nodiscard]] SubmitReceipt last_receipt() const;
 
     private:
