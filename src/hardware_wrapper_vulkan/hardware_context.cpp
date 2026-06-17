@@ -637,6 +637,7 @@ namespace Corona::Horizon
 
         std::vector<FeatureStatus> status;
         add_required_feature(status, "Vulkan 1.0", "samplerAnisotropy", features.features.samplerAnisotropy);
+        add_required_feature(status, "Vulkan 1.0", "geometryShader", features.features.geometryShader);
         add_required_feature(status, "Vulkan 1.0", "shaderInt16", features.features.shaderInt16);
         add_required_feature(status, "Vulkan 1.0", "wideLines", features.features.wideLines);
         add_required_feature(status, "Vulkan 1.0", "fragmentStoresAndAtomics", features.features.fragmentStoresAndAtomics);
@@ -1307,6 +1308,7 @@ namespace Corona::Horizon
         create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice&) {
             VkPhysicalDeviceFeatures features {};
             features.samplerAnisotropy = VK_TRUE;
+            features.geometryShader = VK_TRUE;
             features.shaderInt16 = VK_TRUE;
             features.wideLines = VK_TRUE;
             features.fragmentStoresAndAtomics = VK_TRUE;
