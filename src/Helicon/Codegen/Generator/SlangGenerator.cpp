@@ -205,6 +205,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 {
     if (node->conditionDetector.has_value())
     {
+        Ast::BranchOutput branch;
+        Ast::Parser::pushBranchOutput(std::move(branch));
         //cpu branch pruning
         return "branch_" + std::to_string(node->index) + "();";
     }
@@ -412,6 +414,21 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
  //    result += node->funcName;
  //    result += "\";\n}";
 	return result;
+}
+
+EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::getBranchOutput(std::string name, const std::vector<std::shared_ptr<Ast::Statement>>& body,std::function<bool()>conditionDetector)
+{
+    Ast::BranchOutput branch;
+    branch.conditionDetector = std::move(conditionDetector);
+
+    //body
+    for (const auto & statement : body)
+    {
+
+    }
+
+    branch.output = "void " + name + "(";
+    return branch;
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getPositionOutput()

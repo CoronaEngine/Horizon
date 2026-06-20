@@ -8,18 +8,6 @@
 
 void run_example_branch_pruning()
 {
-    if (0)
-    {
-
-    }
-    else if (2)
-        {
-
-        }
-        else
-        {
-
-        }
     using namespace EmbeddedShader;
     int a = 1;
     Int a2 = 1;

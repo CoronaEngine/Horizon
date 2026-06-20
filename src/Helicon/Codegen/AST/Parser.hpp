@@ -16,12 +16,18 @@ namespace EmbeddedShader::Ast
 		ShaderStage stage;
 	};
 
+    struct BranchOutput
+    {
+        std::function<bool()> conditionDetector;
+        std::string output;
+    };
+
 	struct ParseOutput
 	{
 		std::string output;
 	    std::unordered_set<SlangModule*> sourceModule;
 		ShaderStage stage;
-	    std::vector<std::function<bool()>> branchPruningDetectors;
+	    std::vector<BranchOutput> branches;
 	};
 
 	class Parser
@@ -53,6 +59,8 @@ namespace EmbeddedShader::Ast
 
 		std::vector<ParseOutput> parseOutputs;
 
+	    std::vector<BranchOutput> branches;
+
 		bool isInShaderParse = false;
 
 		bool bindless = false;
@@ -65,5 +73,7 @@ namespace EmbeddedShader::Ast
 		static const std::vector<std::shared_ptr<Statement>>& getGlobalStatements();
 		static size_t getNextRenderTargetLocation();
 		static size_t getCurrentBranchIndex();
+
+	    static void pushBranchOutput(BranchOutput branch);
 	};
 }

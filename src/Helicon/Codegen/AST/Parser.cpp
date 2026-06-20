@@ -91,6 +91,7 @@ void EmbeddedShader::Ast::Parser::reset()
 	positionOutput.reset();
 	dispatchThreadIDInput.reset();
     structure.slangModuleSource.clear();
+    structure.branches.clear();
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()
@@ -121,4 +122,9 @@ size_t EmbeddedShader::Ast::Parser::getNextRenderTargetLocation()
 size_t EmbeddedShader::Ast::Parser::getCurrentBranchIndex()
 {
     return currentParser->currentBranchIndex++;
+}
+
+void EmbeddedShader::Ast::Parser::pushBranchOutput(BranchOutput branch)
+{
+    currentParser->branches.push_back(std::move(branch));
 }
