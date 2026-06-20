@@ -27,17 +27,6 @@ horizon_fetchcontent_declare(
 FetchContent_MakeAvailable(preprocessor)
 
 horizon_fetchcontent_declare(
-    glslang
-    GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
-    GIT_TAG main
-    EXCLUDE_FROM_ALL
-)
-set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
-set(ENABLE_GLSLANG_BINARIES ${HORIZON_BUILD_DEPENDENCY_TOOLS} CACHE BOOL "" FORCE)
-set(GLSLANG_ENABLE_INSTALL ${HORIZON_ENABLE_DEPENDENCY_INSTALL} CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(glslang)
-
-horizon_fetchcontent_declare(
     SPIRV-Cross
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
     GIT_TAG main

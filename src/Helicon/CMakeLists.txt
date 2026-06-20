@@ -63,8 +63,6 @@ target_link_directories(Helicon PUBLIC
 )
 
 target_link_libraries(Helicon PUBLIC
-    glslang
-    glslang-default-resource-limits
     spirv-cross-core
     spirv-cross-c
     spirv-cross-cpp
