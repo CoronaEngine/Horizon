@@ -71,11 +71,11 @@ namespace EmbeddedShader::Ast
 		template<typename VariateType>
 		static std::shared_ptr<OutputVariate> defineOutputVariate(size_t location);
 
-		static void beginIf(std::shared_ptr<Value> condition);
+		static std::shared_ptr<Ast::IfStatement> beginIf(std::shared_ptr<Value> condition, std::optional<std::function<bool()>> conditionDetector = std::nullopt);
 		static void endIf();
 		static void beginElif(std::shared_ptr<Value> condition);
 		static void endElif();
-		static void beginElse();
+		static void beginElse(std::shared_ptr<Ast::IfStatement> followIf);
 		static void endElse();
 
 		static std::shared_ptr<UniversalArray> defineUniversalArray(std::shared_ptr<Type> elementType);

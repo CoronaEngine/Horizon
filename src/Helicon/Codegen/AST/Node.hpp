@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <memory>
+#include <optional>
 
 #include <Codegen/AST/Enum.hpp>
 #include <Codegen/AST/Node.hpp>
@@ -135,18 +136,13 @@ namespace EmbeddedShader::Ast
     {
         std::shared_ptr<Value> condition;
         std::vector<std::shared_ptr<Statement>> statements;
+	    std::optional<std::function<bool()>> conditionDetector;
         std::string parse() override;
     };
 
-	struct ElifStatement : Statement
-	{
-		std::shared_ptr<Value> condition;
-		std::vector<std::shared_ptr<Statement>> statements;
-		std::string parse() override;
-	};
-
 	struct ElseStatement : Statement
 	{
+	    std::shared_ptr<IfStatement> followIf;
 		std::vector<std::shared_ptr<Statement>> statements;
 		std::string parse() override;
 	};

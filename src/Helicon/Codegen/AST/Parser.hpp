@@ -21,6 +21,7 @@ namespace EmbeddedShader::Ast
 		std::string output;
 	    std::unordered_set<SlangModule*> sourceModule;
 		ShaderStage stage;
+	    std::vector<std::function<bool()>> branchPruningDetectors;
 	};
 
 	class Parser

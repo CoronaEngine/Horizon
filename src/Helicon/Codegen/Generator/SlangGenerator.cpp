@@ -46,15 +46,15 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 )";
 	}
 
+    std::string mainContent;
+    for (auto& statement: structure.localStatements)
+    {
+        mainContent += "\t" + statement->parse() + '\n';
+    }
+
 	for (auto& statement: structure.shaderOnlyStatements)
 	{
 		output += statement->parse() + '\n';
-	}
-
-	std::string mainContent;
-	for (auto& statement: structure.localStatements)
-	{
-		mainContent += "\t" + statement->parse() + '\n';
 	}
 
 	std::string stageType = "unknown";
@@ -203,20 +203,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::IfStatement* node)
 {
-	auto result = "if (" + node->condition->parse() + ") {\n";
-	nestHierarchy++;
-	for (auto& statement: node->statements)
-	{
-		result += getCodeIndentation() + statement->parse() + "\n";
-	}
-	nestHierarchy--;
-	result += getCodeIndentation() + "}";
-	return result;
-}
+    if (node->conditionDetector.has_value())
+    {
+        //cpu branch pruning
 
-std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ElifStatement* node)
-{
-	auto result = "else if (" + node->condition->parse() + ") {\n";
+        return "";
+    }
+	auto result = "if (" + node->condition->parse() + ") {\n";
 	nestHierarchy++;
 	for (auto& statement: node->statements)
 	{
@@ -229,6 +222,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ElseStatement* node)
 {
+    if (node->followIf->conditionDetector.has_value())
+    {
+        //cpu branch pruning
+
+        return "";
+    }
+
 	std::string result = "else {\n";
 	nestHierarchy++;
 	for (auto& statement: node->statements)

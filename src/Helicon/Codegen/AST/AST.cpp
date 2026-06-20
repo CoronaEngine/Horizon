@@ -4,6 +4,8 @@
 
 #include "Parser.hpp"
 
+#include <optional>
+
 std::shared_ptr<EmbeddedShader::Ast::LocalVariate> EmbeddedShader::Ast::AST::defineLocalVariate(std::shared_ptr<Type> type, std::shared_ptr<Value> initValue)
 {
 	if (initValue)
@@ -86,12 +88,14 @@ std::shared_ptr<EmbeddedShader::Ast::OutputVariate> EmbeddedShader::Ast::AST::de
 	return outputVariate;
 }
 
-void EmbeddedShader::Ast::AST::beginIf(std::shared_ptr<Value> condition)
+std::shared_ptr<EmbeddedShader::Ast::IfStatement> EmbeddedShader::Ast::AST::beginIf(std::shared_ptr<Value> condition, std::optional<std::function<bool()>> conditionDetector)
 {
 	auto ifStatement = std::make_shared<IfStatement>();
 	ifStatement->condition = std::move(condition);
+	ifStatement->conditionDetector = std::move(conditionDetector);
 	addLocalStatement(ifStatement);
 	getLocalStatementStack().push(&ifStatement->statements);
+    return ifStatement;
 }
 
 void EmbeddedShader::Ast::AST::endIf()
@@ -99,22 +103,15 @@ void EmbeddedShader::Ast::AST::endIf()
 	getLocalStatementStack().pop();
 }
 
-void EmbeddedShader::Ast::AST::beginElif(std::shared_ptr<Value> condition)
-{
-	auto elifStatement = std::make_shared<ElifStatement>();
-	elifStatement->condition = std::move(condition);
-	addLocalStatement(elifStatement);
-	getLocalStatementStack().push(&elifStatement->statements);
-}
-
 void EmbeddedShader::Ast::AST::endElif()
 {
 	getLocalStatementStack().pop();
 }
 
-void EmbeddedShader::Ast::AST::beginElse()
+void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 {
 	auto elseStatement = std::make_shared<ElseStatement>();
+    elseStatement->followIf = std::move(followIf);
 	addLocalStatement(elseStatement);
 	getLocalStatementStack().push(&elseStatement->statements);
 }
