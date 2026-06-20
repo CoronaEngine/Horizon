@@ -276,6 +276,11 @@ namespace EmbeddedShader
 				Ast::AST::addLocalUniversalStatement(node);
 		}
 
+	    operator Type() requires (std::is_arithmetic_v<Type>)
+		{
+		    return value ? *value : Type{};
+        }
+
 		Type* operator->() requires (std::is_aggregate_v<Type> && !ktm::is_vector_v<Type>)
 		{
 			return value.get();

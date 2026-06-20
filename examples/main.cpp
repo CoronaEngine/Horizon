@@ -2,7 +2,7 @@
 #include "example_default/example_default.h"
 #include "example_edsl/example_edsl.h"
 #include "example_glsl/example_glsl.h"
-#include "example_include/example_include.h"
+#include "example_branch_pruning/example_branch_pruning.h"
 
 #include <iostream>
 #include <string_view>
@@ -31,7 +31,11 @@ int main(int argc, char **argv)
         run_example_glsl();
         return 0;
     }
+    if (mode == "branch_pruning")
+    {
+        run_example_branch_pruning();
+    }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning]\n";
     return 0;
 }
