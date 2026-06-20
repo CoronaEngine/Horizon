@@ -46,6 +46,7 @@ namespace EmbeddedShader::Ast
 		size_t currentGlobalVariateIndex = 0;
 		size_t currentAggregateTypeIndex = 0;
 		size_t nextRenderTargetLocation = 0;
+	    size_t currentBranchIndex = 0;
 
 		std::shared_ptr<Variate> positionOutput;
 		std::shared_ptr<Variate> dispatchThreadIDInput;
@@ -63,5 +64,6 @@ namespace EmbeddedShader::Ast
 		static std::string getUniqueGlobalVariateName();
 		static const std::vector<std::shared_ptr<Statement>>& getGlobalStatements();
 		static size_t getNextRenderTargetLocation();
+		static size_t getCurrentBranchIndex();
 	};
 }

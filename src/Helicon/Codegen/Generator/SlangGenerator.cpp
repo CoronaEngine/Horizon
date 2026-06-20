@@ -206,8 +206,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
     if (node->conditionDetector.has_value())
     {
         //cpu branch pruning
-
-        return "";
+        return "branch_" + std::to_string(node->index) + "();";
     }
 	auto result = "if (" + node->condition->parse() + ") {\n";
 	nestHierarchy++;

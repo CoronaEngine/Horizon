@@ -117,3 +117,8 @@ size_t EmbeddedShader::Ast::Parser::getNextRenderTargetLocation()
 {
 	return currentParser->nextRenderTargetLocation++;
 }
+
+size_t EmbeddedShader::Ast::Parser::getCurrentBranchIndex()
+{
+    return currentParser->currentBranchIndex++;
+}

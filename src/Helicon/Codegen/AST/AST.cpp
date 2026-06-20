@@ -91,7 +91,11 @@ std::shared_ptr<EmbeddedShader::Ast::OutputVariate> EmbeddedShader::Ast::AST::de
 std::shared_ptr<EmbeddedShader::Ast::IfStatement> EmbeddedShader::Ast::AST::beginIf(std::shared_ptr<Value> condition, std::optional<std::function<bool()>> conditionDetector)
 {
 	auto ifStatement = std::make_shared<IfStatement>();
-	ifStatement->condition = std::move(condition);
+    if (conditionDetector.has_value())
+    {
+        ifStatement->index = Parser::getCurrentBranchIndex();
+    }
+    ifStatement->condition = std::move(condition);
 	ifStatement->conditionDetector = std::move(conditionDetector);
 	addLocalStatement(ifStatement);
 	getLocalStatementStack().push(&ifStatement->statements);

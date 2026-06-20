@@ -134,6 +134,7 @@ namespace EmbeddedShader::Ast
 
 	struct IfStatement : Statement
     {
+	    size_t index = 0;
         std::shared_ptr<Value> condition;
         std::vector<std::shared_ptr<Statement>> statements;
 	    std::optional<std::function<bool()>> conditionDetector;
