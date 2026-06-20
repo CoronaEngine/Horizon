@@ -5,8 +5,10 @@
 #include <string>
 #include "Struct.hpp"
 
+#include <set>
+
 namespace EmbeddedShader::Ast
-{
+{struct DefineLocalVariate;
 	struct Variate;
 	struct Statement;
 
@@ -20,6 +22,13 @@ namespace EmbeddedShader::Ast
     {
         std::function<bool()> conditionDetector;
         std::string output;
+        std::set<const Variate*> variateRefs;
+    };
+
+    struct ExternBranchVariateCollection
+    {
+        std::set<const Variate*> variateRefs;
+        std::vector<const DefineLocalVariate*> localDefinitions;
     };
 
 	struct ParseOutput
@@ -59,7 +68,11 @@ namespace EmbeddedShader::Ast
 
 		std::vector<ParseOutput> parseOutputs;
 
+	    //////////////Branch Pruning///////////////
 	    std::vector<BranchOutput> branches;
+
+	    std::stack<ExternBranchVariateCollection> externBranchVar;
+	    //////////////Branch Pruning///////////////
 
 		bool isInShaderParse = false;
 
@@ -74,6 +87,13 @@ namespace EmbeddedShader::Ast
 		static size_t getNextRenderTargetLocation();
 		static size_t getCurrentBranchIndex();
 
+	    static bool isCollectExternBranchVariate();
+	    static void beginCollectExternBranchVariate();
+	    static void endCollectExternBranchVariate();
 	    static void pushBranchOutput(BranchOutput branch);
+	    static void pushBranchVariateReference(const Variate* var);
+	    static void pushBranchLocalVariateDefinition(const DefineLocalVariate* definition);
+	    static ExternBranchVariateCollection getCurrentExternBranchVariateCollection();
+	    static void resetBranches();
 	};
 }

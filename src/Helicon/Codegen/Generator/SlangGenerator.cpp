@@ -169,6 +169,10 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineLocalVariate* node)
 {
+    if (Ast::Parser::isCollectExternBranchVariate())
+    {
+        Ast::Parser::pushBranchLocalVariateDefinition(node);
+    }
 	return node->localVariate->type->parse() + " " + node->localVariate->name +
 		(node->value ? " = " + node->value->parse() : "") + ";";
 }
@@ -205,10 +209,29 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 {
     if (node->conditionDetector.has_value())
     {
-        Ast::BranchOutput branch;
+        auto name = "branch_" + std::to_string(node->index);
+        Ast::BranchOutput branch = getBranchOutput(name,node->statements,node->conditionDetector.value());
+
+        //func call
+        std::string call = name + "(";
+        if (!branch.variateRefs.empty())
+        {
+            for (auto i = branch.variateRefs.begin(); i != branch.variateRefs.end(); )
+            {
+                call += (*i)->name;
+                ++i;
+                if (i != branch.variateRefs.end())
+                {
+                    call += ",";
+                }
+            }
+        }
+        call += ");";
+
+        branch.variateRefs.clear();
         Ast::Parser::pushBranchOutput(std::move(branch));
         //cpu branch pruning
-        return "branch_" + std::to_string(node->index) + "();";
+        return call;
     }
 	auto result = "if (" + node->condition->parse() + ") {\n";
 	nestHierarchy++;
@@ -422,12 +445,35 @@ EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::get
     branch.conditionDetector = std::move(conditionDetector);
 
     //body
-    for (const auto & statement : body)
+    std::string bodyOut = "{\n";
+    Ast::Parser::beginCollectExternBranchVariate();
+    nestHierarchy++;
+    for (auto& statement: body)
     {
-
+        bodyOut += getCodeIndentation() + statement->parse() + "\n";
     }
+    nestHierarchy--;
+    bodyOut += "}\n";
+    auto collection = Ast::Parser::getCurrentExternBranchVariateCollection();
+    Ast::Parser::endCollectExternBranchVariate();
 
-    branch.output = "void " + name + "(";
+    std::string params = "(";
+    if (!collection.variateRefs.empty())
+    {
+        for (auto i = collection.variateRefs.begin(); i != collection.variateRefs.end(); )
+        {
+            params += (*i)->type->parse() + " " + (*i)->name;
+            ++i;
+            if (i != collection.variateRefs.end())
+            {
+                params += ",";
+            }
+        }
+    }
+    params += ")";
+
+    branch.output = "void " + name + params + bodyOut;
+    branch.variateRefs = std::move(collection.variateRefs);
     return branch;
 }
 

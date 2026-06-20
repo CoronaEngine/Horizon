@@ -41,6 +41,10 @@ std::string EmbeddedShader::Ast::Value::accessPath()
 
 std::string EmbeddedShader::Ast::Variate::parse()
 {
+    if (Parser::isCollectExternBranchVariate())
+    {
+        Parser::pushBranchVariateReference(this);
+    }
 	return name;
 }
 

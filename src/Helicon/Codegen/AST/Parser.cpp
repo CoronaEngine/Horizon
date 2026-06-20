@@ -91,7 +91,6 @@ void EmbeddedShader::Ast::Parser::reset()
 	positionOutput.reset();
 	dispatchThreadIDInput.reset();
     structure.slangModuleSource.clear();
-    structure.branches.clear();
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()
@@ -123,8 +122,53 @@ size_t EmbeddedShader::Ast::Parser::getCurrentBranchIndex()
 {
     return currentParser->currentBranchIndex++;
 }
-
+bool EmbeddedShader::Ast::Parser::isCollectExternBranchVariate()
+{
+    return !currentParser->externBranchVar.empty();
+}
+void EmbeddedShader::Ast::Parser::beginCollectExternBranchVariate()
+{
+    currentParser->externBranchVar.push({});
+}
+void EmbeddedShader::Ast::Parser::endCollectExternBranchVariate(){
+    currentParser->externBranchVar.pop();
+}
 void EmbeddedShader::Ast::Parser::pushBranchOutput(BranchOutput branch)
 {
     currentParser->branches.push_back(std::move(branch));
+}
+void EmbeddedShader::Ast::Parser::pushBranchVariateReference(const Variate* var)
+{
+    currentParser->externBranchVar.top().variateRefs.insert(std::move(var));
+}
+void EmbeddedShader::Ast::Parser::pushBranchLocalVariateDefinition(const DefineLocalVariate* definition)
+{
+    currentParser->externBranchVar.top().localDefinitions.push_back(std::move(definition));
+}
+EmbeddedShader::Ast::ExternBranchVariateCollection EmbeddedShader::Ast::Parser::getCurrentExternBranchVariateCollection(){
+    auto collection = currentParser->externBranchVar.top();
+    for (auto i = collection.variateRefs.begin(); i != collection.variateRefs.end();)
+    {
+        bool isLocal = false;
+        for (auto definition : collection.localDefinitions)
+        {
+            if (definition->localVariate->name == (*i)->name)
+            {
+                //local var
+                isLocal = true;
+                break;
+            }
+        }
+        if (isLocal)
+        {
+            collection.variateRefs.erase(i);
+            continue;
+        }
+        ++i;
+    }
+    return collection;
+}
+void EmbeddedShader::Ast::Parser::resetBranches()
+{
+    currentParser->branches.clear();
 }
