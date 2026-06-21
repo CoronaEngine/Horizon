@@ -147,6 +147,7 @@ void EmbeddedShader::Ast::Parser::pushBranchLocalVariateDefinition(const DefineL
     currentParser->externBranchVar.top().localDefinitions.push_back(std::move(definition));
 }
 EmbeddedShader::Ast::ExternBranchVariateCollection EmbeddedShader::Ast::Parser::getCurrentExternBranchVariateCollection(){
+    std::set<const Variate*> nVars;
     auto collection = currentParser->externBranchVar.top();
     for (auto i = collection.variateRefs.begin(); i != collection.variateRefs.end();)
     {
@@ -167,6 +168,15 @@ EmbeddedShader::Ast::ExternBranchVariateCollection EmbeddedShader::Ast::Parser::
         }
         ++i;
     }
+
+    for (const auto & variate_ref : collection.variateRefs)
+    {
+         if (auto nVar = variate_ref->getRootVariate(); nVar)
+         {
+             nVars.insert(nVar);
+         }
+    }
+    collection.variateRefs.swap(nVars);
     return collection;
 }
 void EmbeddedShader::Ast::Parser::resetBranches()
