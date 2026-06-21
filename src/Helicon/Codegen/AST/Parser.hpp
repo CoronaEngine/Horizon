@@ -18,13 +18,6 @@ namespace EmbeddedShader::Ast
 		ShaderStage stage;
 	};
 
-    struct BranchOutput
-    {
-        std::function<bool()> conditionDetector;
-        std::string output;
-        std::set<const Variate*> variateRefs;
-    };
-
     struct ExternBranchVariateCollection
     {
         std::set<const Variate*> variateRefs;
