@@ -52,6 +52,10 @@ std::string EmbeddedShader::Ast::Variate::accessPath()
 {
 	return name;
 }
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::Variate::getRootVariate()const
+{
+    return this;
+}
 
 std::string EmbeddedShader::Ast::BasicValue::parse()
 {
@@ -103,6 +107,9 @@ std::string EmbeddedShader::Ast::MemberAccess::accessPath()
 {
 	return value->accessPath() + "." + memberName;
 }
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::MemberAccess::getRootVariate()const{
+    return value->getRootVariate();
+}
 
 std::string EmbeddedShader::Ast::OutputVariate::parse()
 {
@@ -139,6 +146,9 @@ void EmbeddedShader::Ast::ElementVariate::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
 	array->access(permissions);
+}
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::ElementVariate::getRootVariate()const{
+    return array->getRootVariate();
 }
 
 std::string EmbeddedShader::Ast::DefineUniversalArray::parse()

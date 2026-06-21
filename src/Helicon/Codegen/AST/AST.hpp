@@ -73,8 +73,6 @@ namespace EmbeddedShader::Ast
 
 		static std::shared_ptr<Ast::IfStatement> beginIf(std::shared_ptr<Value> condition, std::optional<std::function<bool()>> conditionDetector = std::nullopt);
 		static void endIf();
-		static void beginElif(std::shared_ptr<Value> condition);
-		static void endElif();
 		static void beginElse(std::shared_ptr<Ast::IfStatement> followIf);
 		static void endElse();
 

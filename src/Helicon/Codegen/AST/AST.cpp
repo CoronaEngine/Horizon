@@ -107,11 +107,6 @@ void EmbeddedShader::Ast::AST::endIf()
 	getLocalStatementStack().pop();
 }
 
-void EmbeddedShader::Ast::AST::endElif()
-{
-	getLocalStatementStack().pop();
-}
-
 void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 {
 	auto elseStatement = std::make_shared<ElseStatement>();

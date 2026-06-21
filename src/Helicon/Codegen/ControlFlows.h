@@ -56,7 +56,7 @@ GPU_PUSH_VARIATE(GPU_IF_BRANCH gpuIfBranchJ6hF4rT9mK2zV8cX5bN1pQ3{TheIfElseState
 
 	struct GPU_ELSE_BRANCH
 	{
-		GPU_ELSE_BRANCH(GPU_IF& gpuIf)
+		GPU_ELSE_BRANCH(const GPU_IF& gpuIf)
 		{
 			Ast::AST::beginElse(gpuIf.node);
 			//else begin pattern

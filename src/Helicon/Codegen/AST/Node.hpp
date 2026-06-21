@@ -31,12 +31,14 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+    struct Variate;
 	class Value : public Node
 	{
 	public:
 		std::shared_ptr<Type> type;
 		virtual void access(AccessPermissions permissions);
 		virtual std::string accessPath();
+	    virtual const Variate *getRootVariate() const { return nullptr; }
 	};
 
 	struct Variate : Value
@@ -44,6 +46,7 @@ namespace EmbeddedShader::Ast
 		std::string name;
 		std::string parse() override;
 		std::string accessPath() override;
+	    const Variate *getRootVariate()const override;
 	};
 
 	struct LocalVariate : Variate
@@ -118,6 +121,7 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
 		std::string accessPath() override;
+	    const Variate *getRootVariate()const override;
 	};
 
 	struct OutputVariate : Variate
@@ -162,6 +166,7 @@ namespace EmbeddedShader::Ast
 	{
 		std::shared_ptr<Value> array;
 		void access(AccessPermissions permissions) override;
+	    const Variate *getRootVariate()const override;
 	};
 
 	struct DefineUniversalArray : Statement
