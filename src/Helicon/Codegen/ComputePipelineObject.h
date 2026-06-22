@@ -41,6 +41,11 @@ namespace EmbeddedShader
 		auto outputs = parse(computeShaderCode);
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
+	    for (const auto& branch : outputs[0].branches)
+        {
+            std::cout << branch.output << "\n";
+        }
+
 		ComputePipelineObject result;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption,sourceLocation);
 

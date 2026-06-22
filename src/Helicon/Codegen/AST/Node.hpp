@@ -163,13 +163,16 @@ namespace EmbeddedShader::Ast
 		AccessPermissions permissions = AccessPermissions::None;
 		void access(AccessPermissions permissions) override;
 		std::string parse() override;
+	    const Variate* getRootVariate() const override;
 	};
 
-	struct ElementVariate : Variate
+	struct ElementValue : Value
 	{
 		std::shared_ptr<Value> array;
+	    std::shared_ptr<Value> index;
 		void access(AccessPermissions permissions) override;
 	    const Variate *getRootVariate()const override;
+	    std::string parse() override;
 	};
 
 	struct DefineUniversalArray : Statement
@@ -187,6 +190,7 @@ namespace EmbeddedShader::Ast
 		uint32_t boundValueSize = 0;
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
+	    const Variate* getRootVariate() const override;
 	};
 
 	struct DefineUniformVariate : Statement
@@ -233,6 +237,7 @@ namespace EmbeddedShader::Ast
         // Render target location assigned by Texture2DProxy::operator().
         // -1 means this texture is NOT used as a render target output.
         int32_t renderTargetLocation = -1;
+        const Variate* getRootVariate() const override;
     };
 
     struct DefineUniversalTexture2D : Statement

@@ -1,5 +1,7 @@
 #include "Node.hpp"
 
+#include "AST.hpp"
+
 #include <filesystem>
 #include <Codegen/Generator/SlangGenerator.hpp>
 
@@ -7,7 +9,7 @@
 
 std::string EmbeddedShader::Ast::Node::generate()
 {
-
+    collectVariateReference();
     return parse();
 }
 
@@ -149,14 +151,23 @@ std::string EmbeddedShader::Ast::UniversalArray::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalArray::getRootVariate() const
+{
+    if (Parser::getBindless())
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalParameterBlock().get();
+}
 
-void EmbeddedShader::Ast::ElementVariate::access(AccessPermissions permissions)
+void EmbeddedShader::Ast::ElementValue::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
 	array->access(permissions);
 }
-const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::ElementVariate::getRootVariate()const{
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::ElementValue::getRootVariate()const{
     return array->getRootVariate();
+}
+std::string EmbeddedShader::Ast::ElementValue::parse(){
+    return Generator::SlangGenerator::getParseOutput(this);
 }
 
 std::string EmbeddedShader::Ast::DefineUniversalArray::parse()
@@ -178,6 +189,15 @@ void EmbeddedShader::Ast::UniformVariate::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
 	this->permissions = this->permissions | permissions;
+}
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniformVariate::getRootVariate() const
+{
+    if (pushConstant)
+        return AST::getGlobalPushConstant().get();
+    // bindless 模式下 SamplerType 在 push constant 中
+    if (Parser::getBindless() && std::dynamic_pointer_cast<Ast::SamplerType>(type))
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalUBO().get();
 }
 
 std::string EmbeddedShader::Ast::DefineUniformVariate::parse()
@@ -216,6 +236,12 @@ std::string EmbeddedShader::Ast::UniversalTexture2D::parse()
 	return Generator::SlangGenerator::getParseOutput(this);
 }
 
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalTexture2D::getRootVariate() const
+{
+    if (Parser::getBindless())
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalParameterBlock().get();
+}
 std::string EmbeddedShader::Ast::DefineUniversalTexture2D::parse()
 {
     return Generator::SlangGenerator::getParseOutput(this);
