@@ -1,10 +1,5 @@
 #include <iostream>
 
-#include <SPIRV/GlslangToSpv.h>
-#include <glslang/Public/ResourceLimits.h>
-#include <glslang/Public/ShaderLang.h>
-// #include <glslang/Include/ResourceLimits.h>
-
 #include <spirv_cross.hpp>
 #include <spirv_glsl.hpp>
 #include <spirv_hlsl.hpp>
@@ -17,48 +12,12 @@
 
 #include <algorithm>
 #include <array>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <set>
 #include <utility>
 
 namespace EmbeddedShader
 {
-
-	class Includer : public glslang::TShader::Includer
-	{
-	public:
-		Includer() = default;
-
-		IncludeResult* includeLocal(const char* includeName,const char* includerName,size_t inclusionDepth) override
-		{
-			std::string content;
-			for (const auto& path: includePaths)
-			{
-				std::ifstream f(path / includeName);
-				if (!f.is_open()) continue;
-				content = std::string((std::istreambuf_iterator(f)),
-								 std::istreambuf_iterator<char>());
-			}
-			if (content.empty()) return nullptr;
-
-			auto storage = new std::string(std::move(content));
-			return new IncludeResult(includeName, storage->data(), storage->size(), storage);
-		}
-		IncludeResult* includeSystem(const char* n, const char* i, size_t d) override
-		{
-			return includeLocal(n,i,d);
-		}
-		void releaseInclude(IncludeResult* r) override
-		{
-			if (!r) return;
-			delete static_cast<std::string*>(r->userData);
-			delete r;
-		}
-
-		std::vector<std::filesystem::path> includePaths;
-	};
 
     ShaderStage slangStageToShaderStage(SlangStage stage)
     {
@@ -410,108 +369,6 @@ namespace EmbeddedShader
         fillSemanticAndLocation(info);
         resources.bindInfoPool.push_back(info);
     }
-
-	std::vector<uint32_t> ShaderLanguageConverter::glslangSpirvCompiler(
-		const std::string& shaderCode, ShaderLanguage inputLanguage, ShaderStage inputStage, const std::vector<std::filesystem::
-		path>& includePaths, bool isLink)
-	{
-		// GLSL version is default by 460
-		// Higher versions are compatible with lower versions
-		// Version in HLSL is disabled
-		Includer a;
-		std::vector<uint32_t> resultSpirvCode;
-
-		glslang::EShSource shaderLang;
-		switch (inputLanguage)
-		{
-			case ShaderLanguage::GLSL:
-				shaderLang = glslang::EShSourceGlsl;
-				break;
-			case ShaderLanguage::HLSL:
-				shaderLang = glslang::EShSourceHlsl;
-				break;
-			default:
-				return resultSpirvCode;
-		}
-
-		EShLanguage stage = EShLangVertex;
-		switch (inputStage)
-		{
-			case ShaderStage::VertexShader:
-				stage = EShLangVertex;
-				break;
-			case ShaderStage::FragmentShader:
-				stage = EShLangFragment;
-				break;
-			case ShaderStage::ComputeShader:
-				stage = EShLangCompute;
-				break;
-			default:
-				return resultSpirvCode;
-		}
-
-		std::vector<const char*> shaderSources;
-		shaderSources.push_back(shaderCode.c_str());
-
-		glslang::InitializeProcess();
-
-		glslang::TShader shader(stage);
-		shader.setStrings(shaderSources.data(), 1);
-		shader.setEnvInput(shaderLang, stage, glslang::EShClientVulkan, 460);
-		shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_4);
-		shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
-
-		//shader.setSourceEntryPoint("__no_entrypoint");
-
-		Includer includer;
-		includer.includePaths = includePaths;
-		if (!shader.parse(GetDefaultResources(), 460, false, EShMsgDefault, includer))
-		{
-			std::cerr << shader.getInfoLog();
-			return resultSpirvCode;
-		}
-
-		glslang::TIntermediate* intermediate = nullptr;
-	    spv::SpvBuildLogger logger;
-		if (isLink)
-		{
-		    glslang::TProgram program;
-			program.addShader(&shader);
-			if (!program.link(EShMsgVulkanRules))
-			{
-				std::cerr << program.getInfoLog();
-				return resultSpirvCode;
-			}
-
-			if (!program.buildReflection(EShReflectionAllBlockVariables | EShReflectionIntermediateIO))
-			{
-				// std::cout << "build Reflection Error" << std::endl;
-			} else
-			{
-				// std::cout << program.getNumLiveUniformBlocks() << std::endl;
-				// program.dumpReflection();
-			}
-
-			intermediate = program.getIntermediate(stage);
-
-		    glslang::GlslangToSpv(*intermediate, resultSpirvCode,&logger);
-
-		}
-	    else
-		{
-		    intermediate = shader.getIntermediate();
-
-		    glslang::GlslangToSpv(*intermediate, resultSpirvCode,&logger);
-		}
-	    auto log = logger.getAllMessages();
-	    if (!log.empty()) {
-	        std::cerr << "SpvBuildLogger: " << log << "\n";
-	    }
-
-		glslang::FinalizeProcess();
-
-		return resultSpirvCode;
-	}
 
 	std::string ShaderLanguageConverter::spirvCrossConverter(std::vector<uint32_t> spirv_file,
 	                                                         ShaderLanguage targetLanguage, int32_t targetVersion)

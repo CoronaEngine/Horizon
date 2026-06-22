@@ -6,7 +6,7 @@
 - 不要添加 `HardwareBufferDesc::validate()`；策略检查保留在 `src/hardware_wrapper/validation`。
 - 硬安全不变量始终开启：元素大小为零、byte-size 溢出、上传数据超过 buffer byte size 都不能依赖可选验证。
 - 构造期 `upload_data` 为空指针或 `CpuAccessMode::None` + 非空 `upload_data` 也属于硬错误；device-local buffer 的数据上传应通过显式 `HardwareBuffer::upload(...)` 命令批次完成。
-- `HORIZON_ENABLE_VALIDATION` 是可选验证诊断的编译期开关，应通过 `target_compile_definitions(... PUBLIC ...)` 导出。
+- `HORIZON_ENABLE_HARDWARE_VALIDATION` 是 Horizon 自身可选验证诊断的编译期开关，应通过 `target_compile_definitions(... PUBLIC ...)` 导出。
 - `HardwareValidationMode` 是运行时策略开关：`Disabled`、`Log` 或 `Throw`。
 
 ## 放置位置

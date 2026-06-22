@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <set>
@@ -20,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -34,15 +36,130 @@
 
 namespace Corona::Horizon
 {
-#ifndef HORIZON_ENABLE_VALIDATION
-#define HORIZON_ENABLE_VALIDATION 1
+#ifndef HORIZON_ENABLE_VULKAN_VALIDATION
+#if defined(NDEBUG)
+#define HORIZON_ENABLE_VULKAN_VALIDATION 0
+#else
+#define HORIZON_ENABLE_VULKAN_VALIDATION 1
+#endif
 #endif
 
     HardwareContext g_hardware_context;
 
-    constexpr uint32_t required_api_version = VK_API_VERSION_1_3;
+    constexpr uint32_t required_api_version = VK_API_VERSION_1_4;
 
-#if HORIZON_ENABLE_VALIDATION
+    namespace
+    {
+        constexpr std::array<const char*, 6> blocked_overlay_layers = {{
+            "VK_LAYER_OBS_HOOK",
+            "VK_LAYER_RTSS",
+            "VK_LAYER_EOS_Overlay",
+            "VK_LAYER_VALVE_steam_fossilize",
+            "VK_LAYER_VALVE_steam_overlay",
+            "VK_LAYER_TENCENT_wegame_cross_overlay",
+        }};
+
+        bool environment_flag_enabled(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return value != nullptr && std::strcmp(value, "1") == 0;
+        }
+
+        void set_process_environment(const char* name, const std::string& value)
+        {
+#if defined(_WIN32)
+            if (SetEnvironmentVariableA(name, value.c_str()) == 0)
+            {
+                throw std::runtime_error(std::string("Failed to set process environment variable: ") + name);
+            }
+#else
+            if (setenv(name, value.c_str(), 1) != 0)
+            {
+                throw std::runtime_error(std::string("Failed to set process environment variable: ") + name);
+            }
+#endif
+        }
+
+        std::vector<std::string> parse_layer_filters(const char* value)
+        {
+            std::vector<std::string> filters;
+            if (value == nullptr)
+            {
+                return filters;
+            }
+
+            std::string input(value);
+            size_t begin = 0;
+            while (begin <= input.size())
+            {
+                const size_t end = input.find(',', begin);
+                const size_t token_end = end == std::string::npos ? input.size() : end;
+                const size_t first = input.find_first_not_of(" \t", begin);
+                if (first != std::string::npos && first < token_end)
+                {
+                    const size_t last = input.find_last_not_of(" \t", token_end - 1);
+                    filters.emplace_back(input.substr(first, last - first + 1));
+                }
+
+                if (end == std::string::npos)
+                {
+                    break;
+                }
+                begin = end + 1;
+            }
+            return filters;
+        }
+
+        std::string join_layer_filters(const std::vector<std::string>& filters)
+        {
+            std::ostringstream stream;
+            for (size_t index = 0; index < filters.size(); ++index)
+            {
+                if (index != 0)
+                {
+                    stream << ',';
+                }
+                stream << filters[index];
+            }
+            return stream.str();
+        }
+
+        void configure_vulkan_layer_isolation()
+        {
+            static std::once_flag isolation_once;
+
+            std::call_once(isolation_once, [] {
+                if (environment_flag_enabled("HORIZON_ALLOW_VULKAN_OVERLAYS"))
+                {
+                    Diagnostics::write(Diagnostics::Level::Info,
+                                       "VULKAN PROFILE",
+                                       "Vulkan overlay isolation: disabled by HORIZON_ALLOW_VULKAN_OVERLAYS");
+                    return;
+                }
+
+                std::vector<std::string> disabled_layers =
+                    parse_layer_filters(std::getenv("VK_LOADER_LAYERS_DISABLE"));
+                for (const char* layer_name : blocked_overlay_layers)
+                {
+                    if (std::find(disabled_layers.begin(), disabled_layers.end(), layer_name) == disabled_layers.end())
+                    {
+                        disabled_layers.emplace_back(layer_name);
+                    }
+                }
+
+                const std::string merged_disabled_layers = join_layer_filters(disabled_layers);
+                set_process_environment("VK_LOADER_LAYERS_DISABLE", merged_disabled_layers);
+
+                std::ostringstream report;
+                report << "Vulkan overlay isolation: enabled\n"
+                       << "  scope: current process\n"
+                       << "  VK_LOADER_LAYERS_DISABLE: " << merged_disabled_layers;
+                Diagnostics::write(Diagnostics::Level::Info, "VULKAN PROFILE", report.str());
+            });
+        }
+    }
+
+#if HORIZON_ENABLE_VULKAN_VALIDATION
     constexpr const char* validation_layer_name = "VK_LAYER_KHRONOS_validation";
 
     constexpr std::array<VkValidationFeatureEnableEXT, 2> enabled_validation_features {
@@ -520,6 +637,7 @@ namespace Corona::Horizon
 
         std::vector<FeatureStatus> status;
         add_required_feature(status, "Vulkan 1.0", "samplerAnisotropy", features.features.samplerAnisotropy);
+        add_required_feature(status, "Vulkan 1.0", "geometryShader", features.features.geometryShader);
         add_required_feature(status, "Vulkan 1.0", "shaderInt16", features.features.shaderInt16);
         add_required_feature(status, "Vulkan 1.0", "wideLines", features.features.wideLines);
         add_required_feature(status, "Vulkan 1.0", "fragmentStoresAndAtomics", features.features.fragmentStoresAndAtomics);
@@ -705,7 +823,7 @@ namespace Corona::Horizon
                            stream.str());
     }
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
     bool contains_name(const std::vector<const char*>& names, const char* target)
     {
         return std::any_of(names.begin(), names.end(), [target](const char* name) {
@@ -991,6 +1109,7 @@ namespace Corona::Horizon
         VulkanValidationReport report;
         report.compiled = true;
 
+        configure_vulkan_layer_isolation();
         if (volkInitialize() != VK_SUCCESS)
         {
             report.missing_requirements.emplace_back("Vulkan loader is not available.");
@@ -1029,12 +1148,12 @@ namespace Corona::Horizon
 
     VulkanValidationReport vulkan_validation_report()
     {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         return make_validation_report();
 #else
         VulkanValidationReport report;
         report.compiled = false;
-        report.missing_requirements.emplace_back("HORIZON_ENABLE_VALIDATION is disabled at compile time.");
+        report.missing_requirements.emplace_back("HORIZON_ENABLE_VULKAN_VALIDATION is disabled at compile time.");
         return report;
 #endif
     }
@@ -1189,6 +1308,7 @@ namespace Corona::Horizon
         create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice&) {
             VkPhysicalDeviceFeatures features {};
             features.samplerAnisotropy = VK_TRUE;
+            features.geometryShader = VK_TRUE;
             features.shaderInt16 = VK_TRUE;
             features.wideLines = VK_TRUE;
             features.fragmentStoresAndAtomics = VK_TRUE;
@@ -1237,6 +1357,7 @@ namespace Corona::Horizon
         static std::once_flag volk_once;
 
         std::call_once(volk_once, [] {
+            configure_vulkan_layer_isolation();
             if (volkInitialize() != VK_SUCCESS)
             {
                 Diagnostics::write(Diagnostics::Level::Error, "VULKAN PROFILE", "COMPATIBILITY FAIL: failed to initialize Volk/Vulkan loader.");
@@ -1301,7 +1422,7 @@ namespace Corona::Horizon
         auto requested_extensions = create_config_.get_instance_extensions(instance_, nullptr);
         std::vector<const char*> requested_layers;
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         const bool enable_validation = validation_layer_available();
         if (enable_validation)
         {
@@ -1318,7 +1439,7 @@ namespace Corona::Horizon
 
         const std::set<const char*> requested_extensions_report = requested_extensions;
         const auto enabled_extensions = supported_instance_extensions(std::move(requested_extensions), requested_layers);
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         const bool debug_utils_enabled = contains_name(enabled_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         const bool validation_features_enabled = contains_name(enabled_extensions, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
         write_instance_extension_report(requested_extensions_report,
@@ -1341,7 +1462,7 @@ namespace Corona::Horizon
         instance_info.enabledLayerCount = static_cast<uint32_t>(requested_layers.size());
         instance_info.ppEnabledLayerNames = requested_layers.data();
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         VkDebugUtilsMessengerCreateInfoEXT debug_info {};
         VkValidationFeaturesEXT validation_features {};
         if (!requested_layers.empty())
@@ -1386,7 +1507,7 @@ namespace Corona::Horizon
 
         instance_ = instance;
 
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         if (!requested_layers.empty() && debug_utils_enabled)
         {
             try
@@ -1474,7 +1595,7 @@ namespace Corona::Horizon
 
     void HardwareContext::setup_debug_messenger()
     {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         VkDebugUtilsMessengerCreateInfoEXT create_info = debug_messenger_create_info();
         const VkResult result = create_debug_utils_messenger_ext(instance_, &create_info, nullptr, &debug_messenger_);
         if (result != VK_SUCCESS)
@@ -1489,7 +1610,7 @@ namespace Corona::Horizon
 
     void HardwareContext::cleanup_debug_messenger()
     {
-#if HORIZON_ENABLE_VALIDATION
+#if HORIZON_ENABLE_VULKAN_VALIDATION
         if (debug_messenger_ != VK_NULL_HANDLE && instance_ != VK_NULL_HANDLE)
         {
             destroy_debug_utils_messenger_ext(instance_, debug_messenger_, nullptr);

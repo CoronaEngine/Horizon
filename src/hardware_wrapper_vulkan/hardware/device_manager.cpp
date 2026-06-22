@@ -1,10 +1,14 @@
 #include "device_manager.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "hardware_wrapper/diagnostics.h"
@@ -45,6 +49,76 @@ namespace Corona::Horizon
         }
 
         return "unknown";
+    }
+
+    [[nodiscard]] bool trace_timeline_enabled() noexcept
+    {
+        static const bool enabled = [] {
+            const char* value = std::getenv("HORIZON_TRACE_TIMELINE");
+            return value != nullptr && value[0] != '\0' && value[0] != '0';
+        }();
+        return enabled;
+    }
+
+    [[nodiscard]] bool trace_timeline_full() noexcept
+    {
+        static const bool full = [] {
+            const char* value = std::getenv("HORIZON_TRACE_TIMELINE");
+            return value != nullptr && (std::strcmp(value, "full") == 0 || std::strcmp(value, "2") == 0);
+        }();
+        return full;
+    }
+
+    [[nodiscard]] std::string hex_handle(uint64_t value)
+    {
+        std::ostringstream stream;
+        stream << "0x" << std::hex << value;
+        return stream.str();
+    }
+
+    void trace_timeline_event(const char* event,
+                              const QueueId& id,
+                              VkDevice device,
+                              VkQueue queue,
+                              VkSemaphore timeline,
+                              uint64_t value,
+                              uint64_t last_completed,
+                              size_t in_flight = 0,
+                              size_t pooled = 0) noexcept
+    {
+        if (!trace_timeline_enabled())
+        {
+            return;
+        }
+
+        try
+        {
+            std::ostringstream stream;
+            stream << event
+                   << " thread=" << std::this_thread::get_id()
+                   << " device_id=" << id.device.value
+                   << " family=" << id.family_index
+                   << " queue_index=" << id.queue_index
+                   << " capability=" << capability_name(id.capability)
+                   << " device=" << hex_handle(reinterpret_cast<uint64_t>(device))
+                   << " queue=" << hex_handle(reinterpret_cast<uint64_t>(queue))
+                   << " timeline=" << hex_handle(reinterpret_cast<uint64_t>(timeline))
+                   << " value=" << value
+                   << " last_completed=" << last_completed
+                   << " in_flight=" << in_flight
+                   << " pooled=" << pooled;
+            Diagnostics::write(Diagnostics::Level::Info, "HORIZON TIMELINE", stream.str());
+        }
+        catch (...)
+        {
+        }
+    }
+
+    [[nodiscard]] bool should_trace_timeline_query() noexcept
+    {
+        static std::atomic<uint64_t> query_count { 0 };
+        const uint64_t count = query_count.fetch_add(1, std::memory_order_relaxed);
+        return trace_timeline_full() || count < 128 || (count % 1024) == 0;
     }
 
     [[nodiscard]] std::vector<const char*> filter_supported_device_extensions(VkPhysicalDevice physical_device, const std::set<const char*>& requested)
@@ -291,10 +365,26 @@ namespace Corona::Horizon
     {
         std::deque<std::shared_ptr<TrackedCommandBuffer>> in_flight;
         std::deque<std::shared_ptr<TrackedCommandBuffer>> pool;
+        VkSemaphore timeline_to_destroy = VK_NULL_HANDLE;
         {
             std::lock_guard lock(mutex_);
+            trace_timeline_event("queue.destroy.begin",
+                                 id_,
+                                 device_,
+                                 queue_,
+                                 timeline_,
+                                 last_submitted_value_,
+                                 last_completed_value_.load(std::memory_order_acquire),
+                                 in_flight_.size(),
+                                 pool_.size());
             in_flight.swap(in_flight_);
             pool.swap(pool_);
+            timeline_to_destroy = timeline_;
+            timeline_ = VK_NULL_HANDLE;
+            if (timeline_sync_)
+            {
+                timeline_sync_->invalidate();
+            }
         }
 
         for (std::shared_ptr<TrackedCommandBuffer>& command_buffer : in_flight)
@@ -305,10 +395,16 @@ namespace Corona::Horizon
             }
         }
 
-        if (device_ != VK_NULL_HANDLE && timeline_ != VK_NULL_HANDLE)
+        if (device_ != VK_NULL_HANDLE && timeline_to_destroy != VK_NULL_HANDLE)
         {
-            vkDestroySemaphore(device_, timeline_, nullptr);
-            timeline_ = VK_NULL_HANDLE;
+            vkDestroySemaphore(device_, timeline_to_destroy, nullptr);
+            trace_timeline_event("queue.destroy.timeline-destroyed",
+                                 id_,
+                                 device_,
+                                 queue_,
+                                 timeline_to_destroy,
+                                 last_submitted_value_,
+                                 last_completed_value_.load(std::memory_order_acquire));
         }
     }
 
@@ -343,6 +439,14 @@ namespace Corona::Horizon
                            "horizon.queue.timeline.device." + std::to_string(id_.device.value) +
                                ".family." + std::to_string(id_.family_index) +
                                ".index." + std::to_string(id_.queue_index));
+        timeline_sync_ = SubmissionSync::make(timeline_);
+        trace_timeline_event("queue.timeline.created",
+                             id_,
+                             device_,
+                             queue_,
+                             timeline_,
+                             0,
+                             last_completed_value_.load(std::memory_order_acquire));
     }
 
     std::shared_ptr<TrackedCommandBuffer> Queue::acquire()
@@ -468,8 +572,17 @@ namespace Corona::Horizon
         last_submitted_value_ = signal_value;
         submission.command_buffer->mark_submitted(signal_value, std::move(submission.keep_alive));
         in_flight_.push_back(std::move(submission.command_buffer));
+        trace_timeline_event("queue.submit.signal",
+                             id_,
+                             device_,
+                             queue_,
+                             timeline_,
+                             signal_value,
+                             last_completed_value_.load(std::memory_order_acquire),
+                             in_flight_.size(),
+                             pool_.size());
 
-        return { id_.device, id_, signal_value, SubmissionSync::make(timeline_) };
+        return { id_.device, id_, signal_value, timeline_sync_ };
     }
 
     SubmissionToken Queue::signal_timeline_locked()
@@ -510,7 +623,16 @@ namespace Corona::Horizon
         }
 
         last_submitted_value_ = signal_value;
-        return { id_.device, id_, signal_value, SubmissionSync::make(timeline_) };
+        trace_timeline_event("queue.present.signal",
+                             id_,
+                             device_,
+                             queue_,
+                             timeline_,
+                             signal_value,
+                             last_completed_value_.load(std::memory_order_acquire),
+                             in_flight_.size(),
+                             pool_.size());
+        return { id_.device, id_, signal_value, timeline_sync_ };
     }
 
     QueuePresentResult Queue::present(const VkPresentInfoKHR& present_info)
@@ -618,6 +740,17 @@ namespace Corona::Horizon
         }
 
         uint64_t value = 0;
+        const bool trace_query = should_trace_timeline_query();
+        if (trace_query)
+        {
+            trace_timeline_event("queue.query.begin",
+                                 id_,
+                                 device_,
+                                 queue_,
+                                 timeline_,
+                                 0,
+                                 last_completed_value_.load(std::memory_order_acquire));
+        }
         VkResult result = vkGetSemaphoreCounterValue(device_, timeline_, &value);
         if (result != VK_SUCCESS)
         {
@@ -638,6 +771,16 @@ namespace Corona::Horizon
         }
 
         last_completed_value_.store(value, std::memory_order_release);
+        if (trace_query)
+        {
+            trace_timeline_event("queue.query.end",
+                                 id_,
+                                 device_,
+                                 queue_,
+                                 timeline_,
+                                 value,
+                                 value);
+        }
         return value;
     }
 
@@ -695,6 +838,7 @@ namespace Corona::Horizon
 
     uint64_t Queue::completed_value() const
     {
+        std::lock_guard lock(mutex_);
         return query_completed_value();
     }
 
@@ -777,6 +921,12 @@ namespace Corona::Horizon
         compute_queues_.clear();
         transfer_queues_.clear();
         //present_queues_.clear();
+
+        if (logical_device_ != VK_NULL_HANDLE)
+        {
+            (void)vkDeviceWaitIdle(logical_device_);
+        }
+
         queues_.clear();
 
         if (logical_device_ != VK_NULL_HANDLE)
@@ -835,7 +985,8 @@ namespace Corona::Horizon
             throw std::runtime_error("vkCreateDevice failed. VkResult=" + std::to_string(static_cast<int>(result)));
         }
 
-        volkLoadDevice(logical_device_);
+        // this is shit
+        //volkLoadDevice(logical_device_);
     }
 
     void DeviceManager::create_queues()

@@ -1,5 +1,5 @@
 # Runtime Diagnostics And Crash Reporting Task Notes
-<!-- TASK_DOCS_RUNTIME_DIAGNOSTICS_REPORTING_ZH_CN_SHA256: 397fe87aa9d4a5b622ff8f7b41fdbc3955e405cdcf4c7a26aec7af7b49891c16 -->
+<!-- TASK_DOCS_RUNTIME_DIAGNOSTICS_REPORTING_ZH_CN_SHA256: 0bd95e3fb550fa356993918c40b8f55a9d81ba3d0c5631a8fe4fdca67dace98f -->
 
 ## Goal
 
@@ -21,7 +21,7 @@
 
 - Report envelope: `schema_version`, `report_id`, timestamp, session ID, anonymous install ID, Horizon version, git commit/build id, build configuration, program name, example mode, and command-line allowlist.
 - Machine information: OS version, CPU architecture/core count, memory size, GPU list, driver versions, Vulkan loader/API version, available layers/extensions, selected/skipped devices, and skip reasons.
-- Horizon runtime information: enabled feature flags, `HORIZON_ENABLE_VALIDATION`, key environment-variable allowlist, resource/pipeline/queue counts, recent submit tokens, and window/swapchain state.
+- Horizon runtime information: enabled feature flags, `HORIZON_ENABLE_HARDWARE_VALIDATION`, `HORIZON_ENABLE_VULKAN_VALIDATION`, key environment-variable allowlist, resource/pipeline/queue counts, recent submit tokens, and window/swapchain state.
 - Diagnostic attachments: `horizon-vulkan-diagnostics.txt`, stdout/stderr summaries, Horizon validation records, Vulkan validation records, recent breadcrumb ring logs, and required config snapshots.
 - Crash attachments: exception code/signal, crashing thread, thread list, stack traces, loaded modules, symbol-file identifiers, minidump/crash dump, last unhandled error, and current report package path.
 - Upload metadata: compression format, content hashes, attachment list, collection mode, sampling reason, redaction version, upload attempt count, and server response ID.

@@ -9,7 +9,7 @@ namespace Corona::Horizon::Diagnostics
 {
     namespace
     {
-#if HORIZON_ENABLE_VALIDATION && defined(CABBAGE_ENGINE_DEBUG)
+#if HORIZON_ENABLE_HARDWARE_VALIDATION || HORIZON_ENABLE_VULKAN_VALIDATION
         constexpr bool diagnostics_compiled = true;
 #else
         constexpr bool diagnostics_compiled = false;

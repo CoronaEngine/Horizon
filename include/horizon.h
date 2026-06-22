@@ -30,8 +30,12 @@
 #include "resource.h"
 #include "horizon_execution.h"
 
-#ifndef HORIZON_ENABLE_VALIDATION
-#define HORIZON_ENABLE_VALIDATION 1
+#ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
+#if defined(NDEBUG)
+#define HORIZON_ENABLE_HARDWARE_VALIDATION 0
+#else
+#define HORIZON_ENABLE_HARDWARE_VALIDATION 1
+#endif
 #endif
 
 namespace Corona::Horizon
@@ -162,6 +166,7 @@ namespace Corona::Horizon
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait(const HardwareExecutor& producer);
+        HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
         [[nodiscard]] SubmitReceipt last_receipt() const;
 
     private:

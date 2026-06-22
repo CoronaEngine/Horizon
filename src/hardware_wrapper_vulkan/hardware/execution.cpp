@@ -26,12 +26,12 @@ namespace Corona::Horizon
     {
     }
 
-    std::shared_ptr<const SubmissionSync> SubmissionSync::make(VkSemaphore timeline)
+    std::shared_ptr<SubmissionSync> SubmissionSync::make(VkSemaphore timeline)
     {
         if (timeline == VK_NULL_HANDLE)
             return {};
 
-        return std::shared_ptr<const SubmissionSync>(new SubmissionSync(timeline));
+        return std::shared_ptr<SubmissionSync>(new SubmissionSync(timeline));
     }
 
     namespace
@@ -2049,6 +2049,39 @@ namespace Corona::Horizon
     HardwareExecutor& HardwareExecutor::wait(const HardwareExecutor& producer)
     {
         return wait(producer.last_receipt());
+    }
+
+    HardwareExecutor& HardwareExecutor::wait_idle(const SubmitReceipt& receipt)
+    {
+        for (const SubmissionToken& token : receipt.tokens)
+        {
+            if (token.value == 0)
+            {
+                continue;
+            }
+
+            Queue* queue = nullptr;
+            if (queue_resolver_)
+            {
+                queue = &queue_resolver_(token.device, token.queue.capability);
+            }
+            else
+            {
+                if (token.device.value != 0)
+                {
+                    throw std::logic_error("Default HardwareExecutor currently waits only on the main device.");
+                }
+                queue = main_device_context().device_manager.queue_for(token.queue.capability);
+            }
+
+            if (queue == nullptr)
+            {
+                throw std::runtime_error("HardwareExecutor could not resolve a queue for receipt wait.");
+            }
+
+            queue->wait_idle();
+        }
+        return *this;
     }
 
     SubmitReceipt HardwareExecutor::last_receipt() const
