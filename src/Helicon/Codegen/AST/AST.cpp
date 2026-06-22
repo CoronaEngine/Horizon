@@ -177,25 +177,25 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getDispa
 	return idOutput;
 }
 
-std::shared_ptr<EmbeddedShader::Ast::ElementVariate> EmbeddedShader::Ast::AST::at(
+std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(
 	std::shared_ptr<Value> array, uint32_t index)
 {
-	auto variate = std::make_shared<ElementVariate>();
-	variate->type = array->type;
-	variate->name = array->parse() + "[" + std::to_string(index) + "]";
-	variate->array = std::move(array);
-	return variate;
+	auto element = std::make_shared<ElementValue>();
+	element->type = array->type;
+	element->index = createValue(index);
+	element->array = std::move(array);
+	return element;
 }
 
-std::shared_ptr<EmbeddedShader::Ast::ElementVariate> EmbeddedShader::Ast::AST::at(std::shared_ptr<Value> array,
+std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(std::shared_ptr<Value> array,
 	const std::shared_ptr<Value>& index)
 {
 	index->access(AccessPermissions::ReadOnly);
-	auto variate = std::make_shared<ElementVariate>();
-	variate->type = array->type;
-	variate->name = array->parse() + "[" + index->parse() + "]";
-	variate->array = std::move(array);
-	return variate;
+	auto element = std::make_shared<ElementValue>();
+	element->type = array->type;
+	element->index = index;
+	element->array = std::move(array);
+	return element;
 }
 
 void EmbeddedShader::Ast::AST::addLocalUniversalStatement(
@@ -269,12 +269,37 @@ EmbeddedShader::Ast::EmbeddedShaderStructure& EmbeddedShader::Ast::AST::getEmbed
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalUBO()
 {
 	auto& ubo = Parser::currentParser->globalUBO;
-	if (ubo)
+	if (!ubo)
 	{
+        auto type = std::make_shared<NameType>();
 		ubo = std::make_shared<Variate>();
-		ubo->type = std::make_shared<NameType>();
-		ubo->type->name = "ConstantBuffer<global_ubo_struct>";
+		ubo->type = type;
+		type->name = "ConstantBuffer<global_ubo_struct>";
 		ubo->name = "global_ubo";
 	}
 	return ubo;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalParameterBlock()
+{
+    auto& pb = Parser::currentParser->globalParameterBlock;
+    if (!pb)
+    {
+        auto type = std::make_shared<NameType>();
+        pb = std::make_shared<Variate>();
+        pb->type = type;
+        type->name = "ParameterBlock<parameter_block_struct>";
+        pb->name = "global_parameter_block";
+    }
+    return pb;
+}std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalPushConstant(){
+    auto& pc = Parser::currentParser->globalPushConstant;
+    if (!pc)
+    {
+        auto type = std::make_shared<NameType>();
+        pc = std::make_shared<Variate>();
+        pc->type = type;
+        type->name = "ParameterBlock<global_push_constant_struct>";
+        pc->name = "global_push_constant";
+    }
+    return pc;
 }

@@ -133,22 +133,28 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	// ① UBO — 始终生成为 ConstantBuffer，bindless 模式下显式绑定到 set=3
 	if (!uboMembers.empty())
 	{
-		std::string uboStructName = "global_ubo_struct";
+	    auto ubo = Ast::AST::getGlobalUBO();
+	    auto type = ubo->type->generate();
+	    auto begin = type.find_first_of('<') + 1;
+	    std::string uboStructName = type.substr(begin,type.find_last_of('>') - begin);
 		output += "struct " + uboStructName + " {\n" + uboMembers + "}\n";
 		if (bindless())
-			output += "[[vk::binding(0, 3)]] ConstantBuffer<" + uboStructName + "> global_ubo;\n";
+	        output += "[[vk::binding(0, 3)]]" + type + " " + ubo->generate() + ";\n";
 		else
-			output += "ConstantBuffer<" + uboStructName + "> global_ubo;\n";
+		    output += type + " " + ubo->generate() + ";\n";
 		uboMembers.clear();
 	}
 
 	// ② Push Constant — 仅包含用户显式 pushConstant 成员 + bindless handle 成员
 	if (!pushConstantMembers.empty() || !bindlessHandleMembers.empty())
 	{
-		std::string pushConstantStructName = "global_push_constant_struct";
+	    auto pc = Ast::AST::getGlobalPushConstant();
+	    auto type = pc->type->generate();
+	    auto begin = type.find_first_of('<') + 1;
+		std::string pushConstantStructName = type.substr(begin,type.find_last_of('>') - begin);
 		auto pushConstantStruct = "struct " + pushConstantStructName + " {\n"
 			+ pushConstantMembers + bindlessHandleMembers + "}\n";
-		auto pushConstant = "[[vk::push_constant]] ConstantBuffer<" + pushConstantStructName + "> global_push_constant;\n";
+		auto pushConstant = "[[vk::push_constant]] " + type + " " + pc->generate() + ";\n";
 		output += pushConstantStruct + pushConstant;
 		pushConstantMembers.clear();
 		bindlessHandleMembers.clear();
@@ -157,9 +163,12 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	// ③ ParameterBlock — non-bindless 模式下的资源容器
 	if (!parameterBlockMembers.empty())
 	{
-		std::string parameterBlockStructName = "parameter_block_struct";
+	    auto pb = Ast::AST::getGlobalParameterBlock();
+	    auto type = pb->type->generate();
+	    auto begin = type.find_first_of('<') + 1;
+	    std::string parameterBlockStructName = type.substr(begin,type.find_last_of('>') - begin);
 		auto parameterBlockStruct = "struct " + parameterBlockStructName + " {\n" + parameterBlockMembers + "}\n";
-		auto parameterBlock = "ParameterBlock<" + parameterBlockStructName + "> global_parameter_block;\n";
+		auto parameterBlock = type + " " + pb->generate() + ";\n";
 		output += parameterBlockStruct + parameterBlock;
 		parameterBlockMembers.clear();
 	}
@@ -312,25 +321,25 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniformVariate* node)
 {
 	if (node->pushConstant)
-		return "global_push_constant." + node->name;
+		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
 	// bindless 模式下 SamplerType 在 push constant 中
 	if (bindless() && std::dynamic_pointer_cast<Ast::SamplerType>(node->type))
-		return "global_push_constant." + node->name;
-	return "global_ubo." + node->name;
+		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
+	return  Ast::AST::getGlobalUBO()->name + "." + node->name;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniversalTexture2D* node)
 {
 	if (bindless())
-		return "global_push_constant." + node->name;
-	return "global_parameter_block." + node->name;
+		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
+	return Ast::AST::getGlobalParameterBlock()->name + "." + node->name;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniversalArray* node)
 {
 	if (bindless())
-		return "global_push_constant." + node->name;
-	return "global_parameter_block." + node->name;
+		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
+	return Ast::AST::getGlobalParameterBlock()->name + "." + node->name;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineAggregateType* node)
@@ -437,6 +446,10 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
  //    result += node->funcName;
  //    result += "\";\n}";
 	return result;
+}
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ElementValue* node)
+{
+    return node->array->generate() + "[" + node->index->generate() + "]";
 }
 
 EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::getBranchOutput(std::string name, const std::vector<std::shared_ptr<Ast::Statement>>& body,std::function<bool()>conditionDetector)

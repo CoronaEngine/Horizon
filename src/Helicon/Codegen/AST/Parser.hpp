@@ -60,6 +60,8 @@ namespace EmbeddedShader::Ast
 		std::shared_ptr<Variate> dispatchThreadIDInput;
 
 		std::shared_ptr<Variate> globalUBO;
+		std::shared_ptr<Variate> globalParameterBlock;
+		std::shared_ptr<Variate> globalPushConstant;
 
 		std::vector<ParseOutput> parseOutputs;
 
