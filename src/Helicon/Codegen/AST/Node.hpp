@@ -14,8 +14,10 @@ namespace EmbeddedShader::Ast
 	struct Node
 	{
 		friend class Parser;
+	    std::string generate();
 		virtual ~Node() = default;
 		virtual std::string parse();
+	    virtual void collectVariateReference() {}
 		static const std::vector<std::shared_ptr<Value>>& accessAll(const std::vector<std::shared_ptr<Value>>& values,AccessPermissions permissions);
 	};
 
@@ -45,6 +47,7 @@ namespace EmbeddedShader::Ast
 	{
 		std::string name;
 		std::string parse() override;
+	    void collectVariateReference() override;
 		std::string accessPath() override;
 	    const Variate *getRootVariate()const override;
 	};

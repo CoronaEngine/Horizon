@@ -266,3 +266,7 @@ EmbeddedShader::Ast::EmbeddedShaderStructure& EmbeddedShader::Ast::AST::getEmbed
 {
 	return Parser::currentParser->structure;
 }
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalUBO()
+{
+
+}

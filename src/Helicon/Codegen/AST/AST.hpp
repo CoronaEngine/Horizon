@@ -110,6 +110,7 @@ namespace EmbeddedShader::Ast
 		static void addShaderOnlyStatement(std::shared_ptr<Statement> shaderOnlyStatement);
 		static std::stack<std::vector<std::shared_ptr<Statement>>*>& getLocalStatementStack();
 		static EmbeddedShaderStructure& getEmbeddedShaderStructure();
+	    static std::shared_ptr<Variate> getGlobalUBO();
 	private:
 		template<typename Type>
 		struct ValueConverter

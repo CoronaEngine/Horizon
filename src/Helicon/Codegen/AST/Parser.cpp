@@ -140,7 +140,10 @@ void EmbeddedShader::Ast::Parser::pushBranchOutput(BranchOutput branch)
 }
 void EmbeddedShader::Ast::Parser::pushBranchVariateReference(const Variate* var)
 {
-    currentParser->externBranchVar.top().variateRefs.insert(std::move(var));
+    if (Parser::isCollectExternBranchVariate())
+    {
+        currentParser->externBranchVar.top().variateRefs.insert(std::move(var));
+    }
 }
 void EmbeddedShader::Ast::Parser::pushBranchLocalVariateDefinition(const DefineLocalVariate* definition)
 {

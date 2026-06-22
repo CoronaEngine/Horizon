@@ -49,12 +49,12 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
     std::string mainContent;
     for (auto& statement: structure.localStatements)
     {
-        mainContent += "\t" + statement->parse() + '\n';
+        mainContent += "\t" + statement->generate() + '\n';
     }
 
 	for (auto& statement: structure.shaderOnlyStatements)
 	{
-		output += statement->parse() + '\n';
+		output += statement->generate() + '\n';
 	}
 
 	std::string stageType = "unknown";
@@ -80,7 +80,7 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 		std::string inputStruct = "struct " + inputStructName +" {\n";
 		for (auto& statement: structure.inputStatements)
 		{
-			inputStruct += "\t" + statement->parse() + '\n';
+			inputStruct += "\t" + statement->generate() + '\n';
 		}
 		inputStruct += "}\n";
 		output += inputStruct;
@@ -92,7 +92,7 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 		std::string outputStruct = "struct " + outputStructName +" {\n";
 		for (auto& statement: structure.outputStatements)
 		{
-			outputStruct += "\t" + statement->parse() + '\n';
+			outputStruct += "\t" + statement->generate() + '\n';
 		}
 		outputStruct += "}\n";
 		output += outputStruct;
@@ -125,7 +125,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	std::string output;
 	for (auto& statement: structure.globalStatements)
 	{
-		auto statementContent = statement->parse();
+		auto statementContent = statement->generate();
 		if (!statementContent.empty())
 			output += std::move(statementContent) + '\n';
 	}
@@ -173,36 +173,36 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
     {
         Ast::Parser::pushBranchLocalVariateDefinition(node);
     }
-	return node->localVariate->type->parse() + " " + node->localVariate->name +
-		(node->value ? " = " + node->value->parse() : "") + ";";
+	return node->localVariate->type->generate() + " " + node->localVariate->name +
+		(node->value ? " = " + node->value->generate() : "") + ";";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineInputVariate* node)
 {
 	//这段内容应放在Generator生成的input struct中
-	return node->variate->type->parse() + " " + node->variate->name + " : LOCATION" + std::to_string(node->variate->location) + ";";
+	return node->variate->type->generate() + " " + node->variate->name + " : LOCATION" + std::to_string(node->variate->location) + ";";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::Assign* node)
 {
-	return node->leftValue->parse() + " = " + node->rightValue->parse() + ";";
+	return node->leftValue->generate() + " = " + node->rightValue->generate() + ";";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::BinaryOperator* node)
 {
-	return "(" + node->value1->parse() + " " + node->operatorType + " " + node->value2->parse() + ")";
+	return "(" + node->value1->generate() + " " + node->operatorType + " " + node->value2->generate() + ")";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::MemberAccess* node)
 {
-	return node->value->parse() + "." + node->memberName;
+	return node->value->generate() + "." + node->memberName;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineOutputVariate* node)
 {
 	if (currentStage != Ast::ShaderStage::Fragment)
-		return node->variate->type->parse() + " " + node->variate->name + " : LOCATION" + std::to_string(node->variate->location) + ";";
-	return node->variate->type->parse() + " " + node->variate->name + " : SV_TARGET" + std::to_string(node->variate->location) + ";";
+		return node->variate->type->generate() + " " + node->variate->name + " : LOCATION" + std::to_string(node->variate->location) + ";";
+	return node->variate->type->generate() + " " + node->variate->name + " : SV_TARGET" + std::to_string(node->variate->location) + ";";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::IfStatement* node)
@@ -233,11 +233,11 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
         //cpu branch pruning
         return call;
     }
-	auto result = "if (" + node->condition->parse() + ") {\n";
+	auto result = "if (" + node->condition->generate() + ") {\n";
 	nestHierarchy++;
 	for (auto& statement: node->statements)
 	{
-		result += getCodeIndentation() + statement->parse() + "\n";
+		result += getCodeIndentation() + statement->generate() + "\n";
 	}
 	nestHierarchy--;
 	result += getCodeIndentation() + "}";
@@ -257,7 +257,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	nestHierarchy++;
 	for (auto& statement: node->statements)
 	{
-		result += getCodeIndentation() + statement->parse() + "\n";
+		result += getCodeIndentation() + statement->generate() + "\n";
 	}
 	nestHierarchy--;
 	result += getCodeIndentation() + "}";
@@ -279,7 +279,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	if (node->array->permissions == Ast::AccessPermissions::None)
 		return "";
 
-	auto result = node->array->type->parse() + " " + node->array->name + ";";
+	auto result = node->array->type->generate() + " " + node->array->name + ";";
 	if (node->array->permissions != Ast::AccessPermissions::ReadOnly)
 		result = "RW" + result;
 
@@ -296,16 +296,16 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 		return "";
 	if (node->variate->pushConstant)
 	{
-		pushConstantMembers += "\t" + node->variate->type->parse() + " " + node->variate->name + ";\n";
+		pushConstantMembers += "\t" + node->variate->type->generate() + " " + node->variate->name + ";\n";
 		return "";
 	}
 	// bindless 模式下，资源类型 (Sampler) 走 push constant handle
 	if (bindless() && std::dynamic_pointer_cast<Ast::SamplerType>(node->variate->type))
 	{
-		bindlessHandleMembers += "\t" + node->variate->type->parse() + " " + node->variate->name + ";\n";
+		bindlessHandleMembers += "\t" + node->variate->type->generate() + " " + node->variate->name + ";\n";
 		return "";
 	}
-	uboMembers += "\t" + node->variate->type->parse() + " " + node->variate->name + ";\n";
+	uboMembers += "\t" + node->variate->type->generate() + " " + node->variate->name + ";\n";
 	return "";
 }
 
@@ -342,7 +342,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	{
 		for (const auto& member: node->aggregate->members)
 		{
-			result += "\t" + member->type->parse() + " " + member->name + ";\n";
+			result += "\t" + member->type->generate() + " " + member->name + ";\n";
 		}
 	}
 	else
@@ -351,10 +351,10 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 		{
 			if (std::dynamic_pointer_cast<Ast::ArrayType>(member->type) || std::dynamic_pointer_cast<Ast::Texture2DType>(member->type))
 			{
-				result += "\t" "RW" + member->type->parse() + " " + member->name + ";\n";
+				result += "\t" "RW" + member->type->generate() + " " + member->name + ";\n";
 				continue;
 			}
-			result += "\t" + member->type->parse() + " " + member->name + ";\n";
+			result += "\t" + member->type->generate() + " " + member->name + ";\n";
 		}
 	}
 	result += "}";
@@ -366,7 +366,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
     if (node->texture->permissions == Ast::AccessPermissions::None)
         return "";
 
-	auto result = node->texture->type->parse() + " " + node->texture->name + ";";
+	auto result = node->texture->type->generate() + " " + node->texture->name + ";";
 
     if (node->texture->permissions != Ast::AccessPermissions::ReadOnly)
     {
@@ -383,21 +383,21 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UnaryOperator* node)
 {
 	if (node->isPrefix)
-		return "(" + node->operatorType + node->value->parse() + ")";
+		return "(" + node->operatorType + node->value->generate() + ")";
 
-	return "(" + node->value->parse() + node->operatorType + ")";
+	return "(" + node->value->generate() + node->operatorType + ")";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ArrayType* node)
 {
 	if ((node->permissions & Ast::AccessPermissions::WriteOnly) != Ast::AccessPermissions::None && std::dynamic_pointer_cast<Ast::Texture2DType>(node->elementType))
-		return "StructuredBuffer<RW" + node->elementType->parse() + ">" + (bindless() ?  ".Handle" : "");
-	return "StructuredBuffer<" + node->elementType->parse() + ">" + (bindless() ?  ".Handle" : "");
+		return "StructuredBuffer<RW" + node->elementType->generate() + ">" + (bindless() ?  ".Handle" : "");
+	return "StructuredBuffer<" + node->elementType->generate() + ">" + (bindless() ?  ".Handle" : "");
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::Texture2DType* node)
 {
-	return node->name + "<" + node->texelType->parse() + ">" + (bindless() ?  ".Handle" : "");
+	return node->name + "<" + node->texelType->generate() + ">" + (bindless() ?  ".Handle" : "");
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::CallFunc* node)
@@ -406,11 +406,11 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	if (node->args.empty())
 		return result + ")";
 
-	result += node->args[0]->parse();
+	result += node->args[0]->generate();
 
 	for (size_t i = 1; i < node->args.size(); ++i)
 	{
-		result += "," + node->args[i]->parse();
+		result += "," + node->args[i]->generate();
 	}
 
 	return result + ")";
@@ -450,7 +450,7 @@ EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::get
     nestHierarchy++;
     for (auto& statement: body)
     {
-        bodyOut += getCodeIndentation() + statement->parse() + "\n";
+        bodyOut += getCodeIndentation() + statement->generate() + "\n";
     }
     nestHierarchy--;
     bodyOut += "}\n";
@@ -462,7 +462,7 @@ EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::get
     {
         for (auto i = collection.variateRefs.begin(); i != collection.variateRefs.end(); )
         {
-            params += (*i)->type->parse() + " " + (*i)->name;
+            params += (*i)->type->generate() + " " + (*i)->name;
             ++i;
             if (i != collection.variateRefs.end())
             {
@@ -516,5 +516,5 @@ std::string EmbeddedShader::Generator::SlangGenerator::getCodeIndentation()
 
 std::string EmbeddedShader::Generator::DefineSystemSemanticVariate::parse()
 {
-	return variate->type->parse() + " " + variate->name + " : " + semanticName + ";";
+	return variate->type->generate() + " " + variate->name + " : " + semanticName + ";";
 }

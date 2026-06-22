@@ -5,6 +5,12 @@
 
 #include "Parser.hpp"
 
+std::string EmbeddedShader::Ast::Node::generate()
+{
+
+    return parse();
+}
+
 std::string EmbeddedShader::Ast::Node::parse()
 {
 	return "";
@@ -41,11 +47,13 @@ std::string EmbeddedShader::Ast::Value::accessPath()
 
 std::string EmbeddedShader::Ast::Variate::parse()
 {
-    if (Parser::isCollectExternBranchVariate())
-    {
-        Parser::pushBranchVariateReference(this);
-    }
+
 	return name;
+}
+void EmbeddedShader::Ast::Variate::collectVariateReference()
+{
+    Value::collectVariateReference();
+    Parser::pushBranchVariateReference(this);
 }
 
 std::string EmbeddedShader::Ast::Variate::accessPath()
