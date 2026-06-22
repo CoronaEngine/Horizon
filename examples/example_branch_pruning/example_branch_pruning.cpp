@@ -20,15 +20,19 @@ void run_example_branch_pruning()
         }
         $ELSE $IF(a == 1)
         {
-            texture[dispatchThreadID()->xy()] = Float4(1,1,1,1);
-        }
-        $ELSE $IF(a2 == 2)
-        {
-            texture[dispatchThreadID()->xy()] = Float4(1,1,1,3);
+            Float v = 1;
+            texture[dispatchThreadID()->xy()] = Float4(1,1,1,v);
         }
         $ELSE
         {
-            texture[dispatchThreadID()->xy()] = Float4();
+            $IF(a2 == 0)
+            {
+                texture[dispatchThreadID()->xy()] = Float4(1,1,1,2);
+            }
+            $ELSE
+            {
+                texture[dispatchThreadID()->xy()] = Float4(1,1,1,3);
+            }
         }
 
         /*for (GPU_IF TheIfElseStatementMustBeGuidedByIf;TheIfElseStatementMustBeGuidedByIf.index < 1; ++TheIfElseStatementMustBeGuidedByIf.index)
