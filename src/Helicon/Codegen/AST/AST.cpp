@@ -268,5 +268,13 @@ EmbeddedShader::Ast::EmbeddedShaderStructure& EmbeddedShader::Ast::AST::getEmbed
 }
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalUBO()
 {
-
+	auto& ubo = Parser::currentParser->globalUBO;
+	if (ubo)
+	{
+		ubo = std::make_shared<Variate>();
+		ubo->type = std::make_shared<NameType>();
+		ubo->type->name = "ConstantBuffer<global_ubo_struct>";
+		ubo->name = "global_ubo";
+	}
+	return ubo;
 }
