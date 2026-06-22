@@ -113,6 +113,8 @@ namespace EmbeddedShader::Ast
 	    static std::shared_ptr<Variate> getGlobalUBO();
 	    static std::shared_ptr<Variate> getGlobalParameterBlock();
 	    static std::shared_ptr<Variate> getGlobalPushConstant();
+	    static std::shared_ptr<Variate> getStageInput();
+	    static std::shared_ptr<Variate> getStageOutput();
 	private:
 		template<typename Type>
 		struct ValueConverter

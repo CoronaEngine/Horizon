@@ -37,6 +37,10 @@ std::string EmbeddedShader::Ast::NameType::parse()
 	return name;
 }
 
+std::string EmbeddedShader::Ast::StageType::parse()
+{
+    return Generator::SlangGenerator::getParseOutput(this);
+}
 void EmbeddedShader::Ast::Value::access(AccessPermissions permissions)
 {
 	type->access(permissions);
@@ -96,6 +100,10 @@ std::string EmbeddedShader::Ast::InputVariate::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::InputVariate::getRootVariate() const
+{
+    return AST::getStageInput().get();
+}
 
 std::string EmbeddedShader::Ast::DefineInputVariate::parse()
 {
@@ -124,6 +132,10 @@ const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::MemberAccess::getRootVa
 std::string EmbeddedShader::Ast::OutputVariate::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
+}
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::OutputVariate::getRootVariate() const
+{
+    return AST::getStageOutput().get();
 }
 
 std::string EmbeddedShader::Ast::DefineOutputVariate::parse()

@@ -33,6 +33,13 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+    struct StageType : Type
+    {
+        std::string suffix;
+        std::string prefix;
+        std::string parse() override;
+    };
+
     struct Variate;
 	class Value : public Node
 	{
@@ -109,6 +116,7 @@ namespace EmbeddedShader::Ast
 	{
 		size_t location = 0;
 		std::string parse() override;
+	    const Variate* getRootVariate() const override;
 	};
 
 	struct DefineInputVariate : Statement
@@ -131,6 +139,7 @@ namespace EmbeddedShader::Ast
 	{
 		size_t location = 0;
 		std::string parse() override;
+	    const Variate* getRootVariate() const override;
 	};
 
 	struct DefineOutputVariate : Statement

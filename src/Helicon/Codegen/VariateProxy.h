@@ -305,11 +305,6 @@ namespace EmbeddedShader
 					storeRuntimeValue(*rhs.value);
 				return *this;
 			}
-			if (!std::dynamic_pointer_cast<Ast::Variate>(node))
-			{
-				node = Ast::AST::defineLocalVariate(node->type, rhs.node);
-				return *this;
-			}
 			Ast::AST::assign(node,rhs.node);
 		    return *this;
 		}

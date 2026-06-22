@@ -257,7 +257,11 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 {
     if (node->followIf->conditionDetector.has_value())
     {
-        //cpu branch pruning
+        auto name = "branch_" + std::to_string(node->followIf->index);
+        Ast::BranchOutput branch = getBranchOutput(name,node->statements,node->followIf->conditionDetector.value());
+
+        branch.variateRefs.clear();
+        Ast::Parser::pushBranchOutput(std::move(branch));
 
         return "";
     }
@@ -450,6 +454,24 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ElementValue* node)
 {
     return node->array->generate() + "[" + node->index->generate() + "]";
+}
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::StageType* node)
+{
+    auto structure = Ast::AST::getEmbeddedShaderStructure();
+    std::string stageKind = "unknown";
+    switch (structure.stage)
+    {
+    case Ast::ShaderStage::Vertex:
+        stageKind = "vertex";
+        break;
+    case Ast::ShaderStage::Fragment:
+        stageKind = "fragment";
+        break;
+    case Ast::ShaderStage::Compute:
+        stageKind = "compute";
+        break;
+    }
+    return node->prefix + stageKind + node->suffix;
 }
 
 EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::getBranchOutput(std::string name, const std::vector<std::shared_ptr<Ast::Statement>>& body,std::function<bool()>conditionDetector)

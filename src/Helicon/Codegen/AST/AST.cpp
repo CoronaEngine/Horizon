@@ -3,6 +3,7 @@
 #include <Codegen/Generator/SlangGenerator.hpp>
 
 #include "Parser.hpp"
+#include "Compiler/ShaderCommon.h"
 
 #include <optional>
 
@@ -302,4 +303,30 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGloba
         pc->name = "global_push_constant";
     }
     return pc;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStageInput()
+{
+    auto& input = Parser::currentParser->stageInput;
+    if (!input)
+    {
+        auto type = std::make_shared<StageType>();
+        input = std::make_shared<Variate>();
+        input->type = type;
+        type->suffix = "_input";
+        input->name = "input";
+    }
+    return input;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStageOutput()
+{
+    auto& input = Parser::currentParser->stageOutput;
+    if (!input)
+    {
+        auto type = std::make_shared<StageType>();
+        input = std::make_shared<Variate>();
+        input->type = type;
+        type->suffix = "_output";
+        input->name = "output";
+    }
+    return input;
 }

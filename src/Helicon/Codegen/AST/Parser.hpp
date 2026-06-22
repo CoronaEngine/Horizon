@@ -63,6 +63,9 @@ namespace EmbeddedShader::Ast
 		std::shared_ptr<Variate> globalParameterBlock;
 		std::shared_ptr<Variate> globalPushConstant;
 
+	    std::shared_ptr<Variate> stageInput;
+	    std::shared_ptr<Variate> stageOutput;
+
 		std::vector<ParseOutput> parseOutputs;
 
 	    //////////////Branch Pruning///////////////
