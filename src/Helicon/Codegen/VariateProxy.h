@@ -138,6 +138,7 @@ namespace EmbeddedShader
 			if (auto v = std::dynamic_pointer_cast<Ast::Variate>(node)) return v->name;
 			return "";
 		}
+
 		VariateProxy()
 		{
             value = std::make_unique<Type>();
@@ -170,7 +171,7 @@ namespace EmbeddedShader
 
 			if (ParseHelper::isInShaderCodeLambda())
 			{
-				node = Ast::AST::defineLocalVariate<Type>({});
+				node = Ast::AST::createValue<Type>({});
 				return;
 			}
 			node = Ast::AST::defineUniformVariate<Type>();
@@ -219,7 +220,7 @@ namespace EmbeddedShader
 		    }
 		    else if (ParseHelper::isInShaderCodeLambda())
 		    {
-		        node = Ast::AST::defineLocalVariate<Type>({});
+		        node = Ast::AST::createValue<Type>({});
 		    }
 		    else
 		    {
@@ -253,7 +254,7 @@ namespace EmbeddedShader
 			//Local Variate
 			if (ParseHelper::isInShaderCodeLambda())
 			{
-				node = Ast::AST::defineLocalVariate(value);
+				node = Ast::AST::createValue<Type>(value);
 				return;
 			}
 
