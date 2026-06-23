@@ -497,7 +497,7 @@ EmbeddedShader::Ast::BranchOutput EmbeddedShader::Generator::SlangGenerator::get
     {
         for (auto i = collection.variateRefs.begin(); i != collection.variateRefs.end(); )
         {
-            params += (*i)->type->generate() + " " + (*i)->name;
+            params += "inout " + (*i)->type->generate() + " " + (*i)->name;
             ++i;
             if (i != collection.variateRefs.end())
             {

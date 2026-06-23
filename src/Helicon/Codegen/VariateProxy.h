@@ -171,7 +171,7 @@ namespace EmbeddedShader
 
 			if (ParseHelper::isInShaderCodeLambda())
 			{
-				node = Ast::AST::createValue<Type>({});
+				node = Ast::AST::defineLocalVariate<Type>({});
 				return;
 			}
 			node = Ast::AST::defineUniformVariate<Type>();
@@ -220,7 +220,7 @@ namespace EmbeddedShader
 		    }
 		    else if (ParseHelper::isInShaderCodeLambda())
 		    {
-		        node = Ast::AST::createValue<Type>({});
+		        node = Ast::AST::defineLocalVariate<Type>({});
 		    }
 		    else
 		    {
@@ -254,7 +254,7 @@ namespace EmbeddedShader
 			//Local Variate
 			if (ParseHelper::isInShaderCodeLambda())
 			{
-				node = Ast::AST::createValue<Type>(value);
+				node = Ast::AST::defineLocalVariate(value);
 				return;
 			}
 

@@ -14,7 +14,13 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::parse
 
 	auto globalOutput = Generator::SlangGenerator::getGlobalOutput(currentParser->structure);
 	for (auto& output: outputs)
-		output.output = globalOutput + output.output;
+	{
+	    output.output = globalOutput + output.output;
+	    for (auto & branch : output.branches)
+        {
+            branch.output = globalOutput + branch.output;
+        }
+	}
 
 	for (const auto& global: currentParser->structure.globalStatements)
 		global->resetAccessPermissions();
@@ -48,7 +54,13 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
 
 	auto globalOutput = Generator::SlangGenerator::getGlobalOutput(currentParser->structure);
 	for (auto& output: currentParser->parseOutputs)
-		output.output = globalOutput + output.output;
+	{
+	    output.output = globalOutput + output.output;
+	    for (auto & branch : output.branches)
+	    {
+	        branch.output = globalOutput + branch.output;
+	    }
+	}
 
 	for (const auto& global: currentParser->structure.globalStatements)
 	{
@@ -166,7 +178,7 @@ EmbeddedShader::Ast::ExternBranchVariateCollection EmbeddedShader::Ast::Parser::
         }
         if (isLocal)
         {
-            collection.variateRefs.erase(i);
+            i = collection.variateRefs.erase(i);
             continue;
         }
         ++i;

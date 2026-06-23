@@ -9,6 +9,17 @@
 void run_example_branch_pruning()
 {
     using namespace EmbeddedShader;
+    auto branch = R"(
+float branch() {
+    return 1.5;
+})";
+    auto entrypoint = R"(
+RWTexture2D<float4> texture;
+[shader("compute")]
+void main() {
+    texture[uint2(0,0)].x = branch();
+})";
+    ShaderLanguageConverter::slangModuleCompiler();
     int a = 1;
     Int a2 = 1;
     Texture2D<ktm::fvec4> texture;
