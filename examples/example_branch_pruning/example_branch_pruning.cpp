@@ -20,7 +20,7 @@ void run_example_branch_pruning()
         }
         $ELSE $IF(a == 1)
         {
-            Float v = 1;
+            Float v = Float(dispatchThreadID()->x);
             texture[dispatchThreadID()->xy()] = Float4(1,1,1,v);
         }
         $ELSE
@@ -31,7 +31,7 @@ void run_example_branch_pruning()
             }
             $ELSE
             {
-                texture[dispatchThreadID()->xy()] = Float4(1,1,1,3);
+                texture[dispatchThreadID()->xy()] = Float4();
             }
         }
 
