@@ -764,6 +764,13 @@ namespace Corona::Horizon
 
         if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
         {
+            // VK_SUBOPTIMAL_KHR: the image is still usable for this frame, so we
+            // present it and flag a deferred recreate that prepare_present() drains
+            // next frame. This keeps acquire and present consistent (see present()).
+            if (result == VK_SUBOPTIMAL_KHR)
+            {
+                needs_recreate_ = true;
+            }
             acquire.acquired = true;
             acquire.status = present_status(result);
             acquire.message = present_message(acquire.status);
@@ -823,6 +830,16 @@ namespace Corona::Horizon
             prepared.immediate_result.message = "Native display window has no drawable client area.";
             return prepared;
         }
+
+        if (needs_recreate_ && swapchain_ != VK_NULL_HANDLE)
+        {
+            // A previous acquire/present reported VK_SUBOPTIMAL_KHR. The frame was
+            // still presentable, so we deferred teardown to here. destroy_swapchain()
+            // waits idle + retires before destroying, so this is VUID-safe, and the
+            // following ensure_swapchain() rebuilds against the current surface size.
+            destroy_swapchain();
+        }
+        needs_recreate_ = false;
 
         ensure_swapchain();
 
@@ -954,6 +971,15 @@ namespace Corona::Horizon
         if (vk_result != VK_SUCCESS && vk_result != VK_SUBOPTIMAL_KHR)
         {
             throw std::runtime_error("vkQueuePresentKHR failed. VkResult=" + std::to_string(static_cast<int>(vk_result)));
+        }
+
+        // VK_SUBOPTIMAL_KHR: the frame presented fine, but the swapchain no longer
+        // matches the surface (e.g. after resize). Flag a deferred recreate so the
+        // next prepare_present() rebuilds via ensure_swapchain(); we do not destroy
+        // here because the just-submitted present is still referencing the images.
+        if (vk_result == VK_SUBOPTIMAL_KHR)
+        {
+            needs_recreate_ = true;
         }
 
         if (pending.image_index < present_tokens_.size() && queue_present.completion.value != 0)
