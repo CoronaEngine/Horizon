@@ -9,17 +9,38 @@
 void run_example_branch_pruning()
 {
     using namespace EmbeddedShader;
+    auto branch0 = R"(
+float branch();)";
     auto branch = R"(
 float branch() {
     return 1.5;
 })";
     auto entrypoint = R"(
+import branch;
 RWTexture2D<float4> texture;
 [shader("compute")]
 void main() {
     texture[uint2(0,0)].x = branch();
 })";
-    ShaderLanguageConverter::slangModuleCompiler();
+    SlangModuleCompileArgs args;
+    args.sourceLanguage = ShaderLanguage::Slang;
+    args.shaderCode = branch;
+    args.moduleName = "branch";
+    auto branchResult = ShaderLanguageConverter::slangModuleCompiler(args);
+    args.shaderCode = branch0;
+    args.moduleName = "branch";
+    auto branch0Result = ShaderLanguageConverter::slangModuleCompiler(args);
+    args.shaderCode = entrypoint;
+    args.moduleName = "entrypoint";
+    args.deps = {&branch0Result};
+    auto entrypointResult = ShaderLanguageConverter::slangModuleCompiler(args);
+
+    SlangCompileArgs2 compileArgs;
+    compileArgs.module = &entrypointResult;
+    compileArgs.sourceLanguage = ShaderLanguage::Slang;
+    compileArgs.deps = {&branchResult};
+    compileArgs.targetLanguages = {ShaderLanguage::HLSL};
+    std::cout << ShaderLanguageConverter::slangCompilerWithModules(compileArgs).stringTargets[ShaderLanguage::HLSL] << "\n";
     int a = 1;
     Int a2 = 1;
     Texture2D<ktm::fvec4> texture;

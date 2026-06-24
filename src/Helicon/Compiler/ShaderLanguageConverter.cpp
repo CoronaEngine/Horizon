@@ -1265,6 +1265,22 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    sessionDesc.compilerOptionEntryCount = options.size();
 	    Slang::ComPtr<slang::ISession> session;
         slangGlobalSession->createSession(sessionDesc, session.writeRef());
+
+        //load modules
+        {
+	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        for (auto module : arg.deps)
+	        {
+	            auto dataBlob = slang_createBlob(module->binData.data(), module->binData.size());
+	            auto mod = session->loadModuleFromIRBlob(module->name.c_str(),module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
+	            diagnoseIfNeeded(diagnosticsBlob);
+	            if (!mod)
+	            {
+	                std::cout << "Load Module From IR Blob failed: " << module->name << std::endl;
+	            }
+	        }
+        }
+
         Slang::ComPtr<slang::IModule> slangModule;
 	    {
             Slang::ComPtr<slang::IBlob> diagnosticsBlob;
