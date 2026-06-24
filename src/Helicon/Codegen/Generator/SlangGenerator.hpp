@@ -109,7 +109,9 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::ElementValue* node);
 		static std::string getParseOutput(const Ast::StageType* node);
 
-	    static Ast::BranchOutput getBranchOutput(std::string name, const std::vector<std::shared_ptr<Ast::Statement>>& body,std::function<bool()>conditionDetector);
+	    static Ast::BranchInfo getBranchInfo(std::string name, const std::vector<std::shared_ptr<Ast::Statement>>& body,std::function<bool()>conditionDetector);
+	    static std::string getBranchDeclaration(std::string name, std::string params);
+	    static std::string getBranchImport(std::vector<size_t> refs);
 
 		static std::shared_ptr<Ast::Variate> getPositionOutput();
 		static std::shared_ptr<Ast::Variate> getDispatchThreadIDInput();

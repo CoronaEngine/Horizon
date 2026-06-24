@@ -57,7 +57,7 @@ void main() {
         }
         $ELSE
         {
-            $IF(a2 == 0)
+            $IF(a == 0)
             {
                 texture[dispatchThreadID()->xy()] = Float4(1,1,1,2);
             }

@@ -15,11 +15,20 @@ namespace EmbeddedShader::Ast
 	struct Statement;
 	struct Variate;
 
-    struct BranchOutput
+    struct BranchInfo
     {
         std::function<bool()> conditionDetector;
         std::string output;
+        std::string params;
         std::set<const Variate*> variateRefs;
+    };
+
+    struct BranchOutput
+    {
+        std::function<bool()> conditionDetector;
+        std::string trueBranch;
+        std::string falseBranch;
+        std::string declareBranch;
     };
 
 	struct EmbeddedShaderStructure

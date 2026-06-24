@@ -18,7 +18,9 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::parse
 	    output.output = globalOutput + output.output;
 	    for (auto & branch : output.branches)
         {
-            branch.output = globalOutput + branch.output;
+            branch.declareBranch = globalOutput + branch.declareBranch;
+            branch.trueBranch = globalOutput + branch.trueBranch;
+            branch.falseBranch = globalOutput + branch.falseBranch;
         }
 	}
 
@@ -32,7 +34,7 @@ void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage)
 {
 	if (currentParser->isInShaderParse)
 	{
-		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branches);
+		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branchOutputs);
 		currentParser->reset();
 		currentParser->localStatementStack.pop();
 		currentParser->isInShaderParse = false;
@@ -46,7 +48,7 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
 {
 	if (currentParser->isInShaderParse)
 	{
-		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branches);
+		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branchOutputs);
 		currentParser->reset();
 		currentParser->localStatementStack.pop();
 		currentParser->isInShaderParse = false;
@@ -58,7 +60,9 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
 	    output.output = globalOutput + output.output;
 	    for (auto & branch : output.branches)
 	    {
-	        branch.output = globalOutput + branch.output;
+	        branch.declareBranch = globalOutput + branch.declareBranch;
+	        branch.trueBranch = globalOutput + branch.trueBranch;
+	        branch.falseBranch = globalOutput + branch.falseBranch;
 	    }
 	}
 
@@ -99,11 +103,12 @@ void EmbeddedShader::Ast::Parser::reset()
 	structure.outputStatements.clear();
 	structure.shaderOnlyStatements.clear();
 	currentVariateIndex = 0;
+    currentBranchIndex = 0;
 	nextRenderTargetLocation = 0;
 	positionOutput.reset();
 	dispatchThreadIDInput.reset();
     structure.slangModuleSource.clear();
-    resetBranches();
+    resetBranchOutputs();
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()
@@ -145,10 +150,6 @@ void EmbeddedShader::Ast::Parser::beginCollectExternBranchVariate()
 }
 void EmbeddedShader::Ast::Parser::endCollectExternBranchVariate(){
     currentParser->externBranchVar.pop();
-}
-void EmbeddedShader::Ast::Parser::pushBranchOutput(BranchOutput branch)
-{
-    currentParser->branches.push_back(std::move(branch));
 }
 void EmbeddedShader::Ast::Parser::pushBranchVariateReference(const Variate* var)
 {
@@ -194,7 +195,19 @@ EmbeddedShader::Ast::ExternBranchVariateCollection EmbeddedShader::Ast::Parser::
     collection.variateRefs.swap(nVars);
     return collection;
 }
-void EmbeddedShader::Ast::Parser::resetBranches()
+void EmbeddedShader::Ast::Parser::resetBranchOutputs()
 {
-    currentParser->branches.clear();
+    currentParser->branchOutputs.clear();
+}
+std::vector<EmbeddedShader::Ast::BranchOutput>& EmbeddedShader::Ast::Parser::getBranchOutputs()
+{
+    return currentParser->branchOutputs;
+}
+std::stack<std::vector<size_t>>& EmbeddedShader::Ast::Parser::getBranchReferences()
+{
+    if (currentParser->branchReferences.empty())
+    {
+        currentParser->branchReferences.push({});
+    }
+    return currentParser->branchReferences;
 }

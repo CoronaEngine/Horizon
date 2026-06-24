@@ -69,9 +69,9 @@ namespace EmbeddedShader::Ast
 		std::vector<ParseOutput> parseOutputs;
 
 	    //////////////Branch Pruning///////////////
-	    std::vector<BranchOutput> branches;
-
+        std::vector<BranchOutput> branchOutputs;
 	    std::stack<ExternBranchVariateCollection> externBranchVar;
+	    std::stack<std::vector<size_t>> branchReferences;
 	    //////////////Branch Pruning///////////////
 
 		bool isInShaderParse = false;
@@ -90,10 +90,11 @@ namespace EmbeddedShader::Ast
 	    static bool isCollectExternBranchVariate();
 	    static void beginCollectExternBranchVariate();
 	    static void endCollectExternBranchVariate();
-	    static void pushBranchOutput(BranchOutput branch);
 	    static void pushBranchVariateReference(const Variate* var);
 	    static void pushBranchLocalVariateDefinition(const DefineLocalVariate* definition);
 	    static ExternBranchVariateCollection getCurrentExternBranchVariateCollection();
-	    static void resetBranches();
+	    static void resetBranchOutputs();
+	    static std::vector<BranchOutput>& getBranchOutputs();
+	    static std::stack<std::vector<size_t>>& getBranchReferences();
 	};
 }
