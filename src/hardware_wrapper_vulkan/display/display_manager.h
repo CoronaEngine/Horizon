@@ -103,6 +103,7 @@ namespace Corona::Horizon
         std::vector<std::optional<SubmissionToken>> submitted_frames_;
         std::vector<std::optional<SubmissionToken>> present_tokens_;
         uint32_t frame_index_ { 0 };
+        bool needs_recreate_ { false };
         std::optional<PendingFrame> pending_frame_;
         PresentStatus fake_status_ { PresentStatus::Skipped };
         std::string fake_message_ { "No swapchain has been created for this DisplayManager." };

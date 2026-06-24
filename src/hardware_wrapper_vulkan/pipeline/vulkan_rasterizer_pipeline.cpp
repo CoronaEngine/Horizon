@@ -825,6 +825,30 @@ namespace Corona::Horizon
                 : desc_.blend.attachments.front();
             VkPipelineColorBlendAttachmentState blend_attachment = to_vk_blend_attachment(blend_desc);
 
+            // If blending is requested but the color attachment format does not advertise
+            // VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT (e.g. integer render targets like
+            // RGBA32_UINT), forcing blendEnable would trip Vulkan validation / runtime errors.
+            // Honor the user's blend factors/ops but clamp blendEnable to false and warn so the
+            // dropped blend is visible rather than silently swallowed.
+            if (blend_attachment.blendEnable == VK_TRUE && key.color_format != VK_FORMAT_UNDEFINED)
+            {
+                const VkPhysicalDevice physical_device = device_manager().physical_device();
+                if (physical_device != VK_NULL_HANDLE)
+                {
+                    VkFormatProperties format_properties {};
+                    vkGetPhysicalDeviceFormatProperties(physical_device, key.color_format, &format_properties);
+                    if ((format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) == 0)
+                    {
+                        blend_attachment.blendEnable = VK_FALSE;
+                        Diagnostics::write(Diagnostics::Level::Warning,
+                                           "HORIZON PIPELINE",
+                                           "Color attachment format (VkFormat=" + std::to_string(static_cast<int>(key.color_format)) +
+                                               ") does not support VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT; "
+                                               "blending was requested but has been disabled for this pipeline.");
+                    }
+                }
+            }
+
             VkPipelineColorBlendStateCreateInfo color_blend {};
             color_blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
             color_blend.logicOpEnable = desc_.blend.logic_op_enabled ? VK_TRUE : VK_FALSE;
