@@ -113,6 +113,8 @@ void CUDADevice::memory_free(handle_ty *handle) {
     memory_guard_.with_lock([&] {
         auto iter = exported_resources.find(*handle);
         if (iter != exported_resources.cend()) {
+            alloc_handle = iter->second.handle;
+            size = iter->second.size;
             exported_resources.erase(iter);
             found = true;
         }
