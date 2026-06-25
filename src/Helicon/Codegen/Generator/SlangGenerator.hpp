@@ -89,8 +89,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::BinaryOperator* node);
 		static std::string getParseOutput(const Ast::MemberAccess* node);
 		static std::string getParseOutput(const Ast::DefineOutputVariate* node);
-		static std::string getParseOutput(const Ast::IfStatement* node);
-		static std::string getParseOutput(const Ast::ElifStatement* node);
+		static std::string getParseOutput(      Ast::IfStatement* node);
 		static std::string getParseOutput(const Ast::ElseStatement* node);
 		static std::string getParseOutput(const Ast::InputVariate* node);
 		static std::string getParseOutput(const Ast::OutputVariate* node);
@@ -107,6 +106,12 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::CallFunc* node);
 		static std::string getParseOutput(const Ast::SamplerType* node);
 		static std::string getParseOutput(const Ast::FunctionDeclaration* node);
+		static std::string getParseOutput(const Ast::ElementValue* node);
+		static std::string getParseOutput(const Ast::StageType* node);
+
+	    static Ast::BranchInfo getBranchInfo( const std::vector<std::shared_ptr<Ast::Statement>>&body);
+	    static std::string getBranchDeclaration(std::string name, std::string params);
+	    static std::string getBranchImport(std::vector<size_t> refs);
 
 		static std::shared_ptr<Ast::Variate> getPositionOutput();
 		static std::shared_ptr<Ast::Variate> getDispatchThreadIDInput();

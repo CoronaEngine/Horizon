@@ -71,11 +71,9 @@ namespace EmbeddedShader::Ast
 		template<typename VariateType>
 		static std::shared_ptr<OutputVariate> defineOutputVariate(size_t location);
 
-		static void beginIf(std::shared_ptr<Value> condition);
+		static std::shared_ptr<Ast::IfStatement> beginIf(std::shared_ptr<Value> condition, std::optional<std::function<bool()>> conditionDetector = std::nullopt);
 		static void endIf();
-		static void beginElif(std::shared_ptr<Value> condition);
-		static void endElif();
-		static void beginElse();
+		static void beginElse(std::shared_ptr<Ast::IfStatement> followIf);
 		static void endElse();
 
 		static std::shared_ptr<UniversalArray> defineUniversalArray(std::shared_ptr<Type> elementType);
@@ -96,10 +94,10 @@ namespace EmbeddedShader::Ast
 		static std::shared_ptr<Variate> getPositionOutput();
 		static std::shared_ptr<Variate> getDispatchThreadIDInput();
 
-		static std::shared_ptr<ElementVariate> at(std::shared_ptr<Value> array, uint32_t index);
-		static std::shared_ptr<ElementVariate> at(std::shared_ptr<Value> array, const std::shared_ptr<Value>& index);
+		static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, uint32_t index);
+		static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, const std::shared_ptr<Value>& index);
 	    template<typename IndexType> requires std::is_integral_v<IndexType>
-	    static std::shared_ptr<ElementVariate> at(std::shared_ptr<Value> array, ktm::vec<2,IndexType> index);
+	    static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, ktm::vec<2,IndexType> index);
 		static void addLocalUniversalStatement(std::shared_ptr<Node> node);
 		static std::shared_ptr<CallFunc> callFunc(std::string funcName,std::shared_ptr<Type> returnType,std::vector<std::shared_ptr<Value>> args);
 		static void callFunc(std::string funcName,std::vector<std::shared_ptr<Value>> args);
@@ -112,6 +110,11 @@ namespace EmbeddedShader::Ast
 		static void addShaderOnlyStatement(std::shared_ptr<Statement> shaderOnlyStatement);
 		static std::stack<std::vector<std::shared_ptr<Statement>>*>& getLocalStatementStack();
 		static EmbeddedShaderStructure& getEmbeddedShaderStructure();
+	    static std::shared_ptr<Variate> getGlobalUBO();
+	    static std::shared_ptr<Variate> getGlobalParameterBlock();
+	    static std::shared_ptr<Variate> getGlobalPushConstant();
+	    static std::shared_ptr<Variate> getStageInput();
+	    static std::shared_ptr<Variate> getStageOutput();
 	private:
 		template<typename Type>
 		struct ValueConverter
@@ -335,11 +338,11 @@ namespace EmbeddedShader::Ast
 	}
 
 	template<typename IndexType> requires std::is_integral_v<IndexType>
-	std::shared_ptr<ElementVariate> AST::at(std::shared_ptr<Value> array, ktm::vec<2, IndexType> index)
+	std::shared_ptr<ElementValue> AST::at(std::shared_ptr<Value> array, ktm::vec<2, IndexType> index)
 	{
-		auto variate = std::make_shared<ElementVariate>();
+		auto variate = std::make_shared<ElementValue>();
 		variate->type = array->type;
-		variate->name = array->parse() + "[" + Generator::SlangGenerator::getValueOutput(index) + "]";
+		variate->index = createValue(index);
 		variate->array = std::move(array);
 		return variate;
 	}

@@ -138,6 +138,7 @@ namespace EmbeddedShader
 			if (auto v = std::dynamic_pointer_cast<Ast::Variate>(node)) return v->name;
 			return "";
 		}
+
 		VariateProxy()
 		{
             value = std::make_unique<Type>();
@@ -276,6 +277,11 @@ namespace EmbeddedShader
 				Ast::AST::addLocalUniversalStatement(node);
 		}
 
+	    operator Type() requires (std::is_arithmetic_v<Type>)
+		{
+		    return value ? *value : Type{};
+        }
+
 		Type* operator->() requires (std::is_aggregate_v<Type> && !ktm::is_vector_v<Type>)
 		{
 			return value.get();
@@ -298,11 +304,6 @@ namespace EmbeddedShader
 			{
 				if (rhs.value)
 					storeRuntimeValue(*rhs.value);
-				return *this;
-			}
-			if (!std::dynamic_pointer_cast<Ast::Variate>(node))
-			{
-				node = Ast::AST::defineLocalVariate(node->type, rhs.node);
 				return *this;
 			}
 			Ast::AST::assign(node,rhs.node);

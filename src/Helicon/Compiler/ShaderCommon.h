@@ -94,6 +94,7 @@ namespace EmbeddedShader
         std::optional<std::string> modulePath;
         std::string shaderCode;
         ShaderLanguage sourceLanguage;
+        std::vector<SlangModule*> deps;
     };
 
     struct SlangModuleReflectionArgs0

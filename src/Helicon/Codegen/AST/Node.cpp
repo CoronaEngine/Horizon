@@ -1,9 +1,17 @@
 #include "Node.hpp"
 
+#include "AST.hpp"
+
 #include <filesystem>
 #include <Codegen/Generator/SlangGenerator.hpp>
 
 #include "Parser.hpp"
+
+std::string EmbeddedShader::Ast::Node::generate()
+{
+    collectVariateReference();
+    return parse();
+}
 
 std::string EmbeddedShader::Ast::Node::parse()
 {
@@ -29,6 +37,10 @@ std::string EmbeddedShader::Ast::NameType::parse()
 	return name;
 }
 
+std::string EmbeddedShader::Ast::StageType::parse()
+{
+    return Generator::SlangGenerator::getParseOutput(this);
+}
 void EmbeddedShader::Ast::Value::access(AccessPermissions permissions)
 {
 	type->access(permissions);
@@ -41,12 +53,22 @@ std::string EmbeddedShader::Ast::Value::accessPath()
 
 std::string EmbeddedShader::Ast::Variate::parse()
 {
+
 	return name;
+}
+void EmbeddedShader::Ast::Variate::collectVariateReference()
+{
+    Value::collectVariateReference();
+    Parser::pushBranchVariateReference(this);
 }
 
 std::string EmbeddedShader::Ast::Variate::accessPath()
 {
 	return name;
+}
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::Variate::getRootVariate()const
+{
+    return this;
 }
 
 std::string EmbeddedShader::Ast::BasicValue::parse()
@@ -78,6 +100,10 @@ std::string EmbeddedShader::Ast::InputVariate::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::InputVariate::getRootVariate() const
+{
+    return AST::getStageInput().get();
+}
 
 std::string EmbeddedShader::Ast::DefineInputVariate::parse()
 {
@@ -99,10 +125,17 @@ std::string EmbeddedShader::Ast::MemberAccess::accessPath()
 {
 	return value->accessPath() + "." + memberName;
 }
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::MemberAccess::getRootVariate()const{
+    return value->getRootVariate();
+}
 
 std::string EmbeddedShader::Ast::OutputVariate::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
+}
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::OutputVariate::getRootVariate() const
+{
+    return AST::getStageOutput().get();
 }
 
 std::string EmbeddedShader::Ast::DefineOutputVariate::parse()
@@ -111,11 +144,6 @@ std::string EmbeddedShader::Ast::DefineOutputVariate::parse()
 }
 
 std::string EmbeddedShader::Ast::IfStatement::parse()
-{
-	return Generator::SlangGenerator::getParseOutput(this);
-}
-
-std::string EmbeddedShader::Ast::ElifStatement::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
@@ -135,11 +163,23 @@ std::string EmbeddedShader::Ast::UniversalArray::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalArray::getRootVariate() const
+{
+    if (Parser::getBindless())
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalParameterBlock().get();
+}
 
-void EmbeddedShader::Ast::ElementVariate::access(AccessPermissions permissions)
+void EmbeddedShader::Ast::ElementValue::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
 	array->access(permissions);
+}
+const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::ElementValue::getRootVariate()const{
+    return array->getRootVariate();
+}
+std::string EmbeddedShader::Ast::ElementValue::parse(){
+    return Generator::SlangGenerator::getParseOutput(this);
 }
 
 std::string EmbeddedShader::Ast::DefineUniversalArray::parse()
@@ -161,6 +201,15 @@ void EmbeddedShader::Ast::UniformVariate::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
 	this->permissions = this->permissions | permissions;
+}
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniformVariate::getRootVariate() const
+{
+    if (pushConstant)
+        return AST::getGlobalPushConstant().get();
+    // bindless 模式下 SamplerType 在 push constant 中
+    if (Parser::getBindless() && std::dynamic_pointer_cast<Ast::SamplerType>(type))
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalUBO().get();
 }
 
 std::string EmbeddedShader::Ast::DefineUniformVariate::parse()
@@ -199,6 +248,12 @@ std::string EmbeddedShader::Ast::UniversalTexture2D::parse()
 	return Generator::SlangGenerator::getParseOutput(this);
 }
 
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalTexture2D::getRootVariate() const
+{
+    if (Parser::getBindless())
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalParameterBlock().get();
+}
 std::string EmbeddedShader::Ast::DefineUniversalTexture2D::parse()
 {
     return Generator::SlangGenerator::getParseOutput(this);

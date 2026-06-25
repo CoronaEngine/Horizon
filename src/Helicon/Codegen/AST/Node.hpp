@@ -1,7 +1,12 @@
 #pragma once
+#include "Struct.hpp"
+
+
 #include <cstdint>
 #include <string>
 #include <memory>
+#include <optional>
+#include <set>
 
 #include <Codegen/AST/Enum.hpp>
 #include <Codegen/AST/Node.hpp>
@@ -13,8 +18,10 @@ namespace EmbeddedShader::Ast
 	struct Node
 	{
 		friend class Parser;
+	    std::string generate();
 		virtual ~Node() = default;
 		virtual std::string parse();
+	    virtual void collectVariateReference() {}
 		static const std::vector<std::shared_ptr<Value>>& accessAll(const std::vector<std::shared_ptr<Value>>& values,AccessPermissions permissions);
 	};
 
@@ -30,19 +37,30 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+    struct StageType : Type
+    {
+        std::string suffix;
+        std::string prefix;
+        std::string parse() override;
+    };
+
+    struct Variate;
 	class Value : public Node
 	{
 	public:
 		std::shared_ptr<Type> type;
 		virtual void access(AccessPermissions permissions);
 		virtual std::string accessPath();
+	    virtual const Variate *getRootVariate() const { return nullptr; }
 	};
 
 	struct Variate : Value
 	{
 		std::string name;
 		std::string parse() override;
+	    void collectVariateReference() override;
 		std::string accessPath() override;
+	    const Variate *getRootVariate()const override;
 	};
 
 	struct LocalVariate : Variate
@@ -102,6 +120,7 @@ namespace EmbeddedShader::Ast
 	{
 		size_t location = 0;
 		std::string parse() override;
+	    const Variate* getRootVariate() const override;
 	};
 
 	struct DefineInputVariate : Statement
@@ -117,12 +136,14 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
 		std::string accessPath() override;
+	    const Variate *getRootVariate()const override;
 	};
 
 	struct OutputVariate : Variate
 	{
 		size_t location = 0;
 		std::string parse() override;
+	    const Variate* getRootVariate() const override;
 	};
 
 	struct DefineOutputVariate : Statement
@@ -133,20 +154,18 @@ namespace EmbeddedShader::Ast
 
 	struct IfStatement : Statement
     {
+	    size_t index = 0;
         std::shared_ptr<Value> condition;
         std::vector<std::shared_ptr<Statement>> statements;
+	    std::optional<std::function<bool()>> conditionDetector;
+	    BranchInfo branchInfo;
+	    std::string importPart;
         std::string parse() override;
     };
 
-	struct ElifStatement : Statement
-	{
-		std::shared_ptr<Value> condition;
-		std::vector<std::shared_ptr<Statement>> statements;
-		std::string parse() override;
-	};
-
 	struct ElseStatement : Statement
 	{
+	    std::shared_ptr<IfStatement> followIf;
 		std::vector<std::shared_ptr<Statement>> statements;
 		std::string parse() override;
 	};
@@ -159,12 +178,16 @@ namespace EmbeddedShader::Ast
 		AccessPermissions permissions = AccessPermissions::None;
 		void access(AccessPermissions permissions) override;
 		std::string parse() override;
+	    const Variate* getRootVariate() const override;
 	};
 
-	struct ElementVariate : Variate
+	struct ElementValue : Value
 	{
 		std::shared_ptr<Value> array;
+	    std::shared_ptr<Value> index;
 		void access(AccessPermissions permissions) override;
+	    const Variate *getRootVariate()const override;
+	    std::string parse() override;
 	};
 
 	struct DefineUniversalArray : Statement
@@ -182,6 +205,7 @@ namespace EmbeddedShader::Ast
 		uint32_t boundValueSize = 0;
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
+	    const Variate* getRootVariate() const override;
 	};
 
 	struct DefineUniformVariate : Statement
@@ -228,6 +252,7 @@ namespace EmbeddedShader::Ast
         // Render target location assigned by Texture2DProxy::operator().
         // -1 means this texture is NOT used as a render target output.
         int32_t renderTargetLocation = -1;
+        const Variate* getRootVariate() const override;
     };
 
     struct DefineUniversalTexture2D : Statement

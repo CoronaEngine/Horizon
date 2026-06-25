@@ -3,6 +3,9 @@
 #include <Codegen/Generator/SlangGenerator.hpp>
 
 #include "Parser.hpp"
+#include "Compiler/ShaderCommon.h"
+
+#include <optional>
 
 std::shared_ptr<EmbeddedShader::Ast::LocalVariate> EmbeddedShader::Ast::AST::defineLocalVariate(std::shared_ptr<Type> type, std::shared_ptr<Value> initValue)
 {
@@ -86,12 +89,18 @@ std::shared_ptr<EmbeddedShader::Ast::OutputVariate> EmbeddedShader::Ast::AST::de
 	return outputVariate;
 }
 
-void EmbeddedShader::Ast::AST::beginIf(std::shared_ptr<Value> condition)
+std::shared_ptr<EmbeddedShader::Ast::IfStatement> EmbeddedShader::Ast::AST::beginIf(std::shared_ptr<Value> condition, std::optional<std::function<bool()>> conditionDetector)
 {
 	auto ifStatement = std::make_shared<IfStatement>();
-	ifStatement->condition = std::move(condition);
+    if (conditionDetector.has_value())
+    {
+        ifStatement->index = Parser::getCurrentBranchIndex();
+    }
+    ifStatement->condition = std::move(condition);
+	ifStatement->conditionDetector = std::move(conditionDetector);
 	addLocalStatement(ifStatement);
 	getLocalStatementStack().push(&ifStatement->statements);
+    return ifStatement;
 }
 
 void EmbeddedShader::Ast::AST::endIf()
@@ -99,22 +108,10 @@ void EmbeddedShader::Ast::AST::endIf()
 	getLocalStatementStack().pop();
 }
 
-void EmbeddedShader::Ast::AST::beginElif(std::shared_ptr<Value> condition)
-{
-	auto elifStatement = std::make_shared<ElifStatement>();
-	elifStatement->condition = std::move(condition);
-	addLocalStatement(elifStatement);
-	getLocalStatementStack().push(&elifStatement->statements);
-}
-
-void EmbeddedShader::Ast::AST::endElif()
-{
-	getLocalStatementStack().pop();
-}
-
-void EmbeddedShader::Ast::AST::beginElse()
+void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 {
 	auto elseStatement = std::make_shared<ElseStatement>();
+    elseStatement->followIf = std::move(followIf);
 	addLocalStatement(elseStatement);
 	getLocalStatementStack().push(&elseStatement->statements);
 }
@@ -181,25 +178,25 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getDispa
 	return idOutput;
 }
 
-std::shared_ptr<EmbeddedShader::Ast::ElementVariate> EmbeddedShader::Ast::AST::at(
+std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(
 	std::shared_ptr<Value> array, uint32_t index)
 {
-	auto variate = std::make_shared<ElementVariate>();
-	variate->type = array->type;
-	variate->name = array->parse() + "[" + std::to_string(index) + "]";
-	variate->array = std::move(array);
-	return variate;
+	auto element = std::make_shared<ElementValue>();
+	element->type = array->type;
+	element->index = createValue(index);
+	element->array = std::move(array);
+	return element;
 }
 
-std::shared_ptr<EmbeddedShader::Ast::ElementVariate> EmbeddedShader::Ast::AST::at(std::shared_ptr<Value> array,
+std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(std::shared_ptr<Value> array,
 	const std::shared_ptr<Value>& index)
 {
 	index->access(AccessPermissions::ReadOnly);
-	auto variate = std::make_shared<ElementVariate>();
-	variate->type = array->type;
-	variate->name = array->parse() + "[" + index->parse() + "]";
-	variate->array = std::move(array);
-	return variate;
+	auto element = std::make_shared<ElementValue>();
+	element->type = array->type;
+	element->index = index;
+	element->array = std::move(array);
+	return element;
 }
 
 void EmbeddedShader::Ast::AST::addLocalUniversalStatement(
@@ -269,4 +266,67 @@ std::stack<std::vector<std::shared_ptr<EmbeddedShader::Ast::Statement>>*>& Embed
 EmbeddedShader::Ast::EmbeddedShaderStructure& EmbeddedShader::Ast::AST::getEmbeddedShaderStructure()
 {
 	return Parser::currentParser->structure;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalUBO()
+{
+	auto& ubo = Parser::currentParser->globalUBO;
+	if (!ubo)
+	{
+        auto type = std::make_shared<NameType>();
+		ubo = std::make_shared<Variate>();
+		ubo->type = type;
+		type->name = "ConstantBuffer<global_ubo_struct>";
+		ubo->name = "global_ubo";
+	}
+	return ubo;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalParameterBlock()
+{
+    auto& pb = Parser::currentParser->globalParameterBlock;
+    if (!pb)
+    {
+        auto type = std::make_shared<NameType>();
+        pb = std::make_shared<Variate>();
+        pb->type = type;
+        type->name = "ParameterBlock<parameter_block_struct>";
+        pb->name = "global_parameter_block";
+    }
+    return pb;
+}std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalPushConstant(){
+    auto& pc = Parser::currentParser->globalPushConstant;
+    if (!pc)
+    {
+        auto type = std::make_shared<NameType>();
+        pc = std::make_shared<Variate>();
+        pc->type = type;
+        type->name = "ParameterBlock<global_push_constant_struct>";
+        pc->name = "global_push_constant";
+    }
+    return pc;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStageInput()
+{
+    auto& input = Parser::currentParser->stageInput;
+    if (!input)
+    {
+        auto type = std::make_shared<StageType>();
+        input = std::make_shared<Variate>();
+        input->type = type;
+        type->suffix = "_input";
+        input->name = "input";
+    }
+    return input;
+}
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStageOutput()
+{
+    auto& input = Parser::currentParser->stageOutput;
+    if (!input)
+    {
+        auto type = std::make_shared<StageType>();
+        input = std::make_shared<Variate>();
+        input->type = type;
+        type->suffix = "_output";
+        input->name = "output";
+    }
+    return input;
 }

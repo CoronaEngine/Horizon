@@ -1,6 +1,7 @@
 #pragma once
 #include <Codegen/AST/Enum.hpp>
 #include <memory>
+#include <set>
 #include <unordered_set>
 #include <vector>
 
@@ -12,6 +13,21 @@ struct SlangModule;
 namespace EmbeddedShader::Ast
 {
 	struct Statement;
+	struct Variate;
+
+    struct BranchInfo
+    {
+        std::string body;
+        std::set<const Variate*> variateRefs;
+    };
+
+    struct BranchOutput
+    {
+        std::function<bool()> conditionDetector;
+        std::string trueBranch;
+        std::string falseBranch;
+        std::string declareBranch;
+    };
 
 	struct EmbeddedShaderStructure
 	{
