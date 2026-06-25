@@ -228,41 +228,18 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	return node->variate->type->generate() + " " + node->variate->name + " : SV_TARGET" + std::to_string(node->variate->location) + ";";
 }
 
-std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::IfStatement* node)
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfStatement* node)
 {
     if (node->conditionDetector.has_value())
     {
+        Ast::Parser::getBranchOutputs().emplace_back();
         auto& branchRefs = Ast::Parser::getBranchReferences();
         branchRefs.top().push_back(node->index);
-        branchRefs.push({});
-        auto name = "branch_" + std::to_string(node->index);
-        Ast::BranchInfo branch = getBranchInfo(name,node->statements,node->conditionDetector.value());
-        auto ip = getBranchImport(branchRefs.top());
+        branchRefs.emplace();
+        node->branchInfo = getBranchInfo(node->statements);
+        node->importPart = getBranchImport(branchRefs.top());
         branchRefs.pop();
-
-        //func call
-        std::string call = name + "(";
-        if (!branch.variateRefs.empty())
-        {
-            for (auto i = branch.variateRefs.begin(); i != branch.variateRefs.end(); )
-            {
-                call += (*i)->name;
-                ++i;
-                if (i != branch.variateRefs.end())
-                {
-                    call += ",";
-                }
-            }
-        }
-        call += ");";
-
-        Ast::BranchOutput output;
-        output.declareBranch = getBranchDeclaration(name,branch.params);
-        output.trueBranch = ip + branch.output;
-        output.conditionDetector = node->conditionDetector.value();
-        Ast::Parser::getBranchOutputs().push_back(std::move(output));
-        //cpu branch pruning
-        return call;
+        return "";
     }
 	auto result = "if (" + node->condition->generate() + ") {\n";
 	nestHierarchy++;
@@ -280,14 +257,42 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
     if (node->followIf->conditionDetector.has_value())
     {
         auto& branchRefs = Ast::Parser::getBranchReferences();
-        auto name = "branch_" + std::to_string(node->followIf->index);
-        branchRefs.push({});
-        Ast::BranchInfo branch = getBranchInfo(name,node->statements,node->followIf->conditionDetector.value());
-        auto ip = getBranchImport(branchRefs.top());
+        branchRefs.emplace();
+        Ast::BranchInfo falseBranch = getBranchInfo(node->statements);
+        auto falseIp = getBranchImport(branchRefs.top());
         branchRefs.pop();
 
-        Ast::Parser::getBranchOutputs()[node->followIf->index].falseBranch = ip + branch.output;
-        return "";
+        std::set<const Ast::Variate*> allVarRefs;
+        allVarRefs.swap(node->followIf->branchInfo.variateRefs);
+        allVarRefs.insert(falseBranch.variateRefs.begin(), falseBranch.variateRefs.end());
+
+        std::string name = "branch_" + std::to_string(node->followIf->index);
+        //func call
+        std::string call = name + "(";
+        std::string func = "void " + name + "(";
+        if (!allVarRefs.empty())
+        {
+            for (auto i = allVarRefs.begin(); i != allVarRefs.end(); )
+            {
+                call += (*i)->name;
+                func += "inout " + (*i)->type->generate() + " " + (*i)->name;
+                ++i;
+                if (i != allVarRefs.end())
+                {
+                    call += ",";
+                    func += ",";
+                }
+            }
+        }
+        call += ");";
+        func += ")";
+
+        auto& output = Ast::Parser::getBranchOutputs()[node->followIf->index];
+        output.declareBranch = func + ";";
+        output.trueBranch = node->followIf->importPart + func + "\n" + node->followIf->branchInfo.body;
+        output.falseBranch = falseIp + func + "\n" + falseBranch.body;
+        output.conditionDetector = node->followIf->conditionDetector.value();
+        return call;
     }
 
 	std::string result = "else {\n";
@@ -498,10 +503,9 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
     return node->prefix + stageKind + node->suffix;
 }
 
-EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBranchInfo(std::string name, const std::vector<std::shared_ptr<Ast::Statement>>& body,std::function<bool()>conditionDetector)
+EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBranchInfo(const std::vector<std::shared_ptr<Ast::Statement>>&body)
 {
     Ast::BranchInfo branch;
-    branch.conditionDetector = std::move(conditionDetector);
 
     //body
     std::string bodyOut = "{\n";
@@ -516,24 +520,8 @@ EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBr
     auto collection = Ast::Parser::getCurrentExternBranchVariateCollection();
     Ast::Parser::endCollectExternBranchVariate();
 
-    std::string params = "(";
-    if (!collection.variateRefs.empty())
-    {
-        for (auto i = collection.variateRefs.begin(); i != collection.variateRefs.end(); )
-        {
-            params += "inout " + (*i)->type->generate() + " " + (*i)->name;
-            ++i;
-            if (i != collection.variateRefs.end())
-            {
-                params += ",";
-            }
-        }
-    }
-    params += ")";
-
-    branch.output = "void " + name + params + bodyOut;
+    branch.body = std::move(bodyOut);
     branch.variateRefs = std::move(collection.variateRefs);
-    branch.params = std::move(params);
     return branch;
 }
 std::string EmbeddedShader::Generator::SlangGenerator::getBranchDeclaration(std::string name, std::string params)

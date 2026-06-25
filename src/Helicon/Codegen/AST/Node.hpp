@@ -1,8 +1,12 @@
 #pragma once
+#include "Struct.hpp"
+
+
 #include <cstdint>
 #include <string>
 #include <memory>
 #include <optional>
+#include <set>
 
 #include <Codegen/AST/Enum.hpp>
 #include <Codegen/AST/Node.hpp>
@@ -154,6 +158,8 @@ namespace EmbeddedShader::Ast
         std::shared_ptr<Value> condition;
         std::vector<std::shared_ptr<Statement>> statements;
 	    std::optional<std::function<bool()>> conditionDetector;
+	    BranchInfo branchInfo;
+	    std::string importPart;
         std::string parse() override;
     };
 

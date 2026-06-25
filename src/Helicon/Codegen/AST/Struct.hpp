@@ -17,9 +17,7 @@ namespace EmbeddedShader::Ast
 
     struct BranchInfo
     {
-        std::function<bool()> conditionDetector;
-        std::string output;
-        std::string params;
+        std::string body;
         std::set<const Variate*> variateRefs;
     };
 
