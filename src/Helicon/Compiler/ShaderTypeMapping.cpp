@@ -198,9 +198,9 @@ namespace EmbeddedShader
 		if (typeName == "double4x4") return "::ktm::dmat4x4";
 
 		// 特定类型名称
-		if (typeName == "uint") return "unsigned int";
+		if (typeName == "uint") return "uint32_t";
 		if (typeName == "half") return "float";
-		if (typeName == "dword") return "unsigned int";
+		if (typeName == "dword") return "uint32_t";
 
 		// Opaque sampler/image types -> Texture2DProxy (EDSL proxy for GLSL sampler/image)
 		// float texel types
@@ -249,8 +249,29 @@ namespace EmbeddedShader
 		return !cppType.empty() && cppType[0] == '@';
 	}
 
+	// Map a type-name string to its bare C++ *value* type (no VariateProxy wrap).
+	// Recurses into Array<...> so nested arrays resolve to ::EmbeddedShader::Array<T>
+	// (= ArrayProxy<T>, defined in Codegen/TypeAlias.h) rather than a bare `Array`.
+	static std::string cppValueType(const std::string& typeName)
+	{
+		if (typeName.rfind("Array<", 0) == 0 && !typeName.empty() && typeName.back() == '>')
+		{
+			auto inner = typeName.substr(6, typeName.size() - 7);
+			return "::EmbeddedShader::Array<" + cppValueType(inner) + ">";
+		}
+		auto cppType = typeNameToCpp(typeName);
+		if (isOpaqueProxyType(cppType))
+			return "::EmbeddedShader::" + cppType.substr(1);
+		return cppType;
+	}
+
 	std::string emitCppParamType(const std::string& typeName)
 	{
+		// Array<...> is itself a proxy type (ArrayProxy) — emit it directly,
+		// mirroring the opaque-proxy path, never wrapped in another VariateProxy.
+		if (typeName.rfind("Array<", 0) == 0)
+			return cppValueType(typeName);
+
 		auto cppType = typeNameToCpp(typeName);
 		if (isOpaqueProxyType(cppType))
 			return "::EmbeddedShader::" + cppType.substr(1);

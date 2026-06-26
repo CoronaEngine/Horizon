@@ -14,34 +14,42 @@
 
 # 解析源文件中的 shader include 指令
 # 返回: SHADER_LANG_LIST, SHADER_PATH_LIST, SHADER_RELATIVE_PATH_LIST
-function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PATHS OUT_REL_PATHS)
+function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PATHS OUT_REL_PATHS OUT_SCANNED_FILES)
     set(LANG_LIST "")
     set(PATH_LIST "")
     set(REL_PATH_LIST "")
-    
+    set(SCANNED_FILES "")
+
     foreach(SOURCE_FILE ${SOURCE_FILES})
         # 确保是绝对路径
         if(NOT IS_ABSOLUTE "${SOURCE_FILE}")
             set(SOURCE_FILE "${SOURCE_DIR}/${SOURCE_FILE}")
         endif()
-        
+
         # 只处理 C/C++ 源文件
         get_filename_component(EXT "${SOURCE_FILE}" EXT)
         if(NOT EXT MATCHES "\\.(cpp|c|h|hpp|cxx|cc)$")
             continue()
         endif()
-        
+
         # 检查文件是否存在
         if(NOT EXISTS "${SOURCE_FILE}")
             continue()
         endif()
-        
+
         # 读取文件内容
         file(READ "${SOURCE_FILE}" FILE_CONTENT)
-        
+
         # 匹配 #include HLSL(path) 或 #include GLSL(path)
         string(REGEX MATCHALL "#include[ \t]+(HLSL|GLSL)\\([^)]+\\)" MATCHES "${FILE_CONTENT}")
-        
+
+        # 记录"含 shader include 的源文件"，供调用方注册为 configure 依赖：
+        # 改名/新增 shader 时编辑这些文件会自动触发重新配置(重新扫描)。
+        # 只登记真正含宏的文件，避免编辑任意普通源文件都触发重配置。
+        if(MATCHES)
+            list(APPEND SCANNED_FILES "${SOURCE_FILE}")
+        endif()
+
         foreach(MATCH ${MATCHES})
             # 提取语言类型
             string(REGEX MATCH "(HLSL|GLSL)" LANG "${MATCH}")
@@ -75,6 +83,7 @@ function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PA
     set(${OUT_LANGS} "${LANG_LIST}" PARENT_SCOPE)
     set(${OUT_PATHS} "${PATH_LIST}" PARENT_SCOPE)
     set(${OUT_REL_PATHS} "${REL_PATH_LIST}" PARENT_SCOPE)
+    set(${OUT_SCANNED_FILES} "${SCANNED_FILES}" PARENT_SCOPE)
 endfunction()
 
 # ============================================================================
@@ -106,9 +115,19 @@ function(helicon_compile_shaders TARGET_NAME)
     endif()
     
     # 解析所有源文件中的 shader include
-    _helicon_parse_shader_includes("${TARGET_SOURCES}" "${TARGET_SOURCE_DIR}" 
-        SHADER_LANGS SHADER_PATHS SHADER_REL_PATHS)
-    
+    _helicon_parse_shader_includes("${TARGET_SOURCES}" "${TARGET_SOURCE_DIR}"
+        SHADER_LANGS SHADER_PATHS SHADER_REL_PATHS SHADER_SCANNED_FILES)
+
+    # 把"含 shader include 的源文件"注册为 configure 依赖。
+    # 要生成哪些 shader 的集合在 configure 时冻结；若不监视这些文件，
+    # 改名/新增 shader(只改源里的 #include GLSL(...))不会触发重新扫描，
+    # 导致旧命令留下孤儿 .hpp、新 shader 永不生成(编译期 C1083)。
+    # 监视后，编辑这些文件即自动重配置、重新冻结正确的命令集。
+    if(SHADER_SCANNED_FILES)
+        set_property(DIRECTORY APPEND PROPERTY
+            CMAKE_CONFIGURE_DEPENDS ${SHADER_SCANNED_FILES})
+    endif()
+
     # 计算 shader 数量
     list(LENGTH SHADER_PATHS SHADER_COUNT)
     
@@ -213,7 +232,9 @@ function(helicon_compile_shaders TARGET_NAME)
         add_dependencies(${TARGET_NAME} ${SHADER_TARGET})
         
         # 添加 include 路径（OUTPUT_DIR 作为根目录）
-        target_include_directories(${TARGET_NAME} PUBLIC "${ARG_OUTPUT_DIR}")
+        # BEFORE: keep freshly-generated shader headers ahead of any stale
+        # build-cache copies on transitive include paths so they can't be shadowed.
+        target_include_directories(${TARGET_NAME} BEFORE PUBLIC "${ARG_OUTPUT_DIR}")
         
         message(STATUS "[Helicon] ${TARGET_NAME}: Output directory: ${ARG_OUTPUT_DIR}")
     endif()

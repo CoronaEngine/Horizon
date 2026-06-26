@@ -377,7 +377,7 @@ std::string procType(slang::TypeReflection* reflection)
     case slang::TypeReflection::Kind::Struct:
         return reflection->getName();
     case slang::TypeReflection::Kind::Array:
-        break;
+        return "Array<" + procType(reflection->getElementType()) + ">";
     case slang::TypeReflection::Kind::Matrix:
         return procMatType(reflection);
     case slang::TypeReflection::Kind::Vector:
