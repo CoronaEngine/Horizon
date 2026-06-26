@@ -377,7 +377,7 @@ std::string procType(slang::TypeReflection* reflection)
     case slang::TypeReflection::Kind::Struct:
         return reflection->getName();
     case slang::TypeReflection::Kind::Array:
-        break;
+        return "Array<" + procType(reflection->getElementType()) + ">";
     case slang::TypeReflection::Kind::Matrix:
         return procMatType(reflection);
     case slang::TypeReflection::Kind::Vector:
@@ -664,6 +664,8 @@ int main(int argc, char** argv)
     shaderResourceArgs.module = &slangModule;
     shaderResourceArgs.stage = inputStage;
     ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
+    std::vector<uint32_t> spirvCode =
+        ShaderLanguageConverter::glslangSpirvCompiler(code, inputLanguage, inputStage);
     //提取成员名，删去路径前缀
     for (auto& info : resources.bindInfoPool)
     {
@@ -692,8 +694,11 @@ int main(int argc, char** argv)
     auto smName = "slang_module_" + fileName;
 
 	generateBinary(out, smName, slangModule);
+    auto spvName = "spirv_" + fileName;
+    generateBinary(out, spvName, spirvCode);
 
-    // 稳定别名：用户可通过 vert_glsl::spirv 引用预编译 SPIR-V 二进制
+    // 稳定别名：用户可通过 xxx_glsl::spirv 或 xxx_glsl::slangModule 引用预编译 shader。
+    out << "static inline auto& spirv = " << spvName << ";\n";
     out << "static inline auto& slangModule = " << smName << ";\n";
 
     // Generate BindingKey struct declarations first, collect binding block names

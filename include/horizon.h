@@ -1169,9 +1169,13 @@ namespace Corona::Horizon
     {
         template <typename CS>
         concept GeneratedComputeShaderObject =
+            (
+            requires {
+                std::remove_cvref_t<CS>::spirv;
+            } ||
             requires {
                 std::remove_cvref_t<CS>::slangModule;
-            } &&
+            }) &&
             requires {
                 typename std::remove_cvref_t<CS>::template Bindings<ComputePipelineBase>;
             };
@@ -1237,9 +1241,18 @@ namespace Corona::Horizon
 
         static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
         {
-            return ComputePipelineDesc(
-                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
-                numthreads);
+            if constexpr (requires { CS::spirv; })
+            {
+                return ComputePipelineDesc(
+                    PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, CS::spirv),
+                    numthreads);
+            }
+            else
+            {
+                return ComputePipelineDesc(
+                    PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
+                    numthreads);
+            }
         }
 
         explicit ComputePipeline(CS, ktm::uvec3 numthreads = { 1, 1, 1 },
