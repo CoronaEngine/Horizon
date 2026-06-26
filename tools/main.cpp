@@ -664,8 +664,17 @@ int main(int argc, char** argv)
     shaderResourceArgs.module = &slangModule;
     shaderResourceArgs.stage = inputStage;
     ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
-    std::vector<uint32_t> spirvCode =
-        ShaderLanguageConverter::glslangSpirvCompiler(code, inputLanguage, inputStage);
+    // glslang 已移除：复用上面已编译的 slangModule，经 slang 直出 SPIR-V
+    SlangCompileArgs2 spirvArgs;
+    spirvArgs.module = &slangModule;
+    spirvArgs.sourceLanguage = inputLanguage;
+    spirvArgs.targetLanguages = {ShaderLanguage::SpirV};
+    spirvArgs.stage = inputStage;
+    auto spirvResult = ShaderLanguageConverter::slangCompilerWithModules(spirvArgs);
+    auto spirvIt = spirvResult.binaryTargets.find(ShaderLanguage::SpirV);
+    if (spirvIt == spirvResult.binaryTargets.end())
+        throw std::runtime_error("Failed to generate SPIR-V from Slang module.");
+    std::vector<uint32_t> spirvCode = std::move(spirvIt->second);
     //提取成员名，删去路径前缀
     for (auto& info : resources.bindInfoPool)
     {
