@@ -1,6 +1,7 @@
 # IDE 配置文件
 .vs/
 .vscode/
+CMakeUserPresets.json
 .cache/
 .idea/
 .github/
