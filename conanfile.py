@@ -165,6 +165,8 @@ class HorizonConan(ConanFile):
             "spirv_cross_c",
             "spirv_cross_cpp",
             "spirv_cross_core",
+            "spirv_cross_glsl",
+            "spirv_cross_hlsl",
             "spirv_cross_util",
             "spirv_tools_link",
         ]
@@ -190,6 +192,14 @@ class HorizonConan(ConanFile):
 
         self.cpp_info.components["spirv_cross_core"].set_property("cmake_target_name", "spirv-cross-core")
         self.cpp_info.components["spirv_cross_core"].libs = ["spirv-cross-core"]
+
+        self.cpp_info.components["spirv_cross_glsl"].set_property("cmake_target_name", "spirv-cross-glsl")
+        self.cpp_info.components["spirv_cross_glsl"].libs = ["spirv-cross-glsl"]
+        self.cpp_info.components["spirv_cross_glsl"].requires = ["spirv_cross_core"]
+
+        self.cpp_info.components["spirv_cross_hlsl"].set_property("cmake_target_name", "spirv-cross-hlsl")
+        self.cpp_info.components["spirv_cross_hlsl"].libs = ["spirv-cross-hlsl"]
+        self.cpp_info.components["spirv_cross_hlsl"].requires = ["spirv_cross_glsl", "spirv_cross_core"]
 
         self.cpp_info.components["spirv_cross_util"].set_property("cmake_target_name", "spirv-cross-util")
         self.cpp_info.components["spirv_cross_util"].libs = ["spirv-cross-util"]
