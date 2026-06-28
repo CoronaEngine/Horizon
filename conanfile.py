@@ -8,7 +8,6 @@ from conan.tools.files import copy
 
 class HorizonConan(ConanFile):
     name = "horizon"
-    version = "0.5.0"
     package_type = "library"
 
     settings = "os", "arch", "compiler", "build_type"
@@ -35,6 +34,9 @@ class HorizonConan(ConanFile):
 
     def layout(self):
         cmake_layout(self, build_folder="build/conan")
+
+    def set_version(self):
+        self.version = os.environ.get("HORIZON_CONAN_VERSION", "0.5.0")
 
     def validate(self):
         if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):

@@ -4,11 +4,13 @@ This task note records the first Horizon Conan package scaffold used by CoronaEn
 
 ## Current Scope
 
-- `conanfile.py` defines `horizon/0.5.0`.
+- `conanfile.py` defines `horizon/<version>`.
+- The default migration version is `0.5.0`; CI/release jobs may override it with `HORIZON_CONAN_VERSION`.
 - The recipe exposes the first package options:
   - `shared`
   - `with_ocarina`
   - `with_vision_hotfix`
+  - `with_cuda`
   - `with_tools`
   - `with_examples`
   - `with_tests`
