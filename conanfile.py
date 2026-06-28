@@ -3,12 +3,20 @@ import os
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
-from conan.tools.files import copy
+from conan.tools.files import collect_libs, copy
 
 
 class HorizonConan(ConanFile):
     name = "horizon"
     package_type = "library"
+    exports_sources = (
+        "CMakeLists.txt",
+        "cmake/*",
+        "include/*",
+        "modules/corona/*",
+        "src/*",
+        "tools/*",
+    )
 
     settings = "os", "arch", "compiler", "build_type"
 
@@ -87,4 +95,4 @@ class HorizonConan(ConanFile):
                 "cmake_extra_variables",
                 {"HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE": shader_tool_path},
             )
-        self.cpp_info.libs = ["Horizon"]
+        self.cpp_info.libs = collect_libs(self)
