@@ -68,10 +68,12 @@ class HorizonConan(ConanFile):
         copy(self, "*.h", src=os.path.join(self.source_folder, "include"), dst=os.path.join(self.package_folder, "include"))
         copy(self, "*.hpp", src=os.path.join(self.source_folder, "include"), dst=os.path.join(self.package_folder, "include"))
         copy(self, "*.inl", src=os.path.join(self.source_folder, "include"), dst=os.path.join(self.package_folder, "include"))
+        copy(self, "HeliconShaderCompile.cmake", src=os.path.join(self.source_folder, "cmake"), dst=os.path.join(self.package_folder, "cmake"))
         copy(self, "*.lib", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.a", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "Horizon")
         self.cpp_info.set_property("cmake_target_name", "Horizon::Horizon")
+        self.cpp_info.set_property("cmake_build_modules", [os.path.join("cmake", "HeliconShaderCompile.cmake")])
         self.cpp_info.libs = ["Horizon"]
