@@ -52,11 +52,15 @@ class HorizonConan(ConanFile):
             copy(conanfile, pattern, src=src, dst=dst, keep_path=True)
 
     def _build_deps_root(self):
-        candidates = (
+        candidates = []
+        fetchcontent_source_root = self._fetchcontent_source_root()
+        if fetchcontent_source_root:
+            candidates.append(fetchcontent_source_root)
+        candidates.extend((
             os.path.join(self.build_folder, "_deps"),
             os.path.join(os.path.dirname(self.build_folder), "_deps"),
             os.path.join(os.path.dirname(os.path.dirname(self.build_folder)), "_deps"),
-        )
+        ))
         for candidate in candidates:
             if os.path.isdir(os.path.join(candidate, "ktm-src")):
                 return candidate
@@ -69,6 +73,37 @@ class HorizonConan(ConanFile):
                 os.path.join(self.source_folder, "third-party", "slang", "src"),
             )
         )
+
+    def _fetchcontent_source_root(self):
+        source_root = os.environ.get("HORIZON_FETCHCONTENT_SOURCE_ROOT")
+        if source_root and os.path.isdir(source_root):
+            return os.path.normpath(source_root)
+        return None
+
+    def _fetchcontent_source_overrides(self):
+        source_root = self._fetchcontent_source_root()
+        if not source_root:
+            return {}
+
+        dependency_sources = {
+            "pfr": "pfr-src",
+            "ktm": "ktm-src",
+            "preprocessor": "preprocessor-src",
+            "SPIRV-Cross": "spirv-cross-src",
+            "SPIRV-Headers": "spirv-headers-src",
+            "SPIRV-Tools": "spirv-tools-src",
+            "volk": "volk-src",
+            "Vulkan-Headers": "vulkan-headers-src",
+            "VulkanMemoryAllocator": "vulkanmemoryallocator-src",
+            "quill": "quill-src",
+        }
+
+        overrides = {}
+        for cmake_name, source_dir_name in dependency_sources.items():
+            source_dir = os.path.join(source_root, source_dir_name)
+            if os.path.isdir(source_dir):
+                overrides[f"FETCHCONTENT_SOURCE_DIR_{cmake_name.upper()}"] = os.path.normpath(source_dir)
+        return overrides
 
     def validate(self):
         if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):
@@ -89,6 +124,11 @@ class HorizonConan(ConanFile):
         toolchain.variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
         toolchain.variables["HORIZON_BUILD_BENCHMARKS"] = False
         toolchain.variables["HORIZON_ENABLE_DEPENDENCY_INSTALL"] = False
+        fetchcontent_source_root = self._fetchcontent_source_root()
+        if fetchcontent_source_root:
+            toolchain.variables["HORIZON_FETCHCONTENT_SOURCE_ROOT"] = fetchcontent_source_root.replace("\\", "/")
+            for variable_name, source_dir in self._fetchcontent_source_overrides().items():
+                toolchain.variables[variable_name] = source_dir.replace("\\", "/")
         if os.path.isdir(self._slang_root()):
             toolchain.variables["HORIZON_SLANG_ROOT"] = self._slang_root().replace("\\", "/")
         toolchain.generate()
