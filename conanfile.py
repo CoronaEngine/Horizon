@@ -63,6 +63,8 @@ class HorizonConan(ConanFile):
         cmake = CMake(self)
         cmake.configure()
         cmake.build(target="Horizon")
+        if bool(self.options.with_tools):
+            cmake.build(target="ShaderCompileScripts")
 
     def package(self):
         copy(self, "*.h", src=os.path.join(self.source_folder, "include"), dst=os.path.join(self.package_folder, "include"))
@@ -71,9 +73,18 @@ class HorizonConan(ConanFile):
         copy(self, "HeliconShaderCompile.cmake", src=os.path.join(self.source_folder, "cmake"), dst=os.path.join(self.package_folder, "cmake"))
         copy(self, "*.lib", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.a", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
+        if bool(self.options.with_tools):
+            copy(self, "ShaderCompileScripts*", src=self.build_folder, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "Horizon")
         self.cpp_info.set_property("cmake_target_name", "Horizon::Horizon")
         self.cpp_info.set_property("cmake_build_modules", [os.path.join("cmake", "HeliconShaderCompile.cmake")])
+        if bool(self.options.with_tools):
+            shader_tool_name = "ShaderCompileScripts.exe" if self.settings.os == "Windows" else "ShaderCompileScripts"
+            shader_tool_path = os.path.join(self.package_folder, "bin", shader_tool_name).replace("\\", "/")
+            self.cpp_info.set_property(
+                "cmake_extra_variables",
+                {"HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE": shader_tool_path},
+            )
         self.cpp_info.libs = ["Horizon"]

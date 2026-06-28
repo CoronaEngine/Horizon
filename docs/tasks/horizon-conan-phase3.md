@@ -17,7 +17,8 @@ This task note records the first Horizon Conan package scaffold used by CoronaEn
 - The recipe generates `CMakeToolchain` and `CMakeDeps`.
 - The recipe maps options to existing CMake cache variables without changing Horizon's default CMake build.
 - The recipe exports `cmake/HeliconShaderCompile.cmake` as a CMake build module so consumers can keep calling `helicon_compile_shaders()` after `find_package(Horizon CONFIG)`.
-- Consumer-side `conan install` now writes `horizon_BUILD_MODULES_PATHS_<CONFIG>` with the Helicon build module path. Full `find_package(Horizon CONFIG)` smoke is still blocked until the Horizon library artifact and shader tool target are available in the package/editable layout.
+- When `with_tools=True`, the recipe builds/packages `ShaderCompileScripts` and exports `HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE` so the build module can create an imported tool target for package consumers.
+- Consumer-side `conan install` now writes `horizon_BUILD_MODULES_PATHS_<CONFIG>` with the Helicon build module path. Full `find_package(Horizon CONFIG)` smoke is still blocked until the Horizon library artifact is available in the package/editable layout.
 - Windows MSVC Debug/Release profiles live in `conan/profiles/`.
 
 ## Validation
@@ -31,5 +32,5 @@ conan graph info . --profile:host conan/profiles/windows-msvc-debug --profile:bu
 
 - This is not yet a complete release package.
 - Existing FetchContent dependency migration is deferred.
-- Full component targets and packaged shader tool targets are deferred.
+- Full component targets and package-library layout validation are deferred.
 - `conan create` should be validated only after the package dependency surface is made explicit.

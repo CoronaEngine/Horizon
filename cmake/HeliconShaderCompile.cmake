@@ -12,6 +12,15 @@
 #   -> 预处理展开为 #include "shaders/example.hlsl.hpp"
 # ============================================================================
 
+if(NOT TARGET ShaderCompileScripts
+   AND DEFINED HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE
+   AND NOT HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE STREQUAL ""
+   AND EXISTS "${HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE}")
+    add_executable(ShaderCompileScripts IMPORTED GLOBAL)
+    set_target_properties(ShaderCompileScripts PROPERTIES
+        IMPORTED_LOCATION "${HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE}")
+endif()
+
 # 解析源文件中的 shader include 指令
 # 返回: SHADER_LANG_LIST, SHADER_PATH_LIST, SHADER_RELATIVE_PATH_LIST
 function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PATHS OUT_REL_PATHS OUT_SCANNED_FILES)
@@ -95,6 +104,13 @@ endfunction()
 #   OUTPUT_DIR  - 输出目录 (可选, 默认: ${PROJECT_SOURCE_DIR}/Src/Helicon/Compiler/HardcodeShaders)
 # ============================================================================
 function(helicon_compile_shaders TARGET_NAME)
+    if(NOT TARGET ShaderCompileScripts)
+        message(FATAL_ERROR
+            "helicon_compile_shaders requires the ShaderCompileScripts target. "
+            "When consuming Horizon as a package, build/package Horizon with with_tools=True "
+            "or provide HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE.")
+    endif()
+
     # 解析可选参数
     cmake_parse_arguments(ARG "" "OUTPUT_DIR" "" ${ARGN})
     
