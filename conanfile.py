@@ -82,7 +82,11 @@ class HorizonConan(ConanFile):
         copy(self, "*.lib", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.a", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
         if bool(self.options.with_tools):
-            copy(self, "ShaderCompileScripts*", src=self.build_folder, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
+            tool_output_dir = os.path.join(self.build_folder, "tools", str(self.settings.build_type))
+            copy(self, "ShaderCompileScripts*", src=tool_output_dir, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
+            copy(self, "*.dll", src=tool_output_dir, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
+            copy(self, "*.dylib", src=tool_output_dir, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
+            copy(self, "*.so*", src=tool_output_dir, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "Horizon")
