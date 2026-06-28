@@ -87,7 +87,14 @@ else()
         CACHE PATH "${_horizon_fetchcontent_binary_root_doc}"
     )
 endif()
-mark_as_advanced(HORIZON_FETCHCONTENT_SOURCE_ROOT HORIZON_FETCHCONTENT_BINARY_ROOT)
+
+option(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE
+    "Require pre-populated FetchContent source directories instead of allowing downloads"
+    OFF)
+mark_as_advanced(
+    HORIZON_FETCHCONTENT_SOURCE_ROOT
+    HORIZON_FETCHCONTENT_BINARY_ROOT
+    HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE)
 
 cmake_path(
     ABSOLUTE_PATH HORIZON_FETCHCONTENT_SOURCE_ROOT
@@ -128,34 +135,49 @@ unset(_horizon_legacy_source_root_absolute)
 
 message(STATUS "Horizon FetchContent source cache: ${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}")
 message(STATUS "Horizon FetchContent build root: ${HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE}")
+message(STATUS "Horizon FetchContent require source cache: ${HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE}")
+
+if(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE)
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
+        "Do not download FetchContent sources when Horizon source cache mode is required"
+        FORCE)
+endif()
 
 function(horizon_fetchcontent_declare name)
-    string(TOLOWER "${name}" lowercase_name)
+    string(TOLOWER "${name}" _horizon_content_lowercase_name)
 
-    set(has_source_dir OFF)
-    set(has_binary_dir OFF)
-    foreach(arg IN LISTS ARGN)
-        if(arg STREQUAL "SOURCE_DIR")
-            set(has_source_dir ON)
-        elseif(arg STREQUAL "BINARY_DIR")
-            set(has_binary_dir ON)
+    set(_horizon_content_has_source_dir OFF)
+    set(_horizon_content_has_binary_dir OFF)
+    foreach(_horizon_content_arg IN LISTS ARGN)
+        if(_horizon_content_arg STREQUAL "SOURCE_DIR")
+            set(_horizon_content_has_source_dir ON)
+        elseif(_horizon_content_arg STREQUAL "BINARY_DIR")
+            set(_horizon_content_has_binary_dir ON)
         endif()
     endforeach()
 
-    set(directory_args)
-    if(NOT has_source_dir)
-        list(APPEND directory_args
-            SOURCE_DIR "${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}/${lowercase_name}-src"
+    set(_horizon_content_directory_args)
+    if(NOT _horizon_content_has_source_dir)
+        set(_horizon_content_source_dir
+            "${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}/${_horizon_content_lowercase_name}-src")
+        if(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE
+           AND NOT EXISTS "${_horizon_content_source_dir}")
+            message(FATAL_ERROR
+                "Horizon FetchContent source cache is required for '${name}', "
+                "but this directory does not exist: ${_horizon_content_source_dir}")
+        endif()
+        list(APPEND _horizon_content_directory_args
+            SOURCE_DIR "${_horizon_content_source_dir}"
         )
     endif()
-    if(NOT has_binary_dir)
-        list(APPEND directory_args
-            BINARY_DIR "${HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE}/${lowercase_name}-build"
+    if(NOT _horizon_content_has_binary_dir)
+        list(APPEND _horizon_content_directory_args
+            BINARY_DIR "${HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE}/${_horizon_content_lowercase_name}-build"
         )
     endif()
 
     FetchContent_Declare(${name}
         ${ARGN}
-        ${directory_args}
+        ${_horizon_content_directory_args}
     )
 endfunction()
