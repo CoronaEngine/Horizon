@@ -80,6 +80,56 @@ class HorizonConan(ConanFile):
             return os.path.normpath(source_root)
         return None
 
+    def _editable_build_root(self):
+        return os.path.normpath(
+            os.environ.get(
+                "HORIZON_EDITABLE_BUILD_ROOT",
+                os.path.join(self.package_folder, "build"),
+            )
+        )
+
+    def _is_editable(self):
+        return os.path.isfile(os.path.join(self.package_folder, "conanfile.py"))
+
+    def _editable_slang_root(self):
+        return os.path.normpath(
+            os.environ.get(
+                "HORIZON_SLANG_ROOT",
+                os.path.join(self.package_folder, "third-party", "slang", "src"),
+            )
+        )
+
+    def _editable_libdirs(self):
+        build_root = self._editable_build_root()
+        config = str(self.settings.build_type)
+        candidates = [
+            os.path.join(build_root, "src", config),
+            os.path.join(build_root, "src", "Helicon", config),
+            os.path.join(build_root, "modules", "corona", "src", "kernel", config),
+            os.path.join(build_root, "modules", "corona", "src", "pal", config),
+            os.path.join(build_root, "_deps", "volk-build", config),
+            os.path.join(build_root, "_deps", "spirv-cross-build", config),
+            os.path.join(build_root, "_deps", "spirv-tools-build", "source", config),
+            os.path.join(build_root, "_deps", "spirv-tools-build", "source", "opt", config),
+            os.path.join(build_root, "_deps", "spirv-tools-build", "source", "link", config),
+            os.path.join(self._editable_slang_root(), "lib"),
+        ]
+        return [path for path in candidates if os.path.isdir(path)]
+
+    def _shader_tool_path(self):
+        shader_tool_name = "ShaderCompileScripts.exe" if self.settings.os == "Windows" else "ShaderCompileScripts"
+        if self._is_editable():
+            return os.path.join(
+                self._editable_build_root(),
+                "tools",
+                str(self.settings.build_type),
+                shader_tool_name,
+            )
+        return os.path.join(self.package_folder, "bin", shader_tool_name)
+
+    def _spirv_cross_debug_suffix(self):
+        return "d" if str(self.settings.build_type) == "Debug" else ""
+
     def _fetchcontent_source_overrides(self):
         source_root = self._fetchcontent_source_root()
         if not source_root:
@@ -188,8 +238,7 @@ class HorizonConan(ConanFile):
             ],
         )
         if bool(self.options.with_tools):
-            shader_tool_name = "ShaderCompileScripts.exe" if self.settings.os == "Windows" else "ShaderCompileScripts"
-            shader_tool_path = os.path.join(self.package_folder, "bin", shader_tool_name).replace("\\", "/")
+            shader_tool_path = self._shader_tool_path().replace("\\", "/")
             self.cpp_info.set_property(
                 "cmake_extra_variables",
                 {"HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE": shader_tool_path},
@@ -223,26 +272,26 @@ class HorizonConan(ConanFile):
         self.cpp_info.components["volk"].libs = ["volk"]
 
         self.cpp_info.components["spirv_cross_c"].set_property("cmake_target_name", "spirv-cross-c")
-        self.cpp_info.components["spirv_cross_c"].libs = ["spirv-cross-c"]
+        self.cpp_info.components["spirv_cross_c"].libs = [f"spirv-cross-c{self._spirv_cross_debug_suffix()}"]
         self.cpp_info.components["spirv_cross_c"].requires = ["spirv_cross_core"]
 
         self.cpp_info.components["spirv_cross_cpp"].set_property("cmake_target_name", "spirv-cross-cpp")
-        self.cpp_info.components["spirv_cross_cpp"].libs = ["spirv-cross-cpp"]
+        self.cpp_info.components["spirv_cross_cpp"].libs = [f"spirv-cross-cpp{self._spirv_cross_debug_suffix()}"]
         self.cpp_info.components["spirv_cross_cpp"].requires = ["spirv_cross_core"]
 
         self.cpp_info.components["spirv_cross_core"].set_property("cmake_target_name", "spirv-cross-core")
-        self.cpp_info.components["spirv_cross_core"].libs = ["spirv-cross-core"]
+        self.cpp_info.components["spirv_cross_core"].libs = [f"spirv-cross-core{self._spirv_cross_debug_suffix()}"]
 
         self.cpp_info.components["spirv_cross_glsl"].set_property("cmake_target_name", "spirv-cross-glsl")
-        self.cpp_info.components["spirv_cross_glsl"].libs = ["spirv-cross-glsl"]
+        self.cpp_info.components["spirv_cross_glsl"].libs = [f"spirv-cross-glsl{self._spirv_cross_debug_suffix()}"]
         self.cpp_info.components["spirv_cross_glsl"].requires = ["spirv_cross_core"]
 
         self.cpp_info.components["spirv_cross_hlsl"].set_property("cmake_target_name", "spirv-cross-hlsl")
-        self.cpp_info.components["spirv_cross_hlsl"].libs = ["spirv-cross-hlsl"]
+        self.cpp_info.components["spirv_cross_hlsl"].libs = [f"spirv-cross-hlsl{self._spirv_cross_debug_suffix()}"]
         self.cpp_info.components["spirv_cross_hlsl"].requires = ["spirv_cross_glsl", "spirv_cross_core"]
 
         self.cpp_info.components["spirv_cross_util"].set_property("cmake_target_name", "spirv-cross-util")
-        self.cpp_info.components["spirv_cross_util"].libs = ["spirv-cross-util"]
+        self.cpp_info.components["spirv_cross_util"].libs = [f"spirv-cross-util{self._spirv_cross_debug_suffix()}"]
         self.cpp_info.components["spirv_cross_util"].requires = ["spirv_cross_core"]
 
         self.cpp_info.components["spirv_tools"].set_property("cmake_target_name", "SPIRV-Tools")
@@ -258,6 +307,8 @@ class HorizonConan(ConanFile):
 
         for component in self.cpp_info.components.values():
             component.includedirs = ["include"]
+            if self._is_editable():
+                component.libdirs = self._editable_libdirs()
 
         if self.settings.compiler == "msvc":
             for component_name in ("horizon", "helicon", "corona_kernel"):
