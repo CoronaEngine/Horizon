@@ -106,6 +106,28 @@ class HorizonConan(ConanFile):
             )
         )
 
+    def _editable_includedirs(self):
+        source_root = self.package_folder
+        candidates = [
+            os.path.join(source_root, "include"),
+            os.path.join(source_root, "src", "Helicon"),
+            os.path.join(source_root, "modules", "corona", "include"),
+            os.path.join(self._editable_slang_root(), "include"),
+        ]
+
+        deps_root = self._fetchcontent_source_root()
+        if deps_root:
+            candidates.extend((
+                os.path.join(deps_root, "ktm-src"),
+                os.path.join(deps_root, "pfr-src", "include"),
+                os.path.join(deps_root, "quill-src", "include"),
+                os.path.join(deps_root, "spirv-headers-src", "include"),
+                os.path.join(deps_root, "spirv-tools-src", "include"),
+                os.path.join(deps_root, "vulkan-headers-src", "include"),
+                os.path.join(deps_root, "vulkanmemoryallocator-src", "include"),
+            ))
+        return [path for path in candidates if os.path.isdir(path)]
+
     def _editable_libdirs(self):
         build_root = self._editable_build_root()
         config = str(self.settings.build_type)
@@ -325,10 +347,13 @@ class HorizonConan(ConanFile):
         self.cpp_info.components["spirv_tools_link"].libs = ["SPIRV-Tools-link"]
         self.cpp_info.components["spirv_tools_link"].requires = ["spirv_tools_opt", "spirv_tools"]
 
+        editable = self._is_editable()
+        editable_includedirs = self._editable_includedirs() if editable else None
+        editable_libdirs = self._editable_libdirs() if editable else None
         for component in self.cpp_info.components.values():
-            component.includedirs = ["include"]
-            if self._is_editable():
-                component.libdirs = self._editable_libdirs()
+            component.includedirs = editable_includedirs if editable else ["include"]
+            if editable:
+                component.libdirs = editable_libdirs
 
         if self.settings.compiler == "msvc":
             for component_name in ("horizon", "helicon", "corona_kernel"):
