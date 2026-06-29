@@ -2,11 +2,7 @@ include_guard(GLOBAL)
 
 set(HORIZON_SLANG_VERSION "2026.10" CACHE STRING "Slang binary distribution version")
 set(HORIZON_SLANG_ROOT "" CACHE PATH "Path to an existing Slang binary distribution")
-set(HORIZON_SLANG_DOWNLOAD_URL "" CACHE STRING "Override URL for the Slang binary distribution archive")
-set(HORIZON_SLANG_DOWNLOAD_SHA256 "" CACHE STRING "Override SHA256 for the Slang binary distribution archive")
-option(HORIZON_SLANG_REQUIRE_LOCAL
-    "Require a pre-populated Slang SDK root or archive instead of downloading"
-    OFF)
+set(HORIZON_SLANG_ARCHIVE_SHA256 "" CACHE STRING "Expected SHA256 for the local Slang binary distribution archive")
 
 set(_horizon_slang_managed_root "${PROJECT_SOURCE_DIR}/third-party/slang/src")
 get_filename_component(_horizon_slang_managed_root "${_horizon_slang_managed_root}" ABSOLUTE)
@@ -26,7 +22,7 @@ if(NOT WIN32)
     if(_horizon_slang_custom_root)
         message(STATUS "Slang: using custom root ${HORIZON_SLANG_ROOT}")
     else()
-        message(FATAL_ERROR "Managed Slang download is currently configured for Windows packages. Set HORIZON_SLANG_ROOT to a local Slang distribution for this platform.")
+        message(FATAL_ERROR "Managed Slang archive extraction is currently configured for Windows packages. Set HORIZON_SLANG_ROOT to a local Slang distribution for this platform.")
     endif()
 endif()
 
@@ -47,17 +43,12 @@ else()
 endif()
 
 set(_horizon_slang_archive "slang-${HORIZON_SLANG_VERSION}-windows-${_horizon_slang_arch}.zip")
-set(_horizon_slang_default_url "https://github.com/shader-slang/slang/releases/download/v${HORIZON_SLANG_VERSION}/${_horizon_slang_archive}")
 
-if(NOT HORIZON_SLANG_DOWNLOAD_URL)
-    set(HORIZON_SLANG_DOWNLOAD_URL "${_horizon_slang_default_url}")
-endif()
-
-if(NOT HORIZON_SLANG_DOWNLOAD_SHA256 AND HORIZON_SLANG_VERSION STREQUAL "2026.10")
+if(NOT HORIZON_SLANG_ARCHIVE_SHA256 AND HORIZON_SLANG_VERSION STREQUAL "2026.10")
     if(_horizon_slang_arch STREQUAL "x86_64")
-        set(HORIZON_SLANG_DOWNLOAD_SHA256 "4d681fd6c40a028939d4907d714fb633a16895bd7ae8b8ef288401b805c17aa4")
+        set(HORIZON_SLANG_ARCHIVE_SHA256 "4d681fd6c40a028939d4907d714fb633a16895bd7ae8b8ef288401b805c17aa4")
     elseif(_horizon_slang_arch STREQUAL "aarch64")
-        set(HORIZON_SLANG_DOWNLOAD_SHA256 "54b88155e5d94ddf63ef5013a59a8a49f35a7b415048fc57078d9eecdf2ccc7d")
+        set(HORIZON_SLANG_ARCHIVE_SHA256 "54b88155e5d94ddf63ef5013a59a8a49f35a7b415048fc57078d9eecdf2ccc7d")
     endif()
 endif()
 
@@ -125,49 +116,20 @@ if(_horizon_slang_needs_extract)
 
     file(MAKE_DIRECTORY "${_horizon_slang_download_dir}")
 
-    if(EXISTS "${_horizon_slang_archive_path}" AND HORIZON_SLANG_DOWNLOAD_SHA256)
+    if(EXISTS "${_horizon_slang_archive_path}" AND HORIZON_SLANG_ARCHIVE_SHA256)
         file(SHA256 "${_horizon_slang_archive_path}" _horizon_slang_archive_sha256)
-        if(NOT _horizon_slang_archive_sha256 STREQUAL HORIZON_SLANG_DOWNLOAD_SHA256)
+        if(NOT _horizon_slang_archive_sha256 STREQUAL HORIZON_SLANG_ARCHIVE_SHA256)
             message(STATUS "Slang: removing archive with mismatched hash: ${_horizon_slang_archive_path}")
             file(REMOVE "${_horizon_slang_archive_path}")
         endif()
     endif()
 
     if(NOT EXISTS "${_horizon_slang_archive_path}")
-        if(HORIZON_SLANG_REQUIRE_LOCAL)
-            message(FATAL_ERROR
-                "Slang: local SDK/archive is required, but the archive is missing:\n"
-                "  ${_horizon_slang_archive_path}\n"
-                "Set HORIZON_SLANG_ROOT to a local Slang distribution or pre-populate "
-                "the archive before configuring.")
-        endif()
-
-        message(STATUS "Slang: downloading ${HORIZON_SLANG_DOWNLOAD_URL} -> ${_horizon_slang_archive_path}")
-
-        if(HORIZON_SLANG_DOWNLOAD_SHA256)
-            file(DOWNLOAD
-                "${HORIZON_SLANG_DOWNLOAD_URL}"
-                "${_horizon_slang_archive_path}"
-                SHOW_PROGRESS
-                EXPECTED_HASH "SHA256=${HORIZON_SLANG_DOWNLOAD_SHA256}"
-                STATUS _horizon_slang_download_status
-                LOG _horizon_slang_download_log
-            )
-        else()
-            file(DOWNLOAD
-                "${HORIZON_SLANG_DOWNLOAD_URL}"
-                "${_horizon_slang_archive_path}"
-                SHOW_PROGRESS
-                STATUS _horizon_slang_download_status
-                LOG _horizon_slang_download_log
-            )
-        endif()
-
-        list(GET _horizon_slang_download_status 0 _horizon_slang_download_code)
-        list(GET _horizon_slang_download_status 1 _horizon_slang_download_message)
-        if(NOT _horizon_slang_download_code EQUAL 0)
-            message(FATAL_ERROR "Slang download failed (${_horizon_slang_download_code}): ${_horizon_slang_download_message}\n${_horizon_slang_download_log}")
-        endif()
+        message(FATAL_ERROR
+            "Slang: local SDK/archive is required, but the archive is missing:\n"
+            "  ${_horizon_slang_archive_path}\n"
+            "Set HORIZON_SLANG_ROOT to a local Slang distribution or pre-populate "
+            "the archive before configuring. CMake no longer downloads Slang.")
     endif()
 
     message(STATUS "Slang: extracting ${_horizon_slang_archive_path} -> ${HORIZON_SLANG_ROOT}")

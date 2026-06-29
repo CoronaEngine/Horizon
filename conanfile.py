@@ -80,6 +80,11 @@ class HorizonConan(ConanFile):
             return os.path.normpath(source_root)
         return None
 
+    @staticmethod
+    def _env_bool(name):
+        value = os.environ.get(name, "")
+        return value.lower() in ("1", "true", "yes", "on")
+
     def _editable_build_root(self):
         return os.path.normpath(
             os.environ.get(
@@ -175,8 +180,15 @@ class HorizonConan(ConanFile):
         toolchain.variables["HORIZON_BUILD_BENCHMARKS"] = False
         toolchain.variables["HORIZON_ENABLE_DEPENDENCY_INSTALL"] = False
         fetchcontent_source_root = self._fetchcontent_source_root()
+        if self._env_bool("HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE") and not fetchcontent_source_root:
+            raise ConanInvalidConfiguration(
+                "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE requires HORIZON_FETCHCONTENT_SOURCE_ROOT"
+            )
         if fetchcontent_source_root:
             toolchain.variables["HORIZON_FETCHCONTENT_SOURCE_ROOT"] = fetchcontent_source_root.replace("\\", "/")
+            toolchain.variables["HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"] = self._env_bool(
+                "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"
+            )
             for variable_name, source_dir in self._fetchcontent_source_overrides().items():
                 toolchain.variables[variable_name] = source_dir.replace("\\", "/")
         if os.path.isdir(self._slang_root()):

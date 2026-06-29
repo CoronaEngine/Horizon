@@ -61,6 +61,7 @@ For newcomer on-demand target selection, load `docs/tasks/optional-build-targets
 - The common entry point for newcomers and agents is `tools/dev.ps1`; use direct `cmake` commands only when investigating lower-level issues.
 - Each configure preset uses its own `build/<preset>` directory; do not assume all generators share `build/`.
 - FetchContent dependencies use a shared source cache and preset-local build directories.
+- Slang is a required local input. CMake does not download it during configure; set `HORIZON_SLANG_ROOT` or pre-populate `third-party/slang/download/slang-<version>-windows-<arch>.zip`.
 
 ## Presets And Directories
 
@@ -82,6 +83,7 @@ For newcomer on-demand target selection, load `docs/tasks/optional-build-targets
 - Preset-local third-party build directories: `build/<preset>/deps/*-build`.
 - Prefer `horizon_fetchcontent_declare(...)` for new FetchContent dependencies.
 - Do not call bare `FetchContent_Declare(...)` unless the dependency truly needs custom `SOURCE_DIR` or `BINARY_DIR`.
+- Set `HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE=ON` for CI/release/package verification so missing source checkouts fail instead of being populated during configure.
 - If `build/<preset>/_deps` appears, first check stale cache or a new dependency bypassing `horizon_fetchcontent_declare(...)`.
 - For daily cleanup, delete the specific `build/<preset>` directory; delete `build/_deps` only when third-party sources must be re-cloned.
 
