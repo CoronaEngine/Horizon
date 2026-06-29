@@ -114,13 +114,17 @@ class HorizonConan(ConanFile):
             os.path.join(build_root, "src", "Helicon", config),
             os.path.join(build_root, "modules", "corona", "src", "kernel", config),
             os.path.join(build_root, "modules", "corona", "src", "pal", config),
-            os.path.join(build_root, "_deps", "volk-build", config),
-            os.path.join(build_root, "_deps", "spirv-cross-build", config),
-            os.path.join(build_root, "_deps", "spirv-tools-build", "source", config),
-            os.path.join(build_root, "_deps", "spirv-tools-build", "source", "opt", config),
-            os.path.join(build_root, "_deps", "spirv-tools-build", "source", "link", config),
             os.path.join(self._editable_slang_root(), "lib"),
         ]
+        for deps_dir_name in ("deps", "_deps"):
+            deps_root = os.path.join(build_root, deps_dir_name)
+            candidates.extend((
+                os.path.join(deps_root, "volk-build", config),
+                os.path.join(deps_root, "spirv-cross-build", config),
+                os.path.join(deps_root, "spirv-tools-build", "source", config),
+                os.path.join(deps_root, "spirv-tools-build", "source", "opt", config),
+                os.path.join(deps_root, "spirv-tools-build", "source", "link", config),
+            ))
         return [path for path in candidates if os.path.isdir(path)]
 
     def _shader_tool_path(self):
