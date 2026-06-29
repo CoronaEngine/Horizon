@@ -59,7 +59,8 @@ cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
 - 修改 CMake 后，运行 configure 和最小相关 build。
 - 新人和 Agent 的常用入口是 `tools/dev.ps1`；只有需要排查底层问题时才直接用 `cmake`。
 - 每个 configure preset 使用独立的 `build/<preset>` 目录，不要假设所有生成器共享 `build/`。
-- FetchContent 依赖采用共享源码缓存和 preset 本地构建目录。
+- FetchContent 依赖采用必需的共享源码缓存和 preset 本地构建目录。
+- Slang 是必需的本地输入。CMake configure 不会下载 Slang；需要设置 `HORIZON_SLANG_ROOT`，或预先填充 `third-party/slang/download/slang-<version>-windows-<arch>.zip`。
 
 ## Preset 和目录
 
@@ -81,6 +82,7 @@ cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
 - Preset 本地第三方构建目录：`build/<preset>/deps/*-build`。
 - 新增 FetchContent 依赖时优先使用 `horizon_fetchcontent_declare(...)`。
 - 不要直接使用裸 `FetchContent_Declare(...)`，除非依赖确实需要自定义 `SOURCE_DIR` 或 `BINARY_DIR`。
+- `HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE` 默认是 `ON`；缺少源码 checkout 时会失败，而不是在 configure 阶段填充。只有显式 bootstrap 时才设置为 `OFF`。
 - 如果出现 `build/<preset>/_deps`，优先检查旧 cache 或是否有新依赖绕过 `horizon_fetchcontent_declare(...)`。
 - 日常清理优先删除具体 `build/<preset>`；只有需要重新拉取第三方源码时才删除 `build/_deps`。
 
