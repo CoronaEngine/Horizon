@@ -3,16 +3,12 @@ include_guard(GLOBAL)
 # ======================== Helicon 依赖 ========================
 horizon_fetchcontent_declare(
     pfr
-    GIT_REPOSITORY https://github.com/boostorg/pfr.git
-    GIT_TAG develop
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(pfr)
 
 horizon_fetchcontent_declare(
     ktm
-    GIT_REPOSITORY https://github.com/YGXXD/ktm.git
-    GIT_TAG main
     EXCLUDE_FROM_ALL
     SOURCE_SUBDIR cmake/horizon-skip-subdir
 )
@@ -20,16 +16,12 @@ FetchContent_MakeAvailable(ktm)
 
 horizon_fetchcontent_declare(
     preprocessor
-    GIT_REPOSITORY https://github.com/boostorg/preprocessor.git
-    GIT_TAG develop
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(preprocessor)
 
 horizon_fetchcontent_declare(
     SPIRV-Cross
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
-    GIT_TAG main
     EXCLUDE_FROM_ALL
 )
 set(SPIRV_CROSS_SHARED OFF)
@@ -45,16 +37,12 @@ FetchContent_MakeAvailable(SPIRV-Cross)
 
 horizon_fetchcontent_declare(
     SPIRV-Headers
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
-    GIT_TAG vulkan-sdk-1.4.341
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(SPIRV-Headers)
 
 horizon_fetchcontent_declare(
     SPIRV-Tools
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
-    GIT_TAG vulkan-sdk-1.4.341
     EXCLUDE_FROM_ALL
 )
 if(HORIZON_BUILD_DEPENDENCY_TOOLS)
@@ -76,7 +64,7 @@ if(MSVC AND TARGET SPIRV-Tools-opt)
     target_compile_options(SPIRV-Tools-opt PRIVATE /wd4717 /wd5232)
 endif()
 
-# ======================== ocarina 共享依赖（在线拉取，集中管理） ========================
+# ======================== ocarina 共享依赖（本地缓存，集中管理） ========================
 # 这些库当前仅 ocarina 子项目使用；在根级声明以统一 FetchContent 入口。
 # EXCLUDE_FROM_ALL 保证未启用 ocarina 时不参与构建。
 
@@ -85,8 +73,6 @@ if(HORIZON_BUILD_OCARINA AND DEFINED ENV{CUDA_PATH})
 set(FMT_OS OFF CACHE BOOL "" FORCE)
 horizon_fetchcontent_declare(
     fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG main
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(fmt)
@@ -100,8 +86,6 @@ target_include_directories(fmt-header-only INTERFACE ${fmt_SOURCE_DIR}/include)
 set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
 horizon_fetchcontent_declare(
     spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG v1.x
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(spdlog)
@@ -112,8 +96,6 @@ target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
 # ---- xxHash (header-only, 不使用其顶层 CMakeLists) ----
 horizon_fetchcontent_declare(
     xxhash
-    GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
-    GIT_TAG dev
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(xxhash)
@@ -131,16 +113,12 @@ set(VOLK_PULL_IN_VULKAN OFF) # We will provide Vulkan-Headers ourselves
 set(VOLK_INSTALL ${HORIZON_ENABLE_DEPENDENCY_INSTALL} CACHE BOOL "" FORCE)
 horizon_fetchcontent_declare(
     volk
-    GIT_REPOSITORY https://github.com/zeux/volk.git
-    GIT_TAG master
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(volk)
 
 horizon_fetchcontent_declare(
     Vulkan-Headers
-    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-    GIT_TAG v1.4.341
     EXCLUDE_FROM_ALL
 )
 set(VULKAN_HEADERS_ENABLE_INSTALL ${HORIZON_ENABLE_DEPENDENCY_INSTALL} CACHE BOOL "" FORCE)
@@ -148,8 +126,6 @@ FetchContent_MakeAvailable(Vulkan-Headers)
 
 horizon_fetchcontent_declare(
     VulkanMemoryAllocator
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-    GIT_TAG master
     EXCLUDE_FROM_ALL
 )
 set(VMA_ENABLE_INSTALL ${HORIZON_ENABLE_DEPENDENCY_INSTALL} CACHE BOOL "" FORCE)
