@@ -45,11 +45,11 @@ add_compile_definitions(
 )
 
 include(FetchContent)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonFetchContent.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonSlang.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCoreDependencies.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonRuntimeDeps.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCorona.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_fetch_content.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_corona.cmake)
 
 # ======================== Shader 自动编译模块 ========================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
@@ -62,17 +62,17 @@ endif()
 
 if(HORIZON_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
     enable_testing()
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonTesting.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_testing.cmake)
     add_subdirectory(tests)
 endif()
 
 if(HORIZON_BUILD_BENCHMARKS)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonBenchmarking.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_benchmarking.cmake)
     add_subdirectory(benchmarks)
 endif()
 
 if(HORIZON_BUILD_EXAMPLES)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonExampleDependencies.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_example_dependencies.cmake)
     add_subdirectory(examples)
 endif()
 
@@ -91,7 +91,7 @@ else()
     message(WARNING "Python not found. Please install Python or set the Python_ROOT_DIR to proceed.")
 endif()
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonOcarina.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_ocarina.cmake)
 
 if(HORIZON_BUILD_VISION_HOTFIX)
     if(NOT TARGET ocarina OR NOT TARGET ocarina-include)
