@@ -1,9 +1,0 @@
-{
-    "clangd.arguments": [
-        "--completion-style=detailed",
-        "--header-insertion=never"
-    ],
-    "files.associations": {
-        "memory": "cpp"
-    }
-}
