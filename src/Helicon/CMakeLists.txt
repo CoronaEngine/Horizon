@@ -22,6 +22,9 @@ endif()
 
 target_include_directories(Helicon PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${ktm_SOURCE_DIR}"
+    "${pfr_SOURCE_DIR}/include"
+    "${HORIZON_SLANG_INCLUDE_DIR}"
 )
 
 # --- 架构检测 ---
@@ -55,33 +58,29 @@ endif()
 
 message(STATUS "Target Arch: ${TARGET_ARCH}")
 
+target_link_directories(Helicon PUBLIC
+    "${HORIZON_SLANG_LIBRARY_DIR}"
+)
+
 target_link_libraries(Helicon PUBLIC
-    horizon::ktm
-    horizon::pfr
-    horizon::spirv_cross_core
-    horizon::spirv_cross_c
-    horizon::spirv_cross_cpp
-    horizon::spirv_cross_util
-    horizon::slang
-    horizon::slang_rt
-    horizon::gfx
-    horizon::spirv_tools_link
+    spirv-cross-core
+    spirv-cross-c
+    spirv-cross-cpp
+    spirv-cross-util
+    slang
+    slang-rt
+    gfx
+    SPIRV-Tools-link
 )
 
 set(HELICON_RUNTIME_DEPS)
 
 if(WIN32)
-    set(SLANG_DLLS)
-    foreach(_horizon_slang_binary_dir IN LISTS HORIZON_SLANG_BINARY_DIRS)
-        file(GLOB _horizon_slang_dir_dlls CONFIGURE_DEPENDS "${_horizon_slang_binary_dir}/*.dll")
-        list(APPEND SLANG_DLLS ${_horizon_slang_dir_dlls})
-    endforeach()
-
+    file(GLOB SLANG_DLLS CONFIGURE_DEPENDS "${HORIZON_SLANG_BINARY_DIR}/*.dll")
     if(NOT SLANG_DLLS)
-        message(FATAL_ERROR "Slang runtime DLLs were not found in Conan package bin directories: ${HORIZON_SLANG_BINARY_DIRS}")
+        message(FATAL_ERROR "Slang runtime DLLs were not found under ${HORIZON_SLANG_BINARY_DIR}")
     endif()
 
-    list(REMOVE_DUPLICATES SLANG_DLLS)
     list(APPEND HELICON_RUNTIME_DEPS ${SLANG_DLLS})
 
     file(GLOB DXC_DLLS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/third-party/dxc/bin/${TARGET_ARCH}/*.dll")

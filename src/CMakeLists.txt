@@ -44,12 +44,15 @@ target_compile_definitions(Horizon
     HORIZON_ENABLE_VULKAN_VALIDATION=${HORIZON_VALIDATION_DEFINE}
 )
 
+# 链接库依赖
+target_link_libraries(volk PUBLIC Vulkan-Headers)
+
 target_link_libraries(Horizon PUBLIC
     Helicon
     corona::kernel
-    horizon::volk
-    horizon::vulkan_headers
-    horizon::vma
+    volk
+    Vulkan-Headers
+    VulkanMemoryAllocator
 )
 
 # 忽略第三方库（VulkanMemoryAllocator）的 nullability 警告

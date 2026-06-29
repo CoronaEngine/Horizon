@@ -11,6 +11,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-include(corona_third_party)
+include(CoronaThirdParty)
 
 add_subdirectory(src/kernel)

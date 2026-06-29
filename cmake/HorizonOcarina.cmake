@@ -22,7 +22,7 @@ add_subdirectory(modules/ocarina)
 # 由根级负责把共享依赖装配到 ocarina-ext 上，子目录不再引用这些库的目标名
 if(TARGET ocarina-ext)
     target_link_libraries(ocarina-ext PUBLIC
-        horizon::fmt
-        horizon::spdlog
-        horizon::xxhash)
+        fmt::fmt-header-only
+        spdlog
+        xxhash)
 endif()

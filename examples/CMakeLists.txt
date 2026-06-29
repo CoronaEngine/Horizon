@@ -21,14 +21,15 @@ add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEAD
 
 target_include_directories(HorizonExamples PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${glfw_SOURCE_DIR}/include"
+    "${stb_SOURCE_DIR}"
+    "${tinyobjloader_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/src"
 )
 
 target_link_libraries(HorizonExamples PRIVATE
-    horizon::glm
-    horizon::glfw
-    horizon::stb
-    horizon::tinyobjloader
+    glm
+    glfw
     Horizon)
 
 add_custom_command(TARGET HorizonExamples POST_BUILD

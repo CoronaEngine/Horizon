@@ -1,5 +1,5 @@
 # Horizon Build Context
-<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 63b8b1a608f187f92bad25e04a77e0034898316376f0ab795bd30c05e2df3e98 -->
+<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 38bdd5bfc550cd3dece5e94bcb6af3ff820ec0b1b9e8db7c2294fca39c968e6a -->
 
 Load this file only for CMake, preset, build, CI, or validation-command work.
 
@@ -60,8 +60,7 @@ For newcomer on-demand target selection, load `docs/tasks/optional-build-targets
 - After CMake changes, run configure plus the smallest relevant build.
 - The common entry point for newcomers and agents is `tools/dev.ps1`; use direct `cmake` commands only when investigating lower-level issues.
 - Each configure preset uses its own `build/<preset>` directory; do not assume all generators share `build/`.
-- FetchContent dependencies use a required shared source cache and preset-local build directories.
-- Slang is provided by the project-local Conan recipe; `tools/dev.ps1 install/configure/build` exports the recipe before installing dependencies. CMake no longer supports `HORIZON_SLANG_ROOT` or a `third-party/slang` local fallback.
+- FetchContent dependencies use a shared source cache and preset-local build directories.
 
 ## Presets And Directories
 
@@ -83,7 +82,6 @@ For newcomer on-demand target selection, load `docs/tasks/optional-build-targets
 - Preset-local third-party build directories: `build/<preset>/deps/*-build`.
 - Prefer `horizon_fetchcontent_declare(...)` for new FetchContent dependencies.
 - Do not call bare `FetchContent_Declare(...)` unless the dependency truly needs custom `SOURCE_DIR` or `BINARY_DIR`.
-- `HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE` defaults to `ON`; missing source checkouts fail instead of being populated during configure. Set it to `OFF` only for an explicit bootstrap run.
 - If `build/<preset>/_deps` appears, first check stale cache or a new dependency bypassing `horizon_fetchcontent_declare(...)`.
 - For daily cleanup, delete the specific `build/<preset>` directory; delete `build/_deps` only when third-party sources must be re-cloned.
 
