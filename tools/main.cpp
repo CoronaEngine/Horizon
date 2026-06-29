@@ -4,6 +4,7 @@
 #include <sstream>
 #include <fstream>
 #include <algorithm>
+#include <regex>
 #include <set>
 #include <Compiler/ShaderUtils.h>
 #include <Compiler/ShaderTypeMapping.h>
@@ -94,6 +95,12 @@ std::string sanitizeToIdentifier(const std::filesystem::path& p)
 	if (!s.empty() && std::isdigit(static_cast<unsigned char>(s[0])))
 		s = "_" + s;
 	return s;
+}
+
+bool hasShaderEntryPoint(const std::string& code)
+{
+    static const std::regex mainPattern(R"(\bmain\s*\()");
+    return std::regex_search(code, mainPattern) || code.find("[shader") != std::string::npos;
 }
 
 std::string extractMemberName(const std::string& qualifiedKey)
@@ -623,6 +630,8 @@ int main(int argc, char** argv)
 	std::string code = (std::stringstream{} << file.rdbuf()).str();
 	file.close();
 
+    bool stageDetected = stageExplicit;
+
 	// 如果未显式指定 stage，则根据文件名后缀或内容推断
 	if (!stageExplicit)
 	{
@@ -631,27 +640,34 @@ int main(int argc, char** argv)
 		// 检查常见命名: xxx.vert, xxx.frag, xxx.comp, xxx.vert.glsl 等
 		if (extension == ".frag" || extension == ".fs" || stem.ends_with(".frag") ||
 		    stem.find("frag") != std::string::npos)
-			inputStage = ShaderStage::FragmentShader;
+			inputStage = ShaderStage::FragmentShader, stageDetected = true;
 		else if (extension == ".comp" || extension == ".cs" || stem.ends_with(".comp") ||
 		         stem.find("compute") != std::string::npos)
-			inputStage = ShaderStage::ComputeShader;
+			inputStage = ShaderStage::ComputeShader, stageDetected = true;
 		else if (extension == ".vert" || extension == ".vs" || stem.ends_with(".vert"))
-			inputStage = ShaderStage::VertexShader;
+			inputStage = ShaderStage::VertexShader, stageDetected = true;
 		else
 		{
 			// 扫描代码中的 gl_FragCoord / gl_Position / gl_GlobalInvocationID 等内置变量
 			if (code.find("gl_FragCoord") != std::string::npos ||
 			    code.find("gl_SampleID") != std::string::npos ||
 			    (code.find("out vec4") != std::string::npos && code.find("gl_Position") == std::string::npos))
-				inputStage = ShaderStage::FragmentShader;
+				inputStage = ShaderStage::FragmentShader, stageDetected = true;
 			else if (code.find("gl_GlobalInvocationID") != std::string::npos ||
 			         code.find("gl_WorkGroupID") != std::string::npos ||
 			         code.find("gl_LocalInvocationID") != std::string::npos)
-				inputStage = ShaderStage::ComputeShader;
+				inputStage = ShaderStage::ComputeShader, stageDetected = true;
 			// else default remains VertexShader
 		}
-		std::cout << "INFO:Auto-detected shader stage: " << static_cast<int>(inputStage) << "\n";
+		if (stageDetected)
+			std::cout << "INFO:Auto-detected shader stage: " << static_cast<int>(inputStage) << "\n";
 	}
+
+    const bool moduleOnly = !stageDetected && !hasShaderEntryPoint(code);
+    if (moduleOnly)
+    {
+        std::cout << "INFO:No shader entry point detected; generating Slang module wrapper only.\n";
+    }
 
     SlangModuleCompileArgs args;
     args.moduleName = path.stem().string();
@@ -660,28 +676,33 @@ int main(int argc, char** argv)
     args.sourceLanguage = inputLanguage;
     auto slangModule = ShaderLanguageConverter::slangModuleCompiler(args);
 
-    SlangModuleReflectShaderResourceArgs shaderResourceArgs;
-    shaderResourceArgs.module = &slangModule;
-    shaderResourceArgs.stage = inputStage;
-    ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
-    // glslang 已移除：复用上面已编译的 slangModule，经 slang 直出 SPIR-V
-    SlangCompileArgs2 spirvArgs;
-    spirvArgs.module = &slangModule;
-    spirvArgs.sourceLanguage = inputLanguage;
-    spirvArgs.targetLanguages = {ShaderLanguage::SpirV};
-    spirvArgs.stage = inputStage;
-    spirvArgs.enableReflection = true;
-    auto spirvResult = ShaderLanguageConverter::slangCompilerWithModules(spirvArgs);
-    auto spirvIt = spirvResult.binaryTargets.find(ShaderLanguage::SpirV);
-    if (spirvIt == spirvResult.binaryTargets.end())
-        throw std::runtime_error("Failed to generate SPIR-V from Slang module.");
-    std::vector<uint32_t> spirvCode = std::move(spirvIt->second);
+    ShaderCodeModule::ShaderResources resources;
+    std::vector<uint32_t> spirvCode;
+    if (!moduleOnly)
+    {
+        SlangModuleReflectShaderResourceArgs shaderResourceArgs;
+        shaderResourceArgs.module = &slangModule;
+        shaderResourceArgs.stage = inputStage;
+        resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
+        // glslang 已移除：复用上面已编译的 slangModule，经 slang 直出 SPIR-V
+        SlangCompileArgs2 spirvArgs;
+        spirvArgs.module = &slangModule;
+        spirvArgs.sourceLanguage = inputLanguage;
+        spirvArgs.targetLanguages = {ShaderLanguage::SpirV};
+        spirvArgs.stage = inputStage;
+        spirvArgs.enableReflection = true;
+        auto spirvResult = ShaderLanguageConverter::slangCompilerWithModules(spirvArgs);
+        auto spirvIt = spirvResult.binaryTargets.find(ShaderLanguage::SpirV);
+        if (spirvIt == spirvResult.binaryTargets.end())
+            throw std::runtime_error("Failed to generate SPIR-V from Slang module.");
+        spirvCode = std::move(spirvIt->second);
+    }
 
     // Slang 的 GLSL 前端不解析 GLSL 的 `layout(local_size_x=...)`：直出的 SPIR-V 默认 LocalSize=1,1,1，
     // 且反射（module 层与链接后 program 层）均返回 0,0,0 —— 信息在解析阶段已丢失，反射无法找回。
     // 因此从 GLSL 源码文本解析 local_size，回填 SPIR-V 的 OpExecutionMode LocalSize，使内嵌 SPIR-V
     // 与 GLSL 源一致。仍是完全 Horizon 内部、零外部传参（数据源 = 源码文本）。
-    if (inputStage == ShaderStage::ComputeShader)
+    if (!moduleOnly && inputStage == ShaderStage::ComputeShader)
     {
         // 从 `code` 解析 layout(local_size_x = N, local_size_y = M, local_size_z = K) in;
         // 缺省维度按 GLSL 规范为 1。
@@ -755,7 +776,10 @@ int main(int argc, char** argv)
             info.variateName = info.variateName.substr(i + 1);
     }
 
-	std::cout << "SUCCESS:Obtain reflection information from SPIR-V IR through SPIRV-CROSS.\n";
+    if (moduleOnly)
+        std::cout << "SUCCESS:Generated Slang module reflection.\n";
+    else
+	    std::cout << "SUCCESS:Obtain reflection information from SPIR-V IR through SPIRV-CROSS.\n";
 
 	std::cout << "INFO:Generate the final C++ shader...\n";
 	std::stringstream out;
@@ -775,11 +799,14 @@ int main(int argc, char** argv)
     auto smName = "slang_module_" + fileName;
 
 	generateBinary(out, smName, slangModule);
-    auto spvName = "spirv_" + fileName;
-    generateBinary(out, spvName, spirvCode);
 
-    // 稳定别名：用户可通过 xxx_glsl::spirv 或 xxx_glsl::slangModule 引用预编译 shader。
-    out << "static inline auto& spirv = " << spvName << ";\n";
+    if (!moduleOnly)
+    {
+        auto spvName = "spirv_" + fileName;
+        generateBinary(out, spvName, spirvCode);
+        // 稳定别名：用户可通过 xxx_glsl::spirv 或 xxx_glsl::slangModule 引用预编译 shader。
+        out << "static inline auto& spirv = " << spvName << ";\n";
+    }
     out << "static inline auto& slangModule = " << smName << ";\n";
 
     // Generate BindingKey struct declarations first, collect binding block names

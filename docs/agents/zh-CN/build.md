@@ -60,7 +60,7 @@ cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
 - 新人和 Agent 的常用入口是 `tools/dev.ps1`；只有需要排查底层问题时才直接用 `cmake`。
 - 每个 configure preset 使用独立的 `build/<preset>` 目录，不要假设所有生成器共享 `build/`。
 - FetchContent 依赖采用必需的共享源码缓存和 preset 本地构建目录。
-- Slang 是必需的本地输入。CMake configure 不会下载 Slang；需要设置 `HORIZON_SLANG_ROOT`，或预先填充 `third-party/slang/download/slang-<version>-windows-<arch>.zip`。
+- Slang 由项目内 Conan recipe 提供；`tools/dev.ps1 install/configure/build` 会先导出 recipe 并安装依赖。CMake 不再支持 `HORIZON_SLANG_ROOT` 或 `third-party/slang` 本地 fallback。
 
 ## Preset 和目录
 

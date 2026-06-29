@@ -11,9 +11,12 @@ class HorizonConan(ConanFile):
     package_type = "library"
     exports_sources = (
         "CMakeLists.txt",
+        "benchmarks/*",
         "cmake/*",
+        "examples/*",
         "include/*",
         "modules/corona/*",
+        "modules/ocarina/*",
         "src/*",
         "tools/*",
     )
@@ -38,6 +41,11 @@ class HorizonConan(ConanFile):
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
+        "spirv-cross/*:shared": False,
+        "spirv-cross/*:build_executable": False,
+        "spirv-tools/*:shared": False,
+        "spirv-tools/*:build_executables": False,
+        "glfw/*:shared": False,
     }
 
     def layout(self):
@@ -45,6 +53,28 @@ class HorizonConan(ConanFile):
 
     def set_version(self):
         self.version = os.environ.get("HORIZON_CONAN_VERSION", "0.5.0")
+
+    def requirements(self):
+        self.requires("ktm/0.2.14", transitive_headers=True)
+        self.requires("pfr/1.91.0", transitive_headers=True)
+        self.requires("spirv-cross/1.4.350.0", transitive_headers=True, transitive_libs=True)
+        self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
+        self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
+        self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
+        self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
+        self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
+        self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
+
+        if bool(self.options.with_examples):
+            self.requires("stb/cci.20240531")
+            self.requires("glfw/3.4")
+            self.requires("tinyobjloader/1.0.7")
+            self.requires("glm/1.0.1")
+
+        if bool(self.options.with_ocarina) and bool(self.options.with_cuda):
+            self.requires("fmt/12.1.0")
+            self.requires("spdlog/1.17.0")
+            self.requires("xxhash/0.8.3")
 
     @staticmethod
     def _copy_headers(conanfile, src, dst):
@@ -65,14 +95,6 @@ class HorizonConan(ConanFile):
             if os.path.isdir(os.path.join(candidate, "ktm-src")):
                 return candidate
         return None
-
-    def _slang_root(self):
-        return os.path.normpath(
-            os.environ.get(
-                "HORIZON_SLANG_ROOT",
-                os.path.join(self.source_folder, "third-party", "slang", "src"),
-            )
-        )
 
     def _fetchcontent_source_root(self):
         source_root = os.environ.get("HORIZON_FETCHCONTENT_SOURCE_ROOT")
@@ -98,21 +120,12 @@ class HorizonConan(ConanFile):
     def _is_editable(self):
         return os.path.isfile(os.path.join(self.package_folder, "conanfile.py"))
 
-    def _editable_slang_root(self):
-        return os.path.normpath(
-            os.environ.get(
-                "HORIZON_SLANG_ROOT",
-                os.path.join(self.package_folder, "third-party", "slang", "src"),
-            )
-        )
-
     def _editable_includedirs(self):
         source_root = self.package_folder
         candidates = [
             os.path.join(source_root, "include"),
             os.path.join(source_root, "src", "Helicon"),
             os.path.join(source_root, "modules", "corona", "include"),
-            os.path.join(self._editable_slang_root(), "include"),
         ]
 
         deps_root = self._fetchcontent_source_root()
@@ -136,7 +149,6 @@ class HorizonConan(ConanFile):
             os.path.join(build_root, "src", "Helicon", config),
             os.path.join(build_root, "modules", "corona", "src", "kernel", config),
             os.path.join(build_root, "modules", "corona", "src", "pal", config),
-            os.path.join(self._editable_slang_root(), "lib"),
         ]
         for deps_dir_name in ("deps", "_deps"):
             deps_root = os.path.join(build_root, deps_dir_name)
@@ -159,9 +171,6 @@ class HorizonConan(ConanFile):
                 shader_tool_name,
             )
         return os.path.join(self.package_folder, "bin", shader_tool_name)
-
-    def _spirv_cross_debug_suffix(self):
-        return "d" if str(self.settings.build_type) == "Debug" else ""
 
     def _fetchcontent_source_overrides(self):
         source_root = self._fetchcontent_source_root()
@@ -199,30 +208,31 @@ class HorizonConan(ConanFile):
         deps.generate()
 
         toolchain = CMakeToolchain(self)
-        toolchain.variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
-        toolchain.variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina and self.options.with_cuda)
-        toolchain.variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
-        toolchain.variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
-        toolchain.variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
-        toolchain.variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
-        toolchain.variables["HORIZON_BUILD_BENCHMARKS"] = False
-        toolchain.variables["HORIZON_ENABLE_DEPENDENCY_INSTALL"] = False
+        cache_variables = toolchain.cache_variables
+        cache_variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
+        cache_variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina and self.options.with_cuda)
+        cache_variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
+        cache_variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
+        cache_variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
+        cache_variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
+        cache_variables["HORIZON_BUILD_BENCHMARKS"] = False
+        cache_variables["HORIZON_ENABLE_DEPENDENCY_INSTALL"] = False
+        dependency_provider = os.environ.get("HORIZON_DEPENDENCY_PROVIDER", "conan")
+        cache_variables["HORIZON_DEPENDENCY_PROVIDER"] = dependency_provider
         fetchcontent_source_root = self._fetchcontent_source_root()
         fetchcontent_require_source_cache = self._env_bool(
             "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE",
-            default=True,
+            default=dependency_provider == "fetchcontent",
         )
         if fetchcontent_require_source_cache and not fetchcontent_source_root:
             raise ConanInvalidConfiguration(
                 "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE requires HORIZON_FETCHCONTENT_SOURCE_ROOT"
             )
-        toolchain.variables["HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"] = fetchcontent_require_source_cache
+        cache_variables["HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"] = fetchcontent_require_source_cache
         if fetchcontent_source_root:
-            toolchain.variables["HORIZON_FETCHCONTENT_SOURCE_ROOT"] = fetchcontent_source_root.replace("\\", "/")
+            cache_variables["HORIZON_FETCHCONTENT_SOURCE_ROOT"] = fetchcontent_source_root.replace("\\", "/")
             for variable_name, source_dir in self._fetchcontent_source_overrides().items():
-                toolchain.variables[variable_name] = source_dir.replace("\\", "/")
-        if os.path.isdir(self._slang_root()):
-            toolchain.variables["HORIZON_SLANG_ROOT"] = self._slang_root().replace("\\", "/")
+                cache_variables[variable_name] = source_dir.replace("\\", "/")
         toolchain.generate()
 
     def build(self):
@@ -252,22 +262,15 @@ class HorizonConan(ConanFile):
                 if os.path.isdir(dep_include):
                     self._copy_headers(self, dep_include, package_include)
 
-        slang_root = self._slang_root()
-        self._copy_headers(self, os.path.join(slang_root, "include"), package_include)
-
         package_cmake = os.path.join(self.package_folder, "cmake")
         copy(self, "HeliconShaderCompile.cmake", src=os.path.join(self.source_folder, "cmake"), dst=package_cmake)
         copy(self, "HorizonPackageAliases.cmake", src=os.path.join(self.source_folder, "cmake"), dst=package_cmake)
         copy(self, "*.lib", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.a", src=self.build_folder, dst=os.path.join(self.package_folder, "lib"), keep_path=False)
-        copy(self, "*.lib", src=os.path.join(slang_root, "lib"), dst=os.path.join(self.package_folder, "lib"), keep_path=False)
-        copy(self, "*.a", src=os.path.join(slang_root, "lib"), dst=os.path.join(self.package_folder, "lib"), keep_path=False)
-        copy(self, "*.dll", src=os.path.join(slang_root, "bin"), dst=os.path.join(self.package_folder, "bin"), keep_path=False)
-        copy(self, "*.dylib", src=os.path.join(slang_root, "bin"), dst=os.path.join(self.package_folder, "bin"), keep_path=False)
-        copy(self, "*.so*", src=os.path.join(slang_root, "bin"), dst=os.path.join(self.package_folder, "bin"), keep_path=False)
         if bool(self.options.with_tools):
             tool_output_dir = os.path.join(self.build_folder, "tools", str(self.settings.build_type))
             copy(self, "ShaderCompileScripts*", src=tool_output_dir, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
+            copy(self, "*.dll", src=tool_output_dir, dst=os.path.join(self.package_folder, "bin"), keep_path=False)
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "Horizon")
@@ -288,64 +291,37 @@ class HorizonConan(ConanFile):
 
         self.cpp_info.components["horizon"].set_property("cmake_target_name", "Horizon")
         self.cpp_info.components["horizon"].libs = ["Horizon"]
-        self.cpp_info.components["horizon"].requires = ["helicon", "corona_kernel", "volk"]
+        self.cpp_info.components["horizon"].requires = [
+            "helicon",
+            "corona_kernel",
+            "ktm::ktm",
+            "volk::libvolk",
+            "vulkan-headers::vulkan-headers",
+            "vulkan-memory-allocator::vulkan-memory-allocator",
+        ]
 
         self.cpp_info.components["helicon"].set_property("cmake_target_name", "Helicon")
-        self.cpp_info.components["helicon"].libs = ["Helicon", "gfx", "slang", "slang-rt"]
+        self.cpp_info.components["helicon"].libs = ["Helicon"]
         self.cpp_info.components["helicon"].requires = [
-            "spirv_cross_c",
-            "spirv_cross_cpp",
-            "spirv_cross_core",
-            "spirv_cross_glsl",
-            "spirv_cross_hlsl",
-            "spirv_cross_util",
-            "spirv_tools_link",
+            "ktm::ktm",
+            "pfr::pfr",
+            "spirv-cross::spirv-cross-c",
+            "spirv-cross::spirv-cross-cpp",
+            "spirv-cross::spirv-cross-core",
+            "spirv-cross::spirv-cross-glsl",
+            "spirv-cross::spirv-cross-hlsl",
+            "spirv-cross::spirv-cross-util",
+            "spirv-tools::spirv-tools-link",
+            "slang::slang",
+            "slang::slang-rt",
+            "slang::gfx",
         ]
 
         self.cpp_info.components["corona_kernel"].set_property("cmake_target_name", "corona_kernel")
         self.cpp_info.components["corona_kernel"].libs = ["corona_kernel"]
-        self.cpp_info.components["corona_kernel"].requires = ["quill"]
+        self.cpp_info.components["corona_kernel"].requires = ["quill::quill"]
 
         self.cpp_info.components["corona_pal"].set_property("cmake_target_name", "corona_pal")
-
-        self.cpp_info.components["quill"].set_property("cmake_target_name", "quill::quill")
-
-        self.cpp_info.components["volk"].set_property("cmake_target_name", "volk")
-        self.cpp_info.components["volk"].libs = ["volk"]
-
-        self.cpp_info.components["spirv_cross_c"].set_property("cmake_target_name", "spirv-cross-c")
-        self.cpp_info.components["spirv_cross_c"].libs = [f"spirv-cross-c{self._spirv_cross_debug_suffix()}"]
-        self.cpp_info.components["spirv_cross_c"].requires = ["spirv_cross_core"]
-
-        self.cpp_info.components["spirv_cross_cpp"].set_property("cmake_target_name", "spirv-cross-cpp")
-        self.cpp_info.components["spirv_cross_cpp"].libs = [f"spirv-cross-cpp{self._spirv_cross_debug_suffix()}"]
-        self.cpp_info.components["spirv_cross_cpp"].requires = ["spirv_cross_core"]
-
-        self.cpp_info.components["spirv_cross_core"].set_property("cmake_target_name", "spirv-cross-core")
-        self.cpp_info.components["spirv_cross_core"].libs = [f"spirv-cross-core{self._spirv_cross_debug_suffix()}"]
-
-        self.cpp_info.components["spirv_cross_glsl"].set_property("cmake_target_name", "spirv-cross-glsl")
-        self.cpp_info.components["spirv_cross_glsl"].libs = [f"spirv-cross-glsl{self._spirv_cross_debug_suffix()}"]
-        self.cpp_info.components["spirv_cross_glsl"].requires = ["spirv_cross_core"]
-
-        self.cpp_info.components["spirv_cross_hlsl"].set_property("cmake_target_name", "spirv-cross-hlsl")
-        self.cpp_info.components["spirv_cross_hlsl"].libs = [f"spirv-cross-hlsl{self._spirv_cross_debug_suffix()}"]
-        self.cpp_info.components["spirv_cross_hlsl"].requires = ["spirv_cross_glsl", "spirv_cross_core"]
-
-        self.cpp_info.components["spirv_cross_util"].set_property("cmake_target_name", "spirv-cross-util")
-        self.cpp_info.components["spirv_cross_util"].libs = [f"spirv-cross-util{self._spirv_cross_debug_suffix()}"]
-        self.cpp_info.components["spirv_cross_util"].requires = ["spirv_cross_core"]
-
-        self.cpp_info.components["spirv_tools"].set_property("cmake_target_name", "SPIRV-Tools")
-        self.cpp_info.components["spirv_tools"].libs = ["SPIRV-Tools"]
-
-        self.cpp_info.components["spirv_tools_opt"].set_property("cmake_target_name", "SPIRV-Tools-opt")
-        self.cpp_info.components["spirv_tools_opt"].libs = ["SPIRV-Tools-opt"]
-        self.cpp_info.components["spirv_tools_opt"].requires = ["spirv_tools"]
-
-        self.cpp_info.components["spirv_tools_link"].set_property("cmake_target_name", "SPIRV-Tools-link")
-        self.cpp_info.components["spirv_tools_link"].libs = ["SPIRV-Tools-link"]
-        self.cpp_info.components["spirv_tools_link"].requires = ["spirv_tools_opt", "spirv_tools"]
 
         editable = self._is_editable()
         editable_includedirs = self._editable_includedirs() if editable else None

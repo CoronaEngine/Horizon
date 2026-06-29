@@ -2,6 +2,22 @@ include_guard(GLOBAL)
 
 include(FetchContent)
 
+if(NOT HORIZON_DEPENDENCY_PROVIDER STREQUAL "fetchcontent")
+    find_package(quill CONFIG QUIET)
+endif()
+
+if(TARGET quill::quill)
+    return()
+endif()
+
+if(HORIZON_DEPENDENCY_PROVIDER STREQUAL "conan")
+    find_package(quill CONFIG REQUIRED)
+endif()
+
+if(TARGET quill::quill)
+    return()
+endif()
+
 if(COMMAND horizon_fetchcontent_declare)
     horizon_fetchcontent_declare(
         quill
