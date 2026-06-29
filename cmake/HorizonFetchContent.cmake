@@ -90,7 +90,7 @@ endif()
 
 option(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE
     "Require pre-populated FetchContent source directories instead of allowing downloads"
-    OFF)
+    ON)
 mark_as_advanced(
     HORIZON_FETCHCONTENT_SOURCE_ROOT
     HORIZON_FETCHCONTENT_BINARY_ROOT

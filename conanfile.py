@@ -81,8 +81,10 @@ class HorizonConan(ConanFile):
         return None
 
     @staticmethod
-    def _env_bool(name):
+    def _env_bool(name, default=False):
         value = os.environ.get(name, "")
+        if not value:
+            return default
         return value.lower() in ("1", "true", "yes", "on")
 
     def _editable_build_root(self):
@@ -180,15 +182,17 @@ class HorizonConan(ConanFile):
         toolchain.variables["HORIZON_BUILD_BENCHMARKS"] = False
         toolchain.variables["HORIZON_ENABLE_DEPENDENCY_INSTALL"] = False
         fetchcontent_source_root = self._fetchcontent_source_root()
-        if self._env_bool("HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE") and not fetchcontent_source_root:
+        fetchcontent_require_source_cache = self._env_bool(
+            "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE",
+            default=True,
+        )
+        if fetchcontent_require_source_cache and not fetchcontent_source_root:
             raise ConanInvalidConfiguration(
                 "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE requires HORIZON_FETCHCONTENT_SOURCE_ROOT"
             )
+        toolchain.variables["HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"] = fetchcontent_require_source_cache
         if fetchcontent_source_root:
             toolchain.variables["HORIZON_FETCHCONTENT_SOURCE_ROOT"] = fetchcontent_source_root.replace("\\", "/")
-            toolchain.variables["HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"] = self._env_bool(
-                "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"
-            )
             for variable_name, source_dir in self._fetchcontent_source_overrides().items():
                 toolchain.variables[variable_name] = source_dir.replace("\\", "/")
         if os.path.isdir(self._slang_root()):
