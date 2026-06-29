@@ -250,7 +250,8 @@ function(helicon_compile_shaders target_name)
         # 添加 include 路径（OUTPUT_DIR 作为根目录）
         # BEFORE: keep freshly-generated shader headers ahead of any stale
         # build-cache copies on transitive include paths so they can't be shadowed.
-        target_include_directories(${target_name} BEFORE PUBLIC "${_helicon_arg_OUTPUT_DIR}")
+        target_include_directories(${target_name} BEFORE PUBLIC
+            "$<BUILD_INTERFACE:${_helicon_arg_OUTPUT_DIR}>")
         
         message(STATUS "[Helicon] ${target_name}: Output directory: ${_helicon_arg_OUTPUT_DIR}")
     endif()
