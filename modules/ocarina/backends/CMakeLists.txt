@@ -1,6 +1,6 @@
 function(ocarina_add_backend name)
-    cmake_parse_arguments(BACKEND "" "" "SOURCES" ${ARGN})
-    add_library(ocarina-backend-${name} MODULE ${BACKEND_SOURCES})
+    cmake_parse_arguments(_ocarina_backend "" "" "SOURCES" ${ARGN})
+    add_library(ocarina-backend-${name} MODULE ${_ocarina_backend_SOURCES})
     target_link_libraries(ocarina-backend-${name} PRIVATE
             ocarina-ast
             ocarina-dsl

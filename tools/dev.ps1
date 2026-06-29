@@ -5,6 +5,7 @@
 
     Usage:
         .\tools\dev.ps1 status
+        .\tools\dev.ps1 install
         .\tools\dev.ps1 configure
         .\tools\dev.ps1 build Horizon
         .\tools\dev.ps1 build Horizon -Configuration Release
@@ -15,7 +16,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Position = 0)]
-    [ValidateSet("status", "configure", "build", "format-check", "format")]
+    [ValidateSet("status", "install", "configure", "build", "format-check", "format")]
     [string]$Command = "status",
 
     [Parameter()]
@@ -46,20 +47,86 @@ function Invoke-NativeCommand {
     }
 }
 
-function Assert-MsvcDeveloperEnvironment {
-    $compiler = Get-Command "cl.exe" -ErrorAction SilentlyContinue
-    if ($null -eq $compiler -or [string]::IsNullOrWhiteSpace($env:INCLUDE)) {
-        throw "MSVC developer environment is not initialized. Run this command from a Visual Studio Developer PowerShell or Developer Command Prompt. Plain PowerShell may fail to find standard library headers."
+function Get-MsvcBuildPreset {
+    switch ($Configuration) {
+        "Debug" { return "conan-debug" }
+        "Release" { return "conan-release" }
+        "RelWithDebInfo" { return "conan-relwithdebinfo" }
+        "MinSizeRel" { return "conan-minsizerel" }
     }
 }
 
-function Get-MsvcBuildPreset {
-    switch ($Configuration) {
-        "Debug" { return "msvc-debug" }
-        "Release" { return "msvc-release" }
-        "RelWithDebInfo" { return "msvc-relwithdebinfo" }
-        "MinSizeRel" { return "msvc-minsizerel" }
+function Import-BatchEnvironment {
+    param([Parameter(Mandatory = $true)][string]$BatchFile)
+
+    if (-not (Test-Path -LiteralPath $BatchFile)) {
+        throw "Environment batch file was not found: $BatchFile"
     }
+
+    $escapedBatchFile = $BatchFile.Replace('"', '\"')
+    $environment = & cmd.exe /d /s /c "`"call `"$escapedBatchFile`" >nul && set`""
+    foreach ($line in $environment) {
+        $separator = $line.IndexOf("=")
+        if ($separator -gt 0) {
+            $name = $line.Substring(0, $separator)
+            $value = $line.Substring($separator + 1)
+            Set-Item -Path "Env:$name" -Value $value
+        }
+    }
+}
+
+function Import-ConanBuildEnvironment {
+    $buildEnv = Join-Path $RepoRoot "build\conan\generators\conanbuild.bat"
+    Import-BatchEnvironment -BatchFile $buildEnv
+}
+
+function Get-ConanProfile {
+    switch ($Configuration) {
+        "Debug" { return (Join-Path $RepoRoot "conan\profiles\windows-msvc-debug") }
+        "Release" { return (Join-Path $RepoRoot "conan\profiles\windows-msvc-release") }
+        "RelWithDebInfo" { return (Join-Path $RepoRoot "conan\profiles\windows-msvc-relwithdebinfo") }
+        "MinSizeRel" { return (Join-Path $RepoRoot "conan\profiles\windows-msvc-minsizerel") }
+    }
+}
+
+function Get-ConanInstallOptions {
+    $targetValues = @($Target)
+    $options = @()
+
+    if ($targetValues -contains "ShaderCompileScripts") {
+        $options += "&:with_tools=True"
+    }
+
+    if ($targetValues -contains "HorizonExamples") {
+        $options += "&:with_examples=True"
+    }
+
+    if ($targetValues -contains "HorizonTests") {
+        $options += "&:with_tests=True"
+    }
+
+    return $options
+}
+
+function Invoke-ConanInstall {
+    $profile = Get-ConanProfile
+    $installOptions = Get-ConanInstallOptions
+    $installArguments = @(
+        "install",
+        ".",
+        "-pr:a", $profile,
+        "-pr:b", $profile
+    )
+    foreach ($option in $installOptions) {
+        $installArguments += @("-o", $option)
+    }
+    $installArguments += "--build=missing"
+
+    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\ktm")
+    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\pfr")
+    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\slang")
+    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\vulkan-memory-allocator")
+    Invoke-NativeCommand -FilePath "conan" -Arguments $installArguments
 }
 
 function Get-FormatArguments {
@@ -92,14 +159,21 @@ try {
     switch ($Command) {
         "status" {
             Invoke-NativeCommand -FilePath "git" -Arguments @("status", "--short", "--branch")
+            Invoke-NativeCommand -FilePath "conan" -Arguments @("--version")
             Invoke-NativeCommand -FilePath "cmake" -Arguments @("--list-presets")
         }
+        "install" {
+            Invoke-ConanInstall
+        }
         "configure" {
-            Assert-MsvcDeveloperEnvironment
-            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "ninja-msvc")
+            Invoke-ConanInstall
+            Import-ConanBuildEnvironment
+            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "conan-default")
         }
         "build" {
-            Assert-MsvcDeveloperEnvironment
+            Invoke-ConanInstall
+            Import-ConanBuildEnvironment
+            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "conan-default")
             Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", "--preset", (Get-MsvcBuildPreset), "--target", $Target[0])
         }
         "format-check" {

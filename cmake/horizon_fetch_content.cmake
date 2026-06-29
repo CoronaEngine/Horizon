@@ -7,15 +7,15 @@ set(_horizon_fetchcontent_binary_root_doc
     "Preset-local FetchContent binary directories"
 )
 
-set(_horizon_legacy_source_root "${PROJECT_SOURCE_DIR}/build/_deps")
+set(_horizon_project_source_cache_root "${PROJECT_SOURCE_DIR}/build/_deps")
 cmake_path(
-    ABSOLUTE_PATH _horizon_legacy_source_root
+    ABSOLUTE_PATH _horizon_project_source_cache_root
     BASE_DIRECTORY "${PROJECT_SOURCE_DIR}"
     NORMALIZE
-    OUTPUT_VARIABLE _horizon_legacy_source_root_absolute
+    OUTPUT_VARIABLE _horizon_project_source_cache_root_absolute
 )
 
-set(_horizon_fetchcontent_base_is_legacy OFF)
+set(_horizon_fetchcontent_base_is_project_source_cache OFF)
 if(NOT PROJECT_IS_TOP_LEVEL
    AND DEFINED FETCHCONTENT_BASE_DIR
    AND NOT FETCHCONTENT_BASE_DIR STREQUAL "")
@@ -26,16 +26,16 @@ if(NOT PROJECT_IS_TOP_LEVEL
         OUTPUT_VARIABLE _horizon_fetchcontent_base_absolute
     )
 
-    if(_horizon_fetchcontent_base_absolute STREQUAL _horizon_legacy_source_root_absolute)
-        set(_horizon_fetchcontent_base_is_legacy ON)
+    if(_horizon_fetchcontent_base_absolute STREQUAL _horizon_project_source_cache_root_absolute)
+        set(_horizon_fetchcontent_base_is_project_source_cache ON)
     endif()
 endif()
 
 if(PROJECT_IS_TOP_LEVEL)
-    set(_horizon_default_source_root "${_horizon_legacy_source_root_absolute}")
+    set(_horizon_default_source_root "${_horizon_project_source_cache_root_absolute}")
 elseif(DEFINED FETCHCONTENT_BASE_DIR
        AND NOT FETCHCONTENT_BASE_DIR STREQUAL ""
-       AND NOT _horizon_fetchcontent_base_is_legacy)
+       AND NOT _horizon_fetchcontent_base_is_project_source_cache)
     set(_horizon_default_source_root "${_horizon_fetchcontent_base_absolute}")
 else()
     set(_horizon_default_source_root "${CMAKE_BINARY_DIR}/_deps")
@@ -61,7 +61,7 @@ if(NOT DEFINED HORIZON_FETCHCONTENT_SOURCE_ROOT
         FORCE
     )
 elseif(NOT PROJECT_IS_TOP_LEVEL
-       AND _horizon_existing_source_root_absolute STREQUAL _horizon_legacy_source_root_absolute)
+       AND _horizon_existing_source_root_absolute STREQUAL _horizon_project_source_cache_root_absolute)
     set(HORIZON_FETCHCONTENT_SOURCE_ROOT
         "${_horizon_default_source_root}"
         CACHE PATH "${_horizon_fetchcontent_source_root_doc}"
@@ -87,7 +87,14 @@ else()
         CACHE PATH "${_horizon_fetchcontent_binary_root_doc}"
     )
 endif()
-mark_as_advanced(HORIZON_FETCHCONTENT_SOURCE_ROOT HORIZON_FETCHCONTENT_BINARY_ROOT)
+
+option(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE
+    "Require pre-populated FetchContent source directories instead of allowing downloads"
+    ON)
+mark_as_advanced(
+    HORIZON_FETCHCONTENT_SOURCE_ROOT
+    HORIZON_FETCHCONTENT_BINARY_ROOT
+    HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE)
 
 cmake_path(
     ABSOLUTE_PATH HORIZON_FETCHCONTENT_SOURCE_ROOT
@@ -102,7 +109,7 @@ cmake_path(
     OUTPUT_VARIABLE HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE
 )
 
-if(_horizon_fetchcontent_base_is_legacy)
+if(_horizon_fetchcontent_base_is_project_source_cache)
     set(FETCHCONTENT_BASE_DIR
         "${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}"
         CACHE PATH "Shared FetchContent population root"
@@ -120,42 +127,57 @@ endif()
 unset(_horizon_default_source_root)
 unset(_horizon_existing_source_root_absolute)
 unset(_horizon_fetchcontent_base_absolute)
-unset(_horizon_fetchcontent_base_is_legacy)
+unset(_horizon_fetchcontent_base_is_project_source_cache)
 unset(_horizon_fetchcontent_binary_root_doc)
 unset(_horizon_fetchcontent_source_root_doc)
-unset(_horizon_legacy_source_root)
-unset(_horizon_legacy_source_root_absolute)
+unset(_horizon_project_source_cache_root)
+unset(_horizon_project_source_cache_root_absolute)
 
 message(STATUS "Horizon FetchContent source cache: ${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}")
 message(STATUS "Horizon FetchContent build root: ${HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE}")
+message(STATUS "Horizon FetchContent require source cache: ${HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE}")
+
+if(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE)
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
+        "Do not download FetchContent sources when Horizon source cache mode is required"
+        FORCE)
+endif()
 
 function(horizon_fetchcontent_declare name)
-    string(TOLOWER "${name}" lowercase_name)
+    string(TOLOWER "${name}" _horizon_content_lowercase_name)
 
-    set(has_source_dir OFF)
-    set(has_binary_dir OFF)
-    foreach(arg IN LISTS ARGN)
-        if(arg STREQUAL "SOURCE_DIR")
-            set(has_source_dir ON)
-        elseif(arg STREQUAL "BINARY_DIR")
-            set(has_binary_dir ON)
+    set(_horizon_content_has_source_dir OFF)
+    set(_horizon_content_has_binary_dir OFF)
+    foreach(_horizon_content_arg IN LISTS ARGN)
+        if(_horizon_content_arg STREQUAL "SOURCE_DIR")
+            set(_horizon_content_has_source_dir ON)
+        elseif(_horizon_content_arg STREQUAL "BINARY_DIR")
+            set(_horizon_content_has_binary_dir ON)
         endif()
     endforeach()
 
-    set(directory_args)
-    if(NOT has_source_dir)
-        list(APPEND directory_args
-            SOURCE_DIR "${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}/${lowercase_name}-src"
+    set(_horizon_content_directory_args)
+    if(NOT _horizon_content_has_source_dir)
+        set(_horizon_content_source_dir
+            "${HORIZON_FETCHCONTENT_SOURCE_ROOT_ABSOLUTE}/${_horizon_content_lowercase_name}-src")
+        if(HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE
+           AND NOT EXISTS "${_horizon_content_source_dir}")
+            message(FATAL_ERROR
+                "Horizon FetchContent source cache is required for '${name}', "
+                "but this directory does not exist: ${_horizon_content_source_dir}")
+        endif()
+        list(APPEND _horizon_content_directory_args
+            SOURCE_DIR "${_horizon_content_source_dir}"
         )
     endif()
-    if(NOT has_binary_dir)
-        list(APPEND directory_args
-            BINARY_DIR "${HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE}/${lowercase_name}-build"
+    if(NOT _horizon_content_has_binary_dir)
+        list(APPEND _horizon_content_directory_args
+            BINARY_DIR "${HORIZON_FETCHCONTENT_BINARY_ROOT_ABSOLUTE}/${_horizon_content_lowercase_name}-build"
         )
     endif()
 
     FetchContent_Declare(${name}
         ${ARGN}
-        ${directory_args}
+        ${_horizon_content_directory_args}
     )
 endfunction()

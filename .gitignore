@@ -1,6 +1,7 @@
 # IDE 配置文件
 .vs/
 .vscode/
+CMakeUserPresets.json
 .cache/
 .idea/
 .github/
@@ -13,10 +14,6 @@
 build/
 out/
 cmake-build-*/
-
-# CMake 会按需下载并解压 Slang 二进制包，避免把大型 DLL/EXE/LIB 提交进仓库
-/third-party/slang/*
-!/third-party/slang/README.md
 
 # CMake 生成的文件
 CMakeCache.txt
