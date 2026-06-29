@@ -5,17 +5,29 @@ include(FetchContent)
 if(COMMAND horizon_fetchcontent_declare)
     horizon_fetchcontent_declare(
         quill
-        GIT_REPOSITORY https://github.com/odygrd/quill.git
-        GIT_TAG v11.0.1
-        GIT_SHALLOW TRUE
         EXCLUDE_FROM_ALL TRUE
     )
 else()
+    if(NOT DEFINED FETCHCONTENT_BASE_DIR OR FETCHCONTENT_BASE_DIR STREQUAL "")
+        set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps" CACHE PATH "FetchContent source cache")
+    endif()
+
+    cmake_path(
+        ABSOLUTE_PATH FETCHCONTENT_BASE_DIR
+        BASE_DIRECTORY "${CMAKE_BINARY_DIR}"
+        NORMALIZE
+        OUTPUT_VARIABLE _corona_fetchcontent_base_absolute
+    )
+    set(_corona_quill_source_dir "${_corona_fetchcontent_base_absolute}/quill-src")
+    if(NOT EXISTS "${_corona_quill_source_dir}")
+        message(FATAL_ERROR
+            "Corona quill source cache is required, but this directory does not exist: "
+            "${_corona_quill_source_dir}")
+    endif()
+
     FetchContent_Declare(
         quill
-        GIT_REPOSITORY https://github.com/odygrd/quill.git
-        GIT_TAG v11.0.1
-        GIT_SHALLOW TRUE
+        SOURCE_DIR "${_corona_quill_source_dir}"
         EXCLUDE_FROM_ALL TRUE
     )
 endif()
