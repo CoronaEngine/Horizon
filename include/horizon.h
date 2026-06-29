@@ -74,6 +74,14 @@ namespace Corona::Horizon
     class HardwareExecutor;
     class HardwareDisplayer;
 
+    // ================================================================
+    // Device memory query (VRAM capacity)
+    // ================================================================
+
+    /// 查询当前设备 DEVICE_LOCAL 显存总容量（字节，= 各 DEVICE_LOCAL 堆 size 之和）。
+    /// 仅返回容量；实际用量由上层（GeometrySystem）自行统计。设备未就绪时返回 0。
+    [[nodiscard]] std::uint64_t query_device_memory_size();
+
     struct BindingSlot;
 
     // ================================================================

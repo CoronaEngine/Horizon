@@ -777,6 +777,32 @@ namespace Corona::Horizon
         throw_if_failed(vmaCreateAllocator(&create_info, &allocator_), "vmaCreateAllocator");
     }
 
+    std::uint64_t ResourceManager::device_local_memory_size() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (allocator_ == VK_NULL_HANDLE)
+        {
+            return 0;
+        }
+
+        const VkPhysicalDeviceMemoryProperties* mem_props = nullptr;
+        vmaGetMemoryProperties(allocator_, &mem_props);
+        if (mem_props == nullptr)
+        {
+            return 0;
+        }
+
+        std::uint64_t total = 0;
+        for (uint32_t heap = 0; heap < mem_props->memoryHeapCount; ++heap)
+        {
+            if ((mem_props->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0)
+            {
+                total += mem_props->memoryHeaps[heap].size;
+            }
+        }
+        return total;
+    }
+
     void ResourceManager::create_default_sampler()
     {
         if (default_sampler_ != VK_NULL_HANDLE)
