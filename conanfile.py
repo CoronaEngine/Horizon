@@ -31,6 +31,13 @@ class HorizonConan(ConanFile):
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
+        "with_benchmarks": [True, False],
+        "with_ocarina_tests": [True, False],
+        "with_ocarina_vulkan": [True, False],
+        "with_hardcode_shaders": [True, False],
+        "enable_debug_validation": [True, False],
+        "enable_relwithdebinfo_validation": [True, False],
+        "enable_release_validation": [True, False],
     }
 
     default_options = {
@@ -41,6 +48,13 @@ class HorizonConan(ConanFile):
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
+        "with_benchmarks": False,
+        "with_ocarina_tests": False,
+        "with_ocarina_vulkan": False,
+        "with_hardcode_shaders": False,
+        "enable_debug_validation": True,
+        "enable_relwithdebinfo_validation": False,
+        "enable_release_validation": False,
         "spirv-cross/*:shared": False,
         "spirv-cross/*:build_executable": False,
         "spirv-tools/*:shared": False,
@@ -81,34 +95,6 @@ class HorizonConan(ConanFile):
         for pattern in ("*.h", "*.hpp", "*.inl"):
             copy(conanfile, pattern, src=src, dst=dst, keep_path=True)
 
-    def _build_deps_root(self):
-        candidates = []
-        fetchcontent_source_root = self._fetchcontent_source_root()
-        if fetchcontent_source_root:
-            candidates.append(fetchcontent_source_root)
-        candidates.extend((
-            os.path.join(self.build_folder, "_deps"),
-            os.path.join(os.path.dirname(self.build_folder), "_deps"),
-            os.path.join(os.path.dirname(os.path.dirname(self.build_folder)), "_deps"),
-        ))
-        for candidate in candidates:
-            if os.path.isdir(os.path.join(candidate, "ktm-src")):
-                return candidate
-        return None
-
-    def _fetchcontent_source_root(self):
-        source_root = os.environ.get("HORIZON_FETCHCONTENT_SOURCE_ROOT")
-        if source_root and os.path.isdir(source_root):
-            return os.path.normpath(source_root)
-        return None
-
-    @staticmethod
-    def _env_bool(name, default=False):
-        value = os.environ.get(name, "")
-        if not value:
-            return default
-        return value.lower() in ("1", "true", "yes", "on")
-
     def _editable_build_root(self):
         return os.path.normpath(
             os.environ.get(
@@ -128,17 +114,6 @@ class HorizonConan(ConanFile):
             os.path.join(source_root, "modules", "corona", "include"),
         ]
 
-        deps_root = self._fetchcontent_source_root()
-        if deps_root:
-            candidates.extend((
-                os.path.join(deps_root, "ktm-src"),
-                os.path.join(deps_root, "pfr-src", "include"),
-                os.path.join(deps_root, "quill-src", "include"),
-                os.path.join(deps_root, "spirv-headers-src", "include"),
-                os.path.join(deps_root, "spirv-tools-src", "include"),
-                os.path.join(deps_root, "vulkan-headers-src", "include"),
-                os.path.join(deps_root, "vulkanmemoryallocator-src", "include"),
-            ))
         return [path for path in candidates if os.path.isdir(path)]
 
     def _editable_libdirs(self):
@@ -150,15 +125,6 @@ class HorizonConan(ConanFile):
             os.path.join(build_root, "modules", "corona", "src", "kernel", config),
             os.path.join(build_root, "modules", "corona", "src", "pal", config),
         ]
-        for deps_dir_name in ("deps", "_deps"):
-            deps_root = os.path.join(build_root, deps_dir_name)
-            candidates.extend((
-                os.path.join(deps_root, "volk-build", config),
-                os.path.join(deps_root, "spirv-cross-build", config),
-                os.path.join(deps_root, "spirv-tools-build", "source", config),
-                os.path.join(deps_root, "spirv-tools-build", "source", "opt", config),
-                os.path.join(deps_root, "spirv-tools-build", "source", "link", config),
-            ))
         return [path for path in candidates if os.path.isdir(path)]
 
     def _shader_tool_path(self):
@@ -172,36 +138,15 @@ class HorizonConan(ConanFile):
             )
         return os.path.join(self.package_folder, "bin", shader_tool_name)
 
-    def _fetchcontent_source_overrides(self):
-        source_root = self._fetchcontent_source_root()
-        if not source_root:
-            return {}
-
-        dependency_sources = {
-            "pfr": "pfr-src",
-            "ktm": "ktm-src",
-            "preprocessor": "preprocessor-src",
-            "SPIRV-Cross": "spirv-cross-src",
-            "SPIRV-Headers": "spirv-headers-src",
-            "SPIRV-Tools": "spirv-tools-src",
-            "volk": "volk-src",
-            "Vulkan-Headers": "vulkan-headers-src",
-            "VulkanMemoryAllocator": "vulkanmemoryallocator-src",
-            "quill": "quill-src",
-        }
-
-        overrides = {}
-        for cmake_name, source_dir_name in dependency_sources.items():
-            source_dir = os.path.join(source_root, source_dir_name)
-            if os.path.isdir(source_dir):
-                overrides[f"FETCHCONTENT_SOURCE_DIR_{cmake_name.upper()}"] = os.path.normpath(source_dir)
-        return overrides
-
     def validate(self):
         if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):
             raise ConanInvalidConfiguration("with_ocarina=True requires with_cuda=True")
         if bool(self.options.with_vision_hotfix) and not bool(self.options.with_ocarina):
             raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True")
+        if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
+            raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True")
+        if bool(self.options.with_ocarina_vulkan) and not bool(self.options.with_ocarina):
+            raise ConanInvalidConfiguration("with_ocarina_vulkan=True requires with_ocarina=True")
 
     def generate(self):
         deps = CMakeDeps(self)
@@ -215,24 +160,16 @@ class HorizonConan(ConanFile):
         cache_variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         cache_variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
         cache_variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
-        cache_variables["HORIZON_BUILD_BENCHMARKS"] = False
-        cache_variables["HORIZON_ENABLE_DEPENDENCY_INSTALL"] = False
-        dependency_provider = os.environ.get("HORIZON_DEPENDENCY_PROVIDER", "conan")
-        cache_variables["HORIZON_DEPENDENCY_PROVIDER"] = dependency_provider
-        fetchcontent_source_root = self._fetchcontent_source_root()
-        fetchcontent_require_source_cache = self._env_bool(
-            "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE",
-            default=dependency_provider == "fetchcontent",
+        cache_variables["HORIZON_BUILD_BENCHMARKS"] = bool(self.options.with_benchmarks)
+        cache_variables["HORIZON_BUILD_OCARINA_TESTS"] = bool(self.options.with_ocarina_tests)
+        cache_variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
+        cache_variables["HORIZON_ENABLE_DEBUG_VALIDATION"] = bool(self.options.enable_debug_validation)
+        cache_variables["HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION"] = bool(
+            self.options.enable_relwithdebinfo_validation
         )
-        if fetchcontent_require_source_cache and not fetchcontent_source_root:
-            raise ConanInvalidConfiguration(
-                "HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE requires HORIZON_FETCHCONTENT_SOURCE_ROOT"
-            )
-        cache_variables["HORIZON_FETCHCONTENT_REQUIRE_SOURCE_CACHE"] = fetchcontent_require_source_cache
-        if fetchcontent_source_root:
-            cache_variables["HORIZON_FETCHCONTENT_SOURCE_ROOT"] = fetchcontent_source_root.replace("\\", "/")
-            for variable_name, source_dir in self._fetchcontent_source_overrides().items():
-                cache_variables[variable_name] = source_dir.replace("\\", "/")
+        cache_variables["HORIZON_ENABLE_RELEASE_VALIDATION"] = bool(self.options.enable_release_validation)
+        if bool(self.options.with_ocarina_vulkan):
+            cache_variables["VISION_BUILD_VULKAN"] = True
         toolchain.generate()
 
     def build(self):
@@ -247,20 +184,6 @@ class HorizonConan(ConanFile):
         self._copy_headers(self, os.path.join(self.source_folder, "include"), package_include)
         self._copy_headers(self, os.path.join(self.source_folder, "src", "Helicon"), package_include)
         self._copy_headers(self, os.path.join(self.source_folder, "modules", "corona", "include"), package_include)
-
-        deps_root = self._build_deps_root()
-        if deps_root:
-            for dep_include in (
-                os.path.join(deps_root, "ktm-src"),
-                os.path.join(deps_root, "pfr-src", "include"),
-                os.path.join(deps_root, "quill-src", "include"),
-                os.path.join(deps_root, "spirv-headers-src", "include"),
-                os.path.join(deps_root, "spirv-tools-src", "include"),
-                os.path.join(deps_root, "vulkan-headers-src", "include"),
-                os.path.join(deps_root, "vulkanmemoryallocator-src", "include"),
-            ):
-                if os.path.isdir(dep_include):
-                    self._copy_headers(self, dep_include, package_include)
 
         package_cmake = os.path.join(self.package_folder, "cmake")
         copy(self, "HeliconShaderCompile.cmake", src=os.path.join(self.source_folder, "cmake"), dst=package_cmake)

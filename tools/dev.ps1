@@ -176,6 +176,10 @@ function Get-ConanProfile {
 function Get-ConanInstallOptions {
     $targetValues = @($Target)
     $options = @()
+    $requiresOcarina = $false
+    $requiresOcarinaTests = $false
+    $requiresOcarinaVulkan = $false
+    $requiresVisionHotfix = $false
 
     if ($targetValues -contains "ShaderCompileScripts") {
         $options += "&:with_tools=True"
@@ -187,6 +191,43 @@ function Get-ConanInstallOptions {
 
     if ($targetValues -contains "HorizonTests") {
         $options += "&:with_tests=True"
+    }
+
+    if ($targetValues -contains "HorizonSmokeBenchmarks") {
+        $options += "&:with_benchmarks=True"
+    }
+
+    foreach ($targetValue in $targetValues) {
+        if ($targetValue -like "ocarina*") {
+            $requiresOcarina = $true
+        }
+        if ($targetValue -like "ocarina-test-*") {
+            $requiresOcarinaTests = $true
+        }
+        if ($targetValue -eq "ocarina-backend-vulkan") {
+            $requiresOcarinaVulkan = $true
+        }
+        if ($targetValue -like "vision-hotfix*") {
+            $requiresOcarina = $true
+            $requiresVisionHotfix = $true
+        }
+    }
+
+    if ($requiresOcarina) {
+        $options += "&:with_ocarina=True"
+        $options += "&:with_cuda=True"
+    }
+
+    if ($requiresOcarinaTests) {
+        $options += "&:with_ocarina_tests=True"
+    }
+
+    if ($requiresOcarinaVulkan) {
+        $options += "&:with_ocarina_vulkan=True"
+    }
+
+    if ($requiresVisionHotfix) {
+        $options += "&:with_vision_hotfix=True"
     }
 
     return $options

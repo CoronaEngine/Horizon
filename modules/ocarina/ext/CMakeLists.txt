@@ -1,6 +1,3 @@
-
-include(FetchContent)
-
 add_library(ocarina-ext SHARED empty.cpp)
 set_target_properties(ocarina-ext PROPERTIES
         PUBLIC_HEADER "${HEADER_FILES}"
@@ -9,8 +6,8 @@ set_target_properties(ocarina-ext PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         FOLDER "ocarina")
 
-# ---- xxhash / fmt / spdlog 由根 Horizon CMakeLists.txt 通过 FetchContent 提供，
-#      并由根级直接 target_link_libraries 到 ocarina-ext，本文件不再处理。
+# fmt, spdlog, and xxHash are provided by the root Conan dependency graph and
+# linked to ocarina-ext from the Horizon root.
 
 add_subdirectory(EASTL)
 target_include_directories(EASTL PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/EASTL/include)
@@ -22,17 +19,22 @@ add_subdirectory(stblib)
 
 cmake_policy(SET CMP0148 NEW)
 
-# ---- SPIRV-Cross 由根 Horizon CMakeLists.txt 通过 FetchContent 提供 ----
+# SPIRV-Cross is provided by the root Conan dependency graph.
 if(VISION_BUILD_VULKAN)
-    set_property(TARGET spirv-cross PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-c PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-core PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-glsl PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-hlsl PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-msl PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-cpp PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-reflect PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-util PROPERTY FOLDER "ocarina/ext/spirv")
+    foreach(_ocarina_spirv_target IN ITEMS
+        spirv-cross
+        spirv-cross-c
+        spirv-cross-core
+        spirv-cross-glsl
+        spirv-cross-hlsl
+        spirv-cross-msl
+        spirv-cross-cpp
+        spirv-cross-reflect
+        spirv-cross-util)
+        if(TARGET ${_ocarina_spirv_target})
+            set_property(TARGET ${_ocarina_spirv_target} PROPERTY FOLDER "ocarina/ext/spirv")
+        endif()
+    endforeach()
 endif()
 #list(APPEND SPIRV_LIBS "spirv-cross-core" "spirv-cross-hlsl" )
 

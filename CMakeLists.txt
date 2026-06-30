@@ -15,8 +15,6 @@ option(HORIZON_BUILD_BENCHMARKS "Build Horizon performance benchmarks" OFF)
 option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module when CUDA is available" OFF)
 option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
 option(HORIZON_BUILD_VISION_HOTFIX "Build Vision hotfix support targets" OFF)
-option(HORIZON_BUILD_DEPENDENCY_TOOLS "Build third-party command line tool executables" OFF)
-option(HORIZON_ENABLE_DEPENDENCY_INSTALL "Enable third-party dependency install rules" OFF)
 option(HORIZON_ENABLE_DEBUG_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Debug builds" ON)
 option(HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in RelWithDebInfo builds" OFF)
 option(HORIZON_ENABLE_RELEASE_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Release and MinSizeRel builds" OFF)
@@ -42,8 +40,6 @@ add_compile_definitions(
     $<$<CONFIG:MinSizeRel>:CABBAGE_ENGINE_RELEASE>
 )
 
-include(FetchContent)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_fetch_content.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
