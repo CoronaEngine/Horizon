@@ -8,7 +8,10 @@
         .\tools\dev.ps1 install
         .\tools\dev.ps1 configure
         .\tools\dev.ps1 build Horizon
+        .\tools\dev.ps1 build-fast Horizon
+        .\tools\dev.ps1 rebuild Horizon
         .\tools\dev.ps1 build Horizon -Configuration Release
+        .\tools\dev.ps1 update
         .\tools\dev.ps1 format-check
         .\tools\dev.ps1 format
         .\tools\dev.ps1 format src/hardware_wrapper_vulkan
@@ -16,7 +19,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Position = 0)]
-    [ValidateSet("status", "install", "configure", "build", "format-check", "format")]
+    [ValidateSet("status", "install", "configure", "build", "build-fast", "rebuild", "update", "format-check", "format")]
     [string]$Command = "status",
 
     [Parameter()]
@@ -47,12 +50,87 @@ function Invoke-NativeCommand {
     }
 }
 
-function Get-MsvcBuildPreset {
-    switch ($Configuration) {
-        "Debug" { return "conan-debug" }
-        "Release" { return "conan-release" }
-        "RelWithDebInfo" { return "conan-relwithdebinfo" }
-        "MinSizeRel" { return "conan-minsizerel" }
+function Remove-RepoPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    $target = Join-Path $RepoRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $target)) {
+        Write-Host "[INFO] Not found: $RelativePath"
+        return
+    }
+
+    $resolvedTarget = (Resolve-Path -LiteralPath $target).Path
+    $resolvedRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $rootPrefix = $resolvedRoot.TrimEnd("\") + "\"
+    if (($resolvedTarget -eq $resolvedRoot) -or (-not $resolvedTarget.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase))) {
+        throw "Refusing to remove path outside repository root: $resolvedTarget"
+    }
+
+    Write-Host "[INFO] Removing $resolvedTarget"
+    Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+}
+
+function Invoke-CleanBuildTree {
+    Remove-RepoPath -RelativePath "build"
+    Remove-RepoPath -RelativePath "install"
+}
+
+function Get-ConanBuildDir {
+    return (Join-Path $RepoRoot "build\conan")
+}
+
+function Convert-ToComparablePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    return $Path.Replace("\", "/").TrimEnd("/").ToLowerInvariant()
+}
+
+function Get-CMakeCacheValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CacheFile,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    foreach ($line in (Get-Content -LiteralPath $CacheFile)) {
+        if ($line -match "^$([regex]::Escape($Name)):[^=]*=(.*)$") {
+            return $Matches[1]
+        }
+    }
+
+    return $null
+}
+
+function Assert-CMakeCacheMatchesRepo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CacheFile
+    )
+
+    $sourceDir = Get-CMakeCacheValue -CacheFile $CacheFile -Name "CMAKE_HOME_DIRECTORY"
+    if ($sourceDir) {
+        $expectedSource = Convert-ToComparablePath -Path $RepoRoot
+        $actualSource = Convert-ToComparablePath -Path $sourceDir
+        if ($actualSource -ne $expectedSource) {
+            throw "CMake cache belongs to '$sourceDir', not '$RepoRoot'. Run '.\tools\dev.ps1 rebuild $($Target[0])'."
+        }
+    }
+
+    $cacheDir = Get-CMakeCacheValue -CacheFile $CacheFile -Name "CMAKE_CACHEFILE_DIR"
+    if ($cacheDir) {
+        $expectedCacheDir = Convert-ToComparablePath -Path (Get-ConanBuildDir)
+        $actualCacheDir = Convert-ToComparablePath -Path $cacheDir
+        if ($actualCacheDir -ne $expectedCacheDir) {
+            throw "CMake cache directory is '$cacheDir', not '$(Get-ConanBuildDir)'. Run '.\tools\dev.ps1 rebuild $($Target[0])'."
+        }
     }
 }
 
@@ -109,6 +187,8 @@ function Get-ConanInstallOptions {
 }
 
 function Invoke-ConanInstall {
+    param([bool]$Update = $false)
+
     $profile = Get-ConanProfile
     $installOptions = Get-ConanInstallOptions
     $installArguments = @(
@@ -122,11 +202,31 @@ function Invoke-ConanInstall {
     }
     $installArguments += "--build=missing"
 
+    if ($Update) {
+        $installArguments += "--update"
+    }
+
     Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\ktm")
     Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\pfr")
     Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\slang")
     Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\vulkan-memory-allocator")
     Invoke-NativeCommand -FilePath "conan" -Arguments $installArguments
+}
+
+function Invoke-CMakeConfigure {
+    Import-ConanBuildEnvironment
+    Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "conan-default")
+}
+
+function Invoke-CMakeBuild {
+    $buildDir = Get-ConanBuildDir
+    $cacheFile = Join-Path $buildDir "CMakeCache.txt"
+    if (-not (Test-Path -LiteralPath $cacheFile)) {
+        throw "CMake cache was not found. Run '.\tools\dev.ps1 configure' or '.\tools\dev.ps1 build' first."
+    }
+    Assert-CMakeCacheMatchesRepo -CacheFile $cacheFile
+
+    Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", $buildDir, "--config", $Configuration, "--target", $Target[0])
 }
 
 function Get-FormatArguments {
@@ -167,14 +267,26 @@ try {
         }
         "configure" {
             Invoke-ConanInstall
-            Import-ConanBuildEnvironment
-            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "conan-default")
+            Invoke-CMakeConfigure
         }
         "build" {
             Invoke-ConanInstall
+            Invoke-CMakeConfigure
+            Invoke-CMakeBuild
+        }
+        "build-fast" {
             Import-ConanBuildEnvironment
-            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "conan-default")
-            Invoke-NativeCommand -FilePath "cmake" -Arguments @("--build", "--preset", (Get-MsvcBuildPreset), "--target", $Target[0])
+            Invoke-CMakeBuild
+        }
+        "rebuild" {
+            Invoke-CleanBuildTree
+            Invoke-ConanInstall
+            Invoke-CMakeConfigure
+            Invoke-CMakeBuild
+        }
+        "update" {
+            Invoke-ConanInstall -Update $true
+            Invoke-CMakeConfigure
         }
         "format-check" {
             Invoke-FormatScript -CheckOnly $true
