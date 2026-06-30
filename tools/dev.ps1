@@ -12,6 +12,7 @@
         .\tools\dev.ps1 rebuild Horizon
         .\tools\dev.ps1 build Horizon -Configuration Release
         .\tools\dev.ps1 update
+        .\tools\dev.ps1 clean
         .\tools\dev.ps1 format-check
         .\tools\dev.ps1 format
         .\tools\dev.ps1 format src/hardware_wrapper_vulkan
@@ -19,7 +20,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Position = 0)]
-    [ValidateSet("status", "install", "configure", "build", "build-fast", "rebuild", "update", "format-check", "format")]
+    [ValidateSet("status", "install", "configure", "build", "build-fast", "rebuild", "update", "clean", "format-check", "format")]
     [string]$Command = "status",
 
     [Parameter()]
@@ -76,6 +77,11 @@ function Remove-RepoPath {
 function Invoke-CleanBuildTree {
     Remove-RepoPath -RelativePath "build"
     Remove-RepoPath -RelativePath "install"
+}
+
+function Invoke-CleanProject {
+    Write-Host "[INFO] Removing ignored local build/cache files"
+    Invoke-NativeCommand -FilePath "git" -Arguments @("clean", "-fdX")
 }
 
 function Get-ConanBuildDir {
@@ -287,6 +293,9 @@ try {
         "update" {
             Invoke-ConanInstall -Update $true
             Invoke-CMakeConfigure
+        }
+        "clean" {
+            Invoke-CleanProject
         }
         "format-check" {
             Invoke-FormatScript -CheckOnly $true

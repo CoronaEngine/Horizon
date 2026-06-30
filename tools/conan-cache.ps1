@@ -15,11 +15,13 @@
         .\tools\conan-cache.ps1 remove slang/2026.10
         .\tools\conan-cache.ps1 remove slang/2026.10 -DryRun
         .\tools\conan-cache.ps1 remove slang -Version 2026.10 -Force
+        .\tools\conan-cache.ps1 clear
+        .\tools\conan-cache.ps1 clear -DryRun
 #>
 [CmdletBinding()]
 Param(
     [Parameter(Position = 0)]
-    [ValidateSet("list", "update", "remove")]
+    [ValidateSet("list", "update", "remove", "clear")]
     [string]$Command = "list",
 
     [Parameter(Position = 1)]
@@ -293,6 +295,23 @@ function Invoke-ConanCacheRemove {
     Invoke-NativeCommand -FilePath "conan" -Arguments $removeArguments
 }
 
+function Invoke-ConanCacheClear {
+    if ($Package -or $Version -or $User -or $Channel -or $Reference -or $PackageId -or $PackageQuery) {
+        throw "clear does not accept package/reference filters. Use remove for filtered cleanup."
+    }
+
+    $pattern = "*"
+    $removeArguments = @("remove", $pattern, "--confirm")
+    if ($DryRun) {
+        Write-Host "[INFO] Dry run: removing all local Conan cache entries"
+        $removeArguments += "--dry-run"
+    }
+    else {
+        Write-Host "[WARN] Removing all recipes/packages from the global Conan cache."
+    }
+    Invoke-NativeCommand -FilePath "conan" -Arguments $removeArguments
+}
+
 Push-Location -LiteralPath $RepoRoot
 try {
     switch ($Command) {
@@ -304,6 +323,9 @@ try {
         }
         "remove" {
             Invoke-ConanCacheRemove
+        }
+        "clear" {
+            Invoke-ConanCacheClear
         }
     }
 }
