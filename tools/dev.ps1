@@ -36,6 +36,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "horizon-conan-recipes.ps1")
 
 function Invoke-NativeCommand {
     param(
@@ -253,10 +254,7 @@ function Invoke-ConanInstall {
         $installArguments += "--update"
     }
 
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\ktm")
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\pfr")
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\slang")
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\vulkan-memory-allocator")
+    Invoke-HorizonConanLocalRecipeExports -RepoRoot $RepoRoot
     Invoke-NativeCommand -FilePath "conan" -Arguments $installArguments
 }
 

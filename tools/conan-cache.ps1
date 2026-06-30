@@ -61,6 +61,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "horizon-conan-recipes.ps1")
 
 function Invoke-NativeCommand {
     param(
@@ -86,10 +87,7 @@ function Get-ConanProfile {
 }
 
 function Invoke-LocalRecipeExports {
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\ktm")
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\pfr")
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\slang")
-    Invoke-NativeCommand -FilePath "conan" -Arguments @("export", "conan\recipes\vulkan-memory-allocator")
+    Invoke-HorizonConanLocalRecipeExports -RepoRoot $RepoRoot
 }
 
 function Test-ReferenceLikeValue {
