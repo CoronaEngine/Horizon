@@ -8,6 +8,7 @@
 #include <volk.h>
 
 #include <array>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -61,6 +62,10 @@ namespace Corona::Horizon
         [[nodiscard]] std::array<VkDescriptorSetLayout, bindless_descriptor_set_count> bindless_descriptor_set_layouts();
         [[nodiscard]] std::array<VkDescriptorSet, bindless_descriptor_set_count> bindless_descriptor_sets();
         [[nodiscard]] VkSampler default_sampler();
+
+        // 返回 DEVICE_LOCAL 显存堆容量之和（字节，VRAM 总量）。
+        // 仅容量，用量由上层自行统计。设备未就绪时返回 0。线程安全。
+        [[nodiscard]] std::uint64_t device_local_memory_size() const;
 
     private:
         struct DescriptorArray
