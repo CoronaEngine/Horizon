@@ -23,10 +23,11 @@ endif()
 
 # 解析源文件中的 shader include 指令
 # 返回: shader lang list, shader path list, shader relative path list
-function(_helicon_parse_shader_includes source_files source_dir out_langs out_paths out_rel_paths out_scanned_files)
+function(_helicon_parse_shader_includes source_files source_dir out_langs out_paths out_rel_paths out_source_paths out_scanned_files)
     set(_helicon_lang_list "")
     set(_helicon_path_list "")
     set(_helicon_rel_path_list "")
+    set(_helicon_source_path_list "")
     set(_helicon_scanned_files "")
 
     foreach(_helicon_source_file ${source_files})
@@ -86,12 +87,14 @@ function(_helicon_parse_shader_includes source_files source_dir out_langs out_pa
             list(APPEND _helicon_lang_list "${_helicon_lang}")
             list(APPEND _helicon_path_list "${_helicon_shader_path}")
             list(APPEND _helicon_rel_path_list "${_helicon_relative_path}")
+            list(APPEND _helicon_source_path_list "${_helicon_source_file}")
         endforeach()
     endforeach()
     
     set(${out_langs} "${_helicon_lang_list}" PARENT_SCOPE)
     set(${out_paths} "${_helicon_path_list}" PARENT_SCOPE)
     set(${out_rel_paths} "${_helicon_rel_path_list}" PARENT_SCOPE)
+    set(${out_source_paths} "${_helicon_source_path_list}" PARENT_SCOPE)
     set(${out_scanned_files} "${_helicon_scanned_files}" PARENT_SCOPE)
 endfunction()
 
@@ -101,7 +104,7 @@ endfunction()
 # 
 # 参数:
 #   TARGET      - 目标名称 (必需)
-#   OUTPUT_DIR  - 输出目录 (可选, 默认: ${PROJECT_SOURCE_DIR}/Src/Helicon/Compiler/HardcodeShaders)
+#   OUTPUT_DIR  - 输出目录 (可选, 默认: ${CMAKE_CURRENT_BINARY_DIR}/helicon_generated/<target>)
 # ============================================================================
 function(helicon_compile_shaders target_name)
     if(NOT TARGET ShaderCompileScripts)
@@ -115,7 +118,7 @@ function(helicon_compile_shaders target_name)
     cmake_parse_arguments(_helicon_arg "" "OUTPUT_DIR" "" ${ARGN})
     
     if(NOT _helicon_arg_OUTPUT_DIR)
-        set(_helicon_arg_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/src/Helicon/Compiler/HardcodeShaders")
+        set(_helicon_arg_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/helicon_generated/${target_name}")
     endif()
     
     # 确保输出目录存在
@@ -132,7 +135,8 @@ function(helicon_compile_shaders target_name)
     
     # 解析所有源文件中的 shader include
     _helicon_parse_shader_includes("${_helicon_target_sources}" "${_helicon_target_source_dir}"
-        _helicon_shader_langs _helicon_shader_paths _helicon_shader_rel_paths _helicon_shader_scanned_files)
+        _helicon_shader_langs _helicon_shader_paths _helicon_shader_rel_paths
+        _helicon_shader_source_paths _helicon_shader_scanned_files)
 
     # 把"含 shader include 的源文件"注册为 configure 依赖。
     # 要生成哪些 shader 的集合在 configure 时冻结；若不监视这些文件，
@@ -162,6 +166,7 @@ function(helicon_compile_shaders target_name)
         list(GET _helicon_shader_langs ${_helicon_idx} _helicon_shader_lang)
         list(GET _helicon_shader_paths ${_helicon_idx} _helicon_shader_path)
         list(GET _helicon_shader_rel_paths ${_helicon_idx} _helicon_shader_rel_path)
+        list(GET _helicon_shader_source_paths ${_helicon_idx} _helicon_shader_source_file)
         
         # 检查 shader 文件是否存在
         if(NOT EXISTS "${_helicon_shader_path}")
@@ -234,6 +239,21 @@ function(helicon_compile_shaders target_name)
         )
         
         list(APPEND _helicon_generated_headers "${_helicon_output_header}")
+
+        get_source_file_property(_helicon_existing_object_depends
+            "${_helicon_shader_source_file}"
+            DIRECTORY "${_helicon_target_source_dir}"
+            OBJECT_DEPENDS)
+        if(NOT _helicon_existing_object_depends OR
+           _helicon_existing_object_depends STREQUAL "NOTFOUND")
+            set(_helicon_existing_object_depends "")
+        endif()
+
+        list(APPEND _helicon_existing_object_depends "${_helicon_output_header}")
+        list(REMOVE_DUPLICATES _helicon_existing_object_depends)
+        set_source_files_properties("${_helicon_shader_source_file}"
+            DIRECTORY "${_helicon_target_source_dir}"
+            PROPERTIES OBJECT_DEPENDS "${_helicon_existing_object_depends}")
     endforeach()
     
     # 创建自定义目标
@@ -246,7 +266,11 @@ function(helicon_compile_shaders target_name)
         
         # 确保 shader 在主目标之前编译
         add_dependencies(${target_name} ${_helicon_shader_target})
-        
+
+        set_source_files_properties(${_helicon_generated_headers}
+            PROPERTIES GENERATED TRUE)
+        target_sources(${target_name} PRIVATE ${_helicon_generated_headers})
+
         # 添加 include 路径（OUTPUT_DIR 作为根目录）
         # BEFORE: keep freshly-generated shader headers ahead of any stale
         # build-cache copies on transitive include paths so they can't be shadowed.
