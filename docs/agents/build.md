@@ -1,5 +1,5 @@
 # Horizon Build Context
-<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 63b8b1a608f187f92bad25e04a77e0034898316376f0ab795bd30c05e2df3e98 -->
+<!-- AGENT_DOCS_BUILD_ZH_CN_SHA256: 71e81c5f53de8b370632ec31919e5220060536ba3eb0f931ef65c1027a8c2a0e -->
 
 Load this file only for CMake, preset, build, CI, or validation-command work.
 
@@ -33,7 +33,7 @@ cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```
 
-Default configure favors a clean build: only library-required targets are enabled. `tools/`, `examples/`, `tests/`, `benchmarks/`, `modules/ocarina`, third-party command line tools, and third-party install rules are off by default. Enable them explicitly when needed:
+Direct CMake preset configure favors a clean build: only library-required targets are enabled. `tools/`, `examples/`, `tests/`, `benchmarks/`, `modules/ocarina`, third-party command line tools, and third-party install rules are off by default. Enable them explicitly when needed:
 
 ```powershell
 cmake --preset ninja-msvc -DHORIZON_BUILD_TOOLS=ON
@@ -45,6 +45,8 @@ cmake --preset ninja-msvc -DHORIZON_BUILD_OCARINA=ON -DHORIZON_BUILD_OCARINA_TES
 cmake --preset ninja-msvc -DHORIZON_BUILD_DEPENDENCY_TOOLS=ON
 cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
 ```
+
+Through the `tools/dev.ps1 install/configure/build` Conan workflow, the root Conan package defaults to `with_ocarina=True`, `with_cuda=True`, and `with_vision_hotfix=True`; this generates `HORIZON_BUILD_OCARINA=ON` and `HORIZON_BUILD_VISION_HOTFIX=ON`, and requires `CUDA_PATH` to be set.
 
 For newcomer on-demand target selection, load `docs/tasks/optional-build-targets.md` first; it contains the short command table, clean-configuration reset, and validation steps.
 
@@ -73,7 +75,7 @@ For newcomer on-demand target selection, load `docs/tasks/optional-build-targets
 - `HORIZON_BUILD_TOOLS` controls `tools/`; disabling it removes `ShaderCompileScripts`.
 - `HORIZON_BUILD_EXAMPLES` controls `examples/` and example dependencies; disabling it removes `HorizonExamples`.
 - `HORIZON_BUILD_TESTS` controls `tests/`; the test entry is `HorizonTests`, and `HorizonTests.exe --list` explains what it covers.
-- `HORIZON_BUILD_OCARINA` controls `modules/ocarina`; it also requires `CUDA_PATH`. `HORIZON_BUILD_OCARINA_TESTS` separately controls ocarina's own tests.
+- `HORIZON_BUILD_OCARINA` controls `modules/ocarina`; it also requires `CUDA_PATH`. Direct CMake defaults it off, while Conan defaults it on. `HORIZON_BUILD_OCARINA_TESTS` separately controls ocarina's own tests.
 - `HORIZON_BUILD_DEPENDENCY_TOOLS` controls SPIRV-Tools-style third-party command line tools; `HORIZON_ENABLE_DEPENDENCY_INSTALL` controls third-party install rules.
 
 ## FetchContent Rules

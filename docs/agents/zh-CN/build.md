@@ -32,7 +32,7 @@ cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```
 
-默认 configure 偏向干净构建：只启用库本体需要的目标，`tools/`、`examples/`、`tests/`、`benchmarks/`、`modules/ocarina`、第三方命令行工具和第三方安装规则都默认关闭。按需开启时使用显式 cache 选项：
+直接使用 CMake preset 的默认 configure 偏向干净构建：只启用库本体需要的目标，`tools/`、`examples/`、`tests/`、`benchmarks/`、`modules/ocarina`、第三方命令行工具和第三方安装规则都默认关闭。按需开启时使用显式 cache 选项：
 
 ```powershell
 cmake --preset ninja-msvc -DHORIZON_BUILD_TOOLS=ON
@@ -44,6 +44,8 @@ cmake --preset ninja-msvc -DHORIZON_BUILD_OCARINA=ON -DHORIZON_BUILD_OCARINA_TES
 cmake --preset ninja-msvc -DHORIZON_BUILD_DEPENDENCY_TOOLS=ON
 cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
 ```
+
+通过 `tools/dev.ps1 install/configure/build` 进入 Conan workflow 时，Conan 根包默认启用 `with_ocarina=True`、`with_cuda=True`、`with_vision_hotfix=True`；这会生成 `HORIZON_BUILD_OCARINA=ON` 和 `HORIZON_BUILD_VISION_HOTFIX=ON`，并要求 `CUDA_PATH` 已设置。
 
 新人按需开启目标时，优先加载 `docs/tasks/optional-build-targets.md`；那里有短命令表、恢复干净配置和验证步骤。
 
@@ -72,7 +74,7 @@ cmake --preset ninja-msvc -DHORIZON_ENABLE_DEPENDENCY_INSTALL=ON
 - `HORIZON_BUILD_TOOLS` 控制 `tools/`；关闭后不会生成 `ShaderCompileScripts`。
 - `HORIZON_BUILD_EXAMPLES` 控制 `examples/` 和示例依赖；关闭后不会生成 `HorizonExamples`。
 - `HORIZON_BUILD_TESTS` 控制 `tests/`；测试入口为 `HorizonTests`，可用 `HorizonTests.exe --list` 查看覆盖说明。
-- `HORIZON_BUILD_OCARINA` 控制 `modules/ocarina`；还需要 `CUDA_PATH` 已设置。`HORIZON_BUILD_OCARINA_TESTS` 单独控制 ocarina 自测。
+- `HORIZON_BUILD_OCARINA` 控制 `modules/ocarina`；还需要 `CUDA_PATH` 已设置。直接 CMake 默认关闭它，Conan 默认开启它。`HORIZON_BUILD_OCARINA_TESTS` 单独控制 ocarina 自测。
 - `HORIZON_BUILD_DEPENDENCY_TOOLS` 控制 SPIRV-Tools 等第三方命令行工具；`HORIZON_ENABLE_DEPENDENCY_INSTALL` 控制第三方安装规则。
 
 ## FetchContent 规则

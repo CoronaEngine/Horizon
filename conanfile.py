@@ -42,9 +42,9 @@ class HorizonConan(ConanFile):
 
     default_options = {
         "shared": False,
-        "with_ocarina": False,
-        "with_vision_hotfix": False,
-        "with_cuda": False,
+        "with_ocarina": True,
+        "with_vision_hotfix": True,
+        "with_cuda": True,
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
@@ -141,6 +141,8 @@ class HorizonConan(ConanFile):
     def validate(self):
         if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):
             raise ConanInvalidConfiguration("with_ocarina=True requires with_cuda=True")
+        if bool(self.options.with_ocarina) and not os.environ.get("CUDA_PATH"):
+            raise ConanInvalidConfiguration("with_ocarina=True requires CUDA_PATH to be set")
         if bool(self.options.with_vision_hotfix) and not bool(self.options.with_ocarina):
             raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True")
         if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
@@ -176,6 +178,10 @@ class HorizonConan(ConanFile):
         cmake = CMake(self)
         cmake.configure()
         cmake.build(target="Horizon")
+        if bool(self.options.with_ocarina) and bool(self.options.with_cuda):
+            cmake.build(target="ocarina")
+        if bool(self.options.with_vision_hotfix):
+            cmake.build(target="vision-hotfix-all")
         if bool(self.options.with_tools):
             cmake.build(target="ShaderCompileScripts")
 

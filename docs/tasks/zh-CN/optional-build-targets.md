@@ -8,7 +8,8 @@
 
 ## 默认行为
 
-- 默认 configure 偏向干净构建，只启用库本体需要的目标。
+- 本文描述直接使用 CMake preset 的默认行为；`tools/dev.ps1` 的 Conan workflow 可能有不同的默认根包选项。
+- 直接 CMake 默认 configure 偏向干净构建，只启用库本体需要的目标。
 - `tools/`、`examples/`、`tests/`、`benchmarks/`、`modules/ocarina` 默认关闭。
 - SPIRV-Tools 等第三方命令行工具和第三方安装规则默认关闭。
 - 旧 build 目录可能缓存过旧的 ON 值；如果行为不符合预期，重新 configure 并显式传入 OFF，或删除对应 `build/<preset>`。

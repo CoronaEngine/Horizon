@@ -14,8 +14,14 @@ This task note records the first Horizon Conan package scaffold used by CoronaEn
   - `with_tools`
   - `with_examples`
   - `with_tests`
+  - `with_benchmarks`
+  - `with_ocarina_tests`
+  - `with_ocarina_vulkan`
+  - `with_hardcode_shaders`
+- The Conan default path enables `with_ocarina=True`, `with_cuda=True`, and `with_vision_hotfix=True`; direct CMake presets still keep Horizon's original CMake defaults.
 - The recipe generates `CMakeToolchain` and `CMakeDeps`.
 - The recipe maps options to existing CMake cache variables without changing Horizon's default CMake build.
+- When ocarina or vision-hotfix are enabled, `conan create` builds the `ocarina` and `vision-hotfix-all` targets in addition to `Horizon`.
 - The recipe exports `cmake/HeliconShaderCompile.cmake` as a CMake build module so consumers can keep calling `helicon_compile_shaders()` after `find_package(Horizon CONFIG)`.
 - When `with_tools=True`, the recipe builds/packages `ShaderCompileScripts` and exports `HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE` so the build module can create an imported tool target for package consumers.
 - Consumer-side `conan install` writes `horizon_BUILD_MODULES_PATHS_<CONFIG>` with the Helicon build module path. `conan create` is the normal way to generate the Horizon library artifact and optional `ShaderCompileScripts` tool package in the local cache.

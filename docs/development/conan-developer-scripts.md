@@ -24,6 +24,9 @@
 - 配置：`Debug`
 - 构建目录：`build/conan`
 - CMake configure preset：`conan-default`
+- Conan 根包默认选项：`with_ocarina=True`、`with_cuda=True`、`with_vision_hotfix=True`
+
+默认 Conan 工作流会启用 ocarina 和 vision-hotfix，因此需要 `CUDA_PATH` 已设置。直接使用普通 CMake preset 时，`HORIZON_BUILD_OCARINA` 和 `HORIZON_BUILD_VISION_HOTFIX` 仍按 CMake 自身默认值关闭。
 
 ### 命令
 
@@ -103,15 +106,27 @@ git clean -fdX
 
 脚本会把剩余参数作为 target 数组接收，但真正传给 CMake build 的是 `Target[0]`。完整 target 数组会用于 Conan option 推导，也会用于格式化命令的路径参数。
 
-### 根据 Target 自动推导的 Conan Options
+### 默认与根据 Target 自动推导的 Conan Options
 
-Horizon 会针对特定 target 自动开启根包选项：
+Horizon Conan recipe 默认启用：
+
+| Conan option | 默认值 | 作用 |
+| --- | --- | --- |
+| `with_ocarina` | `True` | 配置并构建 bundled ocarina。 |
+| `with_cuda` | `True` | 满足 ocarina 的 CUDA 前置条件。 |
+| `with_vision_hotfix` | `True` | 配置并构建 vision-hotfix 支持目标。 |
+
+Horizon 还会针对特定 target 自动开启根包选项：
 
 | target 值 | 自动添加的 Conan option |
 | --- | --- |
 | `ShaderCompileScripts` | `-o &:with_tools=True` |
 | `HorizonExamples` | `-o &:with_examples=True` |
 | `HorizonTests` | `-o &:with_tests=True` |
+| `ocarina*` | `-o &:with_ocarina=True -o &:with_cuda=True` |
+| `ocarina-test-*` | `-o &:with_ocarina_tests=True` |
+| `ocarina-backend-vulkan` | `-o &:with_ocarina_vulkan=True` |
+| `vision-hotfix*` | `-o &:with_ocarina=True -o &:with_cuda=True -o &:with_vision_hotfix=True` |
 
 例如：
 

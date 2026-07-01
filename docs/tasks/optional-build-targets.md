@@ -1,5 +1,5 @@
 # Optional Build Targets
-<!-- TASK_DOCS_OPTIONAL_BUILD_TARGETS_ZH_CN_SHA256: 92a955a5c1d8ba5978cd7ba4fd67366bdbb60cf70ae91b84a62952dc4b461630 -->
+<!-- TASK_DOCS_OPTIONAL_BUILD_TARGETS_ZH_CN_SHA256: b19fd3fed3f0f7f8610c9b4521a7535d9adca6919de66ca8ee159506f1c50c85 -->
 
 ## When To Use
 
@@ -9,7 +9,8 @@
 
 ## Default Behavior
 
-- Default configure favors a clean build and enables only targets required by the core library.
+- This note describes direct CMake preset defaults; the `tools/dev.ps1` Conan workflow may have different root package defaults.
+- Direct CMake default configure favors a clean build and enables only targets required by the core library.
 - `tools/`, `examples/`, `tests/`, `benchmarks/`, and `modules/ocarina` are off by default.
 - SPIRV-Tools-style third-party command line tools and third-party install rules are off by default.
 - Old build directories may cache previous ON values. If behavior looks stale, reconfigure with explicit OFF values or delete the affected `build/<preset>`.
