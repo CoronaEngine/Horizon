@@ -31,6 +31,7 @@
 | --- | --- | --- |
 | `status` | 输出 `git status --short --branch`、`conan --version`、`cmake --list-presets`。 | 快速检查环境和工作区状态。 |
 | `install` | 导出本地 recipe，并用所选 MSVC profile 执行 `conan install .`。 | 只刷新依赖，不重新配置 CMake。 |
+| `package` | 导出本地 recipe，并用所选 MSVC profile 执行 `conan create .`。 | 生成可供 CoronaEngine 或其他消费者使用的 `horizon/<version>` 本地 cache 包。 |
 | `configure` | 执行 `install`，导入 `build/conan/generators/conanbuild.bat`，然后运行 `cmake --preset conan-default`。 | 生成或刷新 CMake 构建树。 |
 | `build` | 执行 `install`、`configure`，然后在 `build/conan` 中构建指定目标。 | 依赖或 CMake 配置可能变化后的常规构建路径。 |
 | `build-fast` | 只导入现有 Conan 构建环境并构建目标，不执行 install/configure。 | 依赖和 CMake cache 已经有效时的快速重编译。 |
@@ -45,6 +46,7 @@
 ```powershell
 .\tools\dev.ps1 status
 .\tools\dev.ps1 install
+.\tools\dev.ps1 package ShaderCompileScripts
 .\tools\dev.ps1 configure
 .\tools\dev.ps1 build Horizon
 .\tools\dev.ps1 build ShaderCompileScripts
@@ -118,6 +120,14 @@ Horizon 会针对特定 target 自动开启根包选项：
 ```
 
 会先导出本地 recipes，用 `with_tools=True` 安装依赖图，配置 CMake，然后构建 `ShaderCompileScripts`。
+
+打包给 CoronaEngine 消费时，通常需要带上 shader 编译工具：
+
+```powershell
+.\tools\dev.ps1 package ShaderCompileScripts
+```
+
+这会生成 `horizon/<version>` 的本地 Conan cache 包，并因为 target 为 `ShaderCompileScripts` 自动传入 `-o &:with_tools=True`。CoronaEngine 的构建只消费 Conan 包，不依赖本机存在 Horizon checkout。
 
 ### 本地 Recipes
 

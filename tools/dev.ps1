@@ -6,6 +6,7 @@
     Usage:
         .\tools\dev.ps1 status
         .\tools\dev.ps1 install
+        .\tools\dev.ps1 package ShaderCompileScripts
         .\tools\dev.ps1 configure
         .\tools\dev.ps1 build Horizon
         .\tools\dev.ps1 build-fast Horizon
@@ -20,7 +21,7 @@
 [CmdletBinding()]
 Param(
     [Parameter(Position = 0)]
-    [ValidateSet("status", "install", "configure", "build", "build-fast", "rebuild", "update", "clean", "format-check", "format")]
+    [ValidateSet("status", "install", "package", "configure", "build", "build-fast", "rebuild", "update", "clean", "format-check", "format")]
     [string]$Command = "status",
 
     [Parameter()]
@@ -258,6 +259,30 @@ function Invoke-ConanInstall {
     Invoke-NativeCommand -FilePath "conan" -Arguments $installArguments
 }
 
+function Invoke-ConanCreate {
+    param([bool]$Update = $false)
+
+    $profile = Get-ConanProfile
+    $installOptions = Get-ConanInstallOptions
+    $createArguments = @(
+        "create",
+        ".",
+        "-pr:a", $profile,
+        "-pr:b", $profile
+    )
+    foreach ($option in $installOptions) {
+        $createArguments += @("-o", $option)
+    }
+    $createArguments += "--build=missing"
+
+    if ($Update) {
+        $createArguments += "--update"
+    }
+
+    Invoke-HorizonConanLocalRecipeExports -RepoRoot $RepoRoot
+    Invoke-NativeCommand -FilePath "conan" -Arguments $createArguments
+}
+
 function Invoke-CMakeConfigure {
     Import-ConanBuildEnvironment
     Invoke-NativeCommand -FilePath "cmake" -Arguments @("--preset", "conan-default")
@@ -309,6 +334,9 @@ try {
         }
         "install" {
             Invoke-ConanInstall
+        }
+        "package" {
+            Invoke-ConanCreate
         }
         "configure" {
             Invoke-ConanInstall
