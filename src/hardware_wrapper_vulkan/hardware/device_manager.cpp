@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <sstream>
 #include <set>
 #include <stdexcept>
@@ -299,6 +300,7 @@ namespace Corona::Horizon
     void TrackedCommandBuffer::reset_for_recording(uint64_t recording_id)
     {
         keep_alive_.clear();
+        debug_summary_.clear();
         recording_id_ = recording_id;
         submission_id_ = 0;
 
@@ -321,15 +323,17 @@ namespace Corona::Horizon
         }
     }
 
-    void TrackedCommandBuffer::mark_submitted(uint64_t submission_id, SubmissionKeepAlive keep_alive)
+    void TrackedCommandBuffer::mark_submitted(uint64_t submission_id, SubmissionKeepAlive keep_alive, std::string debug_summary)
     {
         submission_id_ = submission_id;
         keep_alive_ = std::move(keep_alive);
+        debug_summary_ = std::move(debug_summary);
     }
 
     void TrackedCommandBuffer::retire() noexcept
     {
         keep_alive_.clear();
+        debug_summary_.clear();
         recording_id_ = 0;
         submission_id_ = 0;
     }
@@ -449,11 +453,67 @@ namespace Corona::Horizon
                              last_completed_value_.load(std::memory_order_acquire));
     }
 
+    void Queue::mark_device_lost_unlocked(const char* reason, VkResult result) const noexcept
+    {
+        if (device_lost_)
+        {
+            return;
+        }
+
+        device_lost_ = true;
+
+        try
+        {
+            std::ostringstream stream;
+            stream << reason
+                   << ". family_index=" << id_.family_index
+                   << ", queue_index=" << id_.queue_index
+                   << ", capability=" << capability_name(id_.capability)
+                   << ", VkResult=" << static_cast<int>(result)
+                   << ", last_submitted=" << last_submitted_value_
+                   << ", last_completed=" << last_completed_value_.load(std::memory_order_acquire)
+                   << ", in_flight=" << in_flight_.size()
+                   << ", pooled=" << pool_.size();
+            for (const auto& command_buffer : in_flight_)
+            {
+                if (command_buffer && !command_buffer->debug_summary().empty())
+                {
+                    stream << "\n[in-flight submission_id=" << command_buffer->submission_id()
+                           << ", recording_id=" << command_buffer->recording_id() << "]\n"
+                           << command_buffer->debug_summary();
+                }
+            }
+            Diagnostics::write(Diagnostics::Level::Error, "VK_ERROR", stream.str());
+        }
+        catch (...)
+        {
+        }
+    }
+
     std::shared_ptr<TrackedCommandBuffer> Queue::acquire()
     {
+        {
+            std::lock_guard lock(mutex_);
+            if (device_lost_)
+            {
+                throw std::runtime_error("Queue acquire skipped because the Vulkan device is lost. family_index=" +
+                                         std::to_string(id_.family_index) +
+                                         ", queue_index=" +
+                                         std::to_string(id_.queue_index));
+            }
+        }
+
         retire_completed();
 
         std::lock_guard lock(mutex_);
+        if (device_lost_)
+        {
+            throw std::runtime_error("Queue acquire skipped because the Vulkan device is lost. family_index=" +
+                                     std::to_string(id_.family_index) +
+                                     ", queue_index=" +
+                                     std::to_string(id_.queue_index));
+        }
+
         ++next_recording_id_;
 
         std::shared_ptr<TrackedCommandBuffer> command_buffer;
@@ -510,6 +570,14 @@ namespace Corona::Horizon
         retire_completed();
 
         std::lock_guard lock(mutex_);
+        if (device_lost_)
+        {
+            throw std::runtime_error("Queue submit skipped because the Vulkan device is lost. family_index=" +
+                                     std::to_string(id_.family_index) +
+                                     ", queue_index=" +
+                                     std::to_string(id_.queue_index));
+        }
+
         if (!submission.command_buffer)
         {
             submission.command_buffer = std::make_shared<TrackedCommandBuffer>(device_, id_.family_index);
@@ -552,25 +620,30 @@ namespace Corona::Horizon
             VkResult result = vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE);
             if (result != VK_SUCCESS)
             {
-                Diagnostics::write(Diagnostics::Level::Error,
-                                   "VK_ERROR",
-                                   "vkQueueSubmit2 failed. family_index=" +
-                                       std::to_string(id_.family_index) +
-                                       ", queue_index=" +
-                                       std::to_string(id_.queue_index) +
-                                       ", VkResult=" +
-                                       std::to_string(static_cast<int>(result)));
-                throw std::runtime_error("vkQueueSubmit2 failed. family_index=" +
-                                         std::to_string(id_.family_index) +
-                                         ", queue_index=" +
-                                         std::to_string(id_.queue_index) +
-                                         ", VkResult=" +
-                                         std::to_string(static_cast<int>(result)));
+                if (result == VK_ERROR_DEVICE_LOST)
+                {
+                    mark_device_lost_unlocked("vkQueueSubmit2 reported VK_ERROR_DEVICE_LOST", result);
+                }
+                std::string message = "vkQueueSubmit2 failed. family_index=" +
+                    std::to_string(id_.family_index) +
+                    ", queue_index=" +
+                    std::to_string(id_.queue_index) +
+                    ", VkResult=" +
+                    std::to_string(static_cast<int>(result));
+                if (!submission.debug_summary.empty())
+                {
+                    message += "\n[pending submission]\n";
+                    message += submission.debug_summary;
+                }
+                Diagnostics::write(Diagnostics::Level::Error, "VK_ERROR", message);
+                throw std::runtime_error(message);
             }
         }
 
         last_submitted_value_ = signal_value;
-        submission.command_buffer->mark_submitted(signal_value, std::move(submission.keep_alive));
+        submission.command_buffer->mark_submitted(signal_value,
+                                                  std::move(submission.keep_alive),
+                                                  std::move(submission.debug_summary));
         in_flight_.push_back(std::move(submission.command_buffer));
         trace_timeline_event("queue.submit.signal",
                              id_,
@@ -605,6 +678,10 @@ namespace Corona::Horizon
             const VkResult result = vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE);
             if (result != VK_SUCCESS)
             {
+                if (result == VK_ERROR_DEVICE_LOST)
+                {
+                    mark_device_lost_unlocked("vkQueueSubmit2(present timeline signal) reported VK_ERROR_DEVICE_LOST", result);
+                }
                 Diagnostics::write(Diagnostics::Level::Error,
                                    "VK_ERROR",
                                    "vkQueueSubmit2(present timeline signal) failed. family_index=" +
@@ -641,12 +718,20 @@ namespace Corona::Horizon
         {
             std::lock_guard lock(mutex_);
 
-            if (queue_ == VK_NULL_HANDLE)
+            if (queue_ == VK_NULL_HANDLE || device_lost_)
             {
+                if (device_lost_)
+                {
+                    present_result.result = VK_ERROR_DEVICE_LOST;
+                }
                 return present_result;
             }
 
             present_result.result = vkQueuePresentKHR(queue_, &present_info);
+            if (present_result.result == VK_ERROR_DEVICE_LOST)
+            {
+                mark_device_lost_unlocked("vkQueuePresentKHR reported VK_ERROR_DEVICE_LOST", present_result.result);
+            }
             if (present_result.result == VK_SUCCESS || present_result.result == VK_SUBOPTIMAL_KHR)
             {
                 present_result.completion = signal_timeline_locked();
@@ -672,12 +757,20 @@ namespace Corona::Horizon
         VkResult result = VK_SUCCESS;
         {
             std::lock_guard lock(mutex_);
-            if (queue_ == VK_NULL_HANDLE)
+            if (queue_ == VK_NULL_HANDLE || device_lost_)
             {
+                if (device_lost_)
+                {
+                    result = VK_ERROR_DEVICE_LOST;
+                }
                 return;
             }
 
             result = vkQueueWaitIdle(queue_);
+            if (result == VK_ERROR_DEVICE_LOST)
+            {
+                mark_device_lost_unlocked("vkQueueWaitIdle reported VK_ERROR_DEVICE_LOST", result);
+            }
         }
 
         if (result != VK_SUCCESS)
@@ -708,6 +801,14 @@ namespace Corona::Horizon
             return;
         }
 
+        {
+            std::lock_guard lock(mutex_);
+            if (device_lost_)
+            {
+                throw std::runtime_error("vkWaitSemaphores skipped because the Vulkan device is lost.");
+            }
+        }
+
         const VkSemaphore timeline = token.sync ? token.sync->timeline() : VK_NULL_HANDLE;
         if (device_ == VK_NULL_HANDLE || timeline == VK_NULL_HANDLE)
         {
@@ -724,6 +825,11 @@ namespace Corona::Horizon
         const VkResult result = vkWaitSemaphores(device_, &wait_info, UINT64_MAX);
         if (result != VK_SUCCESS)
         {
+            if (result == VK_ERROR_DEVICE_LOST)
+            {
+                std::lock_guard lock(mutex_);
+                mark_device_lost_unlocked("vkWaitSemaphores reported VK_ERROR_DEVICE_LOST", result);
+            }
             Diagnostics::write(Diagnostics::Level::Error,
                                "VK_ERROR",
                                "vkWaitSemaphores failed. VkResult=" + std::to_string(static_cast<int>(result)));
@@ -737,6 +843,13 @@ namespace Corona::Horizon
         if (device_ == VK_NULL_HANDLE || timeline_ == VK_NULL_HANDLE)
         {
             return last_completed_value_.load(std::memory_order_acquire);
+        }
+        if (device_lost_)
+        {
+            throw std::runtime_error("vkGetSemaphoreCounterValue skipped because the Vulkan device is lost. family_index=" +
+                                     std::to_string(id_.family_index) +
+                                     ", queue_index=" +
+                                     std::to_string(id_.queue_index));
         }
 
         uint64_t value = 0;
@@ -754,6 +867,10 @@ namespace Corona::Horizon
         VkResult result = vkGetSemaphoreCounterValue(device_, timeline_, &value);
         if (result != VK_SUCCESS)
         {
+            if (result == VK_ERROR_DEVICE_LOST)
+            {
+                mark_device_lost_unlocked("vkGetSemaphoreCounterValue reported VK_ERROR_DEVICE_LOST", result);
+            }
             Diagnostics::write(Diagnostics::Level::Error,
                                "VK_ERROR",
                                "vkGetSemaphoreCounterValue failed. family_index=" +
@@ -768,6 +885,14 @@ namespace Corona::Horizon
                                      std::to_string(id_.queue_index) +
                                      ", VkResult=" +
                                      std::to_string(static_cast<int>(result)));
+        }
+        if (value == std::numeric_limits<uint64_t>::max())
+        {
+            mark_device_lost_unlocked("vkGetSemaphoreCounterValue returned UINT64_MAX; refusing to retire all in-flight command buffers", VK_ERROR_DEVICE_LOST);
+            throw std::runtime_error("vkGetSemaphoreCounterValue returned UINT64_MAX. family_index=" +
+                                     std::to_string(id_.family_index) +
+                                     ", queue_index=" +
+                                     std::to_string(id_.queue_index));
         }
 
         last_completed_value_.store(value, std::memory_order_release);
@@ -846,6 +971,12 @@ namespace Corona::Horizon
     {
         std::lock_guard lock(mutex_);
         return last_submitted_value_;
+    }
+
+    bool Queue::device_lost() const noexcept
+    {
+        std::lock_guard lock(mutex_);
+        return device_lost_;
     }
 
     size_t Queue::in_flight_count() const

@@ -5,6 +5,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include <volk.h>
@@ -44,9 +45,10 @@ namespace Corona::Horizon
         [[nodiscard]] uint64_t recording_id() const noexcept { return recording_id_; }
         [[nodiscard]] uint64_t submission_id() const noexcept { return submission_id_; }
         [[nodiscard]] const SubmissionKeepAlive& keep_alive() const noexcept { return keep_alive_; }
+        [[nodiscard]] const std::string& debug_summary() const noexcept { return debug_summary_; }
 
         void reset_for_recording(uint64_t recording_id);
-        void mark_submitted(uint64_t submission_id, SubmissionKeepAlive keep_alive);
+        void mark_submitted(uint64_t submission_id, SubmissionKeepAlive keep_alive, std::string debug_summary);
         void retire() noexcept;
 
     private:
@@ -56,6 +58,7 @@ namespace Corona::Horizon
         uint64_t recording_id_ { 0 };
         uint64_t submission_id_ { 0 };
         SubmissionKeepAlive keep_alive_ {};
+        std::string debug_summary_;
     };
 
     class Queue
@@ -84,6 +87,7 @@ namespace Corona::Horizon
         [[nodiscard]] VkQueue vk_queue() const noexcept { return queue_; }
         [[nodiscard]] VkSemaphore timeline() const noexcept { return timeline_; }
         [[nodiscard]] bool is_fake() const noexcept { return device_ == VK_NULL_HANDLE; }
+        [[nodiscard]] bool device_lost() const noexcept;
         [[nodiscard]] size_t in_flight_count() const;
         [[nodiscard]] size_t pooled_count() const;
 
@@ -93,6 +97,7 @@ namespace Corona::Horizon
     private:
         [[nodiscard]] uint64_t query_completed_value() const;
         [[nodiscard]] SubmissionToken signal_timeline_locked();
+        void mark_device_lost_unlocked(const char* reason, VkResult result) const noexcept;
         void collect_completed_unlocked(std::deque<std::shared_ptr<TrackedCommandBuffer>>& completed);
         void create_timeline_semaphore();
 
@@ -106,6 +111,7 @@ namespace Corona::Horizon
         uint64_t next_recording_id_ { 0 };
         uint64_t last_submitted_value_ { 0 };
         mutable std::atomic<uint64_t> last_completed_value_ { 0 };
+        mutable bool device_lost_ { false };
         bool fail_next_submit_ { false };
 
         std::deque<std::shared_ptr<TrackedCommandBuffer>> in_flight_;

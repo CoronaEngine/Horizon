@@ -595,6 +595,7 @@ namespace Corona::Horizon
             desc.index_type = params.index_type;
             desc.enable_scissor = params.enable_scissor;
             desc.scissor = params.scissor;
+            desc.debug_label = params.debug_label;
             return desc;
         }
 

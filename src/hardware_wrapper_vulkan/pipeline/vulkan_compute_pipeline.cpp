@@ -852,6 +852,12 @@ namespace Corona::Horizon
         dispatch_.groups_z = std::max<uint32_t>(1u, groups_z);
     }
 
+    void VulkanComputePipeline::set_debug_label(std::string label)
+    {
+        std::lock_guard lock(mutex_);
+        dispatch_.debug_label = std::move(label);
+    }
+
     void VulkanComputePipeline::set_push_constant_direct(uint64_t byte_offset,
                                                          const void* data,
                                                          size_t size,

@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <cstdlib>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -103,6 +104,155 @@ namespace Corona::Horizon
 
             signals.push_back(signal);
         }
+
+        [[nodiscard]] const char* command_op_name(CommandOp op) noexcept
+        {
+            switch (op)
+            {
+            case CommandOp::CopyBuffer: return "CopyBuffer";
+            case CommandOp::CopyImage: return "CopyImage";
+            case CommandOp::CopyBufferToImage: return "CopyBufferToImage";
+            case CommandOp::CopyImageToBuffer: return "CopyImageToBuffer";
+            case CommandOp::Dispatch: return "Dispatch";
+            case CommandOp::BeginRendering: return "BeginRendering";
+            case CommandOp::EndRendering: return "EndRendering";
+            case CommandOp::DrawIndexed: return "DrawIndexed";
+            case CommandOp::Present: return "Present";
+            case CommandOp::HostCallback: return "HostCallback";
+            case CommandOp::KeepAlive: return "KeepAlive";
+            default: return "Unknown";
+            }
+        }
+
+        [[nodiscard]] const char* queue_capability_name(QueueCapability capability) noexcept
+        {
+            switch (capability)
+            {
+            case QueueCapability::Graphics: return "Graphics";
+            case QueueCapability::Compute: return "Compute";
+            case QueueCapability::Transfer: return "Transfer";
+            case QueueCapability::Present: return "Present";
+            default: return "Unknown";
+            }
+        }
+
+        [[nodiscard]] std::string shorten_label(std::string label)
+        {
+            constexpr size_t kMaxLabel = 512;
+            if (label.size() > kMaxLabel)
+            {
+                label.resize(kMaxLabel);
+                label += "...";
+            }
+            return label;
+        }
+
+        [[nodiscard]] std::string describe_command_for_diagnostics(const CommandIR& command)
+        {
+            std::ostringstream out;
+            out << "#" << command.sequence << " " << command_op_name(command.op);
+            if (!command.debug_label.empty())
+            {
+                out << " label=\"" << shorten_label(command.debug_label) << "\"";
+            }
+
+            if (command.op == CommandOp::Dispatch)
+            {
+                const DispatchDesc& dispatch = command.payload.dispatch;
+                out << " groups=" << dispatch.groups_x << "x" << dispatch.groups_y << "x" << dispatch.groups_z;
+                if (!command.resources.empty())
+                {
+                    out << " pipeline=" << resource_id(command.resources[0].handle);
+                }
+            }
+            else if (command.op == CommandOp::DrawIndexed)
+            {
+                const DrawIndexedDesc& draw = command.payload.draw_indexed;
+                out << " index_count=" << draw.index_count
+                    << " instances=" << draw.instance_count
+                    << " first_index=" << draw.first_index
+                    << " vertex_offset=" << draw.vertex_offset
+                    << " pipeline=" << resource_id(draw.pipeline);
+                const size_t buffer_offset = draw.pipeline ? 1u : 0u;
+                if (command.resources.size() > buffer_offset)
+                {
+                    out << " index_resource=" << resource_id(command.resources[buffer_offset].handle);
+                }
+                if (command.resources.size() > buffer_offset + 1u)
+                {
+                    out << " vertex_resource=" << resource_id(command.resources[buffer_offset + 1u].handle);
+                }
+            }
+            else if (command.op == CommandOp::Present)
+            {
+                out << " displayer=" << command.payload.present.displayer.id
+                    << " image=" << resource_id(command.payload.present.image.handle)
+                    << " swapchain_image=" << resource_id(command.payload.present.swapchain_image.handle);
+            }
+
+            return out.str();
+        }
+
+        [[nodiscard]] std::string describe_submission_for_diagnostics(const CompiledSubmission& submission)
+        {
+            std::ostringstream out;
+            out << "submission device=" << submission.device.value
+                << " capability=" << queue_capability_name(submission.queue)
+                << " commands=" << submission.commands.size();
+
+            constexpr size_t kMaxCommands = 24;
+            const size_t begin = submission.commands.size() > kMaxCommands
+                ? submission.commands.size() - kMaxCommands
+                : 0;
+            for (size_t i = begin; i < submission.commands.size(); ++i)
+            {
+                out << "\n  " << describe_command_for_diagnostics(submission.commands[i]);
+            }
+            return out.str();
+        }
+
+        class DebugUtilsLabelScope
+        {
+        public:
+            DebugUtilsLabelScope(VkCommandBuffer command_buffer, const std::string& label) noexcept
+                : command_buffer_(command_buffer)
+            {
+                if (vkCmdBeginDebugUtilsLabelEXT == nullptr ||
+                    vkCmdEndDebugUtilsLabelEXT == nullptr ||
+                    command_buffer_ == VK_NULL_HANDLE ||
+                    label.empty())
+                {
+                    return;
+                }
+
+                label_ = shorten_label(label);
+                VkDebugUtilsLabelEXT info {};
+                info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+                info.pLabelName = label_.c_str();
+                info.color[0] = 0.12f;
+                info.color[1] = 0.72f;
+                info.color[2] = 1.0f;
+                info.color[3] = 1.0f;
+                vkCmdBeginDebugUtilsLabelEXT(command_buffer_, &info);
+                active_ = true;
+            }
+
+            ~DebugUtilsLabelScope()
+            {
+                if (active_)
+                {
+                    vkCmdEndDebugUtilsLabelEXT(command_buffer_);
+                }
+            }
+
+            DebugUtilsLabelScope(const DebugUtilsLabelScope&) = delete;
+            DebugUtilsLabelScope& operator=(const DebugUtilsLabelScope&) = delete;
+
+        private:
+            VkCommandBuffer command_buffer_ { VK_NULL_HANDLE };
+            std::string label_;
+            bool active_ { false };
+        };
 
         [[nodiscard]] AccessKind merge_access(AccessKind left, AccessKind right) noexcept
         {
@@ -761,6 +911,7 @@ namespace Corona::Horizon
         command.queue = QueueCapability::Compute;
         command.payload.dispatch = desc;
         command.sequence = next_sequence();
+        command.debug_label = desc.debug_label;
         command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
         mark_device_requirements(devices);
@@ -815,6 +966,7 @@ namespace Corona::Horizon
         command.queue = QueueCapability::Graphics;
         command.payload.draw_indexed = desc;
         command.sequence = next_sequence();
+        command.debug_label = desc.debug_label;
         if (desc.pipeline)
         {
             command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
@@ -1304,6 +1456,7 @@ namespace Corona::Horizon
                 if (command.resources.empty())
                     throw std::logic_error("Dispatch command is missing a ComputePipeline resource.");
 
+                DebugUtilsLabelScope debug_label(command_buffer, command.debug_label);
                 const DispatchDesc& dispatch = command.payload.dispatch;
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(command.resources[0].handle);
 
@@ -1479,6 +1632,7 @@ namespace Corona::Horizon
                 if (!active_rendering.active)
                     throw std::logic_error("DrawIndexed requires an active rendering scope.");
 
+                DebugUtilsLabelScope debug_label(command_buffer, command.debug_label);
                 const DrawIndexedDesc& draw = command.payload.draw_indexed;
                 if (draw.index_count == 0)
                     break;
@@ -1877,6 +2031,7 @@ namespace Corona::Horizon
                 }
 
                 PreparedPresent prepared = manager->prepare_present(desc);
+                command.payload.present = desc;
                 if (present_index < compiled_submission.presents.size())
                 {
                     compiled_submission.presents[present_index] = desc;
@@ -1897,6 +2052,7 @@ namespace Corona::Horizon
                 {
                     manager->cancel_prepared_present();
                     desc.swapchain_image = {};
+                    command.payload.present = desc;
                     if (present_index < compiled_submission.presents.size())
                     {
                         compiled_submission.presents[present_index] = desc;
@@ -1921,6 +2077,11 @@ namespace Corona::Horizon
                 }
                 add_signal_once(present_signals, prepared.signal);
                 compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
+                command.payload.present = desc;
+                if (present_index < compiled_submission.presents.size())
+                {
+                    compiled_submission.presents[present_index] = desc;
+                }
                 prepared_presents.push_back({ std::move(manager), desc });
                 ++present_index;
             }
@@ -1979,6 +2140,7 @@ namespace Corona::Horizon
                 QueueSubmission queue_submission;
                 queue_submission.command_buffer = std::move(compiled_submission.command_buffer);
                 queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
+                queue_submission.debug_summary = describe_submission_for_diagnostics(compiled_submission);
                 tokens.push_back(queue.submit(queue_submission, waits, signals));
                 submitted_tokens[submission_index] = tokens.back();
                 tracked_submission.remember(tokens.back());
@@ -2080,6 +2242,47 @@ namespace Corona::Horizon
             }
 
             queue->wait_idle();
+        }
+        return *this;
+    }
+
+    HardwareExecutor& HardwareExecutor::wait_for_completion(const SubmitReceipt& receipt)
+    {
+        for (const SubmissionToken& token : receipt.tokens)
+        {
+            if (token.value == 0)
+            {
+                continue;
+            }
+
+            Queue* queue = nullptr;
+            if (queue_resolver_)
+            {
+                queue = &queue_resolver_(token.device, token.queue.capability);
+            }
+            else
+            {
+                if (token.device.value != 0)
+                {
+                    throw std::logic_error("Default HardwareExecutor currently waits only on the main device.");
+                }
+                queue = main_device_context().device_manager.queue_by_id(token.queue);
+            }
+
+            if (queue == nullptr)
+            {
+                throw std::runtime_error("HardwareExecutor could not resolve a queue for receipt completion wait.");
+            }
+
+            const QueueId resolved_id = queue->id();
+            if (resolved_id.device.value != token.queue.device.value ||
+                resolved_id.family_index != token.queue.family_index ||
+                resolved_id.queue_index != token.queue.queue_index) {
+                throw std::runtime_error("HardwareExecutor resolved the wrong queue for receipt completion wait.");
+            }
+
+            queue->wait_for(token);
+            queue->retire_completed();
         }
         return *this;
     }

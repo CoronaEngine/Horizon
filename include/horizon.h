@@ -175,6 +175,8 @@ namespace Corona::Horizon
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait(const HardwareExecutor& producer);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
+        /// Waits for exactly the receipt's timeline values, then retires them.
+        HardwareExecutor& wait_for_completion(const SubmitReceipt& receipt);
         [[nodiscard]] SubmitReceipt last_receipt() const;
 
     private:
@@ -1070,6 +1072,7 @@ namespace Corona::Horizon
         ComputePipelineBase& operator=(const ComputePipelineBase& other);
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
         ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
+        ComputePipelineBase& set_debug_label(std::string label);
         ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
         ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
         [[nodiscard]] ComputePipelineDesc desc() const;

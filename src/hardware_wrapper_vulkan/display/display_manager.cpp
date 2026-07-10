@@ -1014,7 +1014,8 @@ namespace Corona::Horizon
     {
         pending_frame_.reset();
 
-        if (present_queue_ != nullptr)
+        const bool queue_device_lost = present_queue_ != nullptr && present_queue_->device_lost();
+        if (present_queue_ != nullptr && !queue_device_lost)
         {
             try
             {
@@ -1032,9 +1033,16 @@ namespace Corona::Horizon
 
         swapchain_images_.clear();
 
+        if (queue_device_lost)
+        {
+            Diagnostics::write(Diagnostics::Level::Warning,
+                               "VK_ERROR",
+                               "DisplayManager destroy_swapchain skipped Vulkan semaphore destruction because the present queue device is lost.");
+        }
+
         for (VkSemaphore semaphore : image_available_)
         {
-            if (device_ != VK_NULL_HANDLE && semaphore != VK_NULL_HANDLE)
+            if (!queue_device_lost && device_ != VK_NULL_HANDLE && semaphore != VK_NULL_HANDLE)
             {
                 vkDestroySemaphore(device_, semaphore, nullptr);
             }
@@ -1043,7 +1051,7 @@ namespace Corona::Horizon
 
         for (VkSemaphore semaphore : render_finished_)
         {
-            if (device_ != VK_NULL_HANDLE && semaphore != VK_NULL_HANDLE)
+            if (!queue_device_lost && device_ != VK_NULL_HANDLE && semaphore != VK_NULL_HANDLE)
             {
                 vkDestroySemaphore(device_, semaphore, nullptr);
             }

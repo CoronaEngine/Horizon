@@ -178,6 +178,7 @@ namespace Corona::Horizon
         std::vector<ResourceUse> resource_uses;
         std::vector<std::byte> push_constant_data;
         std::vector<UniformBufferBindingData> uniform_buffers;
+        std::string debug_label;
     };
 
     enum class DrawBindingKind
@@ -219,6 +220,7 @@ namespace Corona::Horizon
         std::vector<ResourceUse> resource_uses;
         std::vector<std::byte> push_constant_data;
         std::vector<UniformBufferBindingData> uniform_buffers;
+        std::string debug_label;
     };
 
     struct PresentDesc
@@ -252,6 +254,7 @@ namespace Corona::Horizon
         std::function<void()> host_callback {};
         std::shared_ptr<void> keep_alive {};
         uint64_t sequence { 0 };
+        std::string debug_label;
     };
 
     struct RequirementSet
@@ -344,6 +347,7 @@ namespace Corona::Horizon
     {
         std::shared_ptr<class TrackedCommandBuffer> command_buffer;
         SubmissionKeepAlive keep_alive;
+        std::string debug_summary;
     };
 
     struct SubmitReceipt
