@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Codegen/AST/Struct.hpp"
 #include "ktm/type_vec.h"
 #include "spirv-tools/libspirv.hpp"
 
@@ -146,6 +147,7 @@ struct ShaderCodeModule
         bool compileSpirV = true;
         bool enableBindless = true;
         std::vector<SlangModule*> slangModules;
+        std::vector<Ast::BranchOutput> branches;
     };
 
     struct ShaderCodeCompiler

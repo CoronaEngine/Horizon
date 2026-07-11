@@ -11,6 +11,7 @@
 #include "ShaderLanguageConverter.h"
 #include <Compiler/ShaderCommon.h>
 #include <shared_mutex>
+#include <ranges>
 
 namespace EmbeddedShader
 {
@@ -135,6 +136,51 @@ namespace EmbeddedShader
 #endif
         };
         std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
+
+        if (!option.branches.empty())
+        {
+            SlangModuleCompileArgs compileArgs;
+            compileArgs.sourceLanguage = language;
+            std::vector<SlangModule> declares;
+            std::vector<SlangModule*> pDeclares;
+            std::vector<SlangModule> trueBs;
+            std::vector<SlangModule*> pTrueBs;
+            std::vector<SlangModule> falseBs;
+            std::vector<SlangModule*> pFalseBs;
+            size_t index = option.branches.size() - 1;
+            for (auto i = option.branches.rbegin(); i != option.branches.rend(); ++i)
+            {
+                auto& branch = *i;
+
+                compileArgs.shaderCode = branch.declareBranch;
+                compileArgs.deps.swap(pDeclares);
+                auto declare = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+                compileArgs.deps.swap(pDeclares);
+
+                compileArgs.shaderCode = branch.trueBranch;
+                compileArgs.deps.swap(pTrueBs);
+                auto trueB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+                compileArgs.deps.swap(pTrueBs);
+
+                compileArgs.shaderCode = branch.falseBranch;
+                compileArgs.deps.swap(pFalseBs);
+                auto falseB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+                compileArgs.deps.swap(pFalseBs);
+
+                auto languageStr = "SlangModule";
+                auto branchName = "Branch_" + std::to_string(index);
+                // storeCode(trueB, ShaderHardcodeManager::getItemName(branchName + "_True" + sourceLocationStr, languageStr + bindlessStr));
+                // storeCode(falseB, ShaderHardcodeManager::getItemName(branchName + "_False" + sourceLocationStr, languageStr + bindlessStr));
+
+                declares.emplace_back(std::move(declare));
+                pDeclares.emplace_back(&declares.back());
+                trueBs.emplace_back(std::move(trueB));
+                pTrueBs.emplace_back(&trueBs.back());
+                falseBs.emplace_back(std::move(falseB));
+                pFalseBs.emplace_back(&falseBs.back());
+            }
+        }
+
         SlangCompileArgs compileArgs;
         compileArgs.source = shaderCode;
         compileArgs.stage = inputStage;

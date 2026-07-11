@@ -2744,6 +2744,17 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 epInfo.name = entryPoint->getName();
                 // 注意：需要确保 ShaderStage 枚举与 slang::Stage 兼容，或自行映射
                 epInfo.stage = slangStageToShaderStage(entryPoint->getStage());
+
+                if (epInfo.stage == ShaderStage::ComputeShader)
+                {
+                    SlangUInt sizes[3] = { 1, 1, 1 };
+                    entryPoint->getComputeThreadGroupSize(std::size(sizes), sizes);
+                    epInfo.numthreads = ktm::uvec3(
+                        static_cast<unsigned>(sizes[0]),
+                        static_cast<unsigned>(sizes[1]),
+                        static_cast<unsigned>(sizes[2])
+                    );
+                }
                 resources.entryPointInfoPool.push_back(epInfo);
 
                 // Varying Inputs

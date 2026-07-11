@@ -51,6 +51,8 @@ namespace EmbeddedShader
             std::cout << "---[false branch]:\n" << branch.falseBranch << "\n";
         }
 
+	    compilerOption.branches.swap(outputs[0].branches);
+
 		ComputePipelineObject result;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption,sourceLocation);
 
