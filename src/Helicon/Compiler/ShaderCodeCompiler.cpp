@@ -137,35 +137,37 @@ namespace EmbeddedShader
         };
         std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
 
+        std::vector<SlangModule> declares;
+        std::vector<SlangModule*> pDeclares;
+        std::vector<SlangModule> trueBs;
+        std::vector<SlangModule*> pTrueBs;
+        std::vector<SlangModule> falseBs;
+        std::vector<SlangModule*> pFalseBs;
         if (!option.branches.empty())
         {
             SlangModuleCompileArgs compileArgs;
             compileArgs.sourceLanguage = language;
-            std::vector<SlangModule> declares;
-            std::vector<SlangModule*> pDeclares;
-            std::vector<SlangModule> trueBs;
-            std::vector<SlangModule*> pTrueBs;
-            std::vector<SlangModule> falseBs;
-            std::vector<SlangModule*> pFalseBs;
+
             size_t index = option.branches.size() - 1;
             for (auto i = option.branches.rbegin(); i != option.branches.rend(); ++i)
             {
                 auto& branch = *i;
+                compileArgs.moduleName = "branch_" + std::to_string(index);
 
                 compileArgs.shaderCode = branch.declareBranch;
-                compileArgs.deps.swap(pDeclares);
+                compileArgs.deps = option.slangModules;
+                compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
                 auto declare = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-                compileArgs.deps.swap(pDeclares);
 
                 compileArgs.shaderCode = branch.trueBranch;
-                compileArgs.deps.swap(pTrueBs);
+                compileArgs.deps = option.slangModules;
+                compileArgs.deps.insert(compileArgs.deps.end(),pTrueBs.begin(), pTrueBs.end());
                 auto trueB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-                compileArgs.deps.swap(pTrueBs);
 
                 compileArgs.shaderCode = branch.falseBranch;
-                compileArgs.deps.swap(pFalseBs);
+                compileArgs.deps = option.slangModules;
+                compileArgs.deps.insert(compileArgs.deps.end(),pFalseBs.begin(), pFalseBs.end());
                 auto falseB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-                compileArgs.deps.swap(pFalseBs);
 
                 auto languageStr = "SlangModule";
                 auto branchName = "Branch_" + std::to_string(index);
@@ -178,6 +180,7 @@ namespace EmbeddedShader
                 pTrueBs.emplace_back(&trueBs.back());
                 falseBs.emplace_back(std::move(falseB));
                 pFalseBs.emplace_back(&falseBs.back());
+                --index;
             }
         }
 
@@ -186,6 +189,7 @@ namespace EmbeddedShader
         compileArgs.stage = inputStage;
         compileArgs.sourceLanguage = language;
         compileArgs.deps = std::move(option.slangModules);
+        compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
         compileArgs.enableReflection = true;
         if (option.compileGLSL)
             compileArgs.targetLanguages.push_back(ShaderLanguage::GLSL);
