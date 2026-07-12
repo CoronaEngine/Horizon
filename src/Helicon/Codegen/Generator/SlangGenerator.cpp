@@ -57,9 +57,6 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 		output += statement->generate() + '\n';
 	}
 
-    //Import Branch
-    output += getBranchImport(Ast::Parser::getBranchReferences().top());
-
 	std::string stageType = "unknown";
 	switch (structure.stage)
 	{
@@ -87,7 +84,6 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 			inputStruct += "\t" + statement->generate() + '\n';
 		}
 		inputStruct += "}\n";
-		output += inputStruct;
 	}
 
     std::string outputStruct;
@@ -100,17 +96,20 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 			outputStruct += "\t" + statement->generate() + '\n';
 		}
 		outputStruct += "}\n";
-		output += outputStruct;
 	}
 
-    auto ioStruct = inputStruct + outputStruct;
-    if (!ioStruct.empty())
-        for (auto & branch : Ast::Parser::getBranchOutputs())
-        {
-            branch.declareBranch = ioStruct + branch.declareBranch;
-            branch.trueBranch = ioStruct + branch.trueBranch;
-            branch.falseBranch = ioStruct + branch.falseBranch;
-        }
+    if (Ast::Parser::getBranchOutputs().empty())
+    {
+        output += inputStruct + outputStruct;
+    }
+    else
+    {
+        Ast::Parser::getTypeHeader() += inputStruct + outputStruct;
+    }
+
+    //Import Branch
+    output += getBranchImport(Ast::Parser::getBranchReferences().top());
+
 
 	std::string entrypoint = "[shader(\"" + stageType + "\")]\n";
 	if (structure.stage == Ast::ShaderStage::Compute)
@@ -275,7 +274,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
             for (auto i = allVarRefs.begin(); i != allVarRefs.end(); )
             {
                 call += (*i)->name;
-                func += "inout " + (*i)->type->generate() + " " + (*i)->name;
+                func += (*i)->type->generate() + " " + (*i)->name;
                 ++i;
                 if (i != allVarRefs.end())
                 {
@@ -288,7 +287,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
         func += ")";
 
         auto& output = Ast::Parser::getBranchOutputs()[node->followIf->index];
-        output.declareBranch = func + ";";
+        output.declareBranch = "import type_header;\n" + func + ";";
         output.trueBranch = node->followIf->importPart + func + "\n" + node->followIf->branchInfo.body;
         output.falseBranch = falseIp + func + "\n" + falseBranch.body;
         output.conditionDetector = node->followIf->conditionDetector.value();
@@ -524,13 +523,9 @@ EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBr
     branch.variateRefs = std::move(collection.variateRefs);
     return branch;
 }
-std::string EmbeddedShader::Generator::SlangGenerator::getBranchDeclaration(std::string name, std::string params)
+std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std::vector<size_t>& refs)
 {
-    return "void " + name + params + ";";
-}
-std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(std::vector<size_t> refs)
-{
-    std::string result;
+    std::string result = "import type_header;\n";
     for (size_t ref : refs)
     {
         result += "import branch_" + std::to_string(ref) + ";\n";

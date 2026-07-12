@@ -143,10 +143,15 @@ namespace EmbeddedShader
         std::vector<SlangModule*> pTrueBs;
         std::vector<SlangModule> falseBs;
         std::vector<SlangModule*> pFalseBs;
+        SlangModule typeHeaderModule;
         if (!option.branches.empty())
         {
             SlangModuleCompileArgs compileArgs;
             compileArgs.sourceLanguage = language;
+            compileArgs.shaderCode = option.typeHeader;
+            compileArgs.moduleName = "type_header";
+            typeHeaderModule = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+            option.slangModules.push_back(&typeHeaderModule);
 
             size_t index = option.branches.size() - 1;
             for (auto i = option.branches.rbegin(); i != option.branches.rend(); ++i)
@@ -175,11 +180,20 @@ namespace EmbeddedShader
                 // storeCode(falseB, ShaderHardcodeManager::getItemName(branchName + "_False" + sourceLocationStr, languageStr + bindlessStr));
 
                 declares.emplace_back(std::move(declare));
-                pDeclares.emplace_back(&declares.back());
                 trueBs.emplace_back(std::move(trueB));
-                pTrueBs.emplace_back(&trueBs.back());
                 falseBs.emplace_back(std::move(falseB));
-                pFalseBs.emplace_back(&falseBs.back());
+
+                pDeclares.resize(declares.size());
+                pTrueBs.resize(trueBs.size());
+                pFalseBs.resize(falseBs.size());
+
+                for (size_t i = 0; i < declares.size(); ++i)
+                {
+                    pDeclares[i] = &declares[i];
+                    pTrueBs[i] = &trueBs[i];
+                    pFalseBs[i] = &falseBs[i];
+                }
+
                 --index;
             }
         }

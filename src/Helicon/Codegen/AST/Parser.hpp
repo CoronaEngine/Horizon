@@ -12,12 +12,6 @@ namespace EmbeddedShader::Ast
 	struct Variate;
 	struct Statement;
 
-	struct ParseParameter
-	{
-		const std::function<void()>& shaderCode;
-		ShaderStage stage;
-	};
-
     struct ExternBranchVariateCollection
     {
         std::set<const Variate*> variateRefs;
@@ -30,19 +24,19 @@ namespace EmbeddedShader::Ast
 	    std::unordered_set<SlangModule*> sourceModule;
 		ShaderStage stage;
 	    std::vector<BranchOutput> branches;
+	    std::string typeHeader;
 	};
 
 	class Parser
 	{
 		friend class AST;
 	public:
-		static std::vector<ParseOutput> parse(const std::vector<ParseParameter>& parameters);
 		static void beginShaderParse(ShaderStage stage);
 		static std::vector<ParseOutput> endPipelineParse();
 		static void setBindless(bool bindless);
 		static bool getBindless();
 	private:
-		static std::string parse(const std::function<void()>& shaderCode, ShaderStage stage);
+	    static void endShaderParse();
 		Parser() = default;
 
 		void reset();
@@ -72,13 +66,14 @@ namespace EmbeddedShader::Ast
         std::vector<BranchOutput> branchOutputs;
 	    std::stack<ExternBranchVariateCollection> externBranchVar;
 	    std::stack<std::vector<size_t>> branchReferences;
+	    std::string typeHeader;
 	    //////////////Branch Pruning///////////////
 
 		bool isInShaderParse = false;
 
 		bool bindless = false;
 
-		static thread_local std::unique_ptr<Parser> currentParser;
+        static thread_local std::unique_ptr<Parser> currentParser;
 	public:
 		static std::string getUniqueVariateName();
 		static std::string getUniqueAggregateTypeName();
@@ -95,6 +90,7 @@ namespace EmbeddedShader::Ast
 	    static ExternBranchVariateCollection getCurrentExternBranchVariateCollection();
 	    static void resetBranchOutputs();
 	    static std::vector<BranchOutput>& getBranchOutputs();
+	    static std::string& getTypeHeader();
 	    static std::stack<std::vector<size_t>>& getBranchReferences();
 	};
 }

@@ -4,41 +4,9 @@
 
 thread_local std::unique_ptr<EmbeddedShader::Ast::Parser> EmbeddedShader::Ast::Parser::currentParser = std::unique_ptr<Parser>(new Parser);
 
-std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::parse(const std::vector<ParseParameter>& parameters)
-{
-	std::vector<ParseOutput> outputs;
-	for (const auto& parameter: parameters)
-	{
-		outputs.emplace_back(parse(parameter.shaderCode,parameter.stage),currentParser->structure.slangModuleSource,parameter.stage);
-	}
-
-	auto globalOutput = Generator::SlangGenerator::getGlobalOutput(currentParser->structure);
-	for (auto& output: outputs)
-	{
-	    output.output = globalOutput + output.output;
-	    for (auto & branch : output.branches)
-        {
-            branch.declareBranch = globalOutput + branch.declareBranch;
-            branch.trueBranch = globalOutput + branch.trueBranch;
-            branch.falseBranch = globalOutput + branch.falseBranch;
-        }
-	}
-
-	for (const auto& global: currentParser->structure.globalStatements)
-		global->resetAccessPermissions();
-
-	return outputs;
-}
-
 void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage)
 {
-	if (currentParser->isInShaderParse)
-	{
-		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branchOutputs);
-		currentParser->reset();
-		currentParser->localStatementStack.pop();
-		currentParser->isInShaderParse = false;
-	}
+	endShaderParse();
 	currentParser->structure.stage = stage;
 	currentParser->localStatementStack.push(&currentParser->structure.localStatements);
 	currentParser->isInShaderParse = true;
@@ -46,24 +14,17 @@ void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage)
 
 std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPipelineParse()
 {
-	if (currentParser->isInShaderParse)
-	{
-		currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branchOutputs);
-		currentParser->reset();
-		currentParser->localStatementStack.pop();
-		currentParser->isInShaderParse = false;
-	}
+    endShaderParse();
 
 	auto globalOutput = Generator::SlangGenerator::getGlobalOutput(currentParser->structure);
 	for (auto& output: currentParser->parseOutputs)
 	{
-	    output.output = globalOutput + output.output;
-	    for (auto & branch : output.branches)
+	    if (!output.branches.empty())
 	    {
-	        branch.declareBranch = globalOutput + branch.declareBranch;
-	        branch.trueBranch = globalOutput + branch.trueBranch;
-	        branch.falseBranch = globalOutput + branch.falseBranch;
+	        output.typeHeader = globalOutput + output.typeHeader;
+	        continue;
 	    }
+        output.output = globalOutput + output.output;
 	}
 
 	for (const auto& global: currentParser->structure.globalStatements)
@@ -86,14 +47,15 @@ bool EmbeddedShader::Ast::Parser::getBindless()
 	return currentParser->bindless;
 }
 
-std::string EmbeddedShader::Ast::Parser::parse(const std::function<void()>& shaderCode, ShaderStage stage)
+void EmbeddedShader::Ast::Parser::endShaderParse()
 {
-	currentParser->structure.stage = stage;
-	currentParser->localStatementStack.push(&currentParser->structure.localStatements);
-	shaderCode();
-	std::string output = Generator::SlangGenerator::getShaderOutput(currentParser->structure);
-	currentParser->reset();
-	return output;
+    if (currentParser->isInShaderParse)
+    {
+        currentParser->parseOutputs.emplace_back(Generator::SlangGenerator::getShaderOutput(currentParser->structure), currentParser->structure.slangModuleSource,currentParser->structure.stage,currentParser->branchOutputs,currentParser->typeHeader);
+        currentParser->reset();
+        currentParser->localStatementStack.pop();
+        currentParser->isInShaderParse = false;
+    }
 }
 
 void EmbeddedShader::Ast::Parser::reset()
@@ -109,6 +71,7 @@ void EmbeddedShader::Ast::Parser::reset()
 	dispatchThreadIDInput.reset();
     structure.slangModuleSource.clear();
     resetBranchOutputs();
+    typeHeader.clear();
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()
@@ -203,6 +166,12 @@ std::vector<EmbeddedShader::Ast::BranchOutput>& EmbeddedShader::Ast::Parser::get
 {
     return currentParser->branchOutputs;
 }
+
+std::string& EmbeddedShader::Ast::Parser::getTypeHeader()
+{
+    return currentParser->typeHeader;
+}
+
 std::stack<std::vector<size_t>>& EmbeddedShader::Ast::Parser::getBranchReferences()
 {
     if (currentParser->branchReferences.empty())

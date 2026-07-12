@@ -42,6 +42,7 @@ namespace EmbeddedShader
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
 	    std::cout << "[main code]:" << outputs[0].output << "\n";
+	    std::cout << "[Type Header]:" << outputs[0].typeHeader << "\n";
 	    size_t index = 0;
 	    for (const auto & branch : outputs[0].branches)
         {
@@ -52,7 +53,7 @@ namespace EmbeddedShader
         }
 
 	    compilerOption.branches.swap(outputs[0].branches);
-
+	    compilerOption.typeHeader = outputs[0].typeHeader;
 		ComputePipelineObject result;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption,sourceLocation);
 
@@ -60,7 +61,9 @@ namespace EmbeddedShader
 		{
 			Ast::Parser::setBindless(true);
 			outputs = parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
-			result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
+            compilerOption.branches.swap(outputs[0].branches);
+            compilerOption.typeHeader = outputs[0].typeHeader;
+            result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
 		}
 
 		// Collect auto-bind entries from globalStatements:

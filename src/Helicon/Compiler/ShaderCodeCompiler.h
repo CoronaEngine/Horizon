@@ -148,6 +148,7 @@ struct ShaderCodeModule
         bool enableBindless = true;
         std::vector<SlangModule*> slangModules;
         std::vector<Ast::BranchOutput> branches;
+        std::string typeHeader;
     };
 
     struct ShaderCodeCompiler
