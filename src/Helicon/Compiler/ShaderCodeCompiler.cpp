@@ -86,12 +86,23 @@ namespace EmbeddedShader
     {
         std::shared_lock<std::shared_mutex> lock(threadMutex);
 
-        std::string bindlessStr = bindless ? "_Bindless" : "";
         ShaderCodeModule result;
-        auto languageStr = enumToString(language);
+        std::string codeKey;
+        std::string reflKey;
+        if (!conditions.empty())
+        {
+            codeKey = getCurrentCombinationKey(language, bindless, false);
+            reflKey = getCurrentCombinationKey(language, bindless, true);
+        }
+        else
+        {
+            std::string bindlessStr = bindless ? "_Bindless" : "";
+            auto languageStr = enumToString(language);
+            codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
+            reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
+        }
 
-        auto codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
-        auto reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
+
 
 #if HELICON_HAS_HARDCODE_SHADERS
         try
@@ -215,7 +226,7 @@ namespace EmbeddedShader
             compileArgs2.module = &core;
             compileArgs2.stage = inputStage;
             compileArgs2.sourceLanguage = language;
-            compileArgs2.deps = std::move(option.slangModules);
+            compileArgs2.deps.swap(option.slangModules);
 
             //branches
             auto branches = getCurrentBranchModules(option.enableBindless);
@@ -240,7 +251,7 @@ namespace EmbeddedShader
             compileArgs.source = shaderCode;
             compileArgs.stage = inputStage;
             compileArgs.sourceLanguage = language;
-            compileArgs.deps = std::move(option.slangModules);
+            compileArgs.deps.swap(option.slangModules);
             compileArgs.enableReflection = true;
             if (option.compileGLSL)
                 compileArgs.targetLanguages.push_back(ShaderLanguage::GLSL);
@@ -259,23 +270,60 @@ namespace EmbeddedShader
         if (auto spirv = result.binaryTargets.find(ShaderLanguage::SpirV); spirv != result.binaryTargets.end())
             spirvTarget = &spirv->second;
 
+        std::string codeKey;
+        std::string reflKey;
+
         //string targets
         for (auto& stringTarget : result.stringTargets)
         {
-            auto languageStr = enumToString(stringTarget.first);
-            storeCode(stringTarget.second,ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr));
-            storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections),
-                            ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
+            if (!conditions.empty())
+            {
+                codeKey = getCurrentCombinationKey(stringTarget.first, option.enableBindless, false);
+                reflKey = getCurrentCombinationKey(stringTarget.first, option.enableBindless, true);
+            }
+            else
+            {
+                auto languageStr = enumToString(stringTarget.first);
+                codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
+                reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
+            }
+
+            storeCode(stringTarget.second,codeKey);
+            storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections), reflKey);
         }
 
         //binary targets
-        for (auto& binaryTargets : result.binaryTargets)
+        for (auto& binaryTarget : result.binaryTargets)
         {
-            auto languageStr = enumToString(binaryTargets.first);
-            storeCode(binaryTargets.second,ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr));
-            storeReflection(reflectionForTarget(binaryTargets.first, spirvTarget, result.reflections),
-                            ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr));
+            if (!conditions.empty())
+            {
+                codeKey = getCurrentCombinationKey(binaryTarget.first, option.enableBindless, false);
+                reflKey = getCurrentCombinationKey(binaryTarget.first, option.enableBindless, true);
+            }
+            else
+            {
+                auto languageStr = enumToString(binaryTarget.first);
+                codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
+                reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
+            }
+            storeCode(binaryTarget.second,codeKey);
+            storeReflection(reflectionForTarget(binaryTarget.first, spirvTarget, result.reflections), reflKey);
         }
+    }
+
+    std::string ShaderCodeCompiler::getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const
+    {
+        std::string bindlessStr = bindless ? "_Bindless" : "";
+        std::string reflectionStr = reflection ? "_Reflection" : "";
+        auto languageStr = enumToString(language);
+        auto prefixStr = languageStr + reflectionStr + bindlessStr;
+        for (size_t i = 0; i < conditions.size(); ++i)
+        {
+            auto conditionStr = conditions[i]() ? "_True" : "_False";
+            auto branchName = "Branch_" + std::to_string(i);
+            prefixStr += "_" + branchName + "_" + conditionStr;
+        }
+        return ShaderHardcodeManager::getItemName(sourceLocationStr, prefixStr);
     }
 
     std::vector<SlangModule*> ShaderCodeCompiler::getCurrentBranchModules(bool bindless) const
@@ -299,7 +347,7 @@ namespace EmbeddedShader
 
         auto conditionStr = condition ? "_True" : "_False";
 
-        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + conditionStr);;
+        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + conditionStr);
 
 #if HELICON_HAS_HARDCODE_SHADERS
         try

@@ -171,6 +171,7 @@ struct ShaderCodeModule
         [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false) const;
         void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
     private:
+        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const;
         std::vector<SlangModule*> getCurrentBranchModules(bool bindless) const;
         SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
         std::string sourceLocationStr;
