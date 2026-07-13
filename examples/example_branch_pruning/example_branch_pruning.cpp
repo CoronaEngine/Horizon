@@ -18,7 +18,7 @@ void run_example_branch_pruning()
         {
             texture[dispatchThreadID()->xy()] = Float4(1,2,3,4);
         }
-        $ELSE $IF(a == 1)
+        $ELSE $IF(a2 == 1)
         {
             Float v = Float(dispatchThreadID()->x);
             texture[dispatchThreadID()->xy()] = Float4(1,1,1,v);
@@ -43,6 +43,6 @@ void run_example_branch_pruning()
     option.compileSpirV = true;
     option.compileHLSL = true;
     option.enableBindless = false;
-    auto compute = ComputePipelineObject::compile(shader,ktm::uvec3(1),option);
+    auto compute = ComputePipelineObject::compile(shader,ktm::uvec3(8,8,1),option);
     std::cout << std::get<1>(compute.compute->getShaderCode(ShaderLanguage::HLSL).shaderCode) << "\n";
 }
