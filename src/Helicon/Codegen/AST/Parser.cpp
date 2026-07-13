@@ -72,6 +72,7 @@ void EmbeddedShader::Ast::Parser::reset()
     structure.slangModuleSource.clear();
     resetBranchOutputs();
     typeHeader.clear();
+    bIsEnabledTypeHeader = false;
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()
@@ -179,4 +180,14 @@ std::stack<std::vector<size_t>>& EmbeddedShader::Ast::Parser::getBranchReference
         currentParser->branchReferences.push({});
     }
     return currentParser->branchReferences;
+}
+
+bool EmbeddedShader::Ast::Parser::isEnabledTypeHeader()
+{
+    return currentParser->bIsEnabledTypeHeader;
+}
+
+void EmbeddedShader::Ast::Parser::setEnabledTypeHeader(bool enabled)
+{
+    currentParser->bIsEnabledTypeHeader = enabled;
 }

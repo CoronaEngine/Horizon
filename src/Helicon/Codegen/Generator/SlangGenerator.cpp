@@ -231,6 +231,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfSta
 {
     if (node->conditionDetector.has_value())
     {
+        Ast::Parser::setEnabledTypeHeader(true);
         Ast::Parser::getBranchOutputs().emplace_back();
         auto& branchRefs = Ast::Parser::getBranchReferences();
         branchRefs.top().push_back(node->index);
@@ -525,11 +526,17 @@ EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBr
 }
 std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std::vector<size_t>& refs)
 {
-    std::string result = "import type_header;\n";
+    std::string result;
+    if (Ast::Parser::isEnabledTypeHeader())
+    {
+        result = "import type_header;\n";
+    }
+
     for (size_t ref : refs)
     {
         result += "import branch_" + std::to_string(ref) + ";\n";
     }
+
     return result;
 }
 

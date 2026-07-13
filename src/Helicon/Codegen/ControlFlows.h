@@ -37,8 +37,8 @@ namespace EmbeddedShader
 
 		GPU_IF_BRANCH(GPU_IF& gpuIf,bool condition, std::function<bool()> pruningDetector)
 		{
-			gpuIf.node = Ast::AST::beginIf(Ast::AST::createValue(condition), std::move(pruningDetector));
-			//elseif begin pattern
+            gpuIf.node = Ast::AST::beginIf(Ast::AST::createValue(condition), std::move(pruningDetector));
+            //elseif begin pattern
 		}
 
 		~GPU_IF_BRANCH()

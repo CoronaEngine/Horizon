@@ -67,6 +67,7 @@ namespace EmbeddedShader::Ast
 	    std::stack<ExternBranchVariateCollection> externBranchVar;
 	    std::stack<std::vector<size_t>> branchReferences;
 	    std::string typeHeader;
+	    bool bIsEnabledTypeHeader = false;
 	    //////////////Branch Pruning///////////////
 
 		bool isInShaderParse = false;
@@ -92,5 +93,7 @@ namespace EmbeddedShader::Ast
 	    static std::vector<BranchOutput>& getBranchOutputs();
 	    static std::string& getTypeHeader();
 	    static std::stack<std::vector<size_t>>& getBranchReferences();
+	    static bool isEnabledTypeHeader();
+	    static void setEnabledTypeHeader(bool enabled);
 	};
 }

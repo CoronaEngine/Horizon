@@ -16,7 +16,13 @@ namespace EmbeddedShader
 {
 enum class ShaderLanguage : uint16_t;
 enum class ShaderStage : uint16_t;
-struct SlangModule;
+
+    struct SlangModule
+    {
+        std::string name;
+        std::string path;
+        std::vector<uint8_t> binData;
+    };
 
 struct ShaderCodeModule
     {
@@ -100,7 +106,7 @@ struct ShaderCodeModule
             : shaderCode(std::move(shaderCode))
         {
         }
-        ShaderCodeModule(SlangModule* shaderCode)
+        ShaderCodeModule(SlangModule shaderCode)
             : shaderCode(shaderCode)
         {
         }
@@ -115,7 +121,7 @@ struct ShaderCodeModule
         {
         }
 
-        ShaderCodeModule(SlangModule* shaderCode,ShaderResources shaderResources)
+        ShaderCodeModule(SlangModule shaderCode,ShaderResources shaderResources)
             : shaderResources(std::move(shaderResources)),shaderCode(shaderCode)
         {
         }
@@ -130,12 +136,12 @@ struct ShaderCodeModule
             return std::get<std::vector<uint32_t>>(shaderCode);
         }
 
-        operator SlangModule*() const
+        operator SlangModule() const
         {
-            return std::get<SlangModule*>(shaderCode);
+            return std::get<SlangModule>(shaderCode);
         }
 
-        std::variant<std::vector<uint32_t>, std::string, SlangModule*> shaderCode;
+        std::variant<std::vector<uint32_t>, std::string, SlangModule> shaderCode;
     };
 
     struct CompilerOption
@@ -163,13 +169,16 @@ struct ShaderCodeModule
         ~ShaderCodeCompiler() = default;
 
         [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false) const;
-        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}) const;
+        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
     private:
+        std::vector<SlangModule*> getCurrentBranchModules(bool bindless) const;
+        SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
         std::string sourceLocationStr;
         std::string stage;
+        std::vector<std::function<bool()>> conditions;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
-        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule*>>;
+        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule>>;
         mutable std::unordered_map<std::string, CompiledVariant> compiledOutputs_;
     };
 }
