@@ -20,6 +20,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "format.h"
@@ -60,6 +62,7 @@ namespace Corona::Horizon
         BeginRendering,
         EndRendering,
         DrawIndexed,
+        DrawIndexedBatch,
         Present,
         HostCallback,
         KeepAlive,
@@ -223,6 +226,18 @@ namespace Corona::Horizon
         std::string debug_label;
     };
 
+    struct DrawIndexedBatchItem
+    {
+        BufferRef index {};
+        BufferRef vertex {};
+        DrawIndexedDesc draw {};
+    };
+
+    struct DrawIndexedBatchDesc
+    {
+        std::vector<DrawIndexedBatchItem> draws;
+    };
+
     struct PresentDesc
     {
         DisplayerRef displayer {};
@@ -240,6 +255,7 @@ namespace Corona::Horizon
         DispatchDesc dispatch {};
         RenderingDesc rendering {};
         DrawIndexedDesc draw_indexed {};
+        DrawIndexedBatchDesc draw_indexed_batch {};
         PresentDesc present {};
     };
 
@@ -256,6 +272,31 @@ namespace Corona::Horizon
         uint64_t sequence { 0 };
         std::string debug_label;
     };
+
+    template<typename Visitor>
+    [[nodiscard]] bool visit_indexed_draws(const CommandIR& command, Visitor&& visitor)
+    {
+        if (command.op == CommandOp::DrawIndexed)
+        {
+            const DrawIndexedDesc& draw = command.payload.draw_indexed;
+            const std::size_t buffer_offset = draw.pipeline ? 1u : 0u;
+            const BufferRef index = command.resources.size() > buffer_offset
+                ? BufferRef{command.resources[buffer_offset].handle}
+                : BufferRef{};
+            const BufferRef vertex = command.resources.size() > buffer_offset + 1u
+                ? BufferRef{command.resources[buffer_offset + 1u].handle}
+                : BufferRef{};
+            std::forward<Visitor>(visitor)(index, vertex, draw);
+            return true;
+        }
+        if (command.op == CommandOp::DrawIndexedBatch)
+        {
+            for (const DrawIndexedBatchItem& item : command.payload.draw_indexed_batch.draws)
+                visitor(item.index, item.vertex, item.draw);
+            return true;
+        }
+        return false;
+    }
 
     struct RequirementSet
     {
@@ -330,6 +371,7 @@ namespace Corona::Horizon
 
     private:
         std::vector<std::shared_ptr<const IResourceRef>> resources_;
+        std::unordered_set<std::uintptr_t> resource_ids_;
         std::vector<std::shared_ptr<void>> objects_;
     };
 
@@ -405,6 +447,7 @@ namespace Corona::Horizon
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});
         void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
+        void draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {});
         void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
         void host_callback(std::function<void()> callback);
         void keep_alive(std::shared_ptr<void> object);

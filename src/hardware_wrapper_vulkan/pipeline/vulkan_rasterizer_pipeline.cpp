@@ -2,6 +2,7 @@
 
 #include "hardware_wrapper/validation/hardware_validation.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/hardware/execution_profile.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
@@ -1188,6 +1189,7 @@ namespace Corona::Horizon
         pool_info.pPoolSizes = pool_sizes.data();
 
         VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
+        note_descriptor_pool_create();
         if (result != VK_SUCCESS)
         {
             throw std::runtime_error("vkCreateDescriptorPool failed for RasterizerPipeline draw. VkResult=" +
@@ -1257,6 +1259,7 @@ namespace Corona::Horizon
                                                                     1,
                                                                     BufferUsageFlags::Uniform,
                                                                     "RasterizerPipeline.uniform_buffer");
+                    note_uniform_buffer_allocation();
                     BufferStore::Read buffer = read_buffer_resource(static_cast<const ResourceHandle&>(ubo));
                     if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
                         throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
@@ -1681,5 +1684,84 @@ namespace Corona::Horizon
             batch << end_rendering();
 
         return batch;
+    }
+
+    void VulkanRasterizerPipeline::record_consuming(CommandRecorder& recorder)
+    {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool depth_enabled = false;
+        std::vector<BoundImage> images;
+        HardwareImage depth_target;
+        std::vector<RecordedDraw> draws;
+        {
+            std::lock_guard lock(mutex_);
+            width = width_;
+            height = height_;
+            depth_enabled = desc_.depth_attachment.enabled;
+            images = bound_images_;
+            depth_target = depth_target_;
+            draws = std::move(draws_);
+            draws_.clear();
+        }
+
+        const BoundImage* first_color = nullptr;
+        for (const BoundImage& image : images)
+        {
+            if (!is_stage_output(image.bind_type) || !image.image)
+                continue;
+            if (first_color == nullptr || image.location < first_color->location)
+                first_color = &image;
+        }
+
+        const bool has_rendering_scope = first_color != nullptr && width != 0 && height != 0;
+        if (has_rendering_scope)
+        {
+            const bool has_depth = depth_target && depth_enabled;
+            recorder.begin_rendering(
+                {
+                    .color = image_ref(first_color->image),
+                    .depth = has_depth ? image_ref(depth_target) : ImageRef {},
+                    .width = width,
+                    .height = height,
+                    .clear_color = true,
+                    .clear_depth = has_depth,
+                });
+        }
+
+        DrawIndexedBatchDesc batch;
+        batch.draws.reserve(draws.size());
+        for (RecordedDraw& draw : draws)
+        {
+            DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
+            draw_desc.debug_label = std::move(draw.params.debug_label);
+            ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
+            draw_desc.push_constant_data = std::move(draw.push_constant_data);
+            draw_desc.uniform_buffers = std::move(draw.uniform_buffers);
+            draw_desc.bindings.reserve(draw.images.size());
+            draw_desc.resource_uses.reserve(draw.images.size());
+            for (const BoundImage& image : draw.images)
+            {
+                ResourceHandle handle = static_cast<const ResourceHandle&>(image.image);
+                draw_desc.bindings.push_back(
+                    {
+                        .set = image.set,
+                        .binding = image.binding,
+                        .resource = handle,
+                        .kind = DrawBindingKind::SampledImage,
+                        .access = AccessKind::Read,
+                    });
+                draw_desc.resource_uses.push_back({ handle, AccessKind::Read, 0 });
+            }
+            batch.draws.push_back({
+                .index = buffer_ref(draw.index_buffer),
+                .vertex = buffer_ref(draw.vertex_buffer),
+                .draw = std::move(draw_desc),
+            });
+        }
+        recorder.draw_indexed_batch(std::move(batch));
+
+        if (has_rendering_scope)
+            recorder.end_rendering();
     }
 }

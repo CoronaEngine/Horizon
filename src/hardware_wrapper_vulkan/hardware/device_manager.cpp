@@ -1,7 +1,9 @@
 #include "device_manager.h"
+#include "execution_profile.h"
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -490,7 +492,7 @@ namespace Corona::Horizon
         }
     }
 
-    std::shared_ptr<TrackedCommandBuffer> Queue::acquire()
+    std::shared_ptr<TrackedCommandBuffer> Queue::acquire(ExecutionCommitProfileSample* profile)
     {
         {
             std::lock_guard lock(mutex_);
@@ -503,9 +505,15 @@ namespace Corona::Horizon
             }
         }
 
-        retire_completed();
+        retire_completed(profile);
 
+        const auto lock_start = std::chrono::steady_clock::now();
         std::lock_guard lock(mutex_);
+        if (profile != nullptr)
+        {
+            profile->queue_lock_wait_ms += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - lock_start).count();
+        }
         if (device_lost_)
         {
             throw std::runtime_error("Queue acquire skipped because the Vulkan device is lost. family_index=" +
@@ -531,7 +539,10 @@ namespace Corona::Horizon
         return command_buffer;
     }
 
-    SubmissionToken Queue::submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals)
+    SubmissionToken Queue::submit(QueueSubmission& submission,
+                                  std::span<const SubmitWait> waits,
+                                  std::span<const SubmitSignal> signals,
+                                  ExecutionCommitProfileSample* profile)
     {
         std::vector<VkSemaphoreSubmitInfo> wait_infos;
         wait_infos.reserve(waits.size());
@@ -567,9 +578,15 @@ namespace Corona::Horizon
             signal_infos.push_back(info);
         }
 
-        retire_completed();
+        retire_completed(profile);
 
+        const auto lock_start = std::chrono::steady_clock::now();
         std::lock_guard lock(mutex_);
+        if (profile != nullptr)
+        {
+            profile->queue_lock_wait_ms += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - lock_start).count();
+        }
         if (device_lost_)
         {
             throw std::runtime_error("Queue submit skipped because the Vulkan device is lost. family_index=" +
@@ -617,7 +634,13 @@ namespace Corona::Horizon
             submit_info.commandBufferInfoCount = 1;
             submit_info.pCommandBufferInfos = &command_info;
 
+            const auto submit_start = std::chrono::steady_clock::now();
             VkResult result = vkQueueSubmit2(queue_, 1, &submit_info, VK_NULL_HANDLE);
+            if (profile != nullptr)
+            {
+                profile->queue_submit_ms += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - submit_start).count();
+            }
             if (result != VK_SUCCESS)
             {
                 if (result == VK_ERROR_DEVICE_LOST)
@@ -909,8 +932,9 @@ namespace Corona::Horizon
         return value;
     }
 
-    void Queue::retire_completed()
+    void Queue::retire_completed(ExecutionCommitProfileSample* profile)
     {
+        const auto retire_start = std::chrono::steady_clock::now();
         std::deque<std::shared_ptr<TrackedCommandBuffer>> completed;
         {
             std::lock_guard lock(mutex_);
@@ -927,6 +951,11 @@ namespace Corona::Horizon
 
         if (completed.empty())
         {
+            if (profile != nullptr)
+            {
+                profile->queue_retire_ms += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - retire_start).count();
+            }
             return;
         }
 
@@ -935,6 +964,11 @@ namespace Corona::Horizon
         {
             pool_.push_back(std::move(completed.front()));
             completed.pop_front();
+        }
+        if (profile != nullptr)
+        {
+            profile->queue_retire_ms += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - retire_start).count();
         }
     }
 

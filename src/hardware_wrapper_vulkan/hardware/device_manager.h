@@ -15,6 +15,7 @@
 
 namespace Corona::Horizon
 {
+    struct ExecutionCommitProfileSample;
     struct QueueFamilyInfo
     {
         uint32_t family_index { 0 };
@@ -73,12 +74,15 @@ namespace Corona::Horizon
         Queue(Queue&&) = delete;
         Queue& operator=(Queue&&) = delete;
 
-        [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire();
-        [[nodiscard]] SubmissionToken submit(QueueSubmission& submission, std::span<const SubmitWait> waits, std::span<const SubmitSignal> signals);
+        [[nodiscard]] std::shared_ptr<TrackedCommandBuffer> acquire(ExecutionCommitProfileSample* profile = nullptr);
+        [[nodiscard]] SubmissionToken submit(QueueSubmission& submission,
+                                             std::span<const SubmitWait> waits,
+                                             std::span<const SubmitSignal> signals,
+                                             ExecutionCommitProfileSample* profile = nullptr);
         [[nodiscard]] QueuePresentResult present(const VkPresentInfoKHR& present_info);
         void wait_idle();
         void wait_for(const SubmissionToken& token) const;
-        void retire_completed();
+        void retire_completed(ExecutionCommitProfileSample* profile = nullptr);
 
         [[nodiscard]] uint64_t completed_value() const;
         [[nodiscard]] uint64_t last_submitted_value() const noexcept;

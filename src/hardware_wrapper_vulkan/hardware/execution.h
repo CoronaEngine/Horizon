@@ -9,6 +9,7 @@
 #include <volk.h>
 
 #include "horizon.h"
+#include "execution_profile.h"
 
 namespace Corona::Horizon
 {
@@ -69,11 +70,12 @@ namespace Corona::Horizon
     class ExecutionCompiler
     {
     public:
-        [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
+        [[nodiscard]] ExecutionPlan compile(const RecordedTask& task, ExecutionCommitProfileSample* profile = nullptr) const;
+        [[nodiscard]] ExecutionPlan compile(RecordedTask&& task, ExecutionCommitProfileSample* profile = nullptr) const;
 
     private:
+        [[nodiscard]] ExecutionPlan compile_owned(RecordedTask& task, ExecutionCommitProfileSample* profile) const;
         static void collect_keep_alive(CompiledSubmission& submission, const CommandIR& command);
-        static void collect_barriers(CompiledSubmission& submission, const CommandIR& command);
     };
 
     class VulkanCommandEncoder
