@@ -82,7 +82,7 @@ namespace EmbeddedShader
         compile(shaderCode,inputStage,language,option);
     }
 
-    ShaderCodeModule ShaderCodeCompiler::getShaderCode(ShaderLanguage language, bool bindless) const
+    ShaderCodeModule ShaderCodeCompiler::getShaderCode(ShaderLanguage language, bool bindless)
     {
         std::shared_lock<std::shared_mutex> lock(threadMutex);
 
@@ -120,7 +120,30 @@ namespace EmbeddedShader
         if (auto it = compiledOutputs_.find(codeKey); it != compiledOutputs_.end())
             result.shaderCode = std::get<1>(it->second);
         else
-            throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
+        {
+            if (!conditions.empty())
+            {
+                combine(false);
+                if (compilerOption.enableBindless)
+                {
+                    combine(true);
+                }
+
+                it = compiledOutputs_.find(codeKey);
+                if (it != compiledOutputs_.end())
+                {
+                    result.shaderCode = std::get<1>(it->second);
+                }
+                else
+                {
+                    throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
+                }
+            }
+            else
+            {
+                throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
+            }
+        }
 
         if (auto it = compiledOutputs_.find(reflKey); it != compiledOutputs_.end())
             result.shaderResources = std::get<0>(it->second);
@@ -133,6 +156,8 @@ namespace EmbeddedShader
     void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language,
         CompilerOption option)
     {
+        compilerOption = option;
+        sourceStage = inputStage;
         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
             compiledOutputs_[itemName] = code;
@@ -148,25 +173,27 @@ namespace EmbeddedShader
         };
         std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
 
-        std::vector<SlangModule> declares;
-        std::vector<SlangModule*> pDeclares;
-        std::vector<SlangModule> trueBs;
-        std::vector<SlangModule> falseBs;
-        SlangModule typeHeaderModule;
-
         SlangCompileResult result;
         if (!option.branches.empty())
         {
+            std::vector<SlangModule*> pDeclares;
             auto languageStr = "SlangModule";
+
+            std::vector<SlangModule> declares;
+            std::vector<SlangModule> trueBs;
+            std::vector<SlangModule> falseBs;
 
             std::vector<SlangModule*> pTrueBs;
             std::vector<SlangModule*> pFalseBs;
+
             SlangModuleCompileArgs compileArgs;
             compileArgs.sourceLanguage = language;
             compileArgs.shaderCode = option.typeHeader;
             compileArgs.moduleName = "type_header";
-            typeHeaderModule = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+
+            auto typeHeaderModule = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
             option.slangModules.push_back(&typeHeaderModule);
+            storeCode(typeHeaderModule, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Type_Header"));
 
             size_t index = option.branches.size() - 1;
             conditions.resize(option.branches.size());
@@ -229,7 +256,7 @@ namespace EmbeddedShader
             compileArgs2.deps.swap(option.slangModules);
 
             //branches
-            auto branches = getCurrentBranchModules(option.enableBindless);
+            auto branches = getCurrentBranchModules(Ast::Parser::getBindless());
             compileArgs2.deps.insert(compileArgs2.deps.end(),branches.begin(), branches.end());
 
             compileArgs2.enableReflection = true;
@@ -278,8 +305,8 @@ namespace EmbeddedShader
         {
             if (!conditions.empty())
             {
-                codeKey = getCurrentCombinationKey(stringTarget.first, option.enableBindless, false);
-                reflKey = getCurrentCombinationKey(stringTarget.first, option.enableBindless, true);
+                codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false);
+                reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true);
             }
             else
             {
@@ -297,8 +324,8 @@ namespace EmbeddedShader
         {
             if (!conditions.empty())
             {
-                codeKey = getCurrentCombinationKey(binaryTarget.first, option.enableBindless, false);
-                reflKey = getCurrentCombinationKey(binaryTarget.first, option.enableBindless, true);
+                codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false);
+                reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true);
             }
             else
             {
@@ -326,6 +353,74 @@ namespace EmbeddedShader
         return ShaderHardcodeManager::getItemName(sourceLocationStr, prefixStr);
     }
 
+    void ShaderCodeCompiler::combine(bool bindless)
+    {
+        // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
+        auto storeCode = [&](const auto& code, const std::string& itemName) {
+            compiledOutputs_[itemName] = code;
+#ifdef CABBAGE_ENGINE_DEBUG
+            ShaderHardcodeManager::addTarget(code, stage, itemName);
+#endif
+        };
+        auto storeReflection = [&](const ShaderCodeModule::ShaderResources& res, const std::string& itemName) {
+            compiledOutputs_[itemName] = res;
+#ifdef CABBAGE_ENGINE_DEBUG
+            ShaderHardcodeManager::addTarget(res, stage, itemName);
+#endif
+        };
+
+        SlangCompileArgs2 compileArgs2;
+        compileArgs2.module = getCoreBranchModule(bindless);
+        compileArgs2.stage = sourceStage;
+        compileArgs2.sourceLanguage = sourceLanguage;
+        compileArgs2.deps = compilerOption.slangModules;
+        compileArgs2.deps.push_back(getTypeHeaderModule(bindless));
+
+        //branches
+        auto branches = getCurrentBranchModules(bindless);
+        compileArgs2.deps.insert(compileArgs2.deps.end(),branches.begin(), branches.end());
+
+        compileArgs2.enableReflection = true;
+        if (compilerOption.compileGLSL)
+            compileArgs2.targetLanguages.push_back(ShaderLanguage::GLSL);
+        if (compilerOption.compileHLSL)
+            compileArgs2.targetLanguages.push_back(ShaderLanguage::HLSL);
+        if (compilerOption.compileSpirV)
+            compileArgs2.targetLanguages.push_back(ShaderLanguage::SpirV);
+        if (compilerOption.compileDXIL)
+            compileArgs2.targetLanguages.push_back(ShaderLanguage::DXIL);
+        if (compilerOption.compileDXBC && !Ast::Parser::getBindless())
+            compileArgs2.targetLanguages.push_back(ShaderLanguage::DXBC);
+        auto result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs2);
+
+        const std::vector<uint32_t>* spirvTarget = nullptr;
+        if (auto spirv = result.binaryTargets.find(ShaderLanguage::SpirV); spirv != result.binaryTargets.end())
+            spirvTarget = &spirv->second;
+
+        std::string codeKey;
+        std::string reflKey;
+
+        //string targets
+        for (auto& stringTarget : result.stringTargets)
+        {
+            codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false);
+            reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true);
+
+            storeCode(stringTarget.second,codeKey);
+            storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections), reflKey);
+        }
+
+        //binary targets
+        for (auto& binaryTarget : result.binaryTargets)
+        {
+            codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false);
+            reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true);
+
+            storeCode(binaryTarget.second,codeKey);
+            storeReflection(reflectionForTarget(binaryTarget.first, spirvTarget, result.reflections), reflKey);
+        }
+    }
+
     std::vector<SlangModule*> ShaderCodeCompiler::getCurrentBranchModules(bool bindless) const
     {
         std::vector<SlangModule*> result;
@@ -348,6 +443,62 @@ namespace EmbeddedShader
         auto conditionStr = condition ? "_True" : "_False";
 
         auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + conditionStr);
+
+#if HELICON_HAS_HARDCODE_SHADERS
+        try
+        {
+            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
+        }
+        catch (const std::runtime_error&)
+        {
+            // Fall through to per-instance outputs when hardcoded shaders are stale or incomplete.
+        }
+#endif
+
+        if (auto it = compiledOutputs_.find(branchKey); it != compiledOutputs_.end())
+            result = &std::get<2>(std::get<1>(it->second));
+        else
+            throw std::runtime_error("Compiled shader code not found for key: " + branchKey);
+
+        return result;
+    }
+
+    SlangModule* ShaderCodeCompiler::getCoreBranchModule(bool bindless) const
+    {
+        std::shared_lock<std::shared_mutex> lock(threadMutex);
+        SlangModule* result = nullptr;
+        std::string bindlessStr = bindless ? "_Bindless" : "";
+        auto languageStr = "SlangModule";
+
+        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Branch_Core");
+
+#if HELICON_HAS_HARDCODE_SHADERS
+        try
+        {
+            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
+        }
+        catch (const std::runtime_error&)
+        {
+            // Fall through to per-instance outputs when hardcoded shaders are stale or incomplete.
+        }
+#endif
+
+        if (auto it = compiledOutputs_.find(branchKey); it != compiledOutputs_.end())
+            result = &std::get<2>(std::get<1>(it->second));
+        else
+            throw std::runtime_error("Compiled shader code not found for key: " + branchKey);
+
+        return result;
+    }
+
+    SlangModule* ShaderCodeCompiler::getTypeHeaderModule(bool bindless) const
+    {
+        std::shared_lock<std::shared_mutex> lock(threadMutex);
+        SlangModule* result = nullptr;
+        std::string bindlessStr = bindless ? "_Bindless" : "";
+        auto languageStr = "SlangModule";
+
+        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Type_Header");;
 
 #if HELICON_HAS_HARDCODE_SHADERS
         try
