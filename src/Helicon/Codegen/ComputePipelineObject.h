@@ -41,17 +41,6 @@ namespace EmbeddedShader
 		auto outputs = parse(computeShaderCode);
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
-	    std::cout << "[main code]:" << outputs[0].output << "\n";
-	    std::cout << "[Type Header]:" << outputs[0].typeHeader << "\n";
-	    size_t index = 0;
-	    for (const auto & branch : outputs[0].branches)
-        {
-	        std::cout << "+++[branch " << index++ << "]:\n";
-            std::cout << "---[declare branch]:\n" << branch.declareBranch << "\n";
-            std::cout << "---[true branch]:\n" << branch.trueBranch << "\n";
-            std::cout << "---[false branch]:\n" << branch.falseBranch << "\n";
-        }
-
 	    compilerOption.branches.swap(outputs[0].branches);
 	    compilerOption.typeHeader = outputs[0].typeHeader;
 		ComputePipelineObject result;
