@@ -118,7 +118,7 @@ namespace Corona::Horizon
 
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
         bind_auto_resources(impl);
-        impl->record(*this, index_buffer, vertex_buffer, params);
+        impl->record(this, index_buffer, vertex_buffer, params);
         return *this;
     }
 

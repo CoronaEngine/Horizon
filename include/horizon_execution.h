@@ -29,6 +29,7 @@
 
 namespace Corona::Horizon
 {
+    class RasterizerPipelineBase;
     class ComputePipelineBase;
     // ================================================================
     // Execution / Command Public Types
@@ -212,7 +213,7 @@ namespace Corona::Horizon
 
     struct DrawIndexedDesc
     {
-        ResourceHandle pipeline {};
+        RasterizerPipelineBase* pipeline {};
         uint32_t index_count { 0 };
         uint32_t instance_count { 1 };
         uint32_t first_index { 0 };
@@ -281,12 +282,12 @@ namespace Corona::Horizon
         if (command.op == CommandOp::DrawIndexed)
         {
             const DrawIndexedDesc& draw = command.payload.draw_indexed;
-            const std::size_t buffer_offset = draw.pipeline ? 1u : 0u;
-            const BufferRef index = command.resources.size() > buffer_offset
-                ? BufferRef{command.resources[buffer_offset].handle}
+            //const std::size_t buffer_offset = draw.pipeline ? 1u : 0u;
+            const BufferRef index = command.resources.size() > 0
+                ? BufferRef{command.resources[0].handle}
                 : BufferRef{};
-            const BufferRef vertex = command.resources.size() > buffer_offset + 1u
-                ? BufferRef{command.resources[buffer_offset + 1u].handle}
+            const BufferRef vertex = command.resources.size() > 1
+                ? BufferRef{command.resources[1].handle}
                 : BufferRef{};
             std::forward<Visitor>(visitor)(index, vertex, draw);
             return true;

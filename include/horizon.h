@@ -130,7 +130,7 @@ namespace Corona::Horizon
         // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
         // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
         HardwareStream& operator<<(ComputePipelineBase& pipeline);
-        HardwareStream& operator<<(const RasterizerPipelineBase& pipeline);
+        HardwareStream& operator<<(RasterizerPipelineBase& pipeline);
         HardwareStream& append_consuming(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 

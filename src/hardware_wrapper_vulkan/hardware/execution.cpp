@@ -174,7 +174,7 @@ namespace Corona::Horizon
                     << " instances=" << draw.instance_count
                     << " first_index=" << draw.first_index
                     << " vertex_offset=" << draw.vertex_offset
-                    << " pipeline=" << resource_id(draw.pipeline);
+                    << " pipeline=" << resource_id(*draw.pipeline);
                 const size_t buffer_offset = draw.pipeline ? 1u : 0u;
                 if (command.resources.size() > buffer_offset)
                 {
@@ -970,10 +970,10 @@ namespace Corona::Horizon
         command.queue = QueueCapability::Graphics;
         command.sequence = next_sequence();
         command.debug_label = desc.debug_label;
-        if (desc.pipeline)
-        {
-            command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
-        }
+        // if (desc.pipeline)
+        // {
+        //     command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
+        // }
         command.resources.push_back({ index.handle, AccessKind::Read, 0 });
         command.resources.push_back({ vertex.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
@@ -1014,7 +1014,7 @@ namespace Corona::Horizon
         };
         for (const DrawIndexedBatchItem& item : batch.draws)
         {
-            append_resource({item.draw.pipeline, AccessKind::Read, 0});
+            //append_resource({item.draw.pipeline, AccessKind::Read, 0});
             append_resource({item.index.handle, AccessKind::Read, 0});
             append_resource({item.vertex.handle, AccessKind::Read, 0});
             for (const ResourceUse& use : item.draw.resource_uses)
@@ -1407,7 +1407,7 @@ namespace Corona::Horizon
                     throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
             }
 
-            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
+            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(*draw.pipeline);
             VulkanRasterizerPipeline::PreparedDraw prepared =
                 pipeline->prepare_draw(device_,
                                        active_rendering.color_format,
@@ -1935,7 +1935,7 @@ namespace Corona::Horizon
         return *this << pipeline.command_batch();
     }
 
-    HardwareStream& HardwareStream::operator<<(const RasterizerPipelineBase& pipeline)
+    HardwareStream& HardwareStream::operator<<(RasterizerPipelineBase& pipeline)
     {
         return *this << pipeline.command_batch();
     }
@@ -2217,9 +2217,9 @@ namespace Corona::Horizon
                 submitted_tokens[submission_index] = tokens.back();
                 tracked_submission.remember(tokens.back());
             }
-            catch (...)
+            catch (std::exception e)
             {
-                //std::cerr << e.what() << std::endl;
+                std::cerr << e.what() << std::endl;
                 for (PreparedQueuePresent& present : prepared_presents)
                 {
                     if (present.manager)
