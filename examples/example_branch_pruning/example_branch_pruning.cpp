@@ -43,6 +43,7 @@ void run_example_branch_pruning()
     option.compileSpirV = true;
     option.compileHLSL = true;
     option.enableBindless = false;
-    auto compute = ComputePipelineObject::compile(shader,ktm::uvec3(1),option);
+    auto compute = ComputePipelineObject::compile(shader,ktm::uvec3(8,8,1),option);
+    a = 0;
     std::cout << std::get<1>(compute.compute->getShaderCode(ShaderLanguage::HLSL).shaderCode) << "\n";
 }

@@ -83,8 +83,20 @@ namespace EmbeddedShader
 
 	}
 
-	void ShaderHardcodeManager::addTarget(const ShaderCodeModule::ShaderResources& shaderResource,
-		const std::string& targetName, const std::string& itemName)
+    void ShaderHardcodeManager::addTarget(const SlangModule& shaderCode, const std::string& targetName, const std::string& itemName)
+    {
+	    createTarget(targetName);
+
+	    std::fstream hardcodeShaderFile(hardcodePath / ("HardcodeShaders" + targetName + ".cpp"), std::ios::out | std::ios::in);
+	    seekBeforeTail(hardcodeShaderFile, "};");
+	    hardcodeShaderFile << "{\"" + itemName + "\", ::EmbeddedShader::SlangModule{{\"" << shaderCode.name << "\"}," << " {\"" << shaderCode.path << "\"},"  << "{";
+	    emitSlangModuleLiteral(hardcodeShaderFile, shaderCode.binData);
+	    hardcodeShaderFile << "}}}," << std::endl;
+	    hardcodeShaderFile << "};";
+    }
+
+    void ShaderHardcodeManager::addTarget(const ShaderCodeModule::ShaderResources& shaderResource,
+                                          const std::string& targetName, const std::string& itemName)
 	{
 		createTarget(targetName);
 

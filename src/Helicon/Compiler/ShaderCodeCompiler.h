@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Codegen/AST/Struct.hpp"
 #include "ktm/type_vec.h"
 #include "spirv-tools/libspirv.hpp"
 
@@ -15,7 +16,13 @@ namespace EmbeddedShader
 {
 enum class ShaderLanguage : uint16_t;
 enum class ShaderStage : uint16_t;
-struct SlangModule;
+
+    struct SlangModule
+    {
+        std::string name;
+        std::string path;
+        std::vector<uint8_t> binData;
+    };
 
 struct ShaderCodeModule
     {
@@ -99,7 +106,7 @@ struct ShaderCodeModule
             : shaderCode(std::move(shaderCode))
         {
         }
-        ShaderCodeModule(SlangModule* shaderCode)
+        ShaderCodeModule(SlangModule shaderCode)
             : shaderCode(shaderCode)
         {
         }
@@ -114,7 +121,7 @@ struct ShaderCodeModule
         {
         }
 
-        ShaderCodeModule(SlangModule* shaderCode,ShaderResources shaderResources)
+        ShaderCodeModule(SlangModule shaderCode,ShaderResources shaderResources)
             : shaderResources(std::move(shaderResources)),shaderCode(shaderCode)
         {
         }
@@ -129,12 +136,12 @@ struct ShaderCodeModule
             return std::get<std::vector<uint32_t>>(shaderCode);
         }
 
-        operator SlangModule*() const
+        operator SlangModule() const
         {
-            return std::get<SlangModule*>(shaderCode);
+            return std::get<SlangModule>(shaderCode);
         }
 
-        std::variant<std::vector<uint32_t>, std::string, SlangModule*> shaderCode;
+        std::variant<std::vector<uint32_t>, std::string, SlangModule> shaderCode;
     };
 
     struct CompilerOption
@@ -146,6 +153,8 @@ struct ShaderCodeModule
         bool compileSpirV = true;
         bool enableBindless = true;
         std::vector<SlangModule*> slangModules;
+        std::vector<Ast::BranchOutput> branches;
+        std::string typeHeader;
     };
 
     struct ShaderCodeCompiler
@@ -159,14 +168,24 @@ struct ShaderCodeModule
         ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
         ~ShaderCodeCompiler() = default;
 
-        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false) const;
-        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}) const;
+        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false);
+        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
     private:
+        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const;
+        void combine(bool bindless);
+        std::vector<SlangModule*> getCurrentBranchModules(bool bindless) const;
+        SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
+        SlangModule* getCoreBranchModule(bool bindless) const;
+        SlangModule* getTypeHeaderModule(bool bindless) const;
         std::string sourceLocationStr;
         std::string stage;
+        std::vector<std::function<bool()>> conditions;
+        CompilerOption compilerOption;
+        ShaderLanguage sourceLanguage;
+        ShaderStage sourceStage;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
-        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule*>>;
+        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule>>;
         mutable std::unordered_map<std::string, CompiledVariant> compiledOutputs_;
     };
 }

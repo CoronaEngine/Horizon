@@ -262,6 +262,14 @@ namespace EmbeddedShader
 			bindUniformValue();
 		}
 
+	    template<typename T_> requires std::is_convertible_v<T_, Type>
+	    VariateProxy(const VariateProxy<T_>& value)
+		{
+		    //Local Variate
+		    if (ParseHelper::isInShaderCodeLambda())
+		        node = Ast::AST::defineLocalVariate(value.node->type, value.node);
+		}
+
 		VariateProxy(const VariateProxy& value)
 		{
 			//Local Variate

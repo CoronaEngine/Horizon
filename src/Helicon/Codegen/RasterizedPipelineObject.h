@@ -35,8 +35,12 @@ namespace EmbeddedShader
 
         RasterizedPipelineObject result;
 	    compilerOption.slangModules.swap(vertSlangModules);
+	    compilerOption.branches = outputs[0].branches;
+	    compilerOption.typeHeader = outputs[0].typeHeader;
 		result.vertex = std::make_unique<ShaderCodeCompiler>(outputs[0].output,ShaderStage::VertexShader, ShaderLanguage::Slang,compilerOption, sourceLocation);
 	    compilerOption.slangModules.swap(fraqSlangModules);
+	    compilerOption.branches = outputs[1].branches;
+	    compilerOption.typeHeader = outputs[1].typeHeader;
 		result.fragment = std::make_unique<ShaderCodeCompiler>(outputs[1].output,ShaderStage::FragmentShader, ShaderLanguage::Slang,compilerOption, sourceLocation);
 
 		if (compilerOption.enableBindless)
@@ -45,8 +49,12 @@ namespace EmbeddedShader
 			outputs = parse(std::forward<decltype(vertexShaderCode)>(vertexShaderCode),
 							std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode));
 		    compilerOption.slangModules.swap(vertSlangModules);
+		    compilerOption.branches = outputs[0].branches;
+		    compilerOption.typeHeader = outputs[0].typeHeader;
 			result.vertex->compile(outputs[0].output, ShaderStage::VertexShader, ShaderLanguage::Slang, compilerOption);
 		    compilerOption.slangModules.swap(fraqSlangModules);
+		    compilerOption.branches = outputs[1].branches;
+		    compilerOption.typeHeader = outputs[1].typeHeader;
 			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, ShaderLanguage::Slang, compilerOption);
 		}
 

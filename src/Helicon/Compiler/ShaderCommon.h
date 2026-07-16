@@ -81,13 +81,6 @@ namespace EmbeddedShader
         std::unordered_map<ShaderLanguage, ShaderCodeModule::ShaderResources> reflections;
     };
 
-    struct SlangModule
-    {
-        std::string name;
-        std::string path;
-        std::vector<uint8_t> binData;
-    };
-
     struct SlangModuleCompileArgs
     {
         std::string moduleName;
