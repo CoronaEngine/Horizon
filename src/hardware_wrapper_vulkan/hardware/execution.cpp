@@ -904,7 +904,7 @@ namespace Corona::Horizon
         commands_.push_back(std::move(command));
     }
 
-    void CommandRecorder::dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices)
+    void CommandRecorder::dispatch(DispatchDesc desc, DeviceMask devices)
     {
         ensure_open();
         mark_requirement(QueueCapability::Compute);
@@ -916,7 +916,7 @@ namespace Corona::Horizon
         command.payload.dispatch = desc;
         command.sequence = next_sequence();
         command.debug_label = desc.debug_label;
-        command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
+        //command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
         mark_device_requirements(devices);
         commands_.push_back(std::move(command));
@@ -1606,12 +1606,9 @@ namespace Corona::Horizon
             }
             case CommandOp::Dispatch:
             {
-                if (command.resources.empty())
-                    throw std::logic_error("Dispatch command is missing a ComputePipeline resource.");
-
                 DebugUtilsLabelScope debug_label(command_buffer, command.debug_label);
                 const DispatchDesc& dispatch = command.payload.dispatch;
-                std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(command.resources[0].handle);
+                std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);
 
                 for (const DispatchResourceBinding& binding : dispatch.bindings)
                 {
@@ -1933,7 +1930,7 @@ namespace Corona::Horizon
         return *this;
     }
 
-    HardwareStream& HardwareStream::operator<<(const ComputePipelineBase& pipeline)
+    HardwareStream& HardwareStream::operator<<(ComputePipelineBase& pipeline)
     {
         return *this << pipeline.command_batch();
     }
@@ -1993,14 +1990,14 @@ namespace Corona::Horizon
         return HardwareStream(*this);
     }
 
-    HardwareStream HardwareExecutor::operator<<(const ComputePipelineBase& pipeline)
+    HardwareStream HardwareExecutor::operator<<(ComputePipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();
         return s;
     }
 
-    HardwareStream HardwareExecutor::operator<<(const RasterizerPipelineBase& pipeline)
+    HardwareStream HardwareExecutor::operator<<(RasterizerPipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();
@@ -2222,6 +2219,7 @@ namespace Corona::Horizon
             }
             catch (...)
             {
+                //std::cerr << e.what() << std::endl;
                 for (PreparedQueuePresent& present : prepared_presents)
                 {
                     if (present.manager)

@@ -29,6 +29,7 @@
 
 namespace Corona::Horizon
 {
+    class ComputePipelineBase;
     // ================================================================
     // Execution / Command Public Types
     // ================================================================
@@ -174,6 +175,7 @@ namespace Corona::Horizon
 
     struct DispatchDesc
     {
+        ComputePipelineBase* pipeline;
         uint32_t groups_x { 1 };
         uint32_t groups_y { 1 };
         uint32_t groups_z { 1 };
@@ -443,7 +445,7 @@ namespace Corona::Horizon
         void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
         void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
         void copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-        void dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
+        void dispatch(DispatchDesc desc, DeviceMask devices = {});
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});
         void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});

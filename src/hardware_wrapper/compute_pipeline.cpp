@@ -117,7 +117,7 @@ namespace Corona::Horizon
         return pipeline_impl(ResourceBridge::token(*this))->desc();
     }
 
-    CommandBatch ComputePipelineBase::command_batch() const
+    CommandBatch ComputePipelineBase::command_batch()
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);

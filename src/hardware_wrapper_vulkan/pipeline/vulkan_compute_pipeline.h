@@ -74,7 +74,7 @@ namespace Corona::Horizon
         void bind_storage_image(uint32_t binding, const HardwareImage& image);
 
         [[nodiscard]] Snapshot snapshot() const;
-        [[nodiscard]] CommandBatch command_batch(const ResourceHandle& pipeline) const;
+        [[nodiscard]] CommandBatch command_batch(ComputePipelineBase& pipeline) const;
         [[nodiscard]] PreparedDispatch prepare_dispatch(VkDevice device, const DispatchDesc& dispatch);
 
         struct BindingLayout

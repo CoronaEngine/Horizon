@@ -129,7 +129,7 @@ namespace Corona::Horizon
         HardwareStream& operator<<(const CommandBatch& commands);
         // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
         // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
-        HardwareStream& operator<<(const ComputePipelineBase& pipeline);
+        HardwareStream& operator<<(ComputePipelineBase& pipeline);
         HardwareStream& operator<<(const RasterizerPipelineBase& pipeline);
         HardwareStream& append_consuming(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
@@ -168,8 +168,8 @@ namespace Corona::Horizon
 
         [[nodiscard]] HardwareStream stream();
         // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
-        [[nodiscard]] HardwareStream operator<<(const ComputePipelineBase& pipeline);
-        [[nodiscard]] HardwareStream operator<<(const RasterizerPipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
@@ -1079,7 +1079,7 @@ namespace Corona::Horizon
         ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
         ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
         [[nodiscard]] ComputePipelineDesc desc() const;
-        [[nodiscard]] CommandBatch command_batch() const;
+        [[nodiscard]] CommandBatch command_batch();
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
         [[nodiscard]] std::uintptr_t getComputePipelineID() const noexcept { return get_compute_pipeline_id(); }
@@ -1625,17 +1625,16 @@ namespace Corona::Horizon
 
     struct ShaderDispatchCommand
     {
-        ShaderRef shader {};
         DispatchDesc dispatch {};
         DeviceMask devices {};
 
-        [[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
+        //[[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
         [[nodiscard]] DispatchDesc dispatch_desc() const noexcept { return dispatch; }
         [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
 
         void record(CommandRecorder& recorder) const
         {
-            recorder.dispatch(shader, dispatch, devices);
+            recorder.dispatch(dispatch, devices);
         }
 
         [[nodiscard]] StreamCommand stream_command() const
@@ -1833,9 +1832,9 @@ namespace Corona::Horizon
         return { src, dst, region, devices };
     }
 
-    [[nodiscard]] inline ShaderDispatchCommand dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {})
+    [[nodiscard]] inline ShaderDispatchCommand dispatch(DispatchDesc desc, DeviceMask devices = {})
     {
-        return { shader, std::move(desc), devices };
+        return { std::move(desc), devices };
     }
 
     [[nodiscard]] inline BeginRenderingCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {})
