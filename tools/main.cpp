@@ -24,6 +24,34 @@ void generateBinary(std::stringstream& out, std::string_view name, const SlangMo
     out << "}};\n";
 }
 
+// Slang 的 GLSL→SPIR-V codegen 会把 compute 的 OpExecutionMode LocalSize 误烧为 1,1,1，
+// 但 Slang 反射（getComputeThreadGroupSize）能正确恢复 local_size。用反射值回填 SPIR-V，
+// 使内嵌 SPIR-V 的 LocalSize 与源一致。返回是否成功命中并改写了 LocalSize。
+bool patchSpirvLocalSize(std::vector<uint32_t>& spirv, ktm::uvec3 localSize)
+{
+    constexpr size_t kHeaderWords = 5;            // SPIR-V 头部 5 词
+    constexpr uint16_t kOpExecutionMode = 16;
+    constexpr uint32_t kExecutionModeLocalSize = 17;  // LocalSize，后跟 x,y,z
+
+    bool patched = false;
+    for (size_t w = kHeaderWords; w + 5 < spirv.size();)
+    {
+        const uint16_t wordCount = static_cast<uint16_t>(spirv[w] >> 16);
+        const uint16_t opcode = static_cast<uint16_t>(spirv[w] & 0xFFFFu);
+        if (wordCount == 0)
+            break;  // 防御非法指令导致死循环
+        if (opcode == kOpExecutionMode && wordCount >= 6 && spirv[w + 2] == kExecutionModeLocalSize)
+        {
+            spirv[w + 3] = localSize.x;
+            spirv[w + 4] = localSize.y;
+            spirv[w + 5] = localSize.z;
+            patched = true;
+        }
+        w += wordCount;
+    }
+    return patched;
+}
+
 void buildFunctionParameter(FunctionSignature& signature, std::stringstream& out)
 {
 	out << "(";
@@ -677,74 +705,20 @@ int main(int argc, char** argv)
         throw std::runtime_error("Failed to generate SPIR-V from Slang module.");
     std::vector<uint32_t> spirvCode = std::move(spirvIt->second);
 
-    // Slang 的 GLSL 前端不解析 GLSL 的 `layout(local_size_x=...)`：直出的 SPIR-V 默认 LocalSize=1,1,1，
-    // 且反射（module 层与链接后 program 层）均返回 0,0,0 —— 信息在解析阶段已丢失，反射无法找回。
-    // 因此从 GLSL 源码文本解析 local_size，回填 SPIR-V 的 OpExecutionMode LocalSize，使内嵌 SPIR-V
-    // 与 GLSL 源一致。仍是完全 Horizon 内部、零外部传参（数据源 = 源码文本）。
+    // Slang 的 GLSL→SPIR-V codegen 会把 compute 的 OpExecutionMode LocalSize 误烧为 1,1,1，
+    // 但上面 slangModuleReflectShaderResource 的反射（getComputeThreadGroupSize）已正确恢复
+    // local_size。直接用反射值回填 SPIR-V，无需再从源码文本解析。
     if (inputStage == ShaderStage::ComputeShader)
     {
-        // 从 `code` 解析 layout(local_size_x = N, local_size_y = M, local_size_z = K) in;
-        // 缺省维度按 GLSL 规范为 1。
-        auto parse_local_size_dim = [&code](const char* key) -> uint32_t {
-            const size_t key_pos = code.find(key);
-            if (key_pos == std::string::npos)
-            {
-                return 1u;  // GLSL 默认值
-            }
-            const size_t eq = code.find('=', key_pos);
-            if (eq == std::string::npos)
-            {
-                return 1u;
-            }
-            size_t i = eq + 1;
-            while (i < code.size() && (code[i] == ' ' || code[i] == '\t'))
-            {
-                ++i;
-            }
-            uint32_t value = 0;
-            bool has_digit = false;
-            while (i < code.size() && code[i] >= '0' && code[i] <= '9')
-            {
-                value = value * 10u + static_cast<uint32_t>(code[i] - '0');
-                has_digit = true;
-                ++i;
-            }
-            return has_digit && value > 0 ? value : 1u;
-        };
+        if (resources.entryPointInfoPool.empty())
+            throw std::runtime_error("Compute shader reflection produced no entry point.");
 
-        ktm::uvec3 final_numthreads(
-            parse_local_size_dim("local_size_x"),
-            parse_local_size_dim("local_size_y"),
-            parse_local_size_dim("local_size_z"));
+        const ktm::uvec3 numthreads = resources.entryPointInfoPool.front().numthreads;
+        if (numthreads.x == 0 || numthreads.y == 0 || numthreads.z == 0)
+            throw std::runtime_error("Failed to reflect compute local_size (got a zero dimension).");
 
-        std::cout << "DIAG:source-parsed local_size = "
-                  << final_numthreads.x << "," << final_numthreads.y << ","
-                  << final_numthreads.z << "\n";
-
-        // 遍历 SPIR-V 指令流，改写 OpExecutionMode(16) + LocalSize(17) 的三个操作数。
-        if (spirvCode.size() > 5)
-        {
-            size_t word_index = 5;  // 跳过 5 词头部
-            while (word_index < spirvCode.size())
-            {
-                const uint32_t instruction = spirvCode[word_index];
-                const uint16_t word_count = static_cast<uint16_t>(instruction >> 16);
-                const uint16_t opcode = static_cast<uint16_t>(instruction & 0xFFFFu);
-                if (word_count == 0)
-                {
-                    break;  // 防御非法指令导致死循环
-                }
-                // OpExecutionMode = 16；LocalSize 执行模式 = 17，后跟 x,y,z 共 6 词。
-                if (opcode == 16 && word_count >= 6 && word_index + 5 < spirvCode.size() &&
-                    spirvCode[word_index + 2] == 17)
-                {
-                    spirvCode[word_index + 3] = final_numthreads.x;
-                    spirvCode[word_index + 4] = final_numthreads.y;
-                    spirvCode[word_index + 5] = final_numthreads.z;
-                }
-                word_index += word_count;
-            }
-        }
+        if (!patchSpirvLocalSize(spirvCode, numthreads))
+            throw std::runtime_error("Compute SPIR-V has no LocalSize execution mode to patch.");
     }
 
     //提取成员名，删去路径前缀
