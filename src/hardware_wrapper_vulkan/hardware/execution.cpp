@@ -2265,58 +2265,7 @@ namespace Corona::Horizon
         return tokens;
     }
 
-    SubmitReceipt HardwareExecutor::commit(const RecordedTask& task)
-    {
-        const auto total_start = std::chrono::steady_clock::now();
-        ExecutionCommitProfileSample profile;
-        ExecutionCommitProfileScope profile_scope(profile);
-        const auto compile_start = std::chrono::steady_clock::now();
-        ExecutionPlan plan = compiler_->compile(task, &profile);
-        profile.compile_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - compile_start).count();
-        std::vector<SubmissionToken> wait_tokens = consume_pending_waits();
-
-        SubmitReceipt receipt;
-        {
-            std::lock_guard lock(mutex_);
-            receipt.serial = ++next_submit_serial_;
-        }
-
-        std::vector<ComputePipelineBase*> computePipelines;
-        std::vector<RasterizerPipelineBase*> rasterizerPipelines;
-        //提取命令中用到的管线
-        for (auto & submission : plan.submissions)
-        {
-            for (auto & command : submission.commands)
-            {
-                switch (command.op) {
-                case CommandOp::Dispatch:
-                    computePipelines.push_back(command.payload.dispatch.pipeline);
-                    break;
-                case CommandOp::DrawIndexed:
-                    rasterizerPipelines.push_back(command.payload.draw_indexed.pipeline);
-                    break;
-                case CommandOp::DrawIndexedBatch:
-                    for (const auto & draw : command.payload.draw_indexed_batch.draws)
-                    {
-                        rasterizerPipelines.push_back(draw.draw.pipeline);
-                    }
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-
-        receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
-        remember_receipt(receipt);
-        profile.total_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - total_start).count();
-        record_execution_commit_profile(profile);
-        return receipt;
-    }
-
-    SubmitReceipt HardwareExecutor::commit(RecordedTask&& task)
+    SubmitReceipt HardwareExecutor::commit(RecordedTask task)
     {
         const auto total_start = std::chrono::steady_clock::now();
         ExecutionCommitProfileSample profile;
@@ -2331,6 +2280,32 @@ namespace Corona::Horizon
         {
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
+        }
+
+        std::unordered_set<ComputePipelineBase*> computePipelines;
+        std::unordered_set<RasterizerPipelineBase*> rasterizerPipelines;
+        //提取命令中用到的管线
+        for (auto & submission : plan.submissions)
+        {
+            for (auto & command : submission.commands)
+            {
+                switch (command.op) {
+                case CommandOp::Dispatch:
+                    computePipelines.insert(command.payload.dispatch.pipeline);
+                    break;
+                case CommandOp::DrawIndexed:
+                    rasterizerPipelines.insert(command.payload.draw_indexed.pipeline);
+                    break;
+                case CommandOp::DrawIndexedBatch:
+                    for (const auto & draw : command.payload.draw_indexed_batch.draws)
+                    {
+                        rasterizerPipelines.insert(draw.draw.pipeline);
+                    }
+                    break;
+                default:
+                    break;
+                }
+            }
         }
 
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);

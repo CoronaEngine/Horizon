@@ -172,8 +172,7 @@ namespace Corona::Horizon
         [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
-        [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
-        [[nodiscard]] SubmitReceipt commit(RecordedTask&& task);
+        [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait(const HardwareExecutor& producer);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
