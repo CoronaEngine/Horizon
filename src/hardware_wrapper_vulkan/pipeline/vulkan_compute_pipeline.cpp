@@ -1,6 +1,7 @@
 #include "vulkan_compute_pipeline.h"
 
 #include "hardware_wrapper_vulkan/hardware_context.h"
+#include "hardware_wrapper_vulkan/hardware/execution_profile.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
@@ -852,6 +853,12 @@ namespace Corona::Horizon
         dispatch_.groups_z = std::max<uint32_t>(1u, groups_z);
     }
 
+    void VulkanComputePipeline::set_debug_label(std::string label)
+    {
+        std::lock_guard lock(mutex_);
+        dispatch_.debug_label = std::move(label);
+    }
+
     void VulkanComputePipeline::set_push_constant_direct(uint64_t byte_offset,
                                                          const void* data,
                                                          size_t size,
@@ -1152,6 +1159,7 @@ namespace Corona::Horizon
         pool_info.pPoolSizes = pool_sizes.data();
 
         VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
+        note_descriptor_pool_create();
         if (result != VK_SUCCESS)
         {
             throw std::runtime_error("vkCreateDescriptorPool failed for ComputePipeline dispatch. VkResult=" +
@@ -1221,6 +1229,7 @@ namespace Corona::Horizon
                                                                     1,
                                                                     BufferUsageFlags::Uniform,
                                                                     "ComputePipeline.uniform_buffer");
+                    note_uniform_buffer_allocation();
                     BufferStore::Read buffer = read_buffer(static_cast<const ResourceHandle&>(ubo));
                     if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
                         throw std::logic_error("ComputePipeline uniform buffer descriptor requires a valid HardwareBuffer.");

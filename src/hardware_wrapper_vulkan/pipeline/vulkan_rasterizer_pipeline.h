@@ -113,6 +113,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] Snapshot snapshot() const;
         [[nodiscard]] CommandBatch command_batch() const;
+        void record_consuming(CommandRecorder& recorder);
 
     private:
         struct PipelineKey

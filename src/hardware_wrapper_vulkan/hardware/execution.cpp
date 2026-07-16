@@ -9,12 +9,14 @@
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
+#include <chrono>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <cstdlib>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -103,6 +105,161 @@ namespace Corona::Horizon
 
             signals.push_back(signal);
         }
+
+        [[nodiscard]] const char* command_op_name(CommandOp op) noexcept
+        {
+            switch (op)
+            {
+            case CommandOp::CopyBuffer: return "CopyBuffer";
+            case CommandOp::CopyImage: return "CopyImage";
+            case CommandOp::CopyBufferToImage: return "CopyBufferToImage";
+            case CommandOp::CopyImageToBuffer: return "CopyImageToBuffer";
+            case CommandOp::Dispatch: return "Dispatch";
+            case CommandOp::BeginRendering: return "BeginRendering";
+            case CommandOp::EndRendering: return "EndRendering";
+            case CommandOp::DrawIndexed: return "DrawIndexed";
+            case CommandOp::DrawIndexedBatch: return "DrawIndexedBatch";
+            case CommandOp::Present: return "Present";
+            case CommandOp::HostCallback: return "HostCallback";
+            case CommandOp::KeepAlive: return "KeepAlive";
+            default: return "Unknown";
+            }
+        }
+
+        [[nodiscard]] const char* queue_capability_name(QueueCapability capability) noexcept
+        {
+            switch (capability)
+            {
+            case QueueCapability::Graphics: return "Graphics";
+            case QueueCapability::Compute: return "Compute";
+            case QueueCapability::Transfer: return "Transfer";
+            case QueueCapability::Present: return "Present";
+            default: return "Unknown";
+            }
+        }
+
+        [[nodiscard]] std::string shorten_label(std::string label)
+        {
+            constexpr size_t kMaxLabel = 512;
+            if (label.size() > kMaxLabel)
+            {
+                label.resize(kMaxLabel);
+                label += "...";
+            }
+            return label;
+        }
+
+        [[nodiscard]] std::string describe_command_for_diagnostics(const CommandIR& command)
+        {
+            std::ostringstream out;
+            out << "#" << command.sequence << " " << command_op_name(command.op);
+            if (!command.debug_label.empty())
+            {
+                out << " label=\"" << shorten_label(command.debug_label) << "\"";
+            }
+
+            if (command.op == CommandOp::Dispatch)
+            {
+                const DispatchDesc& dispatch = command.payload.dispatch;
+                out << " groups=" << dispatch.groups_x << "x" << dispatch.groups_y << "x" << dispatch.groups_z;
+                if (!command.resources.empty())
+                {
+                    out << " pipeline=" << resource_id(command.resources[0].handle);
+                }
+            }
+            else if (command.op == CommandOp::DrawIndexed)
+            {
+                const DrawIndexedDesc& draw = command.payload.draw_indexed;
+                out << " index_count=" << draw.index_count
+                    << " instances=" << draw.instance_count
+                    << " first_index=" << draw.first_index
+                    << " vertex_offset=" << draw.vertex_offset
+                    << " pipeline=" << resource_id(draw.pipeline);
+                const size_t buffer_offset = draw.pipeline ? 1u : 0u;
+                if (command.resources.size() > buffer_offset)
+                {
+                    out << " index_resource=" << resource_id(command.resources[buffer_offset].handle);
+                }
+                if (command.resources.size() > buffer_offset + 1u)
+                {
+                    out << " vertex_resource=" << resource_id(command.resources[buffer_offset + 1u].handle);
+                }
+            }
+            else if (command.op == CommandOp::DrawIndexedBatch)
+            {
+                out << " draws=" << command.payload.draw_indexed_batch.draws.size()
+                    << " unique_resources=" << command.resources.size();
+            }
+            else if (command.op == CommandOp::Present)
+            {
+                out << " displayer=" << command.payload.present.displayer.id
+                    << " image=" << resource_id(command.payload.present.image.handle)
+                    << " swapchain_image=" << resource_id(command.payload.present.swapchain_image.handle);
+            }
+
+            return out.str();
+        }
+
+        [[nodiscard]] std::string describe_submission_for_diagnostics(const CompiledSubmission& submission)
+        {
+            std::ostringstream out;
+            out << "submission device=" << submission.device.value
+                << " capability=" << queue_capability_name(submission.queue)
+                << " commands=" << submission.commands.size();
+
+            constexpr size_t kMaxCommands = 24;
+            const size_t begin = submission.commands.size() > kMaxCommands
+                ? submission.commands.size() - kMaxCommands
+                : 0;
+            for (size_t i = begin; i < submission.commands.size(); ++i)
+            {
+                out << "\n  " << describe_command_for_diagnostics(submission.commands[i]);
+            }
+            return out.str();
+        }
+
+        class DebugUtilsLabelScope
+        {
+        public:
+            DebugUtilsLabelScope(VkCommandBuffer command_buffer, const std::string& label) noexcept
+                : command_buffer_(command_buffer)
+            {
+                if (vkCmdBeginDebugUtilsLabelEXT == nullptr ||
+                    vkCmdEndDebugUtilsLabelEXT == nullptr ||
+                    command_buffer_ == VK_NULL_HANDLE ||
+                    label.empty())
+                {
+                    return;
+                }
+
+                label_ = shorten_label(label);
+                VkDebugUtilsLabelEXT info {};
+                info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+                info.pLabelName = label_.c_str();
+                info.color[0] = 0.12f;
+                info.color[1] = 0.72f;
+                info.color[2] = 1.0f;
+                info.color[3] = 1.0f;
+                vkCmdBeginDebugUtilsLabelEXT(command_buffer_, &info);
+                active_ = true;
+            }
+
+            ~DebugUtilsLabelScope()
+            {
+                if (active_)
+                {
+                    vkCmdEndDebugUtilsLabelEXT(command_buffer_);
+                }
+            }
+
+            DebugUtilsLabelScope(const DebugUtilsLabelScope&) = delete;
+            DebugUtilsLabelScope& operator=(const DebugUtilsLabelScope&) = delete;
+
+        private:
+            VkCommandBuffer command_buffer_ { VK_NULL_HANDLE };
+            std::string label_;
+            bool active_ { false };
+        };
 
         [[nodiscard]] AccessKind merge_access(AccessKind left, AccessKind right) noexcept
         {
@@ -644,11 +801,7 @@ namespace Corona::Horizon
         }
 
         const std::uintptr_t id = resource->id();
-        const auto duplicate = std::find_if(resources_.begin(), resources_.end(), [id](const std::shared_ptr<const IResourceRef>& existing) {
-            return existing && existing->id() == id;
-        });
-
-        if (duplicate == resources_.end())
+        if (resource_ids_.insert(id).second)
         {
             resources_.push_back(std::move(resource));
         }
@@ -679,6 +832,7 @@ namespace Corona::Horizon
     void SubmissionKeepAlive::clear() noexcept
     {
         resources_.clear();
+        resource_ids_.clear();
         objects_.clear();
     }
 
@@ -761,6 +915,7 @@ namespace Corona::Horizon
         command.queue = QueueCapability::Compute;
         command.payload.dispatch = desc;
         command.sequence = next_sequence();
+        command.debug_label = desc.debug_label;
         command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
         mark_device_requirements(devices);
@@ -813,8 +968,8 @@ namespace Corona::Horizon
         command.op = CommandOp::DrawIndexed;
         command.devices = devices;
         command.queue = QueueCapability::Graphics;
-        command.payload.draw_indexed = desc;
         command.sequence = next_sequence();
+        command.debug_label = desc.debug_label;
         if (desc.pipeline)
         {
             command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
@@ -822,6 +977,50 @@ namespace Corona::Horizon
         command.resources.push_back({ index.handle, AccessKind::Read, 0 });
         command.resources.push_back({ vertex.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
+        command.payload.draw_indexed = std::move(desc);
+        mark_device_requirements(devices);
+        commands_.push_back(std::move(command));
+    }
+
+    void CommandRecorder::draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices)
+    {
+        ensure_open();
+        if (batch.draws.empty())
+            return;
+        mark_requirement(QueueCapability::Graphics);
+
+        CommandIR command;
+        command.op = CommandOp::DrawIndexedBatch;
+        command.devices = devices;
+        command.queue = QueueCapability::Graphics;
+        command.sequence = next_sequence();
+        std::unordered_map<std::uintptr_t, std::size_t> resource_indices;
+        resource_indices.reserve(batch.draws.size() * 3u);
+        command.resources.reserve(batch.draws.size() * 3u);
+        const auto append_resource = [&](const ResourceUse& incoming) {
+            const std::uintptr_t id = resource_id(incoming.handle);
+            if (id == 0)
+                return;
+            const auto [position, inserted] =
+                resource_indices.emplace(id, command.resources.size());
+            if (inserted)
+            {
+                command.resources.push_back(incoming);
+                return;
+            }
+            ResourceUse& current = command.resources[position->second];
+            current.access = merge_access(current.access, incoming.access);
+            current.stages |= incoming.stages;
+        };
+        for (const DrawIndexedBatchItem& item : batch.draws)
+        {
+            append_resource({item.draw.pipeline, AccessKind::Read, 0});
+            append_resource({item.index.handle, AccessKind::Read, 0});
+            append_resource({item.vertex.handle, AccessKind::Read, 0});
+            for (const ResourceUse& use : item.draw.resource_uses)
+                append_resource(use);
+        }
+        command.payload.draw_indexed_batch = std::move(batch);
         mark_device_requirements(devices);
         commands_.push_back(std::move(command));
     }
@@ -950,18 +1149,46 @@ namespace Corona::Horizon
         }
     }
 
-    ExecutionPlan ExecutionCompiler::compile(const RecordedTask& task) const
+    ExecutionPlan ExecutionCompiler::compile(const RecordedTask& task, ExecutionCommitProfileSample* profile) const
+    {
+        RecordedTask owned = task;
+        return compile_owned(owned, profile);
+    }
+
+    ExecutionPlan ExecutionCompiler::compile(RecordedTask&& task, ExecutionCommitProfileSample* profile) const
+    {
+        return compile_owned(task, profile);
+    }
+
+    ExecutionPlan ExecutionCompiler::compile_owned(RecordedTask& task, ExecutionCommitProfileSample* profile) const
     {
         ExecutionPlan plan;
         std::unordered_map<std::uintptr_t, LastResourceUse> global_last_access;
 
-        for (const CommandIR& command : task.commands)
+        for (CommandIR& command : task.commands)
         {
+            if (profile != nullptr)
+            {
+                ++profile->commands;
+                profile->resource_uses += command.resources.size();
+                if (command.op == CommandOp::DrawIndexed)
+                {
+                    ++profile->logical_draws;
+                }
+                else if (command.op == CommandOp::DrawIndexedBatch)
+                {
+                    profile->logical_draws += command.payload.draw_indexed_batch.draws.size();
+                    ++profile->draw_batches;
+                }
+            }
             const std::vector<DeviceId> devices = devices_from_mask(command.devices);
+            std::vector<size_t> submission_indices;
+            submission_indices.reserve(devices.size());
 
             for (DeviceId device : devices)
             {
                 const size_t submission_index = find_or_add_submission(plan, device, command.queue);
+                submission_indices.push_back(submission_index);
                 CompiledSubmission& submission = plan.submissions[submission_index];
 
                 for (const ResourceUse& use : command.resources)
@@ -1002,8 +1229,13 @@ namespace Corona::Horizon
                     throw std::logic_error("Cross-device resource dependency requires an imported timeline or explicit present fallback.");
                 }
 
-                collect_barriers(submission, command);
+                const auto keep_alive_start = std::chrono::steady_clock::now();
                 collect_keep_alive(submission, command);
+                if (profile != nullptr)
+                {
+                    profile->keep_alive_ms += std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - keep_alive_start).count();
+                }
                 if (command.op == CommandOp::Present)
                 {
                     submission.presents.push_back(command.payload.present);
@@ -1012,18 +1244,12 @@ namespace Corona::Horizon
                 {
                     submission.host_callbacks.push_back(command.host_callback);
                 }
-                submission.commands.push_back(command);
             }
 
-            for (DeviceId device : devices)
+            for (size_t device_index = 0; device_index < devices.size(); ++device_index)
             {
-                const auto submission_found = std::find_if(plan.submissions.begin(), plan.submissions.end(), [device, &command](const CompiledSubmission& submission) {
-                    return submission.device == device && submission.queue == command.queue &&
-                           !submission.commands.empty() && submission.commands.back().sequence == command.sequence;
-                });
-                const size_t submission_index = submission_found == plan.submissions.end()
-                    ? 0
-                    : static_cast<size_t>(std::distance(plan.submissions.begin(), submission_found));
+                const DeviceId device = devices[device_index];
+                const size_t submission_index = submission_indices[device_index];
 
                 for (const ResourceUse& use : command.resources)
                 {
@@ -1034,8 +1260,21 @@ namespace Corona::Horizon
                     }
                 }
             }
+
+            for (size_t submission_position = 0;
+                 submission_position < submission_indices.size();
+                 ++submission_position)
+            {
+                CompiledSubmission& submission =
+                    plan.submissions[submission_indices[submission_position]];
+                if (submission_position + 1u == submission_indices.size())
+                    submission.commands.push_back(std::move(command));
+                else
+                    submission.commands.push_back(command);
+            }
         }
 
+        task.commands.clear();
         return plan;
     }
 
@@ -1054,39 +1293,6 @@ namespace Corona::Horizon
         if (command.host_callback)
         {
             submission.keep_alive.add_object(std::make_shared<RetireCallback>(command.host_callback));
-        }
-    }
-
-    void ExecutionCompiler::collect_barriers(CompiledSubmission& submission, const CommandIR& command)
-    {
-        std::unordered_map<std::uintptr_t, AccessKind> last_access;
-        last_access.reserve(submission.commands.size() + command.resources.size());
-
-        for (const CommandIR& prior_command : submission.commands)
-        {
-            for (const ResourceUse& use : prior_command.resources)
-            {
-                const std::uintptr_t id = resource_id(use.handle);
-                if (id != 0)
-                {
-                    last_access[id] = use.access;
-                }
-            }
-        }
-
-        for (const ResourceUse& use : command.resources)
-        {
-            const std::uintptr_t id = resource_id(use.handle);
-            if (id == 0)
-            {
-                continue;
-            }
-
-            auto found = last_access.find(id);
-            if (found != last_access.end() && has_hazard(found->second, use.access))
-            {
-                submission.barriers.push_back({ id, found->second, use.access });
-            }
         }
     }
 
@@ -1134,39 +1340,138 @@ namespace Corona::Horizon
                 if (scoped_command.op == CommandOp::EndRendering || scoped_command.op == CommandOp::BeginRendering)
                     break;
 
-                if (scoped_command.op != CommandOp::DrawIndexed)
-                    continue;
+                visit_indexed_draws(
+                    scoped_command,
+                    [&](BufferRef, BufferRef, const DrawIndexedDesc& draw) {
+                        for (const DrawResourceBinding& binding : draw.bindings)
+                        {
+                            if (binding.kind != DrawBindingKind::SampledImage)
+                                continue;
 
-                const DrawIndexedDesc& draw = scoped_command.payload.draw_indexed;
-                for (const DrawResourceBinding& binding : draw.bindings)
-                {
-                    if (binding.kind != DrawBindingKind::SampledImage)
-                        continue;
+                            const std::uintptr_t id = resource_id(binding.resource);
+                            if (id == 0)
+                                continue;
 
-                    const std::uintptr_t id = resource_id(binding.resource);
-                    if (id == 0)
-                        continue;
+                            if ((color_id != 0 && id == color_id) ||
+                                (depth_id != 0 && id == depth_id))
+                            {
+                                throw std::logic_error("DrawIndexed cannot sample from the active rendering attachment without local-read support.");
+                            }
 
-                    if ((color_id != 0 && id == color_id) || (depth_id != 0 && id == depth_id))
-                    {
-                        throw std::logic_error("DrawIndexed cannot sample from the active rendering attachment without local-read support.");
-                    }
+                            if (std::find(transitioned.begin(), transitioned.end(), id) != transitioned.end())
+                                continue;
 
-                    if (std::find(transitioned.begin(), transitioned.end(), id) != transitioned.end())
-                        continue;
+                            ImageStore::Write image = write_image(binding.resource);
+                            if (!image || image->image_handle == VK_NULL_HANDLE ||
+                                image->image_view == VK_NULL_HANDLE)
+                            {
+                                throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
+                            }
 
-                    ImageStore::Write image = write_image(binding.resource);
-                    if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
-                        throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
-
-                    transition_image(command_buffer,
-                                     *image,
-                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-                    transitioned.push_back(id);
-                }
+                            transition_image(command_buffer,
+                                             *image,
+                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                             VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                                                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                            transitioned.push_back(id);
+                        }
+                    });
             }
+        };
+
+        auto encode_indexed_draw = [&](BufferRef index_ref,
+                                       BufferRef vertex_ref,
+                                       const DrawIndexedDesc& draw) {
+            DebugUtilsLabelScope debug_label(command_buffer, draw.debug_label);
+            if (draw.index_count == 0)
+                return;
+            if (!draw.pipeline)
+                throw std::logic_error("DrawIndexed requires a RasterizerPipeline handle.");
+            if (!index_ref.handle || !vertex_ref.handle)
+                throw std::logic_error("DrawIndexed command is missing index or vertex buffer resources.");
+
+            BufferStore::Read index = read_buffer(index_ref.handle);
+            BufferStore::Read vertex = read_buffer(vertex_ref.handle);
+            if (!index || index->buffer_handle == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexed requires a valid index HardwareBuffer.");
+            if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
+
+            for (const DrawResourceBinding& binding : draw.bindings)
+            {
+                if (binding.kind != DrawBindingKind::SampledImage)
+                    continue;
+                ImageStore::Write image = write_image(binding.resource);
+                if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
+                    throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
+            }
+
+            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
+            VulkanRasterizerPipeline::PreparedDraw prepared =
+                pipeline->prepare_draw(device_,
+                                       active_rendering.color_format,
+                                       active_rendering.depth_format,
+                                       static_cast<uint32_t>(vertex->desc.element_size),
+                                       draw);
+            if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+            if (prepared.uses_bindless)
+            {
+                auto bindless_sets = resource_manager().bindless_descriptor_sets();
+                vkCmdBindDescriptorSets(command_buffer,
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        prepared.layout,
+                                        0,
+                                        static_cast<uint32_t>(bindless_sets.size()),
+                                        bindless_sets.data(),
+                                        0,
+                                        nullptr);
+            }
+
+            for (const VulkanRasterizerPipeline::PreparedDraw::DescriptorSet& descriptor_set : prepared.descriptor_sets)
+            {
+                if (descriptor_set.descriptor_set == VK_NULL_HANDLE)
+                    continue;
+                vkCmdBindDescriptorSets(command_buffer,
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        prepared.layout,
+                                        descriptor_set.set,
+                                        1,
+                                        &descriptor_set.descriptor_set,
+                                        0,
+                                        nullptr);
+            }
+
+            VkBuffer vertex_buffer = vertex->buffer_handle;
+            VkDeviceSize vertex_offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+            vkCmdBindIndexBuffer(command_buffer, index->buffer_handle, 0, resolve_index_type(draw, *index));
+
+            if (!draw.push_constant_data.empty())
+            {
+                vkCmdPushConstants(command_buffer,
+                                   prepared.layout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0,
+                                   static_cast<uint32_t>(draw.push_constant_data.size()),
+                                   draw.push_constant_data.data());
+            }
+            if (prepared.descriptor_set_lifetime)
+                submission.keep_alive.add_object(prepared.descriptor_set_lifetime);
+
+            VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
+            if (scissor.extent.width == 0 || scissor.extent.height == 0)
+                return;
+            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+            vkCmdDrawIndexed(command_buffer,
+                             draw.index_count,
+                             draw.instance_count,
+                             draw.first_index,
+                             draw.vertex_offset,
+                             draw.first_instance);
         };
 
         for (size_t command_index = 0; command_index < submission.commands.size(); ++command_index)
@@ -1304,6 +1609,7 @@ namespace Corona::Horizon
                 if (command.resources.empty())
                     throw std::logic_error("Dispatch command is missing a ComputePipeline resource.");
 
+                DebugUtilsLabelScope debug_label(command_buffer, command.debug_label);
                 const DispatchDesc& dispatch = command.payload.dispatch;
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(command.resources[0].handle);
 
@@ -1475,108 +1781,11 @@ namespace Corona::Horizon
                 }
                 break;
             case CommandOp::DrawIndexed:
-            {
+            case CommandOp::DrawIndexedBatch:
                 if (!active_rendering.active)
                     throw std::logic_error("DrawIndexed requires an active rendering scope.");
-
-                const DrawIndexedDesc& draw = command.payload.draw_indexed;
-                if (draw.index_count == 0)
-                    break;
-
-                if (!draw.pipeline)
-                    throw std::logic_error("DrawIndexed requires a RasterizerPipeline handle.");
-
-                const size_t buffer_offset = draw.pipeline ? 1u : 0u;
-                if (command.resources.size() < buffer_offset + 2u)
-                    throw std::logic_error("DrawIndexed command is missing index or vertex buffer resources.");
-
-                BufferStore::Read index = read_buffer(command.resources[buffer_offset].handle);
-                BufferStore::Read vertex = read_buffer(command.resources[buffer_offset + 1u].handle);
-                if (!index || index->buffer_handle == VK_NULL_HANDLE)
-                    throw std::logic_error("DrawIndexed requires a valid index HardwareBuffer.");
-                if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
-                    throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
-
-                for (const DrawResourceBinding& binding : draw.bindings)
-                {
-                    if (binding.kind != DrawBindingKind::SampledImage)
-                        continue;
-
-                    ImageStore::Write image = write_image(binding.resource);
-                    if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
-                        throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
-                }
-
-                std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
-                VulkanRasterizerPipeline::PreparedDraw prepared =
-                    pipeline->prepare_draw(device_,
-                                           active_rendering.color_format,
-                                           active_rendering.depth_format,
-                                           static_cast<uint32_t>(vertex->desc.element_size),
-                                           draw);
-                if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
-                    throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
-
-                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
-                if (prepared.uses_bindless)
-                {
-                    auto bindless_sets = resource_manager().bindless_descriptor_sets();
-                    vkCmdBindDescriptorSets(command_buffer,
-                                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                            prepared.layout,
-                                            0,
-                                            static_cast<uint32_t>(bindless_sets.size()),
-                                            bindless_sets.data(),
-                                            0,
-                                            nullptr);
-                }
-
-                for (const VulkanRasterizerPipeline::PreparedDraw::DescriptorSet& descriptor_set : prepared.descriptor_sets)
-                {
-                    if (descriptor_set.descriptor_set == VK_NULL_HANDLE)
-                        continue;
-
-                    vkCmdBindDescriptorSets(command_buffer,
-                                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                            prepared.layout,
-                                            descriptor_set.set,
-                                            1,
-                                            &descriptor_set.descriptor_set,
-                                            0,
-                                            nullptr);
-                }
-
-                VkBuffer vertex_buffer = vertex->buffer_handle;
-                VkDeviceSize vertex_offset = 0;
-                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-                vkCmdBindIndexBuffer(command_buffer, index->buffer_handle, 0, resolve_index_type(draw, *index));
-
-                if (!draw.push_constant_data.empty())
-                {
-                    vkCmdPushConstants(command_buffer,
-                                       prepared.layout,
-                                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                                       0,
-                                       static_cast<uint32_t>(draw.push_constant_data.size()),
-                                       draw.push_constant_data.data());
-                }
-
-                if (prepared.descriptor_set_lifetime)
-                    submission.keep_alive.add_object(prepared.descriptor_set_lifetime);
-
-                VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
-                if (scissor.extent.width == 0 || scissor.extent.height == 0)
-                    break;
-
-                vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-                vkCmdDrawIndexed(command_buffer,
-                                 draw.index_count,
-                                 draw.instance_count,
-                                 draw.first_index,
-                                 draw.vertex_offset,
-                                 draw.first_instance);
+                visit_indexed_draws(command, encode_indexed_draw);
                 break;
-            }
             case CommandOp::Present:
             {
                 const PresentDesc& present = command.payload.present;
@@ -1734,6 +1943,13 @@ namespace Corona::Horizon
         return *this << pipeline.command_batch();
     }
 
+    HardwareStream& HardwareStream::append_consuming(RasterizerPipelineBase& pipeline)
+    {
+        ensure_open();
+        pipeline.record_consuming(recorder_);
+        return *this;
+    }
+
     SubmitReceipt HardwareStream::operator<<(CommitCommand)
     {
         return commit();
@@ -1798,12 +2014,13 @@ namespace Corona::Horizon
 
     std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results) const
     {
-        return submit(plan, present_results, {});
+        return submit(plan, present_results, {}, nullptr);
     }
 
     std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan,
                                                           std::vector<PresentResult>* present_results,
-                                                          std::span<const SubmissionToken> wait_tokens) const
+                                                          std::span<const SubmissionToken> wait_tokens,
+                                                          ExecutionCommitProfileSample* profile) const
     {
         const auto resolve_queue = [this](DeviceId device, QueueCapability capability) -> Queue& {
             if (queue_resolver_)
@@ -1877,6 +2094,7 @@ namespace Corona::Horizon
                 }
 
                 PreparedPresent prepared = manager->prepare_present(desc);
+                command.payload.present = desc;
                 if (present_index < compiled_submission.presents.size())
                 {
                     compiled_submission.presents[present_index] = desc;
@@ -1897,6 +2115,7 @@ namespace Corona::Horizon
                 {
                     manager->cancel_prepared_present();
                     desc.swapchain_image = {};
+                    command.payload.present = desc;
                     if (present_index < compiled_submission.presents.size())
                     {
                         compiled_submission.presents[present_index] = desc;
@@ -1921,6 +2140,11 @@ namespace Corona::Horizon
                 }
                 add_signal_once(present_signals, prepared.signal);
                 compiled_submission.keep_alive.add_resource(ResourceBridge::keep_alive(desc.swapchain_image.handle));
+                command.payload.present = desc;
+                if (present_index < compiled_submission.presents.size())
+                {
+                    compiled_submission.presents[present_index] = desc;
+                }
                 prepared_presents.push_back({ std::move(manager), desc });
                 ++present_index;
             }
@@ -1931,7 +2155,7 @@ namespace Corona::Horizon
 
             if (!compiled_submission.command_buffer)
             {
-                compiled_submission.command_buffer = queue.acquire();
+                compiled_submission.command_buffer = queue.acquire(profile);
             }
 
             try
@@ -1971,15 +2195,28 @@ namespace Corona::Horizon
                     add_signal_once(signals, signal);
                 }
 
+                const auto tracker_start = std::chrono::steady_clock::now();
                 auto tracked_submission = resource_submission_tracker().lock_submission(compiled_submission, queue.id(), waits);
+                if (profile != nullptr)
+                {
+                    profile->tracker_wait_ms += std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - tracker_start).count();
+                }
 
                 VulkanCommandEncoder encoder(queue.device());
+                const auto encode_start = std::chrono::steady_clock::now();
                 encoder.encode(compiled_submission);
+                if (profile != nullptr)
+                {
+                    profile->encode_ms += std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - encode_start).count();
+                }
 
                 QueueSubmission queue_submission;
                 queue_submission.command_buffer = std::move(compiled_submission.command_buffer);
                 queue_submission.keep_alive = std::move(compiled_submission.keep_alive);
-                tokens.push_back(queue.submit(queue_submission, waits, signals));
+                queue_submission.debug_summary = describe_submission_for_diagnostics(compiled_submission);
+                tokens.push_back(queue.submit(queue_submission, waits, signals, profile));
                 submitted_tokens[submission_index] = tokens.back();
                 tracked_submission.remember(tokens.back());
             }
@@ -2000,7 +2237,13 @@ namespace Corona::Horizon
                 PresentResult result;
                 try
                 {
+                    const auto present_start = std::chrono::steady_clock::now();
                     result = prepared_presents[index].manager->present(prepared_presents[index].desc, tokens.back());
+                    if (profile != nullptr)
+                    {
+                        profile->present_ms += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - present_start).count();
+                    }
                 }
                 catch (...)
                 {
@@ -2026,7 +2269,13 @@ namespace Corona::Horizon
 
     SubmitReceipt HardwareExecutor::commit(const RecordedTask& task)
     {
-        ExecutionPlan plan = compile(task);
+        const auto total_start = std::chrono::steady_clock::now();
+        ExecutionCommitProfileSample profile;
+        ExecutionCommitProfileScope profile_scope(profile);
+        const auto compile_start = std::chrono::steady_clock::now();
+        ExecutionPlan plan = compiler_->compile(task, &profile);
+        profile.compile_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - compile_start).count();
         std::vector<SubmissionToken> wait_tokens = consume_pending_waits();
 
         SubmitReceipt receipt;
@@ -2034,8 +2283,35 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
         }
-        receipt.tokens = submit(plan, &receipt.presents, wait_tokens);
+        receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
         remember_receipt(receipt);
+        profile.total_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - total_start).count();
+        record_execution_commit_profile(profile);
+        return receipt;
+    }
+
+    SubmitReceipt HardwareExecutor::commit(RecordedTask&& task)
+    {
+        const auto total_start = std::chrono::steady_clock::now();
+        ExecutionCommitProfileSample profile;
+        ExecutionCommitProfileScope profile_scope(profile);
+        const auto compile_start = std::chrono::steady_clock::now();
+        ExecutionPlan plan = compiler_->compile(std::move(task), &profile);
+        profile.compile_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - compile_start).count();
+        std::vector<SubmissionToken> wait_tokens = consume_pending_waits();
+
+        SubmitReceipt receipt;
+        {
+            std::lock_guard lock(mutex_);
+            receipt.serial = ++next_submit_serial_;
+        }
+        receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
+        remember_receipt(receipt);
+        profile.total_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - total_start).count();
+        record_execution_commit_profile(profile);
         return receipt;
     }
 
@@ -2080,6 +2356,47 @@ namespace Corona::Horizon
             }
 
             queue->wait_idle();
+        }
+        return *this;
+    }
+
+    HardwareExecutor& HardwareExecutor::wait_for_completion(const SubmitReceipt& receipt)
+    {
+        for (const SubmissionToken& token : receipt.tokens)
+        {
+            if (token.value == 0)
+            {
+                continue;
+            }
+
+            Queue* queue = nullptr;
+            if (queue_resolver_)
+            {
+                queue = &queue_resolver_(token.device, token.queue.capability);
+            }
+            else
+            {
+                if (token.device.value != 0)
+                {
+                    throw std::logic_error("Default HardwareExecutor currently waits only on the main device.");
+                }
+                queue = main_device_context().device_manager.queue_by_id(token.queue);
+            }
+
+            if (queue == nullptr)
+            {
+                throw std::runtime_error("HardwareExecutor could not resolve a queue for receipt completion wait.");
+            }
+
+            const QueueId resolved_id = queue->id();
+            if (resolved_id.device.value != token.queue.device.value ||
+                resolved_id.family_index != token.queue.family_index ||
+                resolved_id.queue_index != token.queue.queue_index) {
+                throw std::runtime_error("HardwareExecutor resolved the wrong queue for receipt completion wait.");
+            }
+
+            queue->wait_for(token);
+            queue->retire_completed();
         }
         return *this;
     }

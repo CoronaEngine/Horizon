@@ -162,6 +162,12 @@ namespace Corona::Horizon
         return pipeline_impl(token)->command_batch();
     }
 
+    void RasterizerPipelineBase::record_consuming(CommandRecorder& recorder)
+    {
+        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
+        pipeline_impl(token)->record_consuming(recorder);
+    }
+
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
     {
         std::shared_ptr<IResourceRef> token;

@@ -131,6 +131,7 @@ namespace Corona::Horizon
         // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
         HardwareStream& operator<<(const ComputePipelineBase& pipeline);
         HardwareStream& operator<<(const RasterizerPipelineBase& pipeline);
+        HardwareStream& append_consuming(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 
         [[nodiscard]] SubmitReceipt commit();
@@ -172,15 +173,19 @@ namespace Corona::Horizon
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
         [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
+        [[nodiscard]] SubmitReceipt commit(RecordedTask&& task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait(const HardwareExecutor& producer);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
+        /// Waits for exactly the receipt's timeline values, then retires them.
+        HardwareExecutor& wait_for_completion(const SubmitReceipt& receipt);
         [[nodiscard]] SubmitReceipt last_receipt() const;
 
     private:
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan,
                                                           std::vector<PresentResult>* present_results,
-                                                          std::span<const SubmissionToken> wait_tokens) const;
+                                                          std::span<const SubmissionToken> wait_tokens,
+                                                          struct ExecutionCommitProfileSample* profile = nullptr) const;
         [[nodiscard]] std::vector<SubmissionToken> consume_pending_waits();
         void remember_receipt(const SubmitReceipt& receipt);
 
@@ -1070,6 +1075,7 @@ namespace Corona::Horizon
         ComputePipelineBase& operator=(const ComputePipelineBase& other);
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
         ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
+        ComputePipelineBase& set_debug_label(std::string label);
         ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
         ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
         [[nodiscard]] ComputePipelineDesc desc() const;
@@ -1120,6 +1126,7 @@ namespace Corona::Horizon
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
+        void record_consuming(CommandRecorder& recorder);
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_rasterizer_pipeline_id() const noexcept { return resource_id(); }
         [[nodiscard]] std::uintptr_t getRasterizerPipelineID() const noexcept { return get_rasterizer_pipeline_id(); }

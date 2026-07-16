@@ -24,6 +24,7 @@ namespace EmbeddedShader
 #ifdef CABBAGE_ENGINE_DEBUG
 		static void addTarget(const std::string& shaderCode, const std::string& targetName, const std::string& itemName);
 		static void addTarget(const std::vector<uint32_t>& shaderCode, const std::string& targetName, const std::string& itemName);
+		static void addTarget(const SlangModule& shaderCode, const std::string& targetName, const std::string& itemName);
 		static void addTarget(const ShaderCodeModule::ShaderResources& shaderResource, const std::string& targetName, const std::string& itemName);
 #endif
 

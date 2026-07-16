@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <source_location>
+#include <string>
 #include <vector>
 
 namespace Corona::Horizon
@@ -65,6 +66,7 @@ namespace Corona::Horizon
         void bind_auto_resources();
         void bind_auto_image(EmbeddedShader::AutoBindEntry entry, const HardwareImage& image);
         void set_dispatch(uint16_t groups_x, uint16_t groups_y, uint16_t groups_z);
+        void set_debug_label(std::string label);
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);

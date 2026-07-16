@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace Corona::Horizon
 {
@@ -347,6 +348,7 @@ namespace Corona::Horizon
         IndexType index_type = IndexType::Auto;
         bool enable_scissor = false;
         ScissorRect scissor{};
+        std::string debug_label;
     };
 
 
