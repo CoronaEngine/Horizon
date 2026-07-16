@@ -5,6 +5,7 @@ CMakeUserPresets.json
 .cache/
 .idea/
 .github/
+.venv/
 
 # 本地代码索引/工具运行态
 .codegraph/

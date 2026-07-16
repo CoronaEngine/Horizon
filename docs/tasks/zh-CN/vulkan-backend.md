@@ -30,7 +30,7 @@
 ## 验证
 
 ```powershell
-.\tools\dev.ps1 build Horizon
+uv run --frozen python tools/dev.py build Horizon
 cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```

@@ -1,5 +1,5 @@
 # Optional Build Targets
-<!-- TASK_DOCS_OPTIONAL_BUILD_TARGETS_ZH_CN_SHA256: b19fd3fed3f0f7f8610c9b4521a7535d9adca6919de66ca8ee159506f1c50c85 -->
+<!-- TASK_DOCS_OPTIONAL_BUILD_TARGETS_ZH_CN_SHA256: 8d59d1764d96eb7fa69bed82090866b5b47af307a98170c263e2777ca97cb4ff -->
 
 ## When To Use
 
@@ -9,7 +9,7 @@
 
 ## Default Behavior
 
-- This note describes direct CMake preset defaults; the `tools/dev.ps1` Conan workflow may have different root package defaults.
+- This note describes direct CMake preset defaults; `tools/dev.py` enables the required development options from the selected target name.
 - Direct CMake default configure favors a clean build and enables only targets required by the core library.
 - `tools/`, `examples/`, `tests/`, `benchmarks/`, and `modules/ocarina` are off by default.
 - SPIRV-Tools-style third-party command line tools and third-party install rules are off by default.

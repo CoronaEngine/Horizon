@@ -22,5 +22,5 @@
 ## 验证
 
 ```powershell
-.\tools\dev.ps1 build ShaderCompileScripts
+uv run --frozen python tools/dev.py build ShaderCompileScripts
 ```

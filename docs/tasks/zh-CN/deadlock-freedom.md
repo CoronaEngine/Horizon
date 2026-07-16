@@ -58,7 +58,7 @@ git diff --check
 C++ 变更：
 
 ```powershell
-.\tools\dev.ps1 build Horizon
+uv run --frozen python tools/dev.py build Horizon
 cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R "HorizonTests|deadlock|concurrent|queue|present|shutdown" --output-on-failure
 ```

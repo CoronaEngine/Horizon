@@ -1,6 +1,6 @@
 # Public API Layering and Simplification Philosophy
 
-<!-- AGENT_DOCS_API_LAYERING_ZH_CN_SHA256: c916ebd07c1d13f4abba665cb8cfe1cb9da24b8110ffecbda56ce787ce92bfd8 -->
+<!-- AGENT_DOCS_API_LAYERING_ZH_CN_SHA256: d763274998b970df5f630afefc4d24ee9e63c9b7dd2fafc468f89afbaadfe931 -->
 
 > `docs/agents/zh-CN/api-layering.md` is the Chinese source. Edit it first, then sync this file.
 
@@ -60,7 +60,7 @@ Full design and decision log: `docs/design/api-simplification.md`.
 ## 6. Validation
 
 ```powershell
-.\tools\dev.ps1 build HorizonExamples
+uv run --frozen python tools/dev.py build HorizonExamples
 ```
 
 Docs-only changes need no build; changing public headers requires a build.

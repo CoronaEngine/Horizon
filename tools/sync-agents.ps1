@@ -58,12 +58,6 @@ $syncPairs = @(
         Label = "git context"
     },
     @{
-        Source = "docs/agents/zh-CN/formatting.md"
-        Target = "docs/agents/formatting.md"
-        Marker = "AGENT_DOCS_FORMATTING_ZH_CN_SHA256"
-        Label = "formatting context"
-    },
-    @{
         Source = "docs/agents/zh-CN/vulkan.md"
         Target = "docs/agents/vulkan.md"
         Marker = "AGENT_DOCS_VULKAN_ZH_CN_SHA256"
@@ -86,12 +80,6 @@ $syncPairs = @(
         Target = "docs/agents/api-layering.md"
         Marker = "AGENT_DOCS_API_LAYERING_ZH_CN_SHA256"
         Label = "api layering context"
-    },
-    @{
-        Source = "docs/tasks/zh-CN/formatting.md"
-        Target = "docs/tasks/formatting.md"
-        Marker = "TASK_DOCS_FORMATTING_ZH_CN_SHA256"
-        Label = "formatting task notes"
     },
     @{
         Source = "docs/tasks/zh-CN/hardware-buffer-validation.md"

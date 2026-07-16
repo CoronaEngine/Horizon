@@ -1,6 +1,5 @@
 # Horizon Agent Entry
-<!-- AGENTS_ZH_CN_SHA256: PENDING_SYNC -->
-<!-- 上面 SHA256 待用 `.\tools\sync-agents.ps1` 重新生成；AGENTS.zh-CN.md 已更新但 marker 未刷新 -->
+<!-- AGENTS_ZH_CN_SHA256: 89ed64068a573eac458a88be5675b29ed6be3c6580bde71a904117077f7e5ad5 -->
 
 
 > `AGENTS.zh-CN.md` is the Chinese source for the root AI entry.

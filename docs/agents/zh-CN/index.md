@@ -14,7 +14,6 @@
 - `docs/agents/build.md`
 - `docs/agents/codegraph.md`
 - `docs/agents/git.md`
-- `docs/agents/formatting.md`
 - `docs/agents/vulkan.md`
 - `docs/agents/helicon.md`
 - `docs/agents/push-constants.md`

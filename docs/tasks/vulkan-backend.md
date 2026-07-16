@@ -1,5 +1,5 @@
 # Vulkan Backend Task Notes
-<!-- TASK_DOCS_VULKAN_BACKEND_ZH_CN_SHA256: 11522c871e1a1eb24b80f9a787f7104d660d931eeb449fc06b1ed7b1dae16e21 -->
+<!-- TASK_DOCS_VULKAN_BACKEND_ZH_CN_SHA256: ad48de1b0af10eb88b1c3b4b6dc65d73a1137e623a2a4e1fabe9f19206747c04 -->
 
 ## Directory Scope
 
@@ -31,7 +31,7 @@
 ## Validation
 
 ```powershell
-.\tools\dev.ps1 build Horizon
+uv run --frozen python tools/dev.py build Horizon
 cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R HorizonTests --output-on-failure
 ```

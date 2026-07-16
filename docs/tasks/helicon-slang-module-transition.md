@@ -1,5 +1,5 @@
 # Helicon Slang Module Transition Handoff
-<!-- TASK_DOCS_HELICON_SLANG_MODULE_TRANSITION_ZH_CN_SHA256: 44a61a463aa1f8a45ead08dbd4a5be6ebdb6dc62bc8ce0035f6593e4cfac3228 -->
+<!-- TASK_DOCS_HELICON_SLANG_MODULE_TRANSITION_ZH_CN_SHA256: 53fc5d36b4bdd81a48fa1ac44166494a162dd72fc614978381bb8f20c27734a1 -->
 
 This file records the handoff state for the current uncommitted Helicon WIP on 2026-06-08. It is not a completed design document; if the diff has changed, trust a fresh `git status --short --branch` and `git diff`.
 
@@ -41,7 +41,7 @@ This file records the handoff state for the current uncommitted Helicon WIP on 2
 
 - `EXP-001`:
   - Motivation: quickly validate with a `ShaderCompileScripts` build.
-  - Tried: ran `.\tools\dev.ps1 build ShaderCompileScripts` from plain PowerShell.
+  - Tried: ran `uv run --frozen python tools/dev.py build ShaderCompileScripts`.
   - Result: MSVC dependency scanning failed to find standard headers such as `string`, `functional`, `type_traits`, and `inttypes.h`.
   - Rejection reason: the shell lacked the VS developer environment and `INCLUDE` was unset; this is not useful code evidence.
   - Retry condition: only during acceptance, wrap the build with `cmd.exe /d /s /c "call \"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && ..."`.

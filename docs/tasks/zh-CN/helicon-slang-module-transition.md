@@ -40,7 +40,7 @@
 
 - `EXP-001`:
   - Motivation: 想用 `ShaderCompileScripts` build 快速确认改动。
-  - Tried: 在普通 PowerShell 里运行 `.\tools\dev.ps1 build ShaderCompileScripts`。
+  - Tried: 运行 `uv run --frozen python tools/dev.py build ShaderCompileScripts`。
   - Result: MSVC 扫描依赖时报 `string`、`functional`、`type_traits`、`inttypes.h` 等标准头找不到。
   - Rejection reason: 当前 shell 没有 VS developer environment，`INCLUDE` 未设置；这不是有效代码结论。
   - Retry condition: 只有进入验收阶段时，用 `cmd.exe /d /s /c "call \"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat\" -arch=x64 -host_arch=x64 && ..."` 包住构建命令。

@@ -1,5 +1,5 @@
 # Shader Reflection Task Notes
-<!-- TASK_DOCS_SHADER_REFLECTION_ZH_CN_SHA256: 99abb372478871d3d500a18e6703fc398df50bc6882b2aaf55b13e719016eb86 -->
+<!-- TASK_DOCS_SHADER_REFLECTION_ZH_CN_SHA256: ebab355737ebea872cc806e076a09dfae4ca1329faba8d1372f2b795a8d05f11 -->
 
 ## Related Paths
 
@@ -23,5 +23,5 @@ When changing push constant reflection, pay attention to:
 ## Validation
 
 ```powershell
-.\tools\dev.ps1 build ShaderCompileScripts
+uv run --frozen python tools/dev.py build ShaderCompileScripts
 ```

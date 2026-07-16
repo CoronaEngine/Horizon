@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 4.0)
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_dev_bootstrap.cmake)
+    horizon_dev_bootstrap()
+endif()
+
 project(
     Horizon
     VERSION 0.5.0

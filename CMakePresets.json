@@ -1,0 +1,47 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "relwithdebinfo",
+      "displayName": "RelWithDebInfo (default)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release"
+      }
+    },
+    {
+      "name": "minsizerel",
+      "displayName": "MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "debug", "configurePreset": "debug", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "release", "configuration": "Release" },
+    { "name": "minsizerel", "configurePreset": "minsizerel", "configuration": "MinSizeRel" }
+  ]
+}

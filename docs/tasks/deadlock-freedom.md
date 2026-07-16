@@ -1,5 +1,5 @@
 # Deadlock Freedom Task Notes
-<!-- TASK_DOCS_DEADLOCK_FREEDOM_ZH_CN_SHA256: c1755c523e88bd1f32668cf086c5c5194ca65b1bf85a4e84f40ad370b44b4d0d -->
+<!-- TASK_DOCS_DEADLOCK_FREEDOM_ZH_CN_SHA256: 66f8d34580cc18d3ae64e97369bcb5c1b4abe890621fbc8aaaec5599fd5d9fe5 -->
 
 ## Goal
 
@@ -59,7 +59,7 @@ git diff --check
 C++ changes:
 
 ```powershell
-.\tools\dev.ps1 build Horizon
+uv run --frozen python tools/dev.py build Horizon
 cmake --build --preset msvc-debug --target HorizonTests
 ctest --test-dir build/ninja-msvc -C Debug -R "HorizonTests|deadlock|concurrent|queue|present|shutdown" --output-on-failure
 ```

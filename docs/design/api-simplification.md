@@ -319,7 +319,7 @@ A3(DeviceMask 下沉)比设计预估的**爆炸半径更大**:除 `CommandRecord
 - ✅ **A2 已实施**:执行 / 命令 IR 类型抽离到 `include/horizon_execution.h`,`horizon.h` 改为 `#include` 该头并保留一段指向内部头的说明注释。采用"内部头拆分"(用户决策),非 PImpl;在用户删除白盒测试后,符号搬迁不再被测试套件阻塞。
 - ✅ **A3 随 A2 达成**:`CommandRecorder` 的 `DeviceMask` 签名已进入内部头;剩余命令门面 / 工厂函数的 `DeviceMask` 为带默认值尾参,不强制暴露,按用户决策暂不再动。
 - ✅ **测试删除善后**:`CMakeLists.txt` 的 `HORIZON_BUILD_TESTS` 默认改 `OFF`,`add_subdirectory(tests)` 加 `EXISTS` 守卫,避免 `tests/` 已删后 configure 失败。
-- ⏳ **待构建验证**:`cmake --build` / `dev.ps1 build HorizonExamples` 在本环境被自动审批拦截,需用户本地构建确认。
+- 构建验证入口：`uv run --frozen python tools/dev.py build HorizonExamples`。
 
 ### 11.6 文档同步(本轮一并完成)
 

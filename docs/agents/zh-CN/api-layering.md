@@ -58,7 +58,7 @@ Corona::Horizon::RasterizerPipeline rasterizer(vsLambda, fsLambda, desc);
 ## 6. 验证
 
 ```powershell
-.\tools\dev.ps1 build HorizonExamples
+uv run --frozen python tools/dev.py build HorizonExamples
 ```
 
 纯文档改动无需构建；改动公共头后必须构建验证。
