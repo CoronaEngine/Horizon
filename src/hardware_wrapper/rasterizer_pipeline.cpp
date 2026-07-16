@@ -51,7 +51,6 @@ namespace Corona::Horizon
     {
         if (!validate_rasterizer_pipeline_desc(desc))
             return;
-
         ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
     }
 

@@ -2281,6 +2281,33 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
         }
+
+        std::vector<ComputePipelineBase*> computePipelines;
+        std::vector<RasterizerPipelineBase*> rasterizerPipelines;
+        //提取命令中用到的管线
+        for (auto & submission : plan.submissions)
+        {
+            for (auto & command : submission.commands)
+            {
+                switch (command.op) {
+                case CommandOp::Dispatch:
+                    computePipelines.push_back(command.payload.dispatch.pipeline);
+                    break;
+                case CommandOp::DrawIndexed:
+                    rasterizerPipelines.push_back(command.payload.draw_indexed.pipeline);
+                    break;
+                case CommandOp::DrawIndexedBatch:
+                    for (const auto & draw : command.payload.draw_indexed_batch.draws)
+                    {
+                        rasterizerPipelines.push_back(draw.draw.pipeline);
+                    }
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
         remember_receipt(receipt);
         profile.total_ms = std::chrono::duration<double, std::milli>(
@@ -2305,6 +2332,7 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
         }
+
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
         remember_receipt(receipt);
         profile.total_ms = std::chrono::duration<double, std::milli>(

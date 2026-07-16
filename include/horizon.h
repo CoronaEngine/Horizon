@@ -734,6 +734,7 @@ namespace Corona::Horizon
     struct ComputePipelineDesc
     {
         PipelineShaderDesc compute_shader;
+        std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipelineObject;
         ktm::uvec3 thread_group_size = { 1, 1, 1 };
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
@@ -747,16 +748,17 @@ namespace Corona::Horizon
         template <typename F>
         static ComputePipelineDesc from_edsl(F&& compute_shader_code, ktm::uvec3 numthreads = { 1, 1, 1 }, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
         {
-            auto object = EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location);
+            std::shared_ptr<EmbeddedShader::ComputePipelineObject> object{new EmbeddedShader::ComputePipelineObject(EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location))};
 
             ComputePipelineDesc desc(
-                PipelineShaderDesc {
+                 PipelineShaderDesc{
                     PipelineShaderStage::Compute,
-                    object.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
+                    object->compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
                 numthreads);
+            desc.pipelineObject = object;
 
             if (options.auto_bind)
-                desc.auto_bind_entries = std::move(object.autoBindEntries);
+                desc.auto_bind_entries = object->autoBindEntries;
             return desc;
         }
 
@@ -824,6 +826,7 @@ namespace Corona::Horizon
     {
         PipelineShaderDesc vertex_shader { PipelineShaderStage::Vertex, EmbeddedShader::ShaderCodeModule {} };
         PipelineShaderDesc fragment_shader { PipelineShaderStage::Fragment, EmbeddedShader::ShaderCodeModule {} };
+        std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> pipelineObject;
 
         RasterizerStateDesc rasterizer;
         DepthStencilStateDesc depth_stencil;
@@ -872,23 +875,24 @@ namespace Corona::Horizon
                                                 EdslPipelineOptions options = {},
                                                 std::source_location source_location = std::source_location::current())
         {
-            auto object = EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
+            std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{new EmbeddedShader::RasterizedPipelineObject(EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
                                                                             std::forward<FS>(fragment_shader_code),
                                                                             options.compiler,
-                                                                            source_location);
+                                                                            source_location))};
 
             RasterizerPipelineDesc desc(
                 PipelineShaderDesc {
                     PipelineShaderStage::Vertex,
-                    object.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                    object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
                                                  options.compiler.enableBindless) },
                 PipelineShaderDesc {
                     PipelineShaderStage::Fragment,
-                    object.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                    object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
                                                    options.compiler.enableBindless) });
+            desc.pipelineObject = object;
 
             if (options.auto_bind)
-                desc.auto_bind_entries = std::move(object.autoBindEntries);
+                desc.auto_bind_entries = object->autoBindEntries;
 
             return desc;
         }
