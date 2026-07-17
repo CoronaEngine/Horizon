@@ -22,20 +22,6 @@ add_subdirectory(stblib)
 
 cmake_policy(SET CMP0148 NEW)
 
-# ---- SPIRV-Cross 由根 Horizon CMakeLists.txt 通过 FetchContent 提供 ----
-if(VISION_BUILD_VULKAN)
-    set_property(TARGET spirv-cross PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-c PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-core PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-glsl PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-hlsl PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-msl PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-cpp PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-reflect PROPERTY FOLDER "ocarina/ext/spirv")
-    set_property(TARGET spirv-cross-util PROPERTY FOLDER "ocarina/ext/spirv")
-endif()
-#list(APPEND SPIRV_LIBS "spirv-cross-core" "spirv-cross-hlsl" )
-
 target_link_libraries(ocarina-ext
         PUBLIC
         ocarina-ext-stb

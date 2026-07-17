@@ -1,4 +1,0 @@
-interface:
-  display_name: "Agent Project System"
-  short_description: "AI-first project state docs and recovery."
-  default_prompt: "Use this skill to initialize, adopt, or recover AI-first project state docs. In Horizon, route durable state through the existing bilingual agent materials unless a separate state system is explicitly requested."

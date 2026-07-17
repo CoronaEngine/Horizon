@@ -19,27 +19,36 @@ namespace EmbeddedShader
 
     namespace
     {
+        // 将 Slang 反射产出的点分全名（如 "global_ubo.viewMatrix"）裁剪为下游约定的短名
+        // （"viewMatrix"）。codegen 侧按 EDSL 名字用 findShaderBindInfo 查找、runtime 侧的
+        // 硬编码名字比较都依赖短名。此逻辑与离线 codegen tools/main.cpp 保持一致。
+        void stripReflectionMemberPrefixes(ShaderCodeModule::ShaderResources& resources)
+        {
+            for (auto& info : resources.bindInfoPool)
+            {
+                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
+                    info.variateName = info.variateName.substr(pos + 1);
+            }
+        }
+
+        // 反射源统一走 Slang（result.reflections），不再使用 SPIRV-Cross。
+        // spirv 参数在移除 SPIRV-Cross 后已无消费者，保留仅为暂不改动调用点；Phase 3 清理。
         ShaderCodeModule::ShaderResources reflectionForTarget(
             ShaderLanguage targetLanguage,
-            const std::vector<uint32_t>* spirv,
+            const std::vector<uint32_t>* /*spirv*/,
             const std::unordered_map<ShaderLanguage, ShaderCodeModule::ShaderResources>& slangReflections)
         {
             auto slangReflection = slangReflections.find(targetLanguage);
-            if (targetLanguage == ShaderLanguage::SpirV && spirv != nullptr && !spirv->empty())
-            {
-                auto reflection = ShaderLanguageConverter::spirvCrossReflectedBindInfo(*spirv, ShaderLanguage::HLSL);
-                if (slangReflection != slangReflections.end())
-                    reflection.entryPointInfoPool = slangReflection->second.entryPointInfoPool;
-                return reflection;
-            }
+            if (slangReflection == slangReflections.end())
+                return {};
 
-            if (slangReflection != slangReflections.end())
-                return slangReflection->second;
+            auto reflection = slangReflection->second;
+            // SpirV target 此前经 SPIRV-Cross 产出短名；切到 Slang 后需同样裁剪以保持契约。
+            // GLSL/HLSL target 维持原有（点分全名）行为不变。
+            if (targetLanguage == ShaderLanguage::SpirV)
+                stripReflectionMemberPrefixes(reflection);
 
-            if (spirv != nullptr && !spirv->empty())
-                return ShaderLanguageConverter::spirvCrossReflectedBindInfo(*spirv, ShaderLanguage::HLSL);
-
-            return {};
+            return reflection;
         }
     }
 
