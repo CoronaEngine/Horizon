@@ -252,6 +252,32 @@ namespace EmbeddedShader
 
             // 如果元素是叶子资源，合并为一个条目，记录 elementCount
             auto elemBindType = deduceLeafBindType(elemTypeLayout);
+
+            // __DynamicResource<General>[] (bindless 句柄数组, codegen 在 set 0/1/2 生成)。
+            // 这类泛型动态资源在 ProgramLayout 反射里 getBindingRangeCount()==0、kind=DynamicResource,
+            // deduceLeafBindType 无法识别而返回 none —— 但它们正是 bindless 保留集的载体。
+            // 只有落到 SPIR-V 才 lower 成真实 storage image/buffer;此处按 codegen 契约的 set 归类,
+            // 使其进入 bindInfoPool,让 runtime 的 uses_bindless_descriptors()/is_bindless_reserved_binding()
+            // 能正确判定 bindless。set 语义见 ResourceManager::bindless_*_set (0=texture,1=buffer,2=image)。
+            if (elemBindType == EmbeddedShader::ShaderCodeModule::ShaderResources::none &&
+                elemTypeLayout->getKind() == slang::TypeReflection::Kind::DynamicResource)
+            {
+                switch (m_offset.set)
+                {
+                case 0: // combinedTextureSamplerHandles → 采样图像/组合采样器
+                    elemBindType = EmbeddedShader::ShaderCodeModule::ShaderResources::sampledImages;
+                    break;
+                case 1: // bufferHandles → 存储缓冲
+                    elemBindType = EmbeddedShader::ShaderCodeModule::ShaderResources::storageBuffer;
+                    break;
+                case 2: // textureHandles → 存储图像
+                    elemBindType = EmbeddedShader::ShaderCodeModule::ShaderResources::storageTexture;
+                    break;
+                default:
+                    break;
+                }
+            }
+
             if (elemBindType != EmbeddedShader::ShaderCodeModule::ShaderResources::none)
             {
                 EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
@@ -261,7 +287,13 @@ namespace EmbeddedShader
                 info.binding = m_offset.binding;
                 info.byteOffset = m_offset.byteOffset;
                 info.typeSize = static_cast<uint32_t>(elemTypeLayout->getSize());
-                info.elementCount = elemCount;
+                // 无界数组(bindless 句柄表)getElementCount() 返回哨兵值(unbounded/unknown),
+                // 归一化为 0,既满足 bindless 检查的 elementCount!=1,又不把巨大哨兵值写进反射。
+                info.elementCount = (elemCount == SLANG_UNBOUNDED_SIZE || elemCount == SLANG_UNKNOWN_SIZE ||
+                                     elemCount == static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) ||
+                                     elemCount == static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()))
+                                        ? 0
+                                        : elemCount;
                 info.bindType = elemBindType;
                 fillSemanticAndLocation(info);
                 resources.bindInfoPool.push_back(info);
@@ -2158,10 +2190,26 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
             cursor.m_varLayout = param;
             cursor.m_typeLayout = param->getTypeLayout();
 
-            if (param->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ParameterBlock)
+            // 顶层参数的 descriptor set 取法依资源“种类”而不同(已实测 SpirV target 逐字段确认):
+            //   - 容器类型 ConstantBuffer / ParameterBlock: 各自占用一个寄存器空间(set),
+            //     set 来自 getOffset(SubElementRegisterSpace)。bindless UBO
+            //     ([[vk::binding(0,3)]] ConstantBuffer,反射名 global_push_constant)由此得 set=3;
+            //     真 push_constant 的 SubElementRegisterSpace=0(不占 descriptor set),不受影响。
+            //   - 普通资源(纹理/采样器/buffer,含 bindless 句柄数组 __DynamicResource[]):
+            //     set 来自 getBindingSpace(DescriptorTableSlot)。textureHandles([vk::binding(0,2)])由此得 set=2。
+            // 早先统一用 getOffset(RegisterSpace) 对两类都恒返回 0 → set 2/3 资源全被误报到 set 0,
+            // 导致 uses_bindless 判定失败 + UBO 落错 set。此分派与所有内部导航
+            // (field()/ConstantBuffer/ParameterBlock/PushConstant handler)取 set 的方式一致。
+            const auto param_kind = param->getTypeLayout()->getKind();
+            if (param_kind == slang::TypeReflection::Kind::ParameterBlock ||
+                param_kind == slang::TypeReflection::Kind::ConstantBuffer)
+            {
                 cursor.m_offset.set = param->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+            }
             else
-                cursor.m_offset.set = param->getOffset(slang::ParameterCategory::RegisterSpace);
+            {
+                cursor.m_offset.set = param->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+            }
             cursor.m_offset.binding = param->getOffset(slang::ParameterCategory::DescriptorTableSlot);
 
             cursor.collectBindings(resources, param->getName());
