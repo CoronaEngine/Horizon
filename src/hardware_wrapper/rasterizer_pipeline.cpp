@@ -47,11 +47,9 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase::RasterizerPipelineBase() = default;
 
-    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location)
+    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        if (!validate_rasterizer_pipeline_desc(desc))
-            return;
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
+        rebuild_pipeline(desc);
     }
 
     RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
@@ -165,6 +163,13 @@ namespace Corona::Horizon
     {
         std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         pipeline_impl(token)->record_consuming(recorder);
+    }
+
+    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc)
+    {
+        if (!validate_rasterizer_pipeline_desc(desc))
+            return;
+        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), location_));
     }
 
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

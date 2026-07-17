@@ -162,6 +162,10 @@ EmbeddedShader::Ast::ExternBranchVariateCollection EmbeddedShader::Ast::Parser::
 void EmbeddedShader::Ast::Parser::resetBranchOutputs()
 {
     currentParser->branchOutputs.clear();
+    if (!currentParser->branchReferences.empty())
+    {
+        currentParser->branchReferences.top() = {};
+    }
 }
 std::vector<EmbeddedShader::Ast::BranchOutput>& EmbeddedShader::Ast::Parser::getBranchOutputs()
 {

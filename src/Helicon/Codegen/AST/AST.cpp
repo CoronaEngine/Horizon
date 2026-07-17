@@ -296,7 +296,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGloba
     auto& pc = Parser::currentParser->globalPushConstant;
     if (!pc)
     {
-        auto type = std::make_shared<NameType>();
+        auto type = std::make_shared<PushConstantType>();
         pc = std::make_shared<Variate>();
         pc->type = type;
         type->name = "ParameterBlock<global_push_constant_struct>";

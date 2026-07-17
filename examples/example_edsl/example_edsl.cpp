@@ -80,6 +80,8 @@ void run_example_edsl()
     Float4x4 view;
     Float4x4 proj;
 
+    bool option = false;
+
     auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
         position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
         Float color_weight = edsl_header_glsl.get_color_weight(vertex->color);
@@ -88,7 +90,16 @@ void run_example_edsl()
 
     auto fragment_shader = [&](Float4 input) {
         Float4 color = texture(texture_proxy, input->xy());
-        final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
+        Float4 finalColor;
+        $IF (option)
+        {
+            finalColor = color * Float4(input->z, input->z, input->z, 1.0f);;
+        }
+        $ELSE
+        {
+            finalColor = Float4(input->x, input->y, input->z, 1.0f);
+        }
+        final_output_proxy << finalColor;
     };
 
     Corona::Horizon::RasterizerPipelineDesc desc;
@@ -101,6 +112,7 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+    option = true;
     const auto start_time = std::chrono::high_resolution_clock::now();
     while (!glfwWindowShouldClose(window))
     {

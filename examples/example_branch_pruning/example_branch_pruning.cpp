@@ -1,49 +1,60 @@
 #include  <horizon.h>
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ComputePipelineObject.h"
+#include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
+#include "shaders/edsl_header.glsl.hpp"
 
 #include <example_branch_pruning/example_branch_pruning.h>
 #include <Codegen/ControlFlows.h>
 
+struct BaselineEdslVertexProxy
+{
+    EmbeddedShader::Float3 pos;
+    EmbeddedShader::Float3 color;
+    EmbeddedShader::Float2 tex_coord;
+};
+
+
 void run_example_branch_pruning()
 {
     using namespace EmbeddedShader;
-    int a = 1;
-    Int a2 = 1;
-    Texture2D<ktm::fvec4> texture;
-    auto shader = [&]()
-    {
-        $IF(a2 < 0)
+    using namespace ktm;
+    Texture2D<fvec4> texture_proxy;
+    Texture2D<fvec4> final_output_proxy;
+    Float4x4 model;
+    Float4x4 view;
+    Float4x4 proj;
+
+    bool option = true;
+
+    auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
+        position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
+        Float color_weight = edsl_header_glsl.get_color_weight(vertex->color);
+        return Float4(vertex->tex_coord, color_weight, 1.0f);
+    };
+
+    auto fragment_shader = [&](Float4 input) {
+        $IF (option)
         {
-            texture[dispatchThreadID()->xy()] = Float4(1,2,3,4);
-        }
-        $ELSE $IF(a == 1)
-        {
-            Float v = Float(dispatchThreadID()->x);
-            texture[dispatchThreadID()->xy()] = Float4(1,1,1,v);
+            Float4 color = texture(texture_proxy, input->xy());
+            final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
         }
         $ELSE
         {
-            $IF(a == 0)
-            {
-                texture[dispatchThreadID()->xy()] = Float4(1,1,1,2);
-            }
-            $ELSE
-            {
-                texture[dispatchThreadID()->xy()] = Float4();
-            }
+            final_output_proxy << Float4(input->x, input->y, input->z, 1.0f);
         }
     };
 
-    CompilerOption option;
-    option.compileDXBC = false;
-    option.compileDXIL = false;
-    option.compileGLSL = false;
-    option.compileSpirV = true;
-    option.compileHLSL = true;
-    option.enableBindless = false;
-    auto compute = ComputePipelineObject::compile(shader,ktm::uvec3(8,8,1),option);
-    a = 0;
-    std::cout << std::get<1>(compute.compute->getShaderCode(ShaderLanguage::HLSL).shaderCode) << "\n";
+    CompilerOption compilerOption;
+    compilerOption.compileDXBC = false;
+    compilerOption.compileDXIL = false;
+    compilerOption.compileGLSL = false;
+    compilerOption.compileSpirV = true;
+    compilerOption.compileHLSL = true;
+    compilerOption.enableBindless = false;
+
+    auto rasterization = RasterizedPipelineObject::compile(vertex_shader, fragment_shader, compilerOption);
+    std::cout << std::get<1>(rasterization.vertex->getShaderCode(ShaderLanguage::HLSL).shaderCode) << "\n";
+    std::cout << std::get<1>(rasterization.fragment->getShaderCode(ShaderLanguage::HLSL).shaderCode) << "\n";
 }

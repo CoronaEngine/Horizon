@@ -2308,6 +2308,47 @@ namespace Corona::Horizon
             }
         }
 
+        for (auto & computePipeline : computePipelines)
+        {
+            auto desc = computePipeline->desc();
+            if (!desc.pipelineObject) continue;
+            auto& cc = desc.pipelineObject->compute;
+            if (cc->needPipelineRebuild())
+            {
+                desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
+                desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless);
+                desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                computePipeline->rebuild_pipeline(std::move(desc));
+            }
+        }
+
+        for (auto & rasterizerPipeline : rasterizerPipelines)
+        {
+            auto desc = rasterizerPipeline->desc();
+            if (!desc.pipelineObject) continue;
+            auto& vc = desc.pipelineObject->vertex;
+            auto& fc = desc.pipelineObject->fragment;
+            bool needRebuild = false;
+            if (vc->needPipelineRebuild())
+            {
+                desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
+                needRebuild = true;
+            }
+
+            if (fc->needPipelineRebuild())
+            {
+                desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
+                needRebuild = true;
+            }
+
+            if (needRebuild)
+            {
+                desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless);
+                desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                rasterizerPipeline->rebuild_pipeline(std::move(desc));
+            }
+        }
+
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
         remember_receipt(receipt);
         profile.total_ms = std::chrono::duration<double, std::milli>(

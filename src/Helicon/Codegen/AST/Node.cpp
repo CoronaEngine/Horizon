@@ -37,6 +37,11 @@ std::string EmbeddedShader::Ast::NameType::parse()
 	return name;
 }
 
+std::string EmbeddedShader::Ast::PushConstantType::parse()
+{
+    return Generator::SlangGenerator::getParseOutput(this);
+}
+
 std::string EmbeddedShader::Ast::StageType::parse()
 {
     return Generator::SlangGenerator::getParseOutput(this);
@@ -71,6 +76,17 @@ const EmbeddedShader::Ast::Variate *EmbeddedShader::Ast::Variate::getRootVariate
     return this;
 }
 
+void EmbeddedShader::Ast::LocalVariate::access(AccessPermissions permissions)
+{
+    Value::access(permissions);
+    this->permissions = this->permissions | permissions;
+}
+
+EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::LocalVariate::getAccessPermissions() const
+{
+    return permissions;
+}
+
 std::string EmbeddedShader::Ast::BasicValue::parse()
 {
 	return value;
@@ -78,7 +94,7 @@ std::string EmbeddedShader::Ast::BasicValue::parse()
 
 std::string EmbeddedShader::Ast::VecValue::parse()
 {
-	return value;
+    return Generator::SlangGenerator::getParseOutput(this);
 }
 
 std::string EmbeddedShader::Ast::DefineLocalVariate::parse()
@@ -153,6 +169,11 @@ std::string EmbeddedShader::Ast::ElseStatement::parse()
 	return Generator::SlangGenerator::getParseOutput(this);
 }
 
+EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniversalArray::getAccessPermissions() const
+{
+    return permissions;
+}
+
 void EmbeddedShader::Ast::UniversalArray::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
@@ -190,6 +211,11 @@ std::string EmbeddedShader::Ast::DefineUniversalArray::parse()
 void EmbeddedShader::Ast::DefineUniversalArray::resetAccessPermissions()
 {
 	array->permissions = AccessPermissions::None;
+}
+
+EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniformVariate::getAccessPermissions() const
+{
+    return permissions;
 }
 
 std::string EmbeddedShader::Ast::UniformVariate::parse()
@@ -235,6 +261,11 @@ void EmbeddedShader::Ast::DefineAggregateType::resetAccessPermissions()
 std::string EmbeddedShader::Ast::AggregateValue::parse()
 {
 	return value;
+}
+
+EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniversalTexture2D::getAccessPermissions() const
+{
+    return permissions;
 }
 
 void EmbeddedShader::Ast::UniversalTexture2D::access(AccessPermissions permissions)

@@ -1087,7 +1087,9 @@ namespace Corona::Horizon
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
         [[nodiscard]] std::uintptr_t getComputePipelineID() const noexcept { return get_compute_pipeline_id(); }
 
+        void rebuild_pipeline(ComputePipelineDesc desc);
     private:
+        std::source_location location_;
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
@@ -1161,7 +1163,9 @@ namespace Corona::Horizon
             return *this;
         }
 
+        void rebuild_pipeline(RasterizerPipelineDesc desc);
     private:
+        std::source_location location_;
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
@@ -1895,7 +1899,6 @@ namespace Corona::Horizon
         return keep_alive(std::static_pointer_cast<void>(
             std::make_shared<Storage>(std::forward<Args>(args)...)));
     }
-
 }
 
 template <typename PipelineType>
