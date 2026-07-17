@@ -112,6 +112,7 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+    option = true;
     const auto start_time = std::chrono::high_resolution_clock::now();
     while (!glfwWindowShouldClose(window))
     {
