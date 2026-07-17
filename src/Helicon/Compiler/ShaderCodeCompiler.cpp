@@ -12,7 +12,6 @@
 #include <Compiler/ShaderCommon.h>
 #include <shared_mutex>
 #include <ranges>
-#include <iostream>
 
 namespace EmbeddedShader
 {
@@ -48,27 +47,6 @@ namespace EmbeddedShader
             // GLSL/HLSL target 维持原有（点分全名）行为不变。
             if (targetLanguage == ShaderLanguage::SpirV)
                 stripReflectionMemberPrefixes(reflection);
-
-            // [诊断] 转储 SpirV target 的绑定坐标，核实全局 UBO 是否被反射成 set=0（应为 set=3）。
-            // 确认绑定机制问题后应移除本段。
-            if (targetLanguage == ShaderLanguage::SpirV)
-            {
-                std::cout << "===== [ReflectDiag SpirV] binds=" << reflection.bindInfoPool.size()
-                          << " uboSize=" << reflection.uniformBufferSize
-                          << " pcSize=" << reflection.pushConstantSize << " =====\n";
-                for (const auto& info : reflection.bindInfoPool)
-                {
-                    std::cout << "  set=" << info.set
-                              << " bind=" << info.binding
-                              << " loc=" << info.location
-                              << " bindType=" << static_cast<int32_t>(info.bindType)
-                              << " off=" << info.byteOffset
-                              << " size=" << info.typeSize
-                              << " elem=" << info.elementCount
-                              << " '" << info.variateName << "'\n";
-                }
-                std::cout << std::flush;
-            }
 
             return reflection;
         }
