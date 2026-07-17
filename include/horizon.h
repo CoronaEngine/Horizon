@@ -712,10 +712,16 @@ namespace Corona::Horizon
             EmbeddedShader::ShaderCodeModule::ShaderResources resources;
             if (reflection != result.reflections.end())
                 resources = std::move(reflection->second);
-            auto spirv_reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv->second, EmbeddedShader::ShaderLanguage::HLSL);
-            spirv_reflection.entryPointInfoPool = std::move(resources.entryPointInfoPool);
 
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(spirv_reflection)));
+            // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
+            // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
+            for (auto& info : resources.bindInfoPool)
+            {
+                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
+                    info.variateName = info.variateName.substr(pos + 1);
+            }
+
+            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
         }
     };
 

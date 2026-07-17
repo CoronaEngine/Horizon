@@ -27,23 +27,6 @@ horizon_fetchcontent_declare(
 FetchContent_MakeAvailable(preprocessor)
 
 horizon_fetchcontent_declare(
-    SPIRV-Cross
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
-    GIT_TAG main
-    EXCLUDE_FROM_ALL
-)
-set(SPIRV_CROSS_SHARED OFF)
-set(SPIRV_CROSS_STATIC ON)
-set(SPIRV_CROSS_ENABLE_TESTS OFF)
-set(SPIRV_CROSS_CLI ${HORIZON_BUILD_DEPENDENCY_TOOLS} CACHE BOOL "" FORCE)
-if(HORIZON_ENABLE_DEPENDENCY_INSTALL)
-    set(SPIRV_CROSS_SKIP_INSTALL OFF CACHE BOOL "" FORCE)
-else()
-    set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
-endif()
-FetchContent_MakeAvailable(SPIRV-Cross)
-
-horizon_fetchcontent_declare(
     SPIRV-Headers
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
     GIT_TAG vulkan-sdk-1.4.341

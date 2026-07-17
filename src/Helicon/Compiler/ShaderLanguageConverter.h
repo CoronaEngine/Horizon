@@ -56,12 +56,6 @@ namespace EmbeddedShader
 
 	struct ShaderLanguageConverter
 	{
-		//Compile SPIR-V to others
-		static std::string spirvCrossConverter(std::vector<uint32_t> spirv_file, ShaderLanguage targetLanguage, int32_t targetVersion = -1);
-
-		// 通过SPIRV-Cross IR层获取函数签名
-		static std::vector<IRReflection> spirvCrossGetIRReflection(const std::vector<uint32_t>& spirv_file);
-
 		// Compile Slang to others
 		static std::string slangCompiler(std::string shaderCode, ShaderLanguage targetLanguage, Slang::ComPtr<slang::IComponentType>& program);
 		static std::vector<ShaderCodeModule::ShaderResources> slangCompiler(
@@ -79,9 +73,6 @@ namespace EmbeddedShader
 	    static void testSlangModule(const std::vector<uint8_t>& moduleData);
 
 		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
-
-		//get Reflected Bind Info
-		static ShaderCodeModule::ShaderResources spirvCrossReflectedBindInfo(std::vector<uint32_t> spirv_file, ShaderLanguage targetLanguage = ShaderLanguage::GLSL, int32_t targetVersion = 330);
 
 	    static std::vector<uint32_t> spirvLinker(const std::vector<std::vector<uint32_t>> &binaries);
 		//static ShaderCodeModule::ShaderResources slangReflectedBindInfo(const std::string& shaderCode);

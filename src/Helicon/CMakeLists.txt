@@ -63,10 +63,6 @@ target_link_directories(Helicon PUBLIC
 )
 
 target_link_libraries(Helicon PUBLIC
-    spirv-cross-core
-    spirv-cross-c
-    spirv-cross-cpp
-    spirv-cross-util
     slang
     slang-rt
     gfx
