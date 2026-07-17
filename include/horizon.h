@@ -679,12 +679,6 @@ namespace Corona::Horizon
 
         PipelineShaderDesc(PipelineShaderStage stage, EmbeddedShader::ShaderCodeModule module) : stage(stage), module(std::move(module)) {}
 
-        static PipelineShaderDesc from_spirv(PipelineShaderStage stage, std::vector<uint32_t> spirv)
-        {
-            auto reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv, EmbeddedShader::ShaderLanguage::HLSL);
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv), std::move(reflection)));
-        }
-
         static PipelineShaderDesc from_slang_module(PipelineShaderStage stage,
                                                     EmbeddedShader::SlangModule& module,
                                                     EmbeddedShader::CompilerOption compiler_option = {})
@@ -731,25 +725,6 @@ namespace Corona::Horizon
         bool auto_bind = true;
     };
 
-    // 从 SPIR-V 二进制中读取 compute shader 的 OpExecutionMode LocalSize。
-    // 对非 compute 或无 LocalSize 指令的 SPIR-V 返回 {1,1,1}。
-    [[nodiscard]] inline ktm::uvec3 spirv_local_size(const std::vector<uint32_t>& spirv) noexcept
-    {
-        constexpr size_t   kHeaderWords   = 5;
-        constexpr uint16_t kOpExecutionMode = 16;
-        constexpr uint32_t kLocalSizeMode   = 17;   // ExecutionMode::LocalSize
-        for (size_t w = kHeaderWords; w + 5 < spirv.size(); )
-        {
-            const uint16_t wc = static_cast<uint16_t>(spirv[w] >> 16);
-            const uint16_t op = static_cast<uint16_t>(spirv[w] & 0xFFFFu);
-            if (!wc) break;
-            if (op == kOpExecutionMode && wc >= 6 && spirv[w + 2] == kLocalSizeMode)
-                return { spirv[w + 3], spirv[w + 4], spirv[w + 5] };
-            w += wc;
-        }
-        return { 1u, 1u, 1u };
-    }
-
     struct ComputePipelineDesc
     {
         PipelineShaderDesc compute_shader;
@@ -777,16 +752,6 @@ namespace Corona::Horizon
             if (options.auto_bind)
                 desc.auto_bind_entries = std::move(object.autoBindEntries);
             return desc;
-        }
-
-        static ComputePipelineDesc from_spirv(std::vector<uint32_t> spirv)
-        {
-            // thread_group_size 直接从 SPIR-V 的 OpExecutionMode LocalSize 读取，
-            // 外部调用方无需感知 local_size 的具体值。
-            const ktm::uvec3 local_size = spirv_local_size(spirv);
-            return ComputePipelineDesc(
-                PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, std::move(spirv)),
-                local_size);
         }
 
         static ComputePipelineDesc from_source(std::string source,
@@ -915,12 +880,6 @@ namespace Corona::Horizon
                 desc.auto_bind_entries = std::move(object.autoBindEntries);
 
             return desc;
-        }
-
-        static RasterizerPipelineDesc from_spirv(std::vector<uint32_t> vertex_spirv, std::vector<uint32_t> fragment_spirv)
-        {
-            return RasterizerPipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Vertex, std::move(vertex_spirv)),
-                                          PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment, std::move(fragment_spirv)));
         }
 
         static RasterizerPipelineDesc from_source(std::string vertex_source,
@@ -1291,18 +1250,9 @@ namespace Corona::Horizon
 
         static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
         {
-            if constexpr (requires { CS::spirv; })
-            {
-                // thread_group_size 由 from_spirv 从 SPIR-V 的 LocalSize 自动推导，
-                // 外部传入的 numthreads 对此路径无效。
-                return ComputePipelineDesc::from_spirv(CS::spirv);
-            }
-            else
-            {
-                return ComputePipelineDesc(
-                    PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
-                    numthreads);
-            }
+            return ComputePipelineDesc(
+                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
+                numthreads);
         }
 
         explicit ComputePipeline(CS, ktm::uvec3 numthreads = { 1, 1, 1 },
