@@ -63,8 +63,8 @@ struct ShaderCodeModule
             struct EntryPointInfo
             {
                 std::string name;
-                ShaderStage stage;
-                ktm::uvec3 numthreads;
+                ShaderStage stage {};
+                ktm::uvec3 numthreads { 1, 1, 1 };
             };
 
             uint32_t pushConstantSize = 0;
