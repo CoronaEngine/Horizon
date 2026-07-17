@@ -163,8 +163,12 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	{
 	    auto pc = Ast::AST::getGlobalPushConstant();
 	    auto type = pc->type->generate();
-	    auto begin = type.find_last_of('<') + 1;
-		std::string pushConstantStructName = type.substr(begin,type.find_first_of('>') - begin);
+	    // push constant 现为裸 struct 名(无 <>),不能再依赖 <> 提取。兼容仍带 <...> 的写法。
+	    std::string pushConstantStructName;
+	    if (auto lt = type.find_last_of('<'); lt != std::string::npos)
+	        pushConstantStructName = type.substr(lt + 1, type.find_first_of('>') - (lt + 1));
+	    else
+	        pushConstantStructName = type;
 		auto pushConstantStruct = "struct " + pushConstantStructName + " {\n"
 			+ pushConstantMembers + bindlessHandleMembers + "}\n";
 		auto pushConstant = "[[vk::push_constant]] " + type + " " + pc->generate() + ";\n";

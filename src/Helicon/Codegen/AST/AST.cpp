@@ -299,7 +299,12 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGloba
         auto type = std::make_shared<PushConstantType>();
         pc = std::make_shared<Variate>();
         pc->type = type;
-        type->name = "ParameterBlock<global_push_constant_struct>";
+        // push constant 必须是裸 struct 类型:[[vk::push_constant]] T name;
+        // 曾误用 ParameterBlock<...> 包裹 —— Slang 会优先按 ParameterBlock 分配 descriptor set
+        // (在 bindless 下落到 set 3),把 push constant 编译成 set-3 UBO,与 runtime 的
+        // VkPushConstantRange/push_constant_data_ 期望不符,触发 VUID-...layout-07988。
+        // 直接用 struct 名,使 [[vk::push_constant]] 真正生效。对比 getGlobalUBO 用 ConstantBuffer<...>。
+        type->name = "global_push_constant_struct";
         pc->name = "global_push_constant";
     }
     return pc;
