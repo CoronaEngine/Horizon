@@ -170,8 +170,12 @@ struct ShaderCodeModule
 
         [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false);
         void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
+        bool needPipelineRebuild() const;
+        CompilerOption getCompilerOption() const;
     private:
+        using ConditionInfo = std::vector<bool>;
         std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const;
+        ConditionInfo getCurrentConditionInfo() const;
         void combine(bool bindless);
         std::vector<SlangModule*> getCurrentBranchModules(bool bindless) const;
         SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
@@ -183,6 +187,7 @@ struct ShaderCodeModule
         CompilerOption compilerOption;
         ShaderLanguage sourceLanguage;
         ShaderStage sourceStage;
+        ConditionInfo currentConditionInfo;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
         using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule>>;

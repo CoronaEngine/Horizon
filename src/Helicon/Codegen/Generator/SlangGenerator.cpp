@@ -148,8 +148,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	{
 	    auto ubo = Ast::AST::getGlobalUBO();
 	    auto type = ubo->type->generate();
-	    auto begin = type.find_first_of('<') + 1;
-	    std::string uboStructName = type.substr(begin,type.find_last_of('>') - begin);
+	    auto begin = type.find_last_of('<') + 1;
+	    std::string uboStructName = type.substr(begin,type.find_first_of('>') - begin);
 		output += "struct " + uboStructName + " {\n" + uboMembers + "}\n";
 		if (bindless())
 	        output += "[[vk::binding(0, 3)]]" + type + " " + ubo->generate() + ";\n";
@@ -163,8 +163,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	{
 	    auto pc = Ast::AST::getGlobalPushConstant();
 	    auto type = pc->type->generate();
-	    auto begin = type.find_first_of('<') + 1;
-		std::string pushConstantStructName = type.substr(begin,type.find_last_of('>') - begin);
+	    auto begin = type.find_last_of('<') + 1;
+		std::string pushConstantStructName = type.substr(begin,type.find_first_of('>') - begin);
 		auto pushConstantStruct = "struct " + pushConstantStructName + " {\n"
 			+ pushConstantMembers + bindlessHandleMembers + "}\n";
 		auto pushConstant = "[[vk::push_constant]] " + type + " " + pc->generate() + ";\n";
@@ -178,8 +178,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	{
 	    auto pb = Ast::AST::getGlobalParameterBlock();
 	    auto type = pb->type->generate();
-	    auto begin = type.find_first_of('<') + 1;
-	    std::string parameterBlockStructName = type.substr(begin,type.find_last_of('>') - begin);
+	    auto begin = type.find_last_of('<') + 1;
+	    std::string parameterBlockStructName = type.substr(begin,type.find_first_of('>') - begin);
 		auto parameterBlockStruct = "struct " + parameterBlockStructName + " {\n" + parameterBlockMembers + "}\n";
 		auto parameterBlock = type + " " + pb->generate() + ";\n";
 		output += parameterBlockStruct + parameterBlock;
@@ -187,6 +187,19 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	}
 
 	return output;
+}
+
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::VecValue* node)
+{
+    std::string result = node->type->generate() + "(";
+    for (size_t i = 0; i < node->values.size(); ++i)
+    {
+        result += node->values[i]->generate();
+        if (i != node->values.size() - 1)
+            result += ", ";
+    }
+    result += ")";
+    return result;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineLocalVariate* node)
@@ -275,7 +288,20 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
             for (auto i = allVarRefs.begin(); i != allVarRefs.end(); )
             {
                 call += (*i)->name;
-                func += (*i)->type->generate() + " " + (*i)->name;
+                std::string prefix;
+                if ((*i)->getAccessPermissions() == Ast::AccessPermissions::ReadOnly)
+                {
+                    prefix = "in ";
+                }
+                else if ((*i)->getAccessPermissions() == Ast::AccessPermissions::WriteOnly)
+                {
+                    prefix = "out ";
+                }
+                else if ((*i)->getAccessPermissions() == Ast::AccessPermissions::ReadAndWrite)
+                {
+                    prefix = "inout ";
+                }
+                func += prefix + (*i)->type->generate() + " " + (*i)->name;
                 ++i;
                 if (i != allVarRefs.end())
                 {
@@ -484,6 +510,16 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 {
     return node->array->generate() + "[" + node->index->generate() + "]";
 }
+
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::PushConstantType* node)
+{
+    if (bindless())
+    {
+        return "[[vk::push_constant]] ConstantBuffer<" + node->name + ">";
+    }
+    return node->name;
+}
+
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::StageType* node)
 {
     auto structure = Ast::AST::getEmbeddedShaderStructure();

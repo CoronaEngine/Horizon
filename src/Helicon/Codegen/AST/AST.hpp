@@ -197,12 +197,14 @@ namespace EmbeddedShader::Ast
 	template<typename VariateType> requires ktm::is_vector_v<VariateType>
 	std::shared_ptr<VecValue> AST::createValue(const VariateType& value)
 	{
-		auto type = createVecType<VariateType>();
-		auto vecValue = std::make_shared<VecValue>();
-		vecValue->type = type;
-
-		vecValue->value = Generator::SlangGenerator::getValueOutput<VariateType>(value);
-		return vecValue;
+	    auto type = createVecType<VariateType>();
+	    auto vecValue = std::make_shared<VecValue>();
+	    vecValue->type = type;
+        for (auto element : value.to_array())
+        {
+            vecValue->values.push_back(valueConverter(element));
+        }
+	    return vecValue;
 	}
 
 	template<typename VariateType> requires ktm::is_matrix_v<VariateType>
@@ -231,11 +233,9 @@ namespace EmbeddedShader::Ast
 		auto type = createVecType<ValueType>();
 		auto vecValue = std::make_shared<VecValue>();
 		vecValue->type = type;
-
-		bool first = true;
-		//ide可能会误报警告
-		vecValue->value = Generator::SlangGenerator::getVariateTypeName<ValueType>() + "(" + ((first? (first = false,valueConverter(std::forward<Args>(args))->parse()) :
-				valueConverter(std::forward<Args>(args))->parse() + ",") + ...) + ")";
+	    vecValue->values = std::vector{
+	        valueConverter(std::forward<Args>(args))...
+        };
 		return vecValue;
 	}
 

@@ -15,6 +15,7 @@ namespace EmbeddedShader
 		RasterizedPipelineObject() = default;
 	public:
 		static RasterizedPipelineObject compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
+	    void updateAutoBind(bool bindless);
 		std::unique_ptr<ShaderCodeCompiler> vertex;
 		std::unique_ptr<ShaderCodeCompiler> fragment;
 		std::vector<AutoBindEntry> autoBindEntries;
@@ -22,7 +23,97 @@ namespace EmbeddedShader
 		static std::vector<Ast::ParseOutput> parse(auto&& vertexShaderCode, auto&& fragmentShaderCode);
 	};
 
-	RasterizedPipelineObject RasterizedPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)
+    inline void RasterizedPipelineObject::updateAutoBind(bool bindless)
+    {
+        // Collect auto-bind entries from globalStatements (shared across VS/FS):
+		// Walk all globally-defined textures and check if they have a back-pointer
+		// to a proxy's boundResource_. Match against both vertex and fragment shader's bindInfoPool.
+		{
+			auto vsCodeModule = vertex->getShaderCode(ShaderLanguage::SpirV, bindless);
+			auto fsCodeModule = fragment->getShaderCode(ShaderLanguage::SpirV, bindless);
+			auto& globals = Ast::Parser::getGlobalStatements();
+			for (auto& stmt : globals)
+			{
+				if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
+				{
+					if (def->variate && def->variate->boundValueRef)
+					{
+						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
+						{
+							autoBindEntries.push_back({
+								nullptr,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location,
+								def->variate->boundValueRef,
+								def->variate->boundValueSize
+							});
+						}
+						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
+						{
+							autoBindEntries.push_back({
+								nullptr,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location,
+								def->variate->boundValueRef,
+								def->variate->boundValueSize
+							});
+						}
+					}
+				}
+
+				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+				{
+					if (def->texture && def->texture->boundResourceRef)
+					{
+						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
+						{
+							autoBindEntries.push_back({
+								def->texture->boundResourceRef,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location
+							});
+						}
+						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
+						{
+							autoBindEntries.push_back({
+								def->texture->boundResourceRef,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								static_cast<int32_t>(bindInfo->bindType),
+								bindInfo->location
+							});
+						}
+					}
+				}
+			}
+
+			// Collect render target auto-bind entries from operator() calls in FS.
+			// Textures with renderTargetLocation >= 0 were used as render target outputs.
+			for (auto& stmt : globals)
+			{
+				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+				{
+					if (def->texture && def->texture->renderTargetLocation >= 0 && def->texture->boundResourceRef)
+					{
+						autoBindEntries.push_back({
+							def->texture->boundResourceRef,
+							0, 0,
+							static_cast<int32_t>(ShaderCodeModule::ShaderResources::stageOutputs),
+							static_cast<uint32_t>(def->texture->renderTargetLocation)
+						});
+					}
+				}
+			}
+		}
+    }
+
+    RasterizedPipelineObject RasterizedPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)
 	{
 		Ast::Parser::setBindless(false);
 		auto outputs = parse(vertexShaderCode,fragmentShaderCode);
@@ -58,92 +149,7 @@ namespace EmbeddedShader
 			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, ShaderLanguage::Slang, compilerOption);
 		}
 
-		// Collect auto-bind entries from globalStatements (shared across VS/FS):
-		// Walk all globally-defined textures and check if they have a back-pointer
-		// to a proxy's boundResource_. Match against both vertex and fragment shader's bindInfoPool.
-		{
-			auto vsCodeModule = result.vertex->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
-			auto fsCodeModule = result.fragment->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
-			auto& globals = Ast::Parser::getGlobalStatements();
-			for (auto& stmt : globals)
-			{
-				if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
-				{
-					if (def->variate && def->variate->boundValueRef)
-					{
-						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
-						{
-							result.autoBindEntries.push_back({
-								nullptr,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								def->variate->boundValueRef,
-								def->variate->boundValueSize
-							});
-						}
-						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
-						{
-							result.autoBindEntries.push_back({
-								nullptr,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								def->variate->boundValueRef,
-								def->variate->boundValueSize
-							});
-						}
-					}
-				}
-
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
-				{
-					if (def->texture && def->texture->boundResourceRef)
-					{
-						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
-						{
-							result.autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location
-							});
-						}
-						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
-						{
-							result.autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location
-							});
-						}
-					}
-				}
-			}
-
-			// Collect render target auto-bind entries from operator() calls in FS.
-			// Textures with renderTargetLocation >= 0 were used as render target outputs.
-			for (auto& stmt : globals)
-			{
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
-				{
-					if (def->texture && def->texture->renderTargetLocation >= 0 && def->texture->boundResourceRef)
-					{
-						result.autoBindEntries.push_back({
-							def->texture->boundResourceRef,
-							0, 0,
-							static_cast<int32_t>(ShaderCodeModule::ShaderResources::stageOutputs),
-							static_cast<uint32_t>(def->texture->renderTargetLocation)
-						});
-					}
-				}
-			}
-		}
+		result.updateAutoBind(compilerOption.enableBindless);
 
 		return result;
 	}

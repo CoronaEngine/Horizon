@@ -28,13 +28,63 @@ namespace EmbeddedShader
 	{
 	public:
 		static ComputePipelineObject compile(auto&& computeShaderCode, ktm::uvec3 numthreads = ktm::uvec3(1), CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
+	    void updateAutoBind(bool bindless);
 		std::unique_ptr<ShaderCodeCompiler> compute;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
 		static std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode);
 	};
 
-	ComputePipelineObject ComputePipelineObject::compile(auto&& computeShaderCode, ktm::uvec3 numthreads,CompilerOption compilerOption,std::source_location sourceLocation)
+    inline void ComputePipelineObject::updateAutoBind(bool bindless)
+    {
+        // Collect auto-bind entries from globalStatements:
+        // Walk all globally-defined textures and check if they have a back-pointer
+        // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
+        {
+            auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, bindless);
+            auto& globals = Ast::Parser::getGlobalStatements();
+            for (auto& stmt : globals)
+            {
+                if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
+                {
+                    if (def->variate && def->variate->boundValueRef)
+                    {
+                        if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->variate->name))
+                        {
+                            autoBindEntries.push_back({
+                                nullptr,
+                                bindInfo->byteOffset,
+                                bindInfo->typeSize,
+                                static_cast<int32_t>(bindInfo->bindType),
+                                bindInfo->location,
+                                def->variate->boundValueRef,
+                                def->variate->boundValueSize
+                            });
+                        }
+                    }
+                }
+
+                if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+                {
+                    if (def->texture && def->texture->boundResourceRef)
+                    {
+                        if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->texture->name))
+                        {
+                            autoBindEntries.push_back({
+                                def->texture->boundResourceRef,
+                                bindInfo->byteOffset,
+                                bindInfo->typeSize,
+                                static_cast<int32_t>(bindInfo->bindType),
+                                bindInfo->location
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    ComputePipelineObject ComputePipelineObject::compile(auto&& computeShaderCode, ktm::uvec3 numthreads,CompilerOption compilerOption,std::source_location sourceLocation)
 	{
 		Generator::SlangGenerator::numthreads = numthreads;
 		Ast::Parser::setBindless(false);
@@ -55,51 +105,7 @@ namespace EmbeddedShader
             result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
 		}
 
-		// Collect auto-bind entries from globalStatements:
-		// Walk all globally-defined textures and check if they have a back-pointer
-		// to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
-		{
-			auto codeModule = result.compute->getShaderCode(ShaderLanguage::SpirV, compilerOption.enableBindless);
-			auto& globals = Ast::Parser::getGlobalStatements();
-			for (auto& stmt : globals)
-			{
-				if (auto* def = dynamic_cast<Ast::DefineUniformVariate*>(stmt.get()))
-				{
-					if (def->variate && def->variate->boundValueRef)
-					{
-						if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->variate->name))
-						{
-							result.autoBindEntries.push_back({
-								nullptr,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								def->variate->boundValueRef,
-								def->variate->boundValueSize
-							});
-						}
-					}
-				}
-
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
-				{
-					if (def->texture && def->texture->boundResourceRef)
-					{
-						if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->texture->name))
-						{
-							result.autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location
-							});
-						}
-					}
-				}
-			}
-		}
+		result.updateAutoBind(compilerOption.enableBindless);
 
 		return result;
 	}

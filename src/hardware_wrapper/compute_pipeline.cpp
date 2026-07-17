@@ -46,9 +46,9 @@ namespace Corona::Horizon
 
     ComputePipelineBase::ComputePipelineBase() = default;
 
-    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location)
+    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
+        rebuild_pipeline(std::move(desc));
     }
 
     ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
@@ -84,6 +84,11 @@ namespace Corona::Horizon
     ComputePipelineBase::operator bool() const noexcept
     {
         return ResourceHandle::operator bool();
+    }
+
+    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc)
+    {
+        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), location_));
     }
 
     ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
