@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -720,6 +721,24 @@ namespace Corona::Horizon
                 if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
                     info.variateName = info.variateName.substr(pos + 1);
             }
+
+            // [诊断] 转储 from_slang_module 路径的绑定坐标，核实全局 UBO 是否被反射成 set=0（应为 set=3）。
+            // 确认绑定机制问题后应移除本段。
+            std::cout << "===== [ReflectDiag from_slang_module] binds=" << resources.bindInfoPool.size()
+                      << " uboSize=" << resources.uniformBufferSize
+                      << " pcSize=" << resources.pushConstantSize << " =====\n";
+            for (const auto& info : resources.bindInfoPool)
+            {
+                std::cout << "  set=" << info.set
+                          << " bind=" << info.binding
+                          << " loc=" << info.location
+                          << " bindType=" << static_cast<int32_t>(info.bindType)
+                          << " off=" << info.byteOffset
+                          << " size=" << info.typeSize
+                          << " elem=" << info.elementCount
+                          << " '" << info.variateName << "'\n";
+            }
+            std::cout << std::flush;
 
             return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
         }

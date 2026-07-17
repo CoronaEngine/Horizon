@@ -66,6 +66,69 @@ namespace EmbeddedShader
         return result;
     }
 
+    namespace
+    {
+        uint32_t scalarSizeInBytes(slang::TypeReflection::ScalarType st)
+        {
+            switch (st)
+            {
+                case slang::TypeReflection::ScalarType::Float64:
+                case slang::TypeReflection::ScalarType::Int64:
+                case slang::TypeReflection::ScalarType::UInt64: return 8;
+                case slang::TypeReflection::ScalarType::Float16:
+                case slang::TypeReflection::ScalarType::Int16:
+                case slang::TypeReflection::ScalarType::UInt16: return 2;
+                case slang::TypeReflection::ScalarType::Int8:
+                case slang::TypeReflection::ScalarType::UInt8:  return 1;
+                default:                                        return 4; // Float32/Int32/UInt32/未知
+            }
+        }
+
+        // varying(stage input/output)按标量类型给出下游 vertex_attribute_format 依赖的 typeName。
+        const char* varyingScalarTypeName(slang::TypeReflection::ScalarType st)
+        {
+            switch (st)
+            {
+                case slang::TypeReflection::ScalarType::Int8:
+                case slang::TypeReflection::ScalarType::Int16:
+                case slang::TypeReflection::ScalarType::Int32:
+                case slang::TypeReflection::ScalarType::Int64:  return "int";
+                case slang::TypeReflection::ScalarType::UInt8:
+                case slang::TypeReflection::ScalarType::UInt16:
+                case slang::TypeReflection::ScalarType::UInt32:
+                case slang::TypeReflection::ScalarType::UInt64: return "uint";
+                default:                                        return "float";
+            }
+        }
+
+        // 计算 varying 叶子的分量数 / 字节大小 / 标量类型名（对齐旧 spirv-cross 行为：
+        // elementCount = vecsize*columns, typeSize = 4*vecsize*columns）。
+        // varying 不占 uniform 存储，getSize() 返回 0，故必须按向量/矩阵宽度推导。
+        void fillVaryingWidth(slang::TypeLayoutReflection* typeLayout,
+                              EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info)
+        {
+            const auto kind = typeLayout->getKind();
+            if (kind == slang::TypeReflection::Kind::Vector)
+            {
+                info.elementCount = static_cast<uint64_t>(typeLayout->getElementCount());
+                info.typeSize = static_cast<uint32_t>(info.elementCount * scalarSizeInBytes(typeLayout->getScalarType()));
+                info.typeName = varyingScalarTypeName(typeLayout->getScalarType());
+            }
+            else if (kind == slang::TypeReflection::Kind::Matrix)
+            {
+                info.elementCount = static_cast<uint64_t>(typeLayout->getRowCount() * typeLayout->getColumnCount());
+                info.typeSize = static_cast<uint32_t>(info.elementCount * scalarSizeInBytes(typeLayout->getScalarType()));
+                info.typeName = varyingScalarTypeName(typeLayout->getScalarType());
+            }
+            else if (kind == slang::TypeReflection::Kind::Scalar)
+            {
+                info.elementCount = 1;
+                info.typeSize = scalarSizeInBytes(typeLayout->getScalarType());
+                info.typeName = varyingScalarTypeName(typeLayout->getScalarType());
+            }
+        }
+    }
+
     void ShaderCursor::collectBindings(EmbeddedShader::ShaderCodeModule::ShaderResources& resources, const std::string& namePrefix) const
     {
         auto kind = m_typeLayout->getKind();
@@ -227,6 +290,16 @@ namespace EmbeddedShader
             info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
             info.elementCount = 1;
             info.bindType = bindType;
+
+            // varying(顶点输入/输出)不占 uniform 存储, getSize()=0 且分量数需从向量宽度推导。
+            // 下游 vertex_attribute_format 依赖 elementCount(分量数)+typeName 决定 VkFormat,
+            // 顶点属性 offset 累加依赖 typeSize。仅对 varying 修正, 不影响 descriptor 语义。
+            if (bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageInputs ||
+                bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
+            {
+                fillVaryingWidth(m_typeLayout, info);
+            }
+
             fillSemanticAndLocation(info);
             resources.bindInfoPool.push_back(info);
             return;
