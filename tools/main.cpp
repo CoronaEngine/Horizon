@@ -24,34 +24,6 @@ void generateBinary(std::stringstream& out, std::string_view name, const SlangMo
     out << "}};\n";
 }
 
-// Slang 的 GLSL→SPIR-V codegen 会把 compute 的 OpExecutionMode LocalSize 误烧为 1,1,1，
-// 但 Slang 反射（getComputeThreadGroupSize）能正确恢复 local_size。用反射值回填 SPIR-V，
-// 使内嵌 SPIR-V 的 LocalSize 与源一致。返回是否成功命中并改写了 LocalSize。
-bool patchSpirvLocalSize(std::vector<uint32_t>& spirv, ktm::uvec3 localSize)
-{
-    constexpr size_t kHeaderWords = 5;            // SPIR-V 头部 5 词
-    constexpr uint16_t kOpExecutionMode = 16;
-    constexpr uint32_t kExecutionModeLocalSize = 17;  // LocalSize，后跟 x,y,z
-
-    bool patched = false;
-    for (size_t w = kHeaderWords; w + 5 < spirv.size();)
-    {
-        const uint16_t wordCount = static_cast<uint16_t>(spirv[w] >> 16);
-        const uint16_t opcode = static_cast<uint16_t>(spirv[w] & 0xFFFFu);
-        if (wordCount == 0)
-            break;  // 防御非法指令导致死循环
-        if (opcode == kOpExecutionMode && wordCount >= 6 && spirv[w + 2] == kExecutionModeLocalSize)
-        {
-            spirv[w + 3] = localSize.x;
-            spirv[w + 4] = localSize.y;
-            spirv[w + 5] = localSize.z;
-            patched = true;
-        }
-        w += wordCount;
-    }
-    return patched;
-}
-
 void buildFunctionParameter(FunctionSignature& signature, std::stringstream& out)
 {
 	out << "(";
@@ -692,34 +664,6 @@ int main(int argc, char** argv)
     shaderResourceArgs.module = &slangModule;
     shaderResourceArgs.stage = inputStage;
     ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
-    // glslang 已移除：复用上面已编译的 slangModule，经 slang 直出 SPIR-V
-    SlangCompileArgs2 spirvArgs;
-    spirvArgs.module = &slangModule;
-    spirvArgs.sourceLanguage = inputLanguage;
-    spirvArgs.targetLanguages = {ShaderLanguage::SpirV};
-    spirvArgs.stage = inputStage;
-    spirvArgs.enableReflection = true;
-    auto spirvResult = ShaderLanguageConverter::slangCompilerWithModules(spirvArgs);
-    auto spirvIt = spirvResult.binaryTargets.find(ShaderLanguage::SpirV);
-    if (spirvIt == spirvResult.binaryTargets.end())
-        throw std::runtime_error("Failed to generate SPIR-V from Slang module.");
-    std::vector<uint32_t> spirvCode = std::move(spirvIt->second);
-
-    // Slang 的 GLSL→SPIR-V codegen 会把 compute 的 OpExecutionMode LocalSize 误烧为 1,1,1，
-    // 但上面 slangModuleReflectShaderResource 的反射（getComputeThreadGroupSize）已正确恢复
-    // local_size。直接用反射值回填 SPIR-V，无需再从源码文本解析。
-    if (inputStage == ShaderStage::ComputeShader)
-    {
-        if (resources.entryPointInfoPool.empty())
-            throw std::runtime_error("Compute shader reflection produced no entry point.");
-
-        const ktm::uvec3 numthreads = resources.entryPointInfoPool.front().numthreads;
-        if (numthreads.x == 0 || numthreads.y == 0 || numthreads.z == 0)
-            throw std::runtime_error("Failed to reflect compute local_size (got a zero dimension).");
-
-        if (!patchSpirvLocalSize(spirvCode, numthreads))
-            throw std::runtime_error("Compute SPIR-V has no LocalSize execution mode to patch.");
-    }
 
     //提取成员名，删去路径前缀
     for (auto& info : resources.bindInfoPool)
@@ -749,11 +693,8 @@ int main(int argc, char** argv)
     auto smName = "slang_module_" + fileName;
 
 	generateBinary(out, smName, slangModule);
-    auto spvName = "spirv_" + fileName;
-    generateBinary(out, spvName, spirvCode);
 
-    // 稳定别名：用户可通过 xxx_glsl::spirv 或 xxx_glsl::slangModule 引用预编译 shader。
-    out << "static inline auto& spirv = " << spvName << ";\n";
+    // 稳定别名：用户可通过 xxx_glsl::slangModule 引用预编译 shader。
     out << "static inline auto& slangModule = " << smName << ";\n";
 
     // Generate BindingKey struct declarations first, collect binding block names
