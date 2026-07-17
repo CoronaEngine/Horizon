@@ -2190,19 +2190,20 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
             cursor.m_varLayout = param;
             cursor.m_typeLayout = param->getTypeLayout();
 
-            // 顶层参数的 descriptor set 取法依资源“种类”而不同(已实测 SpirV target 逐字段确认):
-            //   - 容器类型 ConstantBuffer / ParameterBlock: 各自占用一个寄存器空间(set),
-            //     set 来自 getOffset(SubElementRegisterSpace)。bindless UBO
-            //     ([[vk::binding(0,3)]] ConstantBuffer,反射名 global_push_constant)由此得 set=3;
-            //     真 push_constant 的 SubElementRegisterSpace=0(不占 descriptor set),不受影响。
-            //   - 普通资源(纹理/采样器/buffer,含 bindless 句柄数组 __DynamicResource[]):
-            //     set 来自 getBindingSpace(DescriptorTableSlot)。textureHandles([vk::binding(0,2)])由此得 set=2。
-            // 早先统一用 getOffset(RegisterSpace) 对两类都恒返回 0 → set 2/3 资源全被误报到 set 0,
-            // 导致 uses_bindless 判定失败 + UBO 落错 set。此分派与所有内部导航
-            // (field()/ConstantBuffer/ParameterBlock/PushConstant handler)取 set 的方式一致。
-            const auto param_kind = param->getTypeLayout()->getKind();
-            if (param_kind == slang::TypeReflection::Kind::ParameterBlock ||
-                param_kind == slang::TypeReflection::Kind::ConstantBuffer)
+            // 顶层参数的 descriptor set 取法(已实测 SpirV target 逐 compile/逐字段确认):
+            //   - ParameterBlock(kind=11): 其内容独占一个寄存器空间, set 来自
+            //     getOffset(SubElementRegisterSpace)。non-bindless 的 global_parameter_block 由此得 set=1。
+            //   - 其余全部(ConstantBuffer UBO + 普通纹理/采样器/buffer + bindless 句柄数组 __DynamicResource[]):
+            //     set 来自 getBindingSpace(DescriptorTableSlot)。
+            //       · bindless global_ubo([[vk::binding(0,3)]] ConstantBuffer) → 3
+            //       · textureHandles([vk::binding(0,2)]) → 2, bufferHandles → 1, combinedTextureSamplerHandles → 0
+            //       · non-bindless global_ubo(无显式 binding) → 0
+            //       · 真 push_constant(getParameterCategory==PushConstantBuffer)DTS=0, 但 set 对 push constant 无意义
+            //         (collectBindings 走 PushConstantBuffer 分支, 进 VkPushConstantRange 而非 descriptor set)。
+            // 旧代码对非 ParameterBlock 统一用 getOffset(RegisterSpace) 恒返回 0 → set 2/3 资源全被误报到 set 0。
+            // 注意: ConstantBuffer 不能并入 ParameterBlock 用 SubElementRegisterSpace —— 那对 global_ubo 返回 0,
+            // 会让 bindless UBO 落到 set 0(bindless 保留集)从而崩溃(rasterizer add_descriptor_binding 抛异常)。
+            if (param->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ParameterBlock)
             {
                 cursor.m_offset.set = param->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
             }
