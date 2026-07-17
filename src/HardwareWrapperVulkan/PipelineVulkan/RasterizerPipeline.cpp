@@ -286,7 +286,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(const std::vector<uint32_t> &
                                                    const std::source_location &sourceLocation)
     : RasterizerPipelineVulkan()
 {
-    // 直接使用预编译 SPIR-V + spirv-cross 反射（跳过 glslang 编译）
+    // 直接使用预编译 SPIR-V + spirv-cross 反射
     auto vertResources = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(vertexSpirV, EmbeddedShader::ShaderLanguage::HLSL);
     auto fragResources = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(fragmentSpirV, EmbeddedShader::ShaderLanguage::HLSL);
 
