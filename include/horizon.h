@@ -731,6 +731,25 @@ namespace Corona::Horizon
         bool auto_bind = true;
     };
 
+    // 从 SPIR-V 二进制中读取 compute shader 的 OpExecutionMode LocalSize。
+    // 对非 compute 或无 LocalSize 指令的 SPIR-V 返回 {1,1,1}。
+    [[nodiscard]] inline ktm::uvec3 spirv_local_size(const std::vector<uint32_t>& spirv) noexcept
+    {
+        constexpr size_t   kHeaderWords   = 5;
+        constexpr uint16_t kOpExecutionMode = 16;
+        constexpr uint32_t kLocalSizeMode   = 17;   // ExecutionMode::LocalSize
+        for (size_t w = kHeaderWords; w + 5 < spirv.size(); )
+        {
+            const uint16_t wc = static_cast<uint16_t>(spirv[w] >> 16);
+            const uint16_t op = static_cast<uint16_t>(spirv[w] & 0xFFFFu);
+            if (!wc) break;
+            if (op == kOpExecutionMode && wc >= 6 && spirv[w + 2] == kLocalSizeMode)
+                return { spirv[w + 3], spirv[w + 4], spirv[w + 5] };
+            w += wc;
+        }
+        return { 1u, 1u, 1u };
+    }
+
     struct ComputePipelineDesc
     {
         PipelineShaderDesc compute_shader;
@@ -762,7 +781,12 @@ namespace Corona::Horizon
 
         static ComputePipelineDesc from_spirv(std::vector<uint32_t> spirv)
         {
-            return ComputePipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, std::move(spirv)));
+            // thread_group_size 直接从 SPIR-V 的 OpExecutionMode LocalSize 读取，
+            // 外部调用方无需感知 local_size 的具体值。
+            const ktm::uvec3 local_size = spirv_local_size(spirv);
+            return ComputePipelineDesc(
+                PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, std::move(spirv)),
+                local_size);
         }
 
         static ComputePipelineDesc from_source(std::string source,
@@ -1079,6 +1103,17 @@ namespace Corona::Horizon
         ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
         ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
         [[nodiscard]] ComputePipelineDesc desc() const;
+
+        // 根据管线自身的 thread_group_size 将像素尺寸换算为 dispatch group 数。
+        // 消除调用方对 local_size 的硬编码依赖（ceil(w/tgs.x), ceil(h/tgs.y)）。
+        struct DispatchGroups { uint32_t x; uint32_t y; };
+        [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const
+        {
+            const ktm::uvec3 tgs = desc().thread_group_size;
+            return { (width  + tgs.x - 1u) / tgs.x,
+                     (height + tgs.y - 1u) / tgs.y };
+        }
+
         [[nodiscard]] CommandBatch command_batch() const;
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
@@ -1258,9 +1293,9 @@ namespace Corona::Horizon
         {
             if constexpr (requires { CS::spirv; })
             {
-                return ComputePipelineDesc(
-                    PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, CS::spirv),
-                    numthreads);
+                // thread_group_size 由 from_spirv 从 SPIR-V 的 LocalSize 自动推导，
+                // 外部传入的 numthreads 对此路径无效。
+                return ComputePipelineDesc::from_spirv(CS::spirv);
             }
             else
             {
