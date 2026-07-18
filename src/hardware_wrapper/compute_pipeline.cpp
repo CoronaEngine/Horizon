@@ -88,7 +88,23 @@ namespace Corona::Horizon
 
     void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc)
     {
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), location_));
+        auto object = desc.pipelineObject;
+        if (object)
+        {
+            condition_info_ = object->compute->getCurrentConditionInfo();
+            auto it = pipeline_pool_.find(object->getCombinedKey());
+            if (it != pipeline_pool_.end())
+            {
+                ResourceBridge::set(*this, it->second);
+                return;
+            }
+        }
+        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        if (object)
+        {
+            pipeline_pool_.insert({ object->getCombinedKey(), pipeline });
+        }
+        ResourceBridge::set(*this, std::move(pipeline));
     }
 
     ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)

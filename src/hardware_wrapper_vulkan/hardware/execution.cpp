@@ -2313,7 +2313,7 @@ namespace Corona::Horizon
             auto desc = computePipeline->desc();
             if (!desc.pipelineObject) continue;
             auto& cc = desc.pipelineObject->compute;
-            if (cc->needPipelineRebuild())
+            if (cc->needPipelineRebuild(computePipeline->condition_info_))
             {
                 desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
                 desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless);
@@ -2329,13 +2329,13 @@ namespace Corona::Horizon
             auto& vc = desc.pipelineObject->vertex;
             auto& fc = desc.pipelineObject->fragment;
             bool needRebuild = false;
-            if (vc->needPipelineRebuild())
+            if (vc->needPipelineRebuild(rasterizerPipeline->vert_condition_info_))
             {
                 desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
                 needRebuild = true;
             }
 
-            if (fc->needPipelineRebuild())
+            if (fc->needPipelineRebuild(rasterizerPipeline->frag_condition_info_))
             {
                 desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
                 needRebuild = true;

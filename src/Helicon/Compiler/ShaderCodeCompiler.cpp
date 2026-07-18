@@ -185,7 +185,6 @@ namespace EmbeddedShader
         SlangCompileResult result;
         if (!option.branches.empty())
         {
-            currentConditionInfo = getCurrentConditionInfo();
             std::vector<SlangModule*> pDeclares;
             auto languageStr = "SlangModule";
 
@@ -348,7 +347,7 @@ namespace EmbeddedShader
         }
     }
 
-    bool ShaderCodeCompiler::needPipelineRebuild() const
+    bool ShaderCodeCompiler::needPipelineRebuild(const ConditionInfo& currentConditionInfo) const
     {
         return currentConditionInfo != getCurrentConditionInfo();
     }
@@ -356,6 +355,16 @@ namespace EmbeddedShader
     CompilerOption ShaderCodeCompiler::getCompilerOption() const
     {
         return compilerOption;
+    }
+
+    std::string ShaderCodeCompiler::getCombinedKey() const
+    {
+        std::string result;
+        for (const auto& value : conditions)
+        {
+            result += value() ? "1" : "0";
+        }
+        return result;
     }
 
     std::string ShaderCodeCompiler::getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const
@@ -385,7 +394,6 @@ namespace EmbeddedShader
 
     void ShaderCodeCompiler::combine(bool bindless)
     {
-        currentConditionInfo = getCurrentConditionInfo();
         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
             compiledOutputs_[itemName] = code;

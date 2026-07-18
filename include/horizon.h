@@ -1056,6 +1056,7 @@ namespace Corona::Horizon
 
     class ComputePipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipelineBase>
     {
+        friend class HardwareExecutor;
     public:
         ComputePipelineBase();
         explicit ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
@@ -1089,6 +1090,8 @@ namespace Corona::Horizon
 
         void rebuild_pipeline(ComputePipelineDesc desc);
     private:
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
         std::source_location location_;
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
@@ -1112,6 +1115,7 @@ namespace Corona::Horizon
 
     class RasterizerPipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipelineBase>
     {
+        friend class HardwareExecutor;
     public:
         RasterizerPipelineBase();
         explicit RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
@@ -1165,6 +1169,9 @@ namespace Corona::Horizon
 
         void rebuild_pipeline(RasterizerPipelineDesc desc);
     private:
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
         std::source_location location_;
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {

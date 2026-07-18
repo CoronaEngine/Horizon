@@ -16,6 +16,7 @@ namespace EmbeddedShader
 	public:
 		static RasterizedPipelineObject compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
 	    void updateAutoBind(bool bindless);
+	    [[nodiscard]] std::string getCombinedKey() const;
 		std::unique_ptr<ShaderCodeCompiler> vertex;
 		std::unique_ptr<ShaderCodeCompiler> fragment;
 		std::vector<AutoBindEntry> autoBindEntries;
@@ -111,6 +112,11 @@ namespace EmbeddedShader
 				}
 			}
 		}
+    }
+
+    inline std::string RasterizedPipelineObject::getCombinedKey() const
+    {
+        return "vertex" + vertex->getCombinedKey() + "fragment" + fragment->getCombinedKey();
     }
 
     RasterizedPipelineObject RasterizedPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)

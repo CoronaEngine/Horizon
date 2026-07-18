@@ -28,12 +28,18 @@ namespace EmbeddedShader
 	{
 	public:
 		static ComputePipelineObject compile(auto&& computeShaderCode, ktm::uvec3 numthreads = ktm::uvec3(1), CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
+	    [[nodiscard]] std::string getCombinedKey() const;
 	    void updateAutoBind(bool bindless);
 		std::unique_ptr<ShaderCodeCompiler> compute;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
 		static std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode);
 	};
+
+    inline std::string ComputePipelineObject::getCombinedKey() const
+    {
+        return "compute" + compute->getCombinedKey();
+    }
 
     inline void ComputePipelineObject::updateAutoBind(bool bindless)
     {

@@ -113,13 +113,24 @@ void run_example_edsl()
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
     //option = true;
+    float t = 0.f;
     const auto start_time = std::chrono::high_resolution_clock::now();
+    auto last_time = std::chrono::high_resolution_clock::now();
+    std::cout << std::boolalpha;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
+        auto now = std::chrono::high_resolution_clock::now();
+        t += std::chrono::duration<float>(now - last_time).count();
+        last_time = now;
+        if (t >= 1.f)
+        {
+            t -= 1.f;
+            option = !option;
+        }
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
         model = to_edsl_matrix(glm::transpose(ubo.model));
         view = to_edsl_matrix(glm::transpose(ubo.view));

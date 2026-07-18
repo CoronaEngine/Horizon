@@ -49,7 +49,7 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        rebuild_pipeline(desc);
+        rebuild_pipeline(std::move(desc));
     }
 
     RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
@@ -169,7 +169,24 @@ namespace Corona::Horizon
     {
         if (!validate_rasterizer_pipeline_desc(desc))
             return;
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), location_));
+        auto object = desc.pipelineObject;
+        if (object)
+        {
+            vert_condition_info_ = object->vertex->getCurrentConditionInfo();
+            frag_condition_info_ = object->fragment->getCurrentConditionInfo();
+            auto it = pipeline_pool_.find(object->getCombinedKey());
+            if (it != pipeline_pool_.end())
+            {
+                ResourceBridge::set(*this, it->second);
+                return;
+            }
+        }
+        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        if (object)
+        {
+            pipeline_pool_.insert({ object->getCombinedKey(), pipeline });
+        }
+        ResourceBridge::set(*this, std::move(pipeline));
     }
 
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)
