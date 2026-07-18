@@ -47,12 +47,9 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase::RasterizerPipelineBase() = default;
 
-    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location)
+    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        if (!validate_rasterizer_pipeline_desc(desc))
-            return;
-
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
+        rebuild_pipeline(std::move(desc));
     }
 
     RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
@@ -118,7 +115,7 @@ namespace Corona::Horizon
 
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
         bind_auto_resources(impl);
-        impl->record(*this, index_buffer, vertex_buffer, params);
+        impl->record(this, index_buffer, vertex_buffer, params);
         return *this;
     }
 
@@ -166,6 +163,30 @@ namespace Corona::Horizon
     {
         std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         pipeline_impl(token)->record_consuming(recorder);
+    }
+
+    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc)
+    {
+        if (!validate_rasterizer_pipeline_desc(desc))
+            return;
+        auto object = desc.pipelineObject;
+        if (object)
+        {
+            vert_condition_info_ = object->vertex->getCurrentConditionInfo();
+            frag_condition_info_ = object->fragment->getCurrentConditionInfo();
+            auto it = pipeline_pool_.find(object->getCombinedKey());
+            if (it != pipeline_pool_.end())
+            {
+                ResourceBridge::set(*this, it->second);
+                return;
+            }
+        }
+        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        if (object)
+        {
+            pipeline_pool_.insert({ object->getCombinedKey(), pipeline });
+        }
+        ResourceBridge::set(*this, std::move(pipeline));
     }
 
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

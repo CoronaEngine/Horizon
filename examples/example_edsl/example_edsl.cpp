@@ -80,6 +80,8 @@ void run_example_edsl()
     Float4x4 view;
     Float4x4 proj;
 
+    bool option = false;
+
     auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
         position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
         Float color_weight = edsl_header_glsl.get_color_weight(vertex->color);
@@ -88,7 +90,16 @@ void run_example_edsl()
 
     auto fragment_shader = [&](Float4 input) {
         Float4 color = texture(texture_proxy, input->xy());
-        final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
+        Float4 finalColor;
+        $IF (option)
+        {
+            finalColor = color * Float4(input->z, input->z, input->z, 1.0f);;
+        }
+        $ELSE
+        {
+            finalColor = Float4(input->x, input->y, input->z, 1.0f);
+        }
+        final_output_proxy << finalColor;
     };
 
     Corona::Horizon::RasterizerPipelineDesc desc;
@@ -101,13 +112,25 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+    //option = true;
+    float t = 0.f;
     const auto start_time = std::chrono::high_resolution_clock::now();
+    auto last_time = std::chrono::high_resolution_clock::now();
+    std::cout << std::boolalpha;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
+        auto now = std::chrono::high_resolution_clock::now();
+        t += std::chrono::duration<float>(now - last_time).count();
+        last_time = now;
+        if (t >= 1.f)
+        {
+            t -= 1.f;
+            option = !option;
+        }
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
         model = to_edsl_matrix(glm::transpose(ubo.model));
         view = to_edsl_matrix(glm::transpose(ubo.view));

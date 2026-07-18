@@ -37,6 +37,11 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+    struct PushConstantType : NameType
+    {
+        std::string parse() override;
+    };
+
     struct StageType : Type
     {
         std::string suffix;
@@ -52,6 +57,7 @@ namespace EmbeddedShader::Ast
 		virtual void access(AccessPermissions permissions);
 		virtual std::string accessPath();
 	    virtual const Variate *getRootVariate() const { return nullptr; }
+	    virtual AccessPermissions getAccessPermissions() const { return AccessPermissions::None; }
 	};
 
 	struct Variate : Value
@@ -65,7 +71,9 @@ namespace EmbeddedShader::Ast
 
 	struct LocalVariate : Variate
 	{
-
+        AccessPermissions permissions = AccessPermissions::None;
+	    void access(AccessPermissions permissions) override;
+	    AccessPermissions getAccessPermissions() const override;
 	};
 
 	struct BasicType : NameType
@@ -85,7 +93,7 @@ namespace EmbeddedShader::Ast
 
 	struct VecValue : Value
 	{
-		std::string value;
+		std::vector<std::shared_ptr<Value>> values;
 		std::string parse() override;
 	};
 
@@ -176,6 +184,7 @@ namespace EmbeddedShader::Ast
 		//Variate::type 将被解释为元素类型
 
 		AccessPermissions permissions = AccessPermissions::None;
+	    AccessPermissions getAccessPermissions() const override;
 		void access(AccessPermissions permissions) override;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
@@ -200,6 +209,7 @@ namespace EmbeddedShader::Ast
 	struct UniformVariate : Variate
 	{
 		AccessPermissions permissions = AccessPermissions::None;
+	    AccessPermissions getAccessPermissions() const override;
 		bool pushConstant = false;
 		const void* boundValueRef = nullptr;
 		uint32_t boundValueSize = 0;
@@ -242,6 +252,7 @@ namespace EmbeddedShader::Ast
         //Variate::type 将被解释为元素类型
 
         AccessPermissions permissions = AccessPermissions::None;
+        AccessPermissions getAccessPermissions() const override;
         void access(AccessPermissions permissions) override;
     	std::string parse() override;
 

@@ -160,6 +160,7 @@ struct ShaderCodeModule
     struct ShaderCodeCompiler
     {
     public:
+        using ConditionInfo = std::vector<bool>;
         // ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
         // ShaderCodeCompiler(const std::vector<uint32_t> &shaderCode, ShaderStage inputStage, ShaderLanguage language = ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
 
@@ -170,6 +171,12 @@ struct ShaderCodeModule
 
         [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false);
         void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
+        bool needPipelineRebuild(const ConditionInfo& currentConditionInfo) const;
+        CompilerOption getCompilerOption() const;
+        std::string getCombinedKey() const;
+
+        ConditionInfo getCurrentConditionInfo() const;
+
     private:
         std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const;
         void combine(bool bindless);

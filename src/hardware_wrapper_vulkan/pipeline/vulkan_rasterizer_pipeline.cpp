@@ -1573,7 +1573,7 @@ namespace Corona::Horizon
         return desc_.auto_bind_entries;
     }
 
-    void VulkanRasterizerPipeline::record(const ResourceHandle& pipeline,
+    void VulkanRasterizerPipeline::record(RasterizerPipelineBase* pipeline,
                                           const HardwareBuffer& index_buffer,
                                           const HardwareBuffer& vertex_buffer,
                                           const DrawIndexedParams& params)
@@ -1582,7 +1582,7 @@ namespace Corona::Horizon
             return;
 
         RecordedDraw draw;
-        draw.pipeline = ResourceBridge::token(pipeline);
+        draw.pipeline = pipeline;
         draw.index_buffer = index_buffer;
         draw.vertex_buffer = vertex_buffer;
         draw.params = normalize_draw_params(index_buffer, params);
@@ -1658,7 +1658,8 @@ namespace Corona::Horizon
         for (const RecordedDraw& draw : state.draws)
         {
             DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-            ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
+            //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
+            draw_desc.pipeline = draw.pipeline;
             draw_desc.push_constant_data = draw.push_constant_data;
             draw_desc.uniform_buffers = draw.uniform_buffers;
             for (const BoundImage& image : draw.images)
@@ -1735,7 +1736,8 @@ namespace Corona::Horizon
         {
             DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
             draw_desc.debug_label = std::move(draw.params.debug_label);
-            ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
+            //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
+            draw_desc.pipeline = draw.pipeline;
             draw_desc.push_constant_data = std::move(draw.push_constant_data);
             draw_desc.uniform_buffers = std::move(draw.uniform_buffers);
             draw_desc.bindings.reserve(draw.images.size());
