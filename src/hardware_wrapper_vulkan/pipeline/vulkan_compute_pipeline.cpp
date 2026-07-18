@@ -1061,9 +1061,10 @@ namespace Corona::Horizon
         };
     }
 
-    CommandBatch VulkanComputePipeline::command_batch(const ResourceHandle& pipeline) const
+    CommandBatch VulkanComputePipeline::command_batch(ComputePipelineBase& pipeline) const
     {
         Snapshot state = snapshot();
+        state.dispatch.pipeline = &pipeline;
 
         for (const BoundBuffer& buffer : state.buffers)
         {
@@ -1100,7 +1101,7 @@ namespace Corona::Horizon
         }
 
         CommandBatch batch;
-        batch << dispatch({ pipeline }, std::move(state.dispatch));
+        batch << dispatch(std::move(state.dispatch));
         return batch;
     }
 

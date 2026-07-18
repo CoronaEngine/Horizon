@@ -174,7 +174,7 @@ namespace Corona::Horizon
                     << " instances=" << draw.instance_count
                     << " first_index=" << draw.first_index
                     << " vertex_offset=" << draw.vertex_offset
-                    << " pipeline=" << resource_id(draw.pipeline);
+                    << " pipeline=" << resource_id(*draw.pipeline);
                 const size_t buffer_offset = draw.pipeline ? 1u : 0u;
                 if (command.resources.size() > buffer_offset)
                 {
@@ -904,7 +904,7 @@ namespace Corona::Horizon
         commands_.push_back(std::move(command));
     }
 
-    void CommandRecorder::dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices)
+    void CommandRecorder::dispatch(DispatchDesc desc, DeviceMask devices)
     {
         ensure_open();
         mark_requirement(QueueCapability::Compute);
@@ -916,7 +916,7 @@ namespace Corona::Horizon
         command.payload.dispatch = desc;
         command.sequence = next_sequence();
         command.debug_label = desc.debug_label;
-        command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
+        //command.resources.push_back({ shader.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
         mark_device_requirements(devices);
         commands_.push_back(std::move(command));
@@ -970,10 +970,10 @@ namespace Corona::Horizon
         command.queue = QueueCapability::Graphics;
         command.sequence = next_sequence();
         command.debug_label = desc.debug_label;
-        if (desc.pipeline)
-        {
-            command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
-        }
+        // if (desc.pipeline)
+        // {
+        //     command.resources.push_back({ desc.pipeline, AccessKind::Read, 0 });
+        // }
         command.resources.push_back({ index.handle, AccessKind::Read, 0 });
         command.resources.push_back({ vertex.handle, AccessKind::Read, 0 });
         command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
@@ -1014,7 +1014,7 @@ namespace Corona::Horizon
         };
         for (const DrawIndexedBatchItem& item : batch.draws)
         {
-            append_resource({item.draw.pipeline, AccessKind::Read, 0});
+            //append_resource({item.draw.pipeline, AccessKind::Read, 0});
             append_resource({item.index.handle, AccessKind::Read, 0});
             append_resource({item.vertex.handle, AccessKind::Read, 0});
             for (const ResourceUse& use : item.draw.resource_uses)
@@ -1407,7 +1407,7 @@ namespace Corona::Horizon
                     throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
             }
 
-            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(draw.pipeline);
+            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(*draw.pipeline);
             VulkanRasterizerPipeline::PreparedDraw prepared =
                 pipeline->prepare_draw(device_,
                                        active_rendering.color_format,
@@ -1606,12 +1606,9 @@ namespace Corona::Horizon
             }
             case CommandOp::Dispatch:
             {
-                if (command.resources.empty())
-                    throw std::logic_error("Dispatch command is missing a ComputePipeline resource.");
-
                 DebugUtilsLabelScope debug_label(command_buffer, command.debug_label);
                 const DispatchDesc& dispatch = command.payload.dispatch;
-                std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(command.resources[0].handle);
+                std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);
 
                 for (const DispatchResourceBinding& binding : dispatch.bindings)
                 {
@@ -1933,12 +1930,12 @@ namespace Corona::Horizon
         return *this;
     }
 
-    HardwareStream& HardwareStream::operator<<(const ComputePipelineBase& pipeline)
+    HardwareStream& HardwareStream::operator<<(ComputePipelineBase& pipeline)
     {
         return *this << pipeline.command_batch();
     }
 
-    HardwareStream& HardwareStream::operator<<(const RasterizerPipelineBase& pipeline)
+    HardwareStream& HardwareStream::operator<<(RasterizerPipelineBase& pipeline)
     {
         return *this << pipeline.command_batch();
     }
@@ -1993,14 +1990,14 @@ namespace Corona::Horizon
         return HardwareStream(*this);
     }
 
-    HardwareStream HardwareExecutor::operator<<(const ComputePipelineBase& pipeline)
+    HardwareStream HardwareExecutor::operator<<(ComputePipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();
         return s;
     }
 
-    HardwareStream HardwareExecutor::operator<<(const RasterizerPipelineBase& pipeline)
+    HardwareStream HardwareExecutor::operator<<(RasterizerPipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();
@@ -2220,8 +2217,9 @@ namespace Corona::Horizon
                 submitted_tokens[submission_index] = tokens.back();
                 tracked_submission.remember(tokens.back());
             }
-            catch (...)
+            catch (std::exception e)
             {
+                std::cerr << e.what() << std::endl;
                 for (PreparedQueuePresent& present : prepared_presents)
                 {
                     if (present.manager)
@@ -2267,31 +2265,7 @@ namespace Corona::Horizon
         return tokens;
     }
 
-    SubmitReceipt HardwareExecutor::commit(const RecordedTask& task)
-    {
-        const auto total_start = std::chrono::steady_clock::now();
-        ExecutionCommitProfileSample profile;
-        ExecutionCommitProfileScope profile_scope(profile);
-        const auto compile_start = std::chrono::steady_clock::now();
-        ExecutionPlan plan = compiler_->compile(task, &profile);
-        profile.compile_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - compile_start).count();
-        std::vector<SubmissionToken> wait_tokens = consume_pending_waits();
-
-        SubmitReceipt receipt;
-        {
-            std::lock_guard lock(mutex_);
-            receipt.serial = ++next_submit_serial_;
-        }
-        receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
-        remember_receipt(receipt);
-        profile.total_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - total_start).count();
-        record_execution_commit_profile(profile);
-        return receipt;
-    }
-
-    SubmitReceipt HardwareExecutor::commit(RecordedTask&& task)
+    SubmitReceipt HardwareExecutor::commit(RecordedTask task)
     {
         const auto total_start = std::chrono::steady_clock::now();
         ExecutionCommitProfileSample profile;
@@ -2307,6 +2281,74 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
         }
+
+        std::unordered_set<ComputePipelineBase*> computePipelines;
+        std::unordered_set<RasterizerPipelineBase*> rasterizerPipelines;
+        //提取命令中用到的管线
+        for (auto & submission : plan.submissions)
+        {
+            for (auto & command : submission.commands)
+            {
+                switch (command.op) {
+                case CommandOp::Dispatch:
+                    computePipelines.insert(command.payload.dispatch.pipeline);
+                    break;
+                case CommandOp::DrawIndexed:
+                    rasterizerPipelines.insert(command.payload.draw_indexed.pipeline);
+                    break;
+                case CommandOp::DrawIndexedBatch:
+                    for (const auto & draw : command.payload.draw_indexed_batch.draws)
+                    {
+                        rasterizerPipelines.insert(draw.draw.pipeline);
+                    }
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+
+        for (auto & computePipeline : computePipelines)
+        {
+            auto desc = computePipeline->desc();
+            if (!desc.pipelineObject) continue;
+            auto& cc = desc.pipelineObject->compute;
+            if (cc->needPipelineRebuild(computePipeline->condition_info_))
+            {
+                desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
+                desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless);
+                desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                computePipeline->rebuild_pipeline(std::move(desc));
+            }
+        }
+
+        for (auto & rasterizerPipeline : rasterizerPipelines)
+        {
+            auto desc = rasterizerPipeline->desc();
+            if (!desc.pipelineObject) continue;
+            auto& vc = desc.pipelineObject->vertex;
+            auto& fc = desc.pipelineObject->fragment;
+            bool needRebuild = false;
+            if (vc->needPipelineRebuild(rasterizerPipeline->vert_condition_info_))
+            {
+                desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
+                needRebuild = true;
+            }
+
+            if (fc->needPipelineRebuild(rasterizerPipeline->frag_condition_info_))
+            {
+                desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
+                needRebuild = true;
+            }
+
+            if (needRebuild)
+            {
+                desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless);
+                desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                rasterizerPipeline->rebuild_pipeline(std::move(desc));
+            }
+        }
+
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
         remember_receipt(receipt);
         profile.total_ms = std::chrono::duration<double, std::milli>(

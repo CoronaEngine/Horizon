@@ -40,7 +40,7 @@ namespace Corona::Horizon
 
         struct RecordedDraw
         {
-            std::weak_ptr<IResourceRef> pipeline;
+            RasterizerPipelineBase* pipeline;
             HardwareBuffer index_buffer {};
             HardwareBuffer vertex_buffer {};
             DrawIndexedParams params {};
@@ -75,7 +75,7 @@ namespace Corona::Horizon
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
         void bind_auto_resources();
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
-        void record(const ResourceHandle& pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        void record(RasterizerPipelineBase* pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void clear_records();
 

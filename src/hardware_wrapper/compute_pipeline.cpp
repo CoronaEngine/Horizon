@@ -46,9 +46,9 @@ namespace Corona::Horizon
 
     ComputePipelineBase::ComputePipelineBase() = default;
 
-    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location)
+    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
+        rebuild_pipeline(std::move(desc));
     }
 
     ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
@@ -86,6 +86,27 @@ namespace Corona::Horizon
         return ResourceHandle::operator bool();
     }
 
+    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc)
+    {
+        auto object = desc.pipelineObject;
+        if (object)
+        {
+            condition_info_ = object->compute->getCurrentConditionInfo();
+            auto it = pipeline_pool_.find(object->getCombinedKey());
+            if (it != pipeline_pool_.end())
+            {
+                ResourceBridge::set(*this, it->second);
+                return;
+            }
+        }
+        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        if (object)
+        {
+            pipeline_pool_.insert({ object->getCombinedKey(), pipeline });
+        }
+        ResourceBridge::set(*this, std::move(pipeline));
+    }
+
     ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
@@ -117,7 +138,7 @@ namespace Corona::Horizon
         return pipeline_impl(ResourceBridge::token(*this))->desc();
     }
 
-    CommandBatch ComputePipelineBase::command_batch() const
+    CommandBatch ComputePipelineBase::command_batch()
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);

@@ -83,6 +83,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		template<typename T> requires std::is_aggregate_v<T>
 		static std::string getValueOutput(const T& value);
 
+		static std::string getParseOutput(const Ast::VecValue* node);
 		static std::string getParseOutput(const Ast::DefineLocalVariate* node);
 		static std::string getParseOutput(const Ast::DefineInputVariate* node);
 		static std::string getParseOutput(const Ast::Assign* node);
@@ -107,6 +108,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::SamplerType* node);
 		static std::string getParseOutput(const Ast::FunctionDeclaration* node);
 		static std::string getParseOutput(const Ast::ElementValue* node);
+		static std::string getParseOutput(const Ast::PushConstantType* node);
 		static std::string getParseOutput(const Ast::StageType* node);
 
 	    static Ast::BranchInfo getBranchInfo( const std::vector<std::shared_ptr<Ast::Statement>>&body);

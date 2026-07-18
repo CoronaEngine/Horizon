@@ -129,8 +129,8 @@ namespace Corona::Horizon
         HardwareStream& operator<<(const CommandBatch& commands);
         // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
         // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
-        HardwareStream& operator<<(const ComputePipelineBase& pipeline);
-        HardwareStream& operator<<(const RasterizerPipelineBase& pipeline);
+        HardwareStream& operator<<(ComputePipelineBase& pipeline);
+        HardwareStream& operator<<(RasterizerPipelineBase& pipeline);
         HardwareStream& append_consuming(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 
@@ -168,12 +168,11 @@ namespace Corona::Horizon
 
         [[nodiscard]] HardwareStream stream();
         // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
-        [[nodiscard]] HardwareStream operator<<(const ComputePipelineBase& pipeline);
-        [[nodiscard]] HardwareStream operator<<(const RasterizerPipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
-        [[nodiscard]] SubmitReceipt commit(const RecordedTask& task);
-        [[nodiscard]] SubmitReceipt commit(RecordedTask&& task);
+        [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait(const HardwareExecutor& producer);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
@@ -734,6 +733,7 @@ namespace Corona::Horizon
     struct ComputePipelineDesc
     {
         PipelineShaderDesc compute_shader;
+        std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipelineObject;
         ktm::uvec3 thread_group_size = { 1, 1, 1 };
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
@@ -763,16 +763,17 @@ namespace Corona::Horizon
         template <typename F>
         static ComputePipelineDesc from_edsl(F&& compute_shader_code, ktm::uvec3 numthreads = { 1, 1, 1 }, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
         {
-            auto object = EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location);
+            std::shared_ptr<EmbeddedShader::ComputePipelineObject> object{new EmbeddedShader::ComputePipelineObject(EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location))};
 
             ComputePipelineDesc desc(
-                PipelineShaderDesc {
+                 PipelineShaderDesc{
                     PipelineShaderStage::Compute,
-                    object.compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
+                    object->compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
                 numthreads);
+            desc.pipelineObject = object;
 
             if (options.auto_bind)
-                desc.auto_bind_entries = std::move(object.autoBindEntries);
+                desc.auto_bind_entries = object->autoBindEntries;
             return desc;
         }
 
@@ -835,6 +836,7 @@ namespace Corona::Horizon
     {
         PipelineShaderDesc vertex_shader { PipelineShaderStage::Vertex, EmbeddedShader::ShaderCodeModule {} };
         PipelineShaderDesc fragment_shader { PipelineShaderStage::Fragment, EmbeddedShader::ShaderCodeModule {} };
+        std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> pipelineObject;
 
         RasterizerStateDesc rasterizer;
         DepthStencilStateDesc depth_stencil;
@@ -883,23 +885,24 @@ namespace Corona::Horizon
                                                 EdslPipelineOptions options = {},
                                                 std::source_location source_location = std::source_location::current())
         {
-            auto object = EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
+            std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{new EmbeddedShader::RasterizedPipelineObject(EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
                                                                             std::forward<FS>(fragment_shader_code),
                                                                             options.compiler,
-                                                                            source_location);
+                                                                            source_location))};
 
             RasterizerPipelineDesc desc(
                 PipelineShaderDesc {
                     PipelineShaderStage::Vertex,
-                    object.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                    object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
                                                  options.compiler.enableBindless) },
                 PipelineShaderDesc {
                     PipelineShaderStage::Fragment,
-                    object.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                    object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
                                                    options.compiler.enableBindless) });
+            desc.pipelineObject = object;
 
             if (options.auto_bind)
-                desc.auto_bind_entries = std::move(object.autoBindEntries);
+                desc.auto_bind_entries = object->autoBindEntries;
 
             return desc;
         }
@@ -1069,6 +1072,7 @@ namespace Corona::Horizon
 
     class ComputePipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipelineBase>
     {
+        friend class HardwareExecutor;
     public:
         ComputePipelineBase();
         explicit ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
@@ -1098,12 +1102,16 @@ namespace Corona::Horizon
                      (height + tgs.y - 1u) / tgs.y };
         }
 
-        [[nodiscard]] CommandBatch command_batch() const;
+        [[nodiscard]] CommandBatch command_batch();
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
         [[nodiscard]] std::uintptr_t getComputePipelineID() const noexcept { return get_compute_pipeline_id(); }
 
+        void rebuild_pipeline(ComputePipelineDesc desc);
     private:
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
+        std::source_location location_;
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
@@ -1126,6 +1134,7 @@ namespace Corona::Horizon
 
     class RasterizerPipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipelineBase>
     {
+        friend class HardwareExecutor;
     public:
         RasterizerPipelineBase();
         explicit RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
@@ -1177,7 +1186,12 @@ namespace Corona::Horizon
             return *this;
         }
 
+        void rebuild_pipeline(RasterizerPipelineDesc desc);
     private:
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
+        std::source_location location_;
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
@@ -1635,17 +1649,16 @@ namespace Corona::Horizon
 
     struct ShaderDispatchCommand
     {
-        ShaderRef shader {};
         DispatchDesc dispatch {};
         DeviceMask devices {};
 
-        [[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
+        //[[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
         [[nodiscard]] DispatchDesc dispatch_desc() const noexcept { return dispatch; }
         [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
 
         void record(CommandRecorder& recorder) const
         {
-            recorder.dispatch(shader, dispatch, devices);
+            recorder.dispatch(dispatch, devices);
         }
 
         [[nodiscard]] StreamCommand stream_command() const
@@ -1843,9 +1856,9 @@ namespace Corona::Horizon
         return { src, dst, region, devices };
     }
 
-    [[nodiscard]] inline ShaderDispatchCommand dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {})
+    [[nodiscard]] inline ShaderDispatchCommand dispatch(DispatchDesc desc, DeviceMask devices = {})
     {
-        return { shader, std::move(desc), devices };
+        return { std::move(desc), devices };
     }
 
     [[nodiscard]] inline BeginRenderingCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {})
@@ -1903,7 +1916,6 @@ namespace Corona::Horizon
         return keep_alive(std::static_pointer_cast<void>(
             std::make_shared<Storage>(std::forward<Args>(args)...)));
     }
-
 }
 
 template <typename PipelineType>

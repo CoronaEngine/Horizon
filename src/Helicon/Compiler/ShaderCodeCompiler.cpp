@@ -347,6 +347,26 @@ namespace EmbeddedShader
         }
     }
 
+    bool ShaderCodeCompiler::needPipelineRebuild(const ConditionInfo& currentConditionInfo) const
+    {
+        return currentConditionInfo != getCurrentConditionInfo();
+    }
+
+    CompilerOption ShaderCodeCompiler::getCompilerOption() const
+    {
+        return compilerOption;
+    }
+
+    std::string ShaderCodeCompiler::getCombinedKey() const
+    {
+        std::string result;
+        for (const auto& value : conditions)
+        {
+            result += value() ? "1" : "0";
+        }
+        return result;
+    }
+
     std::string ShaderCodeCompiler::getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const
     {
         std::string bindlessStr = bindless ? "_Bindless" : "";
@@ -360,6 +380,16 @@ namespace EmbeddedShader
             prefixStr += "_" + branchName + "_" + conditionStr;
         }
         return ShaderHardcodeManager::getItemName(sourceLocationStr, prefixStr);
+    }
+
+    ShaderCodeCompiler::ConditionInfo ShaderCodeCompiler::getCurrentConditionInfo() const
+    {
+        ConditionInfo info(conditions.size());
+        for (size_t i = 0; i < info.size(); ++i)
+        {
+            info[i] = conditions[i]();
+        }
+        return info;
     }
 
     void ShaderCodeCompiler::combine(bool bindless)
