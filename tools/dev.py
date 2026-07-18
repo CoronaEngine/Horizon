@@ -34,7 +34,6 @@ def conan_options(targets: list[str]) -> list[str]:
     options: list[str] = []
     requires_ocarina = False
     requires_ocarina_tests = False
-    requires_ocarina_vulkan = False
     requires_vision_hotfix = False
 
     if "ShaderCompileScripts" in targets:
@@ -51,8 +50,6 @@ def conan_options(targets: list[str]) -> list[str]:
             requires_ocarina = True
         if target.startswith("ocarina-test-"):
             requires_ocarina_tests = True
-        if target == "ocarina-backend-vulkan":
-            requires_ocarina_vulkan = True
         if target.startswith("vision-hotfix"):
             requires_ocarina = True
             requires_vision_hotfix = True
@@ -61,8 +58,6 @@ def conan_options(targets: list[str]) -> list[str]:
         options.extend(("&:with_ocarina=True", "&:with_cuda=True"))
     if requires_ocarina_tests:
         options.append("&:with_ocarina_tests=True")
-    if requires_ocarina_vulkan:
-        options.append("&:with_ocarina_vulkan=True")
     if requires_vision_hotfix:
         options.append("&:with_vision_hotfix=True")
     return options

@@ -1,13 +1,13 @@
 # Horizon Push Constant Context
-<!-- AGENT_DOCS_PUSH_CONSTANTS_ZH_CN_SHA256: 9e24a85141d478fac7c066eae60249fe9d2bd573c9ef41a55ddc5bffa1979391 -->
+<!-- AGENT_DOCS_PUSH_CONSTANTS_ZH_CN_SHA256: b5a542d7e188ae591b0be9444161f6072d230ecacba1ed33d6645837e9143c11 -->
 
 Load this file only for push constant layout, reflection fields, generated bindings, or runtime push constant writes.
 
 ## Source of Truth
 
-The effective source for push constant layout is SPIR-V reflection, especially `spirv-cross`.
+The effective source for push constant layout is Slang program/module reflection.
 
-Do not assume Slang reflection provides complete push constant information.
+Do not restore the removed SPIRV-Cross reflection path. Read block size, member offsets, and member sizes from Slang type and variable layouts.
 
 ## Required Data
 
@@ -34,8 +34,8 @@ The Vulkan/runtime side currently cares about:
 
 Typical path:
 
-1. `ShaderLanguageConverter` reflects SPIR-V push constant buffers.
+1. `ShaderLanguageConverter` collects push constant block and member layouts through Slang reflection.
 2. `ShaderResources` stores block and member metadata.
 3. `tools/main.cpp` generates binding code.
-4. `include/Horizon.h` forwards user assignment data into runtime writes.
+4. `include/horizon.h` forwards user assignment data into runtime writes.
 5. Vulkan pipelines allocate push constant backing storage and call `vkCmdPushConstants`.

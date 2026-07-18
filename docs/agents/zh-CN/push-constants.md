@@ -4,9 +4,9 @@
 
 ## 真实来源
 
-push constant layout 的有效来源是 SPIR-V 反射，尤其是 `spirv-cross`。
+push constant layout 的有效来源是 Slang program/module reflection。
 
-不要假设 Slang reflection 能提供完整 push constant 信息。
+不要恢复已移除的 SPIRV-Cross 反射路径；需要从 Slang 的 type/variable layout 读取 block size、member offset 和 member size。
 
 ## 必要数据
 
@@ -33,8 +33,8 @@ Vulkan/runtime 侧当前关心：
 
 典型路径：
 
-1. `ShaderLanguageConverter` 反射 SPIR-V push constant buffers。
+1. `ShaderLanguageConverter` 通过 Slang reflection 收集 push constant block 和 member layout。
 2. `ShaderResources` 存储 block 和 member metadata。
 3. `tools/main.cpp` 生成绑定代码。
-4. `include/Horizon.h` 把用户赋值转发到 runtime 写入。
+4. `include/horizon.h` 把用户赋值转发到 runtime 写入。
 5. Vulkan pipelines 分配 push constant backing storage 并调用 `vkCmdPushConstants`。

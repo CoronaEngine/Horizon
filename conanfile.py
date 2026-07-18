@@ -20,7 +20,6 @@ class HorizonConan(ConanFile):
         "with_tests": [True, False],
         "with_benchmarks": [True, False],
         "with_ocarina_tests": [True, False],
-        "with_ocarina_vulkan": [True, False],
         "with_hardcode_shaders": [True, False],
         "enable_debug_validation": [True, False],
         "enable_relwithdebinfo_validation": [True, False],
@@ -37,13 +36,10 @@ class HorizonConan(ConanFile):
         "with_tests": False,
         "with_benchmarks": False,
         "with_ocarina_tests": False,
-        "with_ocarina_vulkan": False,
         "with_hardcode_shaders": False,
         "enable_debug_validation": True,
         "enable_relwithdebinfo_validation": False,
         "enable_release_validation": False,
-        "spirv-cross/*:shared": False,
-        "spirv-cross/*:build_executable": False,
         "spirv-tools/*:shared": False,
         "spirv-tools/*:build_executables": False,
         "glfw/*:shared": False,
@@ -56,7 +52,6 @@ class HorizonConan(ConanFile):
     def requirements(self):
         self.requires("ktm/0.2.14", transitive_headers=True)
         self.requires("pfr/1.91.0", transitive_headers=True)
-        self.requires("spirv-cross/1.4.350.0", transitive_headers=True, transitive_libs=True)
         self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
         self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
         self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
@@ -84,8 +79,6 @@ class HorizonConan(ConanFile):
             raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True")
         if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
             raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True")
-        if bool(self.options.with_ocarina_vulkan) and not bool(self.options.with_ocarina):
-            raise ConanInvalidConfiguration("with_ocarina_vulkan=True requires with_ocarina=True")
 
     def generate(self):
         CMakeDeps(self).generate()
@@ -105,6 +98,4 @@ class HorizonConan(ConanFile):
             self.options.enable_relwithdebinfo_validation
         )
         variables["HORIZON_ENABLE_RELEASE_VALIDATION"] = bool(self.options.enable_release_validation)
-        if bool(self.options.with_ocarina_vulkan):
-            variables["VISION_BUILD_VULKAN"] = True
         toolchain.generate()

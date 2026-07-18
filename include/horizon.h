@@ -679,12 +679,6 @@ namespace Corona::Horizon
 
         PipelineShaderDesc(PipelineShaderStage stage, EmbeddedShader::ShaderCodeModule module) : stage(stage), module(std::move(module)) {}
 
-        static PipelineShaderDesc from_spirv(PipelineShaderStage stage, std::vector<uint32_t> spirv)
-        {
-            auto reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv, EmbeddedShader::ShaderLanguage::HLSL);
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv), std::move(reflection)));
-        }
-
         static PipelineShaderDesc from_slang_module(PipelineShaderStage stage,
                                                     EmbeddedShader::SlangModule& module,
                                                     EmbeddedShader::CompilerOption compiler_option = {})
@@ -718,10 +712,16 @@ namespace Corona::Horizon
             EmbeddedShader::ShaderCodeModule::ShaderResources resources;
             if (reflection != result.reflections.end())
                 resources = std::move(reflection->second);
-            auto spirv_reflection = EmbeddedShader::ShaderLanguageConverter::spirvCrossReflectedBindInfo(spirv->second, EmbeddedShader::ShaderLanguage::HLSL);
-            spirv_reflection.entryPointInfoPool = std::move(resources.entryPointInfoPool);
 
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(spirv_reflection)));
+            // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
+            // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
+            for (auto& info : resources.bindInfoPool)
+            {
+                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
+                    info.variateName = info.variateName.substr(pos + 1);
+            }
+
+            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
         }
     };
 
@@ -744,6 +744,22 @@ namespace Corona::Horizon
                 throw std::invalid_argument("ComputePipelineDesc requires a compute shader.");
         }
 
+        // 解析真正生效的 workgroup local size。
+        // 优先取反射(entryPointInfoPool 里 compute entry 的 numthreads)——这是编译进 shader 的
+        // 真实值(源码路径下也正确);反射缺失(旧 hardcode 表未序列化该字段)时回退到 thread_group_size
+        // 覆盖值(EDSL 由构造参数喂入,与 codegen 一致)。
+        [[nodiscard]] ktm::uvec3 resolved_thread_group_size() const
+        {
+            for (const auto& entry : compute_shader.module.shaderResources.entryPointInfoPool)
+            {
+                if (entry.stage != EmbeddedShader::ShaderStage::ComputeShader)
+                    continue;
+                if (entry.numthreads.x != 0 && entry.numthreads.y != 0 && entry.numthreads.z != 0)
+                    return entry.numthreads;
+            }
+            return thread_group_size;
+        }
+
         template <typename F>
         static ComputePipelineDesc from_edsl(F&& compute_shader_code, ktm::uvec3 numthreads = { 1, 1, 1 }, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
         {
@@ -758,11 +774,6 @@ namespace Corona::Horizon
             if (options.auto_bind)
                 desc.auto_bind_entries = std::move(object.autoBindEntries);
             return desc;
-        }
-
-        static ComputePipelineDesc from_spirv(std::vector<uint32_t> spirv)
-        {
-            return ComputePipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, std::move(spirv)));
         }
 
         static ComputePipelineDesc from_source(std::string source,
@@ -891,12 +902,6 @@ namespace Corona::Horizon
                 desc.auto_bind_entries = std::move(object.autoBindEntries);
 
             return desc;
-        }
-
-        static RasterizerPipelineDesc from_spirv(std::vector<uint32_t> vertex_spirv, std::vector<uint32_t> fragment_spirv)
-        {
-            return RasterizerPipelineDesc(PipelineShaderDesc::from_spirv(PipelineShaderStage::Vertex, std::move(vertex_spirv)),
-                                          PipelineShaderDesc::from_spirv(PipelineShaderStage::Fragment, std::move(fragment_spirv)));
         }
 
         static RasterizerPipelineDesc from_source(std::string vertex_source,
@@ -1079,6 +1084,20 @@ namespace Corona::Horizon
         ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
         ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
         [[nodiscard]] ComputePipelineDesc desc() const;
+
+        // 根据管线自身的 workgroup local size 将像素尺寸换算为 dispatch group 数。
+        // 消除调用方对 local_size 的硬编码依赖（ceil(w/tgs.x), ceil(h/tgs.y)）。
+        // local size 优先取自反射（编译进 shader 的真实值），构造参数仅作反射缺失时的回退。
+        struct DispatchGroups { uint32_t x; uint32_t y; };
+        [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const
+        {
+            const ktm::uvec3 tgs = desc().resolved_thread_group_size();
+            if (tgs.x == 0 || tgs.y == 0)
+                throw std::logic_error("ComputePipeline workgroup local size is zero; reflection failed and no override was provided.");
+            return { (width  + tgs.x - 1u) / tgs.x,
+                     (height + tgs.y - 1u) / tgs.y };
+        }
+
         [[nodiscard]] CommandBatch command_batch() const;
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
@@ -1256,18 +1275,9 @@ namespace Corona::Horizon
 
         static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
         {
-            if constexpr (requires { CS::spirv; })
-            {
-                return ComputePipelineDesc(
-                    PipelineShaderDesc::from_spirv(PipelineShaderStage::Compute, CS::spirv),
-                    numthreads);
-            }
-            else
-            {
-                return ComputePipelineDesc(
-                    PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
-                    numthreads);
-            }
+            return ComputePipelineDesc(
+                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
+                numthreads);
         }
 
         explicit ComputePipeline(CS, ktm::uvec3 numthreads = { 1, 1, 1 },

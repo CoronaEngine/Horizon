@@ -27,10 +27,6 @@ target_include_directories(Helicon PUBLIC
 target_link_libraries(Helicon PUBLIC
     horizon::ktm
     horizon::pfr
-    horizon::spirv_cross_core
-    horizon::spirv_cross_c
-    horizon::spirv_cross_cpp
-    horizon::spirv_cross_util
     horizon::slang
     horizon::slang_rt
     horizon::gfx

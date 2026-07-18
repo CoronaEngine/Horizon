@@ -119,6 +119,18 @@ namespace EmbeddedShader
 			result << "},";
 		}
 		result << "}";
+		// entryPointInfoPool：保留 compute 的 [numthreads]/local_size 反射，
+		// 否则 hardcode-shader 构建加载回来 numthreads 丢失，dispatch_groups 会误算。
+		result << ",{";
+		for (const auto& entryPoint : shaderResources.entryPointInfoPool)
+		{
+			result << "{";
+			result << "\"" << entryPoint.name << "\",";
+			result << "static_cast<EmbeddedShader::ShaderStage>(" << static_cast<uint32_t>(entryPoint.stage) << "),";
+			result << "ktm::uvec3(" << entryPoint.numthreads.x << "," << entryPoint.numthreads.y << "," << entryPoint.numthreads.z << ")";
+			result << "},";
+		}
+		result << "}";
 		result << "}";
 		return result.str();
 	}

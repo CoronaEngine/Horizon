@@ -19,25 +19,6 @@ add_subdirectory(stblib)
 
 cmake_policy(SET CMP0148 NEW)
 
-# SPIRV-Cross is provided by the root Conan dependency graph.
-if(VISION_BUILD_VULKAN)
-    foreach(_ocarina_spirv_target IN ITEMS
-        spirv-cross
-        spirv-cross-c
-        spirv-cross-core
-        spirv-cross-glsl
-        spirv-cross-hlsl
-        spirv-cross-msl
-        spirv-cross-cpp
-        spirv-cross-reflect
-        spirv-cross-util)
-        if(TARGET ${_ocarina_spirv_target})
-            set_property(TARGET ${_ocarina_spirv_target} PROPERTY FOLDER "ocarina/ext/spirv")
-        endif()
-    endforeach()
-endif()
-#list(APPEND SPIRV_LIBS "spirv-cross-core" "spirv-cross-hlsl" )
-
 target_link_libraries(ocarina-ext
         PUBLIC
         ocarina-ext-stb

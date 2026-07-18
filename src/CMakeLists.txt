@@ -1,14 +1,4 @@
 file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.cpp"
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.hpp"
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.c"
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.h"
-
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.cpp"
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.hpp"
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.c"
-    #"${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
-
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.c"

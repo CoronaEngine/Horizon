@@ -1,11 +1,5 @@
 #include <iostream>
 
-#include <spirv_cross.hpp>
-#include <spirv_glsl.hpp>
-#include <spirv_hlsl.hpp>
-#include <spirv_msl.hpp>
-#include <spirv_parser.hpp>
-
 #include "ShaderLanguageConverter.h"
 
 #include "spirv-tools/linker.hpp"
@@ -70,6 +64,69 @@ namespace EmbeddedShader
         result.m_offset.arrayIndexInBindingRange += index;
         // 数组元素共享父级的 set/binding，不额外累加
         return result;
+    }
+
+    namespace
+    {
+        uint32_t scalarSizeInBytes(slang::TypeReflection::ScalarType st)
+        {
+            switch (st)
+            {
+                case slang::TypeReflection::ScalarType::Float64:
+                case slang::TypeReflection::ScalarType::Int64:
+                case slang::TypeReflection::ScalarType::UInt64: return 8;
+                case slang::TypeReflection::ScalarType::Float16:
+                case slang::TypeReflection::ScalarType::Int16:
+                case slang::TypeReflection::ScalarType::UInt16: return 2;
+                case slang::TypeReflection::ScalarType::Int8:
+                case slang::TypeReflection::ScalarType::UInt8:  return 1;
+                default:                                        return 4; // Float32/Int32/UInt32/未知
+            }
+        }
+
+        // varying(stage input/output)按标量类型给出下游 vertex_attribute_format 依赖的 typeName。
+        const char* varyingScalarTypeName(slang::TypeReflection::ScalarType st)
+        {
+            switch (st)
+            {
+                case slang::TypeReflection::ScalarType::Int8:
+                case slang::TypeReflection::ScalarType::Int16:
+                case slang::TypeReflection::ScalarType::Int32:
+                case slang::TypeReflection::ScalarType::Int64:  return "int";
+                case slang::TypeReflection::ScalarType::UInt8:
+                case slang::TypeReflection::ScalarType::UInt16:
+                case slang::TypeReflection::ScalarType::UInt32:
+                case slang::TypeReflection::ScalarType::UInt64: return "uint";
+                default:                                        return "float";
+            }
+        }
+
+        // 计算 varying 叶子的分量数 / 字节大小 / 标量类型名（对齐旧 spirv-cross 行为：
+        // elementCount = vecsize*columns, typeSize = 4*vecsize*columns）。
+        // varying 不占 uniform 存储，getSize() 返回 0，故必须按向量/矩阵宽度推导。
+        void fillVaryingWidth(slang::TypeLayoutReflection* typeLayout,
+                              EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo& info)
+        {
+            const auto kind = typeLayout->getKind();
+            if (kind == slang::TypeReflection::Kind::Vector)
+            {
+                info.elementCount = static_cast<uint64_t>(typeLayout->getElementCount());
+                info.typeSize = static_cast<uint32_t>(info.elementCount * scalarSizeInBytes(typeLayout->getScalarType()));
+                info.typeName = varyingScalarTypeName(typeLayout->getScalarType());
+            }
+            else if (kind == slang::TypeReflection::Kind::Matrix)
+            {
+                info.elementCount = static_cast<uint64_t>(typeLayout->getRowCount() * typeLayout->getColumnCount());
+                info.typeSize = static_cast<uint32_t>(info.elementCount * scalarSizeInBytes(typeLayout->getScalarType()));
+                info.typeName = varyingScalarTypeName(typeLayout->getScalarType());
+            }
+            else if (kind == slang::TypeReflection::Kind::Scalar)
+            {
+                info.elementCount = 1;
+                info.typeSize = scalarSizeInBytes(typeLayout->getScalarType());
+                info.typeName = varyingScalarTypeName(typeLayout->getScalarType());
+            }
+        }
     }
 
     void ShaderCursor::collectBindings(EmbeddedShader::ShaderCodeModule::ShaderResources& resources, const std::string& namePrefix) const
@@ -195,6 +252,32 @@ namespace EmbeddedShader
 
             // 如果元素是叶子资源，合并为一个条目，记录 elementCount
             auto elemBindType = deduceLeafBindType(elemTypeLayout);
+
+            // __DynamicResource<General>[] (bindless 句柄数组, codegen 在 set 0/1/2 生成)。
+            // 这类泛型动态资源在 ProgramLayout 反射里 getBindingRangeCount()==0、kind=DynamicResource,
+            // deduceLeafBindType 无法识别而返回 none —— 但它们正是 bindless 保留集的载体。
+            // 只有落到 SPIR-V 才 lower 成真实 storage image/buffer;此处按 codegen 契约的 set 归类,
+            // 使其进入 bindInfoPool,让 runtime 的 uses_bindless_descriptors()/is_bindless_reserved_binding()
+            // 能正确判定 bindless。set 语义见 ResourceManager::bindless_*_set (0=texture,1=buffer,2=image)。
+            if (elemBindType == EmbeddedShader::ShaderCodeModule::ShaderResources::none &&
+                elemTypeLayout->getKind() == slang::TypeReflection::Kind::DynamicResource)
+            {
+                switch (m_offset.set)
+                {
+                case 0: // combinedTextureSamplerHandles → 采样图像/组合采样器
+                    elemBindType = EmbeddedShader::ShaderCodeModule::ShaderResources::sampledImages;
+                    break;
+                case 1: // bufferHandles → 存储缓冲
+                    elemBindType = EmbeddedShader::ShaderCodeModule::ShaderResources::storageBuffer;
+                    break;
+                case 2: // textureHandles → 存储图像
+                    elemBindType = EmbeddedShader::ShaderCodeModule::ShaderResources::storageTexture;
+                    break;
+                default:
+                    break;
+                }
+            }
+
             if (elemBindType != EmbeddedShader::ShaderCodeModule::ShaderResources::none)
             {
                 EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo info;
@@ -204,7 +287,13 @@ namespace EmbeddedShader
                 info.binding = m_offset.binding;
                 info.byteOffset = m_offset.byteOffset;
                 info.typeSize = static_cast<uint32_t>(elemTypeLayout->getSize());
-                info.elementCount = elemCount;
+                // 无界数组(bindless 句柄表)getElementCount() 返回哨兵值(unbounded/unknown),
+                // 归一化为 0,既满足 bindless 检查的 elementCount!=1,又不把巨大哨兵值写进反射。
+                info.elementCount = (elemCount == SLANG_UNBOUNDED_SIZE || elemCount == SLANG_UNKNOWN_SIZE ||
+                                     elemCount == static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) ||
+                                     elemCount == static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()))
+                                        ? 0
+                                        : elemCount;
                 info.bindType = elemBindType;
                 fillSemanticAndLocation(info);
                 resources.bindInfoPool.push_back(info);
@@ -233,6 +322,16 @@ namespace EmbeddedShader
             info.typeSize = static_cast<uint32_t>(m_typeLayout->getSize());
             info.elementCount = 1;
             info.bindType = bindType;
+
+            // varying(顶点输入/输出)不占 uniform 存储, getSize()=0 且分量数需从向量宽度推导。
+            // 下游 vertex_attribute_format 依赖 elementCount(分量数)+typeName 决定 VkFormat,
+            // 顶点属性 offset 累加依赖 typeSize。仅对 varying 修正, 不影响 descriptor 语义。
+            if (bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageInputs ||
+                bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs)
+            {
+                fillVaryingWidth(m_typeLayout, info);
+            }
+
             fillSemanticAndLocation(info);
             resources.bindInfoPool.push_back(info);
             return;
@@ -370,186 +469,6 @@ namespace EmbeddedShader
         resources.bindInfoPool.push_back(info);
     }
 
-	std::string ShaderLanguageConverter::spirvCrossConverter(std::vector<uint32_t> spirv_file,
-	                                                         ShaderLanguage targetLanguage, int32_t targetVersion)
-	{
-		std::string resultCode = "";
-
-		try
-		{
-			switch (targetLanguage)
-			{
-				case ShaderLanguage::GLSL:
-					// case ShaderLanguage::ESSL:
-				{
-					spirv_cross::CompilerGLSL compiler(spirv_file);
-
-					spirv_cross::CompilerGLSL::Options opts = compiler.get_common_options();
-					opts.enable_420pack_extension = false;
-					opts.version = 460;
-					opts.vulkan_semantics = true;
-					opts.es = false;
-					compiler.set_common_options(opts);
-
-					resultCode = compiler.compile();
-					break;
-				}
-				case ShaderLanguage::HLSL:
-				{
-					spirv_cross::CompilerHLSL compiler(spirv_file);
-
-					spirv_cross::CompilerHLSL::Options opts = compiler.get_hlsl_options();
-					opts.shader_model = 67;
-					compiler.set_hlsl_options(opts);
-
-					resultCode = compiler.compile();
-					break;
-				}
-				default:
-					break;
-			}
-		} catch (const spirv_cross::CompilerError& error)
-		{
-			std::cout << error.what();
-		}
-
-		return resultCode;
-	}
-
-	// 辅助函数：将SPIRType转换为类型名字符串
-	static std::string spirTypeToString(const spirv_cross::Compiler& compiler, const spirv_cross::SPIRType& type)
-	{
-		std::string result;
-
-		switch (type.basetype)
-		{
-			case spirv_cross::SPIRType::Void:
-				result = "void";
-				break;
-			case spirv_cross::SPIRType::Boolean:
-				result = "bool";
-				break;
-			case spirv_cross::SPIRType::SByte:
-				result = "int8_t";
-				break;
-			case spirv_cross::SPIRType::UByte:
-				result = "uint8_t";
-				break;
-			case spirv_cross::SPIRType::Short:
-				result = "int16_t";
-				break;
-			case spirv_cross::SPIRType::UShort:
-				result = "uint16_t";
-				break;
-			case spirv_cross::SPIRType::Int:
-				result = "int";
-				break;
-			case spirv_cross::SPIRType::UInt:
-				result = "uint";
-				break;
-			case spirv_cross::SPIRType::Int64:
-				result = "int64_t";
-				break;
-			case spirv_cross::SPIRType::UInt64:
-				result = "uint64_t";
-				break;
-			case spirv_cross::SPIRType::Half:
-				result = "half";
-				break;
-			case spirv_cross::SPIRType::Float:
-				result = "float";
-				break;
-			case spirv_cross::SPIRType::Double:
-				result = "double";
-				break;
-			case spirv_cross::SPIRType::Struct:
-				result = compiler.get_name(type.self);
-				if (result.empty())
-					result = "struct_" + std::to_string(type.self);
-				break;
-			case spirv_cross::SPIRType::Image:
-			{
-				const auto& imgTexelType = compiler.get_type(type.image.type);
-				std::string prefix;
-				if (imgTexelType.basetype == spirv_cross::SPIRType::Int ||
-				    imgTexelType.basetype == spirv_cross::SPIRType::Short ||
-				    imgTexelType.basetype == spirv_cross::SPIRType::SByte)
-					prefix = "i";
-				else if (imgTexelType.basetype == spirv_cross::SPIRType::UInt ||
-				         imgTexelType.basetype == spirv_cross::SPIRType::UShort ||
-				         imgTexelType.basetype == spirv_cross::SPIRType::UByte)
-					prefix = "u";
-
-				switch (type.image.dim)
-				{
-					case spv::Dim2D:   result = prefix + (type.image.arrayed ? "image2DArray" : "image2D"); break;
-					case spv::Dim3D:   result = prefix + "image3D"; break;
-					case spv::DimCube: result = prefix + (type.image.arrayed ? "imageCubeArray" : "imageCube"); break;
-					case spv::Dim1D:   result = prefix + "image1D"; break;
-					default:           result = prefix + "image2D"; break;
-				}
-				break;
-			}
-			case spirv_cross::SPIRType::SampledImage:
-			{
-				const auto& imgTexelType = compiler.get_type(type.image.type);
-				std::string prefix;
-				if (imgTexelType.basetype == spirv_cross::SPIRType::Int ||
-				    imgTexelType.basetype == spirv_cross::SPIRType::Short ||
-				    imgTexelType.basetype == spirv_cross::SPIRType::SByte)
-					prefix = "i";
-				else if (imgTexelType.basetype == spirv_cross::SPIRType::UInt ||
-				         imgTexelType.basetype == spirv_cross::SPIRType::UShort ||
-				         imgTexelType.basetype == spirv_cross::SPIRType::UByte)
-					prefix = "u";
-
-				switch (type.image.dim)
-				{
-					case spv::Dim2D:   result = prefix + (type.image.arrayed ? "sampler2DArray" : "sampler2D"); break;
-					case spv::Dim3D:   result = prefix + "sampler3D"; break;
-					case spv::DimCube: result = prefix + (type.image.arrayed ? "samplerCubeArray" : "samplerCube"); break;
-					case spv::Dim1D:   result = prefix + "sampler1D"; break;
-					default:           result = prefix + "sampler2D"; break;
-				}
-				break;
-			}
-			case spirv_cross::SPIRType::Sampler:
-				result = "sampler";
-				break;
-			case spirv_cross::SPIRType::AccelerationStructure:
-				result = "acceleration_structure";
-				break;
-			case spirv_cross::SPIRType::RayQuery:
-				result = "ray_query";
-				break;
-			default:
-				result = "unknown";
-				break;
-		}
-
-		// 处理向量类型
-		if (type.vecsize > 1 && type.columns == 1)
-		{
-			result = result + std::to_string(type.vecsize);
-		}
-		// 处理矩阵类型
-		else if (type.columns > 1)
-		{
-			result = result + std::to_string(type.columns) + "x" + std::to_string(type.vecsize);
-		}
-
-		// 处理数组类型
-		for (auto& dim: type.array)
-		{
-			if (dim == 0)
-				result += "[]";
-			else
-				result += "[" + std::to_string(dim) + "]";
-		}
-
-		return result;
-	}
-
 	static uint64_t normalizeReflectedElementCount(size_t elementCount)
 	{
 		if (elementCount == SLANG_UNBOUNDED_SIZE || elementCount == SLANG_UNKNOWN_SIZE ||
@@ -560,32 +479,6 @@ namespace EmbeddedShader
 		}
 
 		return static_cast<uint64_t>(elementCount);
-	}
-
-	static bool spirvTypeContainsStorageImage(const spirv_cross::Compiler& compiler,
-	                                          const spirv_cross::SPIRType& type,
-	                                          uint32_t depth = 0)
-	{
-		if (depth > 16)
-			return false;
-
-		if ((type.basetype == spirv_cross::SPIRType::Image ||
-		     type.basetype == spirv_cross::SPIRType::SampledImage) &&
-		    type.image.sampled == 2)
-		{
-			return true;
-		}
-
-		if (type.basetype == spirv_cross::SPIRType::Struct)
-		{
-			for (uint32_t memberTypeId : type.member_types)
-			{
-				if (spirvTypeContainsStorageImage(compiler, compiler.get_type(memberTypeId), depth + 1))
-					return true;
-			}
-		}
-
-		return false;
 	}
 
 	static ShaderCodeModule::ShaderResources::BindType bindTypeFromSlangBinding(slang::BindingType bindingType)
@@ -672,175 +565,6 @@ namespace EmbeddedShader
 		}
 
 		return bindTypeFromSlangResourceAccess(descriptorTypeLayout);
-	}
-
-	std::vector<IRReflection> ShaderLanguageConverter::spirvCrossGetIRReflection(
-		const std::vector<uint32_t>& spirv_file)
-	{
-		std::vector<IRReflection> irReflections;
-
-		if (spirv_file.empty())
-			return irReflections;
-
-		try
-		{
-			// 使用spirv_cross::Parser来解析SPIR-V并获取IR
-			spirv_cross::Parser parser(spirv_file);
-			parser.parse();
-
-			// 获取解析后的IR
-			spirv_cross::ParsedIR& ir = parser.get_parsed_ir();
-
-			// 使用Compiler来获取更多信息（类型名称等）
-			spirv_cross::Compiler compiler(ir);
-
-			// 获取入口点列表
-			/*           auto entryPoints = compiler.get_entry_points_and_stages();
-			           std::set<std::string> entryPointNames;
-			           for (const auto& ep : entryPoints)
-			           {
-			               entryPointNames.insert(ep.name);
-			           }*/
-
-			// 重新解析以获取IR（因为之前的ir被move了）
-			// spirv_cross::Parser parser2(spirv_file);
-			// parser2.parse();
-
-			// 遍历所有ID，查找函数
-			for (size_t i = 0; i < ir.ids.size(); ++i)
-			{
-				auto& idHolder = ir.ids[i];
-				auto type = idHolder.get_type();
-				if (type == spirv_cross::TypeFunction)
-				{
-					const auto& func = idHolder.get<spirv_cross::SPIRFunction>();
-					FunctionSignature sig;
-
-					// 获取函数名称
-					auto nameIt = ir.meta.find(func.self);
-					if (nameIt != ir.meta.end() && !nameIt->second.decoration.alias.empty())
-						sig.name = nameIt->second.decoration.alias.substr(0,nameIt->second.decoration.alias.find('('));
-					else continue;
-
-					// 获取返回类型
-					const auto& funcType = ir.ids[func.function_type].get<spirv_cross::SPIRFunctionPrototype>();
-					sig.returnTypeId = funcType.return_type;
-
-					if (sig.returnTypeId != 0 && ir.ids[sig.returnTypeId].get_type() == spirv_cross::TypeType)
-					{
-						const auto& returnType = ir.ids[sig.returnTypeId].get<spirv_cross::SPIRType>();
-						sig.returnTypeName = spirTypeToString(compiler, returnType);
-					} else
-					{
-						sig.returnTypeName = "void";
-					}
-
-					// 获取函数参数
-					for (size_t j = 0; j < func.arguments.size(); ++j)
-					{
-						const auto& arg = func.arguments[j];
-						VariableInfo param;
-
-						// 获取参数名称
-						auto argNameIt = ir.meta.find(arg.id);
-						if (argNameIt != ir.meta.end() && !argNameIt->second.decoration.alias.empty())
-							param.name = argNameIt->second.decoration.alias;
-						else
-							param.name = "param_" + std::to_string(j);
-
-						// 获取参数类型
-						param.typeId = arg.type;
-						if (ir.ids[arg.type].get_type() == spirv_cross::TypeType)
-						{
-							const auto& argType = ir.ids[arg.type].get<spirv_cross::SPIRType>();
-							param.typeName = spirTypeToString(compiler, argType);
-						} else
-						{
-							param.typeName = "unknown";
-						}
-
-						sig.parameters.push_back(std::move(param));
-					}
-
-					IRReflection reflection;
-					reflection.type = IRReflection::Type::FunctionSignature;
-					reflection.info = std::move(sig);
-
-					irReflections.push_back(std::move(reflection));
-				}
-
-				if (type == spirv_cross::TypeType)
-				{
-					const auto& spvType = idHolder.get<spirv_cross::SPIRType>();
-					if (spvType.basetype != spirv_cross::SPIRType::Struct) continue;
-
-					StructInfo inf;
-					auto it = ir.meta.find(spvType.self);
-					if (it != ir.meta.end() && !it->second.decoration.alias.empty())
-						inf.name = it->second.decoration.alias;
-					else continue;
-
-					inf.members.resize(spvType.member_types.size());
-					for (size_t memberIndex = 0; memberIndex < spvType.member_types.size(); ++memberIndex)
-					{
-						auto& member = inf.members[memberIndex];
-						member.name = compiler.get_member_name(spvType.self, memberIndex);
-						member.typeId = spvType.member_types[memberIndex];
-						member.typeName = spirTypeToString(compiler, compiler.get_type(member.typeId));
-					}
-
-					IRReflection reflection;
-					reflection.type = IRReflection::Type::Struct;
-					reflection.info = std::move(inf);
-
-					irReflections.push_back(std::move(reflection));
-				}
-			}
-		} catch (const spirv_cross::CompilerError& error)
-		{
-			std::cerr << "SPIRV-Cross error while getting function signatures: " << error.what() << std::endl;
-		}
-
-		//查重
-		for (auto comp1 = irReflections.begin(); comp1 != irReflections.end(); ++comp1)
-		{
-			for (auto comp2 = comp1 + 1; comp2 != irReflections.end();)
-			{
-				if (comp1->type == comp2->type)
-				{
-					switch (comp1->type)
-					{
-						case IRReflection::Type::Unknown:
-							break;
-						case IRReflection::Type::FunctionSignature:
-						{
-							auto& sig1 = std::get<FunctionSignature>(comp1->info);
-							auto& sig2 = std::get<FunctionSignature>(comp2->info);
-							if (sig1.name == sig2.name)
-							{
-								comp2 = irReflections.erase(comp2);
-								continue;
-							}
-						}
-						break;
-						case IRReflection::Type::Struct:
-						{
-							auto& struct1 = std::get<StructInfo>(comp1->info);
-							auto& struct2 = std::get<StructInfo>(comp2->info);
-							if (struct1.name == struct2.name)
-							{
-								comp2 = irReflections.erase(comp2);
-								continue;
-							}
-						}
-						break;
-					}
-				}
-				++comp2;
-			}
-		}
-
-		return irReflections;
 	}
 
 	void diagnoseIfNeeded(slang::IBlob* diagnosticsBlob)
@@ -1591,265 +1315,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 		result.resize(spirvCode->getBufferSize() / sizeof(uint32_t));
 		memcpy(result.data(), spirvCode->getBufferPointer(), spirvCode->getBufferSize());
 		program = linkedProgram;
-		return result;
-	}
-
-	// get Reflected Bind Info
-	ShaderCodeModule::ShaderResources ShaderLanguageConverter::spirvCrossReflectedBindInfo(
-		std::vector<uint32_t> spirv_file, ShaderLanguage targetLanguage, int32_t targetVersion)
-	{
-		ShaderCodeModule::ShaderResources result = {};
-		spirv_cross::ShaderResources res{};
-
-		spirv_cross::CompilerGLSL* compiler{};
-		switch (targetLanguage)
-		{
-			case ShaderLanguage::GLSL:
-			{
-				compiler = new spirv_cross::CompilerGLSL(std::move(spirv_file));
-
-				spirv_cross::CompilerGLSL::Options opts = compiler->get_common_options();
-				opts.enable_420pack_extension = false;
-				if (targetVersion > 0)
-				{
-					opts.version = targetVersion;
-				}
-				// opts.es = (targetLanguage == ShaderLanguage::ESSL);
-				opts.es = false;
-				compiler->set_common_options(opts);
-				res = compiler->get_shader_resources();
-				break;
-			}
-			case ShaderLanguage::HLSL:
-			{
-				auto hlsl_compiler = new spirv_cross::CompilerHLSL{std::move(spirv_file)};
-				compiler = hlsl_compiler;
-				auto hlsl_options = hlsl_compiler->get_hlsl_options();
-				hlsl_options.shader_model = 67;
-				hlsl_compiler->set_hlsl_options(hlsl_options);
-
-				res = compiler->get_shader_resources();
-				break;
-			}
-			default:
-				throw std::runtime_error("unsupported shader language");
-		}
-
-		for (auto& item: res.uniform_buffers)
-		{
-			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
-
-		    std::string name = item.name;
-		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
-		    {
-		        name = item.name.substr(pos + 1);
-		    }
-		    bindInfo.variateName = name;
-			bindInfo.typeName = "uniform";
-			bindInfo.elementCount = compiler->get_type((uint64_t) item.base_type_id).member_types.size();
-			bindInfo.typeSize = (uint32_t) compiler->get_declared_struct_size(compiler->get_type(item.base_type_id));
-
-			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
-			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
-			bindInfo.location = compiler->get_decoration(item.id, spv::DecorationLocation);
-
-			bindInfo.bindType = ShaderCodeModule::ShaderResources::uniformBuffers;
-			result.bindInfoPool.push_back(bindInfo);
-
-			// 记录 UBO 的总大小和名称
-			result.uniformBufferSize = bindInfo.typeSize;
-			result.uniformBufferName = item.name;
-
-			// 为 UBO 的每个成员生成独立的 ShaderBindInfo（类似 pushConstantMembers）
-			const auto& uboType = compiler->get_type(item.base_type_id);
-			for (size_t memberIdx = 0; memberIdx < uboType.member_types.size(); ++memberIdx)
-			{
-				ShaderCodeModule::ShaderResources::ShaderBindInfo memberInfo = {};
-				memberInfo.variateName = compiler->get_member_name(item.base_type_id, memberIdx);
-				memberInfo.byteOffset = compiler->type_struct_member_offset(uboType, memberIdx);
-				memberInfo.typeSize = (uint32_t) compiler->get_declared_struct_member_size(uboType, memberIdx);
-				memberInfo.bindType = ShaderCodeModule::ShaderResources::uniformBufferMembers;
-				memberInfo.set = bindInfo.set;
-				memberInfo.binding = bindInfo.binding;
-				result.bindInfoPool.push_back(memberInfo);
-			}
-		}
-
-		auto isStorageImageResource = [&](const spirv_cross::Resource& item)
-		{
-			const spirv_cross::SPIRType& baseType = compiler->get_type(item.base_type_id);
-			if (spirvTypeContainsStorageImage(*compiler, baseType))
-				return true;
-
-			const spirv_cross::SPIRType& descriptorType = compiler->get_type(item.type_id);
-			return spirvTypeContainsStorageImage(*compiler, descriptorType);
-		};
-
-		auto appendDescriptorBindInfo = [&](const spirv_cross::Resource& item,
-		                                    ShaderCodeModule::ShaderResources::BindType bindType)
-		{
-			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
-
-		    std::string name = item.name;
-		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
-		    {
-		        name = item.name.substr(pos + 1);
-		    }
-		    bindInfo.variateName = name;
-
-			bindInfo.variateName = item.name.empty() ? compiler->get_name(item.id) : name;
-			bindInfo.typeName = spirTypeToString(*compiler, compiler->get_type(item.base_type_id));
-
-			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
-			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
-			bindInfo.location = compiler->get_decoration(item.id, spv::DecorationLocation);
-			const spirv_cross::SPIRType& descriptorType = compiler->get_type(item.type_id);
-			bindInfo.elementCount = descriptorType.array.empty()
-				? 1u
-				: normalizeReflectedElementCount(descriptorType.array[0]);
-
-			bindInfo.bindType = isStorageImageResource(item)
-				? ShaderCodeModule::ShaderResources::storageTexture
-				: bindType;
-			result.bindInfoPool.push_back(bindInfo);
-		};
-
-		for (auto& item: res.sampled_images)
-		{
-			appendDescriptorBindInfo(item, ShaderCodeModule::ShaderResources::sampledImages);
-		}
-
-		for (auto& item: res.separate_images)
-		{
-			appendDescriptorBindInfo(item, ShaderCodeModule::ShaderResources::texture);
-		}
-
-		for (auto& item: res.separate_samplers)
-		{
-			appendDescriptorBindInfo(item, ShaderCodeModule::ShaderResources::sampler);
-		}
-
-		for (auto& item: res.storage_images)
-		{
-			appendDescriptorBindInfo(item, ShaderCodeModule::ShaderResources::storageTexture);
-		}
-
-		for (auto& item: res.storage_buffers)
-		{
-			appendDescriptorBindInfo(item, ShaderCodeModule::ShaderResources::storageBuffer);
-		}
-
-		for (auto& item: res.stage_inputs)
-		{
-			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
-
-		    std::string name = item.name;
-		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
-		    {
-		        name = item.name.substr(pos + 1);
-		    }
-		    bindInfo.variateName = name;
-
-			const spirv_cross::SPIRType& base_type = compiler->get_type(item.base_type_id);
-			bindInfo.elementCount = base_type.vecsize * base_type.columns;
-			bindInfo.typeSize = 4 * base_type.vecsize * base_type.columns;
-
-			switch (base_type.basetype)
-			{
-				case spirv_cross::SPIRType::Float:
-					bindInfo.typeName = "float";
-					break;
-				case spirv_cross::SPIRType::UInt:
-					bindInfo.typeName = "uint";
-					break;
-				case spirv_cross::SPIRType::Int:
-					bindInfo.typeName = "int";
-					break;
-				default:
-					break;
-			}
-
-			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
-			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
-			bindInfo.location = compiler->get_decoration(item.id, spv::DecorationLocation);
-
-			bindInfo.bindType = ShaderCodeModule::ShaderResources::stageInputs;
-
-			result.bindInfoPool.push_back(bindInfo);
-		}
-
-		for (auto& item: res.stage_outputs)
-		{
-			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
-
-		    std::string name = item.name;
-		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
-		    {
-                name = item.name.substr(pos + 1);
-		    }
-			bindInfo.variateName = name;
-
-			const spirv_cross::SPIRType& base_type = compiler->get_type(item.base_type_id);
-			bindInfo.elementCount = base_type.vecsize * base_type.columns;
-			bindInfo.typeSize = 4 * base_type.vecsize * base_type.columns;
-
-			switch (base_type.basetype)
-			{
-				case spirv_cross::SPIRType::Float:
-					bindInfo.typeName = "float";
-					break;
-				case spirv_cross::SPIRType::UInt:
-					bindInfo.typeName = "uint";
-					break;
-				case spirv_cross::SPIRType::Int:
-					bindInfo.typeName = "int";
-					break;
-				default:
-					break;
-			}
-
-			bindInfo.set = compiler->get_decoration(item.id, spv::DecorationDescriptorSet);
-			bindInfo.binding = compiler->get_decoration(item.id, spv::DecorationBinding);
-			bindInfo.location = compiler->get_decoration(item.id, spv::DecorationLocation);
-
-			bindInfo.bindType = ShaderCodeModule::ShaderResources::stageOutputs;
-
-			result.bindInfoPool.push_back(bindInfo);
-		}
-
-		for (auto& item: res.push_constant_buffers)
-		{
-		    std::string name = item.name;
-		    if (auto pos = item.name.find_last_of('.'); pos != std::string::npos)
-		    {
-		        name = item.name.substr(pos + 1);
-		    }
-			result.pushConstantName = name;
-			result.pushConstantSize = (uint32_t) compiler->get_declared_struct_size(
-				compiler->get_type((uint64_t) item.base_type_id));
-
-			// obtain all the push constant member
-			spirv_cross::SmallVector<spirv_cross::BufferRange> ranges = compiler->get_active_buffer_ranges(item.id);
-			for (auto& range: ranges)
-			{
-				ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo = {};
-				bindInfo.typeSize = (uint32_t) range.range;
-				bindInfo.byteOffset = (uint32_t) range.offset;
-
-			    std::string memberName = compiler->get_member_name(item.base_type_id, range.index);
-			    if (auto pos = memberName.find_last_of('.'); pos != std::string::npos)
-			    {
-			        memberName = memberName.substr(pos + 1);
-			    }
-			    bindInfo.variateName = memberName;
-
-				bindInfo.bindType = ShaderCodeModule::ShaderResources::pushConstantMembers;
-
-				result.bindInfoPool.push_back(bindInfo);
-			}
-		}
-
-		delete compiler;
 		return result;
 	}
 
@@ -2725,10 +2190,27 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
             cursor.m_varLayout = param;
             cursor.m_typeLayout = param->getTypeLayout();
 
+            // 顶层参数的 descriptor set 取法(已实测 SpirV target 逐 compile/逐字段确认):
+            //   - ParameterBlock(kind=11): 其内容独占一个寄存器空间, set 来自
+            //     getOffset(SubElementRegisterSpace)。non-bindless 的 global_parameter_block 由此得 set=1。
+            //   - 其余全部(ConstantBuffer UBO + 普通纹理/采样器/buffer + bindless 句柄数组 __DynamicResource[]):
+            //     set 来自 getBindingSpace(DescriptorTableSlot)。
+            //       · bindless global_ubo([[vk::binding(0,3)]] ConstantBuffer) → 3
+            //       · textureHandles([vk::binding(0,2)]) → 2, bufferHandles → 1, combinedTextureSamplerHandles → 0
+            //       · non-bindless global_ubo(无显式 binding) → 0
+            //       · 真 push_constant(getParameterCategory==PushConstantBuffer)DTS=0, 但 set 对 push constant 无意义
+            //         (collectBindings 走 PushConstantBuffer 分支, 进 VkPushConstantRange 而非 descriptor set)。
+            // 旧代码对非 ParameterBlock 统一用 getOffset(RegisterSpace) 恒返回 0 → set 2/3 资源全被误报到 set 0。
+            // 注意: ConstantBuffer 不能并入 ParameterBlock 用 SubElementRegisterSpace —— 那对 global_ubo 返回 0,
+            // 会让 bindless UBO 落到 set 0(bindless 保留集)从而崩溃(rasterizer add_descriptor_binding 抛异常)。
             if (param->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ParameterBlock)
+            {
                 cursor.m_offset.set = param->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+            }
             else
-                cursor.m_offset.set = param->getOffset(slang::ParameterCategory::RegisterSpace);
+            {
+                cursor.m_offset.set = param->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+            }
             cursor.m_offset.binding = param->getOffset(slang::ParameterCategory::DescriptorTableSlot);
 
             cursor.collectBindings(resources, param->getName());
