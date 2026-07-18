@@ -1647,6 +1647,62 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         return getCompileResult(targetDescs, slangTarget, arg0, isLibrary);
     }
 
+    namespace
+    {
+        // 从 program layout 取 compute entry 的真实 thread group size（与反射同源）。
+        // 返回 false 表示无 compute entry 或值退化（非 compute 目标）。
+        bool queryComputeThreadGroupSize(slang::ProgramLayout* layout, uint32_t out[3])
+        {
+            if (!layout) return false;
+            const int epCount = layout->getEntryPointCount();
+            for (int i = 0; i < epCount; ++i)
+            {
+                slang::EntryPointReflection* ep = layout->getEntryPointByIndex(i);
+                if (!ep || ep->getStage() != SLANG_STAGE_COMPUTE) continue;
+                SlangUInt sizes[3] = { 1, 1, 1 };
+                ep->getComputeThreadGroupSize(3, sizes);
+                out[0] = static_cast<uint32_t>(sizes[0]);
+                out[1] = static_cast<uint32_t>(sizes[1]);
+                out[2] = static_cast<uint32_t>(sizes[2]);
+                return true;
+            }
+            return false;
+        }
+
+        // 就地把 SPIR-V 的 OpExecutionMode LocalSize 三个字面量改成 (x,y,z)。
+        // 背景：GLSL → 序列化 Slang IR → 重 emit SPIR-V 的往返里，Slang 会把 GLSL
+        // local_size 丢成 (1,1,1)（反射侧却读得到真实值）。这里用反射同源的真实值把
+        // 被执行 SPIR-V 的 LocalSize 补回，令「dispatch_groups 除数」与「GPU 实际每组线程」一致。
+        // 只改操作数、不增删指令，SPIR-V 长度与 header word count 不变。已一致时 no-op。
+        // 返回 true 表示确实改写了（用于日志）。
+        bool patchSpirvLocalSize(std::vector<uint32_t>& words, uint32_t x, uint32_t y, uint32_t z)
+        {
+            constexpr uint32_t kOpExecutionMode = 16u;    // OpExecutionMode
+            constexpr uint32_t kExecModeLocalSize = 17u;  // LocalSize
+            if (words.size() < 5) return false;           // 前 5 word 是 header
+            size_t i = 5;
+            while (i < words.size())
+            {
+                const uint32_t first = words[i];
+                const uint32_t count = first >> 16;
+                const uint32_t op = first & 0xFFFFu;
+                if (count == 0 || i + count > words.size()) break;  // 结构损坏防御
+                // OpExecutionMode: [op][entryPoint][mode][operands...]
+                if (op == kOpExecutionMode && count >= 6 && words[i + 2] == kExecModeLocalSize)
+                {
+                    if (words[i + 3] == x && words[i + 4] == y && words[i + 5] == z)
+                        return false;  // 已一致，no-op（EDSL / actor_pick 天然走这里）
+                    words[i + 3] = x;
+                    words[i + 4] = y;
+                    words[i + 5] = z;
+                    return true;
+                }
+                i += count;
+            }
+            return false;
+        }
+    }
+
     SlangCompileResult ShaderLanguageConverter::getCompileResult(std::vector<slang::TargetDesc> targetDescs, Slang::ComPtr<slang::IComponentType> slangTarget,SlangCompileArgs0& arg0,bool isLibrary)
     {
 	    SlangCompileResult finalResult;
@@ -1701,6 +1757,23 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	            SlangCompileResult::BinaryTarget target(targetCodeBlob->getBufferSize() / sizeof(uint32_t));
 	            memcpy(target.data(), targetCodeBlob->getBufferPointer(),
                        targetCodeBlob->getBufferSize());
+
+	            // SPIR-V compute: 修补被 Slang 往返丢失的 LocalSize（用 layout 真实值）。
+	            if (targetDescs[i].format == SLANG_SPIRV)
+	            {
+	                uint32_t tgs[3] = { 0, 0, 0 };
+	                if (queryComputeThreadGroupSize(slangTarget->getLayout(static_cast<SlangInt>(i)), tgs)
+	                    && (tgs[0] | tgs[1] | tgs[2]) != 0)
+	                {
+	                    if (patchSpirvLocalSize(target, tgs[0], tgs[1], tgs[2]))
+	                    {
+	                        std::cout << "[Helicon] Patched SPIR-V LocalSize -> ("
+	                                  << tgs[0] << "," << tgs[1] << "," << tgs[2]
+	                                  << ") for entry '" << arg0.entrypointName << "'" << std::endl;
+	                    }
+	                }
+	            }
+
 	            finalResult.binaryTargets.insert({targetLang, std::move(target)});
 	            continue;
 	        }
