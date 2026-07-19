@@ -1,16 +1,16 @@
-﻿add_library(vision-hotfix-compiler INTERFACE)
+add_library(horizon-hotfix-compiler INTERFACE)
 
-function(vision_add_compiler_plugins name)
+function(horizon_add_compiler_plugins name)
     cmake_parse_arguments(PLUGIN "" "CATEGORY" "SOURCES" ${ARGN})
-    set(lib_name vision-hotfix-${PLUGIN_CATEGORY}-${name})
+    set(lib_name horizon-hotfix-${PLUGIN_CATEGORY}-${name})
 
     add_library(${lib_name} MODULE ${PLUGIN_SOURCES})
     target_link_libraries(${lib_name} PRIVATE
-            vision-hotfix)
+            horizon-hotfix)
     target_compile_definitions(${lib_name} PRIVATE
             VISION_PLUGIN_NAME="${name}"
             VISION_CATEGORY="${PLUGIN_CATEGORY}")
-    set(category vision-hotfix-${PLUGIN_CATEGORY})
+    set(category horizon-hotfix-${PLUGIN_CATEGORY})
     add_dependencies(${category} ${lib_name})
 
     set_target_properties(${lib_name} PROPERTIES
@@ -22,5 +22,5 @@ function(vision_add_compiler_plugins name)
 endfunction()
 
 
-vision_add_compiler_plugins(msvc CATEGORY compiler SOURCES msvc.cpp)
-vision_add_compiler_plugins(llvm CATEGORY compiler SOURCES llvm.cpp)
+horizon_add_compiler_plugins(msvc CATEGORY compiler SOURCES msvc.cpp)
+horizon_add_compiler_plugins(llvm CATEGORY compiler SOURCES llvm.cpp)

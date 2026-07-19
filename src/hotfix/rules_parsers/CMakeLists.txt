@@ -1,16 +1,16 @@
-﻿add_library(vision-hotfix-rules_parser INTERFACE)
+add_library(horizon-hotfix-rules_parser INTERFACE)
 
-function(vision_add_rules_parser_plugins name)
+function(horizon_add_rules_parser_plugins name)
     cmake_parse_arguments(PLUGIN "" "CATEGORY" "SOURCES" ${ARGN})
-    set(lib_name vision-hotfix-${PLUGIN_CATEGORY}-${name})
+    set(lib_name horizon-hotfix-${PLUGIN_CATEGORY}-${name})
 
     add_library(${lib_name} MODULE ${PLUGIN_SOURCES})
     target_link_libraries(${lib_name} PRIVATE
-            vision-hotfix)
+            horizon-hotfix)
     target_compile_definitions(${lib_name} PRIVATE
             VISION_PLUGIN_NAME="${name}"
             VISION_CATEGORY="${PLUGIN_CATEGORY}")
-    set(category vision-hotfix-${PLUGIN_CATEGORY})
+    set(category horizon-hotfix-${PLUGIN_CATEGORY})
     add_dependencies(${category} ${lib_name})
 
     set_target_properties(${lib_name} PROPERTIES
@@ -21,5 +21,5 @@ function(vision_add_rules_parser_plugins name)
             DEBUG_POSTFIX "")
 endfunction()
 
-vision_add_rules_parser_plugins(ninja CATEGORY rules_parser SOURCES ninja.cpp)
-vision_add_rules_parser_plugins(json CATEGORY rules_parser SOURCES json.cpp)
+horizon_add_rules_parser_plugins(ninja CATEGORY rules_parser SOURCES ninja.cpp)
+horizon_add_rules_parser_plugins(json CATEGORY rules_parser SOURCES json.cpp)

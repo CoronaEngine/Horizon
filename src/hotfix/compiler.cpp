@@ -11,7 +11,7 @@ fs::path Compiler::cli_path() noexcept {
 }
 
 Compiler::Handle Compiler::create(const std::string &name) {
-    string plugin_name = ocarina::format("vision-hotfix-compiler-{}.dll", name);
+    string plugin_name = ocarina::format("horizon-hotfix-compiler-{}.dll", name);
     auto module = ocarina::RHIContext::instance().obtain_module(plugin_name);
     auto creator = module->function<Creator *>("create");
     auto deleter = module->function<Deleter *>("destroy");

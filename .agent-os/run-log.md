@@ -57,3 +57,11 @@
   - Evidence produced: `EV-021`, `EV-022`
   - Failed explorations preserved: 跨 CMake 目录注册 TARGET POST_BUILD 被拒绝；target property 中的嵌套生成表达式需要 `TARGET_GENEX_EVAL`；`codegraph.cmd sync` 仍因仓库未初始化而不可用。
   - Next likely action: 用户在 CLion 中重试 `HorizonExamples baseline`；若还有错误，采集第一条错误原文区分工作目录和运行时 hotfix 路径问题。
+
+- 2026-07-19 将 hotfix targets 和 DLL 前缀统一为 Horizon。
+  - Worked on: `OBJ-003`, `REQ-006`, `AC-006`, `CD-009`
+  - State changes: `vision-hotfix*` CMake targets、聚合库和运行时 DLL 重命名为 `horizon-hotfix*`；compiler/parser 动态加载字符串与 test 注册路径同步更新；C++ 命名空间和配置开关保持不变。
+  - Evidence produced: `EV-023`
+  - Verification: `clion-build` 成功生成 HorizonExamples 和全部新名前缀产物；当前 `build.ninja` 无旧 target 名；`run-horizon-baseline` 返回 PID `5940` 且进程响应。
+  - Failed explorations preserved: `codegraph.cmd sync` 返回 `CodeGraph not initialized`，仓库依赖图工具仍未初始化。
+  - Next likely action: `TD-002`，确认 Horizon 长期工程目标和近期优先级。

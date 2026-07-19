@@ -27,7 +27,7 @@
 - `AC-003`: `project-index.md` 暴露一个全局 top next action、活跃工作流、活跃阻塞和读下一步路径。
 - `AC-004`: `requirements.md` 明确标记尚未由用户确认的长期项目目标，而不是伪造产品路线。
 - `AC-005`: 初始化结果通过技能验证脚本或等价文件检查。
-- `AC-006`: 开启 examples、ocarina 和 Vision hotfix 后，CMake 可成功生成，且 `HorizonExamples` 的构建图包含 `vision-hotfix-all` 及其插件/测试依赖。
+- `AC-006`: 开启 examples、ocarina 和 Vision hotfix 后，CMake 可成功生成，且 `HorizonExamples` 的构建图包含 `horizon-hotfix-all` 及其插件/测试依赖。
 - `AC-007`: 运行 baseline 示例时，按 H 能触发一次 hotfix 检查；修改受监视实现文件后能够 reload，且无需重启 exe 即可观察到行为变化。
 - `AC-008`: `clion-build` 通过 skill 结构校验和绝对路径扫描，实际调用能从 CLion cache 取得同一 CMake/MSVC，并执行 `--build cmake-build-debug --target HorizonExamples -j 30`。
 - `AC-009`: baseline 启动 skill 通过结构和绝对路径扫描；实际调用能创建持续运行的 `HorizonExamples baseline` 进程，并在调用后立即返回 PID。

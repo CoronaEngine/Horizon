@@ -38,3 +38,7 @@
   - Related items: `OBJ-003`, `REQ-006`, `AC-009`, `MS-004`
   - Human rationale: 用户不接受在 `HorizonExamples` 中维护 hotfix DLL 特例列表，希望 vision-hotfix 依赖与其他 runtime 依赖采用相同处理方式。
   - Effect on project: `vision-hotfix-all` 负责声明插件 artifacts，`horizon_install_runtime_deps` 统一复制普通 target runtime DLL 和 provider 插件；CLion 可直接启动 examples 目录下的 exe。
+- `CD-009` 2026-07-19 `[active]`: hotfix 构建 targets 和产物统一使用 `horizon-hotfix*` 前缀。
+  - Related items: `OBJ-003`, `REQ-006`, `AC-006`
+  - Human rationale: 用户明确要求仍包含 `vision` 的 hotfix target 名改为 `horizon`。
+  - Effect on project: 核心库、聚合库、测试库、compiler/parser interface targets 与插件 DLL 全部改为 `horizon-hotfix*`；运行时插件加载字符串同步更新。`vision::hotfix` C++ 命名空间和已有配置开关不在本次 target 重命名范围内。
