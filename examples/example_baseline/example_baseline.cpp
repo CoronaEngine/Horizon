@@ -236,12 +236,21 @@ private:
         window = glfwCreateWindow(WIDTH, HEIGHT, "example_baseline", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+        glfwSetKeyCallback(window, keyCallback);
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
     {
         auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
         app->framebufferResized = true;
+    }
+
+    static void keyCallback(GLFWwindow*, int key, int, int action, int)
+    {
+        if (key == GLFW_KEY_H && action == GLFW_PRESS)
+        {
+            std::cout << "hotfix" << std::endl;
+        }
     }
 
     void initVulkan()
