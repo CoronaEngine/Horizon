@@ -127,7 +127,7 @@ public:
 };
 
 template<typename T>
-requires is_ptr_v<T>
+requires ocarina::is_ptr_v<T>
 class HotfixSlot : public TSlot<T>, public Observer {
 public:
     using ptr_type = ptr_t<T>;

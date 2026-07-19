@@ -38,3 +38,10 @@ target_link_libraries(vision-hotfix-all PUBLIC
         vision-hotfix-compiler
         vision-hotfix-test
         vision-hotfix-rules_parser)
+
+set_property(TARGET vision-hotfix-all PROPERTY
+        INTERFACE_HORIZON_RUNTIME_DEPS
+        "$<TARGET_FILE:vision-hotfix-compiler-msvc>"
+        "$<TARGET_FILE:vision-hotfix-compiler-llvm>"
+        "$<TARGET_FILE:vision-hotfix-rules_parser-ninja>"
+        "$<TARGET_FILE:vision-hotfix-rules_parser-json>")

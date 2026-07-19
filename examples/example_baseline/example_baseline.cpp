@@ -32,6 +32,11 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+#include "example_baseline/baseline_hotfix_test.h"
+#include "hotfix/module_interface.h"
+#endif
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
@@ -160,9 +165,20 @@ struct UniformBufferObject
 class HelloTriangleApplication
 {
 public:
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+    HelloTriangleApplication()
+        : hotfixTest(vision::ModuleInterface::instance().construct_shared<horizon::example_baseline::BaselineHotfixTest>())
+    {
+    }
+#endif
+
     void run()
     {
         initWindow();
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+        std::cout << "[baseline hotfix] edit examples/example_baseline/baseline_hotfix_test.cpp, then press H" << std::endl;
+        hotfixTest->print();
+#endif
         initVulkan();
         mainLoop();
         cleanup();
@@ -227,6 +243,10 @@ private:
 
     bool framebufferResized = false;
 
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+    horizon::example_baseline::BaselineHotfixSlot hotfixTest;
+#endif
+
     void initWindow()
     {
         glfwInit();
@@ -236,6 +256,7 @@ private:
         window = glfwCreateWindow(WIDTH, HEIGHT, "example_baseline", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+        glfwSetKeyCallback(window, keyCallback);
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
@@ -243,6 +264,40 @@ private:
         auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
         app->framebufferResized = true;
     }
+
+    static void keyCallback(GLFWwindow* window, int key, int, int action, int)
+    {
+        if (key == GLFW_KEY_H && action == GLFW_PRESS)
+        {
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+            auto* app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+            app->requestHotfix();
+#else
+            std::cout << "[baseline hotfix] hotfix support is disabled" << std::endl;
+#endif
+        }
+    }
+
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+    void requestHotfix()
+    {
+        auto& hotfixSystem = vision::HotfixSystem::instance();
+        if (hotfixSystem.is_working())
+        {
+            std::cout << "[baseline hotfix] reload already in progress" << std::endl;
+            return;
+        }
+
+        if (hotfixSystem.check_and_build())
+        {
+            std::cout << "[baseline hotfix] source change detected; rebuilding" << std::endl;
+        }
+        else
+        {
+            std::cout << "[baseline hotfix] no modified source detected" << std::endl;
+        }
+    }
+#endif
 
     void initVulkan()
     {
@@ -284,6 +339,9 @@ private:
         while (!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+            vision::HotfixSystem::instance().execute_callback();
+#endif
             drawFrame();
         }
 

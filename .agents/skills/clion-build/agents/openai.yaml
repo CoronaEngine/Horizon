@@ -1,0 +1,4 @@
+interface:
+  display_name: "CLion Build"
+  short_description: "Build HorizonExamples exactly like the CLion Debug profile"
+  default_prompt: "Use $clion-build to build the HorizonExamples target with the CLion Debug configuration."

@@ -80,7 +80,7 @@ if (MSVC)
     add_compile_options(/Zi)
     add_link_options(/INCREMENTAL:NO)
 
-    target_compile_options(Helicon PUBLIC /source-charset:utf-8 /execution-charset:utf-8)
+    target_compile_options(Helicon PUBLIC /utf-8)
 endif()
 
 find_package(Python)
@@ -101,4 +101,8 @@ if(HORIZON_BUILD_VISION_HOTFIX)
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
     add_subdirectory(src/hotfix)
     target_link_libraries(ocarina-include INTERFACE vision-hotfix)
+
+    if(TARGET HorizonExamples)
+        target_link_libraries(HorizonExamples PRIVATE vision-hotfix-all)
+    endif()
 endif()

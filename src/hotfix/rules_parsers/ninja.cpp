@@ -135,6 +135,7 @@ void NinjaParser::extract_link_cmd(const std::string_view *lines) {
         line = lines[i++];
         NINJA_PARSE(compile_flags, "LANGUAGE_COMPILE_FLAGS")
         NINJA_PARSE(link_flags, "LINK_FLAGS")
+        NINJA_PARSE(link_path, "LINK_PATH")
         NINJA_PARSE(target_implib, "TARGET_IMPLIB")
         NINJA_PARSE(target_pdb, "TARGET_PDB")
         NINJA_PARSE(pre_link, "PRE_LINK")

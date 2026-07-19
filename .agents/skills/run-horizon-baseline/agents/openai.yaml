@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Horizon Baseline"
+  short_description: "Launch HorizonExamples in baseline mode from the Debug tree"
+  default_prompt: "Use $run-horizon-baseline to launch HorizonExamples with the baseline argument."
