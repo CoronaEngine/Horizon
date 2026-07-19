@@ -4,7 +4,7 @@
 
 - `OBJ-001`: 初始化 Horizon 仓库的 AI-first 项目文档系统，让后续 agent 能从仓库文件恢复项目状态、约束、TODO、证据和下一步。
 - `OBJ-002` `[needs-human-decision]`: Horizon 的长期工程目标尚未在本文档系统中确认。候选方向包括独立 Horizon 库维护、CoronaEngine 集成支撑、hotfix/ocarina 相关治理、examples/build 稳定性治理。
-- `OBJ-003` `[active]`: 在 `HorizonExamples` 的 `example_baseline` 中加入可交互的 hotfix 测试。
+- `OBJ-003` `[verified]`: 在 `HorizonExamples` 的 `example_baseline` 中加入可交互的 hotfix 测试。
 
 ## Requirements
 
@@ -18,7 +18,7 @@
 - `REQ-008`: 仓库必须提供名为 `clion-build` 的 project skill，使用 CLion Debug 的 `cmake-build-debug` 构建目录、`HorizonExamples` target 和相同并行度；skill 内容不得包含绝对路径。
 - `REQ-009`: 仓库必须提供 project skill，以 `baseline` 作为唯一参数启动 `cmake-build-debug` 中的 `HorizonExamples`，并使用能正确解析相对 shader 和 hotfix runtime DLL 的工作目录与 PATH。
 - `REQ-010`: 每次阶段性修改完成后，必须依次使用 `clion-build` 和 `run-horizon-baseline` 验证；两项均成功并记录证据后才能声明阶段完成。
-- `REQ-011`: baseline 示例必须注册 H 键回调；每次收到 `GLFW_PRESS` 时向标准输出打印一行 `hotfix`，忽略 `GLFW_REPEAT`。
+- `REQ-011` `[superseded by CD-007]`: baseline H 键日志桩已扩展为实际 hotfix 检测及状态输出；仍只处理 `GLFW_PRESS`，忽略 `GLFW_REPEAT`。
 
 ## Acceptance Criteria
 
@@ -32,14 +32,14 @@
 - `AC-008`: `clion-build` 通过 skill 结构校验和绝对路径扫描，实际调用能从 CLion cache 取得同一 CMake/MSVC，并执行 `--build cmake-build-debug --target HorizonExamples -j 30`。
 - `AC-009`: baseline 启动 skill 通过结构和绝对路径扫描；实际调用能创建持续运行的 `HorizonExamples baseline` 进程，并在调用后立即返回 PID。
 - `AC-010`: 阶段验收证据同时包含 `clion-build` 成功结果，以及 `run-horizon-baseline` 启动后进程持续存活的结果。
-- `AC-011`: baseline 运行时实际按下 H，标准输出出现且仅出现对应按下事件的一行 `hotfix`。
+- `AC-011` `[superseded by CD-007]`: baseline 运行时实际按下 H 后输出检测、构建或无修改状态，不再要求固定输出单独的 `hotfix` 字符串。
 
 ## Non-Goals
 
 - 本次初始化不修改 C++、CMake、shader、third-party 或构建产物。
 - 本次初始化不声称 Horizon 当前能完整 configure/build/test，除非后续有命令证据。
 - 本次初始化不替用户决定 Horizon 的长期产品目标或是否保留 hotfix。
-- 当前 CMake 依赖阶段不实现 H 键处理、文件监视注册或运行时行为替换；这些属于后续 `TD-005`。
+- 本次示例不搬迁 `src/hotfix/test` 的复杂嵌套对象图，也不扩展到头文件变化检测或版本前进/回退。
 
 ## Hard Constraints
 

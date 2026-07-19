@@ -23,6 +23,7 @@ struct CompileOptions {
 struct LinkOptions {
     string compile_flags;
     string link_flags;
+    string link_path;
     string pre_link;
     vector<fs::path> obj_files;
     vector<fs::path> all_libraries;

@@ -8,6 +8,11 @@ set(HORIZON_EXAMPLE_SOURCES
     example_branch_pruning/example_branch_pruning.cpp
 )
 
+if(HORIZON_BUILD_VISION_HOTFIX)
+    list(APPEND HORIZON_EXAMPLE_SOURCES
+        example_baseline/baseline_hotfix_test.cpp)
+endif()
+
 set(HORIZON_EXAMPLE_HEADERS
     common.h
     example_baseline/example_baseline.h
@@ -17,7 +22,19 @@ set(HORIZON_EXAMPLE_HEADERS
     example_branch_pruning/example_branch_pruning.h
 )
 
+if(HORIZON_BUILD_VISION_HOTFIX)
+    list(APPEND HORIZON_EXAMPLE_HEADERS
+        example_baseline/baseline_hotfix_test.h)
+endif()
+
 add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})
+
+if(HORIZON_BUILD_VISION_HOTFIX)
+    target_compile_definitions(HorizonExamples PRIVATE
+        HORIZON_EXAMPLE_HOTFIX_ENABLED=1)
+
+    horizon_install_runtime_deps(HorizonExamples vision-hotfix-all)
+endif()
 
 target_include_directories(HorizonExamples PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"

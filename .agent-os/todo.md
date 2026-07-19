@@ -11,9 +11,6 @@
 - `TD-002` `[ready]`: 确认 Horizon 的长期工程目标和近期优先级。
   - Related items: `OBJ-002`, `MS-002`, `RSK-001`
   - Definition of done: 用户选择或说明主要目标；文档更新 `requirements.md`、`change-decisions.md`、`project-index.md`。
-- `TD-005` `[ready]`: 在 `example_baseline` 中实现 H 键触发的 hotfix 检测、自动 reload 和行为更新。
-  - Related items: `OBJ-003`, `REQ-007`, `MS-004`
-  - Definition of done: `AC-007` 有运行时验证证据。
 
 ## Doing
 
@@ -31,6 +28,11 @@
   - Verification: 源码分支、编译和 baseline 启动已验证；真实按键输出自动捕获受执行策略阻止，`AC-011` 仍待人工按键确认。
 
 ## Verified
+
+- `TD-005` `[verified]`: 在 `example_baseline` 中实现 H 键触发的 hotfix 检测、自动 reload 和行为更新。
+  - Related items: `OBJ-003`, `REQ-007`, `MS-004`
+  - Evidence: `EV-017`, `EV-018`, `EV-019`, `EV-020`
+  - Verification: 真实 H 输入触发专用 `.cpp` 检测和运行时编译；临时 DLL 在原进程内加载，既有对象状态得到迁移，v2 行为模块进入同一进程；最终 v1 构建和启动门禁通过。
 
 - `TD-001` `[verified]`: 初始化 Horizon 项目文档系统。
   - Related items: `OBJ-001`, `REQ-001`, `REQ-002`, `MS-001`

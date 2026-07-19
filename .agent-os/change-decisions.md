@@ -30,3 +30,11 @@
   - Related items: `OBJ-003`, `REQ-011`, `TD-010`
   - Human rationale: 用户明确要求按下 H 后打印 `hotfix` 字符串。
   - Effect on project: GLFW window 注册 key callback，仅处理 `GLFW_KEY_H` 的 `GLFW_PRESS`；尚未触发 hotfix 检测或 reload。
+- `CD-007` 2026-07-19 `[active]`: 将 baseline 的 H 键日志桩扩展为完整 hotfix 检测、reload 和行为输出。
+  - Related items: `OBJ-003`, `REQ-007`, `REQ-011`, `TD-005`, `MS-004`
+  - Human rationale: 用户要求参照 hotfix test 为 baseline 增加独立用例，外部修改 `.cpp` 后按 H reload，并以打印展示新行为和状态迁移。
+  - Effect on project: `CD-006` 的固定 `hotfix` 文本不再作为当前验收要求；H 现在输出无修改、构建中、构建启动或 reload 结果。
+- `CD-008` 2026-07-19 `[active]`: Vision hotfix runtime artifacts 使用与其他依赖库一致的 provider 声明和通用 staging helper。
+  - Related items: `OBJ-003`, `REQ-006`, `AC-009`, `MS-004`
+  - Human rationale: 用户不接受在 `HorizonExamples` 中维护 hotfix DLL 特例列表，希望 vision-hotfix 依赖与其他 runtime 依赖采用相同处理方式。
+  - Effect on project: `vision-hotfix-all` 负责声明插件 artifacts，`horizon_install_runtime_deps` 统一复制普通 target runtime DLL 和 provider 插件；CLion 可直接启动 examples 目录下的 exe。

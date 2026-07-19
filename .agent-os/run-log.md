@@ -43,3 +43,17 @@
   - State changes: baseline window 注册 GLFW key callback；H 的 press 事件打印 `hotfix`，repeat 不打印；尚未接入检测和 reload。
   - Evidence produced: `EV-015`, `EV-016`
   - Next likely action: 人工确认 H 键输出，随后继续 `TD-005` 将回调连接到 hotfix 检测逻辑。
+
+- 2026-07-19 完成 baseline hotfix 交互测试。
+  - Worked on: `OBJ-003`, `WS-003`, `MS-004`, `TD-005`
+  - State changes: 新增专用 RuntimeObject/HotfixSlot 测试对象；H 键接入修改检测，主循环派发异步 callback；hotfix 支持非 `bin` 输出目标、Debug plugin 搜索路径和 Ninja `LINK_PATH`；`OBJ-003`、`WS-003`、`MS-004`、`TD-005` 标记为 verified。
+  - Evidence produced: `EV-017`, `EV-018`, `EV-019`, `EV-020`
+  - Failed explorations preserved: compiler plugin 初始搜索目录错误；运行时 linker 初始遗漏 `slang.lib` 搜索路径；文件写入与过早按 H 产生一次 v1 重编译竞态；`codegraph.cmd sync` 再次确认仓库未初始化 CodeGraph。
+  - Next likely action: `TD-002`，确认 Horizon 长期工程目标和近期优先级。
+
+- 2026-07-19 统一 Vision hotfix runtime 依赖处理并修复 CLion 直接启动。
+  - Worked on: `OBJ-003`, `REQ-006`, `REQ-009`, `CD-008`
+  - State changes: 新增通用 `horizon_install_runtime_deps`；`vision-hotfix-all` 声明 compiler/parser plugin artifacts；`HorizonExamples` 不再包含具体 hotfix DLL 名单。
+  - Evidence produced: `EV-021`, `EV-022`
+  - Failed explorations preserved: 跨 CMake 目录注册 TARGET POST_BUILD 被拒绝；target property 中的嵌套生成表达式需要 `TARGET_GENEX_EVAL`；`codegraph.cmd sync` 仍因仓库未初始化而不可用。
+  - Next likely action: 用户在 CLion 中重试 `HorizonExamples baseline`；若还有错误，采集第一条错误原文区分工作目录和运行时 hotfix 路径问题。

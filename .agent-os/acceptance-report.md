@@ -38,6 +38,18 @@
 - `EV-015` related to `TD-010`: H 键回调实现、构建与启动验证通过。
   - Evidence: `example_baseline.cpp` 注册 `glfwSetKeyCallback`，仅在 `GLFW_KEY_H && GLFW_PRESS` 时执行 `std::cout << "hotfix" << std::endl`；`clion-build` 成功；`run-horizon-baseline` 返回 PID 且三秒后进程仍运行。
   - Conclusion: 实现与阶段双 skill 门禁通过。
+- `EV-017` related to `TD-005`: baseline hotfix 实现和 CLion 同构建树编译通过。
+  - Evidence: 新增专用 `baseline_hotfix_test.cpp/.h`；H 回调调用 `check_and_build()`，主循环调用 `execute_callback()`；`clion-build` 最终成功链接 `examples/HorizonExamples.exe`。
+  - Conclusion: 静态实现和构建满足 `REQ-007` 的检测、异步完成回调和对象替换入口。
+- `EV-018` related to `TD-005`: 真实 H 交互和运行时模块替换通过。
+  - Evidence: 捕获日志包含初始 `implementation=v1 reload_count=0`、修改检测、目标 `examples\\HorizonExamples.exe` 运行时构建成功、`module_1.dll` 加载、`reload applied` 和 `implementation=v1 reload_count=1`；同一 PID 随后加载 `module_2.dll`，二进制检查确认其包含 `implementation=v2`。
+  - Conclusion: 既有对象状态在不重启 exe 的情况下迁移，更新后的 v2 代码模块进入同一进程，`AC-007` 满足。
+- `EV-020` related to `TD-005`, `TD-009`: 最终 v1 基线双 skill 门禁通过。
+  - Evidence: 恢复源码为 `implementation=v1` 后，`clion-build` 成功；`run-horizon-baseline` 返回 PID `45304`，随后检查该进程仍在运行且响应。
+  - Conclusion: 最终工作树对应的 Debug 产物可构建并启动，`AC-010` 满足。
+- `EV-021` related to `TD-005`, `TD-009`: CLion 直接启动 runtime 依赖 staging 验证通过。
+  - Evidence: `dumpbin /dependents` 确认 HorizonExamples 直接依赖 `vision-hotfix.dll` 和 `ocarina-core.dll`；重构后 `clion-build` 成功，examples 输出目录包含 hotfix/ocarina runtime DLL 和四个动态插件；不补充 `cmake-build-debug/bin` 到 PATH 的直接启动持续运行并打印 v1；`run-horizon-baseline` 返回 PID `26448` 且进程仍响应。
+  - Conclusion: CLion CMake Run Configuration 不再依赖专用 PATH 才能启动，hotfix runtime artifacts 与其他依赖一样由模块元数据和通用 helper 管理。
 
 ## Failed Or Pending Checks
 
@@ -54,3 +66,9 @@
 - `EV-016` related to `TD-010`: 自动 H 键输出捕获未执行。
   - Evidence: 两种本地窗口按键注入方案均在命令启动前被执行策略拒绝；没有修改文件，也没有启动额外进程。
   - Conclusion: 不能声称真实 H 键输出已被自动捕获；`AC-011` 待人工按键确认。
+- `EV-019` related to `TD-005`: hotfix 集成失败探索已解决。
+  - Evidence: 首轮 H 测试因动态模块只搜索 `cmake-build-debug/examples` 而找不到 compiler plugin；加入 Debug `bin` 搜索路径后，运行时 link 又因未继承 Ninja `LINK_PATH` 报 `LNK1104: slang.lib`。随后补充插件搜索目录和 `LINK_PATH` 解析/传递，下一轮临时 DLL 链接与加载成功。
+  - Conclusion: 两项失败均已由 `EV-018` 解决，保留记录用于后续 hotfix target 集成排障。
+- `EV-022` related to `CD-008`: runtime staging 通用化失败探索已解决。
+  - Evidence: 初版把 `add_custom_command(TARGET HorizonExamples)` 写在顶层，CMake 因 target 创建目录不同而拒绝；第二版把插件 `$<TARGET_FILE:...>` 存入 target property 后未二次求值，复制命令收到字面量。最终 helper 使用 `TARGET_GENEX_EVAL`，并在 examples target 创建目录注册 POST_BUILD 命令。
+  - Conclusion: CMake 目录约束和嵌套生成表达式问题均已解决，后续 provider 可复用同一 helper。
