@@ -100,9 +100,9 @@ if(HORIZON_BUILD_VISION_HOTFIX)
     target_include_directories(ocarina-include INTERFACE
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
     add_subdirectory(src/hotfix)
-    target_link_libraries(ocarina-include INTERFACE vision-hotfix)
+    target_link_libraries(ocarina-include INTERFACE horizon-hotfix)
 
     if(TARGET HorizonExamples)
-        target_link_libraries(HorizonExamples PRIVATE vision-hotfix-all)
+        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-all)
     endif()
 endif()

@@ -33,7 +33,7 @@ if(HORIZON_BUILD_VISION_HOTFIX)
     target_compile_definitions(HorizonExamples PRIVATE
         HORIZON_EXAMPLE_HOTFIX_ENABLED=1)
 
-    horizon_install_runtime_deps(HorizonExamples vision-hotfix-all)
+    horizon_install_runtime_deps(HorizonExamples horizon-hotfix-all)
 endif()
 
 target_include_directories(HorizonExamples PRIVATE

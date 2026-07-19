@@ -30,13 +30,14 @@
 ## Recent Important Changes
 
 - 2026-07-19：初始化 `.agent-os/` 文档系统，创建根 `AGENTS.md` 和硬链接 `CLAUDE.md`，验证脚本通过。
-- 2026-07-19：`HorizonExamples` 在启用 Vision hotfix 时链接 `vision-hotfix-all`；完整 CMake 配置和 Ninja 依赖图检查通过。
+- 2026-07-19：`HorizonExamples` 在启用 Vision hotfix 时链接 `horizon-hotfix-all`；完整 CMake 配置和 Ninja 依赖图检查通过。
 - 2026-07-19：新增仓库级 `clion-build` skill，复用 CLion Debug 构建树；实际构建暴露 MSVC D8016 字符集选项冲突。
 - 2026-07-19：新增 `run-horizon-baseline` skill；已验证能够以 baseline 参数启动 Debug 示例并返回 PID。
 - 2026-07-19：新增阶段双 skill 验证门禁；统一 `/utf-8` 后构建与 baseline 启动均通过，D8016 阻塞解除。
 - 2026-07-19：baseline 注册 H 键 press 回调并打印 `hotfix`；构建和启动门禁通过，真实按键输出待人工确认。
 - 2026-07-19：baseline hotfix 交互测试完成；运行中由 v1 源码生成并加载临时模块，状态计数从 0 迁移到 1，随后同一进程加载包含 v2 行为的第二个模块；最终源码恢复 v1，双 skill 门禁通过。
 - 2026-07-19：Vision hotfix runtime artifacts 改用 provider 元数据和通用 staging helper；CLion 无需手工添加 Debug bin PATH 即可直接启动 HorizonExamples。
+- 2026-07-19：所有 hotfix CMake targets 和对应 DLL 前缀由 `vision-hotfix` 统一重命名为 `horizon-hotfix`；构建图与 baseline 启动验证通过。
 
 ## Read Next
 

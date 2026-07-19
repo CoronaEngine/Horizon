@@ -50,6 +50,9 @@
 - `EV-021` related to `TD-005`, `TD-009`: CLion 直接启动 runtime 依赖 staging 验证通过。
   - Evidence: `dumpbin /dependents` 确认 HorizonExamples 直接依赖 `vision-hotfix.dll` 和 `ocarina-core.dll`；重构后 `clion-build` 成功，examples 输出目录包含 hotfix/ocarina runtime DLL 和四个动态插件；不补充 `cmake-build-debug/bin` 到 PATH 的直接启动持续运行并打印 v1；`run-horizon-baseline` 返回 PID `26448` 且进程仍响应。
   - Conclusion: CLion CMake Run Configuration 不再依赖专用 PATH 才能启动，hotfix runtime artifacts 与其他依赖一样由模块元数据和通用 helper 管理。
+- `EV-023` related to `REQ-006`, `AC-006`, `CD-009`: hotfix target Horizon 前缀重命名验证通过。
+  - Evidence: `clion-build` 在既有 `cmake-build-debug` 中成功构建 `HorizonExamples`，日志生成 `horizon-hotfix.dll`、`horizon-hotfix-all.lib`、`horizon-hotfix-test.dll` 和四个 compiler/parser 插件；当前 `build.ninja` 不包含 `vision-hotfix`，examples 运行目录包含六个 `horizon-hotfix*.dll`；`run-horizon-baseline` 返回 PID `5940` 且进程响应。
+  - Conclusion: hotfix 构建 targets、链接输入、staging 元数据和运行时 DLL 名已统一为 Horizon 前缀，阶段双 skill 门禁通过。
 
 ## Failed Or Pending Checks
 
