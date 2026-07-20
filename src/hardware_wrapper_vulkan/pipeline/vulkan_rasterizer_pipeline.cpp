@@ -1660,6 +1660,12 @@ namespace Corona::Horizon
             DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
             //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
             draw_desc.pipeline = draw.pipeline;
+            auto pipelineDesc = desc();
+            if (auto object = pipelineDesc.pipelineObject; object)
+            {
+                draw_desc.vert_condition_info = object->vertex->getCurrentConditionInfo();
+                draw_desc.frag_condition_info = object->fragment->getCurrentConditionInfo();
+            }
             draw_desc.push_constant_data = draw.push_constant_data;
             draw_desc.uniform_buffers = draw.uniform_buffers;
             for (const BoundImage& image : draw.images)

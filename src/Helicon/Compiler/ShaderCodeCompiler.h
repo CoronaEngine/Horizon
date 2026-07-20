@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <source_location>
 #include <string>
 #include <unordered_map>
@@ -169,18 +170,17 @@ struct ShaderCodeModule
         ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
         ~ShaderCodeCompiler() = default;
 
-        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false);
+        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false, ConditionInfo conditionInfo = {});
         void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
-        bool needPipelineRebuild(const ConditionInfo& currentConditionInfo) const;
         CompilerOption getCompilerOption() const;
-        std::string getCombinedKey() const;
+        static std::string getCombinedKey(const ConditionInfo& conditionInfo);
 
         ConditionInfo getCurrentConditionInfo() const;
 
     private:
-        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const;
-        void combine(bool bindless);
-        std::vector<SlangModule*> getCurrentBranchModules(bool bindless) const;
+        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const;
+        void combine(bool bindless, ConditionInfo conditionInfo);
+        std::vector<SlangModule*> getBranchModules(bool bindless, ConditionInfo conditionInfo) const;
         SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
         SlangModule* getCoreBranchModule(bool bindless) const;
         SlangModule* getTypeHeaderModule(bool bindless) const;

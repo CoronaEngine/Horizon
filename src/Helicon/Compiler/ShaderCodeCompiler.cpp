@@ -91,7 +91,7 @@ namespace EmbeddedShader
         compile(shaderCode,inputStage,language,option);
     }
 
-    ShaderCodeModule ShaderCodeCompiler::getShaderCode(ShaderLanguage language, bool bindless)
+    ShaderCodeModule ShaderCodeCompiler::getShaderCode(ShaderLanguage language, bool bindless, ConditionInfo conditionInfo)
     {
         std::shared_lock<std::shared_mutex> lock(threadMutex);
 
@@ -100,8 +100,10 @@ namespace EmbeddedShader
         std::string reflKey;
         if (!conditions.empty())
         {
-            codeKey = getCurrentCombinationKey(language, bindless, false);
-            reflKey = getCurrentCombinationKey(language, bindless, true);
+            if (conditionInfo.empty())
+                conditionInfo = getCurrentConditionInfo();
+            codeKey = getCurrentCombinationKey(language, bindless, false, conditionInfo);
+            reflKey = getCurrentCombinationKey(language, bindless, true, conditionInfo);
         }
         else
         {
@@ -132,10 +134,10 @@ namespace EmbeddedShader
         {
             if (!conditions.empty())
             {
-                combine(false);
+                combine(false, conditionInfo);
                 if (compilerOption.enableBindless)
                 {
-                    combine(true);
+                    combine(true, conditionInfo);
                 }
 
                 it = compiledOutputs_.find(codeKey);
@@ -163,7 +165,7 @@ namespace EmbeddedShader
     }
 
     void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language,
-        CompilerOption option)
+                                     CompilerOption option)
     {
         compilerOption = option;
         sourceStage = inputStage;
@@ -182,6 +184,7 @@ namespace EmbeddedShader
         };
         std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
 
+        ConditionInfo info;
         SlangCompileResult result;
         if (!option.branches.empty())
         {
@@ -250,6 +253,7 @@ namespace EmbeddedShader
 
                 --index;
             }
+            info = getCurrentConditionInfo();
 
             compileArgs.shaderCode = shaderCode;
             compileArgs.moduleName = "";
@@ -265,7 +269,7 @@ namespace EmbeddedShader
             compileArgs2.deps.swap(option.slangModules);
 
             //branches
-            auto branches = getCurrentBranchModules(Ast::Parser::getBindless());
+            auto branches = getBranchModules(Ast::Parser::getBindless(), info);
             compileArgs2.deps.insert(compileArgs2.deps.end(),branches.begin(), branches.end());
 
             compileArgs2.enableReflection = true;
@@ -314,8 +318,8 @@ namespace EmbeddedShader
         {
             if (!conditions.empty())
             {
-                codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false);
-                reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true);
+                codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false, info);
+                reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true, info);
             }
             else
             {
@@ -333,8 +337,8 @@ namespace EmbeddedShader
         {
             if (!conditions.empty())
             {
-                codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false);
-                reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true);
+                codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false, info);
+                reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true, info);
             }
             else
             {
@@ -347,35 +351,30 @@ namespace EmbeddedShader
         }
     }
 
-    bool ShaderCodeCompiler::needPipelineRebuild(const ConditionInfo& currentConditionInfo) const
-    {
-        return currentConditionInfo != getCurrentConditionInfo();
-    }
-
     CompilerOption ShaderCodeCompiler::getCompilerOption() const
     {
         return compilerOption;
     }
 
-    std::string ShaderCodeCompiler::getCombinedKey() const
+    std::string ShaderCodeCompiler::getCombinedKey(const ConditionInfo& conditionInfo)
     {
         std::string result;
-        for (const auto& value : conditions)
+        for (const auto value : conditionInfo)
         {
-            result += value() ? "1" : "0";
+            result += value ? "1" : "0";
         }
         return result;
     }
 
-    std::string ShaderCodeCompiler::getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const
+    std::string ShaderCodeCompiler::getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const
     {
         std::string bindlessStr = bindless ? "_Bindless" : "";
         std::string reflectionStr = reflection ? "_Reflection" : "";
         auto languageStr = enumToString(language);
         auto prefixStr = languageStr + reflectionStr + bindlessStr;
-        for (size_t i = 0; i < conditions.size(); ++i)
+        for (size_t i = 0; i < conditionInfo.size(); ++i)
         {
-            auto conditionStr = conditions[i]() ? "_True" : "_False";
+            auto conditionStr = conditionInfo[i] ? "_True" : "_False";
             auto branchName = "Branch_" + std::to_string(i);
             prefixStr += "_" + branchName + "_" + conditionStr;
         }
@@ -392,7 +391,7 @@ namespace EmbeddedShader
         return info;
     }
 
-    void ShaderCodeCompiler::combine(bool bindless)
+    void ShaderCodeCompiler::combine(bool bindless, ConditionInfo conditionInfo)
     {
         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
@@ -416,7 +415,7 @@ namespace EmbeddedShader
         compileArgs2.deps.push_back(getTypeHeaderModule(bindless));
 
         //branches
-        auto branches = getCurrentBranchModules(bindless);
+        auto branches = getBranchModules(bindless, conditionInfo);
         compileArgs2.deps.insert(compileArgs2.deps.end(),branches.begin(), branches.end());
 
         compileArgs2.enableReflection = true;
@@ -442,8 +441,8 @@ namespace EmbeddedShader
         //string targets
         for (auto& stringTarget : result.stringTargets)
         {
-            codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false);
-            reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true);
+            codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false, conditionInfo);
+            reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true, conditionInfo);
 
             storeCode(stringTarget.second,codeKey);
             storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections), reflKey);
@@ -452,20 +451,20 @@ namespace EmbeddedShader
         //binary targets
         for (auto& binaryTarget : result.binaryTargets)
         {
-            codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false);
-            reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true);
+            codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false, conditionInfo);
+            reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true, conditionInfo);
 
             storeCode(binaryTarget.second,codeKey);
             storeReflection(reflectionForTarget(binaryTarget.first, spirvTarget, result.reflections), reflKey);
         }
     }
 
-    std::vector<SlangModule*> ShaderCodeCompiler::getCurrentBranchModules(bool bindless) const
+    std::vector<SlangModule*> ShaderCodeCompiler::getBranchModules(bool bindless, ConditionInfo conditionInfo) const
     {
         std::vector<SlangModule*> result;
-        for (int i = conditions.size() - 1; i >= 0; --i)
+        for (int i = conditionInfo.size() - 1; i >= 0; --i)
         {
-            result.emplace_back(getBranchModule(i, conditions[i](), bindless));
+            result.emplace_back(getBranchModule(i, conditionInfo[i], bindless));
         }
         return result;
     }

@@ -177,6 +177,8 @@ namespace Corona::Horizon
     struct DispatchDesc
     {
         ComputePipelineBase* pipeline;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo comp_condition_info;
+
         uint32_t groups_x { 1 };
         uint32_t groups_y { 1 };
         uint32_t groups_z { 1 };
@@ -214,6 +216,9 @@ namespace Corona::Horizon
     struct DrawIndexedDesc
     {
         RasterizerPipelineBase* pipeline {};
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+
         uint32_t index_count { 0 };
         uint32_t instance_count { 1 };
         uint32_t first_index { 0 };

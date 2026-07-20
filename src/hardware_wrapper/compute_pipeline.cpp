@@ -48,7 +48,13 @@ namespace Corona::Horizon
 
     ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        rebuild_pipeline(std::move(desc));
+        if (desc.pipelineObject)
+        {
+            const auto& info = desc.pipelineObject->compute->getCurrentConditionInfo();
+            rebuild_pipeline(std::move(desc), info);
+            return;
+        }
+        rebuild_pipeline(std::move(desc), {});
     }
 
     ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
@@ -86,13 +92,13 @@ namespace Corona::Horizon
         return ResourceHandle::operator bool();
     }
 
-    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc)
+    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo)
     {
         auto object = desc.pipelineObject;
         if (object)
         {
-            condition_info_ = object->compute->getCurrentConditionInfo();
-            auto it = pipeline_pool_.find(object->getCombinedKey());
+            condition_info_ = conditionInfo;
+            auto it = pipeline_pool_.find(object->getCombinedKey(conditionInfo));
             if (it != pipeline_pool_.end())
             {
                 ResourceBridge::set(*this, it->second);
@@ -102,9 +108,14 @@ namespace Corona::Horizon
         auto pipeline = make_pipeline_token(std::move(desc),location_);
         if (object)
         {
-            pipeline_pool_.insert({ object->getCombinedKey(), pipeline });
+            pipeline_pool_.insert({ object->getCombinedKey(conditionInfo), pipeline });
         }
         ResourceBridge::set(*this, std::move(pipeline));
+    }
+
+    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& ComputePipelineBase::compute_condition_info()
+    {
+        return condition_info_;
     }
 
     ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)

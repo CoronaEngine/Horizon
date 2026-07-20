@@ -15,8 +15,8 @@ namespace EmbeddedShader
 		RasterizedPipelineObject() = default;
 	public:
 		static RasterizedPipelineObject compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
-	    void updateAutoBind(bool bindless);
-	    [[nodiscard]] std::string getCombinedKey() const;
+	    void updateAutoBind(bool bindless, ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo);
+	    [[nodiscard]] static std::string getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
 		std::unique_ptr<ShaderCodeCompiler> vertex;
 		std::unique_ptr<ShaderCodeCompiler> fragment;
 		std::vector<AutoBindEntry> autoBindEntries;
@@ -24,14 +24,14 @@ namespace EmbeddedShader
 		static std::vector<Ast::ParseOutput> parse(auto&& vertexShaderCode, auto&& fragmentShaderCode);
 	};
 
-    inline void RasterizedPipelineObject::updateAutoBind(bool bindless)
+    inline void RasterizedPipelineObject::updateAutoBind(bool bindless, ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
     {
         // Collect auto-bind entries from globalStatements (shared across VS/FS):
 		// Walk all globally-defined textures and check if they have a back-pointer
 		// to a proxy's boundResource_. Match against both vertex and fragment shader's bindInfoPool.
 		{
-			auto vsCodeModule = vertex->getShaderCode(ShaderLanguage::SpirV, bindless);
-			auto fsCodeModule = fragment->getShaderCode(ShaderLanguage::SpirV, bindless);
+			auto vsCodeModule = vertex->getShaderCode(ShaderLanguage::SpirV, bindless,vertConditionInfo);
+			auto fsCodeModule = fragment->getShaderCode(ShaderLanguage::SpirV, bindless, fragConditionInfo);
 			auto& globals = Ast::Parser::getGlobalStatements();
 			for (auto& stmt : globals)
 			{
@@ -114,9 +114,9 @@ namespace EmbeddedShader
 		}
     }
 
-    inline std::string RasterizedPipelineObject::getCombinedKey() const
+    inline std::string RasterizedPipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
     {
-        return "vertex" + vertex->getCombinedKey() + "fragment" + fragment->getCombinedKey();
+        return "vertex" + ShaderCodeCompiler::getCombinedKey(vertConditionInfo) + "fragment" + ShaderCodeCompiler::getCombinedKey(fragConditionInfo);
     }
 
     RasterizedPipelineObject RasterizedPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)
@@ -155,7 +155,7 @@ namespace EmbeddedShader
 			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, ShaderLanguage::Slang, compilerOption);
 		}
 
-		result.updateAutoBind(compilerOption.enableBindless);
+		result.updateAutoBind(compilerOption.enableBindless, result.vertex->getCurrentConditionInfo(), result.fragment->getCurrentConditionInfo());
 
 		return result;
 	}
