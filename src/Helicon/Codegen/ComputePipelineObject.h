@@ -28,26 +28,26 @@ namespace EmbeddedShader
 	{
 	public:
 		static ComputePipelineObject compile(auto&& computeShaderCode, ktm::uvec3 numthreads = ktm::uvec3(1), CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
-	    [[nodiscard]] std::string getCombinedKey() const;
-	    void updateAutoBind(bool bindless);
+	    [[nodiscard]] static std::string getCombinedKey(const ShaderCodeCompiler::ConditionInfo& conditionInfo);
+	    void updateAutoBind(bool bindless, const ShaderCodeCompiler::ConditionInfo& compConditionInfo);
 		std::unique_ptr<ShaderCodeCompiler> compute;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
 		static std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode);
 	};
 
-    inline std::string ComputePipelineObject::getCombinedKey() const
+    inline std::string ComputePipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& conditionInfo)
     {
-        return "compute" + compute->getCombinedKey();
+        return "compute" + ShaderCodeCompiler::getCombinedKey(conditionInfo);
     }
 
-    inline void ComputePipelineObject::updateAutoBind(bool bindless)
+    inline void ComputePipelineObject::updateAutoBind(bool bindless, const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
     {
         // Collect auto-bind entries from globalStatements:
         // Walk all globally-defined textures and check if they have a back-pointer
         // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
         {
-            auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, bindless);
+            auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, bindless, compConditionInfo);
             auto& globals = Ast::Parser::getGlobalStatements();
             for (auto& stmt : globals)
             {
@@ -111,7 +111,7 @@ namespace EmbeddedShader
             result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
 		}
 
-		result.updateAutoBind(compilerOption.enableBindless);
+		result.updateAutoBind(compilerOption.enableBindless, result.compute->getCurrentConditionInfo());
 
 		return result;
 	}

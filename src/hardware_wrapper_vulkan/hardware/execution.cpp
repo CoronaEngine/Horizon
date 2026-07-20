@@ -1407,6 +1407,33 @@ namespace Corona::Horizon
                     throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
             }
 
+            auto rasterizerPipeline = draw.pipeline;
+            auto desc = rasterizerPipeline->desc();
+            if (desc.pipelineObject)
+            {
+                auto& vc = desc.pipelineObject->vertex;
+                auto& fc = desc.pipelineObject->fragment;
+                bool needRebuild = false;
+                if (rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info)
+                {
+                    desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
+                    needRebuild = true;
+                }
+
+                if (rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info)
+                {
+                    desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
+                    needRebuild = true;
+                }
+
+                if (needRebuild)
+                {
+                    desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless,  draw.vert_condition_info, draw.frag_condition_info);
+                    desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                    rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
+                }
+            }
+
             std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(*draw.pipeline);
             VulkanRasterizerPipeline::PreparedDraw prepared =
                 pipeline->prepare_draw(device_,
@@ -1608,6 +1635,21 @@ namespace Corona::Horizon
             {
                 DebugUtilsLabelScope debug_label(command_buffer, command.debug_label);
                 const DispatchDesc& dispatch = command.payload.dispatch;
+
+                auto computePipeline = command.payload.dispatch.pipeline;
+                auto desc = computePipeline->desc();
+                if (desc.pipelineObject)
+                {
+                    auto& cc = desc.pipelineObject->compute;
+                    if (dispatch.comp_condition_info != computePipeline->compute_condition_info())
+                    {
+                        desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
+                        desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless, dispatch.comp_condition_info);
+                        desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                        computePipeline->rebuild_pipeline(std::move(desc), dispatch.comp_condition_info);
+                    }
+                }
+
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);
 
                 for (const DispatchResourceBinding& binding : dispatch.bindings)
@@ -2280,73 +2322,6 @@ namespace Corona::Horizon
         {
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
-        }
-
-        std::unordered_set<ComputePipelineBase*> computePipelines;
-        std::unordered_set<RasterizerPipelineBase*> rasterizerPipelines;
-        //提取命令中用到的管线
-        for (auto & submission : plan.submissions)
-        {
-            for (auto & command : submission.commands)
-            {
-                switch (command.op) {
-                case CommandOp::Dispatch:
-                    computePipelines.insert(command.payload.dispatch.pipeline);
-                    break;
-                case CommandOp::DrawIndexed:
-                    rasterizerPipelines.insert(command.payload.draw_indexed.pipeline);
-                    break;
-                case CommandOp::DrawIndexedBatch:
-                    for (const auto & draw : command.payload.draw_indexed_batch.draws)
-                    {
-                        rasterizerPipelines.insert(draw.draw.pipeline);
-                    }
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-
-        for (auto & computePipeline : computePipelines)
-        {
-            auto desc = computePipeline->desc();
-            if (!desc.pipelineObject) continue;
-            auto& cc = desc.pipelineObject->compute;
-            if (cc->needPipelineRebuild(computePipeline->condition_info_))
-            {
-                desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
-                desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless);
-                desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                computePipeline->rebuild_pipeline(std::move(desc));
-            }
-        }
-
-        for (auto & rasterizerPipeline : rasterizerPipelines)
-        {
-            auto desc = rasterizerPipeline->desc();
-            if (!desc.pipelineObject) continue;
-            auto& vc = desc.pipelineObject->vertex;
-            auto& fc = desc.pipelineObject->fragment;
-            bool needRebuild = false;
-            if (vc->needPipelineRebuild(rasterizerPipeline->vert_condition_info_))
-            {
-                desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
-                needRebuild = true;
-            }
-
-            if (fc->needPipelineRebuild(rasterizerPipeline->frag_condition_info_))
-            {
-                desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
-                needRebuild = true;
-            }
-
-            if (needRebuild)
-            {
-                desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless);
-                desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                rasterizerPipeline->rebuild_pipeline(std::move(desc));
-            }
         }
 
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);

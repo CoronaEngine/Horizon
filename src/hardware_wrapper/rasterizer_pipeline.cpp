@@ -49,7 +49,14 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        rebuild_pipeline(std::move(desc));
+        if (desc.pipelineObject)
+        {
+            const auto& vi = desc.pipelineObject->vertex->getCurrentConditionInfo();
+            const auto& fi = desc.pipelineObject->fragment->getCurrentConditionInfo();
+            rebuild_pipeline(std::move(desc),vi,fi);
+            return;
+        }
+        rebuild_pipeline(std::move(desc), {}, {});
     }
 
     RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
@@ -165,16 +172,19 @@ namespace Corona::Horizon
         pipeline_impl(token)->record_consuming(recorder);
     }
 
-    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc)
+    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
+                                                  ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
     {
         if (!validate_rasterizer_pipeline_desc(desc))
             return;
         auto object = desc.pipelineObject;
+        std::string key;
         if (object)
         {
             vert_condition_info_ = object->vertex->getCurrentConditionInfo();
             frag_condition_info_ = object->fragment->getCurrentConditionInfo();
-            auto it = pipeline_pool_.find(object->getCombinedKey());
+            key = object->getCombinedKey(vertConditionInfo, fragConditionInfo);
+            auto it = pipeline_pool_.find(key);
             if (it != pipeline_pool_.end())
             {
                 ResourceBridge::set(*this, it->second);
@@ -184,9 +194,19 @@ namespace Corona::Horizon
         auto pipeline = make_pipeline_token(std::move(desc),location_);
         if (object)
         {
-            pipeline_pool_.insert({ object->getCombinedKey(), pipeline });
+            pipeline_pool_.insert({ std::move(key), pipeline });
         }
         ResourceBridge::set(*this, std::move(pipeline));
+    }
+
+    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& RasterizerPipelineBase::vertex_condition_info() const
+    {
+        return vert_condition_info_;
+    }
+
+    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& RasterizerPipelineBase::fragment_condition_info() const
+    {
+        return frag_condition_info_;
     }
 
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

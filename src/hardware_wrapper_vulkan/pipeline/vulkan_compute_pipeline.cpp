@@ -1066,6 +1066,12 @@ namespace Corona::Horizon
         Snapshot state = snapshot();
         state.dispatch.pipeline = &pipeline;
 
+        auto pipelineDesc = desc();
+        if (auto object = pipelineDesc.pipelineObject; object)
+        {
+            state.dispatch.comp_condition_info = object->compute->getCurrentConditionInfo();
+        }
+
         for (const BoundBuffer& buffer : state.buffers)
         {
             if (!buffer.buffer)

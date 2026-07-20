@@ -1107,7 +1107,8 @@ namespace Corona::Horizon
         [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
         [[nodiscard]] std::uintptr_t getComputePipelineID() const noexcept { return get_compute_pipeline_id(); }
 
-        void rebuild_pipeline(ComputePipelineDesc desc);
+        void rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
+        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& compute_condition_info();
     private:
         EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
         std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
@@ -1186,7 +1187,10 @@ namespace Corona::Horizon
             return *this;
         }
 
-        void rebuild_pipeline(RasterizerPipelineDesc desc);
+        void rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
+                              ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
+        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertex_condition_info() const;
+        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragment_condition_info() const;
     private:
         EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
         EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
