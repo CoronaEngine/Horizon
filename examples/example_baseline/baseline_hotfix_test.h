@@ -6,7 +6,7 @@
 
 namespace horizon::example_baseline {
 
-class BaselineHotfixTest final : public vision::RuntimeObject
+class BaselineHotfixTest : public vision::RuntimeObject
 {
 public:
     void restore(vision::RuntimeObject* oldObject) noexcept override;
