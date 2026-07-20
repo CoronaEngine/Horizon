@@ -1,5 +1,6 @@
 #include "device_manager.h"
 #include "execution_profile.h"
+#include "horizon_profiling.h"
 
 #include <algorithm>
 #include <atomic>
@@ -544,6 +545,7 @@ namespace Corona::Horizon
                                   std::span<const SubmitSignal> signals,
                                   ExecutionCommitProfileSample* profile)
     {
+        HORIZON_PROFILE_SCOPE_N("Horizon::queue_submit");
         std::vector<VkSemaphoreSubmitInfo> wait_infos;
         wait_infos.reserve(waits.size());
         for (const SubmitWait& wait : waits)

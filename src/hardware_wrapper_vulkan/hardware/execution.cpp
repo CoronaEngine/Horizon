@@ -1,5 +1,7 @@
 #include "execution.h"
 
+#include "horizon_profiling.h"
+
 #include "device_manager.h"
 #include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/display/display_manager.h"
@@ -1162,6 +1164,7 @@ namespace Corona::Horizon
 
     ExecutionPlan ExecutionCompiler::compile_owned(RecordedTask& task, ExecutionCommitProfileSample* profile) const
     {
+        HORIZON_PROFILE_SCOPE_N("Horizon::compile");
         ExecutionPlan plan;
         std::unordered_map<std::uintptr_t, LastResourceUse> global_last_access;
 
@@ -1303,6 +1306,7 @@ namespace Corona::Horizon
 
     void VulkanCommandEncoder::encode(CompiledSubmission& submission) const
     {
+        HORIZON_PROFILE_SCOPE_N("Horizon::encode");
         if (!submission.command_buffer || submission.command_buffer->vk() == VK_NULL_HANDLE)
         {
             return;
@@ -2309,6 +2313,7 @@ namespace Corona::Horizon
 
     SubmitReceipt HardwareExecutor::commit(RecordedTask task)
     {
+        HORIZON_PROFILE_SCOPE_N("Horizon::commit");
         const auto total_start = std::chrono::steady_clock::now();
         ExecutionCommitProfileSample profile;
         ExecutionCommitProfileScope profile_scope(profile);
@@ -2329,6 +2334,12 @@ namespace Corona::Horizon
         profile.total_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - total_start).count();
         record_execution_commit_profile(profile);
+        HORIZON_PROFILE_PLOT("commit total (ms)", profile.total_ms);
+        HORIZON_PROFILE_PLOT("commit compile (ms)", profile.compile_ms);
+        HORIZON_PROFILE_PLOT("commit encode (ms)", profile.encode_ms);
+        HORIZON_PROFILE_PLOT("commit vk submit (ms)", profile.queue_submit_ms);
+        HORIZON_PROFILE_PLOT("commit present (ms)", profile.present_ms);
+        HORIZON_PROFILE_PLOT("commit commands", profile.commands);
         return receipt;
     }
 

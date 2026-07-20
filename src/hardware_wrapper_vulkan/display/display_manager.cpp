@@ -7,6 +7,8 @@
 
 #include "display_manager.h"
 
+#include "horizon_profiling.h"
+
 #include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/hardware/device_manager.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
@@ -901,6 +903,10 @@ namespace Corona::Horizon
 
     PresentResult DisplayManager::present(const PresentDesc& desc, const SubmissionToken& producer)
     {
+        HORIZON_PROFILE_SCOPE_N("Horizon::present");
+        // 每次 present 视为一帧结束，作为 Tracy 时间轴上的帧分隔。
+        // 注意：多窗口时各窗口的 present 会混在同一条帧时间轴上。
+        HORIZON_PROFILE_FRAME();
         std::lock_guard lock(mutex_);
 
         PresentResult result;

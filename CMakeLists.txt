@@ -23,6 +23,7 @@ option(HORIZON_ENABLE_DEBUG_VALIDATION "Enable Horizon hardware checks and Vulka
 option(HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in RelWithDebInfo builds" OFF)
 option(HORIZON_ENABLE_RELEASE_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Release and MinSizeRel builds" OFF)
 option(HORIZON_ENABLE_HARDCODE_SHADERS "Compile and use generated Helicon hardcoded shader cache" OFF)
+option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -48,6 +49,7 @@ include(FetchContent)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonFetchContent.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonSlang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCoreDependencies.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonTracy.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonRuntimeDeps.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCorona.cmake)
 
