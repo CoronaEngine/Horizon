@@ -6,6 +6,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_edsl/example_edsl.cpp
     example_default/example_default.cpp
     example_branch_pruning/example_branch_pruning.cpp
+    example_ibl/example_ibl.cpp
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
@@ -20,6 +21,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_edsl/example_edsl.h
     example_default/example_default.h
     example_branch_pruning/example_branch_pruning.h
+    example_ibl/example_ibl.h
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
