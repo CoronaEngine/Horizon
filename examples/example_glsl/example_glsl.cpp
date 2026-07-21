@@ -65,6 +65,7 @@ void run_example_glsl()
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
     const auto start_time = std::chrono::high_resolution_clock::now();
+    Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -79,12 +80,12 @@ void run_example_glsl()
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::submit;
+        render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::submit;
 
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
     }
-
+    display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);
     glfwTerminate();
 }
