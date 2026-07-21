@@ -2198,6 +2198,7 @@ namespace Corona::Horizon
 
             if (!compiled_submission.command_buffer)
             {
+                HORIZON_PROFILE_SCOPE_N("submit::acquire_cmdbuf");
                 compiled_submission.command_buffer = queue.acquire(profile);
             }
 
@@ -2238,6 +2239,7 @@ namespace Corona::Horizon
                     add_signal_once(signals, signal);
                 }
 
+                HORIZON_PROFILE_SCOPE_N("submit::tracker_lock");
                 const auto tracker_start = std::chrono::steady_clock::now();
                 auto tracked_submission = resource_submission_tracker().lock_submission(compiled_submission, queue.id(), waits);
                 if (profile != nullptr)
@@ -2340,6 +2342,9 @@ namespace Corona::Horizon
         HORIZON_PROFILE_PLOT("commit vk submit (ms)", profile.queue_submit_ms);
         HORIZON_PROFILE_PLOT("commit present (ms)", profile.present_ms);
         HORIZON_PROFILE_PLOT("commit commands", profile.commands);
+        HORIZON_PROFILE_PLOT("commit tracker wait (ms)", profile.tracker_wait_ms);
+        HORIZON_PROFILE_PLOT("commit queue retire (ms)", profile.queue_retire_ms);
+        HORIZON_PROFILE_PLOT("commit queue lock wait (ms)", profile.queue_lock_wait_ms);
         return receipt;
     }
 

@@ -805,6 +805,7 @@ namespace Corona::Horizon
 
     PreparedPresent DisplayManager::prepare_present(PresentDesc& desc)
     {
+        HORIZON_PROFILE_SCOPE_N("display::prepare_present");
         std::lock_guard lock(mutex_);
 
         PreparedPresent prepared;
