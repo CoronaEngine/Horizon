@@ -24,6 +24,7 @@ option(HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION "Enable Horizon hardware checks 
 option(HORIZON_ENABLE_RELEASE_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Release and MinSizeRel builds" OFF)
 option(HORIZON_ENABLE_HARDCODE_SHADERS "Compile and use generated Helicon hardcoded shader cache" OFF)
 option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
+option(HORIZON_ENABLE_IMGUI_RENDER "Render the ImGui overlay in Horizon examples" ON)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

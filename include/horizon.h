@@ -846,6 +846,8 @@ namespace Corona::Horizon
 
         uint32_t multiview_count = 1;
 
+        bool clear_color_target = true;
+
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
 
