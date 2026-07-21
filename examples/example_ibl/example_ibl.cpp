@@ -468,7 +468,7 @@ void run_example_ibl()
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(ibl_width, ibl_height, "Horizon IBL [GLSL]", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(ibl_width, ibl_height, "Horizon IBL [Vulkan]", nullptr, nullptr);
 
     InputContext input;
     glfwSetWindowUserPointer(window, &input);
@@ -563,7 +563,7 @@ void run_example_ibl()
         {
             const double fps = fps_frame_count / fps_accum_seconds;
             char title[96];
-            std::snprintf(title, sizeof(title), "Horizon IBL [GLSL] - %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            std::snprintf(title, sizeof(title), "Horizon IBL [Vulkan] - %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
