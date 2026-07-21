@@ -9,6 +9,12 @@ set(HORIZON_EXAMPLE_SOURCES
     example_branch_pruning/example_branch_pruning.cpp
     example_ibl/example_ibl.cpp
     example_drawstress/example_drawstress.cpp
+    example_raymarch/example_raymarch.cpp
+    example_bump/example_bump.cpp
+    example_deferred/example_deferred.cpp
+    example_shadowmaps/example_shadowmaps.cpp
+    example_shadowvolumes/example_shadowvolumes.cpp
+    example_assao/example_assao.cpp
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
@@ -26,6 +32,12 @@ set(HORIZON_EXAMPLE_HEADERS
     example_branch_pruning/example_branch_pruning.h
     example_ibl/example_ibl.h
     example_drawstress/example_drawstress.h
+    example_raymarch/example_raymarch.h
+    example_bump/example_bump.h
+    example_deferred/example_deferred.h
+    example_shadowmaps/example_shadowmaps.h
+    example_shadowvolumes/example_shadowvolumes.h
+    example_assao/example_assao.h
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
