@@ -1,6 +1,7 @@
 set(HORIZON_EXAMPLE_SOURCES
     main.cpp
     common.cpp
+    imgui_horizon.cpp
     example_baseline/example_baseline.cpp
     example_glsl/example_glsl.cpp
     example_edsl/example_edsl.cpp
@@ -17,6 +18,7 @@ endif()
 
 set(HORIZON_EXAMPLE_HEADERS
     common.h
+    imgui_horizon.h
     example_baseline/example_baseline.h
     example_glsl/example_glsl.h
     example_edsl/example_edsl.h
@@ -51,7 +53,11 @@ target_include_directories(HorizonExamples PRIVATE
 target_link_libraries(HorizonExamples PRIVATE
     glm
     glfw
+    horizon_imgui
     Horizon)
+
+target_compile_definitions(HorizonExamples PRIVATE
+    HORIZON_IMGUI_RENDER_ENABLED=$<BOOL:${HORIZON_ENABLE_IMGUI_RENDER}>)
 
 add_custom_command(TARGET HorizonExamples POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

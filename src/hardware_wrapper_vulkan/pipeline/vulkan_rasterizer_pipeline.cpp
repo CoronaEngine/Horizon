@@ -1673,7 +1673,7 @@ namespace Corona::Horizon
                     .depth = has_depth ? image_ref(state.depth_target) : ImageRef {},
                     .width = state.width,
                     .height = state.height,
-                    .clear_color = true,
+                    .clear_color = state.desc.clear_color_target,
                     .clear_depth = has_depth,
                 });
         }
@@ -1723,6 +1723,7 @@ namespace Corona::Horizon
         uint32_t width = 0;
         uint32_t height = 0;
         bool depth_enabled = false;
+        bool clear_color_target = true;
         std::vector<BoundImage> images;
         HardwareImage depth_target;
         std::vector<RecordedDraw> draws;
@@ -1731,6 +1732,7 @@ namespace Corona::Horizon
             width = width_;
             height = height_;
             depth_enabled = desc_.depth_attachment.enabled;
+            clear_color_target = desc_.clear_color_target;
             images = bound_images_;
             depth_target = depth_target_;
             draws = std::move(draws_);
@@ -1756,7 +1758,7 @@ namespace Corona::Horizon
                     .depth = has_depth ? image_ref(depth_target) : ImageRef {},
                     .width = width,
                     .height = height,
-                    .clear_color = true,
+                    .clear_color = clear_color_target,
                     .clear_depth = has_depth,
                 });
         }
