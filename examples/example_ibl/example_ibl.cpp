@@ -16,6 +16,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/ibl_vert.glsl)
 #include GLSL(shaders/ibl_frag.glsl)
@@ -382,6 +385,8 @@ struct InputContext
 
 void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
 {
+    if (ImGui::GetIO().WantCaptureKeyboard)
+        return;
     if (action != GLFW_PRESS)
         return;
 
@@ -414,6 +419,14 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 void cursor_callback(GLFWwindow* window, double x, double y)
 {
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
+    // UI 捕获鼠标时不驱动相机，但仍更新 prev，避免离开 UI 后镜头跳变。
+    if (ImGui::GetIO().WantCaptureMouse)
+    {
+        context->prev_x = x;
+        context->prev_y = y;
+        context->has_prev = true;
+        return;
+    }
     if (!context->has_prev)
     {
         context->prev_x = x;
@@ -437,6 +450,8 @@ void cursor_callback(GLFWwindow* window, double x, double y)
 
 void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
 {
+    if (ImGui::GetIO().WantCaptureMouse)
+        return;
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
     context->camera.dolly(static_cast<float>(-dy) * 0.05f);
 }
@@ -545,12 +560,18 @@ void run_example_ibl()
         return m;
     }();
 
+    HorizonImGuiLayer ui(window, ibl_width, ibl_height);
+
     auto prev_time = std::chrono::high_resolution_clock::now();
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -642,6 +663,7 @@ void run_example_ibl()
         Corona::Horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                          << Corona::Horizon::commit());
