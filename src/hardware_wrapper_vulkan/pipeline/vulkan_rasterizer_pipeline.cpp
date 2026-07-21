@@ -1,5 +1,7 @@
 #include "vulkan_rasterizer_pipeline.h"
 
+#include "horizon_profiling.h"
+
 #include "hardware_wrapper/validation/hardware_validation.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/hardware/execution_profile.h"
@@ -636,8 +638,10 @@ namespace Corona::Horizon
 
             ~TransientDescriptorSet()
             {
+                HORIZON_PROFILE_SCOPE_N("TransientDescriptorSet::destroy");
                 if (device != VK_NULL_HANDLE && pool != VK_NULL_HANDLE)
                     vkDestroyDescriptorPool(device, pool, nullptr);
+                buffers.clear(); // 让 uniform buffer 的销毁也计入本 zone
             }
         };
     }
@@ -1130,6 +1134,8 @@ namespace Corona::Horizon
                                                                                   uint32_t vertex_stride,
                                                                                   const DrawIndexedDesc& draw)
     {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::prepare_draw");
+
         PipelineKey key {
             .device = device,
             .color_format = color_format,
@@ -1188,7 +1194,11 @@ namespace Corona::Horizon
         pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
         pool_info.pPoolSizes = pool_sizes.data();
 
-        VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
+        VkResult result = VK_SUCCESS;
+        {
+            HORIZON_PROFILE_SCOPE_N("prepare_draw::create_descriptor_pool");
+            result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
+        }
         note_descriptor_pool_create();
         if (result != VK_SUCCESS)
         {
@@ -1209,7 +1219,10 @@ namespace Corona::Horizon
         alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
         alloc_info.pSetLayouts = layouts.data();
 
-        result = vkAllocateDescriptorSets(device, &alloc_info, descriptor_sets.data());
+        {
+            HORIZON_PROFILE_SCOPE_N("prepare_draw::allocate_descriptor_sets");
+            result = vkAllocateDescriptorSets(device, &alloc_info, descriptor_sets.data());
+        }
         if (result != VK_SUCCESS)
         {
             throw std::runtime_error("vkAllocateDescriptorSets failed for RasterizerPipeline draw. VkResult=" +
@@ -1249,6 +1262,7 @@ namespace Corona::Horizon
 
                 if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 {
+                    HORIZON_PROFILE_SCOPE_N("prepare_draw::create_uniform_buffer");
                     auto uniform = std::ranges::find_if(draw.uniform_buffers, [&](const UniformBufferBindingData& item) {
                         return item.set == binding_layout.set && item.binding == binding_layout.binding;
                     });
@@ -1303,7 +1317,10 @@ namespace Corona::Horizon
             }
         }
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        {
+            HORIZON_PROFILE_SCOPE_N("prepare_draw::update_descriptor_sets");
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        }
 
         prepared.descriptor_set_lifetime = std::move(descriptor_owner);
         return prepared;
@@ -1325,6 +1342,8 @@ namespace Corona::Horizon
     {
         if (size == 0)
             return;
+
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::set_uniform");
 
         std::lock_guard lock(mutex_);
         if (is_push_constant_member(bind_type))
@@ -1581,6 +1600,8 @@ namespace Corona::Horizon
         if (!validate_rasterizer_pipeline_record(index_buffer, vertex_buffer, params))
             return;
 
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record");
+
         RecordedDraw draw;
         draw.pipeline = pipeline;
         draw.index_buffer = index_buffer;
@@ -1627,6 +1648,8 @@ namespace Corona::Horizon
 
     CommandBatch VulkanRasterizerPipeline::command_batch() const
     {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
+
         Snapshot state = snapshot();
         CommandBatch batch;
 
@@ -1695,6 +1718,8 @@ namespace Corona::Horizon
 
     void VulkanRasterizerPipeline::record_consuming(CommandRecorder& recorder)
     {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_consuming");
+
         uint32_t width = 0;
         uint32_t height = 0;
         bool depth_enabled = false;
