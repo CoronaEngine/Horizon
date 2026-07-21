@@ -16,6 +16,9 @@
 #include "horizon_profiling.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/drawstress_vert.glsl)
 #include GLSL(shaders/drawstress_frag.glsl)
@@ -153,6 +156,8 @@ void run_example_drawstress()
     const glm::mat4 view_proj = proj * view;
     const glm::mat4 scale_mtx = glm::scale(glm::mat4(1.0f), glm::vec3(0.25f));
 
+    HorizonImGuiLayer ui(window, stress_width, stress_height);
+
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -161,6 +166,10 @@ void run_example_drawstress()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -216,6 +225,7 @@ void run_example_drawstress()
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::wait_present");
+            ui.draw_overlay(display_executor, final_output_image, render_receipt);
             display_executor.wait(render_receipt);
             (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                              << Corona::Horizon::commit());

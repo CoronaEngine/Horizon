@@ -9,7 +9,10 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
-//#include GLSL(shaders/edsl_header.glsl)
+#include "imgui_horizon.h"
+
+#include <imgui.h>
+#include GLSL(shaders/edsl_header.glsl)
 
 #include <chrono>
 #include <cstdint>
@@ -101,11 +104,19 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+    //option = true;
+    HorizonImGuiLayer ui(window, edsl_width, edsl_height);
+
+    float t = 0.f;
     const auto start_time = std::chrono::high_resolution_clock::now();
     Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
@@ -119,6 +130,7 @@ void run_example_edsl()
 
         render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
     }
