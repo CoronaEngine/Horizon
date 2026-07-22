@@ -15,6 +15,7 @@
 // horizon.h 会自动包含本头，无需单独引入。
 // ====================================================================
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -206,6 +207,7 @@ namespace Corona::Horizon
     struct RenderingDesc
     {
         ImageRef color {};
+        std::array<ImageRef, 3> extra_colors {};
         ImageRef depth {};
         uint32_t width { 0 };
         uint32_t height { 0 };

@@ -5,6 +5,7 @@
 
 #include <volk.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -102,11 +103,11 @@ namespace Corona::Horizon
         };
 
         [[nodiscard]] GraphicsPipeline graphics_pipeline(VkDevice device,
-                                                         VkFormat color_format,
+                                                         const std::array<VkFormat, 4>& color_formats,
                                                          VkFormat depth_format,
                                                          uint32_t vertex_stride);
         [[nodiscard]] PreparedDraw prepare_draw(VkDevice device,
-                                                VkFormat color_format,
+                                                const std::array<VkFormat, 4>& color_formats,
                                                 VkFormat depth_format,
                                                 uint32_t vertex_stride,
                                                 const DrawIndexedDesc& draw);
@@ -119,7 +120,7 @@ namespace Corona::Horizon
         struct PipelineKey
         {
             VkDevice device { VK_NULL_HANDLE };
-            VkFormat color_format { VK_FORMAT_UNDEFINED };
+            std::array<VkFormat, 4> color_formats { VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED };
             VkFormat depth_format { VK_FORMAT_UNDEFINED };
             uint32_t vertex_stride { 0 };
 
