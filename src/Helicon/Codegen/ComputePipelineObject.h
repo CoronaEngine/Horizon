@@ -76,11 +76,19 @@ namespace EmbeddedShader
                     {
                         if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->texture->name))
                         {
+                            int32_t effectiveBindType = static_cast<int32_t>(bindInfo->bindType);
+                            if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
+                            {
+                                auto* texType = dynamic_cast<Ast::TextureType*>(def->texture->type.get());
+                                const bool isSampled = texType != nullptr && texType->name.rfind("Sampler", 0) == 0;
+                                effectiveBindType = static_cast<int32_t>(isSampled ? ShaderCodeModule::ShaderResources::sampledImages
+                                                                                   : ShaderCodeModule::ShaderResources::storageTexture);
+                            }
                             autoBindEntries.push_back({
                                 def->texture->boundResourceRef,
                                 bindInfo->byteOffset,
                                 bindInfo->typeSize,
-                                static_cast<int32_t>(bindInfo->bindType),
+                                effectiveBindType,
                                 bindInfo->location
                             });
                         }

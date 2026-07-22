@@ -652,7 +652,7 @@ namespace EmbeddedShader
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator-(const VariateProxy<ktm::vec<N,Type>>& a,const VariateProxy<Type>& b)
 	{
-		return b - a;
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"-", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
