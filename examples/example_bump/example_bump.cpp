@@ -12,6 +12,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/bump_vert.glsl)
 #include GLSL(shaders/bump_frag.glsl)
@@ -296,6 +299,8 @@ void run_example_bump()
         { 1.0f, 0.4f, 0.2f, 0.8f },
     };
 
+    HorizonImGuiLayer ui(window, bump_width, bump_height);
+
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -304,6 +309,10 @@ void run_example_bump()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -347,8 +356,8 @@ void run_example_bump()
         {
             for (uint32_t xx = 0; xx < 3; ++xx)
             {
-                // 原版 mtxRotateXY（行向量 Rx·Ry）→ glm 列向量 Ry·Rx
-                glm::mat4 model = glm::eulerAngleYX(time * 0.03f + yy * 0.37f, time * 0.023f + xx * 0.21f);
+                // 原版 mtxRotateXY（行向量 Rx·Ry）→ glm 列向量 Ry·Rx，等效角度取反
+                glm::mat4 model = glm::eulerAngleYX(-(time * 0.03f + yy * 0.37f), -(time * 0.023f + xx * 0.21f));
                 model[3] = glm::vec4(-3.0f + xx * 3.0f, -3.0f + yy * 3.0f, 0.0f, 1.0f);
 
                 rasterizer.vsp.model = model;
@@ -359,6 +368,7 @@ void run_example_bump()
         Corona::Horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer(bump_width, bump_height) << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                          << Corona::Horizon::commit());

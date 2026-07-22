@@ -17,6 +17,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/assao_scene_vert.glsl)
 #include GLSL(shaders/assao_color_frag.glsl)
@@ -345,6 +348,8 @@ void run_example_assao()
     const uint32_t dispatch_x = (ao_width + 7) / 8;
     const uint32_t dispatch_y = (ao_height + 7) / 8;
 
+    HorizonImGuiLayer ui(window, ao_width, ao_height);
+
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -353,6 +358,10 @@ void run_example_assao()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -444,6 +453,7 @@ void run_example_assao()
                             << apply_compute(dispatch_x, dispatch_y, 1)
                             << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                          << Corona::Horizon::commit());

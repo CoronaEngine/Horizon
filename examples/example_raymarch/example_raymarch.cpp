@@ -12,6 +12,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/raymarch_vert.glsl)
 #include GLSL(shaders/raymarch_frag.glsl)
@@ -105,6 +108,8 @@ void run_example_raymarch()
         return m;
     }();
 
+    HorizonImGuiLayer ui(window, rm_width, rm_height);
+
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -113,6 +118,10 @@ void run_example_raymarch()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -131,8 +140,9 @@ void run_example_raymarch()
             fps_frame_count = 0;
         }
 
-        // 原版 mtxRotateXY(time, time*0.37)（行向量 Rx·Ry）→ glm 列向量 Ry·Rx
-        const glm::mat4 model = glm::eulerAngleYX(time * 0.37f, time);
+        // 原版 mtxRotateXY(time, time*0.37)（行向量 Rx·Ry）→ glm 列向量 Ry·Rx，
+        // 且行/列向量旋转矩阵互为转置，等效角度取反
+        const glm::mat4 model = glm::eulerAngleYX(-time * 0.37f, -time);
         const glm::mat4 mvp = proj * view * model;
         const glm::mat4 inv_mvp = glm::inverse(mvp);
 
@@ -148,6 +158,7 @@ void run_example_raymarch()
         Corona::Horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer(rm_width, rm_height) << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                          << Corona::Horizon::commit());
