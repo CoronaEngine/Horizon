@@ -15,6 +15,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/shadowmaps_pack_vert.glsl)
 #include GLSL(shaders/shadowmaps_pack_frag.glsl)
@@ -325,10 +328,12 @@ void run_example_shadowmaps()
     const glm::vec4 material_ka(1.0f, 1.0f, 1.0f, 0.0f);
     const glm::vec4 material_kd(1.0f, 1.0f, 1.0f, 0.0f);
     const glm::vec4 material_ks(1.0f, 1.0f, 1.0f, 0.0f);
-    const glm::vec4 light_ambient(1.0f, 1.0f, 1.0f, 0.02f);
+    const glm::vec4 light_ambient(1.0f, 1.0f, 1.0f, 0.0f); // 与原版一致（ambient power 0）
     const glm::vec4 light_diffuse(1.0f, 1.0f, 1.0f, 850.0f);
     const glm::vec4 light_specular(1.0f, 1.0f, 1.0f, 0.0f);
     const glm::vec3 light_attn(1.0f, 0.0f, 1.0f);
+
+    HorizonImGuiLayer ui(window, smx_width, smx_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
@@ -338,6 +343,10 @@ void run_example_shadowmaps()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -377,22 +386,23 @@ void run_example_shadowmaps()
         std::vector<DrawItem> items;
         items.reserve(4 + 10);
         items.push_back({ &floor_plane, glm::scale(glm::mat4(1.0f), glm::vec3(550.0f)) });
+        // 原版行向量旋转矩阵与 glm 列向量同角旋转互为转置，等效角度取反
         items.push_back({ &bunny,
                           glm::translate(glm::mat4(1.0f), glm::vec3(15.0f, 5.0f, 0.0f)) *
-                              glm::eulerAngleY(1.56f - time) * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f)) });
+                              glm::eulerAngleY(time - 1.56f) * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f)) });
         items.push_back({ &hollowcube,
                           glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 10.0f, 0.0f)) *
-                              glm::eulerAngleY(1.56f - time) * glm::scale(glm::mat4(1.0f), glm::vec3(2.5f)) });
+                              glm::eulerAngleY(time - 1.56f) * glm::scale(glm::mat4(1.0f), glm::vec3(2.5f)) });
         items.push_back({ &cube,
                           glm::translate(glm::mat4(1.0f), glm::vec3(-15.0f, 5.0f, 0.0f)) *
-                              glm::eulerAngleY(1.56f - time) * glm::scale(glm::mat4(1.0f), glm::vec3(2.5f)) });
+                              glm::eulerAngleY(time - 1.56f) * glm::scale(glm::mat4(1.0f), glm::vec3(2.5f)) });
         constexpr int num_trees = 10;
         for (int i = 0; i < num_trees; ++i)
         {
             const float angle = i * 2.0f * glm::pi<float>() / num_trees;
             items.push_back({ &column,
                               glm::translate(glm::mat4(1.0f), glm::vec3(std::sin(angle) * 60.0f, 0.0f, std::cos(angle) * 60.0f)) *
-                                  glm::eulerAngleY(float(i)) * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f)) });
+                                  glm::eulerAngleY(-float(i)) * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f)) });
         }
 
         // Pass 1：光源视角打包深度
@@ -437,6 +447,7 @@ void run_example_shadowmaps()
                             << scene_rasterizer(smx_width, smx_height)
                             << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                          << Corona::Horizon::commit());
