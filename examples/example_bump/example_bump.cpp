@@ -255,7 +255,7 @@ void run_example_bump()
             Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
             Corona::Horizon::ImageUsageFlags::TransferDst,
         "example_bump.output"));
-    final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f); // 原版 0x303030ff
+    final_output_image.set_clear_color(0x30 / 255.0f, 0x30 / 255.0f, 0x30 / 255.0f, 1.0f); // 原版 0x303030ff
 
     Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
         bump_width, bump_height, Corona::Horizon::Format::D32, "example_bump.depth"));
@@ -265,6 +265,7 @@ void run_example_bump()
     desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_bump.depth");
     desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.depth_stencil.depth_compare_op = Corona::Horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
 
     Corona::Horizon::RasterizerPipeline rasterizer(bump_vert_glsl, bump_frag_glsl, desc);
     rasterizer.outColor = final_output_image;

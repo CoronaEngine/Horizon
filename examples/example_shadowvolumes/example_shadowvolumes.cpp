@@ -48,6 +48,7 @@
 #include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/constants.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
 namespace
@@ -458,8 +459,10 @@ void run_example_shadowvolumes()
     Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(sv_width) / static_cast<float>(sv_height);
-    const glm::vec3 eye(0.0f, 25.0f, -60.0f);
-    const glm::mat4 view = glm::lookAtLH(eye, glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    // 原版自由相机初始位姿：pos(3,20,-58)、垂直角 -0.25 rad、yaw 0
+    const glm::vec3 eye(3.0f, 20.0f, -58.0f);
+    const glm::vec3 forward(0.0f, std::sin(-0.25f), std::cos(-0.25f));
+    const glm::mat4 view = glm::lookAtLH(eye, eye + forward, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::mat4 proj = [] {
         glm::mat4 m = glm::perspectiveLH(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
         m[1][1] *= -1.0f; // Vulkan 裁剪空间 Y 翻转
@@ -467,8 +470,13 @@ void run_example_shadowvolumes()
     }();
     const glm::mat4 view_proj = proj * view;
 
-    const glm::vec4 ambient_color(0.09f, 0.09f, 0.12f, 1.0f);
-    const glm::vec4 diffuse_color(0.9f, 0.85f, 0.8f, 1.0f);
+    // 原版默认材质与光照参数
+    const glm::vec4 ambient_color(0.05f, 0.05f, 0.05f, 1.0f);
+    const glm::vec4 diffuse_color(0.8f, 0.8f, 0.8f, 1.0f);
+    const glm::vec4 light_rgb(1.0f, 0.7f, 0.2f, 1.0f);            // 光色表第一盏：yellow
+    const glm::vec4 specular_shininess(1.0f, 1.0f, 1.0f, 25.0f);
+    const glm::vec4 fog_params(0.0f, 0.0f, 0.0f, 0.0055f);        // 黑雾，密度 0.0055
+    constexpr float light_radius = 20.0f;
 
     std::vector<std::array<float, 3>> volume_positions;
 
@@ -505,13 +513,14 @@ void run_example_shadowvolumes()
             fps_frame_count = 0;
         }
 
-        const glm::vec3 light_pos(std::cos(time * 0.7f) * 20.0f, 24.0f, std::sin(time * 0.7f) * 20.0f);
-        const glm::vec4 light_pos_vs = view * glm::vec4(light_pos, 1.0f);
+        const glm::vec3 light_pos(std::cos(time * 1.1f + 3.0f) * 20.0f, 20.0f, std::sin(time * 1.1f + 3.0f) * 20.0f);
+        glm::vec4 light_pos_vs = view * glm::vec4(light_pos, 1.0f);
+        light_pos_vs.w = light_radius;
         const glm::vec4 resolution(float(sv_width), float(sv_height), 0.0f, 0.0f);
 
-        const glm::mat4 mtx_floor = glm::scale(glm::mat4(1.0f), glm::vec3(50.0f));
-        const glm::mat4 mtx_bunny = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f)) *
-                                    glm::eulerAngleY(time * 0.37f) * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f));
+        const glm::mat4 mtx_floor = glm::scale(glm::mat4(1.0f), glm::vec3(500.0f));
+        // 原版 Scene1 bunny：pos(0,0,0)、scale 5、rotY = pi（静止）
+        const glm::mat4 mtx_bunny = glm::eulerAngleY(glm::pi<float>()) * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f));
 
         struct DrawItem
         {
@@ -526,8 +535,11 @@ void run_example_shadowvolumes()
         auto record_scene = [&](auto& pipeline) {
             pipeline.clear_records();
             pipeline.vsp.light_pos_vs = light_pos_vs;
+            pipeline.vsp.light_rgb = light_rgb;
             pipeline.vsp.ambient = ambient_color;
             pipeline.vsp.diffuse = diffuse_color;
+            pipeline.vsp.specular_shininess = specular_shininess;
+            pipeline.vsp.fog = fog_params;
             pipeline.vsp.color = glm::vec4(1.0f);
             pipeline.vsp.params = resolution;
             for (const DrawItem& item : items)

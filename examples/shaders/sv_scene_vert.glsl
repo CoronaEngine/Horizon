@@ -6,11 +6,14 @@
 layout(binding = 0) uniform SvSceneParams {
     mat4 mvp;
     mat4 model_view;
-    vec4 light_pos_vs;  // view 空间光源位置
-    vec4 ambient;       // rgb: 环境光
-    vec4 diffuse;       // rgb: 漫反射光色
-    vec4 color;         // rgb: 物体颜色
-    vec4 params;        // xy: 屏幕分辨率
+    vec4 light_pos_vs;        // xyz: view 空间光源位置，w: 光源半径
+    vec4 light_rgb;           // rgb: 光源颜色
+    vec4 ambient;             // rgb: 环境光
+    vec4 diffuse;             // rgb: 漫反射系数
+    vec4 specular_shininess;  // rgb: 镜面系数，w: shininess
+    vec4 fog;                 // rgb: 雾色，w: 密度
+    vec4 color;               // rgb: 物体颜色
+    vec4 params;              // xy: 屏幕分辨率
 } vsp;
 
 layout(location = 0) in vec3 inPosition;

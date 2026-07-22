@@ -7,8 +7,11 @@ layout(binding = 0) uniform SvSceneParams {
     mat4 mvp;
     mat4 model_view;
     vec4 light_pos_vs;
+    vec4 light_rgb;
     vec4 ambient;
     vec4 diffuse;
+    vec4 specular_shininess;
+    vec4 fog;
     vec4 color;
     vec4 params;
 } fsp;

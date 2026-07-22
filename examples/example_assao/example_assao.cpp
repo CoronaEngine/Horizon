@@ -5,8 +5,9 @@
 // sharpness 0.98、blur ×2）：
 //   光栅 3 pass：场景颜色 / view 法线 / R32F 器件深度（框架单颜色附件限制）
 //   compute 3 站：generate（12-tap 螺旋盘）→ smart blur ×2（ping-pong）→ apply
-// 场景与原版对齐：地面 + 随机摆放的模型（原版模型池里 tree/bunny_decimated
-// 是 meshopt 压缩 chunk 加载器不支持，池子取 orb/column/hollowcube）、
+// 场景与原版对齐（原版侧同步使用相同的 minstd_rand(12345) 摆放和 3 网格池）：
+// cube x10 地面（顶面 y=0）+ 120 个随机模型（orb/column/hollowcube，tree 和
+// bunny_decimated 是 meshopt 压缩 chunk 加载器不支持已从两边池子排除）、
 // 相机 (0,1.5,0) 俯视前方 fovy 60°。
 
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -249,7 +250,7 @@ void run_example_assao()
     } };
     std::vector<ModelInstance> models;
     std::minstd_rand rng(12345);
-    for (int i = 0; i < 32; ++i)
+    for (int i = 0; i < 120; ++i) // 原版 MODEL_COUNT
     {
         const auto& [mesh, scale] = model_pool[rng() % model_pool.size()];
         const float px = ((int(rng() % 256)) - 128.0f) / 20.0f;
@@ -391,8 +392,8 @@ void run_example_assao()
                 params.index_type = Corona::Horizon::IndexType::UInt32;
                 params.index_count = ground.index_count;
 
-                const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.1f, 0.0f)) *
-                                        glm::scale(glm::mat4(1.0f), glm::vec3(12.8f, 0.1f, 12.8f));
+                const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
+                                        glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)); // 原版：cube x10，顶面 y=0
                 pipeline.vsp.mvp = view_proj * model;
                 pipeline.vsp.model_view = view * model;
                 pipeline.vsp.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
@@ -409,7 +410,7 @@ void run_example_assao()
                                         glm::scale(glm::mat4(1.0f), glm::vec3(m.scale));
                 pipeline.vsp.mvp = view_proj * model;
                 pipeline.vsp.model_view = view * model;
-                pipeline.vsp.color = glm::vec4(0.75f, 0.75f, 0.75f, 1.0f);
+                pipeline.vsp.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
                 pipeline.record(m.mesh->ib, m.mesh->vb, params);
             }
         };
