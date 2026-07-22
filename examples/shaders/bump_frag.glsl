@@ -71,5 +71,7 @@ void main()
     vec4 color = vec4(pow(texture(texColor, v_texcoord).xyz, vec3(2.2)), 1.0); // toLinear
 
     vec3 rgb = max(vec3(0.05), lightColor) * color.xyz;
-    outColor = vec4(pow(rgb, vec3(1.0 / 2.2)), 1.0); // toGamma
+    // 线性输出：present blit 到 sRGB 交换链时自动完成伽马编码。
+    // 原版手动 toGamma 是因为其后备缓冲为 UNORM；此处再手动编码会双重伽马导致画面发灰。
+    outColor = vec4(rgb, 1.0);
 }
