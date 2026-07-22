@@ -70,7 +70,7 @@ namespace EmbeddedShader
                     }
                 }
 
-                if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+                if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
                 {
                     if (def->texture && def->texture->boundResourceRef)
                     {

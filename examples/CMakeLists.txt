@@ -8,6 +8,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_default/example_default.cpp
     example_branch_pruning/example_branch_pruning.cpp
     example_ibl/example_ibl.cpp
+    example_edsl_ibl/example_edsl_ibl.cpp
     example_drawstress/example_drawstress.cpp
 )
 
@@ -25,6 +26,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_default/example_default.h
     example_branch_pruning/example_branch_pruning.h
     example_ibl/example_ibl.h
+    example_edsl_ibl/example_edsl_ibl.h
     example_drawstress/example_drawstress.h
 )
 

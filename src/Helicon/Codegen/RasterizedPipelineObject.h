@@ -66,7 +66,7 @@ namespace EmbeddedShader
 					}
 				}
 
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
 				{
 					if (def->texture && def->texture->boundResourceRef)
 					{
@@ -98,7 +98,7 @@ namespace EmbeddedShader
 			// Textures with renderTargetLocation >= 0 were used as render target outputs.
 			for (auto& stmt : globals)
 			{
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
 				{
 					if (def->texture && def->texture->renderTargetLocation >= 0 && def->texture->boundResourceRef)
 					{
@@ -179,7 +179,7 @@ namespace EmbeddedShader
 			{
 				// For Texture2DType members, the output type is the texel type (e.g., float4)
 				std::shared_ptr<Ast::Type> outputType;
-				if (auto tex2dType = std::dynamic_pointer_cast<Ast::Texture2DType>(member->type))
+				if (auto tex2dType = std::dynamic_pointer_cast<Ast::TextureType>(member->type))
 					outputType = tex2dType->texelType;
 				else
 					outputType = member->type;

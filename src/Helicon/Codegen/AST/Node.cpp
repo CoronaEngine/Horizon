@@ -263,34 +263,34 @@ std::string EmbeddedShader::Ast::AggregateValue::parse()
 	return value;
 }
 
-EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniversalTexture2D::getAccessPermissions() const
+EmbeddedShader::Ast::AccessPermissions EmbeddedShader::Ast::UniversalTexture::getAccessPermissions() const
 {
     return permissions;
 }
 
-void EmbeddedShader::Ast::UniversalTexture2D::access(AccessPermissions permissions)
+void EmbeddedShader::Ast::UniversalTexture::access(AccessPermissions permissions)
 {
 	Value::access(permissions);
     this->permissions = this->permissions | permissions;
 }
 
-std::string EmbeddedShader::Ast::UniversalTexture2D::parse()
+std::string EmbeddedShader::Ast::UniversalTexture::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
 
-const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalTexture2D::getRootVariate() const
+const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalTexture::getRootVariate() const
 {
     if (Parser::getBindless())
         return AST::getGlobalPushConstant().get();
     return AST::getGlobalParameterBlock().get();
 }
-std::string EmbeddedShader::Ast::DefineUniversalTexture2D::parse()
+std::string EmbeddedShader::Ast::DefineUniversalTexture::parse()
 {
     return Generator::SlangGenerator::getParseOutput(this);
 }
 
-void EmbeddedShader::Ast::DefineUniversalTexture2D::resetAccessPermissions()
+void EmbeddedShader::Ast::DefineUniversalTexture::resetAccessPermissions()
 {
     texture->permissions = AccessPermissions::None;
 }
@@ -321,7 +321,7 @@ void EmbeddedShader::Ast::ArrayType::access(AccessPermissions permissions)
 	this->permissions = this->permissions | permissions;
 }
 
-std::string EmbeddedShader::Ast::Texture2DType::parse()
+std::string EmbeddedShader::Ast::TextureType::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
 }
