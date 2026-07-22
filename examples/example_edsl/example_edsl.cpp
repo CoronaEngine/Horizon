@@ -12,7 +12,6 @@
 #include "imgui_horizon.h"
 
 #include <imgui.h>
-#include GLSL(shaders/edsl_header.glsl)
 
 #include <chrono>
 #include <cstdint>
@@ -104,11 +103,13 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
-    //option = true;
     HorizonImGuiLayer ui(window, edsl_width, edsl_height);
 
-    float t = 0.f;
     const auto start_time = std::chrono::high_resolution_clock::now();
+    auto prev_time = start_time;
+    double fps_accum_seconds = 0.0;
+    int fps_frame_count = 0;
+
     Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
@@ -120,6 +121,23 @@ void run_example_edsl()
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
+
+        const auto now = std::chrono::high_resolution_clock::now();
+        const float dt = std::chrono::duration<float>(now - prev_time).count();
+        prev_time = now;
+
+        fps_accum_seconds += dt;
+        ++fps_frame_count;
+        if (fps_accum_seconds >= 0.5)
+        {
+            const double fps = fps_frame_count / fps_accum_seconds;
+            char title[160];
+            std::snprintf(title, sizeof(title), "Horizon Baseline [EDSL] %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            glfwSetWindowTitle(window, title);
+            fps_accum_seconds = 0.0;
+            fps_frame_count = 0;
+        }
+
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
         model = to_edsl_matrix(glm::transpose(ubo.model));
         view = to_edsl_matrix(glm::transpose(ubo.view));
