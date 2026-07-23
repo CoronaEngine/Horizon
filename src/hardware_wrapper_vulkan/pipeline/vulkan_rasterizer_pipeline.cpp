@@ -720,7 +720,7 @@ namespace Corona::Horizon
         if (key.device == VK_NULL_HANDLE)
             throw std::logic_error("RasterizerPipeline graphics pipeline creation requires a valid VkDevice.");
 
-        if (key.color_format == VK_FORMAT_UNDEFINED && key.depth_format == VK_FORMAT_UNDEFINED)
+        if (key.color_formats[0] == VK_FORMAT_UNDEFINED && key.depth_format == VK_FORMAT_UNDEFINED)
             throw std::logic_error("RasterizerPipeline graphics pipeline creation requires at least one attachment format.");
 
         VkShaderModule vertex_shader = create_shader_module(key.device, desc_.vertex_shader.module, "vertex");
@@ -836,31 +836,43 @@ namespace Corona::Horizon
             // RGBA32_UINT), forcing blendEnable would trip Vulkan validation / runtime errors.
             // Honor the user's blend factors/ops but clamp blendEnable to false and warn so the
             // dropped blend is visible rather than silently swallowed.
-            if (blend_attachment.blendEnable == VK_TRUE && key.color_format != VK_FORMAT_UNDEFINED)
+            if (blend_attachment.blendEnable == VK_TRUE && key.color_formats[0] != VK_FORMAT_UNDEFINED)
             {
                 const VkPhysicalDevice physical_device = device_manager().physical_device();
                 if (physical_device != VK_NULL_HANDLE)
                 {
                     VkFormatProperties format_properties {};
-                    vkGetPhysicalDeviceFormatProperties(physical_device, key.color_format, &format_properties);
+                    vkGetPhysicalDeviceFormatProperties(physical_device, key.color_formats[0], &format_properties);
                     if ((format_properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) == 0)
                     {
                         blend_attachment.blendEnable = VK_FALSE;
                         Diagnostics::write(Diagnostics::Level::Warning,
                                            "HORIZON PIPELINE",
-                                           "Color attachment format (VkFormat=" + std::to_string(static_cast<int>(key.color_format)) +
+                                           "Color attachment format (VkFormat=" + std::to_string(static_cast<int>(key.color_formats[0])) +
                                                ") does not support VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT; "
                                                "blending was requested but has been disabled for this pipeline.");
                     }
                 }
             }
 
+            uint32_t color_attachment_count = 0;
+            for (VkFormat format : key.color_formats)
+            {
+                if (format == VK_FORMAT_UNDEFINED)
+                    break;
+                ++color_attachment_count;
+            }
+
+            // 所有颜色附件复用 attachment 0 的混合状态
+            std::array<VkPipelineColorBlendAttachmentState, 4> blend_attachments;
+            blend_attachments.fill(blend_attachment);
+
             VkPipelineColorBlendStateCreateInfo color_blend {};
             color_blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
             color_blend.logicOpEnable = desc_.blend.logic_op_enabled ? VK_TRUE : VK_FALSE;
             color_blend.logicOp = VK_LOGIC_OP_COPY;
-            color_blend.attachmentCount = key.color_format == VK_FORMAT_UNDEFINED ? 0u : 1u;
-            color_blend.pAttachments = key.color_format == VK_FORMAT_UNDEFINED ? nullptr : &blend_attachment;
+            color_blend.attachmentCount = color_attachment_count;
+            color_blend.pAttachments = color_attachment_count != 0 ? blend_attachments.data() : nullptr;
 
             VkDynamicState dynamic_states[] = {
                 VK_DYNAMIC_STATE_VIEWPORT,
@@ -1032,8 +1044,8 @@ namespace Corona::Horizon
             rendering_info.viewMask = desc_.multiview_count > 1 && desc_.multiview_count < 32
                 ? ((uint32_t { 1 } << desc_.multiview_count) - 1u)
                 : 0u;
-            rendering_info.colorAttachmentCount = key.color_format == VK_FORMAT_UNDEFINED ? 0u : 1u;
-            rendering_info.pColorAttachmentFormats = key.color_format == VK_FORMAT_UNDEFINED ? nullptr : &key.color_format;
+            rendering_info.colorAttachmentCount = color_attachment_count;
+            rendering_info.pColorAttachmentFormats = color_attachment_count != 0 ? key.color_formats.data() : nullptr;
             rendering_info.depthAttachmentFormat = key.depth_format;
             rendering_info.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
@@ -1099,13 +1111,13 @@ namespace Corona::Horizon
     }
 
     VulkanRasterizerPipeline::GraphicsPipeline VulkanRasterizerPipeline::graphics_pipeline(VkDevice device,
-                                                                                          VkFormat color_format,
+                                                                                          const std::array<VkFormat, 4>& color_formats,
                                                                                           VkFormat depth_format,
                                                                                           uint32_t vertex_stride)
     {
         PipelineKey key {
             .device = device,
-            .color_format = color_format,
+            .color_formats = color_formats,
             .depth_format = depth_format,
             .vertex_stride = vertex_stride,
         };
@@ -1129,7 +1141,7 @@ namespace Corona::Horizon
     }
 
     VulkanRasterizerPipeline::PreparedDraw VulkanRasterizerPipeline::prepare_draw(VkDevice device,
-                                                                                  VkFormat color_format,
+                                                                                  const std::array<VkFormat, 4>& color_formats,
                                                                                   VkFormat depth_format,
                                                                                   uint32_t vertex_stride,
                                                                                   const DrawIndexedDesc& draw)
@@ -1138,7 +1150,7 @@ namespace Corona::Horizon
 
         PipelineKey key {
             .device = device,
-            .color_format = color_format,
+            .color_formats = color_formats,
             .depth_format = depth_format,
             .vertex_stride = vertex_stride,
         };
@@ -1653,29 +1665,30 @@ namespace Corona::Horizon
         Snapshot state = snapshot();
         CommandBatch batch;
 
-        const BoundImage* first_color = nullptr;
+        std::vector<const BoundImage*> color_outputs;
         for (const BoundImage& image : state.images)
         {
             if (!is_stage_output(image.bind_type) || !image.image)
                 continue;
-
-            if (first_color == nullptr || image.location < first_color->location)
-                first_color = &image;
+            color_outputs.push_back(&image);
         }
+        std::sort(color_outputs.begin(), color_outputs.end(),
+                  [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
 
-        const bool has_rendering_scope = first_color != nullptr && state.width != 0 && state.height != 0;
+        const bool has_rendering_scope = !color_outputs.empty() && state.width != 0 && state.height != 0;
         if (has_rendering_scope)
         {
             const bool has_depth = state.depth_target && state.desc.depth_attachment.enabled;
-            batch << begin_rendering(
-                {
-                    .color = image_ref(first_color->image),
-                    .depth = has_depth ? image_ref(state.depth_target) : ImageRef {},
-                    .width = state.width,
-                    .height = state.height,
-                    .clear_color = state.desc.clear_color_target,
-                    .clear_depth = has_depth,
-                });
+            RenderingDesc rendering_desc;
+            rendering_desc.color = image_ref(color_outputs[0]->image);
+            for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
+                rendering_desc.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
+            rendering_desc.depth = has_depth ? image_ref(state.depth_target) : ImageRef {};
+            rendering_desc.width = state.width;
+            rendering_desc.height = state.height;
+            rendering_desc.clear_color = state.desc.clear_color_target;
+            rendering_desc.clear_depth = has_depth;
+            batch << begin_rendering(rendering_desc);
         }
 
         for (const RecordedDraw& draw : state.draws)
@@ -1739,28 +1752,30 @@ namespace Corona::Horizon
             draws_.clear();
         }
 
-        const BoundImage* first_color = nullptr;
+        std::vector<const BoundImage*> color_outputs;
         for (const BoundImage& image : images)
         {
             if (!is_stage_output(image.bind_type) || !image.image)
                 continue;
-            if (first_color == nullptr || image.location < first_color->location)
-                first_color = &image;
+            color_outputs.push_back(&image);
         }
+        std::sort(color_outputs.begin(), color_outputs.end(),
+                  [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
 
-        const bool has_rendering_scope = first_color != nullptr && width != 0 && height != 0;
+        const bool has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
         if (has_rendering_scope)
         {
             const bool has_depth = depth_target && depth_enabled;
-            recorder.begin_rendering(
-                {
-                    .color = image_ref(first_color->image),
-                    .depth = has_depth ? image_ref(depth_target) : ImageRef {},
-                    .width = width,
-                    .height = height,
-                    .clear_color = clear_color_target,
-                    .clear_depth = has_depth,
-                });
+            RenderingDesc rendering_desc;
+            rendering_desc.color = image_ref(color_outputs[0]->image);
+            for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
+                rendering_desc.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
+            rendering_desc.depth = has_depth ? image_ref(depth_target) : ImageRef {};
+            rendering_desc.width = width;
+            rendering_desc.height = height;
+            rendering_desc.clear_color = clear_color_target;
+            rendering_desc.clear_depth = has_depth;
+            recorder.begin_rendering(rendering_desc);
         }
 
         DrawIndexedBatchDesc batch;

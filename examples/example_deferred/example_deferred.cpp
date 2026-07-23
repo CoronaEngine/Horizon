@@ -25,9 +25,7 @@
 #include <imgui.h>
 
 #include GLSL(shaders/deferred_geom_vert.glsl)
-#include GLSL(shaders/deferred_geom_frag.glsl)
-#include GLSL(shaders/deferred_geom_normal_frag.glsl)
-#include GLSL(shaders/deferred_geom_depth_frag.glsl)
+#include GLSL(shaders/deferred_geom_mrt_frag.glsl)
 #include GLSL(shaders/deferred_light_vert.glsl)
 #include GLSL(shaders/deferred_light_frag.glsl)
 #include GLSL(shaders/deferred_combine_vert.glsl)
@@ -300,16 +298,9 @@ void run_example_deferred()
         dfr_width, dfr_height, Corona::Horizon::Format::R32_FLOAT, gbuffer_usage, "example_deferred.gbuffer.depthval"));
     gbuffer_depth_val.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // 远平面
 
-    // 三个几何 pass 各自的深度附件（同一几何 → 相同深度结果）
     Corona::Horizon::HardwareImage gbuffer_depth(Corona::Horizon::HardwareImageDesc::depth_attachment(
         dfr_width, dfr_height, Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth"));
     gbuffer_depth.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage gbuffer_depth_n(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        dfr_width, dfr_height, Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth_n"));
-    gbuffer_depth_n.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage gbuffer_depth_d(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        dfr_width, dfr_height, Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth_d"));
-    gbuffer_depth_d.set_clear_depth(1.0f, 0);
 
     // 光照累加缓冲
     Corona::Horizon::HardwareImage light_buffer(Corona::Horizon::HardwareImageDesc::texture_2d(
@@ -325,31 +316,19 @@ void run_example_deferred()
         "example_deferred.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // Pass 1a/1b/1c：几何 → G-buffer（框架单颜色附件限制，三个 pass 各写一张）
+    // Pass 1：几何 → G-buffer（MRT 单 pass：albedo/normal/depthval 三附件同时输出）
     Corona::Horizon::RasterizerPipelineDesc geom_desc;
     geom_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth");
     geom_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     geom_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
-    Corona::Horizon::RasterizerPipeline geom_albedo_rasterizer(deferred_geom_vert_glsl, deferred_geom_frag_glsl, geom_desc);
-    geom_albedo_rasterizer.outAlbedo = gbuffer_albedo;
-    geom_albedo_rasterizer.bind_depth_target(gbuffer_depth);
-    geom_albedo_rasterizer.texColor = color_image;
-    geom_albedo_rasterizer.texNormal = normal_image;
-
-    Corona::Horizon::RasterizerPipelineDesc geom_n_desc = geom_desc;
-    geom_n_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth_n");
-    Corona::Horizon::RasterizerPipeline geom_normal_rasterizer(deferred_geom_vert_glsl, deferred_geom_normal_frag_glsl, geom_n_desc);
-    geom_normal_rasterizer.outNormal = gbuffer_normal;
-    geom_normal_rasterizer.bind_depth_target(gbuffer_depth_n);
-    geom_normal_rasterizer.texColor = color_image;
-    geom_normal_rasterizer.texNormal = normal_image;
-
-    Corona::Horizon::RasterizerPipelineDesc geom_d_desc = geom_desc;
-    geom_d_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth_d");
-    Corona::Horizon::RasterizerPipeline geom_depth_rasterizer(deferred_geom_vert_glsl, deferred_geom_depth_frag_glsl, geom_d_desc);
-    geom_depth_rasterizer.outDepthVal = gbuffer_depth_val;
-    geom_depth_rasterizer.bind_depth_target(gbuffer_depth_d);
+    Corona::Horizon::RasterizerPipeline geom_rasterizer(deferred_geom_vert_glsl, deferred_geom_mrt_frag_glsl, geom_desc);
+    geom_rasterizer.outAlbedo = gbuffer_albedo;
+    geom_rasterizer.outNormal = gbuffer_normal;
+    geom_rasterizer.outDepthVal = gbuffer_depth_val;
+    geom_rasterizer.bind_depth_target(gbuffer_depth);
+    geom_rasterizer.texColor = color_image;
+    geom_rasterizer.texNormal = normal_image;
 
     // Pass 2：光照累加（加法混合、无深度）
     Corona::Horizon::RasterizerPipelineDesc light_desc;
@@ -459,9 +438,7 @@ void run_example_deferred()
                 }
             }
         };
-        record_geometry(geom_albedo_rasterizer);
-        record_geometry(geom_normal_rasterizer);
-        record_geometry(geom_depth_rasterizer);
+        record_geometry(geom_rasterizer);
 
         // Pass 2：512 光源逐个累加（quad 按光源包围盒 NDC rect 定位）
         light_rasterizer.clear_records();
@@ -524,9 +501,7 @@ void run_example_deferred()
         combine_rasterizer.record(quad_ib, quad_vb, quad_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << geom_albedo_rasterizer(dfr_width, dfr_height)
-                            << geom_normal_rasterizer(dfr_width, dfr_height)
-                            << geom_depth_rasterizer(dfr_width, dfr_height)
+            render_executor << geom_rasterizer(dfr_width, dfr_height)
                             << light_rasterizer(dfr_width, dfr_height)
                             << combine_rasterizer(dfr_width, dfr_height)
                             << Corona::Horizon::submit;

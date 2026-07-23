@@ -939,6 +939,13 @@ namespace Corona::Horizon
         {
             command.resources.push_back({ desc.color.handle, AccessKind::Write, 0 });
         }
+        for (const ImageRef& extra_color : desc.extra_colors)
+        {
+            if (extra_color.handle)
+            {
+                command.resources.push_back({ extra_color.handle, AccessKind::Write, 0 });
+            }
+        }
         if (desc.depth.handle)
         {
             command.resources.push_back({ desc.depth.handle, AccessKind::Write, 0 });
@@ -1326,6 +1333,7 @@ namespace Corona::Horizon
         {
             bool active { false };
             VkFormat color_format { VK_FORMAT_UNDEFINED };
+            std::array<VkFormat, 3> extra_color_formats { VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED };
             VkFormat depth_format { VK_FORMAT_UNDEFINED };
             uint32_t width { 0 };
             uint32_t height { 0 };
@@ -1334,8 +1342,13 @@ namespace Corona::Horizon
         VkCommandBuffer command_buffer = submission.command_buffer->vk();
 
         auto pre_transition_sampled_images_for_rendering = [&](size_t begin_index, const RenderingDesc& rendering) {
-            const std::uintptr_t color_id = resource_id(rendering.color.handle);
-            const std::uintptr_t depth_id = resource_id(rendering.depth.handle);
+            const std::array<std::uintptr_t, 5> attachment_ids {
+                resource_id(rendering.color.handle),
+                resource_id(rendering.extra_colors[0].handle),
+                resource_id(rendering.extra_colors[1].handle),
+                resource_id(rendering.extra_colors[2].handle),
+                resource_id(rendering.depth.handle),
+            };
             std::vector<std::uintptr_t> transitioned;
 
             for (size_t lookahead = begin_index + 1; lookahead < submission.commands.size(); ++lookahead)
@@ -1356,8 +1369,7 @@ namespace Corona::Horizon
                             if (id == 0)
                                 continue;
 
-                            if ((color_id != 0 && id == color_id) ||
-                                (depth_id != 0 && id == depth_id))
+                            if (std::find(attachment_ids.begin(), attachment_ids.end(), id) != attachment_ids.end())
                             {
                                 throw std::logic_error("DrawIndexed cannot sample from the active rendering attachment without local-read support.");
                             }
@@ -1439,9 +1451,15 @@ namespace Corona::Horizon
             }
 
             std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(*draw.pipeline);
+            const std::array<VkFormat, 4> color_formats {
+                active_rendering.color_format,
+                active_rendering.extra_color_formats[0],
+                active_rendering.extra_color_formats[1],
+                active_rendering.extra_color_formats[2],
+            };
             VulkanRasterizerPipeline::PreparedDraw prepared =
                 pipeline->prepare_draw(device_,
-                                       active_rendering.color_format,
+                                       color_formats,
                                        active_rendering.depth_format,
                                        static_cast<uint32_t>(vertex->desc.element_size),
                                        draw);
@@ -1736,20 +1754,27 @@ namespace Corona::Horizon
             case CommandOp::BeginRendering:
             {
                 const RenderingDesc& rendering = command.payload.rendering;
-                ImageStore::Write color;
+                std::array<ImageStore::Write, 4> color_writes;
                 ImageStore::Write depth;
 
                 pre_transition_sampled_images_for_rendering(command_index, rendering);
 
-                VkRenderingAttachmentInfo color_attachment {};
-                color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                std::array<VkRenderingAttachmentInfo, 4> color_attachments {};
+                uint32_t color_attachment_count = 0;
 
                 VkRenderingAttachmentInfo depth_attachment {};
                 depth_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 
-                if (rendering.color.handle)
+                const std::array<ImageRef, 4> color_refs {
+                    rendering.color, rendering.extra_colors[0], rendering.extra_colors[1], rendering.extra_colors[2]
+                };
+                for (const ImageRef& color_ref : color_refs)
                 {
-                    color = write_image(rendering.color.handle);
+                    if (!color_ref.handle)
+                        break;
+
+                    ImageStore::Write& color = color_writes[color_attachment_count];
+                    color = write_image(color_ref.handle);
                     if (!color || color->image_handle == VK_NULL_HANDLE || color->image_view == VK_NULL_HANDLE)
                         throw std::logic_error("BeginRendering requires a valid color HardwareImage.");
 
@@ -1760,12 +1785,19 @@ namespace Corona::Horizon
                                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
+                    VkRenderingAttachmentInfo& color_attachment = color_attachments[color_attachment_count];
+                    color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
                     color_attachment.imageView = color->image_view;
                     color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
                     color_attachment.loadOp = clear_attachment ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
                     color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
                     color_attachment.clearValue = color->clear_value;
-                    active_rendering.color_format = color->image_format;
+
+                    if (color_attachment_count == 0)
+                        active_rendering.color_format = color->image_format;
+                    else
+                        active_rendering.extra_color_formats[color_attachment_count - 1] = color->image_format;
+                    ++color_attachment_count;
                 }
 
                 if (rendering.depth.handle)
@@ -1793,8 +1825,8 @@ namespace Corona::Horizon
                 rendering_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
                 rendering_info.renderArea = full_scissor(rendering.width, rendering.height);
                 rendering_info.layerCount = 1;
-                rendering_info.colorAttachmentCount = rendering.color.handle ? 1u : 0u;
-                rendering_info.pColorAttachments = rendering.color.handle ? &color_attachment : nullptr;
+                rendering_info.colorAttachmentCount = color_attachment_count;
+                rendering_info.pColorAttachments = color_attachment_count != 0 ? color_attachments.data() : nullptr;
                 rendering_info.pDepthAttachment = rendering.depth.handle ? &depth_attachment : nullptr;
 
                 vkCmdBeginRendering(command_buffer, &rendering_info);
