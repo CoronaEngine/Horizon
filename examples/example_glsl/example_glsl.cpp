@@ -56,7 +56,6 @@ void run_example_glsl()
     Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth");
 
     Corona::Horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
     rasterizer.outColor = final_output_image;

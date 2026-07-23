@@ -318,7 +318,6 @@ void run_example_deferred()
 
     // Pass 1：几何 → G-buffer（MRT 单 pass：albedo/normal/depthval 三附件同时输出）
     Corona::Horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_deferred.gbuffer.depth");
     geom_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     geom_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 

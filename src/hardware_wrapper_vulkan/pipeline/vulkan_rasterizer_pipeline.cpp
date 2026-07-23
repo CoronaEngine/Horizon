@@ -1678,7 +1678,7 @@ namespace Corona::Horizon
         const bool has_rendering_scope = !color_outputs.empty() && state.width != 0 && state.height != 0;
         if (has_rendering_scope)
         {
-            const bool has_depth = state.depth_target && state.desc.depth_attachment.enabled;
+            const bool has_depth = static_cast<bool>(state.depth_target);
             RenderingDesc rendering_desc;
             rendering_desc.color = image_ref(color_outputs[0]->image);
             for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
@@ -1735,7 +1735,6 @@ namespace Corona::Horizon
 
         uint32_t width = 0;
         uint32_t height = 0;
-        bool depth_enabled = false;
         bool clear_color_target = true;
         std::vector<BoundImage> images;
         HardwareImage depth_target;
@@ -1744,7 +1743,6 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             width = width_;
             height = height_;
-            depth_enabled = desc_.depth_attachment.enabled;
             clear_color_target = desc_.clear_color_target;
             images = bound_images_;
             depth_target = depth_target_;
@@ -1765,7 +1763,7 @@ namespace Corona::Horizon
         const bool has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
         if (has_rendering_scope)
         {
-            const bool has_depth = depth_target && depth_enabled;
+            const bool has_depth = static_cast<bool>(depth_target);
             RenderingDesc rendering_desc;
             rendering_desc.color = image_ref(color_outputs[0]->image);
             for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)

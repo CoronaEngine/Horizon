@@ -409,7 +409,6 @@ void run_example_shadowvolumes()
 
     // pass 1: ambient
     Corona::Horizon::RasterizerPipelineDesc ambient_desc;
-    ambient_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_shadowvolumes.depth");
     ambient_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     ambient_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
     Corona::Horizon::RasterizerPipeline ambient_rasterizer(sv_scene_vert_glsl, sv_ambient_frag_glsl, ambient_desc);
@@ -418,7 +417,6 @@ void run_example_shadowvolumes()
 
     // pass 2: depthval
     Corona::Horizon::RasterizerPipelineDesc depthval_desc;
-    depthval_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_shadowvolumes.depthval.depth");
     depthval_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     depthval_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
     Corona::Horizon::RasterizerPipeline depthval_rasterizer(sv_scene_vert_glsl, sv_depthval_frag_glsl, depthval_desc);
@@ -445,7 +443,6 @@ void run_example_shadowvolumes()
 
     // pass 4: lit（不清屏、加法混合叠到 ambient 上）
     Corona::Horizon::RasterizerPipelineDesc lit_desc;
-    lit_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_shadowvolumes.lit.depth");
     lit_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     lit_desc.clear_color_target = false;
     lit_desc.blend.attachments = { additive };

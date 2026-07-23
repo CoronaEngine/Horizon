@@ -94,7 +94,6 @@ void run_example_edsl()
     };
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth");
 
     Corona::Horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
     rasterizer.bind_depth_target(depth_image);

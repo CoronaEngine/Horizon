@@ -298,7 +298,6 @@ void run_example_assao()
     depth_d.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_assao.depth_c");
     scene_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
@@ -307,13 +306,11 @@ void run_example_assao()
     color_rasterizer.bind_depth_target(depth_c);
 
     Corona::Horizon::RasterizerPipelineDesc normal_desc = scene_desc;
-    normal_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_assao.depth_n");
     Corona::Horizon::RasterizerPipeline normal_rasterizer(assao_scene_vert_glsl, assao_normal_frag_glsl, normal_desc);
     normal_rasterizer.outNormal = normal_image;
     normal_rasterizer.bind_depth_target(depth_n);
 
     Corona::Horizon::RasterizerPipelineDesc depth_desc = scene_desc;
-    depth_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_assao.depth_d");
     Corona::Horizon::RasterizerPipeline depthval_rasterizer(assao_scene_vert_glsl, assao_depth_frag_glsl, depth_desc);
     depthval_rasterizer.outDepthVal = depth_val_image;
     depthval_rasterizer.bind_depth_target(depth_d);

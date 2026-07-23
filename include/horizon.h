@@ -776,23 +776,6 @@ namespace Corona::Horizon
                 desc.auto_bind_entries = object->autoBindEntries;
             return desc;
         }
-
-        static ComputePipelineDesc from_source(std::string source,
-                                               EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
-                                               EmbeddedShader::CompilerOption compiler_option = {},
-                                               std::source_location source_location = std::source_location::current())
-        {
-            EmbeddedShader::ShaderCodeCompiler compiler(source,
-                                                        EmbeddedShader::ShaderStage::ComputeShader,
-                                                        language,
-                                                        compiler_option,
-                                                        source_location);
-
-            return ComputePipelineDesc(
-                PipelineShaderDesc {
-                    PipelineShaderStage::Compute,
-                    compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) });
-        }
     };
 
     struct BlendStateDesc
@@ -815,23 +798,6 @@ namespace Corona::Horizon
         std::vector<BlendAttachmentDesc> attachments = { alpha_blend_attachment() };
     };
 
-    struct DepthAttachmentDesc
-    {
-        bool enabled = false;
-        Format format = Format::UNKNOWN;
-        std::string debug_name;
-
-        static DepthAttachmentDesc with_format(Format value, std::string name = {})
-        {
-            DepthAttachmentDesc desc;
-            desc.enabled = value != Format::UNKNOWN;
-            desc.format = value;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
-
-    };
-
     struct RasterizerPipelineDesc
     {
         PipelineShaderDesc vertex_shader { PipelineShaderStage::Vertex, EmbeddedShader::ShaderCodeModule {} };
@@ -842,7 +808,6 @@ namespace Corona::Horizon
         DepthStencilStateDesc depth_stencil;
         BlendStateDesc blend;
         MultisampleStateDesc multisample;
-        DepthAttachmentDesc depth_attachment;
 
         uint32_t multiview_count = 1;
 
@@ -876,7 +841,6 @@ namespace Corona::Horizon
             depth_stencil = std::move(state.depth_stencil);
             blend = std::move(state.blend);
             multisample = std::move(state.multisample);
-            depth_attachment = std::move(state.depth_attachment);
             multiview_count = state.multiview_count;
             debug_name = std::move(state.debug_name);
         }
@@ -907,34 +871,6 @@ namespace Corona::Horizon
                 desc.auto_bind_entries = object->autoBindEntries;
 
             return desc;
-        }
-
-        static RasterizerPipelineDesc from_source(std::string vertex_source,
-                                                  std::string fragment_source,
-                                                  EmbeddedShader::ShaderLanguage vertex_language = EmbeddedShader::ShaderLanguage::GLSL,
-                                                  EmbeddedShader::ShaderLanguage fragment_language = EmbeddedShader::ShaderLanguage::GLSL,
-                                                  EmbeddedShader::CompilerOption compiler_option = {},
-                                                  std::source_location source_location = std::source_location::current())
-        {
-            EmbeddedShader::ShaderCodeCompiler vertex_compiler(vertex_source,
-                                                               EmbeddedShader::ShaderStage::VertexShader,
-                                                               vertex_language,
-                                                               compiler_option,
-                                                               source_location);
-
-            EmbeddedShader::ShaderCodeCompiler fragment_compiler(fragment_source,
-                                                                 EmbeddedShader::ShaderStage::FragmentShader,
-                                                                 fragment_language,
-                                                                 compiler_option,
-                                                                 source_location);
-
-            return RasterizerPipelineDesc(
-                PipelineShaderDesc {
-                    PipelineShaderStage::Vertex,
-                    vertex_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) },
-                PipelineShaderDesc {
-                    PipelineShaderStage::Fragment,
-                    fragment_compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler_option.enableBindless) });
         }
 
     };

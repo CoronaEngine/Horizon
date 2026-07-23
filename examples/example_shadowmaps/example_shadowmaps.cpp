@@ -279,7 +279,6 @@ void run_example_shadowmaps()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc pack_desc;
-    pack_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_shadowmaps.shadow_depth");
     pack_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     pack_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
@@ -288,7 +287,6 @@ void run_example_shadowmaps()
     pack_rasterizer.bind_depth_target(shadow_depth_image);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_shadowmaps.depth");
     scene_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
