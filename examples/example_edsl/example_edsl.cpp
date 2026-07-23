@@ -12,7 +12,6 @@
 #include "imgui_horizon.h"
 
 #include <imgui.h>
-#include GLSL(shaders/edsl_header.glsl)
 
 #include <chrono>
 #include <cstdint>
@@ -83,26 +82,15 @@ void run_example_edsl()
     Float4x4 view;
     Float4x4 proj;
 
-    bool option = false;
-
     auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
         position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-        Float color_weight = edsl_header_glsl.get_color_weight(vertex->color);
+        Float color_weight = (vertex->color->x + vertex->color->y + vertex->color->z) / Float(3.0f);
         return Float4(vertex->tex_coord, color_weight, 1.0f);
     };
 
     auto fragment_shader = [&](Float4 input) {
         Float4 color = texture(texture_proxy, input->xy());
-        Float4 finalColor;
-        $IF (option)
-        {
-            finalColor = color * Float4(input->z, input->z, input->z, 1.0f);;
-        }
-        $ELSE
-        {
-            finalColor = Float4(input->x, input->y, input->z, 1.0f);
-        }
-        final_output_proxy << finalColor;
+        final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
     };
 
     Corona::Horizon::RasterizerPipelineDesc desc;
@@ -115,13 +103,14 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
-    //option = true;
     HorizonImGuiLayer ui(window, edsl_width, edsl_height);
 
-    float t = 0.f;
     const auto start_time = std::chrono::high_resolution_clock::now();
-    auto last_time = std::chrono::high_resolution_clock::now();
-    std::cout << std::boolalpha;
+    auto prev_time = start_time;
+    double fps_accum_seconds = 0.0;
+    int fps_frame_count = 0;
+
+    Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -132,14 +121,23 @@ void run_example_edsl()
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
-        auto now = std::chrono::high_resolution_clock::now();
-        t += std::chrono::duration<float>(now - last_time).count();
-        last_time = now;
-        if (t >= 1.f)
+
+        const auto now = std::chrono::high_resolution_clock::now();
+        const float dt = std::chrono::duration<float>(now - prev_time).count();
+        prev_time = now;
+
+        fps_accum_seconds += dt;
+        ++fps_frame_count;
+        if (fps_accum_seconds >= 0.5)
         {
-            t -= 1.f;
-            option = !option;
+            const double fps = fps_frame_count / fps_accum_seconds;
+            char title[160];
+            std::snprintf(title, sizeof(title), "Horizon Baseline [EDSL] %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            glfwSetWindowTitle(window, title);
+            fps_accum_seconds = 0.0;
+            fps_frame_count = 0;
         }
+
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
         model = to_edsl_matrix(glm::transpose(ubo.model));
         view = to_edsl_matrix(glm::transpose(ubo.view));
@@ -148,13 +146,13 @@ void run_example_edsl()
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::submit;
+        render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::submit;
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
     }
-
+    display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);
     glfwTerminate();
 }

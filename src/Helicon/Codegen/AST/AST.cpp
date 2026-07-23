@@ -134,14 +134,28 @@ std::shared_ptr<EmbeddedShader::Ast::UniversalArray> EmbeddedShader::Ast::AST::d
 	return variate;
 }
 
-std::shared_ptr<EmbeddedShader::Ast::UniversalTexture2D> EmbeddedShader::Ast::AST::defineUniversalTexture2D(std::shared_ptr<Type> texelType)
+std::shared_ptr<EmbeddedShader::Ast::UniversalTexture> EmbeddedShader::Ast::AST::defineUniversalTexture2D(std::shared_ptr<Type> texelType)
 {
-	auto textureType = std::make_shared<Texture2DType>();
+	auto textureType = std::make_shared<TextureType>();
 	textureType->texelType = std::move(texelType);
-    auto variate = std::make_shared<UniversalTexture2D>();
+    auto variate = std::make_shared<UniversalTexture>();
     variate->type = textureType;
     variate->name = Parser::getUniqueGlobalVariateName();
-    auto defineNode = std::make_shared<DefineUniversalTexture2D>();
+    auto defineNode = std::make_shared<DefineUniversalTexture>();
+    defineNode->texture = variate;
+    addGlobalStatement(defineNode);
+    return variate;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::UniversalTexture> EmbeddedShader::Ast::AST::defineUniversalTextureCube(std::shared_ptr<Type> texelType)
+{
+    auto textureType = std::make_shared<TextureType>();
+    textureType->name = "TextureCube";
+    textureType->texelType = std::move(texelType);
+    auto variate = std::make_shared<UniversalTexture>();
+    variate->type = textureType;
+    variate->name = Parser::getUniqueGlobalVariateName();
+    auto defineNode = std::make_shared<DefineUniversalTexture>();
     defineNode->texture = variate;
     addGlobalStatement(defineNode);
     return variate;

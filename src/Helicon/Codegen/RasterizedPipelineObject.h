@@ -66,17 +66,25 @@ namespace EmbeddedShader
 					}
 				}
 
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
 				{
 					if (def->texture && def->texture->boundResourceRef)
 					{
+						auto effectiveBindType = [&](ShaderCodeModule::ShaderResources::BindType reflected) {
+							if (reflected != ShaderCodeModule::ShaderResources::pushConstantMembers)
+								return static_cast<int32_t>(reflected);
+							auto* texType = dynamic_cast<Ast::TextureType*>(def->texture->type.get());
+							const bool isSampled = texType != nullptr && texType->name.rfind("Sampler", 0) == 0;
+							return static_cast<int32_t>(isSampled ? ShaderCodeModule::ShaderResources::sampledImages
+							                                      : ShaderCodeModule::ShaderResources::storageTexture);
+						};
 						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
 						{
 							autoBindEntries.push_back({
 								def->texture->boundResourceRef,
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
+								effectiveBindType(bindInfo->bindType),
 								bindInfo->location
 							});
 						}
@@ -86,7 +94,7 @@ namespace EmbeddedShader
 								def->texture->boundResourceRef,
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
+								effectiveBindType(bindInfo->bindType),
 								bindInfo->location
 							});
 						}
@@ -98,7 +106,7 @@ namespace EmbeddedShader
 			// Textures with renderTargetLocation >= 0 were used as render target outputs.
 			for (auto& stmt : globals)
 			{
-				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture2D*>(stmt.get()))
+				if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
 				{
 					if (def->texture && def->texture->renderTargetLocation >= 0 && def->texture->boundResourceRef)
 					{
@@ -179,7 +187,7 @@ namespace EmbeddedShader
 			{
 				// For Texture2DType members, the output type is the texel type (e.g., float4)
 				std::shared_ptr<Ast::Type> outputType;
-				if (auto tex2dType = std::dynamic_pointer_cast<Ast::Texture2DType>(member->type))
+				if (auto tex2dType = std::dynamic_pointer_cast<Ast::TextureType>(member->type))
 					outputType = tex2dType->texelType;
 				else
 					outputType = member->type;

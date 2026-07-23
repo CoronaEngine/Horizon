@@ -70,6 +70,11 @@ void run_example_glsl()
     HorizonImGuiLayer ui(window, glsl_width, glsl_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
+    auto prev_time = start_time;
+    double fps_accum_seconds = 0.0;
+    int fps_frame_count = 0;
+
+    Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -80,6 +85,23 @@ void run_example_glsl()
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
+
+        const auto now = std::chrono::high_resolution_clock::now();
+        const float dt = std::chrono::duration<float>(now - prev_time).count();
+        prev_time = now;
+
+        fps_accum_seconds += dt;
+        ++fps_frame_count;
+        if (fps_accum_seconds >= 0.5)
+        {
+            const double fps = fps_frame_count / fps_accum_seconds;
+            char title[160];
+            std::snprintf(title, sizeof(title), "Horizon Baseline [GLSL] %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            glfwSetWindowTitle(window, title);
+            fps_accum_seconds = 0.0;
+            fps_frame_count = 0;
+        }
+
         baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, glsl_width / static_cast<float>(glsl_height));
         rasterizer.ubo.model = ubo.model;
         rasterizer.ubo.view = ubo.view;
@@ -88,13 +110,13 @@ void run_example_glsl()
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::submit;
+        render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::submit;
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
     }
-
+    display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);
     glfwTerminate();
 }

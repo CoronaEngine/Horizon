@@ -5,6 +5,7 @@
 #include "example_branch_pruning/example_branch_pruning.h"
 #include "example_ibl/example_ibl.h"
 #include "example_drawstress/example_drawstress.h"
+#include "example_edsl_ibl/example_edsl_ibl.h"
 #include "example_raymarch/example_raymarch.h"
 #include "example_bump/example_bump.h"
 #include "example_deferred/example_deferred.h"
@@ -44,11 +45,19 @@ int main(int argc, char **argv)
         run_example_branch_pruning();
         return 0;
     }
+
     if (mode == "ibl")
     {
         run_example_ibl();
         return 0;
     }
+
+    if (mode == "edsl_ibl")
+    {
+        run_example_edsl_ibl();
+        return 0;
+    }
+
     if (mode == "drawstress")
     {
         run_example_drawstress();

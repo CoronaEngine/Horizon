@@ -184,4 +184,5 @@ GPU_PUSH_VARIATE(GPU_IF_BRANCH gpuIfBranchJ6hF4rT9mK2zV8cX5bN1pQ3{TheIfElseState
 #define HELICON_STRINGIZE_(X) #X
 #define HLSL(path) HELICON_STRINGIZE_(path.hpp)
 #define GLSL(path) HELICON_STRINGIZE_(path.hpp)
+#define SLANG(path) HELICON_STRINGIZE_(path.hpp)
 }

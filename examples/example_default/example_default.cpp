@@ -25,9 +25,9 @@
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
 
-#include GLSL(shaders/default_vert.glsl)
-#include GLSL(shaders/default_frag.glsl)
 #include GLSL(shaders/default_compute.glsl)
+#include SLANG(shaders/default_vert.slang)
+#include SLANG(shaders/default_frag.slang)
 
 struct RasterizerStorageBufferObject
 {
@@ -234,8 +234,8 @@ void run_example_default()
         Corona::Horizon::RasterizerPipelineDesc desc;
         desc.depth_stencil = colorOnlyDepthStencil();
 
-        Corona::Horizon::RasterizerPipeline rasterizer(default_vert_glsl, default_frag_glsl, desc);
-        rasterizer.outColor = finalOutputImages[threadIndex];
+        Corona::Horizon::RasterizerPipeline rasterizer(default_vert_slang, default_frag_slang, desc);
+        rasterizer.RETURN = finalOutputImages[threadIndex];
 
         Corona::Horizon::ComputePipeline computer(default_compute_glsl, ktm::uvec3(8, 8, 1));
         computer.pushConsts.imageID = finalOutputImages[threadIndex].storeDescriptor();

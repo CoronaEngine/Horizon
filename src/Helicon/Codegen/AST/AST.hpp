@@ -80,9 +80,13 @@ namespace EmbeddedShader::Ast
 		template<typename ElementType>
 		static std::shared_ptr<UniversalArray> defineUniversalArray();
 
-	    static std::shared_ptr<UniversalTexture2D> defineUniversalTexture2D(std::shared_ptr<Type> texelType);
+	    static std::shared_ptr<UniversalTexture> defineUniversalTexture2D(std::shared_ptr<Type> texelType);
 	    template<typename ElementType>
-        static std::shared_ptr<UniversalTexture2D> defineUniversalTexture2D();
+        static std::shared_ptr<UniversalTexture> defineUniversalTexture2D();
+
+	    static std::shared_ptr<UniversalTexture> defineUniversalTextureCube(std::shared_ptr<Type> texelType);
+	    template<typename ElementType>
+        static std::shared_ptr<UniversalTexture> defineUniversalTextureCube();
 
 		static std::shared_ptr<UniformVariate> defineUniformVariate(std::shared_ptr<Type> type, bool pushConstant = false);
 		template<typename VariateType>
@@ -274,9 +278,15 @@ namespace EmbeddedShader::Ast
 	}
 
     template <typename ElementType>
-    std::shared_ptr<UniversalTexture2D> AST::defineUniversalTexture2D()
+    std::shared_ptr<UniversalTexture> AST::defineUniversalTexture2D()
 	{
 	    return defineUniversalTexture2D(createType<std::remove_cvref_t<ElementType>>());
+	}
+
+    template <typename ElementType>
+    std::shared_ptr<UniversalTexture> AST::defineUniversalTextureCube()
+	{
+	    return defineUniversalTextureCube(createType<std::remove_cvref_t<ElementType>>());
 	}
 
     template<typename VariateType>
@@ -314,7 +324,7 @@ namespace EmbeddedShader::Ast
 			}
 			else if constexpr (ParseHelper::isTexture2DProxy<MemberType>())
 			{
-				auto texture2DType = std::make_shared<Texture2DType>();
+				auto texture2DType = std::make_shared<TextureType>();
 				texture2DType->texelType = createType<std::remove_cvref_t<typename MemberType::value_type>>();
 				member->type = std::move(texture2DType);
 			}

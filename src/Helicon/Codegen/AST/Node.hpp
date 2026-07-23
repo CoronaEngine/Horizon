@@ -246,8 +246,8 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
-    //RWTexture2D/Texture2D
-    struct UniversalTexture2D : Variate
+    //RWTexture2D/Texture2D/RWTextureCube/TextureCube
+    struct UniversalTexture : Variate
     {
         //Variate::type 将被解释为元素类型
 
@@ -266,9 +266,9 @@ namespace EmbeddedShader::Ast
         const Variate* getRootVariate() const override;
     };
 
-    struct DefineUniversalTexture2D : Statement
+    struct DefineUniversalTexture : Statement
     {
-        std::shared_ptr<UniversalTexture2D> texture;
+        std::shared_ptr<UniversalTexture> texture;
         std::string parse() override;
         void resetAccessPermissions() override;
     };
@@ -306,7 +306,7 @@ namespace EmbeddedShader::Ast
 		void access(AccessPermissions permissions) override;
 	};
 
-	struct Texture2DType : Type
+	struct TextureType : Type
 	{
 		std::shared_ptr<Type> texelType;
 		std::string name = "Texture2D";

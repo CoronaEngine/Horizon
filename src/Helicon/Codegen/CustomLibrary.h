@@ -9,7 +9,7 @@ namespace EmbeddedShader::CustomLibrary
 	template<typename Type>
 	VariateProxy<base_type_t<Type>> abs(Type&& a)
 	{
-		return {Ast::AST::callFunc("abs", Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(a)>(a))}),Ast::AccessPermissions::ReadOnly)};
+		return {Ast::AST::callFunc("abs", Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(a)>(a))},Ast::AccessPermissions::ReadOnly))};
 	}
 
 	template<typename Type>
@@ -28,6 +28,18 @@ namespace EmbeddedShader::CustomLibrary
 	VariateProxy<TexelType> texture(Texture2DProxy<TexelType>& tex, const VariateProxy<ktm::fvec2>& uv)
 	{
 		return tex.sample(uv);
+	}
+
+    template<typename TexelType>
+    VariateProxy<TexelType> texture(TextureCubeProxy<TexelType>& tex, const VariateProxy<ktm::fvec3>& dir)
+	{
+	    return tex.sample(dir);
+	}
+
+    template<typename TexelType>
+    VariateProxy<TexelType> textureLod(TextureCubeProxy<TexelType>& tex, const VariateProxy<ktm::fvec3>& dir, const VariateProxy<float>& lod)
+	{
+	    return tex.sampleLevel(dir,lod);
 	}
 
 	template<typename Type> requires ktm::is_vector_v<base_type_t<Type>>
@@ -142,6 +154,36 @@ namespace EmbeddedShader::CustomLibrary
 	VariateProxy<base_type_t<Type>> sqrt(Type&& x)
 	{
 		return {Ast::AST::callFunc("sqrt",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type>
+    VariateProxy<base_type_t<Type>> sin(Type&& x)
+	{
+	    return {Ast::AST::callFunc("sin",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type>
+    VariateProxy<base_type_t<Type>> cos(Type&& x)
+	{
+	    return {Ast::AST::callFunc("cos",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type>
+    VariateProxy<base_type_t<Type>> tan(Type&& x)
+	{
+	    return {Ast::AST::callFunc("tan",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type>
+    VariateProxy<base_type_t<Type>> exp2(Type&& x)
+	{
+	    return {Ast::AST::callFunc("exp2",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type>
+    VariateProxy<base_type_t<Type>> radians(Type&& x)
+	{
+	    return {Ast::AST::callFunc("radians",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
 	}
 
 }

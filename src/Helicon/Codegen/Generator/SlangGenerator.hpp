@@ -97,13 +97,13 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::DefineUniversalArray* node);
 		static std::string getParseOutput(const Ast::DefineUniformVariate* node);
 		static std::string getParseOutput(const Ast::UniformVariate* node);
-		static std::string getParseOutput(const Ast::UniversalTexture2D* node);
+		static std::string getParseOutput(const Ast::UniversalTexture* node);
 		static std::string getParseOutput(const Ast::UniversalArray* node);
 		static std::string getParseOutput(const Ast::DefineAggregateType* node);
-		static std::string getParseOutput(const Ast::DefineUniversalTexture2D* node);
+		static std::string getParseOutput(const Ast::DefineUniversalTexture* node);
 		static std::string getParseOutput(const Ast::UnaryOperator* node);
 		static std::string getParseOutput(const Ast::ArrayType* node);
-		static std::string getParseOutput(const Ast::Texture2DType* node);
+		static std::string getParseOutput(const Ast::TextureType* node);
 		static std::string getParseOutput(const Ast::CallFunc* node);
 		static std::string getParseOutput(const Ast::SamplerType* node);
 		static std::string getParseOutput(const Ast::FunctionDeclaration* node);

@@ -1,11 +1,12 @@
 # ============================================================================
 # HeliconShaderCompile.cmake
-# 自动扫描源码中的 #include HLSL/GLSL(path) 指令并编译 shader
+# 自动扫描源码中的 #include HLSL/GLSL/SLANG(path) 指令并编译 shader
 # 
 # 宏展开说明 (定义于 Src/Codegen/ControlFlows.h):
 #   #define HELICON_STRINGIZE_(X) #X
 #   #define HLSL(path) HELICON_STRINGIZE_(path.hpp)
 #   #define GLSL(path) HELICON_STRINGIZE_(path.hpp)
+#   #define SLANG(path) HELICON_STRINGIZE_(path.hpp)
 #
 # 示例:
 #   #include HLSL(shaders/example.hlsl)
@@ -40,8 +41,8 @@ function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PA
         # 读取文件内容
         file(READ "${SOURCE_FILE}" FILE_CONTENT)
 
-        # 匹配 #include HLSL(path) 或 #include GLSL(path)
-        string(REGEX MATCHALL "#include[ \t]+(HLSL|GLSL)\\([^)]+\\)" MATCHES "${FILE_CONTENT}")
+        # 匹配 #include HLSL(path) 或 #include GLSL(path) 或 #include SLANG(path)
+        string(REGEX MATCHALL "#include[ \t]+(HLSL|GLSL|SLANG)\\([^)]+\\)" MATCHES "${FILE_CONTENT}")
 
         # 记录"含 shader include 的源文件"，供调用方注册为 configure 依赖：
         # 改名/新增 shader 时编辑这些文件会自动触发重新配置(重新扫描)。
@@ -52,7 +53,7 @@ function(_helicon_parse_shader_includes SOURCE_FILES SOURCE_DIR OUT_LANGS OUT_PA
 
         foreach(MATCH ${MATCHES})
             # 提取语言类型
-            string(REGEX MATCH "(HLSL|GLSL)" LANG "${MATCH}")
+            string(REGEX MATCH "(HLSL|GLSL|SLANG)" LANG "${MATCH}")
             # 提取路径（保留原始相对路径）
             string(REGEX MATCH "\\(([^)]+)\\)" PATH_MATCH "${MATCH}")
             string(REGEX REPLACE "^\\(|\\)$" "" RAW_SHADER_PATH "${PATH_MATCH}")

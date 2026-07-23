@@ -391,7 +391,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	return  Ast::AST::getGlobalUBO()->name + "." + node->name;
 }
 
-std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniversalTexture2D* node)
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniversalTexture* node)
 {
 	if (bindless())
 		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
@@ -421,7 +421,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	{
 		for (const auto& member: node->aggregate->members)
 		{
-			if (std::dynamic_pointer_cast<Ast::ArrayType>(member->type) || std::dynamic_pointer_cast<Ast::Texture2DType>(member->type))
+			if (std::dynamic_pointer_cast<Ast::ArrayType>(member->type) || std::dynamic_pointer_cast<Ast::TextureType>(member->type))
 			{
 				result += "\t" "RW" + member->type->generate() + " " + member->name + ";\n";
 				continue;
@@ -433,7 +433,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	return result;
 }
 
-std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineUniversalTexture2D *node)
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineUniversalTexture *node)
 {
     if (node->texture->permissions == Ast::AccessPermissions::None)
         return "";
@@ -462,12 +462,12 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ArrayType* node)
 {
-	if ((node->permissions & Ast::AccessPermissions::WriteOnly) != Ast::AccessPermissions::None && std::dynamic_pointer_cast<Ast::Texture2DType>(node->elementType))
+	if ((node->permissions & Ast::AccessPermissions::WriteOnly) != Ast::AccessPermissions::None && std::dynamic_pointer_cast<Ast::TextureType>(node->elementType))
 		return "StructuredBuffer<RW" + node->elementType->generate() + ">" + (bindless() ?  ".Handle" : "");
 	return "StructuredBuffer<" + node->elementType->generate() + ">" + (bindless() ?  ".Handle" : "");
 }
 
-std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::Texture2DType* node)
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::TextureType* node)
 {
 	return node->name + "<" + node->texelType->generate() + ">" + (bindless() ?  ".Handle" : "");
 }
