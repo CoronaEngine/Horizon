@@ -547,10 +547,18 @@ int main(int argc, char** argv)
 			++i;
 			arg = argv[i];
 			if (arg == "glsl")
-				inputLanguage = ShaderLanguage::GLSL;
-			else if (arg == "hlsl")
-				inputLanguage = ShaderLanguage::HLSL;
-			else
+			{
+			    inputLanguage = ShaderLanguage::GLSL;
+			}
+            else if (arg == "hlsl")
+			{
+                inputLanguage = ShaderLanguage::HLSL;
+            }
+            else if (arg == "slang")
+		    {
+		        inputLanguage = ShaderLanguage::Slang;
+		    }
+            else
 			{
 				std::cout << "ERROR:Unrecognized Shader Language.\n";
 				return 1;
@@ -671,6 +679,8 @@ int main(int argc, char** argv)
         auto i = info.variateName.find_last_of('.');
         if (i != std::string::npos)
             info.variateName = info.variateName.substr(i + 1);
+        if (info.variateName == "return")
+            info.variateName = "RETURN";
     }
 
 	std::cout << "SUCCESS:Obtain reflection information from SPIR-V IR through SPIRV-CROSS.\n";
