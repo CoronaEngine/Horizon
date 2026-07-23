@@ -40,11 +40,11 @@ int main(int argc, char **argv)
         run_example_glsl();
         return 0;
     }
-    if (mode == "branch_pruning")
-    {
-        run_example_branch_pruning();
-        return 0;
-    }
+    // if (mode == "branch_pruning")
+    // {
+    //     run_example_branch_pruning();
+    //     return 0;
+    // }
 
     if (mode == "ibl")
     {
