@@ -2018,19 +2018,7 @@ namespace Corona::Horizon
         return *this << pipeline.command_batch();
     }
 
-    HardwareStream& HardwareStream::append_consuming(RasterizerPipelineBase& pipeline)
-    {
-        ensure_open();
-        pipeline.record_consuming(recorder_);
-        return *this;
-    }
-
     SubmitReceipt HardwareStream::operator<<(CommitCommand)
-    {
-        return commit();
-    }
-
-    SubmitReceipt HardwareStream::commit()
     {
         ensure_open();
         committed_ = true;
@@ -2061,28 +2049,11 @@ namespace Corona::Horizon
         return HardwareStream(*this);
     }
 
-    HardwareStream HardwareExecutor::operator<<(ComputePipelineBase& pipeline)
-    {
-        HardwareStream s(*this);
-        s << pipeline.command_batch();
-        return s;
-    }
-
     HardwareStream HardwareExecutor::operator<<(RasterizerPipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline.command_batch();
         return s;
-    }
-
-    ExecutionPlan HardwareExecutor::compile(const RecordedTask& task) const
-    {
-        return compiler_->compile(task);
-    }
-
-    std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results) const
-    {
-        return submit(plan, present_results, {}, nullptr);
     }
 
     std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan,
@@ -2357,7 +2328,6 @@ namespace Corona::Horizon
         }
 
         receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
-        remember_receipt(receipt);
         profile.total_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - total_start).count();
         record_execution_commit_profile(profile);
@@ -2378,11 +2348,6 @@ namespace Corona::Horizon
         std::lock_guard lock(mutex_);
         pending_waits_.insert(pending_waits_.end(), receipt.tokens.begin(), receipt.tokens.end());
         return *this;
-    }
-
-    HardwareExecutor& HardwareExecutor::wait(const HardwareExecutor& producer)
-    {
-        return wait(producer.last_receipt());
     }
 
     HardwareExecutor& HardwareExecutor::wait_idle(const SubmitReceipt& receipt)
@@ -2459,23 +2424,11 @@ namespace Corona::Horizon
         return *this;
     }
 
-    SubmitReceipt HardwareExecutor::last_receipt() const
-    {
-        std::lock_guard lock(mutex_);
-        return last_receipt_;
-    }
-
     std::vector<SubmissionToken> HardwareExecutor::consume_pending_waits()
     {
         std::lock_guard lock(mutex_);
         std::vector<SubmissionToken> waits = std::move(pending_waits_);
         pending_waits_.clear();
         return waits;
-    }
-
-    void HardwareExecutor::remember_receipt(const SubmitReceipt& receipt)
-    {
-        std::lock_guard lock(mutex_);
-        last_receipt_ = receipt;
     }
 }

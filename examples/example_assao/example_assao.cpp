@@ -418,27 +418,27 @@ void run_example_assao()
         // compute 参数
         const glm::vec4 resolution(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
-        generate_compute.pushConsts.depthID = depth_val_image.storeDescriptor();
-        generate_compute.pushConsts.normalID = normal_image.storeDescriptor();
-        generate_compute.pushConsts.aoID = ao_image_a.storeDescriptor();
+        generate_compute.pushConsts.depthID = depth_val_image.store_descriptor();
+        generate_compute.pushConsts.normalID = normal_image.store_descriptor();
+        generate_compute.pushConsts.aoID = ao_image_a.store_descriptor();
         generate_compute.pushConsts.depth_unpack = glm::vec4(p32, -p22, 0.0f, 0.0f);
         generate_compute.pushConsts.ndc_to_view = glm::vec4(2.0f / p00, 2.0f / p11, -1.0f / p00, -1.0f / p11);
         generate_compute.pushConsts.params0 = glm::vec4(1.2f, 1.0f, 1.5f, 0.06f);
         generate_compute.pushConsts.params1 = glm::vec4(50.0f, 200.0f, float(ao_width), float(ao_height));
 
-        blur_compute_ab.pushConsts.srcID = ao_image_a.storeDescriptor();
-        blur_compute_ab.pushConsts.dstID = ao_image_b.storeDescriptor();
-        blur_compute_ab.pushConsts.depthID = depth_val_image.storeDescriptor();
+        blur_compute_ab.pushConsts.srcID = ao_image_a.store_descriptor();
+        blur_compute_ab.pushConsts.dstID = ao_image_b.store_descriptor();
+        blur_compute_ab.pushConsts.depthID = depth_val_image.store_descriptor();
         blur_compute_ab.pushConsts.params0 = glm::vec4(0.98f, float(ao_width), float(ao_height), 0.0f);
 
-        blur_compute_ba.pushConsts.srcID = ao_image_b.storeDescriptor();
-        blur_compute_ba.pushConsts.dstID = ao_image_a.storeDescriptor();
-        blur_compute_ba.pushConsts.depthID = depth_val_image.storeDescriptor();
+        blur_compute_ba.pushConsts.srcID = ao_image_b.store_descriptor();
+        blur_compute_ba.pushConsts.dstID = ao_image_a.store_descriptor();
+        blur_compute_ba.pushConsts.depthID = depth_val_image.store_descriptor();
         blur_compute_ba.pushConsts.params0 = glm::vec4(0.98f, float(ao_width), float(ao_height), 0.0f);
 
-        apply_compute.pushConsts.colorID = scene_color_image.storeDescriptor();
-        apply_compute.pushConsts.aoID = ao_image_a.storeDescriptor();
-        apply_compute.pushConsts.outputID = final_output_image.storeDescriptor();
+        apply_compute.pushConsts.colorID = scene_color_image.store_descriptor();
+        apply_compute.pushConsts.aoID = ao_image_a.store_descriptor();
+        apply_compute.pushConsts.outputID = final_output_image.store_descriptor();
         apply_compute.pushConsts.params0 = glm::vec4(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
         Corona::Horizon::SubmitReceipt render_receipt =

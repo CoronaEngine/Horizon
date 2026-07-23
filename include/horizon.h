@@ -49,10 +49,7 @@ namespace Corona::Horizon
     class HardwareImage;
     class HardwareImageLayerSelector;
 
-    struct CopyBufferCommand;
     struct CopyBufferToImageCommand;
-    struct CopyImageCommand;
-    struct CopyImageToBufferCommand;
 
     class CommandBatch;
 
@@ -125,10 +122,7 @@ namespace Corona::Horizon
         // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
         HardwareStream& operator<<(ComputePipelineBase& pipeline);
         HardwareStream& operator<<(RasterizerPipelineBase& pipeline);
-        HardwareStream& append_consuming(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
-
-        [[nodiscard]] SubmitReceipt commit();
 
     private:
         void ensure_open() const;
@@ -151,27 +145,14 @@ namespace Corona::Horizon
         HardwareExecutor(HardwareExecutor&&) = delete;
         HardwareExecutor& operator=(HardwareExecutor&&) = delete;
 
-        template <typename RecordFn>
-        [[nodiscard]] RecordedTask record(RecordFn&& fn) const
-        {
-            CommandRecorder recorder;
-            std::forward<RecordFn>(fn)(recorder);
-            return recorder.close();
-        }
-
         [[nodiscard]] HardwareStream stream();
         // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
-        [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
         [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
-        [[nodiscard]] ExecutionPlan compile(const RecordedTask& task) const;
-        [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan, std::vector<PresentResult>* present_results = nullptr) const;
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
-        HardwareExecutor& wait(const HardwareExecutor& producer);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
         /// Waits for exactly the receipt's timeline values, then retires them.
         HardwareExecutor& wait_for_completion(const SubmitReceipt& receipt);
-        [[nodiscard]] SubmitReceipt last_receipt() const;
 
     private:
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan,
@@ -179,13 +160,11 @@ namespace Corona::Horizon
                                                           std::span<const SubmissionToken> wait_tokens,
                                                           struct ExecutionCommitProfileSample* profile = nullptr) const;
         [[nodiscard]] std::vector<SubmissionToken> consume_pending_waits();
-        void remember_receipt(const SubmitReceipt& receipt);
 
         std::shared_ptr<ExecutionCompiler> compiler_;
         QueueResolver queue_resolver_ {};
         mutable std::mutex mutex_;
         uint64_t next_submit_serial_ { 0 };
-        SubmitReceipt last_receipt_ {};
         std::vector<SubmissionToken> pending_waits_;
     };
 
@@ -266,18 +245,6 @@ namespace Corona::Horizon
         {
             return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name));
         }
-
-        template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc uniform(std::string name = {})
-        {
-            return typed<T>(1, BufferUsageFlags::TransferDst | BufferUsageFlags::Uniform, std::move(name));
-        }
-
-        template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc storage(uint64_t count, std::string name = {})
-        {
-            return typed<T>(count, BufferUsageFlags::TransferSrc | BufferUsageFlags::TransferDst | BufferUsageFlags::Storage, std::move(name));
-        }
     };
 
     class HardwareBuffer : public ResourceHandle
@@ -356,30 +323,6 @@ namespace Corona::Horizon
                 std::move(name));
         }
 
-        template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer uniform(const T& value, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::uniform<T>(std::move(name)), std::as_bytes(std::span<const T>(&value, 1)));
-        }
-
-        template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer storage(std::span<const T> data, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::storage<T>(data.size(), std::move(name)), std::as_bytes(data));
-        }
-
-        template <std::ranges::contiguous_range Range>
-            requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
-        [[nodiscard]] static HardwareBuffer storage(const Range& data, std::string name = {})
-        {
-            return storage<std::ranges::range_value_t<Range>>(
-                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name));
-        }
-
-        [[nodiscard]] CommandBatch upload(std::span<const std::byte> data, uint64_t dst_offset = 0) const;
-        [[nodiscard]] CopyBufferCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
-        [[nodiscard]] CopyBufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
         [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
@@ -440,22 +383,6 @@ namespace Corona::Horizon
             return desc;
         }
 
-        static HardwareImageDesc texture_3d(uint32_t width,
-                                            uint32_t height,
-                                            uint32_t depth,
-                                            Format format,
-                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Image3D;
-            desc.extent = { width, height, depth };
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
-
         static HardwareImageDesc cube(uint32_t size,
                                       Format format,
                                       ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
@@ -469,34 +396,6 @@ namespace Corona::Horizon
             desc.usage = usage;
             desc.debug_name = std::move(name);
             return desc;
-        }
-
-        static HardwareImageDesc cube_array(uint32_t size,
-                                            uint32_t cube_count,
-                                            Format format,
-                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::CubeArray;
-            desc.extent = { size, size, 1 };
-            desc.array_layers = cube_count * 6;
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
-
-        static HardwareImageDesc color_attachment(uint32_t width,
-                                                  uint32_t height,
-                                                  Format format,
-                                                  std::string name = {})
-        {
-            return texture_2d(width,
-                              height,
-                              format,
-                              ImageUsageFlags::ColorAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
-                              std::move(name));
         }
 
         static HardwareImageDesc depth_attachment(uint32_t width,
@@ -527,12 +426,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
         [[nodiscard]] HardwareImageLayerSelector operator[](uint32_t layer) const;
-        [[nodiscard]] HardwareImage whole() const;
-        [[nodiscard]] HardwareImage layer(uint32_t layer_index) const;
-        [[nodiscard]] HardwareImage mip(uint32_t mip_index) const;
         [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const;
-        [[nodiscard]] uint32_t subresource_index(uint32_t layer_index, uint32_t mip_index) const;
-        [[nodiscard]] uint32_t subresource_count() const noexcept;
         [[nodiscard]] ImageExtent mip_extent(uint32_t mip_index) const;
         [[nodiscard]] ImageExtent extent() const;
         bool write_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
@@ -569,23 +463,8 @@ namespace Corona::Horizon
         void set_clear_color(float r, float g, float b, float a);
         void set_clear_depth(float depth, uint32_t stencil = 0);
 
-        [[nodiscard]] CommandBatch upload(std::span<const std::byte> data, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
-
-        template <HardwareTransferable T>
-        [[nodiscard]] CommandBatch upload(std::span<const T> data, uint32_t image_layer = 0, uint32_t image_mip = 0) const
-        {
-            return upload(std::as_bytes(data), image_layer, image_mip);
-        }
-
-        [[nodiscard]] CopyImageCommand copy_to(const HardwareImage& dst, uint32_t src_layer = 0, uint32_t dst_layer = 0, uint32_t src_mip = 0, uint32_t dst_mip = 0) const;
-        [[nodiscard]] CopyImageToBufferCommand copy_to(const HardwareBuffer& dst, uint32_t image_layer = 0, uint32_t image_mip = 0, uint64_t buffer_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer& src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-        [[nodiscard]] uint32_t store_sampled_descriptor() const;
-        [[nodiscard]] uint32_t store_storage_descriptor() const;
-        [[nodiscard]] uint32_t storeDescriptor() const { return store_descriptor(); }
-        [[nodiscard]] uint32_t storeSampledDescriptor() const { return store_sampled_descriptor(); }
-        [[nodiscard]] uint32_t storeStorageDescriptor() const { return store_storage_descriptor(); }
         static HardwareImage import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
@@ -962,8 +841,6 @@ namespace Corona::Horizon
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
         ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
         ComputePipelineBase& set_debug_label(std::string label);
-        ComputePipelineBase& bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
-        ComputePipelineBase& bind_storage_image(uint32_t binding, const HardwareImage& image);
         [[nodiscard]] ComputePipelineDesc desc() const;
 
         // 根据管线自身的 workgroup local size 将像素尺寸换算为 dispatch group 数。
@@ -1030,7 +907,6 @@ namespace Corona::Horizon
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
-        void record_consuming(CommandRecorder& recorder);
         [[nodiscard]] explicit operator bool() const noexcept;
 
         template <typename TargetProxy>
@@ -1412,52 +1288,6 @@ namespace Corona::Horizon
         }
     }
 
-    struct CopyBufferCommand
-    {
-        BufferRef src {};
-        BufferRef dst {};
-        CopyRegion region {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.copy(src, dst, region, devices);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
-    };
-
-    struct CopyImageCommand
-    {
-        ImageRef src {};
-        ImageRef dst {};
-        ImageCopyRegion region {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.copy_image(src, dst, region, devices);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
-    };
-
     struct CopyBufferToImageCommand
     {
         BufferRef src {};
@@ -1468,29 +1298,6 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const
         {
             recorder.copy_to_image(src, dst, region, devices);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
-    };
-
-    struct CopyImageToBufferCommand
-    {
-        ImageRef src {};
-        BufferRef dst {};
-        BufferImageCopyRegion region {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.copy_to_buffer(src, dst, region, devices);
         }
 
         [[nodiscard]] StreamCommand stream_command() const
@@ -1641,22 +1448,7 @@ namespace Corona::Horizon
         std::shared_ptr<void> object_ {};
     };
 
-    [[nodiscard]] inline CopyBufferCommand copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {})
-    {
-        return { src, dst, region, devices };
-    }
-
-    [[nodiscard]] inline CopyImageCommand copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {})
-    {
-        return { src, dst, region, devices };
-    }
-
     [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
-    {
-        return { src, dst, region, devices };
-    }
-
-    [[nodiscard]] inline CopyImageToBufferCommand copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
     {
         return { src, dst, region, devices };
     }

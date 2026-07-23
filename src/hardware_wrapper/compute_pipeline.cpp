@@ -132,18 +132,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipelineBase& ComputePipelineBase::bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer)
-    {
-        pipeline_impl(ResourceBridge::token(*this))->bind_storage_buffer(binding, buffer);
-        return *this;
-    }
-
-    ComputePipelineBase& ComputePipelineBase::bind_storage_image(uint32_t binding, const HardwareImage& image)
-    {
-        pipeline_impl(ResourceBridge::token(*this))->bind_storage_image(binding, image);
-        return *this;
-    }
-
     ComputePipelineDesc ComputePipelineBase::desc() const
     {
         return pipeline_impl(ResourceBridge::token(*this))->desc();

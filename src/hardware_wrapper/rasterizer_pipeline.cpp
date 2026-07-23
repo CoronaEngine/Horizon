@@ -166,12 +166,6 @@ namespace Corona::Horizon
         return pipeline_impl(token)->command_batch();
     }
 
-    void RasterizerPipelineBase::record_consuming(CommandRecorder& recorder)
-    {
-        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
-        pipeline_impl(token)->record_consuming(recorder);
-    }
-
     void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
                                                   ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
     {

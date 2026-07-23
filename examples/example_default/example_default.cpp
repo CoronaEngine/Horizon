@@ -238,7 +238,7 @@ void run_example_default()
         rasterizer.RETURN = finalOutputImages[threadIndex];
 
         Corona::Horizon::ComputePipeline computer(default_compute_glsl, ktm::uvec3(8, 8, 1));
-        computer.pushConsts.imageID = finalOutputImages[threadIndex].storeDescriptor();
+        computer.pushConsts.imageID = finalOutputImages[threadIndex].store_descriptor();
 
         auto startTime = std::chrono::high_resolution_clock::now();
         Corona::Horizon::HardwareBuffer indexBuffer = Corona::Horizon::HardwareBuffer::index(indices);
