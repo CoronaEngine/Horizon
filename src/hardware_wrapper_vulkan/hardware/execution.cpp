@@ -2037,13 +2037,6 @@ namespace Corona::Horizon
         return executor_->commit(recorder_.close());
     }
 
-    RecordedTask HardwareStream::close_for_tests()
-    {
-        ensure_open();
-        committed_ = true;
-        return recorder_.close();
-    }
-
     void HardwareStream::ensure_open() const
     {
         if (committed_)

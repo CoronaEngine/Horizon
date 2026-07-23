@@ -48,15 +48,11 @@ namespace Corona::Horizon
     class HardwareBuffer;
     class HardwareImage;
     class HardwareImageLayerSelector;
-    //struct HardwarePushConstant;
 
     struct CopyBufferCommand;
     struct CopyBufferToImageCommand;
     struct CopyImageCommand;
     struct CopyImageToBufferCommand;
-
-    //struct BottomLevelAccelerationStructure;
-    //struct TopLevelAccelerationStructure;
 
     class CommandBatch;
 
@@ -69,7 +65,6 @@ namespace Corona::Horizon
     class ComputePipeline;
     template <typename VS = void, typename FS = void>
     class RasterizerPipeline;
-    class RayTracingPipeline;
 
     class HardwareExecutor;
     class HardwareDisplayer;
@@ -108,7 +103,6 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept { return displayer_.id != 0 && manager_ != nullptr; }
         [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer_; }
-        [[nodiscard]] std::uintptr_t get_displayer_id() const noexcept { return displayer_.id; }
 
     private:
         DisplayerRef displayer_ {};
@@ -135,7 +129,6 @@ namespace Corona::Horizon
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 
         [[nodiscard]] SubmitReceipt commit();
-        [[nodiscard]] RecordedTask close_for_tests();
 
     private:
         void ensure_open() const;
@@ -302,7 +295,6 @@ namespace Corona::Horizon
         HardwareBuffer& operator=(HardwareBuffer&& other) noexcept = default;
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
 
-        [[nodiscard]] std::uintptr_t get_buffer_id() const noexcept { return resource_id(); }
         [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
         [[nodiscard]] uint64_t get_byte_size() const
@@ -315,18 +307,6 @@ namespace Corona::Horizon
             return element_count * element_size;
         }
         [[nodiscard]] void* get_mapped_data() const;
-        [[nodiscard]] std::span<std::byte> get_mapped_bytes() const
-        {
-            auto* data = static_cast<std::byte*>(get_mapped_data());
-            if (data == nullptr)
-                return {};
-
-            const uint64_t mapped_size = get_byte_size();
-            if (mapped_size > std::numeric_limits<size_t>::max())
-                return {};
-
-            return { data, static_cast<size_t>(mapped_size) };
-        }
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
         [[nodiscard]] bool read_bytes(std::span<std::byte> output, uint64_t byte_offset = 0) const;
@@ -338,41 +318,10 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] bool write_elements(std::span<const T> data, uint64_t first_element = 0) const
-        {
-            if (first_element > std::numeric_limits<uint64_t>::max() / sizeof(T))
-                return false;
-
-            return write(data, first_element * sizeof(T));
-        }
-
-        template <HardwareTransferable T>
-        [[nodiscard]] bool write_value(const T& value, uint64_t byte_offset = 0) const
-        {
-            return write(std::span<const T>(&value, 1), byte_offset);
-        }
-
-        template <HardwareTransferable T>
-        [[nodiscard]] bool write_element(const T& value, uint64_t element_index = 0) const
-        {
-            return write_elements(std::span<const T>(&value, 1), element_index);
-        }
-
-        template <HardwareTransferable T>
             requires(!std::is_const_v<T>)
         [[nodiscard]] bool read(std::span<T> output, uint64_t byte_offset = 0) const
         {
             return read_bytes(std::as_writable_bytes(output), byte_offset);
-        }
-
-        template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        [[nodiscard]] bool read_elements(std::span<T> output, uint64_t first_element = 0) const
-        {
-            if (first_element > std::numeric_limits<uint64_t>::max() / sizeof(T))
-                return false;
-
-            return read(output, first_element * sizeof(T));
         }
 
         [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
@@ -432,7 +381,6 @@ namespace Corona::Horizon
         [[nodiscard]] CopyBufferCommand copy_to(const HardwareBuffer& dst, BufferRange src = BufferRange::entire(), uint64_t dst_offset = 0) const;
         [[nodiscard]] CopyBufferToImageCommand copy_to(const HardwareImage& dst, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
-        [[nodiscard]] uint32_t storeDescriptor() const { return store_descriptor(); }
         [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
 
@@ -578,7 +526,6 @@ namespace Corona::Horizon
         HardwareImage& operator=(HardwareImage&& other) noexcept = default;
 
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
-        [[nodiscard]] std::uintptr_t get_image_id() const noexcept { return resource_id(); }
         [[nodiscard]] HardwareImageLayerSelector operator[](uint32_t layer) const;
         [[nodiscard]] HardwareImage whole() const;
         [[nodiscard]] HardwareImage layer(uint32_t layer_index) const;
@@ -949,10 +896,6 @@ namespace Corona::Horizon
         virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
         virtual void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) = 0;
         virtual void bind_image(const BindingSlot& slot, const HardwareImage& image) = 0;
-        /*virtual void bindResource(BindingSlot &, const TopLevelAccelerationStructure &)
-        {
-            throw std::runtime_error("This pipeline does not support acceleration structure binding.");
-        }*/
     };
 
     class ResourceProxy
@@ -975,10 +918,6 @@ namespace Corona::Horizon
             {
                 pipeline_.bind_image(slot_, value);
             }
-            /*else if constexpr (std::same_as<std::remove_cvref_t<T>, TopLevelAccelerationStructure>)
-            {
-                pipeline_.bindResource(slot_, value);
-            }*/
             else
             {
                 static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
@@ -1042,8 +981,6 @@ namespace Corona::Horizon
 
         [[nodiscard]] CommandBatch command_batch();
         [[nodiscard]] explicit operator bool() const noexcept;
-        [[nodiscard]] std::uintptr_t get_compute_pipeline_id() const noexcept { return resource_id(); }
-        [[nodiscard]] std::uintptr_t getComputePipelineID() const noexcept { return get_compute_pipeline_id(); }
 
         void rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
         const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& compute_condition_info();
@@ -1095,8 +1032,6 @@ namespace Corona::Horizon
         [[nodiscard]] CommandBatch command_batch() const;
         void record_consuming(CommandRecorder& recorder);
         [[nodiscard]] explicit operator bool() const noexcept;
-        [[nodiscard]] std::uintptr_t get_rasterizer_pipeline_id() const noexcept { return resource_id(); }
-        [[nodiscard]] std::uintptr_t getRasterizerPipelineID() const noexcept { return get_rasterizer_pipeline_id(); }
 
         template <typename TargetProxy>
             requires requires(TargetProxy& proxy) { proxy.boundResource_; }
@@ -1484,11 +1419,6 @@ namespace Corona::Horizon
         CopyRegion region {};
         DeviceMask devices {};
 
-        [[nodiscard]] BufferRef source() const noexcept { return src; }
-        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
-        [[nodiscard]] CopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
         void record(CommandRecorder& recorder) const
         {
             recorder.copy(src, dst, region, devices);
@@ -1511,11 +1441,6 @@ namespace Corona::Horizon
         ImageRef dst {};
         ImageCopyRegion region {};
         DeviceMask devices {};
-
-        [[nodiscard]] ImageRef source() const noexcept { return src; }
-        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
-        [[nodiscard]] ImageCopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
 
         void record(CommandRecorder& recorder) const
         {
@@ -1540,11 +1465,6 @@ namespace Corona::Horizon
         BufferImageCopyRegion region {};
         DeviceMask devices {};
 
-        [[nodiscard]] BufferRef source() const noexcept { return src; }
-        [[nodiscard]] ImageRef destination() const noexcept { return dst; }
-        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
         void record(CommandRecorder& recorder) const
         {
             recorder.copy_to_image(src, dst, region, devices);
@@ -1568,11 +1488,6 @@ namespace Corona::Horizon
         BufferImageCopyRegion region {};
         DeviceMask devices {};
 
-        [[nodiscard]] ImageRef source() const noexcept { return src; }
-        [[nodiscard]] BufferRef destination() const noexcept { return dst; }
-        [[nodiscard]] BufferImageCopyRegion copy_region() const noexcept { return region; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
         void record(CommandRecorder& recorder) const
         {
             recorder.copy_to_buffer(src, dst, region, devices);
@@ -1593,10 +1508,6 @@ namespace Corona::Horizon
     {
         DispatchDesc dispatch {};
         DeviceMask devices {};
-
-        //[[nodiscard]] ShaderRef shader_ref() const noexcept { return shader; }
-        [[nodiscard]] DispatchDesc dispatch_desc() const noexcept { return dispatch; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
 
         void record(CommandRecorder& recorder) const
         {
@@ -1619,9 +1530,6 @@ namespace Corona::Horizon
         RenderingDesc rendering {};
         DeviceMask devices {};
 
-        [[nodiscard]] RenderingDesc rendering_desc() const noexcept { return rendering; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
         void record(CommandRecorder& recorder) const
         {
             recorder.begin_rendering(rendering, devices);
@@ -1641,8 +1549,6 @@ namespace Corona::Horizon
     struct EndRenderingCommand
     {
         DeviceMask devices {};
-
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
 
         void record(CommandRecorder& recorder) const
         {
@@ -1667,11 +1573,6 @@ namespace Corona::Horizon
         DrawIndexedDesc draw {};
         DeviceMask devices {};
 
-        [[nodiscard]] BufferRef index_buffer() const noexcept { return index; }
-        [[nodiscard]] BufferRef vertex_buffer() const noexcept { return vertex; }
-        [[nodiscard]] DrawIndexedDesc draw_desc() const noexcept { return draw; }
-        [[nodiscard]] DeviceMask device_mask() const noexcept { return devices; }
-
         void record(CommandRecorder& recorder) const
         {
             recorder.draw_indexed(index, vertex, draw, devices);
@@ -1695,11 +1596,6 @@ namespace Corona::Horizon
         DeviceId present_device {};
         bool allow_cpu_bridge_fallback { true };
 
-        [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer; }
-        [[nodiscard]] ImageRef image_ref() const noexcept { return image; }
-        [[nodiscard]] DeviceId device() const noexcept { return present_device; }
-        [[nodiscard]] bool allow_fallback() const noexcept { return allow_cpu_bridge_fallback; }
-
         void record(CommandRecorder& recorder) const
         {
             recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
@@ -1716,37 +1612,6 @@ namespace Corona::Horizon
         }
     };
 
-    class HostFunctionCommand
-    {
-    public:
-        HostFunctionCommand() = default;
-
-        explicit HostFunctionCommand(std::function<void()> callback)
-            : callback_(std::move(callback))
-        {
-        }
-
-        [[nodiscard]] const std::function<void()>& callback() const noexcept { return callback_; }
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.host_callback(callback_);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
-
-    private:
-        std::function<void()> callback_ {};
-    };
-
     class KeepAliveCommand
     {
     public:
@@ -1756,8 +1621,6 @@ namespace Corona::Horizon
             : object_(std::move(object))
         {
         }
-
-        [[nodiscard]] const std::shared_ptr<void>& object() const noexcept { return object_; }
 
         void record(CommandRecorder& recorder) const
         {
@@ -1829,11 +1692,6 @@ namespace Corona::Horizon
                        { static_cast<const ResourceHandle&>(image) },
                        present_device,
                        allow_cpu_bridge_fallback);
-    }
-
-    [[nodiscard]] inline HostFunctionCommand host_callback(std::function<void()> callback)
-    {
-        return HostFunctionCommand(std::move(callback));
     }
 
     [[nodiscard]] inline KeepAliveCommand keep_alive(std::shared_ptr<void> object)
