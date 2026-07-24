@@ -162,26 +162,9 @@ namespace Corona::Horizon
             write_bytes(target, declared_size, byte_offset, &descriptor_index, sizeof(descriptor_index), label);
         }
 
-        [[nodiscard]] VkDescriptorType descriptor_type(DispatchBindingKind kind) noexcept
-        {
-            switch (kind)
-            {
-            case DispatchBindingKind::StorageImage:
-                return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            case DispatchBindingKind::StorageBuffer:
-            default:
-                return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            }
-        }
-
         [[nodiscard]] BufferStore::Read read_buffer(const ResourceHandle& handle)
         {
             return read<BufferStore>(ResourceBridge::token(handle));
-        }
-
-        [[nodiscard]] ImageStore::Read read_image(const ResourceHandle& handle)
-        {
-            return read<ImageStore>(ResourceBridge::token(handle));
         }
 
         [[nodiscard]] BufferStore::Write write_buffer(const ResourceHandle& handle)
@@ -438,20 +421,6 @@ namespace Corona::Horizon
             return key;
         }
 
-        struct TransientDescriptorSet
-        {
-            VkDevice device { VK_NULL_HANDLE };
-            VkDescriptorPool pool { VK_NULL_HANDLE };
-            std::vector<HardwareBuffer> buffers;
-
-            ~TransientDescriptorSet()
-            {
-                if (device != VK_NULL_HANDLE && pool != VK_NULL_HANDLE)
-                {
-                    vkDestroyDescriptorPool(device, pool, nullptr);
-                }
-            }
-        };
     }
 
     VulkanComputePipeline::VulkanComputePipeline(ComputePipelineDesc desc,
@@ -660,12 +629,17 @@ namespace Corona::Horizon
             add_descriptor_binding(uniform_buffer.set, uniform_buffer.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         }
 
+        // 非 UBO 资源（storage buffer/image）强制走 bindless：运行时绑定恒落在
+        // bindless 保留 set 0-2，此处全部跳过（其 descriptor 由 bindless 持久 set 承载）。
+        // 任何落到保留 set 之外的普通 storage 绑定都违反 bindless 契约，直接拒绝。
         for (const BindingLayout& binding : state.bindings)
         {
-            if (state.uses_bindless && binding.set < ResourceManager::bindless_descriptor_set_count)
+            if (binding.set < ResourceManager::bindless_descriptor_set_count)
                 continue;
 
-            add_descriptor_binding(binding.set, binding.binding, descriptor_type(binding.kind));
+            throw std::logic_error(
+                "ComputePipeline storage buffer/image must be bindless (reserved set 0-2); "
+                "transient storage descriptors are not supported.");
         }
 
         std::ranges::sort(state.descriptor_set_layouts, [](const auto& left, const auto& right) {
@@ -696,6 +670,9 @@ namespace Corona::Horizon
 
                 VkDescriptorSetLayoutCreateInfo descriptor_layout_info {};
                 descriptor_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                // 该 set 仅承载每 dispatch 的 UBO（非 UBO 全走 bindless），改用 push
+                // descriptor：无需 pool/allocate，直接 vkCmdPushDescriptorSet 写入命令缓冲。
+                descriptor_layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
                 descriptor_layout_info.bindingCount = static_cast<uint32_t>(descriptor_bindings.size());
                 descriptor_layout_info.pBindings = descriptor_bindings.data();
 
@@ -1038,46 +1015,6 @@ namespace Corona::Horizon
             *found = std::move(value);
     }
 
-    void VulkanComputePipeline::bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer)
-    {
-        std::lock_guard lock(mutex_);
-        auto found = std::ranges::find_if(bound_buffers_, [binding](const BoundBuffer& item) {
-            return item.set == 0 && item.binding == binding;
-        });
-
-        BoundBuffer value {
-            .set = 0,
-            .binding = binding,
-            .buffer = buffer,
-            .access = AccessKind::ReadWrite,
-        };
-
-        if (found == bound_buffers_.end())
-            bound_buffers_.push_back(std::move(value));
-        else
-            *found = std::move(value);
-    }
-
-    void VulkanComputePipeline::bind_storage_image(uint32_t binding, const HardwareImage& image)
-    {
-        std::lock_guard lock(mutex_);
-        auto found = std::ranges::find_if(bound_images_, [binding](const BoundImage& item) {
-            return item.set == 0 && item.binding == binding;
-        });
-
-        BoundImage value {
-            .set = 0,
-            .binding = binding,
-            .image = image,
-            .access = AccessKind::ReadWrite,
-        };
-
-        if (found == bound_images_.end())
-            bound_images_.push_back(std::move(value));
-        else
-            *found = std::move(value);
-    }
-
     VulkanComputePipeline::Snapshot VulkanComputePipeline::snapshot() const
     {
         std::lock_guard lock(mutex_);
@@ -1163,161 +1100,53 @@ namespace Corona::Horizon
             return prepared;
         }
 
-        auto descriptor_owner = std::make_shared<TransientDescriptorSet>();
-        descriptor_owner->device = device;
-
+        // transient set 仅含 UBO（storage buffer/image 已全走 bindless，在建 layout 时
+        // 被固化拒绝）。收集每个 UBO 的持久 buffer 句柄，交由 execution 侧用
+        // vkCmdPushDescriptorSet 直接写入命令缓冲：不再每 dispatch 创建/分配/销毁 pool。
         uint32_t uniform_buffer_count = 0;
-        uint32_t storage_buffer_count = 0;
-        uint32_t storage_image_count = 0;
         for (const PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
         {
             for (const PipelineState::DescriptorBindingLayout& binding : set_layout.bindings)
             {
-                if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    ++uniform_buffer_count;
-                else if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    ++storage_image_count;
-                else
-                    ++storage_buffer_count;
+                if (binding.descriptor_type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                    throw std::logic_error(
+                        "ComputePipeline transient descriptor must be a uniform buffer; "
+                        "storage buffer/image are required to be bindless.");
+                ++uniform_buffer_count;
             }
         }
 
-        std::vector<VkDescriptorPoolSize> pool_sizes;
-        if (uniform_buffer_count != 0)
-            pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniform_buffer_count });
-        if (storage_buffer_count != 0)
-            pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, storage_buffer_count });
-        if (storage_image_count != 0)
-            pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, storage_image_count });
+        if (uniform_buffer_count == 0)
+            return prepared;
 
-        VkDescriptorPoolCreateInfo pool_info {};
-        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        pool_info.maxSets = static_cast<uint32_t>(state.descriptor_set_layouts.size());
-        pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
-        pool_info.pPoolSizes = pool_sizes.data();
-
-        VkResult result = vkCreateDescriptorPool(device, &pool_info, nullptr, &descriptor_owner->pool);
-        note_descriptor_pool_create();
-        if (result != VK_SUCCESS)
-        {
-            throw std::runtime_error("vkCreateDescriptorPool failed for ComputePipeline dispatch. VkResult=" +
-                                     std::to_string(static_cast<int>(result)));
-        }
-
-        std::vector<VkDescriptorSetLayout> layouts;
-        layouts.reserve(state.descriptor_set_layouts.size());
+        // descriptor_set_layouts 已按 set 升序、bindings 已按 binding 升序，
+        // 因此 push_uniform_buffers 天然按 (set, binding) 有序。
+        prepared.push_uniform_buffers.reserve(uniform_buffer_count);
         for (const PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
-            layouts.push_back(set_layout.layout);
-
-        std::vector<VkDescriptorSet> descriptor_sets(layouts.size(), VK_NULL_HANDLE);
-
-        VkDescriptorSetAllocateInfo alloc_info {};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = descriptor_owner->pool;
-        alloc_info.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-        alloc_info.pSetLayouts = layouts.data();
-
-        result = vkAllocateDescriptorSets(device, &alloc_info, descriptor_sets.data());
-        if (result != VK_SUCCESS)
         {
-            throw std::runtime_error("vkAllocateDescriptorSets failed for ComputePipeline dispatch. VkResult=" +
-                                     std::to_string(static_cast<int>(result)));
-        }
-
-        prepared.descriptor_sets.reserve(state.descriptor_set_layouts.size());
-        for (size_t index = 0; index < state.descriptor_set_layouts.size(); ++index)
-        {
-            prepared.descriptor_sets.push_back(
-                {
-                    .set = state.descriptor_set_layouts[index].set,
-                    .descriptor_set = descriptor_sets[index],
-                });
-        }
-
-        std::vector<VkDescriptorBufferInfo> buffer_infos;
-        std::vector<VkDescriptorImageInfo> image_infos;
-        std::vector<VkWriteDescriptorSet> writes;
-        buffer_infos.reserve(uniform_buffer_count + storage_buffer_count);
-        image_infos.reserve(storage_image_count);
-        writes.reserve(uniform_buffer_count + storage_buffer_count + storage_image_count);
-
-        for (size_t set_index = 0; set_index < state.descriptor_set_layouts.size(); ++set_index)
-        {
-            const PipelineState::DescriptorSetLayout& set_layout = state.descriptor_set_layouts[set_index];
-            VkDescriptorSet descriptor_set = descriptor_sets[set_index];
             for (const PipelineState::DescriptorBindingLayout& binding_layout : set_layout.bindings)
             {
-                VkWriteDescriptorSet write {};
-                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                write.dstSet = descriptor_set;
-                write.dstBinding = binding_layout.binding;
-                write.dstArrayElement = 0;
-                write.descriptorCount = 1;
-                write.descriptorType = binding_layout.descriptor_type;
+                auto uniform = std::ranges::find_if(dispatch.uniform_buffers, [&](const UniformBufferBindingData& item) {
+                    return item.set == binding_layout.set && item.binding == binding_layout.binding;
+                });
+                if (uniform == dispatch.uniform_buffers.end() || !uniform->gpu_buffer)
+                    throw std::logic_error("ComputePipeline uniform buffer descriptor is missing persistent GPU buffer.");
 
-                if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                {
-                    auto uniform = std::ranges::find_if(dispatch.uniform_buffers, [&](const UniformBufferBindingData& item) {
-                        return item.set == binding_layout.set && item.binding == binding_layout.binding;
-                    });
-                    if (uniform == dispatch.uniform_buffers.end() || !uniform->gpu_buffer)
-                        throw std::logic_error("ComputePipeline uniform buffer descriptor is missing persistent GPU buffer.");
+                // 直接使用管线初始化时创建的持久 buffer，跳过每次 dispatch 的 VkBuffer 分配
+                BufferStore::Read buffer = read_buffer(uniform->gpu_buffer);
+                if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("ComputePipeline uniform buffer descriptor requires a valid HardwareBuffer.");
 
-                    // 直接使用管线初始化时创建的持久 buffer，跳过每次 dispatch 的 VkBuffer 分配
-                    BufferStore::Read buffer = read_buffer(uniform->gpu_buffer);
-                    if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
-                        throw std::logic_error("ComputePipeline uniform buffer descriptor requires a valid HardwareBuffer.");
-
-                    VkDescriptorBufferInfo info {};
-                    info.buffer = buffer->buffer_handle;
-                    info.offset = 0;
-                    info.range = buffer->logical_size();
-                    buffer_infos.push_back(info);
-                    write.pBufferInfo = &buffer_infos.back();
-                    // gpu_buffer 由 pipeline 对象持有，无需 descriptor_owner 延长其 lifetime
-                }
-                else
-                {
-                    auto resource = std::ranges::find_if(dispatch.bindings, [&](const DispatchResourceBinding& item) {
-                        return item.set == binding_layout.set && item.binding == binding_layout.binding;
-                    });
-                    if (resource == dispatch.bindings.end())
-                        throw std::logic_error("ComputePipeline descriptor binding is missing a dispatch resource.");
-
-                    if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
-                    {
-                        ImageStore::Read image = read_image(resource->resource);
-                        if (!image || image->image_view == VK_NULL_HANDLE)
-                            throw std::logic_error("ComputePipeline storage image binding requires a valid HardwareImage.");
-
-                        VkDescriptorImageInfo info {};
-                        info.imageView = image->image_view;
-                        info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-                        image_infos.push_back(info);
-                        write.pImageInfo = &image_infos.back();
-                    }
-                    else
-                    {
-                        BufferStore::Read buffer = read_buffer(resource->resource);
-                        if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
-                            throw std::logic_error("ComputePipeline storage buffer binding requires a valid HardwareBuffer.");
-
-                        VkDescriptorBufferInfo info {};
-                        info.buffer = buffer->buffer_handle;
-                        info.offset = 0;
-                        info.range = buffer->logical_size();
-                        buffer_infos.push_back(info);
-                        write.pBufferInfo = &buffer_infos.back();
-                    }
-                }
-
-                writes.push_back(write);
+                prepared.push_uniform_buffers.push_back({
+                    .set = binding_layout.set,
+                    .binding = binding_layout.binding,
+                    .buffer = buffer->buffer_handle,
+                    .range = buffer->logical_size(),
+                });
+                // gpu_buffer 由 pipeline 对象持有，无需延长 lifetime
             }
         }
 
-        vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-
-        prepared.descriptor_set_lifetime = std::move(descriptor_owner);
         return prepared;
     }
 }

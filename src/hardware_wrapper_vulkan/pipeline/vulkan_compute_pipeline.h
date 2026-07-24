@@ -43,17 +43,21 @@ namespace Corona::Horizon
 
         struct PreparedDispatch
         {
-            struct DescriptorSet
+            // 非 UBO 资源（storage buffer/image）强制走 bindless（持久 set 0-2 + push
+            // constant 索引），故每 dispatch 的 transient set 只含 UBO，通过 push
+            // descriptor 直接写入命令缓冲，不再分配 descriptor pool。
+            struct PushUniformBuffer
             {
                 uint32_t set { 0 };
-                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
+                uint32_t binding { 0 };
+                VkBuffer buffer { VK_NULL_HANDLE };
+                VkDeviceSize range { 0 };
             };
 
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
             bool uses_bindless { false };
-            std::vector<DescriptorSet> descriptor_sets;
-            std::shared_ptr<void> descriptor_set_lifetime {};
+            std::vector<PushUniformBuffer> push_uniform_buffers;
         };
 
         explicit VulkanComputePipeline(ComputePipelineDesc desc,
@@ -70,8 +74,6 @@ namespace Corona::Horizon
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
-        void bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer);
-        void bind_storage_image(uint32_t binding, const HardwareImage& image);
 
         [[nodiscard]] Snapshot snapshot() const;
         [[nodiscard]] CommandBatch command_batch(ComputePipelineBase& pipeline) const;
