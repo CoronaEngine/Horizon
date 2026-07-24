@@ -5,7 +5,6 @@ set(HORIZON_EXAMPLE_SOURCES
     example_baseline/example_baseline.cpp
     example_glsl/example_glsl.cpp
     example_edsl/example_edsl.cpp
-    example_default/example_default.cpp
     example_ibl/example_ibl.cpp
     example_edsl_ibl/example_edsl_ibl.cpp
     example_drawstress/example_drawstress.cpp
@@ -28,7 +27,6 @@ set(HORIZON_EXAMPLE_HEADERS
     example_baseline/example_baseline.h
     example_glsl/example_glsl.h
     example_edsl/example_edsl.h
-    example_default/example_default.h
     example_ibl/example_ibl.h
     example_edsl_ibl/example_edsl_ibl.h
     example_drawstress/example_drawstress.h

@@ -1,5 +1,4 @@
 #include "example_baseline/example_baseline.h"
-#include "example_default/example_default.h"
 #include "example_edsl/example_edsl.h"
 #include "example_glsl/example_glsl.h"
 #include "example_ibl/example_ibl.h"
@@ -17,18 +16,14 @@
 
 int main(int argc, char **argv)
 {
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("glsl");
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("ibl");
 
     if (mode == "baseline")
     {
         run_example_baseline();
         return 0;
     }
-    if (mode == "default")
-    {
-        run_example_default();
-        return 0;
-    }
+
     if (mode == "edsl")
     {
         run_example_edsl();
