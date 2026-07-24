@@ -62,7 +62,6 @@ RasterizerPipelineDesc make_ui_pipeline_desc()
     RasterizerPipelineDesc desc;
     desc.debug_name = "imgui.pipeline";
     desc.clear_color_target = false; // 叠加渲染：保留场景内容，不清屏
-    desc.rasterizer.cull_mode = CullMode::None;
     desc.depth_stencil.depth_test_enabled = false;
     desc.depth_stencil.depth_write_enabled = false;
     desc.depth_stencil.stencil_test_enabled = false;
