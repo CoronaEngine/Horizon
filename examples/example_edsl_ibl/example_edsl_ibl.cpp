@@ -516,20 +516,18 @@ struct IblEdslVaryings
     EmbeddedShader::Float3 v_dir;
 };
 
-struct IblEdslUniformProxy
+struct IblEdslSharedProxy
 {
-    EmbeddedShader::Float4x4 mvp;
-    EmbeddedShader::Float4x4 model;
+    EmbeddedShader::Float4x4 proj_view;  // 替换 mvp：由 VS 现场计算 proj_view * per_model
     EmbeddedShader::Float4x4 skyEnvMtx;
     EmbeddedShader::Float4x4 envMtx;
     EmbeddedShader::Float4   camPos;
-    EmbeddedShader::Float4   misc;      // x:isSkybox, y:aspect, z:metalOrSpec
-    EmbeddedShader::Float4   params0;   // x:glossiness, y:reflectivity, z:exposure, w:bgType
     EmbeddedShader::Float4   flags;     // x:doDiffuse, y:doSpecular, z:doDiffuseIbl, w:doSpecularIbl
     EmbeddedShader::Float4   rgbDiff;
     EmbeddedShader::Float4   rgbSpec;
     EmbeddedShader::Float4   lightDir;
     EmbeddedShader::Float4   lightCol;
+    // 3×64 + 6×16 = 288 bytes → UBO（批次共享）
 };
 
 // ============================================================================
@@ -587,37 +585,47 @@ void run_example_edsl_ibl()
     Corona::Horizon::RasterizerPipelineDesc desc;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
-
-    IblEdslUniformProxy ubo;
+    // 共享 UBO（批次内所有 draw 相同，288 bytes → UBO）
+    IblEdslSharedProxy shared;
+    // per-draw push constant（model + params0 + misc = 96 bytes < 128B 上限）
+    // 调用 as_push_constant() 将节点标记为 [[vk::push_constant]]，
+    // 这样 record() 每次深拷贝 push_constant_data_，实现真正的 per-draw 隔离。
+    EmbeddedShader::Float4x4 per_model;    // 64 bytes
+    EmbeddedShader::Float4   per_params0;  // 16 bytes：x:glossiness, y:reflectivity, z:exposure, w:bgType
+    EmbeddedShader::Float4   per_misc;     // 16 bytes：x:isSkybox, y:aspect, z:metalOrSpec
+    per_model.as_push_constant();
+    per_params0.as_push_constant();
+    per_misc.as_push_constant();
 
     auto edsl_ibl_vertex = [&](
         Aggregate<IblEdslVertexProxy> vertex
     ) {
         Aggregate<IblEdslVaryings> out;
 
-        Float isSkybox = ubo.misc->x;
+        Float isSkybox = per_misc->x;
         $IF (isSkybox > Float(0.5))
         {
             // 天空盒：NDC 全屏三角形，钉在远平面 z=1
             position() = Float4(vertex->pos->x, vertex->pos->y, Float(1.0), Float(1.0));
 
             Float fovHeight = tan(radians(Float(45.0)) * Float(0.5));
-            Float aspect    = ubo.misc->y;
+            Float aspect    = per_misc->y;
             Float2 tex      = Float2(vertex->pos->x, vertex->pos->y)
                             * Float2(fovHeight * aspect, -fovHeight);
 
-            out->v_dir    = mul(ubo.skyEnvMtx, Float4(tex->x, tex->y, Float(1.0), Float(0.0)))->xyz();
+            out->v_dir    = mul(shared.skyEnvMtx, Float4(tex->x, tex->y, Float(1.0), Float(0.0)))->xyz();
             out->v_view   = Float3(Float(0.0), Float(0.0), Float(0.0));
             out->v_normal = Float3(Float(0.0), Float(0.0), Float(1.0));
         }
         $ELSE
         {
-            // 网格路径
-            Float4 worldPos = mul(ubo.model, Float4(vertex->pos, Float(1.0)));
-            position() = mul(ubo.mvp, Float4(vertex->pos, Float(1.0)));
+            // 网格路径：mvp = proj_view * per_model（逐层 mul 等价于矩阵乘法结合律）
+            Float4 local_pos  = Float4(vertex->pos, Float(1.0));
+            Float4 world_pos  = mul(per_model, local_pos);
+            position() = mul(shared.proj_view, world_pos);
 
-            out->v_view   = ubo.camPos->xyz() - worldPos->xyz();
-            out->v_normal = mul(ubo.model, Float4(vertex->normal, Float(0.0)))->xyz();
+            out->v_view   = shared.camPos->xyz() - world_pos->xyz();
+            out->v_normal = mul(per_model, Float4(vertex->normal, Float(0.0)))->xyz();
             out->v_dir    = Float3(Float(0.0), Float(0.0), Float(0.0));
         };
         return out;
@@ -671,13 +679,13 @@ void run_example_edsl_ibl()
     auto edsl_ibl_fragment = [&](
         Aggregate<IblEdslVaryings> in
     ) {
-        Float isSkybox = ubo.misc->x;
+        Float isSkybox = per_misc->x;
         Float4 finalColor;
         $IF(isSkybox > Float(0.5))
         {
             // 天空盒
             Float3 dir = normalize(in->v_dir);
-            Float bgType = ubo.params0->w;
+            Float bgType = per_params0->w;
             Float3 color;
 
             $IF(bgType == Float(7.0))
@@ -691,14 +699,14 @@ void run_example_edsl_ibl()
                 color = toLinear(textureLod(texCube, nDir, lod)->xyz());
             };
 
-            color = color * exp2(ubo.params0->z);
+            color = color * exp2(per_params0->z);
             finalColor = Float4(toFilmic(color), Float(1.0));
         }
         $ELSE
         {
             // IBL 网格着色
-            Float3 ld     = normalize(Float3(ubo.lightDir->xyz()));
-            Float3 clight = ubo.lightCol->xyz();
+            Float3 ld     = normalize(Float3(shared.lightDir->xyz()));
+            Float3 clight = shared.lightCol->xyz();
 
             Float3 nn = normalize(in->v_normal);
             Float3 vv = normalize(in->v_view);
@@ -709,44 +717,44 @@ void run_example_edsl_ibl()
             Float ndoth = clamp(dot(nn, hh), Float(0.0), Float(1.0));
             Float hdotv = clamp(dot(hh, vv), Float(0.0), Float(1.0));
 
-            Float3 inAlbedo       = ubo.rgbDiff->xyz();
-            Float  inReflectivity = ubo.params0->y;
-            Float  inGloss        = ubo.params0->x;
+            Float3 inAlbedo       = shared.rgbDiff->xyz();
+            Float  inReflectivity = per_params0->y;
+            Float  inGloss        = per_params0->x;
 
             Float3 refl;
-            $IF(ubo.misc->z == Float(0.0))
+            $IF(per_misc->z == Float(0.0))
             {
                 refl = mix(Float3(Float(0.04), Float(0.04), Float(0.04)),
                            inAlbedo, inReflectivity);
             }
             $ELSE
             {
-                refl = ubo.rgbSpec->xyz() * Float3(inReflectivity, inReflectivity, inReflectivity);
+                refl = shared.rgbSpec->xyz() * Float3(inReflectivity, inReflectivity, inReflectivity);
             };
 
             Float3 albedo      = inAlbedo * (Float3(Float(1.0), Float(1.0), Float(1.0)) - inReflectivity);
             Float3 dirFresnel  = calcFresnel(refl, hdotv, inGloss);
             Float3 envFresnel  = calcFresnel(refl, ndotv, inGloss);
 
-            Float3 lambert = ubo.flags->x * calcLambert(albedo * (Float3(Float(1.0), Float(1.0), Float(1.0)) - dirFresnel), ndotl);
-            Float3 blinn   = ubo.flags->y * calcBlinn(dirFresnel, ndoth, ndotl, specPwr(inGloss));
+            Float3 lambert = shared.flags->x * calcLambert(albedo * (Float3(Float(1.0), Float(1.0), Float(1.0)) - dirFresnel), ndotl);
+            Float3 blinn   = shared.flags->y * calcBlinn(dirFresnel, ndoth, ndotl, specPwr(inGloss));
             Float3 direct  = (lambert + blinn) * clight;
 
             Float mip = Float(1.0) + Float(5.0) * (Float(1.0) - inGloss);
 
             Float3 vr = Float(2.0) * ndotv * nn - vv;
-            Float3 cubeR = normalize(Float3(mul(ubo.envMtx, Float4(vr, Float(0.0)))->xyz()));
-            Float3 cubeN = normalize(Float3(mul(ubo.envMtx, Float4(nn, Float(0.0)))->xyz()));
+            Float3 cubeR = normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz()));
+            Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(nn, Float(0.0)))->xyz()));
             Float3 nCubeR = fixCubeLookup(cubeR, mip, Float(256.0));
 
             Float3 radiance    = toLinear(textureLod(texCube, nCubeR, mip)->xyz());
             Float3 irradiance  = toLinear(texture(texCubeIrr, cubeN)->xyz());
-            Float3 envDiffuse  = albedo     * irradiance * ubo.flags->z;
-            Float3 envSpecular = envFresnel * radiance   * ubo.flags->w;
+            Float3 envDiffuse  = albedo     * irradiance * shared.flags->z;
+            Float3 envSpecular = envFresnel * radiance   * shared.flags->w;
             Float3 indirect    = envDiffuse + envSpecular;
 
             Float3 color = direct + indirect;
-            Float3 nColor = color * exp2(ubo.params0->z);
+            Float3 nColor = color * exp2(per_params0->z);
             finalColor = Float4(toFilmic(nColor), Float(1.0));
         }
         final_output << finalColor;
@@ -823,16 +831,17 @@ void run_example_edsl_ibl()
         texCube = probe.lod;
         texCubeIrr = probe.irr;
 
-        // 帧内共享的绑定与 uniform
-        ubo.camPos = fvec4(to_edsl_vector(cam_pos), 1.0f);
-        ubo.flags = fvec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
-                                         s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
-        ubo.rgbDiff = fvec4(s.rgb_diff, 1.0f);
-        ubo.rgbSpec = fvec4(s.rgb_spec, 1.0f);
-        ubo.lightDir = fvec4(s.light_dir, 0.0f);
-        ubo.lightCol = fvec4(s.light_col, 0.0f);
-        ubo.envMtx = to_edsl_matrix(glm::transpose(env_rot));
-        ubo.skyEnvMtx = to_edsl_matrix(glm::transpose(env_rot * camera.env_view_mtx()));
+        // 帧内共享数据（UBO，batch 内不变）
+        shared.proj_view  = to_edsl_matrix(glm::transpose(proj * view));
+        shared.camPos     = fvec4(to_edsl_vector(cam_pos), 1.0f);
+        shared.flags      = fvec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
+                                  s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
+        shared.rgbDiff    = fvec4(s.rgb_diff, 1.0f);
+        shared.rgbSpec    = fvec4(s.rgb_spec, 1.0f);
+        shared.lightDir   = fvec4(s.light_dir, 0.0f);
+        shared.lightCol   = fvec4(s.light_col, 0.0f);
+        shared.envMtx     = to_edsl_matrix(glm::transpose(env_rot));
+        shared.skyEnvMtx  = to_edsl_matrix(glm::transpose(env_rot * camera.env_view_mtx()));
 
         rasterizer.clear_records();
 
@@ -841,10 +850,9 @@ void run_example_edsl_ibl()
         {
             const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.8f, 0.0f)) *
                                     glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-            ubo.misc = fvec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
-            ubo.mvp = to_edsl_matrix(glm::transpose(proj * view * model));
-            ubo.model = to_edsl_matrix(glm::transpose(model));
-            ubo.params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+            per_misc    = fvec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
+            per_model   = to_edsl_matrix(glm::transpose(model));
+            per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
             rasterizer.record(bunny_ib, bunny_vb, bunny_params);
         }
         else
@@ -854,7 +862,6 @@ void run_example_edsl_ibl()
             constexpr float spacing = 2.2f;
             constexpr float y_adj = -0.8f;
 
-            ubo.misc = fvec4(0.0f, aspect, 0.0f, 0.0f);
             for (float yy = 0.0f; yy < grid; yy += 1.0f)
             {
                 for (float xx = 0.0f; xx < grid; xx += 1.0f)
@@ -864,18 +871,18 @@ void run_example_edsl_ibl()
                     const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(tx, ty, 0.0f)) *
                                             glm::scale(glm::mat4(1.0f), glm::vec3(scale / grid));
 
-                    ubo.mvp = to_edsl_matrix(glm::transpose(proj * view * model));
-                    ubo.model = to_edsl_matrix(glm::transpose(model));
-                    ubo.params0 =
-                        fvec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
+                    per_misc    = fvec4(0.0f, aspect, 0.0f, 0.0f);
+                    per_model   = to_edsl_matrix(glm::transpose(model));
+                    per_params0 = fvec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
                     rasterizer.record(orb_ib, orb_vb, orb_params);
                 }
             }
         }
 
-        // ---- 天空盒 draw ----
-        ubo.misc = fvec4(1.0f, aspect, 0.0f, 0.0f);
-        ubo.params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+        // ---- 天空盒 draw（per_misc.x = 1 触发 skybox 路径）----
+        per_misc    = fvec4(1.0f, aspect, 0.0f, 0.0f);
+        per_model   = to_edsl_matrix(glm::mat4(1.0f));  // identity，skybox 路径不使用 model
+        per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
         rasterizer.record(sky_ib, sky_vb, sky_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =

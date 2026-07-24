@@ -604,8 +604,18 @@ namespace EmbeddedShader
 		//VariateProxy<bool>& operator!=(const VariateProxy& rhs) { return *(new VariateProxy<bool>(true)); }
 		//VariateProxy<bool>& operator==(const VariateProxy& rhs) { return *(new VariateProxy<bool>(true)); }
 
-		VariateProxy(std::shared_ptr<Ast::Value> node) : node(std::move(node))//,value(std::make_unique<Type>())
+		VariateProxy(std::shared_ptr<Ast::Value> node) : node(std::move(node))
 	    {
+	    }
+
+	    // 将该 uniform 变量标记为 push constant，而非 UBO 成员。
+	    // 仅对 UBO uniform 有效（在流水线创建前调用），之后每次 record() 会独立快照，
+	    // 实现真正的 per-draw 隔离。
+	    VariateProxy& as_push_constant() &
+	    {
+	        if (auto u = std::dynamic_pointer_cast<Ast::UniformVariate>(node))
+	            u->pushConstant = true;
+	        return *this;
 	    }
 
 	    std::unique_ptr<Type> value{};
