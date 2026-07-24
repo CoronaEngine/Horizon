@@ -62,6 +62,18 @@ void run_example_glsl()
     rasterizer.bind_depth_target(depth_image);
     rasterizer.texSampler = texture_image;
 
+    // VP 不随帧变化（相机固定），绑定一次即可
+    rasterizer.vp.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                                     glm::vec3(0.0f, 0.0f, 0.0f),
+                                     glm::vec3(0.0f, 0.0f, 1.0f));
+    {
+        glm::mat4 proj = glm::perspective(glm::pi<float>() * 0.25f,
+                                          glsl_width / static_cast<float>(glsl_height),
+                                          0.1f, 10.0f);
+        proj[1][1] *= -1.0f; // Vulkan 裁剪空间 Y 翻转
+        rasterizer.vp.proj = proj;
+    }
+
     Corona::Horizon::DrawIndexedParams draw_params;
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
@@ -101,10 +113,10 @@ void run_example_glsl()
             fps_frame_count = 0;
         }
 
-        baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, glsl_width / static_cast<float>(glsl_height));
-        rasterizer.ubo.model = ubo.model;
-        rasterizer.ubo.view = ubo.view;
-        rasterizer.ubo.proj = ubo.proj;
+        // Model 每帧更新（push constant，64 bytes）；VP 已在循环外绑定
+        rasterizer.pc.model = glm::rotate(glm::mat4(1.0f),
+                                          time_seconds * glm::pi<float>() * 0.5f,
+                                          glm::vec3(0.0f, 0.0f, 1.0f));
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);

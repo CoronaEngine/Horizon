@@ -104,6 +104,19 @@ void run_example_edsl()
 
     HorizonImGuiLayer ui(window, edsl_width, edsl_height);
 
+    // VP 不随帧变化（相机固定），在循环外赋值一次
+    view = to_edsl_matrix(glm::transpose(
+        glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                    glm::vec3(0.0f, 0.0f, 0.0f),
+                    glm::vec3(0.0f, 0.0f, 1.0f))));
+    {
+        glm::mat4 proj_mat = glm::perspective(glm::pi<float>() * 0.25f,
+                                              edsl_width / static_cast<float>(edsl_height),
+                                              0.1f, 10.0f);
+        proj_mat[1][1] *= -1.0f; // Vulkan 裁剪空间 Y 翻转
+        proj = to_edsl_matrix(glm::transpose(proj_mat));
+    }
+
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -137,10 +150,11 @@ void run_example_edsl()
             fps_frame_count = 0;
         }
 
-        baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
-        model = to_edsl_matrix(glm::transpose(ubo.model));
-        view = to_edsl_matrix(glm::transpose(ubo.view));
-        proj = to_edsl_matrix(glm::transpose(ubo.proj));
+        // Model 每帧更新（push constant）；VP 已在循环外绑定
+        model = to_edsl_matrix(glm::transpose(
+            glm::rotate(glm::mat4(1.0f),
+                        time_seconds * glm::pi<float>() * 0.5f,
+                        glm::vec3(0.0f, 0.0f, 1.0f))));
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);

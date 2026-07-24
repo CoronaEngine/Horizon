@@ -2,7 +2,6 @@
 #include "example_default/example_default.h"
 #include "example_edsl/example_edsl.h"
 #include "example_glsl/example_glsl.h"
-#include "example_branch_pruning/example_branch_pruning.h"
 #include "example_ibl/example_ibl.h"
 #include "example_drawstress/example_drawstress.h"
 #include "example_edsl_ibl/example_edsl_ibl.h"
@@ -18,7 +17,7 @@
 
 int main(int argc, char **argv)
 {
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("default");
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("glsl");
 
     if (mode == "baseline")
     {
@@ -40,11 +39,6 @@ int main(int argc, char **argv)
         run_example_glsl();
         return 0;
     }
-    // if (mode == "branch_pruning")
-    // {
-    //     run_example_branch_pruning();
-    //     return 0;
-    // }
 
     if (mode == "ibl")
     {
