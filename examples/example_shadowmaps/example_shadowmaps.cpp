@@ -409,7 +409,7 @@ void run_example_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            pack_rasterizer.pc.mvp = light_view_proj * item.model;
+            pack_rasterizer.model_pc.mvp = light_view_proj * item.model;
             pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 
@@ -436,7 +436,7 @@ void run_example_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            scene_rasterizer.pc.model = item.model; // per-draw；VS 从中计算 mvp/model_view/light_mtx
+            scene_rasterizer.model_pc.model = item.model; // per-draw；VS 从中计算 mvp/model_view/light_mtx
             scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 

@@ -15,7 +15,7 @@ layout(push_constant) uniform DeferredLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect; // xy: NDC min, zw: NDC max
-} pc;
+} vpc;
 
 layout(location = 0) in vec3 inCorner;
 
@@ -23,7 +23,7 @@ layout(location = 0) out vec2 v_texcoord;
 
 void main()
 {
-    vec2 ndc = mix(pc.rect.xy, pc.rect.zw, inCorner.xy);
+    vec2 ndc = mix(vpc.rect.xy, vpc.rect.zw, inCorner.xy);
     gl_Position = vec4(ndc, 0.0, 1.0);
     v_texcoord = ndc * 0.5 + 0.5;
 }

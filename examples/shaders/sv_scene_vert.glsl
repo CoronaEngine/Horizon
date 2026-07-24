@@ -21,7 +21,7 @@ layout(binding = 0) uniform SvSceneShared {
 
 layout(push_constant) uniform SvScenePC {
     mat4 model;
-} pc;
+} model_pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -31,8 +31,8 @@ layout(location = 1) out vec3 v_view;
 
 void main()
 {
-    mat4 mvp        = vsp.proj_view   * pc.model;
-    mat4 model_view = vsp.view_matrix * pc.model;
+    mat4 mvp        = vsp.proj_view   * model_pc.model;
+    mat4 model_view = vsp.view_matrix * model_pc.model;
 
     gl_Position = mvp        * vec4(inPosition, 1.0);
     v_normal    = normalize((model_view * vec4(inNormal,   0.0)).xyz);

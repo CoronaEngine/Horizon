@@ -622,9 +622,9 @@ void run_example_ibl()
             // bunny：等价于 bgfx mtxSRT(1,1,1, 0,π,0, 0,-0.8,0)
             const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.8f, 0.0f)) *
                                     glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-            rasterizer.pc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
-            rasterizer.pc.model   = model;
-            rasterizer.pc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+            rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
+            rasterizer.vpc.model   = model;
+            rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
             rasterizer.record(bunny_ib, bunny_vb, bunny_params);
         }
         else
@@ -644,9 +644,9 @@ void run_example_ibl()
                     const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(tx, ty, 0.0f)) *
                                             glm::scale(glm::mat4(1.0f), glm::vec3(scale / grid));
 
-                    rasterizer.pc.misc    = glm::vec4(0.0f, aspect, 0.0f, 0.0f);
-                    rasterizer.pc.model   = model;
-                    rasterizer.pc.params0 =
+                    rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, 0.0f, 0.0f);
+                    rasterizer.vpc.model   = model;
+                    rasterizer.vpc.params0 =
                         glm::vec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
                     rasterizer.record(orb_ib, orb_vb, orb_params);
                 }
@@ -654,9 +654,9 @@ void run_example_ibl()
         }
 
         // ---- 天空盒 draw（pc.misc.x = 1 触发 skybox 路径）----
-        rasterizer.pc.misc    = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
-        rasterizer.pc.model   = glm::mat4(1.0f); // identity，skybox 路径不使用 model
-        rasterizer.pc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+        rasterizer.vpc.misc    = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
+        rasterizer.vpc.model   = glm::mat4(1.0f); // identity，skybox 路径不使用 model
+        rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
         rasterizer.record(sky_ib, sky_vb, sky_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =

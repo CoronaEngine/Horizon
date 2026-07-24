@@ -544,7 +544,7 @@ void run_example_shadowvolumes()
                 params.index_type = Corona::Horizon::IndexType::UInt32;
                 params.index_count = item.mesh->index_count;
 
-                pipeline.pc.model = item.model;
+                pipeline.model_pc.model = item.model;
                 pipeline.record(item.mesh->ib, item.mesh->vb, params);
             }
         };

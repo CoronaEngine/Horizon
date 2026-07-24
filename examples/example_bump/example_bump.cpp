@@ -359,7 +359,7 @@ void run_example_bump()
                 glm::mat4 model = glm::eulerAngleYX(-(time * 0.03f + yy * 0.37f), -(time * 0.023f + xx * 0.21f));
                 model[3] = glm::vec4(-3.0f + xx * 3.0f, -3.0f + yy * 3.0f, 0.0f, 1.0f);
 
-                rasterizer.pc.model = model;
+                rasterizer.model_pc.model = model;
                 rasterizer.record(cube_ib, cube_vb, draw_params);
             }
         }

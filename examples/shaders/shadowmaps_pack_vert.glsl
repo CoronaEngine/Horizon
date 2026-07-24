@@ -6,7 +6,7 @@
 
 layout(push_constant) uniform ShadowPackPC {
     mat4 mvp;
-} pc;
+} model_pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal; // 占位对齐顶点布局
@@ -15,6 +15,6 @@ layout(location = 0) out vec4 v_position;
 
 void main()
 {
-    gl_Position = pc.mvp * vec4(inPosition, 1.0);
+    gl_Position = model_pc.mvp * vec4(inPosition, 1.0);
     v_position  = gl_Position;
 }

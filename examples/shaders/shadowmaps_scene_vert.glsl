@@ -26,7 +26,7 @@ layout(binding = 0) uniform ShadowSceneShared {
 
 layout(push_constant) uniform ShadowScenePC {
     mat4 model; // per-draw
-} pc;
+} model_pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -38,9 +38,9 @@ layout(location = 2) out vec4 v_shadowcoord;
 void main()
 {
     // 从共享矩阵 + per-draw model 现场计算各变换
-    mat4 mvp        = vsp.proj_view       * pc.model;
-    mat4 model_view = vsp.view_matrix     * pc.model;
-    mat4 light_mtx  = vsp.light_proj_view * pc.model;
+    mat4 mvp        = vsp.proj_view       * model_pc.model;
+    mat4 model_view = vsp.view_matrix     * model_pc.model;
+    mat4 light_mtx  = vsp.light_proj_view * model_pc.model;
 
     gl_Position = mvp * vec4(inPosition, 1.0);
 

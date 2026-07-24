@@ -6,7 +6,7 @@
 
 layout(push_constant) uniform DrawStressPC {
     mat4 mvp;
-} pc;
+} model_pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
@@ -15,6 +15,6 @@ layout(location = 0) out vec3 v_color;
 
 void main()
 {
-    gl_Position = pc.mvp * vec4(inPosition, 1.0);
+    gl_Position = model_pc.mvp * vec4(inPosition, 1.0);
     v_color = inColor;
 }

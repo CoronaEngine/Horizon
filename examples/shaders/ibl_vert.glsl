@@ -6,8 +6,8 @@
 // 拆分策略：
 //   - UBO  vsp：批次共享（proj_view、skyEnvMtx、envMtx、camPos、flags、
 //               rgbDiff、rgbSpec、lightDir、lightCol）288 bytes
-//   - PC   pc ：per-draw（model、params0、misc）96 bytes
-// mvp 在 VS 内由 vsp.proj_view * pc.model 现场计算，不再存储。
+//   - PC   vpc：per-draw（model、params0、misc）96 bytes（VS 用 vpc，FS 用 fpc 避免歧义）
+// mvp 在 VS 内由 vsp.proj_view * vpc.model 现场计算，不再存储。
 
 layout(binding = 0) uniform IblShared {
     mat4 proj_view;  // proj * view，由 C++ 每帧写入
@@ -25,7 +25,7 @@ layout(push_constant) uniform IblPC {
     mat4 model;    // 网格：per-draw model；天空盒：identity（不使用）
     vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
     vec4 misc;     // x: isSkybox, y: viewport 宽高比(w/h), z: metalOrSpec, w: unused
-} pc;
+} vpc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -36,13 +36,13 @@ layout(location = 2) out vec3 v_dir;
 
 void main()
 {
-    if (pc.misc.x > 0.5)
+    if (vpc.misc.x > 0.5)
     {
         // 天空盒：全屏三角形顶点已是 NDC 坐标，钉在远平面 (z=1)。
         gl_Position = vec4(inPosition.xy, 1.0, 1.0);
 
         float fovHeight = tan(radians(45.0) * 0.5);
-        float aspect    = pc.misc.y;
+        float aspect    = vpc.misc.y;
         vec2 tex = inPosition.xy * vec2(fovHeight * aspect, -fovHeight);
         v_dir = (vsp.skyEnvMtx * vec4(tex, 1.0, 0.0)).xyz;
 
@@ -51,10 +51,10 @@ void main()
     }
     else
     {
-        mat4 mvp = vsp.proj_view * pc.model;
+        mat4 mvp = vsp.proj_view * vpc.model;
         gl_Position = mvp * vec4(inPosition, 1.0);
-        v_view   = vsp.camPos.xyz - (pc.model * vec4(inPosition, 1.0)).xyz;
-        v_normal = (pc.model * vec4(inNormal, 0.0)).xyz;
+        v_view   = vsp.camPos.xyz - (vpc.model * vec4(inPosition, 1.0)).xyz;
+        v_normal = (vpc.model * vec4(inNormal, 0.0)).xyz;
         v_dir    = vec3(0.0);
     }
 }

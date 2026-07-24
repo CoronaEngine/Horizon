@@ -14,7 +14,7 @@ layout(binding = 0) uniform AssaoSceneShared {
 layout(push_constant) uniform AssaoScenePC {
     mat4 model; // per-draw 变换
     vec4 color; // per-draw 物体底色（压入 PC，避免 UBO 写入 per-draw 数据）
-} pc;
+} vpc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -23,8 +23,8 @@ layout(location = 0) out vec3 v_normal_vs;
 
 void main()
 {
-    mat4 mvp        = vsp.proj_view   * pc.model;
-    mat4 model_view = vsp.view_matrix * pc.model;
+    mat4 mvp        = vsp.proj_view   * vpc.model;
+    mat4 model_view = vsp.view_matrix * vpc.model;
 
     gl_Position  = mvp        * vec4(inPosition, 1.0);
     v_normal_vs  = normalize((model_view * vec4(inNormal, 0.0)).xyz);

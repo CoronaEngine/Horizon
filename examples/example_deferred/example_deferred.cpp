@@ -429,7 +429,7 @@ void run_example_deferred()
                     glm::mat4 model = glm::eulerAngleYX(-(time * 0.03f + yy * 0.37f), -(time * 1.023f + xx * 0.21f));
                     model[3] = glm::vec4(-offset + xx * 3.0f, -offset + yy * 3.0f, 0.0f, 1.0f);
 
-                    pipeline.pc.model = model;
+                    pipeline.model_pc.model = model;
                     pipeline.record(cube_ib, cube_vb, cube_params);
                 }
             }
@@ -482,13 +482,13 @@ void run_example_deferred()
                 continue;
 
             const uint8_t val = light & 7;
-            light_rasterizer.pc.light_pos_radius = glm::vec4(center, radius);
-            light_rasterizer.pc.light_rgb_inner_r = glm::vec4(
+            light_rasterizer.vpc.light_pos_radius = glm::vec4(center, radius);
+            light_rasterizer.vpc.light_rgb_inner_r = glm::vec4(
                 (val & 0x1) ? 1.0f : 0.25f,
                 (val & 0x2) ? 1.0f : 0.25f,
                 (val & 0x4) ? 1.0f : 0.25f,
                 0.8f);
-            light_rasterizer.pc.rect = glm::vec4(rect_min, rect_max);
+            light_rasterizer.vpc.rect = glm::vec4(rect_min, rect_max);
             light_rasterizer.record(quad_ib, quad_vb, quad_params);
         }
 

@@ -11,7 +11,7 @@ layout(binding = 0) uniform AssaoSceneShared {
 layout(push_constant) uniform AssaoScenePC {
     mat4 model;
     vec4 color;
-} pc;
+} fpc;
 
 layout(location = 0) in vec3 v_normal_vs;
 

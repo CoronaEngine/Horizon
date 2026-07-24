@@ -12,7 +12,7 @@ layout(push_constant) uniform DeferredLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect;
-} pc;
+} fpc;
 
 layout(binding = 2) uniform sampler2D gNormal;
 layout(binding = 3) uniform sampler2D gDepth;
@@ -59,8 +59,8 @@ void main()
     vec3 view = -normalize((fsp.view * vec4(wpos, 0.0)).xyz);
 
     vec3 lightColor = calcLight(wpos, normal, view,
-                                pc.light_pos_radius.xyz, pc.light_pos_radius.w,
-                                pc.light_rgb_inner_r.xyz, pc.light_rgb_inner_r.w);
+                                fpc.light_pos_radius.xyz, fpc.light_pos_radius.w,
+                                fpc.light_rgb_inner_r.xyz, fpc.light_rgb_inner_r.w);
 
     outColor = vec4(pow(lightColor, vec3(1.0 / 2.2)), 1.0);
 }

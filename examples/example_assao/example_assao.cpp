@@ -393,8 +393,8 @@ void run_example_assao()
 
                 const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
                                         glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)); // 原版：cube x10，顶面 y=0
-                pipeline.pc.model = model;
-                pipeline.pc.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
+                pipeline.vpc.model = model;
+                pipeline.vpc.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
                 pipeline.record(ground.ib, ground.vb, params);
             }
 
@@ -406,8 +406,8 @@ void run_example_assao()
 
                 const glm::mat4 model = glm::translate(glm::mat4(1.0f), m.position) *
                                         glm::scale(glm::mat4(1.0f), glm::vec3(m.scale));
-                pipeline.pc.model = model;
-                pipeline.pc.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
+                pipeline.vpc.model = model;
+                pipeline.vpc.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
                 pipeline.record(m.mesh->ib, m.mesh->vb, params);
             }
         };

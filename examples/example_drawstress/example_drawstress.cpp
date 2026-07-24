@@ -208,7 +208,7 @@ void run_example_drawstress()
                         glm::mat4 model = glm::eulerAngleZYX(time + zz * 0.13f, time + yy * 0.37f, time + xx * 0.21f) * scale_mtx;
                         model[3] = glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f);
 
-                        rasterizer.pc.mvp = view_proj * model;
+                        rasterizer.model_pc.mvp = view_proj * model;
                         rasterizer.record(cube_ib, cube_vb, cube_params);
                     }
                 }

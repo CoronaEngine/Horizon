@@ -12,7 +12,7 @@ layout(binding = 0) uniform DeferredGeomShared {
 
 layout(push_constant) uniform DeferredGeomPC {
     mat4 model;
-} pc;
+} model_pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -26,11 +26,11 @@ layout(location = 3) out vec2 v_texcoord;
 
 void main()
 {
-    vec3 wpos = (pc.model * vec4(inPosition, 1.0)).xyz;
+    vec3 wpos = (model_pc.model * vec4(inPosition, 1.0)).xyz;
     gl_Position = vsp.view_proj * vec4(wpos, 1.0);
 
-    vec3 wnormal  = normalize((pc.model * vec4(inNormal,      0.0)).xyz);
-    vec3 wtangent = normalize((pc.model * vec4(inTangent.xyz, 0.0)).xyz);
+    vec3 wnormal  = normalize((model_pc.model * vec4(inNormal,      0.0)).xyz);
+    vec3 wtangent = normalize((model_pc.model * vec4(inTangent.xyz, 0.0)).xyz);
 
     v_normal    = wnormal;
     v_tangent   = wtangent;

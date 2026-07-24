@@ -19,7 +19,7 @@ layout(push_constant) uniform IblPC {
     mat4 model;
     vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
     vec4 misc;     // x: isSkybox, y: aspect, z: metalOrSpec
-} pc;
+} fpc;
 
 layout(binding = 2) uniform samplerCube texCube;
 layout(binding = 3) uniform samplerCube texCubeIrr;
@@ -65,11 +65,11 @@ float specPwr(float gloss) { return exp2(10.0 * gloss + 2.0); }
 
 void main()
 {
-    if (pc.misc.x > 0.5)
+    if (fpc.misc.x > 0.5)
     {
         // ---- 天空盒 ----
         vec3 dir = normalize(v_dir);
-        float bgType = pc.params0.w;
+        float bgType = fpc.params0.w;
 
         vec3 color;
         if (bgType == 7.0)
@@ -80,7 +80,7 @@ void main()
             dir = fixCubeLookup(dir, lod, 256.0);
             color = toLinear(textureLod(texCube, dir, lod).xyz);
         }
-        color *= exp2(pc.params0.z);
+        color *= exp2(fpc.params0.z);
         outColor = vec4(toFilmic(color), 1.0);
         return;
     }
@@ -99,11 +99,11 @@ void main()
     float hdotv = clamp(dot(hh, vv), 0.0, 1.0);
 
     vec3  inAlbedo       = fsp.rgbDiff.xyz;
-    float inReflectivity = pc.params0.y;
-    float inGloss        = pc.params0.x;
+    float inReflectivity = fpc.params0.y;
+    float inGloss        = fpc.params0.x;
 
     vec3 refl;
-    if (pc.misc.z == 0.0)
+    if (fpc.misc.z == 0.0)
         refl = mix(vec3(0.04), inAlbedo, inReflectivity);
     else
         refl = fsp.rgbSpec.xyz * vec3(inReflectivity);
@@ -129,6 +129,6 @@ void main()
     vec3 envSpecular = envFresnel * radiance   * fsp.flags.w;
     vec3 indirect    = envDiffuse + envSpecular;
 
-    vec3 color = (direct + indirect) * exp2(pc.params0.z);
+    vec3 color = (direct + indirect) * exp2(fpc.params0.z);
     outColor = vec4(toFilmic(color), 1.0);
 }
