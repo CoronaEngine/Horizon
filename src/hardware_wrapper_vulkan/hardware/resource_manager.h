@@ -74,6 +74,41 @@ namespace Corona::Horizon
             VkDescriptorSetLayout layout { VK_NULL_HANDLE };
             VkDescriptorSet set { VK_NULL_HANDLE };
             uint32_t capacity { 0 };
+            // 单调分配游标 + 回收的空闲槽位。destroy 时归还槽位供后续复用，
+            // 避免 bindless 数组随资源 create/destroy 单调耗尽（P0：slot 泄漏修复）。
+            uint32_t next { 0 };
+            std::vector<uint32_t> free_list;
+
+            static constexpr uint32_t invalid_slot = ~0u;
+
+            // 分配一个槽位：优先复用回收槽位，否则递增游标；容量耗尽返回 invalid_slot。
+            [[nodiscard]] uint32_t allocate() noexcept
+            {
+                if (!free_list.empty())
+                {
+                    const uint32_t index = free_list.back();
+                    free_list.pop_back();
+                    return index;
+                }
+                if (next >= capacity)
+                {
+                    return invalid_slot;
+                }
+                return next++;
+            }
+
+            // 归还槽位供后续复用。调用方须确保 index 有效且该槽位不再被 shader 索引。
+            void release(uint32_t index) noexcept
+            {
+                free_list.push_back(index);
+            }
+
+            // 重建数组时重置分配状态（游标归零、清空回收表）。
+            void reset_allocation() noexcept
+            {
+                next = 0;
+                free_list.clear();
+            }
         };
 
         [[nodiscard]] VmaAllocationCreateInfo allocation_info(const HardwareBufferDesc& desc) const noexcept;
@@ -102,8 +137,5 @@ namespace Corona::Horizon
         DescriptorArray combined_texture_descriptors_ {};
         DescriptorArray storage_buffer_descriptors_ {};
         DescriptorArray storage_image_descriptors_ {};
-        uint32_t next_combined_texture_descriptor_ { 0 };
-        uint32_t next_storage_buffer_descriptor_ { 0 };
-        uint32_t next_storage_image_descriptor_ { 0 };
     };
 }
