@@ -298,7 +298,6 @@ void run_example_assao()
     depth_d.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline color_rasterizer(assao_scene_vert_glsl, assao_color_frag_glsl, scene_desc);
@@ -382,6 +381,9 @@ void run_example_assao()
         // 三个几何 pass
         auto record_scene = [&](auto& pipeline) {
             pipeline.clear_records();
+            // 共享矩阵（UBO，batch 内不变）；per-draw 数据（model、color）走 push constant
+            pipeline.vsp.proj_view   = view_proj;
+            pipeline.vsp.view_matrix = view;
 
             // 地面：压扁的 cube
             {
@@ -391,9 +393,8 @@ void run_example_assao()
 
                 const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
                                         glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)); // 原版：cube x10，顶面 y=0
-                pipeline.vsp.mvp = view_proj * model;
-                pipeline.vsp.model_view = view * model;
-                pipeline.vsp.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
+                pipeline.pc.model = model;
+                pipeline.pc.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
                 pipeline.record(ground.ib, ground.vb, params);
             }
 
@@ -405,9 +406,8 @@ void run_example_assao()
 
                 const glm::mat4 model = glm::translate(glm::mat4(1.0f), m.position) *
                                         glm::scale(glm::mat4(1.0f), glm::vec3(m.scale));
-                pipeline.vsp.mvp = view_proj * model;
-                pipeline.vsp.model_view = view * model;
-                pipeline.vsp.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
+                pipeline.pc.model = model;
+                pipeline.pc.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
                 pipeline.record(m.mesh->ib, m.mesh->vb, params);
             }
         };

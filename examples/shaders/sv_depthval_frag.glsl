@@ -1,11 +1,10 @@
 #version 450
 
-// 阴影体示例 pass 2：器件深度写入 R32F（供阴影体 pass 做逐像素深度剔除，
-// 等价于对场景深度做只读深度测试）。
+// 阴影体示例 pass 2：器件深度写入 R32F。
 
-layout(binding = 0) uniform SvSceneParams {
-    mat4 mvp;
-    mat4 model_view;
+layout(binding = 0) uniform SvSceneShared {
+    mat4 proj_view;
+    mat4 view_matrix;
     vec4 light_pos_vs;
     vec4 light_rgb;
     vec4 ambient;

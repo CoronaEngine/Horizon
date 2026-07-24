@@ -1,12 +1,17 @@
 #version 450
 
 // 39-assao G-buffer 法线 pass：view 空间法线编码到 RGBA8。
+// UBO 同 assao_scene_vert.glsl（AssaoSceneShared）；color 在 PC 中但本 pass 不用。
 
-layout(binding = 0) uniform AssaoSceneParams {
-    mat4 mvp;
-    mat4 model_view;
-    vec4 color;
+layout(binding = 0) uniform AssaoSceneShared {
+    mat4 proj_view;
+    mat4 view_matrix;
 } fsp;
+
+layout(push_constant) uniform AssaoScenePC {
+    mat4 model;
+    vec4 color;
+} pc;
 
 layout(location = 0) in vec3 v_normal_vs;
 

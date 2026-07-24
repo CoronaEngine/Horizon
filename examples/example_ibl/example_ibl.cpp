@@ -528,7 +528,6 @@ void run_example_ibl()
 
     // ---- Pipeline ----
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline rasterizer(ibl_vert_glsl, ibl_frag_glsl, desc);
@@ -601,10 +600,12 @@ void run_example_ibl()
 
         rasterizer.clear_records();
 
-        // 帧内共享的绑定与 uniform（record 时逐 draw 快照）。
-        // 注意：VS/FS 共用同一个 binding=0 的 uniform block，全部经 vsp 代理写入。
+        // 帧内共享的绑定与 uniform（UBO，record 前写入一次即可）。
+        // VS/FS 共用同一个 binding=0 的 IblShared block，经 vsp 代理写入。
+        // per-draw 数据（model、params0、misc）通过 push constant pc 写入。
         rasterizer.texCube = probe.lod;
         rasterizer.texCubeIrr = probe.irr;
+        rasterizer.vsp.proj_view = proj * view;   // NEW：VS 内算 mvp = proj_view * pc.model
         rasterizer.vsp.camPos = glm::vec4(cam_pos, 1.0f);
         rasterizer.vsp.flags = glm::vec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
                                          s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
@@ -621,21 +622,19 @@ void run_example_ibl()
             // bunny：等价于 bgfx mtxSRT(1,1,1, 0,π,0, 0,-0.8,0)
             const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.8f, 0.0f)) *
                                     glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-            rasterizer.vsp.misc = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
-            rasterizer.vsp.mvp = proj * view * model;
-            rasterizer.vsp.model = model;
-            rasterizer.vsp.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+            rasterizer.pc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
+            rasterizer.pc.model   = model;
+            rasterizer.pc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
             rasterizer.record(bunny_ib, bunny_vb, bunny_params);
         }
         else
         {
-            // orbs：5x5 球体阵列，逐球变化 glossiness / reflectivity。
+            // orbs：5x5 球体阵列，逐球变化 glossiness / reflectivity（push constant per-draw）。
             constexpr float grid = 5.0f;
             constexpr float scale = 1.2f;
             constexpr float spacing = 2.2f;
             constexpr float y_adj = -0.8f;
 
-            rasterizer.vsp.misc = glm::vec4(0.0f, aspect, 0.0f, 0.0f);
             for (float yy = 0.0f; yy < grid; yy += 1.0f)
             {
                 for (float xx = 0.0f; xx < grid; xx += 1.0f)
@@ -645,18 +644,19 @@ void run_example_ibl()
                     const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(tx, ty, 0.0f)) *
                                             glm::scale(glm::mat4(1.0f), glm::vec3(scale / grid));
 
-                    rasterizer.vsp.mvp = proj * view * model;
-                    rasterizer.vsp.model = model;
-                    rasterizer.vsp.params0 =
+                    rasterizer.pc.misc    = glm::vec4(0.0f, aspect, 0.0f, 0.0f);
+                    rasterizer.pc.model   = model;
+                    rasterizer.pc.params0 =
                         glm::vec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
                     rasterizer.record(orb_ib, orb_vb, orb_params);
                 }
             }
         }
 
-        // ---- 天空盒 draw ----
-        rasterizer.vsp.misc = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
-        rasterizer.vsp.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+        // ---- 天空盒 draw（pc.misc.x = 1 触发 skybox 路径）----
+        rasterizer.pc.misc    = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
+        rasterizer.pc.model   = glm::mat4(1.0f); // identity，skybox 路径不使用 model
+        rasterizer.pc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
         rasterizer.record(sky_ib, sky_vb, sky_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =

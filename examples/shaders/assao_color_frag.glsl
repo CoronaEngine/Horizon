@@ -1,12 +1,17 @@
 #version 450
 
 // 39-assao 场景颜色 pass：底色 × 固定方向光的简单光照（AO 由 compute 后乘）。
+// UBO 只含相机矩阵；per-draw color 已移入 push constant。
 
-layout(binding = 0) uniform AssaoSceneParams {
-    mat4 mvp;
-    mat4 model_view;
-    vec4 color;
+layout(binding = 0) uniform AssaoSceneShared {
+    mat4 proj_view;
+    mat4 view_matrix;
 } fsp;
+
+layout(push_constant) uniform AssaoScenePC {
+    mat4 model;
+    vec4 color;
+} pc;
 
 layout(location = 0) in vec3 v_normal_vs;
 
@@ -17,5 +22,5 @@ void main()
     vec3 n = normalize(v_normal_vs);
     const vec3 light_dir_vs = normalize(vec3(-0.3, 0.8, -0.5));
     float ndotl = max(0.0, dot(n, light_dir_vs));
-    outColor = vec4(fsp.color.xyz * (0.25 + 0.75 * ndotl), 1.0);
+    outColor = vec4(pc.color.xyz * (0.25 + 0.75 * ndotl), 1.0);
 }

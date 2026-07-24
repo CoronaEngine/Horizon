@@ -1,9 +1,9 @@
 #version 450
 
 // 移植自参考示例 06-bump 的 fs_bump.sc：法线贴图 + 4 点光源（切线空间光照）。
+// FS 只需要共享的 vsp（UBO），不依赖 per-draw 的 pc.model。
 
-layout(binding = 0) uniform BumpParams {
-    mat4 model;
+layout(binding = 0) uniform BumpShared {
     mat4 view_proj;
     vec4 eye_pos;
     vec4 light0_pos_radius;
@@ -47,7 +47,7 @@ vec3 calcLight(vec4 lightPosRadius, vec4 lightRgbInnerR, mat3 tbn, vec3 wpos, ve
 {
     vec3 lp = lightPosRadius.xyz - wpos;
     float attn = 1.0 - smoothstep(lightRgbInnerR.w, 1.0, length(lp) / lightPosRadius.w);
-    vec3 lightDir = normalize(lp) * tbn; // 世界 → 切线空间
+    vec3 lightDir = normalize(lp) * tbn;
     vec2 bln = blinn(lightDir, normal, view);
     vec4 lc = lit(bln.x, bln.y, 1.0);
     return lightRgbInnerR.xyz * clamp(lc.y, 0.0, 1.0) * attn;
@@ -59,7 +59,7 @@ void main()
 
     vec3 normal;
     normal.xy = texture(texNormal, v_texcoord).xy * 2.0 - 1.0;
-    normal.z = sqrt(max(0.0, 1.0 - dot(normal.xy, normal.xy)));
+    normal.z  = sqrt(max(0.0, 1.0 - dot(normal.xy, normal.xy)));
     vec3 view = normalize(v_view);
 
     vec3 lightColor;
@@ -71,7 +71,5 @@ void main()
     vec4 color = vec4(pow(texture(texColor, v_texcoord).xyz, vec3(2.2)), 1.0); // toLinear
 
     vec3 rgb = max(vec3(0.05), lightColor) * color.xyz;
-    // 线性输出：present blit 到 sRGB 交换链时自动完成伽马编码。
-    // 原版手动 toGamma 是因为其后备缓冲为 UNORM；此处再手动编码会双重伽马导致画面发灰。
     outColor = vec4(rgb, 1.0);
 }

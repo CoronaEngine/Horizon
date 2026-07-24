@@ -585,7 +585,6 @@ void run_example_edsl_ibl()
 
     // ---- Pipeline ----
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
 

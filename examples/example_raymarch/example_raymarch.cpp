@@ -83,7 +83,6 @@ void run_example_raymarch()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline rasterizer(raymarch_vert_glsl, raymarch_frag_glsl, desc);

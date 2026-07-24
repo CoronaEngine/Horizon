@@ -262,7 +262,6 @@ void run_example_bump()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
     desc.depth_stencil.depth_compare_op = Corona::Horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
 
@@ -360,7 +359,7 @@ void run_example_bump()
                 glm::mat4 model = glm::eulerAngleYX(-(time * 0.03f + yy * 0.37f), -(time * 0.023f + xx * 0.21f));
                 model[3] = glm::vec4(-3.0f + xx * 3.0f, -3.0f + yy * 3.0f, 0.0f, 1.0f);
 
-                rasterizer.vsp.model = model;
+                rasterizer.pc.model = model;
                 rasterizer.record(cube_ib, cube_vb, draw_params);
             }
         }

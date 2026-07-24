@@ -279,7 +279,6 @@ void run_example_shadowmaps()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc pack_desc;
-    pack_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     pack_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert_glsl, shadowmaps_pack_frag_glsl, pack_desc);
@@ -287,7 +286,6 @@ void run_example_shadowmaps()
     pack_rasterizer.bind_depth_target(shadow_depth_image);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert_glsl, shadowmaps_scene_frag_glsl, scene_desc);
@@ -411,12 +409,16 @@ void run_example_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            pack_rasterizer.spp.mvp = light_view_proj * item.model;
+            pack_rasterizer.pc.mvp = light_view_proj * item.model;
             pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 
         // Pass 2：场景光照 + 硬阴影
         scene_rasterizer.clear_records();
+        // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
+        scene_rasterizer.vsp.proj_view       = view_proj;
+        scene_rasterizer.vsp.view_matrix     = view;
+        scene_rasterizer.vsp.light_proj_view = shadow_mtx; // bias * light_proj * light_view
         scene_rasterizer.vsp.light_pos_vs = light_pos_vs;
         scene_rasterizer.vsp.light_ambient = light_ambient;
         scene_rasterizer.vsp.light_diffuse = light_diffuse;
@@ -434,9 +436,7 @@ void run_example_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            scene_rasterizer.vsp.mvp = view_proj * item.model;
-            scene_rasterizer.vsp.model_view = view * item.model;
-            scene_rasterizer.vsp.light_mtx = shadow_mtx * item.model;
+            scene_rasterizer.pc.model = item.model; // per-draw；VS 从中计算 mvp/model_view/light_mtx
             scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 

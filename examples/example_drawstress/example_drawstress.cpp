@@ -129,7 +129,6 @@ void run_example_drawstress()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline rasterizer(drawstress_vert_glsl, drawstress_frag_glsl, desc);
@@ -209,7 +208,7 @@ void run_example_drawstress()
                         glm::mat4 model = glm::eulerAngleZYX(time + zz * 0.13f, time + yy * 0.37f, time + xx * 0.21f) * scale_mtx;
                         model[3] = glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f);
 
-                        rasterizer.dsp.mvp = view_proj * model;
+                        rasterizer.pc.mvp = view_proj * model;
                         rasterizer.record(cube_ib, cube_vb, cube_params);
                     }
                 }

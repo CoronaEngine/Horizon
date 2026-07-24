@@ -1,17 +1,18 @@
 #version 450
 
-// 移植自参考示例 21-deferred 的 fs_deferred_light.sc + common.sh：
-// 从 G-buffer 重建世界坐标，逐光源累加（管线开加法混合）。
-// 深度从 R32F 目标读取（等价 原版 采样 depth attachment）；Vulkan 裁剪空间
-// y 向下与纹理 v 一致，不需要 原版 D3D 路径的 clip.y 取反。
+// 移植自参考示例 21-deferred 的 fs_deferred_light.sc。
+// uniform block 与 deferred_light_vert.glsl 完全一致（共用 binding=0）。
 
-layout(binding = 0) uniform DeferredLightParams {
+layout(binding = 0) uniform DeferredLightShared {
     mat4 inv_mvp;
     mat4 view;
+} fsp;
+
+layout(push_constant) uniform DeferredLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect;
-} fsp;
+} pc;
 
 layout(binding = 2) uniform sampler2D gNormal;
 layout(binding = 3) uniform sampler2D gDepth;
@@ -35,7 +36,8 @@ vec4 lit(float ndotl, float rdotv, float m)
     return vec4(1.0, diff, spec, 1.0);
 }
 
-vec3 calcLight(vec3 wpos, vec3 normal, vec3 view, vec3 lightPos, float lightRadius, vec3 lightRgb, float lightInner)
+vec3 calcLight(vec3 wpos, vec3 normal, vec3 view,
+               vec3 lightPos, float lightRadius, vec3 lightRgb, float lightInner)
 {
     vec3 lp = lightPos - wpos;
     float attn = 1.0 - smoothstep(lightInner, 1.0, length(lp) / lightRadius);
@@ -47,19 +49,18 @@ vec3 calcLight(vec3 wpos, vec3 normal, vec3 view, vec3 lightPos, float lightRadi
 
 void main()
 {
-    vec3 normal = texture(gNormal, v_texcoord).xyz * 2.0 - 1.0; // decodeNormalUint
+    vec3 normal = texture(gNormal, v_texcoord).xyz * 2.0 - 1.0;
     float deviceDepth = texture(gDepth, v_texcoord).x;
 
     vec3 clip = vec3(v_texcoord * 2.0 - 1.0, deviceDepth);
     vec4 wpos4 = fsp.inv_mvp * vec4(clip, 1.0);
-    vec3 wpos = wpos4.xyz / wpos4.w;
+    vec3 wpos  = wpos4.xyz / wpos4.w;
 
-    // 与 原版 相同的取法：wpos 当方向旋进 view 空间取反归一（原版如此）
     vec3 view = -normalize((fsp.view * vec4(wpos, 0.0)).xyz);
 
     vec3 lightColor = calcLight(wpos, normal, view,
-                                fsp.light_pos_radius.xyz, fsp.light_pos_radius.w,
-                                fsp.light_rgb_inner_r.xyz, fsp.light_rgb_inner_r.w);
+                                pc.light_pos_radius.xyz, pc.light_pos_radius.w,
+                                pc.light_rgb_inner_r.xyz, pc.light_rgb_inner_r.w);
 
-    outColor = vec4(pow(lightColor, vec3(1.0 / 2.2)), 1.0); // toGamma
+    outColor = vec4(pow(lightColor, vec3(1.0 / 2.2)), 1.0);
 }

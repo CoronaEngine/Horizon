@@ -409,7 +409,6 @@ void run_example_shadowvolumes()
 
     // pass 1: ambient
     Corona::Horizon::RasterizerPipelineDesc ambient_desc;
-    ambient_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     ambient_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
     Corona::Horizon::RasterizerPipeline ambient_rasterizer(sv_scene_vert_glsl, sv_ambient_frag_glsl, ambient_desc);
     ambient_rasterizer.outColor = final_output_image;
@@ -417,7 +416,6 @@ void run_example_shadowvolumes()
 
     // pass 2: depthval
     Corona::Horizon::RasterizerPipelineDesc depthval_desc;
-    depthval_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     depthval_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
     Corona::Horizon::RasterizerPipeline depthval_rasterizer(sv_scene_vert_glsl, sv_depthval_frag_glsl, depthval_desc);
     depthval_rasterizer.outColor = scene_depth_image;
@@ -425,7 +423,6 @@ void run_example_shadowvolumes()
 
     // pass 3: volume（加法混合、无深度附件）
     Corona::Horizon::RasterizerPipelineDesc volume_desc;
-    volume_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     volume_desc.depth_stencil.depth_test_enabled = false;
     volume_desc.depth_stencil.depth_write_enabled = false;
     Corona::Horizon::BlendAttachmentDesc additive;
@@ -443,7 +440,6 @@ void run_example_shadowvolumes()
 
     // pass 4: lit（不清屏、加法混合叠到 ambient 上）
     Corona::Horizon::RasterizerPipelineDesc lit_desc;
-    lit_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::None;
     lit_desc.clear_color_target = false;
     lit_desc.blend.attachments = { additive };
     Corona::Horizon::RasterizerPipeline lit_rasterizer(sv_scene_vert_glsl, sv_lit_frag_glsl, lit_desc);
@@ -531,6 +527,9 @@ void run_example_shadowvolumes()
 
         auto record_scene = [&](auto& pipeline) {
             pipeline.clear_records();
+            // 共享矩阵（UBO）；per-draw model 走 push constant
+            pipeline.vsp.proj_view   = view_proj;
+            pipeline.vsp.view_matrix = view;
             pipeline.vsp.light_pos_vs = light_pos_vs;
             pipeline.vsp.light_rgb = light_rgb;
             pipeline.vsp.ambient = ambient_color;
@@ -545,8 +544,7 @@ void run_example_shadowvolumes()
                 params.index_type = Corona::Horizon::IndexType::UInt32;
                 params.index_count = item.mesh->index_count;
 
-                pipeline.vsp.mvp = view_proj * item.model;
-                pipeline.vsp.model_view = view * item.model;
+                pipeline.pc.model = item.model;
                 pipeline.record(item.mesh->ib, item.mesh->vb, params);
             }
         };
