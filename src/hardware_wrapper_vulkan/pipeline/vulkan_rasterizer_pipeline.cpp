@@ -138,23 +138,6 @@ namespace Corona::Horizon
             }
         }
 
-        [[nodiscard]] VkCullModeFlags to_vk_cull_mode(CullMode mode) noexcept
-        {
-            switch (mode)
-            {
-            case CullMode::None: return VK_CULL_MODE_NONE;
-            case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
-            case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
-            case CullMode::FrontAndBack: return VK_CULL_MODE_FRONT_AND_BACK;
-            }
-
-            return VK_CULL_MODE_BACK_BIT;
-        }
-
-        [[nodiscard]] VkFrontFace to_vk_front_face(FrontFace front_face) noexcept
-        {
-            return front_face == FrontFace::Clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
-        }
 
         [[nodiscard]] VkCompareOp to_vk_compare_op(CompareOp op) noexcept
         {
@@ -815,8 +798,8 @@ namespace Corona::Horizon
             rasterization.depthClampEnable = desc_.rasterizer.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
             rasterization.rasterizerDiscardEnable = desc_.rasterizer.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
             rasterization.polygonMode = to_vk_polygon_mode(desc_.rasterizer.fill_mode);
-            rasterization.cullMode = to_vk_cull_mode(desc_.rasterizer.cull_mode);
-            rasterization.frontFace = to_vk_front_face(desc_.rasterizer.front_face);
+            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
             rasterization.lineWidth = desc_.rasterizer.line_width;
 

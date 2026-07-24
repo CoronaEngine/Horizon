@@ -14,17 +14,13 @@ class Shader;
 class VertexBuffer;
 
 struct RasterState {
-    CullingMode cull_mode : 2;
-    bool front_face : 1;
     bool depth_bias : 1;
     bool depth_clamp : 1;
-    int padding : 27;
+    int padding : 30;
 
     static RasterState Default()
     {
         RasterState state;
-        state.cull_mode = CullingMode::BACK;
-        state.front_face = false;// Counter-clockwise
         state.depth_bias = false;
         state.depth_clamp = false;
         return state;
@@ -117,8 +113,6 @@ struct PipelineState {
             shaders[2] != other.shaders[2] ||
             descriptorset_layout != other.descriptorset_layout ||
             vertex_buffer != other.vertex_buffer ||
-            raster_state.cull_mode != other.raster_state.cull_mode ||
-            raster_state.front_face != other.raster_state.front_face ||
             raster_state.depth_bias != other.raster_state.depth_bias ||
             raster_state.depth_clamp != other.raster_state.depth_clamp ||
             blend_state.srccolorblend_factor != other.blend_state.srccolorblend_factor ||

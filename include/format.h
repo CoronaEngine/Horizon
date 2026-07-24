@@ -386,19 +386,6 @@ namespace Corona::Horizon
         Point,
     };
 
-    enum class CullMode : uint16_t
-    {
-        None = 0,
-        Front,
-        Back,
-        FrontAndBack,
-    };
-
-    enum class FrontFace : uint16_t
-    {
-        CounterClockwise = 0,
-        Clockwise,
-    };
 
     enum class CompareOp : uint16_t
     {
@@ -493,8 +480,6 @@ namespace Corona::Horizon
     {
         PrimitiveTopology topology = PrimitiveTopology::TriangleList;
         PolygonFillMode fill_mode = PolygonFillMode::Fill;
-        CullMode cull_mode = CullMode::Back;
-        FrontFace front_face = FrontFace::CounterClockwise;
 
         bool depth_clamp_enabled = false;
         bool rasterizer_discard_enabled = false;
