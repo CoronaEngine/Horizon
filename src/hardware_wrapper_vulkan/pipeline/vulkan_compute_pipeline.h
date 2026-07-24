@@ -125,6 +125,9 @@ namespace Corona::Horizon
         DispatchDesc dispatch_ {};
         std::vector<std::byte> push_constant_data_;
         std::vector<UniformBufferBindingData> uniform_buffers_;
+        // 与 uniform_buffers_ 同序的持久 GPU buffer，初始化时创建一次，
+        // 每次 set_push_constant_direct（UBO 路径）只 write_bytes（memcpy）。
+        std::vector<HardwareBuffer> ubo_buffers_;
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         mutable std::vector<PipelineState> pipeline_cache_;

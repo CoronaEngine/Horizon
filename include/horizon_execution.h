@@ -173,6 +173,9 @@ namespace Corona::Horizon
         uint32_t set { 0 };
         uint32_t binding { 0 };
         std::vector<std::byte> data;
+        // 持久化 GPU buffer，在管线初始化时通过反射创建一次，之后只 write_bytes。
+        // 使用 ResourceHandle（基类）存储句柄，避免与 horizon.h 的循环依赖。
+        ResourceHandle gpu_buffer {};
     };
 
     struct DispatchDesc

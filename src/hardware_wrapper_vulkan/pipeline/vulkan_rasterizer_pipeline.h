@@ -163,6 +163,8 @@ namespace Corona::Horizon
         uint32_t height_ { 0 };
         std::vector<std::byte> push_constant_data_;
         std::vector<UniformBufferBindingData> uniform_buffers_;
+        // 与 uniform_buffers_ 同序的持久 GPU buffer，初始化时创建，批次内写入原地替换
+        std::vector<HardwareBuffer> ubo_buffers_;
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;

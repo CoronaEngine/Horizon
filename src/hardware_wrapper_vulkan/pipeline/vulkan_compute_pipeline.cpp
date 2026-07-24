@@ -475,6 +475,22 @@ namespace Corona::Horizon
         if (constant_size != 0)
             push_constant_data_.resize(constant_size);
         uniform_buffers_ = reflected_uniform_buffers(desc_.compute_shader.module);
+
+        // 为每个 UBO binding 创建持久 GPU buffer（HOST_VISIBLE，之后只 write_bytes）
+        ubo_buffers_.reserve(uniform_buffers_.size());
+        for (auto& ubo : uniform_buffers_)
+        {
+            if (ubo.data.empty())
+            {
+                ubo_buffers_.emplace_back();
+                continue;
+            }
+            HardwareBuffer buf = HardwareBuffer::from_bytes(
+                std::span<const std::byte>(ubo.data),
+                1, BufferUsageFlags::Uniform, "ComputePipeline.ubo_persistent");
+            ubo.gpu_buffer = buf;   // ResourceHandle 切片，用于 dispatch 路径
+            ubo_buffers_.push_back(std::move(buf));
+        }
     }
 
     VulkanComputePipeline::~VulkanComputePipeline()
@@ -879,6 +895,21 @@ namespace Corona::Horizon
         if (is_uniform_buffer_member(bind_type))
         {
             write_uniform_member(uniform_buffers_, set, binding, byte_offset, data, size);
+
+            // 同步 flush 到持久 GPU buffer（HOST_VISIBLE，memcpy 级开销）
+            auto it = std::ranges::find_if(uniform_buffers_, [&](const UniformBufferBindingData& u) {
+                return u.set == set && u.binding == binding;
+            });
+            if (it == uniform_buffers_.end() && uniform_buffers_.size() == 1)
+                it = uniform_buffers_.begin();
+            if (it != uniform_buffers_.end())
+            {
+                const size_t idx = static_cast<size_t>(std::distance(uniform_buffers_.begin(), it));
+                if (idx < ubo_buffers_.size() && ubo_buffers_[idx])
+                    ubo_buffers_[idx].write_bytes(
+                        std::span<const std::byte>(static_cast<const std::byte*>(data), size),
+                        byte_offset);
+            }
             return;
         }
     }
@@ -1229,15 +1260,11 @@ namespace Corona::Horizon
                     auto uniform = std::ranges::find_if(dispatch.uniform_buffers, [&](const UniformBufferBindingData& item) {
                         return item.set == binding_layout.set && item.binding == binding_layout.binding;
                     });
-                    if (uniform == dispatch.uniform_buffers.end() || uniform->data.empty())
-                        throw std::logic_error("ComputePipeline uniform buffer descriptor is missing reflected data.");
+                    if (uniform == dispatch.uniform_buffers.end() || !uniform->gpu_buffer)
+                        throw std::logic_error("ComputePipeline uniform buffer descriptor is missing persistent GPU buffer.");
 
-                    HardwareBuffer ubo = HardwareBuffer::from_bytes(uniform->data,
-                                                                    1,
-                                                                    BufferUsageFlags::Uniform,
-                                                                    "ComputePipeline.uniform_buffer");
-                    note_uniform_buffer_allocation();
-                    BufferStore::Read buffer = read_buffer(static_cast<const ResourceHandle&>(ubo));
+                    // 直接使用管线初始化时创建的持久 buffer，跳过每次 dispatch 的 VkBuffer 分配
+                    BufferStore::Read buffer = read_buffer(uniform->gpu_buffer);
                     if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
                         throw std::logic_error("ComputePipeline uniform buffer descriptor requires a valid HardwareBuffer.");
 
@@ -1247,7 +1274,7 @@ namespace Corona::Horizon
                     info.range = buffer->logical_size();
                     buffer_infos.push_back(info);
                     write.pBufferInfo = &buffer_infos.back();
-                    descriptor_owner->buffers.push_back(std::move(ubo));
+                    // gpu_buffer 由 pipeline 对象持有，无需 descriptor_owner 延长其 lifetime
                 }
                 else
                 {

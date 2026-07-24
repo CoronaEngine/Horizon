@@ -657,6 +657,22 @@ namespace Corona::Horizon
         if (constant_size != 0)
             push_constant_data_.resize(constant_size);
         uniform_buffers_ = reflected_uniform_buffers(desc_);
+
+        // 为每个 UBO binding 创建持久 GPU buffer
+        ubo_buffers_.reserve(uniform_buffers_.size());
+        for (auto& ubo : uniform_buffers_)
+        {
+            if (ubo.data.empty())
+            {
+                ubo_buffers_.emplace_back();
+                continue;
+            }
+            HardwareBuffer buf = HardwareBuffer::from_bytes(
+                std::span<const std::byte>(ubo.data),
+                1, BufferUsageFlags::Uniform, "RasterizerPipeline.ubo_persistent");
+            ubo.gpu_buffer = buf;
+            ubo_buffers_.push_back(std::move(buf));
+        }
     }
 
     VulkanRasterizerPipeline::~VulkanRasterizerPipeline()
@@ -1274,19 +1290,14 @@ namespace Corona::Horizon
 
                 if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                 {
-                    HORIZON_PROFILE_SCOPE_N("prepare_draw::create_uniform_buffer");
                     auto uniform = std::ranges::find_if(draw.uniform_buffers, [&](const UniformBufferBindingData& item) {
                         return item.set == binding_layout.set && item.binding == binding_layout.binding;
                     });
-                    if (uniform == draw.uniform_buffers.end() || uniform->data.empty())
-                        throw std::logic_error("RasterizerPipeline uniform buffer descriptor is missing reflected data.");
+                    if (uniform == draw.uniform_buffers.end() || !uniform->gpu_buffer)
+                        throw std::logic_error("RasterizerPipeline uniform buffer descriptor is missing persistent GPU buffer.");
 
-                    HardwareBuffer ubo = HardwareBuffer::from_bytes(uniform->data,
-                                                                    1,
-                                                                    BufferUsageFlags::Uniform,
-                                                                    "RasterizerPipeline.uniform_buffer");
-                    note_uniform_buffer_allocation();
-                    BufferStore::Read buffer = read_buffer_resource(static_cast<const ResourceHandle&>(ubo));
+                    // 直接使用持久 buffer，跳过 from_bytes VkBuffer 分配
+                    BufferStore::Read buffer = read_buffer_resource(uniform->gpu_buffer);
                     if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
                         throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
 
@@ -1296,7 +1307,7 @@ namespace Corona::Horizon
                     info.range = buffer->logical_size();
                     buffer_infos.push_back(info);
                     write.pBufferInfo = &buffer_infos.back();
-                    descriptor_owner->buffers.push_back(std::move(ubo));
+                    // gpu_buffer 由 pipeline / draw 持有，无需 descriptor_owner 延长 lifetime
                 }
                 else if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                 {
@@ -1367,6 +1378,22 @@ namespace Corona::Horizon
         if (is_uniform_buffer_member(bind_type))
         {
             write_uniform_member(uniform_buffers_, set, binding, byte_offset, data, size);
+
+            // 原地 flush 到持久 GPU buffer（UBO 是批次公共数据，所有 draw 共享同一份，
+            // 批次内重复写入直接替换 byte，无需隔离）
+            auto it = std::ranges::find_if(uniform_buffers_, [&](const UniformBufferBindingData& u) {
+                return u.set == set && u.binding == binding;
+            });
+            if (it == uniform_buffers_.end() && uniform_buffers_.size() == 1)
+                it = uniform_buffers_.begin();
+            if (it != uniform_buffers_.end())
+            {
+                const size_t idx = static_cast<size_t>(std::distance(uniform_buffers_.begin(), it));
+                if (idx < ubo_buffers_.size() && ubo_buffers_[idx])
+                    ubo_buffers_[idx].write_bytes(
+                        std::span<const std::byte>(static_cast<const std::byte*>(data), size),
+                        byte_offset);
+            }
             return;
         }
     }
@@ -1627,7 +1654,10 @@ namespace Corona::Horizon
                 draw.images.push_back(image);
         }
         draw.push_constant_data = push_constant_data_;
+        // UBO 是批次公共数据，所有 draw 共享同一持久 buffer（gpu_buffer 句柄浅拷贝）。
+        // 批次内写入直接原地替换 byte，无需隔离副本。
         draw.uniform_buffers = uniform_buffers_;
+
         draws_.push_back(std::move(draw));
     }
 
