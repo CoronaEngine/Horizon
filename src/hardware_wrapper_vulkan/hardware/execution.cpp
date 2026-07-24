@@ -1414,14 +1414,8 @@ namespace Corona::Horizon
             if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
                 throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
 
-            for (const DrawResourceBinding& binding : draw.bindings)
-            {
-                if (binding.kind != DrawBindingKind::SampledImage)
-                    continue;
-                ImageStore::Write image = write_image(binding.resource);
-                if (!image || image->image_handle == VK_NULL_HANDLE || image->image_view == VK_NULL_HANDLE)
-                    throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
-            }
+            // 纹理已全走 bindless（索引写入 push constant），draw.bindings 在光栅路径恒为空，
+            // 原先遍历 DrawBindingKind::SampledImage 的校验循环是 no-op 死代码，已移除。
 
             auto rasterizerPipeline = draw.pipeline;
             auto desc = rasterizerPipeline->desc();
@@ -1509,6 +1503,14 @@ namespace Corona::Horizon
                     write.pBufferInfo = &buffer_infos[count];
                     ++count;
                     ++end;
+                }
+
+                // 单个 set 的 UBO 数超过静态缓冲上限（16）会被静默截断，丢弃多余 write。
+                // 当前不会触发，但显式报错以防未来踩坑。
+                if (end < prepared.push_uniform_buffers.size() &&
+                    prepared.push_uniform_buffers[end].set == current_set)
+                {
+                    throw std::logic_error("DrawIndexed push descriptor exceeds 16 uniform buffers per set.");
                 }
 
                 vkCmdPushDescriptorSet(command_buffer,
@@ -1764,6 +1766,14 @@ namespace Corona::Horizon
                         write.pBufferInfo = &buffer_infos[count];
                         ++count;
                         ++end;
+                    }
+
+                    // 单个 set 的 UBO 数超过静态缓冲上限（16）会被静默截断，丢弃多余 write。
+                    // 当前不会触发，但显式报错以防未来踩坑。
+                    if (end < prepared.push_uniform_buffers.size() &&
+                        prepared.push_uniform_buffers[end].set == current_set)
+                    {
+                        throw std::logic_error("Dispatch push descriptor exceeds 16 uniform buffers per set.");
                     }
 
                     vkCmdPushDescriptorSet(command_buffer,

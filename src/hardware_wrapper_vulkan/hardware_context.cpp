@@ -663,7 +663,9 @@ namespace Corona::Horizon
         add_required_feature(status, "Vulkan 1.3", "synchronization2", features13.synchronization2);
         add_required_feature(status, "Vulkan 1.3", "dynamicRendering", features13.dynamicRendering);
 
-        (void)features14;
+        // pushDescriptor 是硬依赖：每-draw/dispatch 的 UBO 通过 vkCmdPushDescriptorSet 写入。
+        // 未启用会在建 PUSH_DESCRIPTOR_BIT layout / push 时报 VUID-*-10354 / -10356。
+        add_required_feature(status, "Vulkan 1.4", "pushDescriptor", features14.pushDescriptor);
         return status;
     }
 
@@ -1348,12 +1350,19 @@ namespace Corona::Horizon
             features13.synchronization2 = VK_TRUE;
             features13.dynamicRendering = VK_TRUE;
 
+            // pushDescriptor: 每-draw/dispatch 的 UBO 走 vkCmdPushDescriptorSet（见
+            // vulkan_rasterizer_pipeline / vulkan_compute_pipeline 的 PUSH_DESCRIPTOR_BIT layout）。
+            // 该特性必须显式请求，否则建 layout / push 时报 VUID-*-10354 / -10356。
+            VkPhysicalDeviceVulkan14Features features14 {};
+            features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+            features14.pushDescriptor = VK_TRUE;
+
             // 移除: swapchainMaintenance1 特性 (部分 AMD 核显不支持)
             // VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT features_swapchain_maintenance1{};
             // features_swapchain_maintenance1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
             // features_swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
 
-            return (DeviceFeaturesChain() | features | features11 | features12 | features13);
+            return (DeviceFeaturesChain() | features | features11 | features12 | features13 | features14);
         };
     }
 
