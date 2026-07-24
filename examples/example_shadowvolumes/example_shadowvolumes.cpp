@@ -436,7 +436,8 @@ void run_example_shadowvolumes()
     volume_desc.blend.attachments = { additive };
     Corona::Horizon::RasterizerPipeline volume_rasterizer(sv_volume_vert_glsl, sv_volume_frag_glsl, volume_desc);
     volume_rasterizer.outColor = count_image;
-    volume_rasterizer.sceneDepth = scene_depth_image;
+    // scene depth 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
+    volume_rasterizer.volume_pc.sceneDepthIndex = scene_depth_image.store_descriptor();
 
     // pass 4: lit（不清屏、加法混合叠到 ambient 上）
     Corona::Horizon::RasterizerPipelineDesc lit_desc;
@@ -445,7 +446,8 @@ void run_example_shadowvolumes()
     Corona::Horizon::RasterizerPipeline lit_rasterizer(sv_scene_vert_glsl, sv_lit_frag_glsl, lit_desc);
     lit_rasterizer.outColor = final_output_image;
     lit_rasterizer.bind_depth_target(lit_depth_image);
-    lit_rasterizer.shadowCount = count_image;
+    // shadow count 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
+    lit_rasterizer.model_pc.shadowCountIndex = count_image.store_descriptor();
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;

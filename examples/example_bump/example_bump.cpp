@@ -268,8 +268,9 @@ void run_example_bump()
     Corona::Horizon::RasterizerPipeline rasterizer(bump_vert_glsl, bump_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
-    rasterizer.texColor = color_image;
-    rasterizer.texNormal = normal_image;
+    // 纹理存入 bindless combined-texture 表（set 0），索引经 push constant 传入 shader。
+    rasterizer.model_pc.texColorIndex = color_image.store_descriptor();
+    rasterizer.model_pc.texNormalIndex = normal_image.store_descriptor();
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;

@@ -3,8 +3,18 @@
 // 移植自参考示例 21-deferred 的 fs_deferred_combine.sc：
 // albedo × light（线性空间相乘再回 gamma）。
 
-layout(binding = 2) uniform sampler2D gAlbedo;
-layout(binding = 3) uniform sampler2D gLight;
+#extension GL_EXT_nonuniform_qualifier : enable
+
+// bindless combined-image-sampler 表（set 0）+ FS 专用 push constant（VS 无 PC）。
+layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
+
+layout(push_constant) uniform DeferredCombinePC {
+    uint gAlbedoIndex;
+    uint gLightIndex;
+} fpc;
+
+#define gAlbedo combinedTextureSamplerHandles[fpc.gAlbedoIndex]
+#define gLight  combinedTextureSamplerHandles[fpc.gLightIndex]
 
 layout(location = 0) in vec2 v_texcoord;
 

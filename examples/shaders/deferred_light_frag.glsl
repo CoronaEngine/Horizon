@@ -3,19 +3,28 @@
 // 移植自参考示例 21-deferred 的 fs_deferred_light.sc。
 // uniform block 与 deferred_light_vert.glsl 完全一致（共用 binding=0）。
 
-layout(binding = 0) uniform DeferredLightShared {
+#extension GL_EXT_nonuniform_qualifier : enable
+
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform DeferredLightShared {
     mat4 inv_mvp;
     mat4 view;
 } fsp;
 
+// 与 deferred_light_vert.glsl 共享同一 push constant 块，布局必须一致。
 layout(push_constant) uniform DeferredLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect;
+    uint gNormalIndex;
+    uint gDepthIndex;
 } fpc;
 
-layout(binding = 2) uniform sampler2D gNormal;
-layout(binding = 3) uniform sampler2D gDepth;
+// bindless combined-image-sampler 表（set 0）。
+layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
+
+#define gNormal combinedTextureSamplerHandles[fpc.gNormalIndex]
+#define gDepth  combinedTextureSamplerHandles[fpc.gDepthIndex]
 
 layout(location = 0) in vec2 v_texcoord;
 

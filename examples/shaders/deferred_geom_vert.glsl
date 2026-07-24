@@ -6,12 +6,16 @@
 //   - UBO  vsp：view_proj（共享，所有 cube 相同）  64 bytes
 //   - PC   pc ：model（per-draw，每 cube 不同）     64 bytes
 
-layout(binding = 0) uniform DeferredGeomShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform DeferredGeomShared {
     mat4 view_proj;
 } vsp;
 
+// vert/frag 共享同一 push constant 块，布局必须一致。texColorIndex/texNormalIndex 仅 FS 使用。
 layout(push_constant) uniform DeferredGeomPC {
     mat4 model;
+    uint texColorIndex;
+    uint texNormalIndex;
 } model_pc;
 
 layout(location = 0) in vec3 inPosition;

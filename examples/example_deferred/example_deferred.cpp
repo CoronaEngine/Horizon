@@ -325,8 +325,9 @@ void run_example_deferred()
     geom_rasterizer.outNormal = gbuffer_normal;
     geom_rasterizer.outDepthVal = gbuffer_depth_val;
     geom_rasterizer.bind_depth_target(gbuffer_depth);
-    geom_rasterizer.texColor = color_image;
-    geom_rasterizer.texNormal = normal_image;
+    // 纹理/ G-buffer 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
+    geom_rasterizer.model_pc.texColorIndex = color_image.store_descriptor();
+    geom_rasterizer.model_pc.texNormalIndex = normal_image.store_descriptor();
 
     // Pass 2：光照累加（加法混合、无深度）
     Corona::Horizon::RasterizerPipelineDesc light_desc;
@@ -344,8 +345,8 @@ void run_example_deferred()
 
     Corona::Horizon::RasterizerPipeline light_rasterizer(deferred_light_vert_glsl, deferred_light_frag_glsl, light_desc);
     light_rasterizer.outColor = light_buffer;
-    light_rasterizer.gNormal = gbuffer_normal;
-    light_rasterizer.gDepth = gbuffer_depth_val;
+    light_rasterizer.vpc.gNormalIndex = gbuffer_normal.store_descriptor();
+    light_rasterizer.vpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
 
     // Pass 3：合成
     Corona::Horizon::RasterizerPipelineDesc combine_desc;
@@ -355,8 +356,8 @@ void run_example_deferred()
 
     Corona::Horizon::RasterizerPipeline combine_rasterizer(deferred_combine_vert_glsl, deferred_combine_frag_glsl, combine_desc);
     combine_rasterizer.outColor = final_output_image;
-    combine_rasterizer.gAlbedo = gbuffer_albedo;
-    combine_rasterizer.gLight = light_buffer;
+    combine_rasterizer.fpc.gAlbedoIndex = gbuffer_albedo.store_descriptor();
+    combine_rasterizer.fpc.gLightIndex = light_buffer.store_descriptor();
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;

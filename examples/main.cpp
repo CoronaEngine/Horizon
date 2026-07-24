@@ -16,7 +16,7 @@
 
 int main(int argc, char **argv)
 {
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("ibl");
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("assao");
 
     if (mode == "baseline")
     {

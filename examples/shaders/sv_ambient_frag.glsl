@@ -3,7 +3,8 @@
 // 阴影体示例 pass 1：环境光底色（同时填充本 pass 的深度附件）。
 // UBO 同 sv_scene_vert.glsl（SvSceneShared），FS 不依赖 per-draw pc.model。
 
-layout(binding = 0) uniform SvSceneShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform SvSceneShared {
     mat4 proj_view;
     mat4 view_matrix;
     vec4 light_pos_vs;

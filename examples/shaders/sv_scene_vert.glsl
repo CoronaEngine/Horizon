@@ -6,7 +6,8 @@
 //   - UBO  vsp：批次共享（相机矩阵 + 所有光源/材质参数）256 bytes
 //   - PC   pc ：per-draw（model，每个物体不同）                 64 bytes
 
-layout(binding = 0) uniform SvSceneShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform SvSceneShared {
     mat4 proj_view;
     mat4 view_matrix;
     vec4 light_pos_vs;
@@ -19,8 +20,11 @@ layout(binding = 0) uniform SvSceneShared {
     vec4 params; // xy: 屏幕分辨率
 } vsp;
 
+// vert/frag 共享同一 push constant 块。shadowCountIndex 仅 lit pass 的 FS 使用，
+// ambient/depthval pass 忽略；三 pass 共用 vert，布局必须一致。
 layout(push_constant) uniform SvScenePC {
     mat4 model;
+    uint shadowCountIndex;
 } model_pc;
 
 layout(location = 0) in vec3 inPosition;

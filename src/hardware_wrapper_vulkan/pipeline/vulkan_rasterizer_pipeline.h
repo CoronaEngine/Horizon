@@ -45,7 +45,6 @@ namespace Corona::Horizon
             HardwareBuffer index_buffer {};
             HardwareBuffer vertex_buffer {};
             DrawIndexedParams params {};
-            std::vector<BoundImage> images;
             std::vector<std::byte> push_constant_data;
             std::vector<UniformBufferBindingData> uniform_buffers;
         };

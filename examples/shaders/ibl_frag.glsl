@@ -1,9 +1,12 @@
 #version 450
 
 // 移植自 bgfx examples/18-ibl 的 fs_ibl_mesh.sc + fs_ibl_skybox.sc。
-// uniform block 与 ibl_vert.glsl 完全一致（共用 binding=0，见 vert 注释）。
+// uniform block 与 ibl_vert.glsl 完全一致（共用 set 3 / binding 0，见 vert 注释）。
 
-layout(binding = 0) uniform IblShared {
+#extension GL_EXT_nonuniform_qualifier : enable
+
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform IblShared {
     mat4 proj_view;
     mat4 skyEnvMtx;
     mat4 envMtx;
@@ -15,14 +18,21 @@ layout(binding = 0) uniform IblShared {
     vec4 lightCol;
 } fsp;
 
+// 与 ibl_vert.glsl 共享同一 push constant 块，布局必须一致。
 layout(push_constant) uniform IblPC {
     mat4 model;
     vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
     vec4 misc;     // x: isSkybox, y: aspect, z: metalOrSpec
+    uint texCubeIndex;
+    uint texCubeIrrIndex;
 } fpc;
 
-layout(binding = 2) uniform samplerCube texCube;
-layout(binding = 3) uniform samplerCube texCubeIrr;
+// bindless 表（set 0 / binding 0）的 cube 别名：与 2D 表同一 descriptor（COMBINED_IMAGE_SAMPLER），
+// 视图类型由 VkImageView（cube）决定。cube 图与 2D 图共用同一索引空间。
+layout(set = 0, binding = 0) uniform samplerCube combinedCubeSamplerHandles[];
+
+#define texCube    combinedCubeSamplerHandles[fpc.texCubeIndex]
+#define texCubeIrr combinedCubeSamplerHandles[fpc.texCubeIrrIndex]
 
 layout(location = 0) in vec3 v_view;
 layout(location = 1) in vec3 v_normal;

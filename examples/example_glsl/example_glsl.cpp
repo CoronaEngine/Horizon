@@ -60,7 +60,8 @@ void run_example_glsl()
     Corona::Horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
-    rasterizer.texSampler = texture_image;
+    // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经 push constant 传入 shader。
+    rasterizer.pc.texIndex = texture_image.store_descriptor();
 
     // VP 不随帧变化（相机固定），绑定一次即可
     rasterizer.vp.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),

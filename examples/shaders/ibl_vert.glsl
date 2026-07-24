@@ -9,7 +9,8 @@
 //   - PC   vpc：per-draw（model、params0、misc）96 bytes（VS 用 vpc，FS 用 fpc 避免歧义）
 // mvp 在 VS 内由 vsp.proj_view * vpc.model 现场计算，不再存储。
 
-layout(binding = 0) uniform IblShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform IblShared {
     mat4 proj_view;  // proj * view，由 C++ 每帧写入
     mat4 skyEnvMtx;  // 天空盒路径：相机基向量 × 环境旋转
     mat4 envMtx;     // 网格路径：cube 采样方向的环境旋转
@@ -21,10 +22,14 @@ layout(binding = 0) uniform IblShared {
     vec4 lightCol;
 } vsp;
 
+// vert/frag 共享同一 push constant 块，布局必须一致。
+// texCubeIndex/texCubeIrrIndex 为 bindless combined-texture 表（set 0）索引，仅 FS 使用。
 layout(push_constant) uniform IblPC {
     mat4 model;    // 网格：per-draw model；天空盒：identity（不使用）
     vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
     vec4 misc;     // x: isSkybox, y: viewport 宽高比(w/h), z: metalOrSpec, w: unused
+    uint texCubeIndex;
+    uint texCubeIrrIndex;
 } vpc;
 
 layout(location = 0) in vec3 inPosition;

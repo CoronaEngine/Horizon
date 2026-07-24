@@ -3,7 +3,10 @@
 // 移植自参考示例 06-bump 的 fs_bump.sc：法线贴图 + 4 点光源（切线空间光照）。
 // FS 只需要共享的 vsp（UBO），不依赖 per-draw 的 pc.model。
 
-layout(binding = 0) uniform BumpShared {
+#extension GL_EXT_nonuniform_qualifier : enable
+
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform BumpShared {
     mat4 view_proj;
     vec4 eye_pos;
     vec4 light0_pos_radius;
@@ -16,8 +19,20 @@ layout(binding = 0) uniform BumpShared {
     vec4 light3_rgb_inner_r;
 } fsp;
 
-layout(binding = 2) uniform sampler2D texColor;
-layout(binding = 3) uniform sampler2D texNormal;
+// bindless combined-image-sampler 表（set 0）+ 与 bump_vert.glsl 共享的 push constant。
+layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
+
+// 与 bump_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 将 vert/frag 的
+// ResourceBindings 一并继承，故两个 stage 的 push constant 实例名必须不同，否则 C++
+// 端成员访问二义（C2385）。C++ 通过 vert 的 model_pc 写入，frag 用 model_pc_fs 只读。
+layout(push_constant) uniform BumpPC {
+    mat4 model;
+    uint texColorIndex;
+    uint texNormalIndex;
+} model_pc_fs;
+
+#define texColor  combinedTextureSamplerHandles[model_pc_fs.texColorIndex]
+#define texNormal combinedTextureSamplerHandles[model_pc_fs.texNormalIndex]
 
 layout(location = 0) in vec3 v_wpos;
 layout(location = 1) in vec3 v_view;

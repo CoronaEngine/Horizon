@@ -7,7 +7,8 @@
 //   - UBO  vsp：批次内共享（view_proj、eye_pos、4 组光源参数）208 bytes
 //   - PC   pc ：per-draw（model 矩阵，每个 cube 不同）          64 bytes
 
-layout(binding = 0) uniform BumpShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform BumpShared {
     mat4 view_proj;
     vec4 eye_pos;
     vec4 light0_pos_radius;
@@ -20,8 +21,12 @@ layout(binding = 0) uniform BumpShared {
     vec4 light3_rgb_inner_r;
 } vsp;
 
+// vert/frag 共享同一 push constant 块，布局必须一致。
+// texColorIndex/texNormalIndex 为 bindless combined-texture 表（set 0）索引，仅 FS 使用。
 layout(push_constant) uniform BumpPC {
     mat4 model;
+    uint texColorIndex;
+    uint texNormalIndex;
 } model_pc;
 
 layout(location = 0) in vec3 inPosition;

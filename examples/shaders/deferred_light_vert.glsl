@@ -6,15 +6,19 @@
 //   - UBO  vsp：inv_mvp + view（批次共享，所有光源相同的相机矩阵）128 bytes
 //   - PC   pc ：per-draw（light_pos_radius/light_rgb_inner_r/rect，每光不同）48 bytes
 
-layout(binding = 0) uniform DeferredLightShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform DeferredLightShared {
     mat4 inv_mvp;
     mat4 view;
 } vsp;
 
+// vert/frag 共享同一 push constant 块，布局必须一致。gNormalIndex/gDepthIndex 仅 FS 使用。
 layout(push_constant) uniform DeferredLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect; // xy: NDC min, zw: NDC max
+    uint gNormalIndex;
+    uint gDepthIndex;
 } vpc;
 
 layout(location = 0) in vec3 inCorner;

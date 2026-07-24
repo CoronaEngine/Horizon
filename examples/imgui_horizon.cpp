@@ -83,7 +83,8 @@ struct HorizonImGuiLayer::Impl
         , font_image(upload_font_atlas())
         , pipeline(imgui_vert_glsl, imgui_frag_glsl, make_ui_pipeline_desc())
     {
-        pipeline.texSampler = font_image;
+        // 字体图集存入 bindless 表（set 0），索引经 push constant 传入 shader。
+        pipeline.pc.texIndex = font_image.store_descriptor();
     }
 };
 

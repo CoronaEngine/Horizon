@@ -1,14 +1,17 @@
 #version 450
 
-// VP：全局 uniform buffer，每帧相机固定时只需绑定一次
-layout(set = 0, binding = 0) uniform ViewProj {
+// VP：全局 uniform buffer。set 0-2 为 Horizon bindless 保留集（0=纹理/1=storage buffer/
+// 2=storage image），普通 UBO 必须放在 set 3（与 EDSL bindless 约定一致）。
+layout(set = 3, binding = 0) uniform ViewProj {
     mat4 view;
     mat4 proj;
 } vp;
 
-// Model：push constant，每个 draw call 独立更新（64 bytes，符合 Vulkan 128 bytes 保证）
-layout(push_constant) uniform Model {
+// push constant：per-draw 的 model 矩阵 + bindless 纹理索引（texIndex）。
+// vert/frag 共享同一 push constant 块，布局必须一致。
+layout(push_constant) uniform PushConsts {
     mat4 model;
+    uint texIndex;
 } pc;
 
 layout(location = 0) in vec3 inPosition;

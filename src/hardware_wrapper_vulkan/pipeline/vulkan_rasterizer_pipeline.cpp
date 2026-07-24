@@ -315,11 +315,6 @@ namespace Corona::Horizon
             return write<BufferStore>(ResourceBridge::token(handle));
         }
 
-        [[nodiscard]] ImageStore::Read read_image_resource(const ResourceHandle& handle)
-        {
-            return read<ImageStore>(ResourceBridge::token(handle));
-        }
-
         [[nodiscard]] ImageStore::Write write_image_resource(const ResourceHandle& handle)
         {
             return write<ImageStore>(ResourceBridge::token(handle));
@@ -473,28 +468,6 @@ namespace Corona::Horizon
             append_reflected_uniform_buffers(buffers, desc.vertex_shader.module);
             append_reflected_uniform_buffers(buffers, desc.fragment_shader.module);
             return buffers;
-        }
-
-        void append_reflected_sampled_images(std::vector<std::pair<uint32_t, uint32_t>>& bindings,
-                                             const EmbeddedShader::ShaderCodeModule& module)
-        {
-            for (const auto& info : module.shaderResources.bindInfoPool)
-            {
-                if (!is_sampled_image_bind(static_cast<int32_t>(info.bindType)) || is_bindless_reserved_binding(info))
-                    continue;
-
-                auto found = std::ranges::find(bindings, std::pair<uint32_t, uint32_t> { info.set, info.binding });
-                if (found == bindings.end())
-                    bindings.push_back({ info.set, info.binding });
-            }
-        }
-
-        [[nodiscard]] std::vector<std::pair<uint32_t, uint32_t>> reflected_sampled_images(const RasterizerPipelineDesc& desc)
-        {
-            std::vector<std::pair<uint32_t, uint32_t>> bindings;
-            append_reflected_sampled_images(bindings, desc.vertex_shader.module);
-            append_reflected_sampled_images(bindings, desc.fragment_shader.module);
-            return bindings;
         }
 
         void write_uniform_member(std::vector<UniformBufferBindingData>& buffers,
@@ -931,11 +904,6 @@ namespace Corona::Horizon
                 add_descriptor_binding(uniform_buffer.set, uniform_buffer.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
             }
 
-            for (const auto& [set, binding] : reflected_sampled_images(desc_))
-            {
-                add_descriptor_binding(set, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-            }
-
             std::ranges::sort(state.descriptor_set_layouts, [](const auto& left, const auto& right) {
                 return left.set < right.set;
             });
@@ -1178,26 +1146,21 @@ namespace Corona::Horizon
         descriptor_owner->device = device;
 
         uint32_t uniform_buffer_count = 0;
-        uint32_t sampled_image_count = 0;
         for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
         {
             for (const PipelineState::DescriptorBindingLayout& binding : set_layout.bindings)
             {
                 if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                     ++uniform_buffer_count;
-                else if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    ++sampled_image_count;
             }
         }
 
-        if (uniform_buffer_count == 0 && sampled_image_count == 0)
+        if (uniform_buffer_count == 0)
             return prepared;
 
         std::vector<VkDescriptorPoolSize> pool_sizes;
         if (uniform_buffer_count != 0)
             pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniform_buffer_count });
-        if (sampled_image_count != 0)
-            pool_sizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampled_image_count });
 
         VkDescriptorPoolCreateInfo pool_info {};
         pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1251,11 +1214,9 @@ namespace Corona::Horizon
         }
 
         std::vector<VkDescriptorBufferInfo> buffer_infos;
-        std::vector<VkDescriptorImageInfo> image_infos;
         std::vector<VkWriteDescriptorSet> writes;
         buffer_infos.reserve(uniform_buffer_count);
-        image_infos.reserve(sampled_image_count);
-        writes.reserve(uniform_buffer_count + sampled_image_count);
+        writes.reserve(uniform_buffer_count);
 
         for (size_t set_index = 0; set_index < found->descriptor_set_layouts.size(); ++set_index)
         {
@@ -1291,28 +1252,6 @@ namespace Corona::Horizon
                     buffer_infos.push_back(info);
                     write.pBufferInfo = &buffer_infos.back();
                     // gpu_buffer 由 pipeline / draw 持有，无需 descriptor_owner 延长 lifetime
-                }
-                else if (binding_layout.descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                {
-                    auto resource = std::ranges::find_if(draw.bindings, [&](const DrawResourceBinding& item) {
-                        return item.kind == DrawBindingKind::SampledImage &&
-                               item.set == binding_layout.set &&
-                               item.binding == binding_layout.binding;
-                    });
-                    if (resource == draw.bindings.end())
-                        throw std::logic_error("RasterizerPipeline sampled image descriptor is missing a draw resource.");
-
-                    ImageStore::Read image = read_image_resource(resource->resource);
-                    if (!image || image->image_view == VK_NULL_HANDLE)
-                        throw std::logic_error("RasterizerPipeline sampled image binding requires a valid HardwareImage.");
-
-                    ResourceManager* manager = image->resource_manager != nullptr ? image->resource_manager : &resource_manager();
-                    VkDescriptorImageInfo info {};
-                    info.sampler = manager->default_sampler();
-                    info.imageView = image->image_view;
-                    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                    image_infos.push_back(info);
-                    write.pImageInfo = &image_infos.back();
                 }
                 else
                 {
@@ -1631,11 +1570,6 @@ namespace Corona::Horizon
         draw.params = normalize_draw_params(index_buffer, params);
 
         std::lock_guard lock(mutex_);
-        for (const BoundImage& image : bound_images_)
-        {
-            if (is_sampled_image_bind(image.bind_type) && !is_stage_output(image.bind_type) && image.image)
-                draw.images.push_back(image);
-        }
         draw.push_constant_data = push_constant_data_;
         // UBO 是批次公共数据，所有 draw 共享同一持久 buffer（gpu_buffer 句柄浅拷贝）。
         // 批次内写入直接原地替换 byte，无需隔离副本。
@@ -1717,19 +1651,6 @@ namespace Corona::Horizon
             }
             draw_desc.push_constant_data = draw.push_constant_data;
             draw_desc.uniform_buffers = draw.uniform_buffers;
-            for (const BoundImage& image : draw.images)
-            {
-                ResourceHandle handle = static_cast<const ResourceHandle&>(image.image);
-                draw_desc.bindings.push_back(
-                    {
-                        .set = image.set,
-                        .binding = image.binding,
-                        .resource = handle,
-                        .kind = DrawBindingKind::SampledImage,
-                        .access = AccessKind::Read,
-                    });
-                draw_desc.resource_uses.push_back({ handle, AccessKind::Read, 0 });
-            }
 
             batch << draw_indexed(buffer_ref(draw.index_buffer),
                                   buffer_ref(draw.vertex_buffer),
@@ -1799,21 +1720,6 @@ namespace Corona::Horizon
             draw_desc.pipeline = draw.pipeline;
             draw_desc.push_constant_data = std::move(draw.push_constant_data);
             draw_desc.uniform_buffers = std::move(draw.uniform_buffers);
-            draw_desc.bindings.reserve(draw.images.size());
-            draw_desc.resource_uses.reserve(draw.images.size());
-            for (const BoundImage& image : draw.images)
-            {
-                ResourceHandle handle = static_cast<const ResourceHandle&>(image.image);
-                draw_desc.bindings.push_back(
-                    {
-                        .set = image.set,
-                        .binding = image.binding,
-                        .resource = handle,
-                        .kind = DrawBindingKind::SampledImage,
-                        .access = AccessKind::Read,
-                    });
-                draw_desc.resource_uses.push_back({ handle, AccessKind::Read, 0 });
-            }
             batch.draws.push_back({
                 .index = buffer_ref(draw.index_buffer),
                 .vertex = buffer_ref(draw.vertex_buffer),

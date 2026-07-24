@@ -1,6 +1,7 @@
 #version 450
 
-layout(binding = 0) uniform UiTransform {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform UiTransform {
     vec2 scale;
     vec2 translate;
 } ubo;

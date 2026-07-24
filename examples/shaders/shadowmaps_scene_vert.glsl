@@ -7,7 +7,8 @@
 //   - PC   pc ：per-draw（model 矩阵，64 bytes）
 // mvp / model_view / light_mtx 在 VS 内从 vsp.proj_view * pc.model 等现场计算。
 
-layout(binding = 0) uniform ShadowSceneShared {
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform ShadowSceneShared {
     mat4 proj_view;       // proj * view（CPU 侧预乘）
     mat4 view_matrix;     // view 矩阵（用于法线/视线变换）
     mat4 light_proj_view; // bias * light_proj * light_view（CPU 侧预乘）
@@ -24,8 +25,10 @@ layout(binding = 0) uniform ShadowSceneShared {
     vec4 color;
 } vsp;
 
+// vert/frag 共享同一 push constant 块，布局必须一致。shadowMapIndex 仅 FS 使用。
 layout(push_constant) uniform ShadowScenePC {
     mat4 model; // per-draw
+    uint shadowMapIndex;
 } model_pc;
 
 layout(location = 0) in vec3 inPosition;

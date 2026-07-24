@@ -291,7 +291,8 @@ void run_example_shadowmaps()
     Corona::Horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert_glsl, shadowmaps_scene_frag_glsl, scene_desc);
     scene_rasterizer.outColor = final_output_image;
     scene_rasterizer.bind_depth_target(depth_image);
-    scene_rasterizer.shadowMap = shadow_map_image;
+    // shadow map 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
+    scene_rasterizer.model_pc.shadowMapIndex = shadow_map_image.store_descriptor();
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;

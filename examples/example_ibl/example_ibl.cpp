@@ -603,8 +603,10 @@ void run_example_ibl()
         // 帧内共享的绑定与 uniform（UBO，record 前写入一次即可）。
         // VS/FS 共用同一个 binding=0 的 IblShared block，经 vsp 代理写入。
         // per-draw 数据（model、params0、misc）通过 push constant pc 写入。
-        rasterizer.texCube = probe.lod;
-        rasterizer.texCubeIrr = probe.irr;
+        // cube 图存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
+        // store_descriptor 幂等（首帧写入后缓存索引），逐帧调用无额外开销。
+        rasterizer.vpc.texCubeIndex = probe.lod.store_descriptor();
+        rasterizer.vpc.texCubeIrrIndex = probe.irr.store_descriptor();
         rasterizer.vsp.proj_view = proj * view;   // NEW：VS 内算 mvp = proj_view * pc.model
         rasterizer.vsp.camPos = glm::vec4(cam_pos, 1.0f);
         rasterizer.vsp.flags = glm::vec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
