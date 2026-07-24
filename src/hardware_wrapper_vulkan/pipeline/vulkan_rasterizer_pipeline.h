@@ -88,17 +88,21 @@ namespace Corona::Horizon
 
         struct PreparedDraw
         {
-            struct DescriptorSet
+            // 每 draw 的非 bindless UBO 通过 push descriptor 直接写入命令缓冲，
+            // 不再分配 transient descriptor pool / set。writes 已按 set 升序、
+            // 同 set 内按 binding 升序排列，execution 侧可按 set 分组推送。
+            struct PushUniformBuffer
             {
                 uint32_t set { 0 };
-                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
+                uint32_t binding { 0 };
+                VkBuffer buffer { VK_NULL_HANDLE };
+                VkDeviceSize range { 0 };
             };
 
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
             bool uses_bindless { false };
-            std::vector<DescriptorSet> descriptor_sets;
-            std::shared_ptr<void> descriptor_set_lifetime {};
+            std::vector<PushUniformBuffer> push_uniform_buffers;
         };
 
         [[nodiscard]] GraphicsPipeline graphics_pipeline(VkDevice device,

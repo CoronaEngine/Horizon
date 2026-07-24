@@ -1480,18 +1480,44 @@ namespace Corona::Horizon
                                         nullptr);
             }
 
-            for (const VulkanRasterizerPipeline::PreparedDraw::DescriptorSet& descriptor_set : prepared.descriptor_sets)
+            // 每 draw 的非 bindless UBO 通过 push descriptor 写入命令缓冲，
+            // 无需 transient descriptor pool。push_uniform_buffers 已按 set 分组、
+            // 组内按 binding 有序，逐 set 组装 writes 后一次推送。
+            for (size_t begin = 0; begin < prepared.push_uniform_buffers.size();)
             {
-                if (descriptor_set.descriptor_set == VK_NULL_HANDLE)
-                    continue;
-                vkCmdBindDescriptorSets(command_buffer,
-                                        VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                        prepared.layout,
-                                        descriptor_set.set,
-                                        1,
-                                        &descriptor_set.descriptor_set,
-                                        0,
-                                        nullptr);
+                const uint32_t current_set = prepared.push_uniform_buffers[begin].set;
+                size_t end = begin;
+                std::array<VkDescriptorBufferInfo, 16> buffer_infos {};
+                std::array<VkWriteDescriptorSet, 16> writes {};
+                uint32_t count = 0;
+                while (end < prepared.push_uniform_buffers.size() &&
+                       prepared.push_uniform_buffers[end].set == current_set &&
+                       count < buffer_infos.size())
+                {
+                    const auto& ubo = prepared.push_uniform_buffers[end];
+                    buffer_infos[count] = VkDescriptorBufferInfo {
+                        .buffer = ubo.buffer,
+                        .offset = 0,
+                        .range = ubo.range,
+                    };
+                    VkWriteDescriptorSet& write = writes[count];
+                    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    write.dstBinding = ubo.binding;
+                    write.dstArrayElement = 0;
+                    write.descriptorCount = 1;
+                    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    write.pBufferInfo = &buffer_infos[count];
+                    ++count;
+                    ++end;
+                }
+
+                vkCmdPushDescriptorSet(command_buffer,
+                                       VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                       prepared.layout,
+                                       current_set,
+                                       count,
+                                       writes.data());
+                begin = end;
             }
 
             VkBuffer vertex_buffer = vertex->buffer_handle;
@@ -1508,9 +1534,6 @@ namespace Corona::Horizon
                                    static_cast<uint32_t>(draw.push_constant_data.size()),
                                    draw.push_constant_data.data());
             }
-            if (prepared.descriptor_set_lifetime)
-                submission.keep_alive.add_object(prepared.descriptor_set_lifetime);
-
             VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
             if (scissor.extent.width == 0 || scissor.extent.height == 0)
                 return;
