@@ -638,6 +638,9 @@ namespace Corona::Horizon
         uint32_t multiview_count = 1;
 
         bool clear_color_target = true;
+        // When a depth target is bound, clear it at pass begin unless the caller opts out
+        // (needed for landscape-then-sky with depth Equal on the sky pass).
+        bool clear_depth_target = true;
 
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
@@ -668,6 +671,8 @@ namespace Corona::Horizon
             blend = std::move(state.blend);
             multisample = std::move(state.multisample);
             multiview_count = state.multiview_count;
+            clear_color_target = state.clear_color_target;
+            clear_depth_target = state.clear_depth_target;
             debug_name = std::move(state.debug_name);
         }
 
