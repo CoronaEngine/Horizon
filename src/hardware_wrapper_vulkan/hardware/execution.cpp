@@ -1884,11 +1884,19 @@ namespace Corona::Horizon
                         throw std::logic_error("BeginRendering requires a valid color HardwareImage.");
 
                     const bool clear_attachment = rendering.clear_color || color->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    // LOAD_OP_LOAD 会在 COLOR_ATTACHMENT_OUTPUT 阶段读取既有内容，所以布局转换
+                    // 本身（它是一次写）必须让后续的读可见；只给 WRITE 会被同步校验判为
+                    // READ_AFTER_WRITE（例如 assao：present 后的 PRESENT_SRC → COLOR_ATTACHMENT_OPTIMAL
+                    // 紧接一次 LOAD）。CLEAR 不读旧内容，无需 READ。
+                    VkAccessFlags2 color_dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+                    if (!clear_attachment)
+                        color_dst_access |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
+
                     transition_image(command_buffer,
                                      *color,
                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+                                     color_dst_access);
 
                     VkRenderingAttachmentInfo& color_attachment = color_attachments[color_attachment_count];
                     color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1912,11 +1920,16 @@ namespace Corona::Horizon
                         throw std::logic_error("BeginRendering requires a valid depth HardwareImage.");
 
                     const bool clear_attachment = rendering.clear_depth || depth->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    // 同 color：LOAD_OP_LOAD 的深度读发生在 EARLY_FRAGMENT_TESTS，转换需一并放开 READ。
+                    VkAccessFlags2 depth_dst_access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                    if (!clear_attachment)
+                        depth_dst_access |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+
                     transition_image(command_buffer,
                                      *depth,
                                      VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+                                     depth_dst_access);
 
                     depth_attachment.imageView = depth->image_view;
                     depth_attachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
