@@ -10,7 +10,7 @@
 #include "example_shadowmaps/example_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_assao/example_assao.h"
-#include "example_sky/example_sky.h"
+// #include "example_sky/example_sky.h"
 #include "example_edsl_sky/example_edsl_sky.h"
 
 #include <iostream>
