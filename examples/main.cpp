@@ -84,11 +84,11 @@ int main(int argc, char **argv)
         run_example_assao();
         return 0;
     }
-    if (mode == "sky")
-    {
-        run_example_sky();
-        return 0;
-    }
+    // if (mode == "sky")
+    // {
+    //     run_example_sky();
+    //     return 0;
+    // }
     if (mode == "edsl_sky")
     {
         run_example_edsl_sky();
