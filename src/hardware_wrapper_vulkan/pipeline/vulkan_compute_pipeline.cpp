@@ -1,5 +1,6 @@
 #include "vulkan_compute_pipeline.h"
 
+#include "hardware_wrapper_vulkan/frame_ring.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/hardware/execution_profile.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
@@ -8,6 +9,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -445,21 +447,9 @@ namespace Corona::Horizon
             push_constant_data_.resize(constant_size);
         uniform_buffers_ = reflected_uniform_buffers(desc_.compute_shader.module);
 
-        // 为每个 UBO binding 创建持久 GPU buffer（HOST_VISIBLE，之后只 write_bytes）
-        ubo_buffers_.reserve(uniform_buffers_.size());
-        for (auto& ubo : uniform_buffers_)
-        {
-            if (ubo.data.empty())
-            {
-                ubo_buffers_.emplace_back();
-                continue;
-            }
-            HardwareBuffer buf = HardwareBuffer::from_bytes(
-                std::span<const std::byte>(ubo.data),
-                1, BufferUsageFlags::Uniform, "ComputePipeline.ubo_persistent");
-            ubo.gpu_buffer = buf;   // ResourceHandle 切片，用于 dispatch 路径
-            ubo_buffers_.push_back(std::move(buf));
-        }
+        // UBO 环在首次 sync_ubo_slot_unlocked() 时惰性创建：构造这里交换链可能
+        // 还没建好，frame_ring_size() 还是 1。
+        ubo_rings_.resize(uniform_buffers_.size());
     }
 
     VulkanComputePipeline::~VulkanComputePipeline()
@@ -886,22 +876,9 @@ namespace Corona::Horizon
 
         if (is_uniform_buffer_member(bind_type))
         {
+            // 只写 CPU 影子并置脏，flush 推迟到 snapshot()（那里才知道本帧槽）。
             write_uniform_member(uniform_buffers_, set, binding, byte_offset, data, size);
-
-            // 同步 flush 到持久 GPU buffer（HOST_VISIBLE，memcpy 级开销）
-            auto it = std::ranges::find_if(uniform_buffers_, [&](const UniformBufferBindingData& u) {
-                return u.set == set && u.binding == binding;
-            });
-            if (it == uniform_buffers_.end() && uniform_buffers_.size() == 1)
-                it = uniform_buffers_.begin();
-            if (it != uniform_buffers_.end())
-            {
-                const size_t idx = static_cast<size_t>(std::distance(uniform_buffers_.begin(), it));
-                if (idx < ubo_buffers_.size() && ubo_buffers_[idx])
-                    ubo_buffers_[idx].write_bytes(
-                        std::span<const std::byte>(static_cast<const std::byte*>(data), size),
-                        byte_offset);
-            }
+            ubo_dirty_ = true;
             return;
         }
     }
@@ -1030,12 +1007,70 @@ namespace Corona::Horizon
             *found = std::move(value);
     }
 
+    void VulkanComputePipeline::sync_ubo_slot_unlocked() const
+    {
+        if (uniform_buffers_.empty())
+            return;
+
+        const uint32_t ring_size = std::max(1u, frame_ring_size());
+        const int64_t slot = static_cast<int64_t>(frame_ring_slot() % ring_size);
+
+        if (ubo_rings_.size() != uniform_buffers_.size())
+            ubo_rings_.resize(uniform_buffers_.size());
+
+        bool ring_ready = true;
+        for (size_t i = 0; i < uniform_buffers_.size(); ++i)
+        {
+            if (uniform_buffers_[i].data.empty())
+                continue;
+            if (ubo_rings_[i].size() < ring_size)
+            {
+                ring_ready = false;
+                break;
+            }
+        }
+        if (ring_ready && !ubo_dirty_ && slot == ubo_slot_)
+            return;
+
+        for (size_t i = 0; i < uniform_buffers_.size(); ++i)
+        {
+            UniformBufferBindingData& ubo = uniform_buffers_[i];
+            if (ubo.data.empty())
+                continue;
+
+            std::vector<HardwareBuffer>& ring = ubo_rings_[i];
+            // 环只增不减：已有 buffer 可能仍被在飞的命令缓冲引用。
+            while (ring.size() < ring_size)
+                ring.push_back(HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(ubo.data),
+                    1, BufferUsageFlags::Uniform, "ComputePipeline.ubo_persistent"));
+
+            HardwareBuffer& target = ring[static_cast<size_t>(slot)];
+            // 换槽时整份写：该槽上一次装的是第 i-N 帧的数据。
+            (void)target.write_bytes(std::span<const std::byte>(ubo.data), 0);
+            ubo.gpu_buffer = target;
+        }
+
+        ubo_slot_ = slot;
+        ubo_dirty_ = false;
+    }
+
     VulkanComputePipeline::Snapshot VulkanComputePipeline::snapshot() const
     {
         std::lock_guard lock(mutex_);
+        sync_ubo_slot_unlocked();
+
         DispatchDesc dispatch = dispatch_;
         dispatch.push_constant_data = push_constant_data_;
-        dispatch.uniform_buffers = uniform_buffers_;
+        // 只带 execution 需要的 (set, binding, gpu_buffer)，不拷 CPU 影子数据。
+        dispatch.uniform_buffers.clear();
+        dispatch.uniform_buffers.reserve(uniform_buffers_.size());
+        for (const UniformBufferBindingData& ubo : uniform_buffers_)
+        {
+            if (ubo.data.empty())
+                continue;
+            dispatch.uniform_buffers.push_back({ .set = ubo.set, .binding = ubo.binding, .data = {}, .gpu_buffer = ubo.gpu_buffer });
+        }
 
         return {
             .dispatch = std::move(dispatch),
@@ -1107,8 +1142,8 @@ namespace Corona::Horizon
             return found->descriptor_set;
 
         // 签名未见过：新分配一份并写入一次。已分配的 set 从不被重写，因为 in-flight
-        // 命令缓冲可能仍绑定着它。稳态下每个 set layout 只会有一份（UBO buffer 在构造
-        // 期建好后句柄恒定），上限仅作兜底。
+        // 命令缓冲可能仍绑定着它。稳态下每个 set layout 有 N 份（N = 帧环长 = 交换链
+        // 图像数，每个 UBO 帧槽一个 buffer 句柄 = 一个签名），上限仅作兜底。
         constexpr size_t max_uniform_sets_per_layout = 64;
         if (set_layout.uniform_sets.size() >= max_uniform_sets_per_layout)
         {

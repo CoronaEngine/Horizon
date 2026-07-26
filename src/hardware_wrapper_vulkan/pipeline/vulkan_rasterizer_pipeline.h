@@ -47,7 +47,6 @@ namespace Corona::Horizon
             HardwareBuffer vertex_buffer {};
             DrawIndexedParams params {};
             std::vector<std::byte> push_constant_data;
-            std::vector<UniformBufferBindingData> uniform_buffers;
         };
 
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
@@ -170,6 +169,9 @@ namespace Corona::Horizon
             const std::string& debug_name);
         [[nodiscard]] PipelineState create_graphics_pipeline_unlocked(const PipelineKey& key) const;
         void destroy_pipeline_cache_unlocked() noexcept;
+        // 把 uniform_buffers_ 的 CPU 影子数据落到本帧槽的持久 buffer，并让
+        // gpu_buffer 指向该槽。槽未变且影子未脏时是空操作。
+        void sync_ubo_slot_unlocked() const;
 
         RasterizerPipelineDesc desc_;
         std::source_location source_location_;
@@ -178,9 +180,16 @@ namespace Corona::Horizon
         uint32_t width_ { 0 };
         uint32_t height_ { 0 };
         std::vector<std::byte> push_constant_data_;
-        std::vector<UniformBufferBindingData> uniform_buffers_;
-        // 与 uniform_buffers_ 同序的持久 GPU buffer，初始化时创建，批次内写入原地替换
-        std::vector<HardwareBuffer> ubo_buffers_;
+        // CPU 影子数据 + 本帧槽的 gpu_buffer 句柄。setter 只写影子并置脏，
+        // 真正的 flush 推迟到 build_draw_plan()（const，故 mutable）。
+        mutable std::vector<UniformBufferBindingData> uniform_buffers_;
+        // 与 uniform_buffers_ 同序的持久 GPU buffer 环，每条 binding 一环、
+        // 环长 = frame_ring_size()。K 帧在飞时第 i 帧写槽 i%N，不会覆写仍在飞的
+        // 第 i-1..i-N+1 帧读的槽。首次 sync 时按当时的环长惰性建好。
+        mutable std::vector<std::vector<HardwareBuffer>> ubo_rings_;
+        // 上次 sync 使用的槽；-1 表示还没 sync 过。
+        mutable int64_t ubo_slot_ { -1 };
+        mutable bool ubo_dirty_ { true };
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;

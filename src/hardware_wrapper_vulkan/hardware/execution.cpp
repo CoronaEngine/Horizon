@@ -2251,6 +2251,10 @@ namespace Corona::Horizon
             CompiledSubmission& compiled_submission = plan.submissions[submission_index];
 
             std::vector<PreparedQueuePresent> prepared_presents;
+            // prepare_present 没给出可提交帧的 manager（最小化 / acquire 超时 / 无
+            // present queue）。命令依然提交给了 GPU，帧环必须照样推进并设卡，
+            // 否则下一帧 CPU 会覆写仍在飞的 UBO 槽。
+            std::vector<std::shared_ptr<DisplayManager>> skipped_managers;
             std::vector<SubmitWait> present_waits;
             std::vector<SubmitSignal> present_signals;
             Queue* present_queue = nullptr;
@@ -2292,6 +2296,7 @@ namespace Corona::Horizon
                     {
                         present_results->push_back(std::move(prepared.immediate_result));
                     }
+                    skipped_managers.push_back(std::move(manager));
                     ++present_index;
                     continue;
                 }
@@ -2310,6 +2315,7 @@ namespace Corona::Horizon
                     {
                         present_results->push_back(skipped_present(desc, "DisplayManager has no present queue for this present."));
                     }
+                    skipped_managers.push_back(std::move(manager));
                     ++present_index;
                     continue;
                 }
@@ -2449,6 +2455,18 @@ namespace Corona::Horizon
                 if (present_results != nullptr)
                 {
                     present_results->push_back(std::move(result));
+                }
+            }
+
+            // 没能 present 的 manager：帧环照样推进并等它的第 N 帧前的卡。
+            if (!tokens.empty())
+            {
+                for (std::shared_ptr<DisplayManager>& manager : skipped_managers)
+                {
+                    if (manager)
+                    {
+                        manager->note_skipped_frame(tokens.back());
+                    }
                 }
             }
         }

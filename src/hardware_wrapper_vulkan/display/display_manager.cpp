@@ -10,13 +10,16 @@
 #include "horizon_profiling.h"
 
 #include "hardware_wrapper/diagnostics.h"
+#include "hardware_wrapper_vulkan/frame_ring.h"
 #include "hardware_wrapper_vulkan/hardware/device_manager.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
@@ -397,9 +400,12 @@ namespace Corona::Horizon
             return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         }
 
+        // 帧槽预算（见 frame_ring.h）已经限住了在飞帧数，acquire 至多阻塞到显示
+        // 引擎交还一张图像——FIFO 下约一个 vblank，这正是期望的 vsync 节流。
+        // 保留有限超时只为在 present 异常时不至于死等。
         [[nodiscard]] constexpr uint64_t swapchain_acquire_timeout_ns() noexcept
         {
-            return 1'000'000;
+            return 1'000'000'000;
         }
 
     }
@@ -581,6 +587,7 @@ namespace Corona::Horizon
             image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         }
 
+        swapchain_min_image_count_ = capabilities.minImageCount;
         uint32_t image_count = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount != 0 && image_count > capabilities.maxImageCount)
         {
@@ -639,17 +646,35 @@ namespace Corona::Horizon
             throw std::runtime_error("DisplayManager cannot create present sync objects without swapchain images.");
         }
 
-        image_available_.resize(swapchain_images_.size());
-        render_finished_.resize(swapchain_images_.size());
-        submitted_frames_.clear();
-        submitted_frames_.resize(swapchain_images_.size());
         present_tokens_.clear();
         present_tokens_.resize(swapchain_images_.size());
+
+        // N（实际交换链图像数）是唯一的那个数：帧槽数、UBO 环长、在飞预算都取它。
+        publish_frame_ring_size(static_cast<uint32_t>(swapchain_images_.size()));
+
+        // 信号量按帧槽索引，所以要按环长分配而不是按交换链图像数：环只增不减，
+        // 若后来的交换链图像变少，按图像数分配会让两个帧槽共用一个信号量（其中
+        // 一个可能还挂着未完成的 wait）。
+        image_available_.resize(frame_ring_size());
+        render_finished_.resize(frame_ring_size());
+        // 只增长、不清空：重建交换链时上一批帧可能仍在飞（渲染队列不一定是 present
+        // 队列，destroy_swapchain 的 wait_idle 只覆盖后者），丢掉它们的 token 会让
+        // 接下来 N 帧不设卡，直接覆写仍在读的 UBO 槽。
+        if (submitted_frames_.size() < frame_ring_size())
+        {
+            submitted_frames_.resize(frame_ring_size());
+        }
+        Diagnostics::write(Diagnostics::Level::Info,
+                           "HORIZON VALIDATION",
+                           "Swapchain image count N=" + std::to_string(swapchain_images_.size()) +
+                               " (minImageCount=" + std::to_string(swapchain_min_image_count_) +
+                               "); frame ring size=" + std::to_string(frame_ring_size()) + ".");
 
         VkSemaphoreCreateInfo create_info {};
         create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        for (size_t index = 0; index < swapchain_images_.size(); ++index)
+        // 遍历整个数组（长度 = 环长），不是交换链图像数：resize 补出来的槽也要建。
+        for (size_t index = 0; index < image_available_.size(); ++index)
         {
             throw_if_failed(vkCreateSemaphore(device_, &create_info, nullptr, &image_available_[index]), "vkCreateSemaphore(image_available)");
             name_vulkan_object(device_,
@@ -664,62 +689,83 @@ namespace Corona::Horizon
         }
     }
 
-    bool DisplayManager::reclaim_frame(uint32_t frame_index)
+    std::optional<SubmissionToken> DisplayManager::rotate_frame_unlocked(const SubmissionToken& producer)
     {
-        if (present_queue_ == nullptr || frame_index >= submitted_frames_.size())
+        if (submitted_frames_.size() < frame_ring_size())
         {
-            return true;
+            // 首帧，或交换链重建把 N 抬高了。只增不减，既有槽的内容全部保留。
+            submitted_frames_.resize(frame_ring_size());
         }
 
-        std::optional<SubmissionToken>& token = submitted_frames_[frame_index];
-        if (!token)
-        {
-            return true;
-        }
+        // 槽号一律按 frame_ring_size() 取模（submitted_frames_ 可能比环更长），
+        // 这样它和各管线 UBO 环用的是同一个槽号。
+        const uint32_t current_slot = frame_ring_slot();
+        submitted_frames_[current_slot] = producer;
 
-        if (!token->has_sync() || token->value == 0)
+        advance_frame_ring();
+
+        const uint32_t next_slot = frame_ring_slot();
+        std::optional<SubmissionToken> gate = submitted_frames_[next_slot];
+        submitted_frames_[next_slot].reset();
+        return gate;
+    }
+
+    void DisplayManager::await_frame_slot(const std::optional<SubmissionToken>& token) const
+    {
+        // 这就是整个管线唯一的 CPU 节流点。等的是"N 帧之前那一帧"，不是上一帧，
+        // 所以 CPU 得以领先 N-1 帧；等完之后下一帧写 UBO 环的那个槽必然空闲。
+        if (!token || !token->has_sync() || token->value == 0)
         {
-            token.reset();
-            return true;
+            return;
         }
 
         Queue* submitted_queue = device_manager_ == nullptr ? nullptr : device_manager_->queue_by_id(token->queue);
         if (submitted_queue == nullptr)
         {
-            token.reset();
-            return true;
+            return;
         }
 
-        const uint64_t completed = completed_value_for_token(*submitted_queue, *token);
-        if (completed < token->value)
+        HORIZON_PROFILE_SCOPE_N("display::await_frame_slot");
+        // [TEMP INSTRUMENTATION] 统计闸门实际阻塞的频率与时长。
+        static std::atomic<uint64_t> gate_total { 0 };
+        static std::atomic<uint64_t> gate_blocked { 0 };
+        static std::atomic<uint64_t> gate_blocked_us { 0 };
+
+        gate_total.fetch_add(1, std::memory_order_relaxed);
+        if (completed_value_for_token(*submitted_queue, *token) < token->value)
         {
-            return false;
+            const auto block_start = std::chrono::steady_clock::now();
+            submitted_queue->wait_for(*token);
+            const auto blocked_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - block_start).count();
+            gate_blocked.fetch_add(1, std::memory_order_relaxed);
+            gate_blocked_us.fetch_add(static_cast<uint64_t>(blocked_us), std::memory_order_relaxed);
         }
 
+        const uint64_t total = gate_total.load(std::memory_order_relaxed);
+        if (total % 300 == 0)
+        {
+            const uint64_t blocked = gate_blocked.load(std::memory_order_relaxed);
+            const uint64_t blocked_us = gate_blocked_us.load(std::memory_order_relaxed);
+            Diagnostics::write(Diagnostics::Level::Info,
+                               "HORIZON GATE",
+                               "frames=" + std::to_string(total) +
+                                   " blocked=" + std::to_string(blocked) +
+                                   " (" + std::to_string(blocked * 100 / total) + "%)" +
+                                   " avg_block=" + std::to_string(blocked == 0 ? 0 : blocked_us / blocked) + "us" +
+                                   " avg_per_frame=" + std::to_string(blocked_us / total) + "us");
+        }
         submitted_queue->retire_completed();
-        token.reset();
-        return true;
     }
 
-    std::optional<uint32_t> DisplayManager::find_reusable_frame()
+    void DisplayManager::note_skipped_frame(const SubmissionToken& producer)
     {
-        if (image_available_.empty())
+        std::optional<SubmissionToken> gate;
         {
-            return std::nullopt;
+            std::lock_guard lock(mutex_);
+            gate = rotate_frame_unlocked(producer);
         }
-
-        const uint32_t frame_count = static_cast<uint32_t>(image_available_.size());
-        for (uint32_t offset = 0; offset < frame_count; ++offset)
-        {
-            const uint32_t frame = (frame_index_ + offset) % frame_count;
-            if (reclaim_frame(frame))
-            {
-                frame_index_ = frame;
-                return frame;
-            }
-        }
-
-        return std::nullopt;
+        await_frame_slot(gate);
     }
 
     SwapchainAcquire DisplayManager::acquire_next_image()
@@ -746,15 +792,10 @@ namespace Corona::Horizon
             return acquire;
         }
 
-        std::optional<uint32_t> reusable_frame = find_reusable_frame();
-        if (!reusable_frame)
-        {
-            acquire.status = PresentStatus::Skipped;
-            acquire.message = "No reusable swapchain acquire semaphore is available yet.";
-            return acquire;
-        }
-
-        const uint32_t frame = *reusable_frame;
+        // 槽位是确定的，不再搜索：上一帧 present 末尾的 await_frame_slot 已经保证
+        // 本槽的上一次占用者（N 帧之前那帧）GPU 已完成，故 image_available_[frame]
+        // 无人再等待，可以安全复用。image_available_ 按环长分配，取模只是兜底。
+        const uint32_t frame = frame_ring_slot() % static_cast<uint32_t>(image_available_.size());
         acquire.frame_index = frame;
 
         const VkResult result = vkAcquireNextImageKHR(device_,
@@ -908,14 +949,31 @@ namespace Corona::Horizon
         // 每次 present 视为一帧结束，作为 Tracy 时间轴上的帧分隔。
         // 注意：多窗口时各窗口的 present 会混在同一条帧时间轴上。
         HORIZON_PROFILE_FRAME();
-        std::lock_guard lock(mutex_);
 
+        // 两段式：锁内做 present 并算出 gate，锁外等 gate。帧环推进对每条退出路径
+        // 都必须发生——渲染命令已经提交给 GPU 了，漏一次推进就会让下一帧 CPU 覆写
+        // 仍在飞的 UBO 槽。
+        std::optional<SubmissionToken> gate;
+        PresentResult result;
+        {
+            std::lock_guard lock(mutex_);
+            result = present_locked(desc, producer, gate);
+        }
+        await_frame_slot(gate);
+        return result;
+    }
+
+    PresentResult DisplayManager::present_locked(const PresentDesc& desc,
+                                                 const SubmissionToken& producer,
+                                                 std::optional<SubmissionToken>& gate)
+    {
         PresentResult result;
         result.displayer = desc.displayer;
         result.image = desc.image;
 
         if (swapchain_ == VK_NULL_HANDLE)
         {
+            gate = rotate_frame_unlocked(producer);
             result.status = fake_status_;
             result.message = fake_message_;
             return result;
@@ -923,6 +981,7 @@ namespace Corona::Horizon
 
         if (!pending_frame_)
         {
+            gate = rotate_frame_unlocked(producer);
             result.status = PresentStatus::Skipped;
             result.message = "DisplayManager has no acquired swapchain image for this present.";
             return result;
@@ -931,6 +990,7 @@ namespace Corona::Horizon
         if (present_queue_ == nullptr)
         {
             pending_frame_.reset();
+            gate = rotate_frame_unlocked(producer);
             result.status = PresentStatus::Skipped;
             result.message = "DisplayManager has no present queue.";
             return result;
@@ -938,10 +998,6 @@ namespace Corona::Horizon
 
         PendingFrame pending = *pending_frame_;
         VkSemaphore wait_semaphore = pending.render_finished;
-        if (pending.frame_index < submitted_frames_.size())
-        {
-            submitted_frames_[pending.frame_index] = producer;
-        }
 
         VkPresentInfoKHR present_info {};
         present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -957,9 +1013,7 @@ namespace Corona::Horizon
         result.message = present_message(result.status);
 
         pending_frame_.reset();
-        frame_index_ = image_available_.empty()
-            ? 0
-            : ((pending.frame_index + 1) % static_cast<uint32_t>(image_available_.size()));
+        gate = rotate_frame_unlocked(producer);
 
         if (vk_result == VK_ERROR_OUT_OF_DATE_KHR)
         {
@@ -1064,7 +1118,9 @@ namespace Corona::Horizon
             }
         }
         render_finished_.clear();
-        submitted_frames_.clear();
+        // submitted_frames_ 故意不清：它按帧槽索引、与交换链无关，且此刻可能仍持有
+        // 在飞帧的 token（见 create_sync_objects 的说明）。present_tokens_ 按交换链
+        // 图像索引，随交换链一起失效。
         present_tokens_.clear();
 
         if (device_ != VK_NULL_HANDLE && swapchain_ != VK_NULL_HANDLE)
@@ -1075,7 +1131,9 @@ namespace Corona::Horizon
         swapchain_ = VK_NULL_HANDLE;
         swapchain_format_ = VK_FORMAT_UNDEFINED;
         swapchain_extent_ = {};
-        frame_index_ = 0;
+        swapchain_min_image_count_ = 0;
+        // 帧环 epoch 不复位：环长只增不减，槽位继续单调轮转即可；复位反而可能
+        // 让重建后的第一帧和重建前某个仍在飞的帧撞到同一槽。
     }
 
     void DisplayManager::destroy_surface() noexcept

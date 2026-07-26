@@ -143,6 +143,9 @@ namespace Corona::Horizon
         [[nodiscard]] PipelineState create_pipeline_state_unlocked(VkDevice device, std::vector<BindingLayout> bindings) const;
         [[nodiscard]] PipelineState& pipeline_state_unlocked(VkDevice device, const DispatchDesc& dispatch);
         void destroy_pipeline_cache_unlocked() noexcept;
+        // 把 uniform_buffers_ 的 CPU 影子数据落到本帧槽的持久 buffer，并让
+        // gpu_buffer 指向该槽。槽未变且影子未脏时是空操作。
+        void sync_ubo_slot_unlocked() const;
 
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries_;
         ComputePipelineDesc desc_;
@@ -151,10 +154,14 @@ namespace Corona::Horizon
         mutable std::mutex mutex_;
         DispatchDesc dispatch_ {};
         std::vector<std::byte> push_constant_data_;
-        std::vector<UniformBufferBindingData> uniform_buffers_;
-        // 与 uniform_buffers_ 同序的持久 GPU buffer，初始化时创建一次，
-        // 每次 set_push_constant_direct（UBO 路径）只 write_bytes（memcpy）。
-        std::vector<HardwareBuffer> ubo_buffers_;
+        // CPU 影子数据 + 本帧槽的 gpu_buffer 句柄。setter 只写影子并置脏，
+        // 真正的 flush 推迟到 snapshot()（const，故 mutable）。
+        mutable std::vector<UniformBufferBindingData> uniform_buffers_;
+        // 与 uniform_buffers_ 同序的持久 GPU buffer 环，每条 binding 一环、
+        // 环长 = frame_ring_size()。第 i 帧写槽 i%N，不覆写仍在飞的帧读的槽。
+        mutable std::vector<std::vector<HardwareBuffer>> ubo_rings_;
+        mutable int64_t ubo_slot_ { -1 };
+        mutable bool ubo_dirty_ { true };
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         mutable std::vector<PipelineState> pipeline_cache_;
