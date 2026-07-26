@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <limits>
@@ -114,65 +113,7 @@ namespace Corona::Horizon
             return formats.front();
         }
 
-        [[nodiscard]] std::string present_mode_name(VkPresentModeKHR mode)
-        {
-            switch (mode)
-            {
-            case VK_PRESENT_MODE_IMMEDIATE_KHR:
-                return "immediate";
-            case VK_PRESENT_MODE_MAILBOX_KHR:
-                return "mailbox";
-            case VK_PRESENT_MODE_FIFO_KHR:
-                return "fifo";
-            case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
-                return "fifo_relaxed";
-            default:
-                return "unknown(" + std::to_string(static_cast<int>(mode)) + ")";
-            }
-        }
-
-        [[nodiscard]] bool present_mode_supported(std::span<const VkPresentModeKHR> modes, VkPresentModeKHR mode) noexcept
-        {
-            return std::ranges::find(modes, mode) != modes.end();
-        }
-
-        [[nodiscard]] std::string requested_present_mode()
-        {
-            const char* raw = std::getenv("HORIZON_VULKAN_PRESENT_MODE");
-            if (raw == nullptr)
-            {
-                return {};
-            }
-
-            std::string value(raw);
-            std::ranges::transform(value, value.begin(), [](unsigned char ch) {
-                return static_cast<char>(std::tolower(ch));
-            });
-            return value;
-        }
-
-        [[nodiscard]] std::optional<VkPresentModeKHR> parse_present_mode_request(std::string_view value)
-        {
-            if (value.empty() || value == "default" || value == "fifo")
-            {
-                return VK_PRESENT_MODE_FIFO_KHR;
-            }
-            if (value == "mailbox")
-            {
-                return VK_PRESENT_MODE_MAILBOX_KHR;
-            }
-            if (value == "immediate")
-            {
-                return VK_PRESENT_MODE_IMMEDIATE_KHR;
-            }
-            if (value == "fifo_relaxed" || value == "fifo-relaxed")
-            {
-                return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
-            }
-
-            return std::nullopt;
-        }
-
+        // Prefer mailbox, fall back to fifo (the only mode the spec guarantees).
         [[nodiscard]] VkPresentModeKHR choose_present_mode(VkPhysicalDevice physical_device, VkSurfaceKHR surface)
         {
             uint32_t mode_count = 0;
@@ -186,26 +127,14 @@ namespace Corona::Horizon
                                 "vkGetPhysicalDeviceSurfacePresentModesKHR");
             }
 
-            const std::string requested = requested_present_mode();
-            if (!requested.empty())
+            for (VkPresentModeKHR mode : modes)
             {
-                const std::optional<VkPresentModeKHR> parsed = parse_present_mode_request(requested);
-                if (parsed && present_mode_supported(modes, *parsed))
+                if (mode == VK_PRESENT_MODE_MAILBOX_KHR)
                 {
-                    Diagnostics::write(Diagnostics::Level::Info,
-                                       "HORIZON VALIDATION",
-                                       "Using requested Vulkan present mode: " + present_mode_name(*parsed) + ".");
-                    return *parsed;
+                    return mode;
                 }
-
-                Diagnostics::write(Diagnostics::Level::Warning,
-                                   "HORIZON VALIDATION",
-                                   "Ignoring unsupported HORIZON_VULKAN_PRESENT_MODE='" + requested + "'; using fifo.");
             }
 
-            Diagnostics::write(Diagnostics::Level::Info,
-                               "HORIZON VALIDATION",
-                               "Using default Vulkan present mode: fifo.");
             return VK_PRESENT_MODE_FIFO_KHR;
         }
 
