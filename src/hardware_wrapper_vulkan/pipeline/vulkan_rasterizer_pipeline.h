@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <source_location>
+#include <string>
 #include <vector>
 
 namespace Corona::Horizon
@@ -88,21 +89,19 @@ namespace Corona::Horizon
 
         struct PreparedDraw
         {
-            // 每 draw 的非 bindless UBO 通过 push descriptor 直接写入命令缓冲，
-            // 不再分配 transient descriptor pool / set。writes 已按 set 升序、
-            // 同 set 内按 binding 升序排列，execution 侧可按 set 分组推送。
-            struct PushUniformBuffer
+            // UBO 与 bindless set 0-2 同形：管线侧按 (binding, buffer, range) 签名
+            // 分配并写入一次持久 descriptor set，execution 侧只 bind，不再每 draw
+            // push descriptor。按 set 升序排列。
+            struct UniformSet
             {
                 uint32_t set { 0 };
-                uint32_t binding { 0 };
-                VkBuffer buffer { VK_NULL_HANDLE };
-                VkDeviceSize range { 0 };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
             };
 
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
             bool uses_bindless { false };
-            std::vector<PushUniformBuffer> push_uniform_buffers;
+            std::vector<UniformSet> uniform_sets;
         };
 
         [[nodiscard]] GraphicsPipeline graphics_pipeline(VkDevice device,
@@ -139,11 +138,30 @@ namespace Corona::Horizon
                 VkDescriptorType descriptor_type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
             };
 
+            // 一组已写入的 UBO descriptor：签名相同即可复用，签名不同另分配一份。
+            // 已分配的 set 从不重写——in-flight 命令缓冲可能仍在引用它。
+            struct UniformDescriptorSet
+            {
+                struct Signature
+                {
+                    uint32_t binding { 0 };
+                    VkBuffer buffer { VK_NULL_HANDLE };
+                    VkDeviceSize range { 0 };
+
+                    [[nodiscard]] friend bool operator==(const Signature&, const Signature&) noexcept = default;
+                };
+
+                std::vector<Signature> signature;
+                VkDescriptorPool pool { VK_NULL_HANDLE };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
+            };
+
             struct DescriptorSetLayout
             {
                 uint32_t set { 0 };
                 std::vector<DescriptorBindingLayout> bindings;
                 VkDescriptorSetLayout layout { VK_NULL_HANDLE };
+                std::vector<UniformDescriptorSet> uniform_sets;
             };
 
             PipelineKey key {};
@@ -155,6 +173,12 @@ namespace Corona::Horizon
         };
 
         [[nodiscard]] uint32_t push_constant_size() const noexcept;
+        // 按签名取回（必要时分配并写入）该 set 的持久 UBO descriptor set。
+        [[nodiscard]] static VkDescriptorSet uniform_descriptor_set_unlocked(
+            VkDevice device,
+            PipelineState::DescriptorSetLayout& set_layout,
+            const std::vector<PipelineState::UniformDescriptorSet::Signature>& signature,
+            const std::string& debug_name);
         [[nodiscard]] PipelineState create_graphics_pipeline_unlocked(const PipelineKey& key) const;
         void destroy_pipeline_cache_unlocked() noexcept;
 

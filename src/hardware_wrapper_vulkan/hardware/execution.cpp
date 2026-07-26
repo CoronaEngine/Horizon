@@ -1311,11 +1311,10 @@ namespace Corona::Horizon
         // 单个命令缓冲内、单个绑定点上的描述符绑定状态缓存。
         //
         // bindless 的三个 set（0/1/2）是全进程单例、句柄恒定，descriptor 内容通过
-        // UPDATE_AFTER_BIND 就地更新，绑定一次即对后续所有 draw/dispatch 有效；
-        // UBO 的 push descriptor 同理——同一 layout 下推送同一组 (binding, buffer, range)
-        // 是幂等命令。二者原先都是每 draw/dispatch 无条件重发，drawstress 这类
-        // 单 pipeline 多 draw 的场景里全是冗余命令，且 bindless 那次还要过一遍
-        // ResourceManager 的全局锁。
+        // UPDATE_AFTER_BIND 就地更新，绑定一次即对后续所有 draw/dispatch 有效。
+        // UBO 的 set（3+）现在同形：管线侧按 (binding, buffer, range) 签名分配并写入
+        // 一次持久 descriptor set，值的变化走 mapped 内存写入而非重写 descriptor，
+        // 所以句柄不变即无需重绑。二者原先都是每 draw/dispatch 无条件重发。
         //
         // 失效规则（保守）：layout 句柄一变就整体清空。Vulkan 只在新 layout 与旧
         // layout 对某 set "不兼容"时才扰乱该 set 的绑定，而 layout 兼容性需要比对
@@ -1324,23 +1323,21 @@ namespace Corona::Horizon
         // 各自维护一份状态。
         struct DescriptorBindingCache
         {
-            struct PushedUniform
+            struct BoundUniformSet
             {
                 uint32_t set { 0 };
-                uint32_t binding { 0 };
-                VkBuffer buffer { VK_NULL_HANDLE };
-                VkDeviceSize range { 0 };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
             };
 
             VkPipelineLayout layout { VK_NULL_HANDLE };
             bool bindless_bound { false };
-            std::vector<PushedUniform> pushed_uniforms;
+            std::vector<BoundUniformSet> bound_uniform_sets;
 
             void reset() noexcept
             {
                 layout = VK_NULL_HANDLE;
                 bindless_bound = false;
-                pushed_uniforms.clear();
+                bound_uniform_sets.clear();
             }
 
             // layout 变更即丢弃该绑定点的全部缓存状态。
@@ -1350,34 +1347,65 @@ namespace Corona::Horizon
                     return;
                 layout = next;
                 bindless_bound = false;
-                pushed_uniforms.clear();
+                bound_uniform_sets.clear();
             }
 
-            template <typename PushUniformRange>
-            [[nodiscard]] bool uniforms_match(const PushUniformRange& prepared) const noexcept
+            template <typename UniformSetRange>
+            [[nodiscard]] bool uniform_sets_match(const UniformSetRange& prepared) const noexcept
             {
-                if (pushed_uniforms.size() != prepared.size())
+                if (bound_uniform_sets.size() != prepared.size())
                     return false;
-                for (size_t i = 0; i < pushed_uniforms.size(); ++i)
+                for (size_t i = 0; i < bound_uniform_sets.size(); ++i)
                 {
-                    const PushedUniform& cached = pushed_uniforms[i];
+                    const BoundUniformSet& cached = bound_uniform_sets[i];
                     const auto& next = prepared[i];
-                    if (cached.set != next.set || cached.binding != next.binding ||
-                        cached.buffer != next.buffer || cached.range != next.range)
+                    if (cached.set != next.set || cached.descriptor_set != next.descriptor_set)
                         return false;
                 }
                 return true;
             }
 
-            template <typename PushUniformRange>
-            void remember_uniforms(const PushUniformRange& prepared)
+            template <typename UniformSetRange>
+            void remember_uniform_sets(const UniformSetRange& prepared)
             {
-                pushed_uniforms.clear();
-                pushed_uniforms.reserve(prepared.size());
+                bound_uniform_sets.clear();
+                bound_uniform_sets.reserve(prepared.size());
                 for (const auto& next : prepared)
-                    pushed_uniforms.push_back({ next.set, next.binding, next.buffer, next.range });
+                    bound_uniform_sets.push_back({ next.set, next.descriptor_set });
             }
         };
+
+        // 把已按 set 升序排列的 UBO descriptor set 按连续段合并成尽量少的
+        // vkCmdBindDescriptorSets（反射出的 set 号可能不连续，中间是空 layout）。
+        template <typename UniformSetRange>
+        void bind_uniform_descriptor_sets(VkCommandBuffer command_buffer,
+                                          VkPipelineBindPoint bind_point,
+                                          VkPipelineLayout layout,
+                                          const UniformSetRange& uniform_sets)
+        {
+            std::vector<VkDescriptorSet> run;
+            for (size_t begin = 0; begin < uniform_sets.size();)
+            {
+                size_t end = begin;
+                run.clear();
+                while (end < uniform_sets.size() &&
+                       uniform_sets[end].set == uniform_sets[begin].set + static_cast<uint32_t>(end - begin))
+                {
+                    run.push_back(uniform_sets[end].descriptor_set);
+                    ++end;
+                }
+
+                vkCmdBindDescriptorSets(command_buffer,
+                                        bind_point,
+                                        layout,
+                                        uniform_sets[begin].set,
+                                        static_cast<uint32_t>(run.size()),
+                                        run.data(),
+                                        0,
+                                        nullptr);
+                begin = end;
+            }
+        }
     } // namespace
 
     VulkanCommandEncoder::VulkanCommandEncoder(VkDevice device)
@@ -1567,59 +1595,16 @@ namespace Corona::Horizon
                 graphics_descriptors.bindless_bound = true;
             }
 
-            // 每 draw 的非 bindless UBO 通过 push descriptor 写入命令缓冲，
-            // 无需 transient descriptor pool。push_uniform_buffers 已按 set 分组、
-            // 组内按 binding 有序，逐 set 组装 writes 后一次推送。
-            // 同 layout 下推送内容未变则整体跳过：UBO 是批次共享的持久 buffer，
-            // (binding, buffer, range) 恒定，值的变化走 buffer 内存写入而非重推。
-            const bool push_uniforms_dirty =
-                !graphics_descriptors.uniforms_match(prepared.push_uniform_buffers);
-            for (size_t begin = 0; push_uniforms_dirty && begin < prepared.push_uniform_buffers.size();)
+            // 非 bindless 的 UBO set 由管线侧分配并写入一次，这里只绑定；
+            // 同 layout 下句柄未变则整体跳过（与 bindless set 0-2 同形）。
+            if (!graphics_descriptors.uniform_sets_match(prepared.uniform_sets))
             {
-                const uint32_t current_set = prepared.push_uniform_buffers[begin].set;
-                size_t end = begin;
-                std::array<VkDescriptorBufferInfo, 16> buffer_infos {};
-                std::array<VkWriteDescriptorSet, 16> writes {};
-                uint32_t count = 0;
-                while (end < prepared.push_uniform_buffers.size() &&
-                       prepared.push_uniform_buffers[end].set == current_set &&
-                       count < buffer_infos.size())
-                {
-                    const auto& ubo = prepared.push_uniform_buffers[end];
-                    buffer_infos[count] = VkDescriptorBufferInfo {
-                        .buffer = ubo.buffer,
-                        .offset = 0,
-                        .range = ubo.range,
-                    };
-                    VkWriteDescriptorSet& write = writes[count];
-                    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    write.dstBinding = ubo.binding;
-                    write.dstArrayElement = 0;
-                    write.descriptorCount = 1;
-                    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                    write.pBufferInfo = &buffer_infos[count];
-                    ++count;
-                    ++end;
-                }
-
-                // 单个 set 的 UBO 数超过静态缓冲上限（16）会被静默截断，丢弃多余 write。
-                // 当前不会触发，但显式报错以防未来踩坑。
-                if (end < prepared.push_uniform_buffers.size() &&
-                    prepared.push_uniform_buffers[end].set == current_set)
-                {
-                    throw std::logic_error("DrawIndexed push descriptor exceeds 16 uniform buffers per set.");
-                }
-
-                vkCmdPushDescriptorSet(command_buffer,
-                                       VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                       prepared.layout,
-                                       current_set,
-                                       count,
-                                       writes.data());
-                begin = end;
+                bind_uniform_descriptor_sets(command_buffer,
+                                             VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                             prepared.layout,
+                                             prepared.uniform_sets);
+                graphics_descriptors.remember_uniform_sets(prepared.uniform_sets);
             }
-            if (push_uniforms_dirty)
-                graphics_descriptors.remember_uniforms(prepared.push_uniform_buffers);
 
             VkBuffer vertex_buffer = vertex->buffer_handle;
             VkDeviceSize vertex_offset = 0;
@@ -1841,58 +1826,16 @@ namespace Corona::Horizon
                     compute_descriptors.bindless_bound = true;
                 }
 
-                // 每 dispatch 的非 bindless UBO 通过 push descriptor 写入命令缓冲，
-                // 无需 transient descriptor pool。push_uniform_buffers 已按 set 分组、
-                // 组内按 binding 有序，逐 set 组装 writes 后一次推送。
-                // 同 layout 且推送内容未变则整体跳过（理由同光栅路径）。
-                const bool push_uniforms_dirty =
-                    !compute_descriptors.uniforms_match(prepared.push_uniform_buffers);
-                for (size_t begin = 0; push_uniforms_dirty && begin < prepared.push_uniform_buffers.size();)
+                // 非 bindless 的 UBO set 由管线侧分配并写入一次，这里只绑定；
+                // 同 layout 下句柄未变则整体跳过（理由同光栅路径）。
+                if (!compute_descriptors.uniform_sets_match(prepared.uniform_sets))
                 {
-                    const uint32_t current_set = prepared.push_uniform_buffers[begin].set;
-                    size_t end = begin;
-                    std::array<VkDescriptorBufferInfo, 16> buffer_infos {};
-                    std::array<VkWriteDescriptorSet, 16> writes {};
-                    uint32_t count = 0;
-                    while (end < prepared.push_uniform_buffers.size() &&
-                           prepared.push_uniform_buffers[end].set == current_set &&
-                           count < buffer_infos.size())
-                    {
-                        const auto& ubo = prepared.push_uniform_buffers[end];
-                        buffer_infos[count] = VkDescriptorBufferInfo {
-                            .buffer = ubo.buffer,
-                            .offset = 0,
-                            .range = ubo.range,
-                        };
-                        VkWriteDescriptorSet& write = writes[count];
-                        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        write.dstBinding = ubo.binding;
-                        write.dstArrayElement = 0;
-                        write.descriptorCount = 1;
-                        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                        write.pBufferInfo = &buffer_infos[count];
-                        ++count;
-                        ++end;
-                    }
-
-                    // 单个 set 的 UBO 数超过静态缓冲上限（16）会被静默截断，丢弃多余 write。
-                    // 当前不会触发，但显式报错以防未来踩坑。
-                    if (end < prepared.push_uniform_buffers.size() &&
-                        prepared.push_uniform_buffers[end].set == current_set)
-                    {
-                        throw std::logic_error("Dispatch push descriptor exceeds 16 uniform buffers per set.");
-                    }
-
-                    vkCmdPushDescriptorSet(command_buffer,
-                                           VK_PIPELINE_BIND_POINT_COMPUTE,
-                                           prepared.layout,
-                                           current_set,
-                                           count,
-                                           writes.data());
-                    begin = end;
+                    bind_uniform_descriptor_sets(command_buffer,
+                                                 VK_PIPELINE_BIND_POINT_COMPUTE,
+                                                 prepared.layout,
+                                                 prepared.uniform_sets);
+                    compute_descriptors.remember_uniform_sets(prepared.uniform_sets);
                 }
-                if (push_uniforms_dirty)
-                    compute_descriptors.remember_uniforms(prepared.push_uniform_buffers);
 
                 if (!dispatch.push_constant_data.empty())
                 {

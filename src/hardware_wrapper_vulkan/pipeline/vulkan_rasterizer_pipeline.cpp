@@ -655,6 +655,14 @@ namespace Corona::Horizon
 
                 for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
                 {
+                    // 销毁 pool 即隐式释放其中的 descriptor set。
+                    for (PipelineState::UniformDescriptorSet& uniform_set : set_layout.uniform_sets)
+                    {
+                        if (uniform_set.pool != VK_NULL_HANDLE)
+                            vkDestroyDescriptorPool(state.key.device, uniform_set.pool, nullptr);
+                    }
+                    set_layout.uniform_sets.clear();
+
                     if (set_layout.layout != VK_NULL_HANDLE)
                     {
                         vkDestroyDescriptorSetLayout(state.key.device, set_layout.layout, nullptr);
@@ -916,9 +924,10 @@ namespace Corona::Horizon
 
                 VkDescriptorSetLayoutCreateInfo descriptor_layout_info {};
                 descriptor_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-                // 该 set 仅承载每 draw 的 UBO，改用 push descriptor：无需 pool/allocate，
-                // 直接 vkCmdPushDescriptorSet 写入命令缓冲。
-                descriptor_layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
+                // 该 set 仅承载 UBO。UBO 是批次共享的持久 buffer，(binding, buffer, range)
+                // 在管线生命周期内恒定，值的变化走 mapped 内存写入，所以按 bindless set
+                // 0-2 的同一形式处理：分配一次普通 descriptor set、写入一次、之后只 bind。
+                descriptor_layout_info.flags = 0;
                 descriptor_layout_info.bindingCount = static_cast<uint32_t>(descriptor_bindings.size());
                 descriptor_layout_info.pBindings = descriptor_bindings.data();
 
@@ -1096,6 +1105,106 @@ namespace Corona::Horizon
         };
     }
 
+    VkDescriptorSet VulkanRasterizerPipeline::uniform_descriptor_set_unlocked(
+        VkDevice device,
+        PipelineState::DescriptorSetLayout& set_layout,
+        const std::vector<PipelineState::UniformDescriptorSet::Signature>& signature,
+        const std::string& debug_name)
+    {
+        auto found = std::ranges::find_if(set_layout.uniform_sets, [&](const PipelineState::UniformDescriptorSet& candidate) {
+            return candidate.signature == signature;
+        });
+        if (found != set_layout.uniform_sets.end())
+            return found->descriptor_set;
+
+        // 签名未见过：新分配一份并写入一次。已分配的 set 从不被重写，因为 in-flight
+        // 命令缓冲可能仍绑定着它。稳态下每个 set layout 只会有一份（UBO buffer 在构造
+        // 期建好后句柄恒定）；只有 rebuild_pipeline 换了实现、旧 draw 仍带着旧 buffer
+        // 句柄进来时才会多出一份，故设上限兜底。
+        constexpr size_t max_uniform_sets_per_layout = 64;
+        if (set_layout.uniform_sets.size() >= max_uniform_sets_per_layout)
+        {
+            throw std::runtime_error("RasterizerPipeline uniform descriptor set signatures exceeded " +
+                                     std::to_string(max_uniform_sets_per_layout) + " for one set layout.");
+        }
+
+        PipelineState::UniformDescriptorSet allocated;
+        allocated.signature = signature;
+
+        VkDescriptorPoolSize pool_size {};
+        pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        pool_size.descriptorCount = static_cast<uint32_t>(signature.size());
+
+        VkDescriptorPoolCreateInfo pool_info {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.maxSets = 1;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = &pool_size;
+
+        VkResult pool_result = vkCreateDescriptorPool(device, &pool_info, nullptr, &allocated.pool);
+        if (pool_result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkCreateDescriptorPool failed for RasterizerPipeline uniform set. VkResult=" +
+                                     std::to_string(static_cast<int>(pool_result)));
+        }
+
+        try
+        {
+            VkDescriptorSetAllocateInfo alloc_info {};
+            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            alloc_info.descriptorPool = allocated.pool;
+            alloc_info.descriptorSetCount = 1;
+            alloc_info.pSetLayouts = &set_layout.layout;
+
+            VkResult alloc_result = vkAllocateDescriptorSets(device, &alloc_info, &allocated.descriptor_set);
+            if (alloc_result != VK_SUCCESS)
+            {
+                throw std::runtime_error("vkAllocateDescriptorSets failed for RasterizerPipeline uniform set. VkResult=" +
+                                         std::to_string(static_cast<int>(alloc_result)));
+            }
+
+            std::vector<VkDescriptorBufferInfo> buffer_infos;
+            std::vector<VkWriteDescriptorSet> writes;
+            buffer_infos.reserve(signature.size());
+            writes.reserve(signature.size());
+            for (const PipelineState::UniformDescriptorSet::Signature& entry : signature)
+            {
+                buffer_infos.push_back(VkDescriptorBufferInfo {
+                    .buffer = entry.buffer,
+                    .offset = 0,
+                    .range = entry.range,
+                });
+            }
+            for (size_t i = 0; i < signature.size(); ++i)
+            {
+                VkWriteDescriptorSet write {};
+                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                write.dstSet = allocated.descriptor_set;
+                write.dstBinding = signature[i].binding;
+                write.dstArrayElement = 0;
+                write.descriptorCount = 1;
+                write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                write.pBufferInfo = &buffer_infos[i];
+                writes.push_back(write);
+            }
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+            name_vulkan_object(device,
+                               VK_OBJECT_TYPE_DESCRIPTOR_SET,
+                               reinterpret_cast<uint64_t>(allocated.descriptor_set),
+                               debug_name + ".uniform_set" + std::to_string(set_layout.set));
+        }
+        catch (...)
+        {
+            vkDestroyDescriptorPool(device, allocated.pool, nullptr);
+            throw;
+        }
+
+        set_layout.uniform_sets.push_back(std::move(allocated));
+        return set_layout.uniform_sets.back().descriptor_set;
+    }
+
     VulkanRasterizerPipeline::PreparedDraw VulkanRasterizerPipeline::prepare_draw(VkDevice device,
                                                                                   const std::array<VkFormat, 4>& color_formats,
                                                                                   VkFormat depth_format,
@@ -1131,27 +1240,14 @@ namespace Corona::Horizon
         if (found->descriptor_set_layouts.empty())
             return prepared;
 
-        // transient set 仅含 UBO（纹理已全走 bindless）。收集每个 UBO 的持久 buffer
-        // 句柄，交由 execution 侧用 vkCmdPushDescriptorSet 直接写入命令缓冲：
-        // 不再每 draw 创建/分配/销毁 descriptor pool。
-        uint32_t uniform_buffer_count = 0;
-        for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
+        // 非 bindless set 仅含 UBO（纹理已全走 bindless）。按 (binding, buffer, range)
+        // 签名取回持久 descriptor set：签名不变就是同一个句柄，execution 侧因而能像
+        // bindless set 0-2 那样只在首次 / layout 变更时 bind 一次。
+        const std::string debug_name = desc_.debug_name.empty() ? "horizon.rasterizer_pipeline" : desc_.debug_name;
+        std::vector<PipelineState::UniformDescriptorSet::Signature> signature;
+        for (PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
         {
-            for (const PipelineState::DescriptorBindingLayout& binding : set_layout.bindings)
-            {
-                if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    ++uniform_buffer_count;
-            }
-        }
-
-        if (uniform_buffer_count == 0)
-            return prepared;
-
-        // descriptor_set_layouts 已按 set 升序、bindings 已按 binding 升序，
-        // 因此 push_uniform_buffers 天然按 (set, binding) 有序。
-        prepared.push_uniform_buffers.reserve(uniform_buffer_count);
-        for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
-        {
+            signature.clear();
             for (const PipelineState::DescriptorBindingLayout& binding_layout : set_layout.bindings)
             {
                 if (binding_layout.descriptor_type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
@@ -1168,14 +1264,21 @@ namespace Corona::Horizon
                 if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
                     throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
 
-                prepared.push_uniform_buffers.push_back({
-                    .set = binding_layout.set,
+                signature.push_back({
                     .binding = binding_layout.binding,
                     .buffer = buffer->buffer_handle,
                     .range = buffer->logical_size(),
                 });
                 // gpu_buffer 由 pipeline / draw 持有，无需延长 lifetime
             }
+
+            if (signature.empty())
+                continue;
+
+            prepared.uniform_sets.push_back({
+                .set = set_layout.set,
+                .descriptor_set = uniform_descriptor_set_unlocked(device, set_layout, signature, debug_name),
+            });
         }
 
         return prepared;
