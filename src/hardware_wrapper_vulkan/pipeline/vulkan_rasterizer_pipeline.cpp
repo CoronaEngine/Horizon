@@ -1544,7 +1544,7 @@ namespace Corona::Horizon
             rendering_desc.width = state.width;
             rendering_desc.height = state.height;
             rendering_desc.clear_color = state.desc.clear_color_target;
-            rendering_desc.clear_depth = has_depth;
+            rendering_desc.clear_depth = has_depth && state.desc.clear_depth_target;
             batch << begin_rendering(rendering_desc);
         }
 
@@ -1580,6 +1580,7 @@ namespace Corona::Horizon
         uint32_t width = 0;
         uint32_t height = 0;
         bool clear_color_target = true;
+        bool clear_depth_target = true;
         std::vector<BoundImage> images;
         HardwareImage depth_target;
         std::vector<RecordedDraw> draws;
@@ -1588,6 +1589,7 @@ namespace Corona::Horizon
             width = width_;
             height = height_;
             clear_color_target = desc_.clear_color_target;
+            clear_depth_target = desc_.clear_depth_target;
             images = bound_images_;
             depth_target = depth_target_;
             draws = std::move(draws_);
@@ -1616,7 +1618,7 @@ namespace Corona::Horizon
             rendering_desc.width = width;
             rendering_desc.height = height;
             rendering_desc.clear_color = clear_color_target;
-            rendering_desc.clear_depth = has_depth;
+            rendering_desc.clear_depth = has_depth && clear_depth_target;
             recorder.begin_rendering(rendering_desc);
         }
 
