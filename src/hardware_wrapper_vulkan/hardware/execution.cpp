@@ -1306,6 +1306,80 @@ namespace Corona::Horizon
         }
     }
 
+    namespace
+    {
+        // 单个命令缓冲内、单个绑定点上的描述符绑定状态缓存。
+        //
+        // bindless 的三个 set（0/1/2）是全进程单例、句柄恒定，descriptor 内容通过
+        // UPDATE_AFTER_BIND 就地更新，绑定一次即对后续所有 draw/dispatch 有效；
+        // UBO 的 push descriptor 同理——同一 layout 下推送同一组 (binding, buffer, range)
+        // 是幂等命令。二者原先都是每 draw/dispatch 无条件重发，drawstress 这类
+        // 单 pipeline 多 draw 的场景里全是冗余命令，且 bindless 那次还要过一遍
+        // ResourceManager 的全局锁。
+        //
+        // 失效规则（保守）：layout 句柄一变就整体清空。Vulkan 只在新 layout 与旧
+        // layout 对某 set "不兼容"时才扰乱该 set 的绑定，而 layout 兼容性需要比对
+        // 各 set layout 与 push constant range；按句柄相等判定是其充分条件，
+        // 代价只是切 pipeline 时多绑一次。graphics 与 compute 是独立绑定点，
+        // 各自维护一份状态。
+        struct DescriptorBindingCache
+        {
+            struct PushedUniform
+            {
+                uint32_t set { 0 };
+                uint32_t binding { 0 };
+                VkBuffer buffer { VK_NULL_HANDLE };
+                VkDeviceSize range { 0 };
+            };
+
+            VkPipelineLayout layout { VK_NULL_HANDLE };
+            bool bindless_bound { false };
+            std::vector<PushedUniform> pushed_uniforms;
+
+            void reset() noexcept
+            {
+                layout = VK_NULL_HANDLE;
+                bindless_bound = false;
+                pushed_uniforms.clear();
+            }
+
+            // layout 变更即丢弃该绑定点的全部缓存状态。
+            void use_layout(VkPipelineLayout next) noexcept
+            {
+                if (layout == next)
+                    return;
+                layout = next;
+                bindless_bound = false;
+                pushed_uniforms.clear();
+            }
+
+            template <typename PushUniformRange>
+            [[nodiscard]] bool uniforms_match(const PushUniformRange& prepared) const noexcept
+            {
+                if (pushed_uniforms.size() != prepared.size())
+                    return false;
+                for (size_t i = 0; i < pushed_uniforms.size(); ++i)
+                {
+                    const PushedUniform& cached = pushed_uniforms[i];
+                    const auto& next = prepared[i];
+                    if (cached.set != next.set || cached.binding != next.binding ||
+                        cached.buffer != next.buffer || cached.range != next.range)
+                        return false;
+                }
+                return true;
+            }
+
+            template <typename PushUniformRange>
+            void remember_uniforms(const PushUniformRange& prepared)
+            {
+                pushed_uniforms.clear();
+                pushed_uniforms.reserve(prepared.size());
+                for (const auto& next : prepared)
+                    pushed_uniforms.push_back({ next.set, next.binding, next.buffer, next.range });
+            }
+        };
+    } // namespace
+
     VulkanCommandEncoder::VulkanCommandEncoder(VkDevice device)
         : device_(device)
     {
@@ -1340,6 +1414,18 @@ namespace Corona::Horizon
         } active_rendering;
 
         VkCommandBuffer command_buffer = submission.command_buffer->vk();
+
+        DescriptorBindingCache graphics_descriptors;
+        DescriptorBindingCache compute_descriptors;
+
+        // 三个 bindless set 全submission只取一次：省掉每 draw/dispatch 一次
+        // ResourceManager 全局锁 + 数组拷贝。
+        std::optional<std::array<VkDescriptorSet, ResourceManager::bindless_descriptor_set_count>> bindless_sets_cache;
+        auto bindless_sets = [&]() -> const std::array<VkDescriptorSet, ResourceManager::bindless_descriptor_set_count>& {
+            if (!bindless_sets_cache.has_value())
+                bindless_sets_cache = resource_manager().bindless_descriptor_sets();
+            return *bindless_sets_cache;
+        };
 
         auto pre_transition_sampled_images_for_rendering = [&](size_t begin_index, const RenderingDesc& rendering) {
             const std::array<std::uintptr_t, 5> attachment_ids {
@@ -1441,6 +1527,11 @@ namespace Corona::Horizon
                     desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless,  draw.vert_condition_info, draw.frag_condition_info);
                     desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
                     rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
+                    // 重建可能销毁旧 VulkanRasterizerPipeline 连带其 VkPipelineLayout，
+                    // 新建的 layout 有可能复用同一句柄值（ABA）。缓存按句柄相等判定，
+                    // 故此处必须整体作废，两个绑定点都清（句柄池是设备级共享的）。
+                    graphics_descriptors.reset();
+                    compute_descriptors.reset();
                 }
             }
 
@@ -1461,23 +1552,29 @@ namespace Corona::Horizon
                 throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
-            if (prepared.uses_bindless)
+            graphics_descriptors.use_layout(prepared.layout);
+            if (prepared.uses_bindless && !graphics_descriptors.bindless_bound)
             {
-                auto bindless_sets = resource_manager().bindless_descriptor_sets();
+                const auto& sets = bindless_sets();
                 vkCmdBindDescriptorSets(command_buffer,
                                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                                         prepared.layout,
                                         0,
-                                        static_cast<uint32_t>(bindless_sets.size()),
-                                        bindless_sets.data(),
+                                        static_cast<uint32_t>(sets.size()),
+                                        sets.data(),
                                         0,
                                         nullptr);
+                graphics_descriptors.bindless_bound = true;
             }
 
             // 每 draw 的非 bindless UBO 通过 push descriptor 写入命令缓冲，
             // 无需 transient descriptor pool。push_uniform_buffers 已按 set 分组、
             // 组内按 binding 有序，逐 set 组装 writes 后一次推送。
-            for (size_t begin = 0; begin < prepared.push_uniform_buffers.size();)
+            // 同 layout 下推送内容未变则整体跳过：UBO 是批次共享的持久 buffer，
+            // (binding, buffer, range) 恒定，值的变化走 buffer 内存写入而非重推。
+            const bool push_uniforms_dirty =
+                !graphics_descriptors.uniforms_match(prepared.push_uniform_buffers);
+            for (size_t begin = 0; push_uniforms_dirty && begin < prepared.push_uniform_buffers.size();)
             {
                 const uint32_t current_set = prepared.push_uniform_buffers[begin].set;
                 size_t end = begin;
@@ -1521,6 +1618,8 @@ namespace Corona::Horizon
                                        writes.data());
                 begin = end;
             }
+            if (push_uniforms_dirty)
+                graphics_descriptors.remember_uniforms(prepared.push_uniform_buffers);
 
             VkBuffer vertex_buffer = vertex->buffer_handle;
             VkDeviceSize vertex_offset = 0;
@@ -1694,6 +1793,9 @@ namespace Corona::Horizon
                         desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless, dispatch.comp_condition_info);
                         desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
                         computePipeline->rebuild_pipeline(std::move(desc), dispatch.comp_condition_info);
+                        // 同光栅路径：layout 句柄可能被回收复用，缓存整体作废。
+                        graphics_descriptors.reset();
+                        compute_descriptors.reset();
                     }
                 }
 
@@ -1724,23 +1826,28 @@ namespace Corona::Horizon
                     throw std::logic_error("Dispatch resolved an invalid compute pipeline.");
 
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, prepared.pipeline);
-                if (prepared.uses_bindless)
+                compute_descriptors.use_layout(prepared.layout);
+                if (prepared.uses_bindless && !compute_descriptors.bindless_bound)
                 {
-                    auto bindless_sets = resource_manager().bindless_descriptor_sets();
+                    const auto& sets = bindless_sets();
                     vkCmdBindDescriptorSets(command_buffer,
                                             VK_PIPELINE_BIND_POINT_COMPUTE,
                                             prepared.layout,
                                             0,
-                                            static_cast<uint32_t>(bindless_sets.size()),
-                                            bindless_sets.data(),
+                                            static_cast<uint32_t>(sets.size()),
+                                            sets.data(),
                                             0,
                                             nullptr);
+                    compute_descriptors.bindless_bound = true;
                 }
 
                 // 每 dispatch 的非 bindless UBO 通过 push descriptor 写入命令缓冲，
                 // 无需 transient descriptor pool。push_uniform_buffers 已按 set 分组、
                 // 组内按 binding 有序，逐 set 组装 writes 后一次推送。
-                for (size_t begin = 0; begin < prepared.push_uniform_buffers.size();)
+                // 同 layout 且推送内容未变则整体跳过（理由同光栅路径）。
+                const bool push_uniforms_dirty =
+                    !compute_descriptors.uniforms_match(prepared.push_uniform_buffers);
+                for (size_t begin = 0; push_uniforms_dirty && begin < prepared.push_uniform_buffers.size();)
                 {
                     const uint32_t current_set = prepared.push_uniform_buffers[begin].set;
                     size_t end = begin;
@@ -1784,6 +1891,8 @@ namespace Corona::Horizon
                                            writes.data());
                     begin = end;
                 }
+                if (push_uniforms_dirty)
+                    compute_descriptors.remember_uniforms(prepared.push_uniform_buffers);
 
                 if (!dispatch.push_constant_data.empty())
                 {
