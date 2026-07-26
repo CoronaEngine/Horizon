@@ -912,6 +912,8 @@ namespace Corona::Horizon
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
+        // 与 command_batch() 等价，但直接录进 recorder，省掉中间容器与一次批次拷贝。
+        void record_into(CommandRecorder& recorder) const;
         [[nodiscard]] explicit operator bool() const noexcept;
 
         template <typename TargetProxy>
@@ -1401,6 +1403,31 @@ namespace Corona::Horizon
         }
     };
 
+    // 批量 indexed draw。payload 由 shared_ptr 持有：make_stream_command 会按值
+    // 拷贝命令对象，而一个批次可能有数万条 draw，直接内嵌 vector 会让每次
+    // StreamCommand 拷贝都变成一次深拷贝。
+    struct DrawIndexedBatchCommand
+    {
+        std::shared_ptr<DrawIndexedBatchDesc> batch {};
+        DeviceMask devices {};
+
+        void record(CommandRecorder& recorder) const
+        {
+            if (batch)
+                recorder.draw_indexed_batch(*batch, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
     struct PresentCommand
     {
         DisplayerRef displayer {};
@@ -1476,6 +1503,11 @@ namespace Corona::Horizon
     [[nodiscard]] inline DrawIndexedCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {})
     {
         return { index, vertex, std::move(desc), devices };
+    }
+
+    [[nodiscard]] inline DrawIndexedBatchCommand draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {})
+    {
+        return { std::make_shared<DrawIndexedBatchDesc>(std::move(batch)), devices };
     }
 
     [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)

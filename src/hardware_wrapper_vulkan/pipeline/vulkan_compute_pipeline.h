@@ -63,6 +63,8 @@ namespace Corona::Horizon
         ~VulkanComputePipeline();
 
         [[nodiscard]] ComputePipelineDesc desc() const;
+        // 只取 pipelineObject（shared_ptr 浅拷贝），避免 desc() 的整份深拷贝。
+        [[nodiscard]] std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipeline_object() const;
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void bind_auto_resources();

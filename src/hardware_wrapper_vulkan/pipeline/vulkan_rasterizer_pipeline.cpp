@@ -1604,89 +1604,17 @@ namespace Corona::Horizon
         draws_.clear();
     }
 
-    VulkanRasterizerPipeline::Snapshot VulkanRasterizerPipeline::snapshot() const
+    VulkanRasterizerPipeline::DrawPlan VulkanRasterizerPipeline::build_draw_plan() const
     {
-        std::lock_guard lock(mutex_);
-        return {
-            .desc = desc_,
-            .width = width_,
-            .height = height_,
-            .buffers = bound_buffers_,
-            .images = bound_images_,
-            .depth_target = depth_target_,
-            .draws = draws_,
-        };
-    }
-
-    CommandBatch VulkanRasterizerPipeline::command_batch() const
-    {
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
-
-        Snapshot state = snapshot();
-        CommandBatch batch;
-
-        std::vector<const BoundImage*> color_outputs;
-        for (const BoundImage& image : state.images)
-        {
-            if (!is_stage_output(image.bind_type) || !image.image)
-                continue;
-            color_outputs.push_back(&image);
-        }
-        std::sort(color_outputs.begin(), color_outputs.end(),
-                  [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
-
-        const bool has_rendering_scope = !color_outputs.empty() && state.width != 0 && state.height != 0;
-        if (has_rendering_scope)
-        {
-            const bool has_depth = static_cast<bool>(state.depth_target);
-            RenderingDesc rendering_desc;
-            rendering_desc.color = image_ref(color_outputs[0]->image);
-            for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
-                rendering_desc.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
-            rendering_desc.depth = has_depth ? image_ref(state.depth_target) : ImageRef {};
-            rendering_desc.width = state.width;
-            rendering_desc.height = state.height;
-            rendering_desc.clear_color = state.desc.clear_color_target;
-            rendering_desc.clear_depth = has_depth && state.desc.clear_depth_target;
-            batch << begin_rendering(rendering_desc);
-        }
-
-        for (const RecordedDraw& draw : state.draws)
-        {
-            DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-            //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
-            draw_desc.pipeline = draw.pipeline;
-            auto pipelineDesc = desc();
-            if (auto object = pipelineDesc.pipelineObject; object)
-            {
-                draw_desc.vert_condition_info = object->vertex->getCurrentConditionInfo();
-                draw_desc.frag_condition_info = object->fragment->getCurrentConditionInfo();
-            }
-            draw_desc.push_constant_data = draw.push_constant_data;
-            draw_desc.uniform_buffers = draw.uniform_buffers;
-
-            batch << draw_indexed(buffer_ref(draw.index_buffer),
-                                  buffer_ref(draw.vertex_buffer),
-                                  std::move(draw_desc));
-        }
-
-        if (has_rendering_scope)
-            batch << end_rendering();
-
-        return batch;
-    }
-
-    void VulkanRasterizerPipeline::record_consuming(CommandRecorder& recorder)
-    {
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_consuming");
-
+        // 只在锁内取真正需要的状态。原先走 snapshot()，它会把 draws_ 整份深拷贝
+        // 一遍（每 draw 两个 vector），压测下是纯浪费；这里直接在锁内构建批次。
         uint32_t width = 0;
         uint32_t height = 0;
         bool clear_color_target = true;
         bool clear_depth_target = true;
         std::vector<BoundImage> images;
         HardwareImage depth_target;
-        std::vector<RecordedDraw> draws;
+        DrawPlan plan;
         {
             std::lock_guard lock(mutex_);
             width = width_;
@@ -1695,8 +1623,33 @@ namespace Corona::Horizon
             clear_depth_target = desc_.clear_depth_target;
             images = bound_images_;
             depth_target = depth_target_;
-            draws = std::move(draws_);
-            draws_.clear();
+
+            // 条件信息在一个批次内对所有 draw 相同（getCurrentConditionInfo 返回
+            // vector<bool>，原先每 draw 调两次 = 每 draw 两次堆分配），提到循环外。
+            EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+            EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+            if (const auto& object = desc_.pipelineObject; object)
+            {
+                vert_condition_info = object->vertex->getCurrentConditionInfo();
+                frag_condition_info = object->fragment->getCurrentConditionInfo();
+            }
+
+            plan.batch.draws.reserve(draws_.size());
+            for (const RecordedDraw& draw : draws_)
+            {
+                DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
+                draw_desc.pipeline = draw.pipeline;
+                draw_desc.vert_condition_info = vert_condition_info;
+                draw_desc.frag_condition_info = frag_condition_info;
+                draw_desc.push_constant_data = draw.push_constant_data;
+                draw_desc.uniform_buffers = draw.uniform_buffers;
+
+                plan.batch.draws.push_back({
+                    .index = buffer_ref(draw.index_buffer),
+                    .vertex = buffer_ref(draw.vertex_buffer),
+                    .draw = std::move(draw_desc),
+                });
+            }
         }
 
         std::vector<const BoundImage*> color_outputs;
@@ -1709,41 +1662,59 @@ namespace Corona::Horizon
         std::sort(color_outputs.begin(), color_outputs.end(),
                   [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
 
-        const bool has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
-        if (has_rendering_scope)
+        plan.has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
+        if (plan.has_rendering_scope)
         {
             const bool has_depth = static_cast<bool>(depth_target);
-            RenderingDesc rendering_desc;
-            rendering_desc.color = image_ref(color_outputs[0]->image);
+            plan.rendering.color = image_ref(color_outputs[0]->image);
             for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
-                rendering_desc.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
-            rendering_desc.depth = has_depth ? image_ref(depth_target) : ImageRef {};
-            rendering_desc.width = width;
-            rendering_desc.height = height;
-            rendering_desc.clear_color = clear_color_target;
-            rendering_desc.clear_depth = has_depth && clear_depth_target;
-            recorder.begin_rendering(rendering_desc);
+                plan.rendering.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
+            plan.rendering.depth = has_depth ? image_ref(depth_target) : ImageRef {};
+            plan.rendering.width = width;
+            plan.rendering.height = height;
+            plan.rendering.clear_color = clear_color_target;
+            plan.rendering.clear_depth = has_depth && clear_depth_target;
         }
 
-        DrawIndexedBatchDesc batch;
-        batch.draws.reserve(draws.size());
-        for (RecordedDraw& draw : draws)
-        {
-            DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-            draw_desc.debug_label = std::move(draw.params.debug_label);
-            //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
-            draw_desc.pipeline = draw.pipeline;
-            draw_desc.push_constant_data = std::move(draw.push_constant_data);
-            draw_desc.uniform_buffers = std::move(draw.uniform_buffers);
-            batch.draws.push_back({
-                .index = buffer_ref(draw.index_buffer),
-                .vertex = buffer_ref(draw.vertex_buffer),
-                .draw = std::move(draw_desc),
-            });
-        }
-        recorder.draw_indexed_batch(std::move(batch));
+        return plan;
+    }
 
-        if (has_rendering_scope)
+    CommandBatch VulkanRasterizerPipeline::command_batch() const
+    {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
+
+        DrawPlan plan = build_draw_plan();
+        CommandBatch batch;
+
+        if (plan.has_rendering_scope)
+            batch << begin_rendering(plan.rendering);
+
+        // 一条 DrawIndexedBatch 而不是每 draw 一条 DrawIndexed：编译期的资源去重
+        // 让 64k draws 只产生 2 个唯一 resource use，而不是 128k 个，同时省掉
+        // 每 draw 一个 StreamCommand(std::function) + 一个 CommandIR。
+        if (!plan.batch.draws.empty())
+            batch << draw_indexed_batch(std::move(plan.batch));
+
+        if (plan.has_rendering_scope)
+            batch << end_rendering();
+
+        return batch;
+    }
+
+    void VulkanRasterizerPipeline::record_into(CommandRecorder& recorder) const
+    {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_into");
+
+        DrawPlan plan = build_draw_plan();
+
+        if (plan.has_rendering_scope)
+            recorder.begin_rendering(plan.rendering);
+
+        if (!plan.batch.draws.empty())
+            recorder.draw_indexed_batch(std::move(plan.batch));
+
+        if (plan.has_rendering_scope)
             recorder.end_rendering();
     }
+
 }

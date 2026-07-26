@@ -50,17 +50,6 @@ namespace Corona::Horizon
             std::vector<UniformBufferBindingData> uniform_buffers;
         };
 
-        struct Snapshot
-        {
-            RasterizerPipelineDesc desc;
-            uint32_t width { 0 };
-            uint32_t height { 0 };
-            std::vector<BoundBuffer> buffers;
-            std::vector<BoundImage> images;
-            HardwareImage depth_target {};
-            std::vector<RecordedDraw> draws;
-        };
-
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
                                           std::source_location source_location = std::source_location::current());
         ~VulkanRasterizerPipeline();
@@ -114,9 +103,10 @@ namespace Corona::Horizon
                                                 uint32_t vertex_stride,
                                                 const DrawIndexedDesc& draw);
 
-        [[nodiscard]] Snapshot snapshot() const;
         [[nodiscard]] CommandBatch command_batch() const;
-        void record_consuming(CommandRecorder& recorder);
+        // 直接录进 recorder：与 command_batch() 等价，但省掉中间的 CommandBatch /
+        // StreamCommand(std::function) 以及批次 payload 的一次拷贝。
+        void record_into(CommandRecorder& recorder) const;
 
     private:
         struct PipelineKey
@@ -171,6 +161,16 @@ namespace Corona::Horizon
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
         };
+
+        // 一帧提交所需的全部内容，在一次加锁内取齐。
+        struct DrawPlan
+        {
+            bool has_rendering_scope { false };
+            RenderingDesc rendering {};
+            DrawIndexedBatchDesc batch {};
+        };
+
+        [[nodiscard]] DrawPlan build_draw_plan() const;
 
         [[nodiscard]] uint32_t push_constant_size() const noexcept;
         // 按签名取回（必要时分配并写入）该 set 的持久 UBO descriptor set。

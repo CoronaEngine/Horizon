@@ -13,9 +13,12 @@ namespace Corona::Horizon
     {
         using RasterizerPipelineStore = ResourceStore<RasterizerPipelineWrap, NoopReleaser>;
 
+        // 只读槽位里的 impl 指针（VulkanRasterizerPipeline 自身有内部锁负责状态变更），
+        // 因此取共享锁即可。原先用 write<> 拿独占锁：每次 record / 每次 reflected
+        // binding 赋值都要独占一次槽位，既是纯开销也让并发录制互相串行化。
         [[nodiscard]] std::shared_ptr<VulkanRasterizerPipeline> pipeline_impl(const std::shared_ptr<IResourceRef>& token)
         {
-            auto pipeline = write<RasterizerPipelineStore>(token);
+            auto pipeline = read<RasterizerPipelineStore>(token);
             if (!pipeline || !pipeline->impl)
                 throw std::logic_error("RasterizerPipeline does not reference a valid implementation.");
 
@@ -164,6 +167,14 @@ namespace Corona::Horizon
         token = ResourceBridge::token(*this);
 
         return pipeline_impl(token)->command_batch();
+    }
+
+    void RasterizerPipelineBase::record_into(CommandRecorder& recorder) const
+    {
+        std::shared_ptr<IResourceRef> token;
+        token = ResourceBridge::token(*this);
+
+        pipeline_impl(token)->record_into(recorder);
     }
 
     void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::

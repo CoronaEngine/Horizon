@@ -1239,12 +1239,18 @@ namespace Corona::Horizon
                     throw std::logic_error("Cross-device resource dependency requires an imported timeline or explicit present fallback.");
                 }
 
-                const auto keep_alive_start = std::chrono::steady_clock::now();
-                collect_keep_alive(submission, command);
+                // 只在开了 profile 时查时钟：每命令两次 steady_clock::now() 在
+                // 命令数很多时本身就是可观测开销。
                 if (profile != nullptr)
                 {
+                    const auto keep_alive_start = std::chrono::steady_clock::now();
+                    collect_keep_alive(submission, command);
                     profile->keep_alive_ms += std::chrono::duration<double, std::milli>(
                         std::chrono::steady_clock::now() - keep_alive_start).count();
+                }
+                else
+                {
+                    collect_keep_alive(submission, command);
                 }
                 if (command.op == CommandOp::Present)
                 {
@@ -1446,6 +1452,50 @@ namespace Corona::Horizon
         DescriptorBindingCache graphics_descriptors;
         DescriptorBindingCache compute_descriptors;
 
+        // 一个批次里连续的 draw 绝大多数共用同一 pipeline / IB / VB。每 draw 重新
+        // 走一遍 resource store（shared_ptr 拷贝 + dynamic_cast + 槽位 shared_mutex）
+        // 和 prepare_draw（管线锁 + 线性查找）在压测下是主要剩余开销。
+        //
+        // 这里只缓存**取出来的值**（VkBuffer / stride / PreparedDraw），不跨 draw
+        // 持有 Read 句柄，因此不会把槽位锁按住、不影响其它线程写同一资源。
+        //
+        // key 用的是 token 地址，本来会有 ABA 风险（token 释放后新 token 复用同一
+        // 地址）；但 submission.keep_alive 已持有本次提交用到的每个资源 token 的
+        // shared_ptr，encode 期间它们不可能被释放，故地址在本次 encode 内唯一。
+        // 缓存生命周期严格限于单次 encode()，不要提升为成员。
+        struct DrawEncodeCache
+        {
+            const IResourceRef* index_token { nullptr };
+            VkBuffer index_buffer { VK_NULL_HANDLE };
+            IndexType index_type_request { IndexType::Auto };
+            VkIndexType index_type { VK_INDEX_TYPE_UINT32 };
+
+            const IResourceRef* vertex_token { nullptr };
+            VkBuffer vertex_buffer { VK_NULL_HANDLE };
+            uint32_t vertex_stride { 0 };
+
+            const RasterizerPipelineBase* pipeline_key { nullptr };
+            std::shared_ptr<VulkanRasterizerPipeline> pipeline_impl;
+            bool prepared_valid { false };
+            VulkanRasterizerPipeline::PreparedDraw prepared {};
+
+            void reset() noexcept
+            {
+                index_token = nullptr;
+                vertex_token = nullptr;
+                pipeline_key = nullptr;
+                pipeline_impl.reset();
+                prepared_valid = false;
+                prepared = {};
+            }
+
+            void invalidate_prepared() noexcept
+            {
+                prepared_valid = false;
+                prepared = {};
+            }
+        } draw_cache;
+
         // 三个 bindless set 全submission只取一次：省掉每 draw/dispatch 一次
         // ResourceManager 全局锁 + 数组拷贝。
         std::optional<std::array<VkDescriptorSet, ResourceManager::bindless_descriptor_set_count>> bindless_sets_cache;
@@ -1521,37 +1571,60 @@ namespace Corona::Horizon
             if (!index_ref.handle || !vertex_ref.handle)
                 throw std::logic_error("DrawIndexed command is missing index or vertex buffer resources.");
 
-            BufferStore::Read index = read_buffer(index_ref.handle);
-            BufferStore::Read vertex = read_buffer(vertex_ref.handle);
-            if (!index || index->buffer_handle == VK_NULL_HANDLE)
-                throw std::logic_error("DrawIndexed requires a valid index HardwareBuffer.");
-            if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
-                throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
+            // IB / VB：句柄与上一 draw 相同则复用已取出的值，不再进 resource store。
+            const IResourceRef* index_token = ResourceBridge::token(index_ref.handle).get();
+            if (draw_cache.index_token != index_token || draw_cache.index_type_request != draw.index_type)
+            {
+                BufferStore::Read index = read_buffer(index_ref.handle);
+                if (!index || index->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("DrawIndexed requires a valid index HardwareBuffer.");
+
+                draw_cache.index_token = index_token;
+                draw_cache.index_buffer = index->buffer_handle;
+                draw_cache.index_type_request = draw.index_type;
+                draw_cache.index_type = resolve_index_type(draw, *index);
+            }
+
+            const IResourceRef* vertex_token = ResourceBridge::token(vertex_ref.handle).get();
+            if (draw_cache.vertex_token != vertex_token)
+            {
+                BufferStore::Read vertex = read_buffer(vertex_ref.handle);
+                if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("DrawIndexed requires a valid vertex HardwareBuffer.");
+
+                const uint32_t stride = static_cast<uint32_t>(vertex->desc.element_size);
+                if (draw_cache.vertex_stride != stride)
+                    draw_cache.invalidate_prepared(); // stride 参与 prepare_draw 的 key
+
+                draw_cache.vertex_token = vertex_token;
+                draw_cache.vertex_buffer = vertex->buffer_handle;
+                draw_cache.vertex_stride = stride;
+            }
 
             // 纹理已全走 bindless（索引写入 push constant），draw.bindings 在光栅路径恒为空，
             // 原先遍历 DrawBindingKind::SampledImage 的校验循环是 no-op 死代码，已移除。
 
             auto rasterizerPipeline = draw.pipeline;
-            auto desc = rasterizerPipeline->desc();
-            if (desc.pipelineObject)
+            // desc() 深拷贝整个 RasterizerPipelineDesc（含两份 SPIR-V + 反射表），
+            // 每 draw 一次在压测下是主要开销。条件信息比较不需要 desc，先比较、
+            // 只有真的要 rebuild 时才付这份拷贝。条件相同（或无 pipelineObject，
+            // 此时两边都是默认值）时原本也不会 rebuild，语义不变。
+            const bool vertex_condition_changed =
+                rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info;
+            const bool fragment_condition_changed =
+                rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info;
+            if (vertex_condition_changed || fragment_condition_changed)
             {
-                auto& vc = desc.pipelineObject->vertex;
-                auto& fc = desc.pipelineObject->fragment;
-                bool needRebuild = false;
-                if (rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info)
+                auto desc = rasterizerPipeline->desc();
+                if (desc.pipelineObject)
                 {
-                    desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
-                    needRebuild = true;
-                }
+                    auto& vc = desc.pipelineObject->vertex;
+                    auto& fc = desc.pipelineObject->fragment;
+                    if (vertex_condition_changed)
+                        desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
+                    if (fragment_condition_changed)
+                        desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
 
-                if (rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info)
-                {
-                    desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
-                    needRebuild = true;
-                }
-
-                if (needRebuild)
-                {
                     desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless,  draw.vert_condition_info, draw.frag_condition_info);
                     desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
                     rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
@@ -1560,22 +1633,42 @@ namespace Corona::Horizon
                     // 故此处必须整体作废，两个绑定点都清（句柄池是设备级共享的）。
                     graphics_descriptors.reset();
                     compute_descriptors.reset();
+                    // rebuild 换掉了 impl 与 layout，memo 里的 pipeline/prepared 全部失效。
+                    draw_cache.pipeline_key = nullptr;
+                    draw_cache.pipeline_impl.reset();
+                    draw_cache.invalidate_prepared();
                 }
             }
 
-            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(*draw.pipeline);
-            const std::array<VkFormat, 4> color_formats {
-                active_rendering.color_format,
-                active_rendering.extra_color_formats[0],
-                active_rendering.extra_color_formats[1],
-                active_rendering.extra_color_formats[2],
-            };
-            VulkanRasterizerPipeline::PreparedDraw prepared =
-                pipeline->prepare_draw(device_,
-                                       color_formats,
-                                       active_rendering.depth_format,
-                                       static_cast<uint32_t>(vertex->desc.element_size),
-                                       draw);
+            if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
+            {
+                draw_cache.pipeline_impl = rasterizer_impl(*draw.pipeline);
+                draw_cache.pipeline_key = rasterizerPipeline;
+                draw_cache.invalidate_prepared();
+            }
+            const std::shared_ptr<VulkanRasterizerPipeline>& pipeline = draw_cache.pipeline_impl;
+
+            // prepare_draw 的结果由 (device, color/depth formats, vertex_stride,
+            // draw.uniform_buffers) 决定。formats 在 BeginRendering 时固定（那里会清
+            // memo），stride 变化上面已作废。uniform_buffers 非空时逐 draw 比较签名不
+            // 一定比直接调用便宜，保守起见只在它为空（纹理全 bindless + push constant
+            // 的常见路径）时复用。
+            if (!draw_cache.prepared_valid || !draw.uniform_buffers.empty())
+            {
+                const std::array<VkFormat, 4> color_formats {
+                    active_rendering.color_format,
+                    active_rendering.extra_color_formats[0],
+                    active_rendering.extra_color_formats[1],
+                    active_rendering.extra_color_formats[2],
+                };
+                draw_cache.prepared = pipeline->prepare_draw(device_,
+                                                            color_formats,
+                                                            active_rendering.depth_format,
+                                                            draw_cache.vertex_stride,
+                                                            draw);
+                draw_cache.prepared_valid = draw.uniform_buffers.empty();
+            }
+            const VulkanRasterizerPipeline::PreparedDraw& prepared = draw_cache.prepared;
             if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                 throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
 
@@ -1606,10 +1699,10 @@ namespace Corona::Horizon
                 graphics_descriptors.remember_uniform_sets(prepared.uniform_sets);
             }
 
-            VkBuffer vertex_buffer = vertex->buffer_handle;
+            VkBuffer vertex_buffer = draw_cache.vertex_buffer;
             VkDeviceSize vertex_offset = 0;
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, index->buffer_handle, 0, resolve_index_type(draw, *index));
+            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, draw_cache.index_type);
 
             if (!draw.push_constant_data.empty())
             {
@@ -1768,12 +1861,14 @@ namespace Corona::Horizon
                 const DispatchDesc& dispatch = command.payload.dispatch;
 
                 auto computePipeline = command.payload.dispatch.pipeline;
-                auto desc = computePipeline->desc();
-                if (desc.pipelineObject)
+                // 同光栅路径：desc() 深拷贝整个 ComputePipelineDesc（SPIR-V + 反射），
+                // 先比条件、只有要 rebuild 时才付这份拷贝。
+                if (dispatch.comp_condition_info != computePipeline->compute_condition_info())
                 {
-                    auto& cc = desc.pipelineObject->compute;
-                    if (dispatch.comp_condition_info != computePipeline->compute_condition_info())
+                    auto desc = computePipeline->desc();
+                    if (desc.pipelineObject)
                     {
+                        auto& cc = desc.pipelineObject->compute;
                         desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
                         desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless, dispatch.comp_condition_info);
                         desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
@@ -1781,6 +1876,7 @@ namespace Corona::Horizon
                         // 同光栅路径：layout 句柄可能被回收复用，缓存整体作废。
                         graphics_descriptors.reset();
                         compute_descriptors.reset();
+                        draw_cache.reset();
                     }
                 }
 
@@ -1964,6 +2060,9 @@ namespace Corona::Horizon
                 active_rendering.active = true;
                 active_rendering.width = rendering.width;
                 active_rendering.height = rendering.height;
+                // 新的 rendering scope 意味着 attachment 格式可能变了，而格式是
+                // prepare_draw 的 key 之一；memo 整体作废。
+                draw_cache.reset();
                 break;
             }
             case CommandOp::EndRendering:
@@ -2133,7 +2232,9 @@ namespace Corona::Horizon
 
     HardwareStream& HardwareStream::operator<<(RasterizerPipelineBase& pipeline)
     {
-        return *this << pipeline.command_batch();
+        ensure_open();
+        pipeline.record_into(recorder_);
+        return *this;
     }
 
     SubmitReceipt HardwareStream::operator<<(CommitCommand)
@@ -2170,7 +2271,7 @@ namespace Corona::Horizon
     HardwareStream HardwareExecutor::operator<<(RasterizerPipelineBase& pipeline)
     {
         HardwareStream s(*this);
-        s << pipeline.command_batch();
+        s << pipeline;
         return s;
     }
 

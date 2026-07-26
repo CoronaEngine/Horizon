@@ -474,6 +474,12 @@ namespace Corona::Horizon
         return desc_;
     }
 
+    std::shared_ptr<EmbeddedShader::ComputePipelineObject> VulkanComputePipeline::pipeline_object() const
+    {
+        std::lock_guard lock(mutex_);
+        return desc_.pipelineObject;
+    }
+
     void VulkanComputePipeline::bind_auto_resources()
     {
         struct AutoValue
@@ -1043,8 +1049,8 @@ namespace Corona::Horizon
         Snapshot state = snapshot();
         state.dispatch.pipeline = &pipeline;
 
-        auto pipelineDesc = desc();
-        if (auto object = pipelineDesc.pipelineObject; object)
+        // 只需要 pipelineObject，不必深拷贝整个 ComputePipelineDesc（含 SPIR-V + 反射）。
+        if (std::shared_ptr<EmbeddedShader::ComputePipelineObject> object = pipeline_object(); object)
         {
             state.dispatch.comp_condition_info = object->compute->getCurrentConditionInfo();
         }
