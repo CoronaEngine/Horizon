@@ -69,13 +69,6 @@ namespace Corona::Horizon
         void record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void clear_records();
 
-        struct GraphicsPipeline
-        {
-            VkPipelineLayout layout { VK_NULL_HANDLE };
-            VkPipeline pipeline { VK_NULL_HANDLE };
-            bool uses_bindless { false };
-        };
-
         struct PreparedDraw
         {
             // UBO 与 bindless set 0-2 同形：管线侧按 (binding, buffer, range) 签名
@@ -93,10 +86,6 @@ namespace Corona::Horizon
             std::vector<UniformSet> uniform_sets;
         };
 
-        [[nodiscard]] GraphicsPipeline graphics_pipeline(VkDevice device,
-                                                         const std::array<VkFormat, 4>& color_formats,
-                                                         VkFormat depth_format,
-                                                         uint32_t vertex_stride);
         [[nodiscard]] PreparedDraw prepare_draw(VkDevice device,
                                                 const std::array<VkFormat, 4>& color_formats,
                                                 VkFormat depth_format,

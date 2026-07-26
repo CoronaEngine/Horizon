@@ -1075,36 +1075,6 @@ namespace Corona::Horizon
         }
     }
 
-    VulkanRasterizerPipeline::GraphicsPipeline VulkanRasterizerPipeline::graphics_pipeline(VkDevice device,
-                                                                                          const std::array<VkFormat, 4>& color_formats,
-                                                                                          VkFormat depth_format,
-                                                                                          uint32_t vertex_stride)
-    {
-        PipelineKey key {
-            .device = device,
-            .color_formats = color_formats,
-            .depth_format = depth_format,
-            .vertex_stride = vertex_stride,
-        };
-
-        std::lock_guard lock(mutex_);
-        auto found = std::ranges::find_if(pipeline_cache_, [&](const PipelineState& state) {
-            return state.key == key;
-        });
-
-        if (found == pipeline_cache_.end())
-        {
-            pipeline_cache_.push_back(create_graphics_pipeline_unlocked(key));
-            found = std::prev(pipeline_cache_.end());
-        }
-
-        return {
-            .layout = found->layout,
-            .pipeline = found->pipeline,
-            .uses_bindless = found->uses_bindless,
-        };
-    }
-
     VkDescriptorSet VulkanRasterizerPipeline::uniform_descriptor_set_unlocked(
         VkDevice device,
         PipelineState::DescriptorSetLayout& set_layout,

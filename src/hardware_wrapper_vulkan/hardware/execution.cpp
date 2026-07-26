@@ -817,20 +817,6 @@ namespace Corona::Horizon
         }
     }
 
-    void SubmissionKeepAlive::merge(SubmissionKeepAlive&& other)
-    {
-        for (auto& resource : other.resources_)
-        {
-            add_resource(std::move(resource));
-        }
-
-        objects_.insert(objects_.end(),
-                        std::make_move_iterator(other.objects_.begin()),
-                        std::make_move_iterator(other.objects_.end()));
-
-        other.clear();
-    }
-
     void SubmissionKeepAlive::clear() noexcept
     {
         resources_.clear();
@@ -1156,12 +1142,6 @@ namespace Corona::Horizon
         {
             mark_requirement(FeatureRequirement::DeviceGroup);
         }
-    }
-
-    ExecutionPlan ExecutionCompiler::compile(const RecordedTask& task, ExecutionCommitProfileSample* profile) const
-    {
-        RecordedTask owned = task;
-        return compile_owned(owned, profile);
     }
 
     ExecutionPlan ExecutionCompiler::compile(RecordedTask&& task, ExecutionCommitProfileSample* profile) const
@@ -1505,61 +1485,6 @@ namespace Corona::Horizon
             return *bindless_sets_cache;
         };
 
-        auto pre_transition_sampled_images_for_rendering = [&](size_t begin_index, const RenderingDesc& rendering) {
-            const std::array<std::uintptr_t, 5> attachment_ids {
-                resource_id(rendering.color.handle),
-                resource_id(rendering.extra_colors[0].handle),
-                resource_id(rendering.extra_colors[1].handle),
-                resource_id(rendering.extra_colors[2].handle),
-                resource_id(rendering.depth.handle),
-            };
-            std::vector<std::uintptr_t> transitioned;
-
-            for (size_t lookahead = begin_index + 1; lookahead < submission.commands.size(); ++lookahead)
-            {
-                const CommandIR& scoped_command = submission.commands[lookahead];
-                if (scoped_command.op == CommandOp::EndRendering || scoped_command.op == CommandOp::BeginRendering)
-                    break;
-
-                visit_indexed_draws(
-                    scoped_command,
-                    [&](BufferRef, BufferRef, const DrawIndexedDesc& draw) {
-                        for (const DrawResourceBinding& binding : draw.bindings)
-                        {
-                            if (binding.kind != DrawBindingKind::SampledImage)
-                                continue;
-
-                            const std::uintptr_t id = resource_id(binding.resource);
-                            if (id == 0)
-                                continue;
-
-                            if (std::find(attachment_ids.begin(), attachment_ids.end(), id) != attachment_ids.end())
-                            {
-                                throw std::logic_error("DrawIndexed cannot sample from the active rendering attachment without local-read support.");
-                            }
-
-                            if (std::find(transitioned.begin(), transitioned.end(), id) != transitioned.end())
-                                continue;
-
-                            ImageStore::Write image = write_image(binding.resource);
-                            if (!image || image->image_handle == VK_NULL_HANDLE ||
-                                image->image_view == VK_NULL_HANDLE)
-                            {
-                                throw std::logic_error("DrawIndexed sampled image binding requires a valid HardwareImage.");
-                            }
-
-                            transition_image(command_buffer,
-                                             *image,
-                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                             VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                                                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-                            transitioned.push_back(id);
-                        }
-                    });
-            }
-        };
-
         auto encode_indexed_draw = [&](BufferRef index_ref,
                                        BufferRef vertex_ref,
                                        const DrawIndexedDesc& draw) {
@@ -1600,9 +1525,6 @@ namespace Corona::Horizon
                 draw_cache.vertex_buffer = vertex->buffer_handle;
                 draw_cache.vertex_stride = stride;
             }
-
-            // 纹理已全走 bindless（索引写入 push constant），draw.bindings 在光栅路径恒为空，
-            // 原先遍历 DrawBindingKind::SampledImage 的校验循环是 no-op 死代码，已移除。
 
             auto rasterizerPipeline = draw.pipeline;
             // desc() 深拷贝整个 RasterizerPipelineDesc（含两份 SPIR-V + 反射表），
@@ -1958,7 +1880,13 @@ namespace Corona::Horizon
                 std::array<ImageStore::Write, 4> color_writes;
                 ImageStore::Write depth;
 
-                pre_transition_sampled_images_for_rendering(command_index, rendering);
+                // 注意：光栅路径的采样图像不在这里做 layout 转换。纹理已全走 bindless
+                // （索引写进 push constant），draw 不再携带 per-draw 的 sampled image
+                // 绑定，所以"进 rendering scope 前把后续 draw 要采样的图像转成
+                // SHADER_READ_ONLY_OPTIMAL"这件事已无从下手，原先的前瞻实现恒为
+                // no-op，已删除。约束仍然成立：不能在 rendering scope 内采样当前
+                // attachment（无 local-read 支持），但现在没有任何地方会检查它。
+                // 纯 bindless 图像的 layout 转换整体是缺失的，属已知待办。
 
                 std::array<VkRenderingAttachmentInfo, 4> color_attachments {};
                 uint32_t color_attachment_count = 0;
