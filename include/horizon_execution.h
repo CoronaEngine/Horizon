@@ -193,20 +193,6 @@ namespace Corona::Horizon
         std::string debug_label;
     };
 
-    enum class DrawBindingKind
-    {
-        SampledImage
-    };
-
-    struct DrawResourceBinding
-    {
-        uint32_t set { 0 };
-        uint32_t binding { 0 };
-        ResourceHandle resource {};
-        DrawBindingKind kind { DrawBindingKind::SampledImage };
-        AccessKind access { AccessKind::Read };
-    };
-
     struct RenderingDesc
     {
         ImageRef color {};
@@ -232,7 +218,6 @@ namespace Corona::Horizon
         IndexType index_type { IndexType::Auto };
         bool enable_scissor { false };
         ScissorRect scissor {};
-        std::vector<DrawResourceBinding> bindings;
         std::vector<ResourceUse> resource_uses;
         std::vector<std::byte> push_constant_data;
         std::vector<UniformBufferBindingData> uniform_buffers;
@@ -375,7 +360,6 @@ namespace Corona::Horizon
     public:
         void add_resource(std::shared_ptr<const IResourceRef> resource);
         void add_object(std::shared_ptr<void> object);
-        void merge(SubmissionKeepAlive&& other);
         void clear() noexcept;
 
         [[nodiscard]] size_t resource_count() const noexcept { return resources_.size(); }

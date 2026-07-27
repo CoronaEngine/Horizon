@@ -10,7 +10,7 @@
 #include "example_shadowmaps/example_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_assao/example_assao.h"
-#include "example_sky/example_sky.h"
+// #include "example_sky/example_sky.h"
 #include "example_edsl_sky/example_edsl_sky.h"
 
 #include <iostream>
@@ -84,11 +84,11 @@ int main(int argc, char **argv)
         run_example_assao();
         return 0;
     }
-    if (mode == "sky")
-    {
-        run_example_sky();
-        return 0;
-    }
+    // if (mode == "sky")
+    // {
+    //     run_example_sky();
+    //     return 0;
+    // }
     if (mode == "edsl_sky")
     {
         run_example_edsl_sky();

@@ -44,20 +44,18 @@ namespace Corona::Horizon
         struct PreparedDispatch
         {
             // 非 UBO 资源（storage buffer/image）强制走 bindless（持久 set 0-2 + push
-            // constant 索引），故每 dispatch 的 transient set 只含 UBO，通过 push
-            // descriptor 直接写入命令缓冲，不再分配 descriptor pool。
-            struct PushUniformBuffer
+            // constant 索引）。UBO 与之同形：管线侧按 (binding, buffer, range) 签名
+            // 分配并写入一次持久 descriptor set，execution 侧只 bind。按 set 升序排列。
+            struct UniformSet
             {
                 uint32_t set { 0 };
-                uint32_t binding { 0 };
-                VkBuffer buffer { VK_NULL_HANDLE };
-                VkDeviceSize range { 0 };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
             };
 
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
             bool uses_bindless { false };
-            std::vector<PushUniformBuffer> push_uniform_buffers;
+            std::vector<UniformSet> uniform_sets;
         };
 
         explicit VulkanComputePipeline(ComputePipelineDesc desc,
@@ -65,6 +63,8 @@ namespace Corona::Horizon
         ~VulkanComputePipeline();
 
         [[nodiscard]] ComputePipelineDesc desc() const;
+        // 只取 pipelineObject（shared_ptr 浅拷贝），避免 desc() 的整份深拷贝。
+        [[nodiscard]] std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipeline_object() const;
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void bind_auto_resources();
@@ -98,11 +98,30 @@ namespace Corona::Horizon
                 VkDescriptorType descriptor_type { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER };
             };
 
+            // 一组已写入的 UBO descriptor：签名相同即可复用，签名不同另分配一份。
+            // 已分配的 set 从不重写——in-flight 命令缓冲可能仍在引用它。
+            struct UniformDescriptorSet
+            {
+                struct Signature
+                {
+                    uint32_t binding { 0 };
+                    VkBuffer buffer { VK_NULL_HANDLE };
+                    VkDeviceSize range { 0 };
+
+                    [[nodiscard]] friend bool operator==(const Signature&, const Signature&) noexcept = default;
+                };
+
+                std::vector<Signature> signature;
+                VkDescriptorPool pool { VK_NULL_HANDLE };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
+            };
+
             struct DescriptorSetLayout
             {
                 uint32_t set { 0 };
                 std::vector<DescriptorBindingLayout> bindings;
                 VkDescriptorSetLayout layout { VK_NULL_HANDLE };
+                std::vector<UniformDescriptorSet> uniform_sets;
             };
 
             VkDevice device { VK_NULL_HANDLE };
@@ -115,9 +134,18 @@ namespace Corona::Horizon
         };
 
         [[nodiscard]] uint32_t push_constant_size() const noexcept;
+        // 按签名取回（必要时分配并写入）该 set 的持久 UBO descriptor set。
+        [[nodiscard]] static VkDescriptorSet uniform_descriptor_set_unlocked(
+            VkDevice device,
+            PipelineState::DescriptorSetLayout& set_layout,
+            const std::vector<PipelineState::UniformDescriptorSet::Signature>& signature,
+            const std::string& debug_name);
         [[nodiscard]] PipelineState create_pipeline_state_unlocked(VkDevice device, std::vector<BindingLayout> bindings) const;
         [[nodiscard]] PipelineState& pipeline_state_unlocked(VkDevice device, const DispatchDesc& dispatch);
         void destroy_pipeline_cache_unlocked() noexcept;
+        // 把 uniform_buffers_ 的 CPU 影子数据落到本帧槽的持久 buffer，并让
+        // gpu_buffer 指向该槽。槽未变且影子未脏时是空操作。
+        void sync_ubo_slot_unlocked() const;
 
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries_;
         ComputePipelineDesc desc_;
@@ -126,10 +154,14 @@ namespace Corona::Horizon
         mutable std::mutex mutex_;
         DispatchDesc dispatch_ {};
         std::vector<std::byte> push_constant_data_;
-        std::vector<UniformBufferBindingData> uniform_buffers_;
-        // 与 uniform_buffers_ 同序的持久 GPU buffer，初始化时创建一次，
-        // 每次 set_push_constant_direct（UBO 路径）只 write_bytes（memcpy）。
-        std::vector<HardwareBuffer> ubo_buffers_;
+        // CPU 影子数据 + 本帧槽的 gpu_buffer 句柄。setter 只写影子并置脏，
+        // 真正的 flush 推迟到 snapshot()（const，故 mutable）。
+        mutable std::vector<UniformBufferBindingData> uniform_buffers_;
+        // 与 uniform_buffers_ 同序的持久 GPU buffer 环，每条 binding 一环、
+        // 环长 = frame_ring_size()。第 i 帧写槽 i%N，不覆写仍在飞的帧读的槽。
+        mutable std::vector<std::vector<HardwareBuffer>> ubo_rings_;
+        mutable int64_t ubo_slot_ { -1 };
+        mutable bool ubo_dirty_ { true };
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         mutable std::vector<PipelineState> pipeline_cache_;

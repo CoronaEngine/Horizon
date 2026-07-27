@@ -14,7 +14,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_shadowmaps/example_shadowmaps.cpp
     example_shadowvolumes/example_shadowvolumes.cpp
     example_assao/example_assao.cpp
-    example_sky/example_sky.cpp
+    # example_sky/example_sky.cpp
     example_edsl_sky/example_edsl_sky.cpp
 )
 
@@ -38,7 +38,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_shadowmaps/example_shadowmaps.h
     example_shadowvolumes/example_shadowvolumes.h
     example_assao/example_assao.h
-    example_sky/example_sky.h
+    # example_sky/example_sky.h
     example_edsl_sky/example_edsl_sky.h
 )
 
