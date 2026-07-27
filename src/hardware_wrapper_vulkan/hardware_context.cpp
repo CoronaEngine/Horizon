@@ -644,6 +644,8 @@ namespace Corona::Horizon
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageExtendedFormats", features.features.shaderStorageImageExtendedFormats);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageReadWithoutFormat", features.features.shaderStorageImageReadWithoutFormat);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageWriteWithoutFormat", features.features.shaderStorageImageWriteWithoutFormat);
+        add_required_feature(status, "Vulkan 1.0", "multiDrawIndirect", features.features.multiDrawIndirect);
+        add_required_feature(status, "Vulkan 1.0", "drawIndirectFirstInstance", features.features.drawIndirectFirstInstance);
         add_required_feature(status, "Vulkan 1.1", "multiview", features11.multiview);
         add_required_feature(status, "Vulkan 1.2", "bufferDeviceAddress", features12.bufferDeviceAddress);
         add_required_feature(status, "Vulkan 1.2", "shaderFloat16", features12.shaderFloat16);
@@ -1322,6 +1324,9 @@ namespace Corona::Horizon
             features.shaderStorageImageExtendedFormats = VK_TRUE;
             features.shaderStorageImageReadWithoutFormat = VK_TRUE;
             features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+            // MultiDrawIndirect (drawCount > 1) and non-zero firstInstance in indirect commands.
+            features.multiDrawIndirect = VK_TRUE;
+            features.drawIndirectFirstInstance = VK_TRUE;
 
             VkPhysicalDeviceVulkan11Features features11 {};
             features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;

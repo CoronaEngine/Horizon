@@ -49,6 +49,17 @@ namespace Corona::Horizon
             std::vector<UniformBufferBindingData> uniform_buffers;
         };
 
+        struct RecordedIndirectDraw
+        {
+            RasterizerPipelineBase* pipeline;
+            HardwareBuffer index_buffer {};
+            HardwareBuffer vertex_buffer {};
+            HardwareBuffer indirect_buffer {};
+            DrawIndexedIndirectParams params {};
+            std::vector<std::byte> push_constant_data;
+            std::vector<UniformBufferBindingData> uniform_buffers;
+        };
+
         struct Snapshot
         {
             RasterizerPipelineDesc desc;
@@ -58,6 +69,7 @@ namespace Corona::Horizon
             std::vector<BoundImage> images;
             HardwareImage depth_target {};
             std::vector<RecordedDraw> draws;
+            std::vector<RecordedIndirectDraw> indirect_draws;
         };
 
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
@@ -77,6 +89,11 @@ namespace Corona::Horizon
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
         void record(RasterizerPipelineBase* pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        void record_indirect(RasterizerPipelineBase* pipeline,
+                             const HardwareBuffer& index_buffer,
+                             const HardwareBuffer& vertex_buffer,
+                             const HardwareBuffer& indirect_buffer,
+                             const DrawIndexedIndirectParams& params);
         void clear_records();
 
         struct GraphicsPipeline
@@ -172,6 +189,7 @@ namespace Corona::Horizon
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;
         std::vector<RecordedDraw> draws_;
+        std::vector<RecordedIndirectDraw> indirect_draws_;
         mutable std::vector<PipelineState> pipeline_cache_;
     };
 }

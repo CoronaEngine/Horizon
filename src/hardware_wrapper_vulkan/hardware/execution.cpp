@@ -121,6 +121,7 @@ namespace Corona::Horizon
             case CommandOp::EndRendering: return "EndRendering";
             case CommandOp::DrawIndexed: return "DrawIndexed";
             case CommandOp::DrawIndexedBatch: return "DrawIndexedBatch";
+            case CommandOp::DrawIndexedIndirect: return "DrawIndexedIndirect";
             case CommandOp::Present: return "Present";
             case CommandOp::HostCallback: return "HostCallback";
             case CommandOp::KeepAlive: return "KeepAlive";
@@ -191,6 +192,16 @@ namespace Corona::Horizon
             {
                 out << " draws=" << command.payload.draw_indexed_batch.draws.size()
                     << " unique_resources=" << command.resources.size();
+            }
+            else if (command.op == CommandOp::DrawIndexedIndirect)
+            {
+                const DrawIndexedIndirectDesc& draw = command.payload.draw_indexed_indirect;
+                out << " draw_count=" << draw.draw_count
+                    << " offset=" << draw.indirect_offset
+                    << " stride=" << draw.stride
+                    << " pipeline=" << resource_id(*draw.pipeline);
+                if (command.resources.size() > 2u)
+                    out << " indirect_resource=" << resource_id(command.resources[2].handle);
             }
             else if (command.op == CommandOp::Present)
             {
@@ -483,9 +494,9 @@ namespace Corona::Horizon
             image.image_layout = new_layout;
         }
 
-        [[nodiscard]] VkIndexType resolve_index_type(const DrawIndexedDesc& draw, const BufferWrap& index_buffer) noexcept
+        [[nodiscard]] VkIndexType resolve_index_type(IndexType index_type, const BufferWrap& index_buffer) noexcept
         {
-            switch (draw.index_type)
+            switch (index_type)
             {
             case IndexType::UInt32:
                 return VK_INDEX_TYPE_UINT32;
@@ -497,6 +508,11 @@ namespace Corona::Horizon
             }
         }
 
+        [[nodiscard]] VkIndexType resolve_index_type(const DrawIndexedDesc& draw, const BufferWrap& index_buffer) noexcept
+        {
+            return resolve_index_type(draw.index_type, index_buffer);
+        }
+
         [[nodiscard]] VkRect2D full_scissor(uint32_t width, uint32_t height) noexcept
         {
             return {
@@ -505,25 +521,33 @@ namespace Corona::Horizon
             };
         }
 
-        [[nodiscard]] VkRect2D draw_scissor(const DrawIndexedDesc& draw, uint32_t width, uint32_t height) noexcept
+        [[nodiscard]] VkRect2D draw_scissor(bool enable_scissor, const ScissorRect& scissor, uint32_t width, uint32_t height) noexcept
         {
-            if (!draw.enable_scissor)
+            if (!enable_scissor)
                 return full_scissor(width, height);
 
-            const int32_t x = std::max<int32_t>(0, draw.scissor.x);
-            const int32_t y = std::max<int32_t>(0, draw.scissor.y);
+            const int32_t x = std::max<int32_t>(0, scissor.x);
+            const int32_t y = std::max<int32_t>(0, scissor.y);
             const int32_t right = std::min<int32_t>(static_cast<int32_t>(width),
-                                                    draw.scissor.x + static_cast<int32_t>(draw.scissor.width));
+                                                    scissor.x + static_cast<int32_t>(scissor.width));
             const int32_t bottom = std::min<int32_t>(static_cast<int32_t>(height),
-                                                     draw.scissor.y + static_cast<int32_t>(draw.scissor.height));
+                                                     scissor.y + static_cast<int32_t>(scissor.height));
 
             if (right <= x || bottom <= y)
                 return { .offset = { 0, 0 }, .extent = { 0, 0 } };
 
             return {
                 .offset = { x, y },
-                .extent = { static_cast<uint32_t>(right - x), static_cast<uint32_t>(bottom - y) },
+                .extent = {
+                    static_cast<uint32_t>(right - x),
+                    static_cast<uint32_t>(bottom - y),
+                },
             };
+        }
+
+        [[nodiscard]] VkRect2D draw_scissor(const DrawIndexedDesc& draw, uint32_t width, uint32_t height) noexcept
+        {
+            return draw_scissor(draw.enable_scissor, draw.scissor, width, height);
         }
 
         [[nodiscard]] std::shared_ptr<VulkanRasterizerPipeline> rasterizer_impl(const ResourceHandle& handle)
@@ -575,9 +599,25 @@ namespace Corona::Horizon
         {
             if (!plan.submissions.empty())
             {
-                const CompiledSubmission& tail = plan.submissions.back();
+                CompiledSubmission& tail = plan.submissions.back();
                 if (tail.device == device && tail.queue == queue)
                 {
+                    return plan.submissions.size() - 1;
+                }
+
+                // Fold Graphics↔Compute into one submission/command buffer.
+                // Bindless storage (Hi-Z mips, compacted instance/indirect SSBOs) is often
+                // referenced only by descriptor index and never appears in CommandIR::resources,
+                // so cross-submission timeline waits are missing. Keeping producer/consumer in
+                // one CB lets intra-buffer pipeline barriers provide the required sync
+                // (e.g. Hi-Z generate → occlude/compact → DrawIndirect).
+                const bool graphics_compute_mix =
+                    (tail.queue == QueueCapability::Graphics && queue == QueueCapability::Compute) ||
+                    (tail.queue == QueueCapability::Compute && queue == QueueCapability::Graphics);
+                if (tail.device == device && graphics_compute_mix)
+                {
+                    if (queue == QueueCapability::Graphics)
+                        tail.queue = QueueCapability::Graphics;
                     return plan.submissions.size() - 1;
                 }
             }
@@ -1034,6 +1074,32 @@ namespace Corona::Horizon
         commands_.push_back(std::move(command));
     }
 
+    void CommandRecorder::draw_indexed_indirect(BufferRef index,
+                                                BufferRef vertex,
+                                                BufferRef indirect,
+                                                DrawIndexedIndirectDesc desc,
+                                                DeviceMask devices)
+    {
+        ensure_open();
+        mark_requirement(QueueCapability::Graphics);
+
+        CommandIR command;
+        command.op = CommandOp::DrawIndexedIndirect;
+        command.devices = devices;
+        command.queue = QueueCapability::Graphics;
+        command.sequence = next_sequence();
+        command.debug_label = desc.debug_label;
+        command.resources.push_back({ index.handle, AccessKind::Read, 0 });
+        command.resources.push_back({ vertex.handle, AccessKind::Read, 0 });
+        command.resources.push_back({ indirect.handle, AccessKind::Read, 0 });
+        command.resources.insert(command.resources.end(), desc.resource_uses.begin(), desc.resource_uses.end());
+        if (desc.stride == 0)
+            desc.stride = static_cast<uint32_t>(sizeof(DrawIndexedIndirectCommand));
+        command.payload.draw_indexed_indirect = std::move(desc);
+        mark_device_requirements(devices);
+        commands_.push_back(std::move(command));
+    }
+
     void CommandRecorder::present(DisplayerRef displayer, ImageRef image, DeviceId present_device, bool allow_cpu_bridge_fallback)
     {
         ensure_open();
@@ -1190,6 +1256,11 @@ namespace Corona::Horizon
                     profile->logical_draws += command.payload.draw_indexed_batch.draws.size();
                     ++profile->draw_batches;
                 }
+                else if (command.op == CommandOp::DrawIndexedIndirect)
+                {
+                    profile->logical_draws += command.payload.draw_indexed_indirect.draw_count;
+                    ++profile->draw_batches;
+                }
             }
             const std::vector<DeviceId> devices = devices_from_mask(command.devices);
             std::vector<size_t> submission_indices;
@@ -1337,6 +1408,9 @@ namespace Corona::Horizon
             VkFormat depth_format { VK_FORMAT_UNDEFINED };
             uint32_t width { 0 };
             uint32_t height { 0 };
+            // Color attachments that may be consumed by later bindless compute (Storage/Sampled).
+            std::array<ResourceHandle, 4> color_handles {};
+            uint32_t color_handle_count { 0 };
         } active_rendering;
 
         VkCommandBuffer command_buffer = submission.command_buffer->vk();
@@ -1548,6 +1622,172 @@ namespace Corona::Horizon
                              draw.first_instance);
         };
 
+        auto encode_indexed_indirect_draw = [&](BufferRef index_ref,
+                                                BufferRef vertex_ref,
+                                                BufferRef indirect_ref,
+                                                const DrawIndexedIndirectDesc& draw) {
+            DebugUtilsLabelScope debug_label(command_buffer, draw.debug_label);
+            if (draw.draw_count == 0)
+                return;
+            if (!draw.pipeline)
+                throw std::logic_error("DrawIndexedIndirect requires a RasterizerPipeline handle.");
+            if (!index_ref.handle || !vertex_ref.handle || !indirect_ref.handle)
+                throw std::logic_error("DrawIndexedIndirect command is missing index, vertex, or indirect buffer resources.");
+
+            BufferStore::Read index = read_buffer(index_ref.handle);
+            BufferStore::Read vertex = read_buffer(vertex_ref.handle);
+            BufferStore::Read indirect = read_buffer(indirect_ref.handle);
+            if (!index || index->buffer_handle == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexedIndirect requires a valid index HardwareBuffer.");
+            if (!vertex || vertex->buffer_handle == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexedIndirect requires a valid vertex HardwareBuffer.");
+            if (!indirect || indirect->buffer_handle == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexedIndirect requires a valid indirect HardwareBuffer.");
+
+            auto rasterizerPipeline = draw.pipeline;
+            auto desc = rasterizerPipeline->desc();
+            if (desc.pipelineObject)
+            {
+                auto& vc = desc.pipelineObject->vertex;
+                auto& fc = desc.pipelineObject->fragment;
+                bool needRebuild = false;
+                if (rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info)
+                {
+                    desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
+                    needRebuild = true;
+                }
+
+                if (rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info)
+                {
+                    desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
+                    needRebuild = true;
+                }
+
+                if (needRebuild)
+                {
+                    desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless, draw.vert_condition_info, draw.frag_condition_info);
+                    desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
+                    rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
+                }
+            }
+
+            DrawIndexedDesc prepare_desc;
+            prepare_desc.pipeline = draw.pipeline;
+            prepare_desc.vert_condition_info = draw.vert_condition_info;
+            prepare_desc.frag_condition_info = draw.frag_condition_info;
+            prepare_desc.index_count = 1;
+            prepare_desc.index_type = draw.index_type;
+            prepare_desc.enable_scissor = draw.enable_scissor;
+            prepare_desc.scissor = draw.scissor;
+            prepare_desc.bindings = draw.bindings;
+            prepare_desc.resource_uses = draw.resource_uses;
+            prepare_desc.push_constant_data = draw.push_constant_data;
+            prepare_desc.uniform_buffers = draw.uniform_buffers;
+            prepare_desc.debug_label = draw.debug_label;
+
+            std::shared_ptr<VulkanRasterizerPipeline> pipeline = rasterizer_impl(*draw.pipeline);
+            const std::array<VkFormat, 4> color_formats {
+                active_rendering.color_format,
+                active_rendering.extra_color_formats[0],
+                active_rendering.extra_color_formats[1],
+                active_rendering.extra_color_formats[2],
+            };
+            VulkanRasterizerPipeline::PreparedDraw prepared =
+                pipeline->prepare_draw(device_,
+                                       color_formats,
+                                       active_rendering.depth_format,
+                                       static_cast<uint32_t>(vertex->desc.element_size),
+                                       prepare_desc);
+            if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
+                throw std::logic_error("DrawIndexedIndirect resolved an invalid graphics pipeline.");
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+            if (prepared.uses_bindless)
+            {
+                auto bindless_sets = resource_manager().bindless_descriptor_sets();
+                vkCmdBindDescriptorSets(command_buffer,
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        prepared.layout,
+                                        0,
+                                        static_cast<uint32_t>(bindless_sets.size()),
+                                        bindless_sets.data(),
+                                        0,
+                                        nullptr);
+            }
+
+            for (size_t begin = 0; begin < prepared.push_uniform_buffers.size();)
+            {
+                const uint32_t current_set = prepared.push_uniform_buffers[begin].set;
+                size_t end = begin;
+                std::array<VkDescriptorBufferInfo, 16> buffer_infos {};
+                std::array<VkWriteDescriptorSet, 16> writes {};
+                uint32_t count = 0;
+                while (end < prepared.push_uniform_buffers.size() &&
+                       prepared.push_uniform_buffers[end].set == current_set &&
+                       count < buffer_infos.size())
+                {
+                    const auto& ubo = prepared.push_uniform_buffers[end];
+                    buffer_infos[count] = VkDescriptorBufferInfo {
+                        .buffer = ubo.buffer,
+                        .offset = 0,
+                        .range = ubo.range,
+                    };
+                    VkWriteDescriptorSet& write = writes[count];
+                    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    write.dstBinding = ubo.binding;
+                    write.dstArrayElement = 0;
+                    write.descriptorCount = 1;
+                    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    write.pBufferInfo = &buffer_infos[count];
+                    ++count;
+                    ++end;
+                }
+
+                if (end < prepared.push_uniform_buffers.size() &&
+                    prepared.push_uniform_buffers[end].set == current_set)
+                {
+                    throw std::logic_error("DrawIndexedIndirect push descriptor exceeds 16 uniform buffers per set.");
+                }
+
+                vkCmdPushDescriptorSet(command_buffer,
+                                       VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                       prepared.layout,
+                                       current_set,
+                                       count,
+                                       writes.data());
+                begin = end;
+            }
+
+            VkBuffer vertex_buffer = vertex->buffer_handle;
+            VkDeviceSize vertex_offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+            vkCmdBindIndexBuffer(command_buffer, index->buffer_handle, 0, resolve_index_type(draw.index_type, *index));
+
+            if (!draw.push_constant_data.empty())
+            {
+                vkCmdPushConstants(command_buffer,
+                                   prepared.layout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0,
+                                   static_cast<uint32_t>(draw.push_constant_data.size()),
+                                   draw.push_constant_data.data());
+            }
+
+            VkRect2D scissor = draw_scissor(draw.enable_scissor, draw.scissor, active_rendering.width, active_rendering.height);
+            if (scissor.extent.width == 0 || scissor.extent.height == 0)
+                return;
+            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+            const uint32_t stride = draw.stride != 0
+                ? draw.stride
+                : static_cast<uint32_t>(sizeof(DrawIndexedIndirectCommand));
+            vkCmdDrawIndexedIndirect(command_buffer,
+                                     indirect->buffer_handle,
+                                     static_cast<VkDeviceSize>(draw.indirect_offset),
+                                     draw.draw_count,
+                                     stride);
+        };
+
         for (size_t command_index = 0; command_index < submission.commands.size(); ++command_index)
         {
             const CommandIR& command = submission.commands[command_index];
@@ -1723,6 +1963,28 @@ namespace Corona::Horizon
                 if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                     throw std::logic_error("Dispatch resolved an invalid compute pipeline.");
 
+                // Bindless dispatches reference images/buffers only by descriptor index in
+                // push constants / UBOs. Insert a memory barrier so prior attachment/compute
+                // writes are visible before this shader runs.
+                if (prepared.uses_bindless)
+                {
+                    VkMemoryBarrier2 memory_barrier {};
+                    memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                    memory_barrier.srcStageMask =
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                        VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+                    memory_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+                    memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+                    memory_barrier.dstAccessMask =
+                        VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+
+                    VkDependencyInfo dependency {};
+                    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    dependency.memoryBarrierCount = 1;
+                    dependency.pMemoryBarriers = &memory_barrier;
+                    vkCmdPipelineBarrier2(command_buffer, &dependency);
+                }
+
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, prepared.pipeline);
                 if (prepared.uses_bindless)
                 {
@@ -1810,6 +2072,30 @@ namespace Corona::Horizon
                 std::array<ImageStore::Write, 4> color_writes;
                 ImageStore::Write depth;
 
+                // Prior bindless compute may have rewritten SSBOs / indirect-arg buffers
+                // (e.g. GDR stream compaction → main DrawIndirect). Make those writes
+                // visible to VS/FS storage reads and to vkCmdDraw*Indirect.
+                {
+                    VkMemoryBarrier2 memory_barrier {};
+                    memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                    memory_barrier.srcStageMask =
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                    memory_barrier.srcAccessMask =
+                        VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+                    memory_barrier.dstStageMask =
+                        VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+                    memory_barrier.dstAccessMask =
+                        VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                        VK_ACCESS_2_SHADER_READ_BIT;
+
+                    VkDependencyInfo dependency {};
+                    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                    dependency.memoryBarrierCount = 1;
+                    dependency.pMemoryBarriers = &memory_barrier;
+                    vkCmdPipelineBarrier2(command_buffer, &dependency);
+                }
+
                 pre_transition_sampled_images_for_rendering(command_index, rendering);
 
                 std::array<VkRenderingAttachmentInfo, 4> color_attachments {};
@@ -1832,11 +2118,14 @@ namespace Corona::Horizon
                         throw std::logic_error("BeginRendering requires a valid color HardwareImage.");
 
                     const bool clear_attachment = rendering.clear_color || color->image_layout == VK_IMAGE_LAYOUT_UNDEFINED;
+                    const VkAccessFlags2 color_access =
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                        (clear_attachment ? VkAccessFlags2{ 0 } : VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT);
                     transition_image(command_buffer,
                                      *color,
                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+                                     color_access);
 
                     VkRenderingAttachmentInfo& color_attachment = color_attachments[color_attachment_count];
                     color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1850,8 +2139,10 @@ namespace Corona::Horizon
                         active_rendering.color_format = color->image_format;
                     else
                         active_rendering.extra_color_formats[color_attachment_count - 1] = color->image_format;
+                    active_rendering.color_handles[color_attachment_count] = color_ref.handle;
                     ++color_attachment_count;
                 }
+                active_rendering.color_handle_count = color_attachment_count;
 
                 if (rendering.depth.handle)
                 {
@@ -1905,6 +2196,34 @@ namespace Corona::Horizon
                 if (active_rendering.active)
                 {
                     vkCmdEndRendering(command_buffer);
+
+                    // Hi-Z style targets (R32F color + Storage/Sampled) are later read via
+                    // bindless compute. Promote only those to GENERAL; leave normal color RTs
+                    // in COLOR_ATTACHMENT_OPTIMAL for the next graphics pass.
+                    for (uint32_t i = 0; i < active_rendering.color_handle_count; ++i)
+                    {
+                        const ResourceHandle handle = active_rendering.color_handles[i];
+                        if (!handle)
+                            continue;
+
+                        ImageStore::Write color = write_image(handle);
+                        if (!color || color->image_handle == VK_NULL_HANDLE)
+                            continue;
+
+                        const bool hi_z_style =
+                            color->desc.format == Format::R32_FLOAT &&
+                            has_flag(color->desc.usage, ImageUsageFlags::Storage) &&
+                            has_flag(color->desc.usage, ImageUsageFlags::Sampled);
+                        if (!hi_z_style)
+                            continue;
+
+                        transition_image(command_buffer,
+                                         *color,
+                                         VK_IMAGE_LAYOUT_GENERAL,
+                                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                         VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT);
+                    }
+
                     active_rendering = {};
                 }
                 break;
@@ -1914,6 +2233,18 @@ namespace Corona::Horizon
                     throw std::logic_error("DrawIndexed requires an active rendering scope.");
                 visit_indexed_draws(command, encode_indexed_draw);
                 break;
+            case CommandOp::DrawIndexedIndirect:
+            {
+                if (!active_rendering.active)
+                    throw std::logic_error("DrawIndexedIndirect requires an active rendering scope.");
+                if (command.resources.size() < 3u)
+                    throw std::logic_error("DrawIndexedIndirect command is missing index, vertex, or indirect buffers.");
+                encode_indexed_indirect_draw(BufferRef{ command.resources[0].handle },
+                                             BufferRef{ command.resources[1].handle },
+                                             BufferRef{ command.resources[2].handle },
+                                             command.payload.draw_indexed_indirect);
+                break;
+            }
             case CommandOp::Present:
             {
                 const PresentDesc& present = command.payload.present;

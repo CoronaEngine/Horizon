@@ -138,6 +138,17 @@ namespace Corona::Horizon
             }
         }
 
+        [[nodiscard]] VkCullModeFlags to_vk_cull_mode(CullMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
+            case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
+            case CullMode::FrontAndBack: return VK_CULL_MODE_FRONT_AND_BACK;
+            case CullMode::None:
+            default: return VK_CULL_MODE_NONE;
+            }
+        }
 
         [[nodiscard]] VkCompareOp to_vk_compare_op(CompareOp op) noexcept
         {
@@ -547,10 +558,10 @@ namespace Corona::Horizon
         {
             DrawIndexedDesc desc;
             desc.index_count = params.index_count;
-            desc.instance_count = 1;
+            desc.instance_count = params.instance_count != 0 ? params.instance_count : 1;
             desc.first_index = params.first_index;
             desc.vertex_offset = params.vertex_offset;
-            desc.first_instance = 0;
+            desc.first_instance = params.first_instance;
             desc.index_type = params.index_type;
             desc.enable_scissor = params.enable_scissor;
             desc.scissor = params.scissor;
@@ -757,7 +768,7 @@ namespace Corona::Horizon
             rasterization.depthClampEnable = desc_.rasterizer.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
             rasterization.rasterizerDiscardEnable = desc_.rasterizer.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
             rasterization.polygonMode = to_vk_polygon_mode(desc_.rasterizer.fill_mode);
-            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.cullMode = to_vk_cull_mode(desc_.rasterizer.cull_mode);
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
             rasterization.lineWidth = desc_.rasterizer.line_width;
@@ -1495,10 +1506,39 @@ namespace Corona::Horizon
         record({}, index_buffer, vertex_buffer, params);
     }
 
+    void VulkanRasterizerPipeline::record_indirect(RasterizerPipelineBase* pipeline,
+                                                   const HardwareBuffer& index_buffer,
+                                                   const HardwareBuffer& vertex_buffer,
+                                                   const HardwareBuffer& indirect_buffer,
+                                                   const DrawIndexedIndirectParams& params)
+    {
+        if (!index_buffer || !vertex_buffer || !indirect_buffer)
+            return;
+        if (params.draw_count == 0)
+            return;
+
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_indirect");
+
+        RecordedIndirectDraw draw;
+        draw.pipeline = pipeline;
+        draw.index_buffer = index_buffer;
+        draw.vertex_buffer = vertex_buffer;
+        draw.indirect_buffer = indirect_buffer;
+        draw.params = params;
+        if (draw.params.stride == 0)
+            draw.params.stride = static_cast<uint32_t>(sizeof(DrawIndexedIndirectCommand));
+
+        std::lock_guard lock(mutex_);
+        draw.push_constant_data = push_constant_data_;
+        draw.uniform_buffers = uniform_buffers_;
+        indirect_draws_.push_back(std::move(draw));
+    }
+
     void VulkanRasterizerPipeline::clear_records()
     {
         std::lock_guard lock(mutex_);
         draws_.clear();
+        indirect_draws_.clear();
     }
 
     VulkanRasterizerPipeline::Snapshot VulkanRasterizerPipeline::snapshot() const
@@ -1512,6 +1552,7 @@ namespace Corona::Horizon
             .images = bound_images_,
             .depth_target = depth_target_,
             .draws = draws_,
+            .indirect_draws = indirect_draws_,
         };
     }
 
@@ -1567,6 +1608,32 @@ namespace Corona::Horizon
                                   std::move(draw_desc));
         }
 
+        for (const RecordedIndirectDraw& draw : state.indirect_draws)
+        {
+            DrawIndexedIndirectDesc draw_desc;
+            draw_desc.pipeline = draw.pipeline;
+            draw_desc.indirect_offset = draw.params.indirect_offset;
+            draw_desc.draw_count = draw.params.draw_count;
+            draw_desc.stride = draw.params.stride;
+            draw_desc.index_type = draw.params.index_type;
+            draw_desc.enable_scissor = draw.params.enable_scissor;
+            draw_desc.scissor = draw.params.scissor;
+            draw_desc.debug_label = draw.params.debug_label;
+            auto pipelineDesc = desc();
+            if (auto object = pipelineDesc.pipelineObject; object)
+            {
+                draw_desc.vert_condition_info = object->vertex->getCurrentConditionInfo();
+                draw_desc.frag_condition_info = object->fragment->getCurrentConditionInfo();
+            }
+            draw_desc.push_constant_data = draw.push_constant_data;
+            draw_desc.uniform_buffers = draw.uniform_buffers;
+
+            batch << draw_indexed_indirect(buffer_ref(draw.index_buffer),
+                                           buffer_ref(draw.vertex_buffer),
+                                           buffer_ref(draw.indirect_buffer),
+                                           std::move(draw_desc));
+        }
+
         if (has_rendering_scope)
             batch << end_rendering();
 
@@ -1584,6 +1651,7 @@ namespace Corona::Horizon
         std::vector<BoundImage> images;
         HardwareImage depth_target;
         std::vector<RecordedDraw> draws;
+        std::vector<RecordedIndirectDraw> indirect_draws;
         {
             std::lock_guard lock(mutex_);
             width = width_;
@@ -1594,6 +1662,8 @@ namespace Corona::Horizon
             depth_target = depth_target_;
             draws = std::move(draws_);
             draws_.clear();
+            indirect_draws = std::move(indirect_draws_);
+            indirect_draws_.clear();
         }
 
         std::vector<const BoundImage*> color_outputs;
@@ -1639,6 +1709,27 @@ namespace Corona::Horizon
             });
         }
         recorder.draw_indexed_batch(std::move(batch));
+
+        for (RecordedIndirectDraw& draw : indirect_draws)
+        {
+            DrawIndexedIndirectDesc draw_desc;
+            draw_desc.pipeline = draw.pipeline;
+            draw_desc.indirect_offset = draw.params.indirect_offset;
+            draw_desc.draw_count = draw.params.draw_count;
+            draw_desc.stride = draw.params.stride != 0
+                ? draw.params.stride
+                : static_cast<uint32_t>(sizeof(DrawIndexedIndirectCommand));
+            draw_desc.index_type = draw.params.index_type;
+            draw_desc.enable_scissor = draw.params.enable_scissor;
+            draw_desc.scissor = draw.params.scissor;
+            draw_desc.debug_label = std::move(draw.params.debug_label);
+            draw_desc.push_constant_data = std::move(draw.push_constant_data);
+            draw_desc.uniform_buffers = std::move(draw.uniform_buffers);
+            recorder.draw_indexed_indirect(buffer_ref(draw.index_buffer),
+                                           buffer_ref(draw.vertex_buffer),
+                                           buffer_ref(draw.indirect_buffer),
+                                           std::move(draw_desc));
+        }
 
         if (has_rendering_scope)
             recorder.end_rendering();

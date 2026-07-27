@@ -119,6 +119,8 @@ namespace Corona::Horizon
         Index = 1 << 3,
         Uniform = 1 << 4,
         Storage = 1 << 5,
+        // GPU-readable draw arguments for vkCmdDraw*Indirect / MultiDrawIndirect.
+        Indirect = 1 << 6,
     };
 
     constexpr BufferUsageFlags operator|(BufferUsageFlags a, BufferUsageFlags b)
@@ -343,8 +345,33 @@ namespace Corona::Horizon
     struct DrawIndexedParams
     {
         uint32_t index_count = 0;
+        uint32_t instance_count = 1;
         uint32_t first_index = 0;
         int32_t vertex_offset = 0;
+        uint32_t first_instance = 0;
+        IndexType index_type = IndexType::Auto;
+        bool enable_scissor = false;
+        ScissorRect scissor{};
+        std::string debug_label;
+    };
+
+    // Matches VkDrawIndexedIndirectCommand (20 bytes, tightly packed).
+    struct DrawIndexedIndirectCommand
+    {
+        uint32_t index_count = 0;
+        uint32_t instance_count = 1;
+        uint32_t first_index = 0;
+        int32_t vertex_offset = 0;
+        uint32_t first_instance = 0;
+    };
+    static_assert(sizeof(DrawIndexedIndirectCommand) == 20, "DrawIndexedIndirectCommand must match Vulkan layout");
+
+    struct DrawIndexedIndirectParams
+    {
+        uint32_t draw_count = 1;
+        uint64_t indirect_offset = 0;
+        // 0 means sizeof(DrawIndexedIndirectCommand).
+        uint32_t stride = 0;
         IndexType index_type = IndexType::Auto;
         bool enable_scissor = false;
         ScissorRect scissor{};
@@ -386,6 +413,13 @@ namespace Corona::Horizon
         Point,
     };
 
+    enum class CullMode : uint16_t
+    {
+        None = 0,
+        Front,
+        Back,
+        FrontAndBack,
+    };
 
     enum class CompareOp : uint16_t
     {
@@ -480,6 +514,7 @@ namespace Corona::Horizon
     {
         PrimitiveTopology topology = PrimitiveTopology::TriangleList;
         PolygonFillMode fill_mode = PolygonFillMode::Fill;
+        CullMode cull_mode = CullMode::None;
 
         bool depth_clamp_enabled = false;
         bool rasterizer_discard_enabled = false;

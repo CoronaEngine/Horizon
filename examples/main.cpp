@@ -12,6 +12,7 @@
 #include "example_assao/example_assao.h"
 #include "example_sky/example_sky.h"
 #include "example_edsl_sky/example_edsl_sky.h"
+#include "example_gpudrivenrendering/example_gpudrivenrendering.h"
 
 #include <iostream>
 #include <string_view>
@@ -94,7 +95,12 @@ int main(int argc, char **argv)
         run_example_edsl_sky();
         return 0;
     }
+    if (mode == "gpudrivenrendering")
+    {
+        run_example_gpudrivenrendering();
+        return 0;
+    }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|shadowmaps|shadowvolumes|assao|sky|edsl_sky]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
     return 0;
 }

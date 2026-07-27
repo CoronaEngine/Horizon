@@ -1191,6 +1191,8 @@ namespace EmbeddedShader
 		uint32_t typeSize = 0;
 		int32_t  bindType = -1;   // mirrors ShaderResources::BindType; -1 = no metadata
 		uint32_t location = 0;
+		uint32_t set = 0;
+		uint32_t binding = 0;
 
 		bool hasMetadata() const { return bindType >= 0; }
 
@@ -1216,11 +1218,18 @@ namespace EmbeddedShader
 		uint32_t typeSize;
 		int32_t  bindType;
 		uint32_t location;
+		uint32_t set;
+		uint32_t binding;
 
-		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc)
-			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc) {}
+		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc,
+		           uint32_t set_ = 0, uint32_t binding_ = 0)
+			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc),
+			  set(set_), binding(binding_) {}
 
 		template<typename T>
 		BoundField& operator=(const T& value);
 	};
+
+	template<typename ElementType>
+	using Array = ArrayProxy<ElementType>;
 }
