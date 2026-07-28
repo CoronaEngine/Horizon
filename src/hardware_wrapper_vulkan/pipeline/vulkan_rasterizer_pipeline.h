@@ -12,6 +12,7 @@
 #include <mutex>
 #include <source_location>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace Corona::Horizon
@@ -49,6 +50,16 @@ namespace Corona::Horizon
             std::vector<std::byte> push_constant_data;
         };
 
+        struct RecordedIndirectDraw
+        {
+            RasterizerPipelineBase* pipeline;
+            HardwareBuffer index_buffer {};
+            HardwareBuffer vertex_buffer {};
+            HardwareBuffer indirect_buffer {};
+            DrawIndexedIndirectParams params {};
+            std::vector<std::byte> push_constant_data;
+        };
+
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
                                           std::source_location source_location = std::source_location::current());
         ~VulkanRasterizerPipeline();
@@ -66,6 +77,11 @@ namespace Corona::Horizon
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
         void record(RasterizerPipelineBase* pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        void record_indirect(RasterizerPipelineBase* pipeline,
+                             const HardwareBuffer& index_buffer,
+                             const HardwareBuffer& vertex_buffer,
+                             const HardwareBuffer& indirect_buffer,
+                             const DrawIndexedIndirectParams& params);
         void clear_records();
 
         struct PreparedDraw
@@ -156,6 +172,7 @@ namespace Corona::Horizon
             bool has_rendering_scope { false };
             RenderingDesc rendering {};
             DrawIndexedBatchDesc batch {};
+            std::vector<std::tuple<BufferRef, BufferRef, BufferRef, DrawIndexedIndirectDesc>> indirect_draws;
         };
 
         [[nodiscard]] DrawPlan build_draw_plan() const;
@@ -194,6 +211,7 @@ namespace Corona::Horizon
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;
         std::vector<RecordedDraw> draws_;
+        std::vector<RecordedIndirectDraw> indirect_draws_;
         mutable std::vector<PipelineState> pipeline_cache_;
     };
 }

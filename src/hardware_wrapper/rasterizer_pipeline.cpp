@@ -129,6 +129,23 @@ namespace Corona::Horizon
         return *this;
     }
 
+    RasterizerPipelineBase& RasterizerPipelineBase::record_indirect(const HardwareBuffer& index_buffer,
+                                                                   const HardwareBuffer& vertex_buffer,
+                                                                   const HardwareBuffer& indirect_buffer,
+                                                                   const DrawIndexedIndirectParams& params)
+    {
+        if (!index_buffer || !vertex_buffer || !indirect_buffer || params.draw_count == 0)
+            return *this;
+
+        std::shared_ptr<IResourceRef> token;
+        token = ResourceBridge::token(*this);
+
+        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
+        bind_auto_resources(impl);
+        impl->record_indirect(this, index_buffer, vertex_buffer, indirect_buffer, params);
+        return *this;
+    }
+
     RasterizerPipelineBase& RasterizerPipelineBase::clear_records()
     {
         std::shared_ptr<IResourceRef> token;

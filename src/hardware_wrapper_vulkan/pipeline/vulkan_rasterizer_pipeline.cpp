@@ -15,6 +15,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <variant>
 
@@ -137,6 +138,17 @@ namespace Corona::Horizon
             case PolygonFillMode::Point: return VK_POLYGON_MODE_POINT;
             case PolygonFillMode::Fill:
             default: return VK_POLYGON_MODE_FILL;
+            }
+        }
+
+        [[nodiscard]] VkCullModeFlags to_vk_cull_mode(CullMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
+            case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
+            case CullMode::None:
+            default: return VK_CULL_MODE_NONE;
             }
         }
 
@@ -549,10 +561,10 @@ namespace Corona::Horizon
         {
             DrawIndexedDesc desc;
             desc.index_count = params.index_count;
-            desc.instance_count = 1;
+            desc.instance_count = params.instance_count;
             desc.first_index = params.first_index;
             desc.vertex_offset = params.vertex_offset;
-            desc.first_instance = 0;
+            desc.first_instance = params.first_instance;
             desc.index_type = params.index_type;
             desc.enable_scissor = params.enable_scissor;
             desc.scissor = params.scissor;
@@ -754,7 +766,7 @@ namespace Corona::Horizon
             rasterization.depthClampEnable = desc_.rasterizer.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
             rasterization.rasterizerDiscardEnable = desc_.rasterizer.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
             rasterization.polygonMode = to_vk_polygon_mode(desc_.rasterizer.fill_mode);
-            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.cullMode = to_vk_cull_mode(desc_.rasterizer.cull_mode);
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
             rasterization.lineWidth = desc_.rasterizer.line_width;
@@ -1541,10 +1553,31 @@ namespace Corona::Horizon
         record({}, index_buffer, vertex_buffer, params);
     }
 
+    void VulkanRasterizerPipeline::record_indirect(RasterizerPipelineBase* pipeline,
+                                                   const HardwareBuffer& index_buffer,
+                                                   const HardwareBuffer& vertex_buffer,
+                                                   const HardwareBuffer& indirect_buffer,
+                                                   const DrawIndexedIndirectParams& params)
+    {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_indirect");
+
+        RecordedIndirectDraw draw;
+        draw.pipeline = pipeline;
+        draw.index_buffer = index_buffer;
+        draw.vertex_buffer = vertex_buffer;
+        draw.indirect_buffer = indirect_buffer;
+        draw.params = params;
+
+        std::lock_guard lock(mutex_);
+        draw.push_constant_data = push_constant_data_;
+        indirect_draws_.push_back(std::move(draw));
+    }
+
     void VulkanRasterizerPipeline::clear_records()
     {
         std::lock_guard lock(mutex_);
         draws_.clear();
+        indirect_draws_.clear();
     }
 
     void VulkanRasterizerPipeline::sync_ubo_slot_unlocked() const
@@ -1655,6 +1688,29 @@ namespace Corona::Horizon
                     .draw = std::move(draw_desc),
                 });
             }
+
+            plan.indirect_draws.reserve(indirect_draws_.size());
+            for (const RecordedIndirectDraw& draw : indirect_draws_)
+            {
+                DrawIndexedIndirectDesc indirect_desc;
+                indirect_desc.pipeline = draw.pipeline;
+                indirect_desc.vert_condition_info = vert_condition_info;
+                indirect_desc.frag_condition_info = frag_condition_info;
+                indirect_desc.indirect_offset = draw.params.indirect_offset;
+                indirect_desc.draw_count = draw.params.draw_count;
+                indirect_desc.stride = draw.params.stride;
+                indirect_desc.index_type = draw.params.index_type;
+                indirect_desc.enable_scissor = draw.params.enable_scissor;
+                indirect_desc.scissor = draw.params.scissor;
+                indirect_desc.push_constant_data = draw.push_constant_data;
+                indirect_desc.uniform_buffers = frame_uniforms;
+                indirect_desc.debug_label = draw.params.debug_label;
+
+                plan.indirect_draws.emplace_back(buffer_ref(draw.index_buffer),
+                                                 buffer_ref(draw.vertex_buffer),
+                                                 buffer_ref(draw.indirect_buffer),
+                                                 std::move(indirect_desc));
+            }
         }
 
         std::vector<const BoundImage*> color_outputs;
@@ -1699,6 +1755,8 @@ namespace Corona::Horizon
         // 每 draw 一个 StreamCommand(std::function) + 一个 CommandIR。
         if (!plan.batch.draws.empty())
             batch << draw_indexed_batch(std::move(plan.batch));
+        for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
+            batch << draw_indexed_indirect(index, vertex, indirect, std::move(draw));
 
         if (plan.has_rendering_scope)
             batch << end_rendering();
@@ -1717,6 +1775,8 @@ namespace Corona::Horizon
 
         if (!plan.batch.draws.empty())
             recorder.draw_indexed_batch(std::move(plan.batch));
+        for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
+            recorder.draw_indexed_indirect(index, vertex, indirect, std::move(draw));
 
         if (plan.has_rendering_scope)
             recorder.end_rendering();
