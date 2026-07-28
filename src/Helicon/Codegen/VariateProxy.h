@@ -1233,4 +1233,7 @@ namespace EmbeddedShader
 		template<typename T>
 		BoundField& operator=(const T& value);
 	};
+
+	template<typename ElementType>
+	using Array = ArrayProxy<ElementType>;
 }
