@@ -186,6 +186,11 @@ namespace EmbeddedShader::CustomLibrary
 	    return {Ast::AST::callFunc("radians",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
 	}
 
+    template<typename Type>
+    VariateProxy<base_type_t<Type>> fract(Type&& x)
+	{
+	    return {Ast::AST::callFunc("fract",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
 }
 
 namespace EmbeddedShader
