@@ -242,6 +242,17 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 
 using namespace EmbeddedShader;
+// 顶点输入必须用 Aggregate 而不是多个独立参数：多参数那条路径
+// （VariateProxy.h:177 走 ParseHelper::getCurrentInputIndex()，递减）会把
+// vertex input location 分配反，position 和 normal 会互换。Aggregate 走的是
+// VariateProxy.h:213 那条显式递增的展开路径，location 与成员声明顺序一致。
+// 其它 edsl 例子（edsl / edsl_ibl / edsl_sky）都用 Aggregate，所以没踩到。
+struct ShadowMapsVertexIn
+{
+    Float3 pos;    // location 0 —— 与 AoVertex.position 对应
+    Float3 normal; // location 1 —— 与 AoVertex.normal 对应
+};
+
 struct ShadowMapsSceneVertOut
 {
     Float3 v_normal;
@@ -306,8 +317,8 @@ void run_example_edsl_shadowmaps()
     Texture2D<ktm::fvec4> pack_out_color = shadow_map_image;
     Float4x4 mvp;
     mvp.as_push_constant();
-    auto shadowmaps_pack_vert = [&](Float3 inPosition, Float3 inNormal) {
-        position() = mul(mvp,Float4(inPosition, 1.f));
+    auto shadowmaps_pack_vert = [&](Aggregate<ShadowMapsVertexIn> vin) {
+        position() = mul(mvp,Float4(vin->pos, 1.f));
         return position();
     };
 
@@ -343,8 +354,10 @@ void run_example_edsl_shadowmaps()
 
     Float4x4 model;
     model.as_push_constant();
-    auto shadowmaps_scene_vert = [&](Float3 inPosition, Float3 inNormal) {
+    auto shadowmaps_scene_vert = [&](Aggregate<ShadowMapsVertexIn> vin) {
         Aggregate<ShadowMapsSceneVertOut> out;
+        Float3 inPosition = vin->pos;
+        Float3 inNormal   = vin->normal;
         auto mvp_       = mul(proj_view,       model);
         auto model_view = mul(view_matrix,     model);
         auto light_mtx = mul(light_proj_view, model);
@@ -413,7 +426,7 @@ void run_example_edsl_shadowmaps()
 
         auto ambi = light_ambient->xyz() * light_ambient->w * material_ka->xyz();
         auto diff = light_diffuse->xyz() * light_diffuse->w * material_kd->xyz() * lc->x;
-        auto spec = light_specular->xyz() * light_specular->w * material_kd->xyz() * lc->y;
+        auto spec = light_specular->xyz() * light_specular->w * material_ks->xyz() * lc->y;
 
         auto fogColor = Float3(0.f,0.f,0.f);
         Float fogDensity = 0.0035f;
