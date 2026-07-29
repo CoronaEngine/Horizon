@@ -191,6 +191,24 @@ namespace EmbeddedShader::CustomLibrary
 	{
 	    return {Ast::AST::callFunc("fract",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
 	}
+
+    template<typename Type>
+    VariateProxy<bool> any(Type&& x)
+	{
+	    return {Ast::AST::callFunc("any",Ast::AST::createType<bool>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type> requires ktm::is_vector_v<base_type_t<Type>>
+    VariateProxy<float> length(Type&& x)
+	{
+	    return {Ast::AST::callFunc("length",Ast::AST::createType<float>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(x)>(x))},Ast::AccessPermissions::ReadOnly))};
+	}
+
+    template<typename Type> requires std::is_floating_point_v<base_type_t<Type>>
+    VariateProxy<base_type_t<Type>> step(Type&& v1, proxy_wrapper<Type> auto&& v2)
+	{
+	    return {Ast::AST::callFunc("step",Ast::AST::createType<base_type_t<Type>>(),Ast::Node::accessAll({proxy_wrap(std::forward<decltype(v1)>(v1)),proxy_wrap(std::forward<decltype(v2)>(v2))},Ast::AccessPermissions::ReadOnly))};
+	}
 }
 
 namespace EmbeddedShader

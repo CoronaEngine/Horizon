@@ -44,6 +44,15 @@
 
 namespace
 {
+    ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
+    {
+        static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
+
+        ktm::fmat4x4 result;
+        std::memcpy(&result, &matrix, sizeof(result));
+        return result;
+    }
+
 constexpr uint32_t smx_width = 1280;
 constexpr uint32_t smx_height = 720;
 constexpr uint32_t shadow_map_size = 1024; // m_sizePwrTwo=10
@@ -231,6 +240,15 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 } // namespace
 
+
+using namespace EmbeddedShader;
+struct ShadowMapsSceneVertOut
+{
+    Float3 v_normal;
+    Float3 v_view;
+    Float4 v_shadowcoord;
+};
+
 void run_example_edsl_shadowmaps()
 {
     glfwInit();
@@ -285,8 +303,6 @@ void run_example_edsl_shadowmaps()
     Corona::Horizon::RasterizerPipelineDesc pack_desc;
     pack_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
-
-    using namespace EmbeddedShader;
     Texture2D<ktm::fvec4> pack_out_color = shadow_map_image;
     Float4x4 mvp;
     mvp.as_push_constant();
@@ -299,24 +315,118 @@ void run_example_edsl_shadowmaps()
         auto shift = Float4(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0, 1.0);
         auto mask = Float4(0.0, 1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0);
         auto comp = fract(value * shift);
-        comp -= comp->xxyz();
+        auto nComp = comp - comp->xxyz() * mask;
+        return nComp;
     };
 
     auto shadowmaps_pack_frag = [&](Float4 v_position) {
-
+        auto depth = v_position->z / v_position->w;
+        pack_out_color << packFloatToRgba(depth);
     };
 
-    Texture2D<ktm::fvec4> scene_out_color;
+    Texture2D<ktm::fvec4> scene_out_color = final_output_image;
+
+    Float4x4 proj_view;
+    Float4x4 view_matrix;
+    Float4x4 light_proj_view;
+    Float4 light_pos_vs;
+    Float4 light_ambient;
+    Float4 light_diffuse;
+    Float4 light_specular;
+    Float4 spot_dir_inner_vs;
+    Float4 attn_spot_outer;
+    Float4 params1;
+    Float4 material_ka;
+    Float4 material_kd;
+    Float4 material_ks;
+    Float4 color;
+
     Float4x4 model;
-    Uint shadow_map_index;
     model.as_push_constant();
-    shadow_map_index.as_push_constant();
-    auto shadowmaps_scene_vert = [&]() {
-
+    auto shadowmaps_scene_vert = [&](Float3 inPosition, Float3 inNormal) {
+        Aggregate<ShadowMapsSceneVertOut> out;
+        auto mvp_       = mul(proj_view,       model);
+        auto model_view = mul(view_matrix,     model);
+        auto light_mtx = mul(light_proj_view, model);
+        position() = mul(mvp_, Float4(inPosition, 1.f));
+        out->v_normal = normalize(mul(model_view,Float4(inNormal,0.f))->xyz());
+        out->v_view = mul(model_view,Float4(inPosition,1.f))->xyz();
+        auto posOffset = inPosition + inNormal * params1->y;
+        out->v_shadowcoord = mul(light_mtx, Float4(posOffset,1.f));
+        return out;
     };
 
-    auto shadowmaps_scene_frag = [&]() {
+    auto unpackRgbaToFloat = [&](Float4 rgba) {
+        auto shift = Float4(1.0 / (256.0 * 256.0 * 256.0), 1.0 / (256.0 * 256.0), 1.0 / 256.0, 1.0);
+        return dot(rgba, shift);
+    };
 
+    auto attenuation = [&](Float dist, Float3 attn)
+    {
+        return Float(1.0f) / (attn->x + attn->y * dist + attn->z * dist * dist);
+    };
+
+    auto spotFalloff = [&](Float ldotsd, Float innerDeg, Float outerDeg)
+    {
+        auto inner = cos(radians(innerDeg));
+        auto outer = cos(radians(min(outerDeg, innerDeg - Float(0.001f))));
+        return clamp((ldotsd - inner) / (outer - inner), 0.0f, 1.0f);
+    };
+
+    auto lit = [&](Float3 ld, Float3 n, Float3 vd, Float exp_)
+    {
+        auto ndotl = dot(n, ld);
+        auto r = 2.0f * ndotl * n - ld;
+        auto rdotv = dot(r, vd);
+        auto spec = step(0.0f, ndotl) * pow(max(0.0f, rdotv), exp_) * (2.0f + exp_) / Float(8.0f);
+        return max(Float2(ndotl, spec), Float2(0.0f, 0.0f));
+    };
+
+    Texture2D<ktm::fvec4> shadowMap = shadow_map_image;
+    auto hardShadow = [&](Float4 shadowCoord, Float bias)
+    {
+        Float result;
+        auto texCoord = shadowCoord->xy() / shadowCoord->w;
+        auto outside = any(texCoord > Float2(1.0f,1.0f)) || any(texCoord < Float2(0.0f,0.0f));
+        $IF (outside) result = Float(1.0f);
+        $ELSE
+        {
+            auto receiver = (shadowCoord->z - bias) / shadowCoord->w;
+            auto occluder = unpackRgbaToFloat(texture(shadowMap, texCoord));
+            result = step(receiver, occluder);
+        }
+        return result;
+    };
+
+    auto shadowmaps_scene_frag = [&](Aggregate<ShadowMapsSceneVertOut> in) {
+        auto visibility = hardShadow(in->v_shadowcoord,params1->x);
+        auto v = in->v_view;
+        auto vd = -normalize(in->v_view);
+        auto n = in->v_normal;
+
+        auto l = light_pos_vs->xyz() - v;
+        auto ld = normalize(l);
+        auto ldotsd = max(0.f, dot(-ld, normalize(spot_dir_inner_vs->xyz())));
+        auto falloff = spotFalloff(ldotsd,attn_spot_outer->w,spot_dir_inner_vs->w);
+        auto attn = attenuation(length(l),attn_spot_outer->xyz()) * mix(falloff,1.f,step(90.f,attn_spot_outer->w));
+        auto lc = lit(ld,n,vd,material_ks->w) * attn;
+
+        auto ambi = light_ambient->xyz() * light_ambient->w * material_ka->xyz();
+        auto diff = light_diffuse->xyz() * light_diffuse->w * material_kd->xyz() * lc->x;
+        auto spec = light_specular->xyz() * light_specular->w * material_kd->xyz() * lc->y;
+
+        auto fogColor = Float3(0.f,0.f,0.f);
+        Float fogDensity = 0.0035f;
+        Float LOG2 = 1.442695f;
+        auto z = length(v);
+        auto fogFactor = clamp(Float(1.f) / exp2(fogDensity * fogDensity * z * z * LOG2),0.f,1.f);
+        auto baseColor = color->xyz();
+        auto ambient = ambi * baseColor;
+        auto brdf = (diff + spec) * baseColor * visibility;
+
+        auto t = 1.f / 2.2f;
+        auto final = pow(abs(ambient + brdf),Float3(t,t,t));
+        scene_out_color << Float4(mix(fogColor,final,fogFactor),1.f);
     };
 
     Corona::Horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert, shadowmaps_pack_frag, pack_desc);
@@ -327,10 +437,8 @@ void run_example_edsl_shadowmaps()
     scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert, shadowmaps_scene_frag, scene_desc);
-    scene_rasterizer.outColor = final_output_image;
+    //scene_rasterizer.outColor = final_output_image;
     scene_rasterizer.bind_depth_target(depth_image);
-    // shadow map 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
-    scene_rasterizer.model_pc.shadowMapIndex = shadow_map_image.store_descriptor();
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;
@@ -360,13 +468,13 @@ void run_example_edsl_shadowmaps()
                                       glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 1.0f));
 
     // 材质/光源常量（原版 m_defaultMaterial / m_pointLight）
-    const glm::vec4 material_ka(1.0f, 1.0f, 1.0f, 0.0f);
-    const glm::vec4 material_kd(1.0f, 1.0f, 1.0f, 0.0f);
-    const glm::vec4 material_ks(1.0f, 1.0f, 1.0f, 0.0f);
-    const glm::vec4 light_ambient(1.0f, 1.0f, 1.0f, 0.0f); // 与原版一致（ambient power 0）
-    const glm::vec4 light_diffuse(1.0f, 1.0f, 1.0f, 850.0f);
-    const glm::vec4 light_specular(1.0f, 1.0f, 1.0f, 0.0f);
-    const glm::vec3 light_attn(1.0f, 0.0f, 1.0f);
+    const glm::vec4 c_material_ka(1.0f, 1.0f, 1.0f, 0.0f);
+    const glm::vec4 c_material_kd(1.0f, 1.0f, 1.0f, 0.0f);
+    const glm::vec4 c_material_ks(1.0f, 1.0f, 1.0f, 0.0f);
+    const glm::vec4 c_light_ambient(1.0f, 1.0f, 1.0f, 0.0f); // 与原版一致（ambient power 0）
+    const glm::vec4 c_light_diffuse(1.0f, 1.0f, 1.0f, 850.0f);
+    const glm::vec4 c_light_specular(1.0f, 1.0f, 1.0f, 0.0f);
+    const glm::vec3 c_light_attn(1.0f, 0.0f, 1.0f);
 
     HorizonImGuiLayer ui(window, smx_width, smx_height);
 
@@ -401,16 +509,16 @@ void run_example_edsl_shadowmaps()
         }
 
         // 聚光灯：绕场景旋转，指向原点
-        const glm::vec3 light_pos(std::cos(time) * 20.0f, 26.0f, std::sin(time) * 20.0f);
-        const glm::vec3 spot_dir = -light_pos;
+        const glm::vec3 c_light_pos(std::cos(time) * 20.0f, 26.0f, std::sin(time) * 20.0f);
+        const glm::vec3 c_spot_dir = -c_light_pos;
 
-        const glm::mat4 light_view = glm::lookAtLH(light_pos, light_pos + spot_dir, glm::vec3(0.0f, 1.0f, 0.0f));
-        const glm::mat4 light_view_proj = light_proj * light_view;
+        const glm::mat4 c_light_view = glm::lookAtLH(c_light_pos, c_light_pos + c_spot_dir, glm::vec3(0.0f, 1.0f, 0.0f));
+        const glm::mat4 light_view_proj = light_proj * c_light_view;
         const glm::mat4 shadow_mtx = shadow_bias_mtx * light_view_proj;
 
         // view 空间光源参数
-        const glm::vec4 light_pos_vs = view * glm::vec4(light_pos, 1.0f);
-        const glm::vec3 spot_dir_vs = glm::vec3(view * glm::vec4(spot_dir, 0.0f));
+        const glm::vec4 c_light_pos_vs = view * glm::vec4(c_light_pos, 1.0f);
+        const glm::vec3 c_spot_dir_vs = glm::vec3(view * glm::vec4(c_spot_dir, 0.0f));
 
         // 场景物体矩阵（原版 mtxSRT 行向量 S·R·T → glm 列向量 T·R·S）
         struct DrawItem
@@ -448,34 +556,36 @@ void run_example_edsl_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            pack_rasterizer.model_pc.mvp = light_view_proj * item.model;
+            mvp = to_edsl_matrix(transpose((light_view_proj * item.model)));
             pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 
         // Pass 2：场景光照 + 硬阴影
         scene_rasterizer.clear_records();
         // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
-        scene_rasterizer.vsp.proj_view       = view_proj;
-        scene_rasterizer.vsp.view_matrix     = view;
-        scene_rasterizer.vsp.light_proj_view = shadow_mtx; // bias * light_proj * light_view
-        scene_rasterizer.vsp.light_pos_vs = light_pos_vs;
-        scene_rasterizer.vsp.light_ambient = light_ambient;
-        scene_rasterizer.vsp.light_diffuse = light_diffuse;
-        scene_rasterizer.vsp.light_specular = light_specular;
-        scene_rasterizer.vsp.spot_dir_inner_vs = glm::vec4(spot_dir_vs, spot_inner_angle);
-        scene_rasterizer.vsp.attn_spot_outer = glm::vec4(light_attn, spot_outer_angle);
-        scene_rasterizer.vsp.material_ka = material_ka;
-        scene_rasterizer.vsp.material_kd = material_kd;
-        scene_rasterizer.vsp.material_ks = material_ks;
-        scene_rasterizer.vsp.color = glm::vec4(1.0f);
-        scene_rasterizer.vsp.params1 = glm::vec4(shadow_bias, shadow_normal_offset, 1.0f / shadow_map_size, 0.0f);
+        proj_view       = to_edsl_matrix(transpose(view_proj));
+        view_matrix     = to_edsl_matrix(transpose(view));
+        light_proj_view = to_edsl_matrix(transpose(shadow_mtx)); // bias * light_proj * light_view
+        light_pos_vs = ktm::fvec4(c_light_pos_vs.x,c_light_pos_vs.y,c_light_pos_vs.z,c_light_pos_vs.w);
+        light_ambient = ktm::fvec4(c_light_ambient.x,c_light_ambient.y,c_light_ambient.z,c_light_ambient.w);
+        light_diffuse = ktm::fvec4(c_light_diffuse.x,c_light_diffuse.y,c_light_diffuse.z,c_light_diffuse.w);
+        light_specular = ktm::fvec4(c_light_specular.x,c_light_specular.y,c_light_specular.z,c_light_specular.w);
+        auto glm_spot_dir_inner_vs = glm::vec4(c_spot_dir_vs, spot_inner_angle);
+        spot_dir_inner_vs = ktm::fvec4(glm_spot_dir_inner_vs.x,glm_spot_dir_inner_vs.y,glm_spot_dir_inner_vs.z,glm_spot_dir_inner_vs.w);
+        auto glm_attn_spot_outer = glm::vec4(c_light_attn, spot_outer_angle);
+        attn_spot_outer = ktm::fvec4(glm_attn_spot_outer.x, glm_attn_spot_outer.y,glm_attn_spot_outer.z,glm_attn_spot_outer.w);
+        material_ka = ktm::fvec4(c_material_ka.x,c_material_ka.y,c_material_ka.z,c_material_ka.w);
+        material_kd = ktm::fvec4(c_material_kd.x,c_material_kd.y,c_material_kd.z,c_material_kd.w);
+        material_ks = ktm::fvec4(c_material_ks.x,c_material_ks.y,c_material_ks.z,c_material_ks.w);
+        color = ktm::fvec4(1.0f);
+        params1 = ktm::fvec4(shadow_bias, shadow_normal_offset, 1.0f / shadow_map_size, 0.0f);
         for (const DrawItem& item : items)
         {
             Corona::Horizon::DrawIndexedParams params;
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            scene_rasterizer.model_pc.model = item.model; // per-draw；VS 从中计算 mvp/model_view/light_mtx
+            model = to_edsl_matrix(transpose(item.model)); // per-draw；VS 从中计算 mvp/model_view/light_mtx
             scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 

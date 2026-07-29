@@ -42,6 +42,9 @@ namespace EmbeddedShader
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const VariateProxy<T>& proxy);
 
+    template<typename T>
+    std::shared_ptr<Ast::Value> proxy_wrap(const SwizzleProxy<T>& proxy);
+
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const Texture2DProxy<T>& proxy);
 
@@ -56,6 +59,12 @@ namespace EmbeddedShader
 	{
 		using type = T;
 	};
+
+    template<typename T>
+    struct base_type<SwizzleProxy<T>>
+    {
+        using type = T;
+    };
 
 	template<typename T>
 	using base_type_t = typename base_type<std::remove_cvref_t<T>>::type;
@@ -1103,6 +1112,12 @@ namespace EmbeddedShader
 	std::shared_ptr<Ast::Value> proxy_wrap(const VariateProxy<T>& proxy)
 	{
 		return proxy.node;
+	}
+
+    template <typename T>
+    std::shared_ptr<Ast::Value> proxy_wrap(const SwizzleProxy<T>& proxy)
+	{
+	    return proxy.node;
 	}
 
 	template<typename T>

@@ -109,6 +109,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|shadowmaps|edsl_shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
     return 0;
 }
