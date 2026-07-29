@@ -13,6 +13,11 @@
 
 *.spv binary
 
+# GPU texture containers and packed mesh payloads.
+*.ktx binary
+*.ktx2 binary
+*.bin binary
+
 *.7z binary
 *.gz binary
 *.tar binary
