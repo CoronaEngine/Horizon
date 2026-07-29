@@ -20,7 +20,7 @@
 
 int main(int argc, char **argv)
 {
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("assao");
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("sponza");
 
     if (mode == "baseline")
     {
