@@ -1,0 +1,1382 @@
+{
+  "format": "HZMS",
+  "version": 2,
+  "source": "KhronosGroup/Vulkan-Samples-Assets scenes/sponza (CC BY 3.0)",
+  "mesh": "sponza.bin",
+  "vertexStride": 48,
+  "vertexLayout": [
+    {
+      "name": "position",
+      "type": "float3",
+      "offset": 0
+    },
+    {
+      "name": "normal",
+      "type": "float3",
+      "offset": 12
+    },
+    {
+      "name": "tangent",
+      "type": "float4",
+      "offset": 24
+    },
+    {
+      "name": "uv",
+      "type": "float2",
+      "offset": 40
+    }
+  ],
+  "indexType": "uint32",
+  "vertexCount": 190448,
+  "indexCount": 786723,
+  "transformBaked": true,
+  "upAxis": "Y",
+  "min": [
+    -1920.949951171875,
+    -126.4421363611038,
+    -1182.8098384848645
+  ],
+  "max": [
+    1799.9100341796875,
+    1429.4300983777348,
+    1105.4301954966845
+  ],
+  "textureDir": "textures",
+  "submeshes": [
+    {
+      "name": "flagpole",
+      "firstIndex": 0,
+      "indexCount": 49488,
+      "vertexOffset": 0,
+      "vertexCount": 12290,
+      "material": 0,
+      "min": [
+        -958.697998046875,
+        274.95995533507084,
+        -289.7039618346628
+      ],
+      "max": [
+        830.2940063476562,
+        886.1389584321427,
+        209.1150365944159
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Material__25",
+      "firstIndex": 49488,
+      "indexCount": 9126,
+      "vertexOffset": 12290,
+      "vertexCount": 1746,
+      "material": 1,
+      "min": [
+        -1427.4300537109375,
+        79.90479948413066,
+        -114.69097713981951
+      ],
+      "max": [
+        1299.030029296875,
+        264.7609833785581,
+        42.85342054383607
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Material__298",
+      "firstIndex": 58614,
+      "indexCount": 12258,
+      "vertexOffset": 14036,
+      "vertexCount": 2259,
+      "material": 2,
+      "min": [
+        -1428.27001953125,
+        40.81860312978857,
+        -163.38689766776645
+      ],
+      "max": [
+        1299.8699951171875,
+        758.5529577700491,
+        88.62692607424879
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "leaf",
+      "firstIndex": 70872,
+      "indexCount": 94308,
+      "vertexOffset": 16295,
+      "vertexCount": 24174,
+      "material": 3,
+      "min": [
+        -680.2639770507812,
+        -28.04963265105449,
+        -341.1359750231852
+      ],
+      "max": [
+        551.2260131835938,
+        225.10203536060737,
+        266.44197659241183
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Material__57",
+      "firstIndex": 165180,
+      "indexCount": 10416,
+      "vertexOffset": 40469,
+      "vertexCount": 3932,
+      "material": 4,
+      "min": [
+        -992.9600219726562,
+        42.31907601961449,
+        -261.8359820873687
+      ],
+      "max": [
+        861.885986328125,
+        73.1236255976458,
+        187.85200449146018
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "bricks",
+      "firstIndex": 175596,
+      "indexCount": 2388,
+      "vertexOffset": 44401,
+      "vertexCount": 1180,
+      "material": 5,
+      "min": [
+        -1866.97998046875,
+        -126.4421363611038,
+        -1139.0298109431462
+      ],
+      "max": [
+        1746.68994140625,
+        1347.2000561981115,
+        1039.7101047161204
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "ceiling",
+      "firstIndex": 177984,
+      "indexCount": 17628,
+      "vertexOffset": 45581,
+      "vertexCount": 4974,
+      "material": 6,
+      "min": [
+        -1429.449951171875,
+        215.8039162245227,
+        -645.1479591762472
+      ],
+      "max": [
+        1302.199951171875,
+        1263.93001514719,
+        574.903111363556
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "column_a",
+      "firstIndex": 195612,
+      "indexCount": 8448,
+      "vertexOffset": 50555,
+      "vertexCount": 3373,
+      "material": 7,
+      "min": [
+        -1057.219970703125,
+        -2.4607313498629737,
+        -316.8689492595497
+      ],
+      "max": [
+        925.60400390625,
+        220.99702902830316,
+        246.6150267447937
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "arch",
+      "firstIndex": 204060,
+      "indexCount": 30504,
+      "vertexOffset": 53928,
+      "vertexCount": 10826,
+      "material": 8,
+      "min": [
+        -1052.8800048828125,
+        211.39497200834907,
+        -318.10591042308164
+      ],
+      "max": [
+        921.9349975585938,
+        1275.0099708226267,
+        245.81404317746097
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "column_c",
+      "firstIndex": 234564,
+      "indexCount": 21264,
+      "vertexOffset": 64754,
+      "vertexCount": 11033,
+      "material": 9,
+      "min": [
+        -1430.31005859375,
+        182.65190919218955,
+        -646.9679708924357
+      ],
+      "max": [
+        1303.27001953125,
+        695.3230611728608,
+        575.7260869001307
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "details",
+      "firstIndex": 255828,
+      "indexCount": 2640,
+      "vertexOffset": 75787,
+      "vertexCount": 1068,
+      "material": 10,
+      "min": [
+        -509.6830139160156,
+        -2.2154150403984283,
+        -651.5389794612812
+      ],
+      "max": [
+        1315.52001953125,
+        716.8509931074974,
+        605.0139871480977
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "floor",
+      "firstIndex": 258468,
+      "indexCount": 63,
+      "vertexOffset": 76855,
+      "vertexCount": 31,
+      "material": 11,
+      "min": [
+        -1432.219970703125,
+        -2.5062771153842687,
+        -645.4309523511345
+      ],
+      "max": [
+        1302.219970703125,
+        415.5300712756832,
+        574.1850337352099
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "column_b",
+      "firstIndex": 258531,
+      "indexCount": 69624,
+      "vertexOffset": 76886,
+      "vertexCount": 22813,
+      "material": 12,
+      "min": [
+        -1037.6500244140625,
+        506.63294701833365,
+        -309.7058906747342
+      ],
+      "max": [
+        907.406982421875,
+        699.6119837121466,
+        234.7730803814399
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "vase",
+      "firstIndex": 328155,
+      "indexCount": 27552,
+      "vertexOffset": 99699,
+      "vertexCount": 5308,
+      "material": 13,
+      "min": [
+        -1276.6700439453125,
+        -0.6934609490956527,
+        -523.499965241219
+      ],
+      "max": [
+        1194.1700439453125,
+        133.01706107251405,
+        478.2619938781248
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "Material__47",
+      "firstIndex": 355707,
+      "indexCount": 54,
+      "vertexOffset": 105007,
+      "vertexCount": 29,
+      "material": 14,
+      "min": [
+        -119.40699768066406,
+        256.7309014371046,
+        568.6580350492743
+      ],
+      "max": [
+        -8.262900352478027,
+        348.1969026442778,
+        575.5050319674608
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "vase_hanging",
+      "firstIndex": 355761,
+      "indexCount": 59484,
+      "vertexOffset": 105036,
+      "vertexCount": 11856,
+      "material": 15,
+      "min": [
+        -654.1840209960938,
+        98.67287456082475,
+        -246.83496911577427
+      ],
+      "max": [
+        522.6119995117188,
+        216.9510297668715,
+        170.47602123894748
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "vase_round",
+      "firstIndex": 415245,
+      "indexCount": 53064,
+      "vertexOffset": 116892,
+      "vertexCount": 9848,
+      "material": 16,
+      "min": [
+        -990.739013671875,
+        -4.0307231352505,
+        -251.64299001294464
+      ],
+      "max": [
+        859.2949829101562,
+        56.19953203860848,
+        179.31100479729344
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "chain",
+      "firstIndex": 468309,
+      "indexCount": 96,
+      "vertexOffset": 126740,
+      "vertexCount": 64,
+      "material": 17,
+      "min": [
+        -644.9329833984375,
+        133.72096920565008,
+        -221.48697390535938
+      ],
+      "max": [
+        513.3610229492188,
+        214.3550179092543,
+        145.12802970142215
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "fabric_g",
+      "firstIndex": 468405,
+      "indexCount": 42984,
+      "vertexOffset": 126804,
+      "vertexCount": 7721,
+      "material": 18,
+      "min": [
+        -577.6199951171875,
+        -0.3088631279481511,
+        -295.2539849680723
+      ],
+      "max": [
+        820.1740112304688,
+        283.681027380973,
+        213.48198919502573
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "fabric_c",
+      "firstIndex": 511389,
+      "indexCount": 56802,
+      "vertexOffset": 134525,
+      "vertexCount": 10230,
+      "material": 19,
+      "min": [
+        -946.2379760742188,
+        -0.30892737284414984,
+        -295.2539849680723
+      ],
+      "max": [
+        820.1740112304688,
+        283.681027380973,
+        213.48198919502573
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "fabric_f",
+      "firstIndex": 568191,
+      "indexCount": 42984,
+      "vertexOffset": 144755,
+      "vertexCount": 7721,
+      "material": 20,
+      "min": [
+        -946.2379760742188,
+        -0.30892737284414984,
+        -289.2569768931282
+      ],
+      "max": [
+        448.03399658203125,
+        283.6809631360749,
+        213.48198919502573
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "fabric_e",
+      "firstIndex": 611175,
+      "indexCount": 49536,
+      "vertexOffset": 152476,
+      "vertexCount": 9780,
+      "material": 21,
+      "min": [
+        -783.7940063476562,
+        339.4429594894749,
+        -324.52592336866917
+      ],
+      "max": [
+        651.9559936523438,
+        520.594013400999,
+        252.2860533478542
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "fabric_d",
+      "firstIndex": 660711,
+      "indexCount": 49536,
+      "vertexOffset": 162256,
+      "vertexCount": 9780,
+      "material": 22,
+      "min": [
+        -786.8989868164062,
+        339.4429594894749,
+        -324.52592336866917
+      ],
+      "max": [
+        648.8519897460938,
+        520.594013400999,
+        252.2860533478542
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "fabric_a",
+      "firstIndex": 710247,
+      "indexCount": 33024,
+      "vertexOffset": 172036,
+      "vertexCount": 6520,
+      "material": 23,
+      "min": [
+        -418.2929992675781,
+        339.4429594894749,
+        -324.52592336866917
+      ],
+      "max": [
+        283.3500061035156,
+        520.594013400999,
+        252.2860533478542
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "roof",
+      "firstIndex": 743271,
+      "indexCount": 43452,
+      "vertexOffset": 178556,
+      "vertexCount": 11892,
+      "material": 24,
+      "min": [
+        -1920.949951171875,
+        1280.509999259443,
+        -1182.8098384848645
+      ],
+      "max": [
+        1799.9100341796875,
+        1429.4300983777348,
+        1105.4301954966845
+      ],
+      "sourceTransform": {
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.7071068286895752,
+          0,
+          0,
+          0.7071067094802856
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "materials": [
+    {
+      "name": "flagpole",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_flagpole_diff.ktx",
+      "specular": "sponza_flagpole_spec.ktx"
+    },
+    {
+      "name": "Material__25",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "lion.ktx",
+      "bump": "lion_bump.ktx"
+    },
+    {
+      "name": "Material__298",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "background.ktx",
+      "bump": "background_bump.ktx"
+    },
+    {
+      "name": "leaf",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_thorn_diff.ktx",
+      "bump": "sponza_thorn_bump.ktx",
+      "specular": "sponza_thorn_spec.ktx",
+      "mask": "sponza_thorn_mask.ktx"
+    },
+    {
+      "name": "Material__57",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "vase_plant.ktx",
+      "specular": "vase_plant_spec.ktx",
+      "mask": "vase_plant_mask.ktx"
+    },
+    {
+      "name": "bricks",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "spnza_bricks_a_diff.ktx",
+      "bump": "spnza_bricks_a_bump.ktx",
+      "specular": "spnza_bricks_a_spec.ktx"
+    },
+    {
+      "name": "ceiling",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_ceiling_a_diff.ktx",
+      "specular": "sponza_ceiling_a_spec.ktx"
+    },
+    {
+      "name": "column_a",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_column_a_diff.ktx",
+      "bump": "sponza_column_a_bump.ktx",
+      "specular": "sponza_column_a_spec.ktx"
+    },
+    {
+      "name": "arch",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_arch_diff.ktx",
+      "bump": "sponza_arch_bump.ktx",
+      "specular": "sponza_arch_spec.ktx"
+    },
+    {
+      "name": "column_c",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_column_c_diff.ktx",
+      "bump": "sponza_column_c_bump.ktx",
+      "specular": "sponza_column_c_spec.ktx"
+    },
+    {
+      "name": "details",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_details_diff.ktx",
+      "specular": "sponza_details_spec.ktx"
+    },
+    {
+      "name": "floor",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_floor_a_diff.ktx",
+      "specular": "sponza_floor_a_spec.ktx"
+    },
+    {
+      "name": "column_b",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_column_b_diff.ktx",
+      "bump": "sponza_column_b_bump.ktx",
+      "specular": "sponza_column_b_spec.ktx"
+    },
+    {
+      "name": "vase",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "vase_dif.ktx",
+      "bump": "vase_bump.ktx"
+    },
+    {
+      "name": "Material__47",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "spnza_bricks_a_diff.ktx",
+      "bump": "spnza_bricks_a_bump.ktx",
+      "specular": "spnza_bricks_a_spec.ktx"
+    },
+    {
+      "name": "vase_hanging",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "vase_hanging.ktx"
+    },
+    {
+      "name": "vase_round",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "vase_round.ktx",
+      "bump": "vase_round_bump.ktx",
+      "specular": "vase_round_spec.ktx"
+    },
+    {
+      "name": "chain",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "chain_texture.ktx",
+      "bump": "chain_texture_bump.ktx",
+      "mask": "chain_texture_mask.ktx"
+    },
+    {
+      "name": "fabric_g",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_curtain_blue_diff.ktx"
+    },
+    {
+      "name": "fabric_c",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_curtain_diff.ktx"
+    },
+    {
+      "name": "fabric_f",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_curtain_green_diff.ktx"
+    },
+    {
+      "name": "fabric_e",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_fabric_green_diff.ktx"
+    },
+    {
+      "name": "fabric_d",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_fabric_blue_diff.ktx"
+    },
+    {
+      "name": "fabric_a",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_fabric_diff.ktx",
+      "specular": "sponza_fabric_spec.ktx"
+    },
+    {
+      "name": "roof",
+      "baseColorFactor": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "metallic": 0.5879999995231628,
+      "roughness": 0.8999999761581421,
+      "doubleSided": false,
+      "alphaMode": "OPAQUE",
+      "baseColor": "sponza_roof_diff.ktx"
+    }
+  ],
+  "lights": [
+    {
+      "name": "",
+      "type": "directional",
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "range": null,
+      "spot": null,
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "direction": [
+        0.5000005163372002,
+        -0.8660251056761962,
+        1.03267493362647e-06
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "main_camera",
+      "type": "perspective",
+      "aspectRatio": 1.77,
+      "yfov": 1.0,
+      "zfar": 4000.0,
+      "znear": 1.0,
+      "position": [
+        -705.01001,
+        195.20282,
+        -119.932266
+      ],
+      "direction": [
+        0.9791547887650593,
+        -0.014976245372350283,
+        0.20256261183396887
+      ],
+      "target": [
+        -704.0308552112349,
+        195.18784375462766,
+        -119.72970338816603
+      ],
+      "up": [
+        0.014665532925767144,
+        0.9998878493817651,
+        0.0030349304295379247
+      ]
+    }
+  ]
+}

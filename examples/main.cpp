@@ -7,6 +7,7 @@
 #include "example_raymarch/example_raymarch.h"
 #include "example_bump/example_bump.h"
 #include "example_deferred/example_deferred.h"
+#include "example_sponza/example_sponza.h"
 #include "example_shadowmaps/example_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_assao/example_assao.h"
@@ -70,6 +71,11 @@ int main(int argc, char **argv)
         run_example_deferred();
         return 0;
     }
+    if (mode == "sponza")
+    {
+        run_example_sponza();
+        return 0;
+    }
     if (mode == "shadowmaps")
     {
         run_example_shadowmaps();
@@ -101,6 +107,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
     return 0;
 }
