@@ -72,7 +72,7 @@ namespace EmbeddedShader
 		static std::tuple<ParamTypes...> createParamTuple(const std::function<ReturnType(ParamTypes...)>& f)
 		{
 			instance.bIsInInputParameter = true;
-			instance.currentInputIndex = sizeof...(ParamTypes);
+		    instance.currentInputIndex = 0;
 			auto tuple = std::tuple<ParamTypes...>();
 			instance.bIsInInputParameter = false;
 			return tuple;
@@ -82,7 +82,7 @@ namespace EmbeddedShader
 		static ParamType createParam(const std::function<ReturnType(ParamType)>& f)
 		{
 			instance.bIsInInputParameter = true;
-			instance.currentInputIndex = 1;
+		    instance.currentInputIndex = 0;
 			ParamType param;
 			instance.bIsInInputParameter = false;
 			return param;
@@ -147,7 +147,7 @@ namespace EmbeddedShader
 
 		static size_t getCurrentInputIndex()
 		{
-			return --instance.currentInputIndex;
+			return instance.currentInputIndex++;
 		}
 
 	    static void beginAggregateParent(std::shared_ptr<Ast::Value> parent)

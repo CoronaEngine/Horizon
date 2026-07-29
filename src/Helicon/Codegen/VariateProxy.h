@@ -174,6 +174,7 @@ namespace EmbeddedShader
 			//Uniform,Input,Local Variate
 			if (ParseHelper::isInInputParameter())
 			{
+			    Ast::Parser::setInputPush(false);
 				node = Ast::AST::defineInputVariate<Type>(ParseHelper::getCurrentInputIndex());
 				return;
 			}
@@ -214,6 +215,7 @@ namespace EmbeddedShader
 		            auto aggregateType = Ast::AST::createType<Type>();
 		            node = Ast::AST::defineLocalVariate(
 		                std::static_pointer_cast<Ast::Type>(aggregateType), nullptr);
+		            Ast::Parser::setInputPush(true);
 		            for (size_t loc = 0; loc < aggregateType->members.size(); ++loc)
 		            {
 		                auto& member = aggregateType->members[loc];
@@ -224,6 +226,7 @@ namespace EmbeddedShader
 		        }
 		        else
 		        {
+		            Ast::Parser::setInputPush(false);
 		            node = Ast::AST::defineInputVariate<Type>(ParseHelper::getCurrentInputIndex());
 		        }
 		    }

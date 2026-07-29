@@ -317,8 +317,8 @@ void run_example_edsl_shadowmaps()
     Texture2D<ktm::fvec4> pack_out_color = shadow_map_image;
     Float4x4 mvp;
     mvp.as_push_constant();
-    auto shadowmaps_pack_vert = [&](Aggregate<ShadowMapsVertexIn> vin) {
-        position() = mul(mvp,Float4(vin->pos, 1.f));
+    auto shadowmaps_pack_vert = [&](Float3 pos, Float3 normal) {
+        position() = mul(mvp,Float4(pos, 1.f));
         return position();
     };
 
@@ -354,10 +354,10 @@ void run_example_edsl_shadowmaps()
 
     Float4x4 model;
     model.as_push_constant();
-    auto shadowmaps_scene_vert = [&](Aggregate<ShadowMapsVertexIn> vin) {
+    auto shadowmaps_scene_vert = [&](Float3 pos, Float3 normal) {
         Aggregate<ShadowMapsSceneVertOut> out;
-        Float3 inPosition = vin->pos;
-        Float3 inNormal   = vin->normal;
+        Float3 inPosition = pos;
+        Float3 inNormal   = normal;
         auto mvp_       = mul(proj_view,       model);
         auto model_view = mul(view_matrix,     model);
         auto light_mtx = mul(light_proj_view, model);

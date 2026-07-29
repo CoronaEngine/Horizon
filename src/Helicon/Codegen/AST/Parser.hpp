@@ -34,8 +34,10 @@ namespace EmbeddedShader::Ast
 		static void beginShaderParse(ShaderStage stage);
 		static std::vector<ParseOutput> endPipelineParse();
 		static void setBindless(bool bindless);
-		static bool getBindless();
-	private:
+        static bool getBindless();
+        static void setInputPush(bool push);
+        static bool getInputPush();
+    private:
 	    static void endShaderParse();
 		Parser() = default;
 
@@ -49,6 +51,8 @@ namespace EmbeddedShader::Ast
 		size_t currentAggregateTypeIndex = 0;
 		size_t nextRenderTargetLocation = 0;
 	    size_t currentBranchIndex = 0;
+
+	    bool bInputPush = true;
 
 		std::shared_ptr<Variate> positionOutput;
 		std::shared_ptr<Variate> dispatchThreadIDInput;
