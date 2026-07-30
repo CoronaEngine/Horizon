@@ -273,7 +273,7 @@ void run_example_edsl_ssr()
     Texture2D<float> ld_depth_in = depth_val_image;
     Texture2D<float> ld_linear_out = linear_depth_image;
     Float4 u_depth_unpack; // xy: viewZ = x / (device_z + y)，即 x=p32, y=-p22
-    Float4 u_ld_params;    // z: far（无几何处的填充值）
+    Float4 u_ld_params;    // z: far（无几何处的填充值）；其余分量为对齐 GLSL 版打包保留，未使用
 
     auto linear_depth_cs = [&] {
         auto coord = dispatchThreadID()->xy();
@@ -296,6 +296,8 @@ void run_example_edsl_ssr()
     Texture2D<ktm::fvec4> tr_normal = normal_image;        // storage 读
     Texture2D<ktm::fvec4> tr_color = color_image;          // storage 读
     Texture2D<ktm::fvec4> tr_ssr_out = ssr_image;          // storage 写
+    // 打包沿用 GLSL 版 pushConsts 布局；步数/精修/分辨率已编译进 shader，
+    // 对应分量（params0.w / params1.zw / params2.z）保留但未使用
     Float4 u_ndc_to_view; // xy: mul, zw: add（uv → view.xy / viewZ）
     Float4 u_tr_params0;  // x: proj00, y: proj11, z: maxDistance
     Float4 u_tr_params1;  // x: thickness, y: frameIdx
@@ -432,8 +434,10 @@ void run_example_edsl_ssr()
                 {
                     Float3 mid;
                     mid = (lo + hi) * Float(0.5f);
+                    Float2 mid_uv;
+                    mid_uv = view_to_uv(mid);
                     Float mid_scene_z;
-                    mid_scene_z = tr_linear_depth[uv_to_coord(view_to_uv(mid))];
+                    mid_scene_z = tr_linear_depth[uv_to_coord(mid_uv)];
                     $IF(mid->z > mid_scene_z) hi = mid;
                     $ELSE lo = mid;
                 }
