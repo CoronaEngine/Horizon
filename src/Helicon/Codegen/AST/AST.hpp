@@ -75,6 +75,7 @@ namespace EmbeddedShader::Ast
 		static void endIf();
 		static void beginElse(std::shared_ptr<Ast::IfStatement> followIf);
 		static void endElse();
+		static void discard();
 
 		static std::shared_ptr<UniversalArray> defineUniversalArray(std::shared_ptr<Type> elementType);
 		template<typename ElementType>
@@ -96,6 +97,7 @@ namespace EmbeddedShader::Ast
 		static std::shared_ptr<AggregateType> createAggregateType(const T& value);
 
 		static std::shared_ptr<Variate> getPositionOutput();
+		static std::shared_ptr<Variate> getIsFrontFaceOutput();
 		static std::shared_ptr<Variate> getDispatchThreadIDInput();
 
 		static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, uint32_t index);

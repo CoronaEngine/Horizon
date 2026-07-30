@@ -77,7 +77,9 @@ void EmbeddedShader::Ast::Parser::reset()
 	currentVariateIndex = 0;
     currentBranchIndex = 0;
 	nextRenderTargetLocation = 0;
-	positionOutput.reset();
+	vsPositionOutput.reset();
+	fsPositionOutput.reset();
+    isFrontFaceOutput.reset();
 	dispatchThreadIDInput.reset();
     structure.slangModuleSource.clear();
     resetBranchOutputs();

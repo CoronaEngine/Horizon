@@ -121,6 +121,16 @@ void EmbeddedShader::Ast::AST::endElse()
 	getLocalStatementStack().pop();
 }
 
+void EmbeddedShader::Ast::AST::discard()
+{
+    thread_local auto discardStatement = [] {
+        auto p =std::make_shared<StringStatement>();
+        p->content = "discard";
+        return std::move(p);
+    }();
+    addLocalStatement(discardStatement);
+}
+
 std::shared_ptr<EmbeddedShader::Ast::UniversalArray> EmbeddedShader::Ast::AST::defineUniversalArray(std::shared_ptr<Type> elementType)
 {
 	auto arrayType = std::make_shared<ArrayType>();
@@ -176,11 +186,28 @@ std::shared_ptr<EmbeddedShader::Ast::UniformVariate> EmbeddedShader::Ast::AST::d
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getPositionOutput()
 {
-	auto& posOutput = Parser::currentParser->positionOutput;
-	if (posOutput)
-		return posOutput;
-	posOutput = Generator::SlangGenerator::getPositionOutput();
-	return posOutput;
+	std::shared_ptr<Variate>* posOutput = nullptr;
+    if (getEmbeddedShaderStructure().stage == ShaderStage::Fragment) {
+        posOutput = &Parser::currentParser->fsPositionOutput;
+    } else if (getEmbeddedShaderStructure().stage == ShaderStage::Vertex) {
+        posOutput = &Parser::currentParser->vsPositionOutput;
+    } else {
+        throw std::runtime_error("Using Position Builtin-Variate in a non-supported ShaderStage");
+    }
+
+	if (*posOutput)
+		return *posOutput;
+	*posOutput = Generator::SlangGenerator::getPositionOutput();
+	return *posOutput;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getIsFrontFaceOutput()
+{
+    auto& frontFace = Parser::currentParser->isFrontFaceOutput;
+    if (frontFace)
+        return frontFace;
+    frontFace = Generator::SlangGenerator::getIsFrontFaceOutput();
+    return frontFace;
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getDispatchThreadIDInput()

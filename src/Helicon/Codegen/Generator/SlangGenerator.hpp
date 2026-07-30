@@ -115,6 +115,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 	    static std::string getBranchImport(const std::vector<size_t>& refs);
 
 		static std::shared_ptr<Ast::Variate> getPositionOutput();
+		static std::shared_ptr<Ast::Variate> getIsFrontFaceOutput();
 		static std::shared_ptr<Ast::Variate> getDispatchThreadIDInput();
 	private:
 		static bool bindless();
