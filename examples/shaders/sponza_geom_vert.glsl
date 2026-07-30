@@ -12,19 +12,17 @@
 // set 0-2 are reserved for Horizon bindless tables, so plain UBOs go in set 3.
 layout(set = 3, binding = 0) uniform SponzaGeomShared {
     mat4 view_proj;
-    vec4 spec_range;   // x: min specular, y: max specular, z: min gloss, w: max gloss
-    vec4 no_map_material; // x: specular, y: gloss (materials without a '*_spec' map)
 } vsp;
 
 // Shared with sponza_geom_frag.glsl; the layout must stay identical.
-// Only the vertex stage reads nothing here, but the block must still match.
 layout(push_constant) uniform SponzaGeomPC {
     vec4 base_color_factor;
+    vec4 mr_factor; // x: metallicFactor, y: roughnessFactor, zw: unused
     uint tex_base_color_index;
     uint tex_normal_index;
-    uint tex_specular_index;
+    uint tex_metal_rough_index;
     uint tex_mask_index;
-    uint material_flags; // bit0: normal map, bit1: alpha mask, bit2: specular map
+    uint material_flags; // bit0: normal map, bit1: alpha mask, bit2: MR map, bit3: mask 采 alpha
 } model_pc;
 
 layout(location = 0) in vec3 inPosition;
@@ -41,9 +39,8 @@ void main()
 {
     gl_Position = vsp.view_proj * vec4(inPosition, 1.0);
 
-    // The Khronos Sponza tangents are not strictly perpendicular to the normals
-    // (about 16% of vertices exceed a 0.1 dot product), so re-orthogonalise here
-    // with Gram-Schmidt instead of trusting the authored frame.
+    // 部分资产的切线与法线并不严格垂直,Gram-Schmidt 重新正交化,
+    // 不信任烘焙进来的切线框架。
     vec3 n = normalize(inNormal);
     vec3 t = normalize(inTangent.xyz - n * dot(n, inTangent.xyz));
 
