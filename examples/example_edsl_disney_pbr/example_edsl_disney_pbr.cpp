@@ -1,19 +1,20 @@
-// Disney Principled PBR chart: 10 parameter rows x 11 value columns (0.0 .. 1.0).
+// Disney Principled PBR chart — EDSL version of example_disney_pbr
+// (10 parameter rows x 11 value columns, UV spheres + IBL probes).
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+#include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
+#include "Codegen/CustomLibrary.h"
+#include "Codegen/TypeAlias.h"
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
-
-#include GLSL(shaders/disney_pbr_vert.glsl)
-#include GLSL(shaders/disney_pbr_frag.glsl)
 
 #include <algorithm>
 #include <array>
@@ -23,6 +24,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -135,27 +137,27 @@ LightProbe load_light_probe(const std::string& name)
 {
     LightProbe probe;
     probe.lod = create_cubemap_image(load_dds_cube_rgba16f(asset_root / "env" / (name + "_lod.dds")),
-                                     "example_disney_pbr." + name + ".lod");
+                                     "example_edsl_disney_pbr." + name + ".lod");
     probe.irr = create_cubemap_image(load_dds_cube_rgba16f(asset_root / "env" / (name + "_irr.dds")),
-                                     "example_disney_pbr." + name + ".irr");
+                                     "example_edsl_disney_pbr." + name + ".irr");
     return probe;
 }
 
-struct IblVertex
+struct MeshVertex
 {
     std::array<float, 3> position {};
     std::array<float, 3> normal {};
 };
 
-struct IblMesh
+struct MeshData
 {
-    std::vector<IblVertex> vertices;
+    std::vector<MeshVertex> vertices;
     std::vector<uint32_t> indices;
 };
 
-IblMesh make_uv_sphere(int slices, int stacks)
+MeshData make_uv_sphere(int slices, int stacks)
 {
-    IblMesh mesh;
+    MeshData mesh;
     mesh.vertices.reserve(static_cast<size_t>((slices + 1) * (stacks + 1)));
     mesh.indices.reserve(static_cast<size_t>(slices * stacks * 6));
 
@@ -173,7 +175,7 @@ IblMesh make_uv_sphere(int slices, int stacks)
             const float sin_theta = std::sin(theta);
             const float cos_theta = std::cos(theta);
 
-            IblVertex vertex;
+            MeshVertex vertex;
             vertex.normal = { sin_phi * cos_theta, cos_phi, sin_phi * sin_theta };
             vertex.position = vertex.normal;
             mesh.vertices.push_back(vertex);
@@ -230,22 +232,17 @@ enum class ChartParam : int
     ClearcoatGloss,
 };
 
-constexpr const char* chart_param_names[] = {
-    "subsurface",     "metallic",      "specular",    "specularTint", "roughness",
-    "anisotropic",    "sheen",         "sheenTint",   "clearcoat",    "clearcoatGloss",
-};
-
 constexpr glm::vec3 chart_row_colors[chart_row_count] = {
-    glm::vec3(1.0f, 1.0f, 1.0f),       // subsurface
-    glm::vec3(1.0f, 0.86f, 0.12f),     // metallic
-    glm::vec3(0.92f, 0.12f, 0.12f),    // specular
-    glm::vec3(0.92f, 0.12f, 0.12f),    // specularTint
-    glm::vec3(0.42f, 0.32f, 0.92f),    // roughness
-    glm::vec3(0.92f, 0.18f, 0.78f),    // anisotropic
-    glm::vec3(0.62f, 0.18f, 0.14f),    // sheen
-    glm::vec3(0.62f, 0.18f, 0.14f),    // sheenTint
-    glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoat
-    glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoatGloss
+    glm::vec3(1.0f, 1.0f, 1.0f),
+    glm::vec3(1.0f, 0.86f, 0.12f),
+    glm::vec3(0.92f, 0.12f, 0.12f),
+    glm::vec3(0.92f, 0.12f, 0.12f),
+    glm::vec3(0.42f, 0.32f, 0.92f),
+    glm::vec3(0.92f, 0.18f, 0.78f),
+    glm::vec3(0.62f, 0.18f, 0.14f),
+    glm::vec3(0.62f, 0.18f, 0.14f),
+    glm::vec3(0.10f, 0.34f, 0.40f),
+    glm::vec3(0.10f, 0.34f, 0.40f),
 };
 
 DisneyMaterial make_default_chart_material(glm::vec3 base_color)
@@ -346,15 +343,6 @@ struct OrbitCamera
                             std::sin(pitch_curr) * std::cos(yaw_curr));
         return target + dir * dist_curr;
     }
-
-    [[nodiscard]] glm::mat4 env_view_mtx() const
-    {
-        const glm::vec3 forward = glm::normalize(target - position());
-        const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), forward));
-        const glm::vec3 up = glm::normalize(glm::cross(forward, right));
-        return glm::mat4(glm::vec4(right, 0.0f), glm::vec4(up, 0.0f), glm::vec4(forward, 0.0f),
-                         glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-    }
 };
 
 struct InputContext
@@ -365,18 +353,6 @@ struct InputContext
     double prev_y = 0.0;
     bool has_prev = false;
 };
-
-template <typename VertShader, typename FragShader>
-void apply_material_to_pipeline(Corona::Horizon::RasterizerPipeline<VertShader, FragShader>& rasterizer,
-                                const DisneyMaterial& material, float aspect)
-{
-    rasterizer.vpc.mat0 = glm::vec4(material.base_color, material.metallic);
-    rasterizer.vpc.mat1 =
-        glm::vec4(material.roughness, material.specular, material.specular_tint, material.subsurface);
-    rasterizer.vpc.mat2 =
-        glm::vec4(material.anisotropic, material.sheen, material.sheen_tint, material.clearcoat);
-    rasterizer.vpc.mat3 = glm::vec4(material.clearcoat_gloss, 0.0f, aspect, 0.0f);
-}
 
 void cursor_callback(GLFWwindow* window, double x, double y)
 {
@@ -417,15 +393,59 @@ void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
     context->camera.dolly(static_cast<float>(-dy) * 0.05f);
 }
 
+ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
+{
+    static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
+    ktm::fmat4x4 result;
+    std::memcpy(&result, &matrix, sizeof(result));
+    return result;
+}
+
+template <typename Type, size_t N>
+    requires std::is_arithmetic_v<Type>
+ktm::vec<N, Type> to_edsl_vector(const glm::vec<N, Type>& vec)
+{
+    ktm::vec<N, Type> result;
+    for (size_t i = 0; i < N; ++i)
+        result[i] = vec[i];
+    return result;
+}
+
 } // namespace
 
-void run_example_disney_pbr()
+using namespace EmbeddedShader;
+using namespace ktm;
+
+struct DisneyEdslVertexProxy
+{
+    Float3 pos;
+    Float3 normal;
+};
+
+struct DisneyEdslVaryings
+{
+    Float3 v_view;
+    Float3 v_normal;
+};
+
+struct DisneyEdslSharedProxy
+{
+    Float4x4 proj_view;
+    Float4x4 envMtx;
+    Float4 camPos;
+    Float4 flags;
+    Float4 lightDir;
+    Float4 lightCol;
+    Float4 exposurePad;
+};
+
+void run_example_edsl_disney_pbr()
 {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     GLFWwindow* window =
-        glfwCreateWindow(disney_width, disney_height, "Horizon Disney PBR [Vulkan]", nullptr, nullptr);
+        glfwCreateWindow(disney_width, disney_height, "Horizon Disney PBR [EDSL]", nullptr, nullptr);
 
     InputContext input;
     const std::array<DisneyMaterial, chart_sphere_count> chart_materials = build_chart_materials();
@@ -435,30 +455,234 @@ void run_example_disney_pbr()
     glfwSetScrollCallback(window, scroll_callback);
 
     LightProbe probes[2] = { load_light_probe("bolonga"), load_light_probe("kyoto") };
-    IblMesh sphere_mesh = make_uv_sphere(48, 24);
+    MeshData sphere_mesh = make_uv_sphere(48, 24);
 
     Corona::Horizon::HardwareBuffer sphere_vb =
-        Corona::Horizon::HardwareBuffer::vertex(sphere_mesh.vertices, "example_disney_pbr.sphere.vb");
+        Corona::Horizon::HardwareBuffer::vertex(sphere_mesh.vertices, "example_edsl_disney_pbr.sphere.vb");
     Corona::Horizon::HardwareBuffer sphere_ib =
-        Corona::Horizon::HardwareBuffer::index(sphere_mesh.indices, "example_disney_pbr.sphere.ib");
+        Corona::Horizon::HardwareBuffer::index(sphere_mesh.indices, "example_edsl_disney_pbr.sphere.ib");
 
     Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
         disney_width, disney_height, Corona::Horizon::Format::RGBA16_FLOAT,
         Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
             Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
             Corona::Horizon::ImageUsageFlags::TransferDst,
-        "example_disney_pbr.output"));
+        "example_edsl_disney_pbr.output"));
     final_output_image.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
 
     Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        disney_width, disney_height, Corona::Horizon::Format::D32, "example_disney_pbr.depth"));
+        disney_width, disney_height, Corona::Horizon::Format::D32, "example_edsl_disney_pbr.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
     desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
-    Corona::Horizon::RasterizerPipeline rasterizer(disney_pbr_vert_glsl, disney_pbr_frag_glsl, desc);
-    rasterizer.outColor = final_output_image;
+    DisneyEdslSharedProxy shared;
+
+    // Push constants: model (64) + 4×mat (64) = 128 bytes.
+    Float4x4 per_model;
+    Float4 per_mat0;
+    Float4 per_mat1;
+    Float4 per_mat2;
+    Float4 per_mat3;
+    per_model.as_push_constant();
+    per_mat0.as_push_constant();
+    per_mat1.as_push_constant();
+    per_mat2.as_push_constant();
+    per_mat3.as_push_constant();
+
+    auto edsl_vertex = [&](Aggregate<DisneyEdslVertexProxy> vertex) {
+        Aggregate<DisneyEdslVaryings> out;
+
+        Float4 local_pos = Float4(vertex->pos, Float(1.0));
+        Float4 world_pos = mul(per_model, local_pos);
+        position() = mul(shared.proj_view, world_pos);
+
+        out->v_view = shared.camPos->xyz() - world_pos->xyz();
+        out->v_normal = mul(per_model, Float4(vertex->normal, Float(0.0)))->xyz();
+        return out;
+    };
+
+    auto toLinear = [](Float3 rgb) -> Float3 {
+        return pow(abs(rgb), Float3(Float(2.2), Float(2.2), Float(2.2)));
+    };
+
+    auto toFilmic = [](Float3 rgb) -> Float3 {
+        Float3 mapped = max(Float3(Float(0.0), Float(0.0), Float(0.0)),
+                            rgb - Float3(Float(0.004), Float(0.004), Float(0.004)));
+        return (mapped * (Float(6.2) * mapped + Float3(Float(0.5), Float(0.5), Float(0.5)))) /
+               (mapped * (Float(6.2) * mapped + Float3(Float(1.7), Float(1.7), Float(1.7))) +
+                Float3(Float(0.06), Float(0.06), Float(0.06)));
+    };
+
+    auto fixCubeLookup = [](Float3 v, Float lod, Float topLevelCubeSize) -> Float3 {
+        Float ax = abs(v->x);
+        Float ay = abs(v->y);
+        Float az = abs(v->z);
+        Float vmax = max(max(ax, ay), az);
+        Float scale = Float(1.0) - exp2(lod) / topLevelCubeSize;
+        Float3 result;
+        result = v;
+        $IF(ax != vmax) { result->x = v->x * scale; };
+        $IF(ay != vmax) { result->y = v->y * scale; };
+        $IF(az != vmax) { result->z = v->z * scale; };
+        return result;
+    };
+
+    auto sqr = [](Float x) -> Float { return x * x; };
+
+    auto schlickFresnel = [](Float u) -> Float {
+        Float m = clamp(Float(1.0) - u, Float(0.0), Float(1.0));
+        return m * m * m * m * m;
+    };
+
+    auto edsl_log = [](Float x) -> Float {
+        return Float { Ast::AST::callFunc(
+            "log", Ast::AST::createType<float>(),
+            Ast::Node::accessAll({ proxy_wrap(x) }, Ast::AccessPermissions::ReadOnly)) };
+    };
+
+    auto edsl_cross = [](Float3 a, Float3 b) -> Float3 {
+        return Float3 { Ast::AST::callFunc(
+            "cross", Ast::AST::createType<ktm::fvec3>(),
+            Ast::Node::accessAll({ proxy_wrap(a), proxy_wrap(b) }, Ast::AccessPermissions::ReadOnly)) };
+    };
+
+    auto gtr1 = [&](Float NdotH, Float a) -> Float {
+        // clearcoat uses a in [0.001, 0.1], so the a>=1 branch is unused.
+        Float a2 = a * a;
+        Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
+        return (a2 - Float(1.0)) / (Float(3.14159265358979323846) * edsl_log(a2) * t);
+    };
+
+    auto gtr2_aniso = [&](Float NdotH, Float HdotX, Float HdotY, Float ax, Float ay) -> Float {
+        return Float(1.0) /
+               (Float(3.14159265358979323846) * ax * ay *
+                sqr(sqr(HdotX / ax) + sqr(HdotY / ay) + NdotH * NdotH));
+    };
+
+    auto smithG_GGX = [&](Float NdotV, Float alphaG) -> Float {
+        Float a = alphaG * alphaG;
+        Float b = NdotV * NdotV;
+        return Float(1.0) / (NdotV + sqrt(a + b - a * b));
+    };
+
+    auto smithG_GGX_aniso = [&](Float NdotV, Float VdotX, Float VdotY, Float ax, Float ay) -> Float {
+        return Float(1.0) / (NdotV + sqrt(sqr(VdotX * ax) + sqr(VdotY * ay) + sqr(NdotV)));
+    };
+
+    TextureCube<fvec4> texCube = probes[0].lod;
+    TextureCube<fvec4> texCubeIrr = probes[0].irr;
+    Texture2D<fvec4> final_output = final_output_image;
+
+    auto edsl_fragment = [&](Aggregate<DisneyEdslVaryings> in) {
+        Float3 N = normalize(in->v_normal);
+        Float3 V = normalize(in->v_view);
+        Float3 L = normalize(Float3(shared.lightDir->xyz()));
+
+        Float3 X;
+        X = normalize(edsl_cross(N, Float3(Float(0.0), Float(1.0), Float(0.0))));
+        $IF(dot(X, X) < Float(1e-4))
+        {
+            X = normalize(edsl_cross(N, Float3(Float(1.0), Float(0.0), Float(0.0))));
+        };
+        Float3 Y = normalize(edsl_cross(N, X));
+
+        Float3 baseColor = Float3(per_mat0->xyz());
+        Float metallic = per_mat0->w;
+        Float roughness = clamp(per_mat1->x, Float(0.001), Float(1.0));
+        Float specular = per_mat1->y;
+        Float specularTint = per_mat1->z;
+        Float subsurface = per_mat1->w;
+        Float anisotropic = per_mat2->x;
+        Float sheen = per_mat2->y;
+        Float sheenTint = per_mat2->z;
+        Float clearcoat = per_mat2->w;
+        Float clearcoatGloss = per_mat3->x;
+
+        Float3 Cdlin = toLinear(baseColor);
+        Float Cdlum = dot(Cdlin, Float3(Float(0.3), Float(0.6), Float(0.1)));
+        Float3 Ctint;
+        Ctint = Float3(Float(1.0), Float(1.0), Float(1.0));
+        $IF(Cdlum > Float(0.0)) { Ctint = Cdlin / Cdlum; };
+        Float3 Cspec0 =
+            mix(specular * Float(0.08) * mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, specularTint),
+                Cdlin, metallic);
+        Float3 Csheen = mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, sheenTint);
+
+        Float NdotV = clamp(dot(N, V), Float(0.0), Float(1.0));
+        Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
+
+        Float3 brdf;
+        brdf = Float3(Float(0.0), Float(0.0), Float(0.0));
+        Float NdotL = dot(N, L);
+        Float NdotVraw = dot(N, V);
+        $IF(NdotL >= Float(0.0))
+        {
+            $IF(NdotVraw >= Float(0.0))
+            {
+                Float3 H = normalize(L + V);
+                Float NdotH = dot(N, H);
+                Float LdotH = dot(L, H);
+
+                Float FL = schlickFresnel(NdotL);
+                Float FV = schlickFresnel(NdotVraw);
+                Float Fd90 = Float(0.5) + Float(2.0) * LdotH * LdotH * roughness;
+                Float Fd = mix(Float(1.0), Fd90, FL) * mix(Float(1.0), Fd90, FV);
+
+                Float Fss90 = LdotH * LdotH * roughness;
+                Float Fss = mix(Float(1.0), Fss90, FL) * mix(Float(1.0), Fss90, FV);
+                Float ss = Float(1.25) * (Fss * (Float(1.0) / (NdotL + NdotVraw) - Float(0.5)) + Float(0.5));
+
+                Float aniso_aspect = sqrt(Float(1.0) - anisotropic * Float(0.9));
+                Float ax = max(Float(0.001), sqr(roughness) / aniso_aspect);
+                Float ay = max(Float(0.001), sqr(roughness) * aniso_aspect);
+                Float Ds = gtr2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
+                Float FH = schlickFresnel(LdotH);
+                Float3 Fs = mix(Cspec0, Float3(Float(1.0), Float(1.0), Float(1.0)), FH);
+                Float Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay) *
+                           smithG_GGX_aniso(NdotVraw, dot(V, X), dot(V, Y), ax, ay);
+
+                Float3 Fsheen = FH * sheen * Csheen;
+
+                Float clearcoatAlpha =
+                    Float(0.1) * (Float(1.0) - clearcoatGloss) + Float(0.001) * clearcoatGloss;
+                Float Dr = gtr1(NdotH, clearcoatAlpha);
+                Float Fr = Float(0.04) * (Float(1.0) - FH) + Float(1.0) * FH;
+                Float Gr = smithG_GGX(NdotL, Float(0.25)) * smithG_GGX(NdotVraw, Float(0.25));
+
+                Float3 diffusePart =
+                    ((Float(1.0) / Float(3.14159265358979323846)) * mix(Fd, ss, subsurface) * Cdlin + Fsheen) *
+                    (Float(1.0) - metallic);
+                Float3 specPart = Gs * Fs * Ds + Float(0.25) * clearcoat * Gr * Fr * Dr;
+                brdf = diffusePart + specPart;
+            };
+        };
+
+        Float NdotLclamped = clamp(dot(N, L), Float(0.0), Float(1.0));
+        Float3 lit = brdf * NdotLclamped * Float3(shared.lightCol->xyz());
+        Float enable = max(shared.flags->x + shared.flags->y, Float(0.0));
+        Float3 direct = lit * enable;
+
+        Float mip = roughness * Float(5.0);
+        Float3 vr = normalize(Float(2.0) * NdotV * N - V);
+        Float3 cubeR = fixCubeLookup(normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz())), mip,
+                                     Float(256.0));
+        Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(N, Float(0.0)))->xyz()));
+
+        Float3 radiance = toLinear(Float3(textureLod(texCube, cubeR, mip)->xyz()));
+        Float3 irradiance = toLinear(Float3(texture(texCubeIrr, cubeN)->xyz()));
+
+        Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
+        Float3 envDiffuse = diffuseAlbedo * irradiance * shared.flags->z;
+        Float3 envSpecular = Cspec0 * radiance * envFresnel * shared.flags->w;
+        Float3 indirect = envDiffuse + envSpecular;
+
+        Float3 color = (direct + indirect) * exp2(shared.exposurePad->x);
+        final_output << Float4(toFilmic(color), Float(1.0));
+    };
+
+    Corona::Horizon::RasterizerPipeline rasterizer(edsl_vertex, edsl_fragment, desc);
     rasterizer.bind_depth_target(depth_image);
 
     Corona::Horizon::HardwareExecutor render_executor;
@@ -489,7 +713,7 @@ void run_example_disney_pbr()
         ui.new_frame();
 
         Settings& s = input.settings;
-        ImGui::Begin("Disney PBR Chart");
+        ImGui::Begin("Disney PBR Chart (EDSL)");
         ImGui::Text("10 rows (parameter) x 11 columns (0.0 .. 1.0)");
         ImGui::Text("Rows: subsurface, metallic, specular, specularTint, roughness,");
         ImGui::Text("      anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss");
@@ -515,7 +739,7 @@ void run_example_disney_pbr()
         {
             const double fps = fps_frame_count / fps_accum_seconds;
             char title[96];
-            std::snprintf(title, sizeof(title), "Horizon Disney PBR [Vulkan] - %.1f FPS (%.2f ms)", fps,
+            std::snprintf(title, sizeof(title), "Horizon Disney PBR [EDSL] - %.1f FPS (%.2f ms)", fps,
                           1000.0 / fps);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
@@ -529,33 +753,37 @@ void run_example_disney_pbr()
         const glm::vec3 cam_pos = camera.position();
         const glm::mat4 view = glm::lookAtLH(cam_pos, camera.target, glm::vec3(0.0f, 1.0f, 0.0f));
         const glm::mat4 env_rot = glm::rotate(glm::mat4(1.0f), s.env_rot_curr, glm::vec3(0.0f, 1.0f, 0.0f));
-        const LightProbe& probe = probes[s.current_probe];
+        LightProbe& probe = probes[s.current_probe];
+
+        texCube = probe.lod;
+        texCubeIrr = probe.irr;
+
+        shared.proj_view = to_edsl_matrix(glm::transpose(proj * view));
+        shared.camPos = fvec4(to_edsl_vector(cam_pos), 1.0f);
+        shared.flags = fvec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
+                             s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
+        shared.lightDir = fvec4(to_edsl_vector(glm::normalize(s.light_dir)), 0.0f);
+        shared.lightCol = fvec4(to_edsl_vector(s.light_col), 0.0f);
+        shared.envMtx = to_edsl_matrix(glm::transpose(env_rot));
+        shared.exposurePad = fvec4(s.exposure, 0.0f, 0.0f, 0.0f);
 
         rasterizer.clear_records();
-
-        rasterizer.vpc.texCubeIndex = probe.lod.store_descriptor();
-        rasterizer.vpc.texCubeIrrIndex = probe.irr.store_descriptor();
-        rasterizer.vsp.proj_view = proj * view;
-        rasterizer.vsp.camPos = glm::vec4(cam_pos, 1.0f);
-        rasterizer.vsp.flags = glm::vec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
-                                         s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
-        rasterizer.vsp.lightDir = glm::vec4(glm::normalize(s.light_dir), 0.0f);
-        rasterizer.vsp.lightCol = glm::vec4(s.light_col, 0.0f);
-        rasterizer.vsp.envMtx = env_rot;
-        rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
-        rasterizer.vsp.exposurePad = glm::vec4(s.exposure, 0.0f, 0.0f, 0.0f);
 
         for (int row = 0; row < chart_row_count; ++row)
         {
             for (int col = 0; col < chart_col_count; ++col)
             {
                 const size_t index = static_cast<size_t>(row * chart_col_count + col);
+                const DisneyMaterial& material = chart_materials[index];
                 const glm::vec3 position = chart_sphere_position(row, col);
                 const glm::mat4 model =
                     glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
 
-                rasterizer.vpc.model = model;
-                apply_material_to_pipeline(rasterizer, chart_materials[index], aspect);
+                per_model = to_edsl_matrix(glm::transpose(model));
+                per_mat0 = fvec4(to_edsl_vector(material.base_color), material.metallic);
+                per_mat1 = fvec4(material.roughness, material.specular, material.specular_tint, material.subsurface);
+                per_mat2 = fvec4(material.anisotropic, material.sheen, material.sheen_tint, material.clearcoat);
+                per_mat3 = fvec4(material.clearcoat_gloss, 0.0f, aspect, 0.0f);
                 rasterizer.record(sphere_ib, sphere_vb, sphere_params);
             }
         }

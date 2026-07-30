@@ -20,6 +20,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_edsl_sky/example_edsl_sky.cpp
     example_gpudrivenrendering/example_gpudrivenrendering.cpp
     example_disney_pbr/example_disney_pbr.cpp
+    example_edsl_disney_pbr/example_edsl_disney_pbr.cpp
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
@@ -48,6 +49,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_edsl_sky/example_edsl_sky.h
     example_gpudrivenrendering/example_gpudrivenrendering.h
     example_disney_pbr/example_disney_pbr.h
+    example_edsl_disney_pbr/example_edsl_disney_pbr.h
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
