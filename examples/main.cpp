@@ -11,6 +11,7 @@
 #include "example_shadowmaps/example_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_assao/example_assao.h"
+#include "example_ssr/example_ssr.h"
 // #include "example_sky/example_sky.h"
 #include "example_edsl_sky/example_edsl_sky.h"
 #include "example_gpudrivenrendering/example_gpudrivenrendering.h"
@@ -89,6 +90,11 @@ int main(int argc, char **argv)
     if (mode == "assao")
     {
         run_example_assao();
+        return 0;
+    }
+    if (mode == "ssr")
+    {
+        run_example_ssr();
         return 0;
     }
     // if (mode == "sky")
