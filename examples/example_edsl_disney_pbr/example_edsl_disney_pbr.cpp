@@ -393,22 +393,16 @@ void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
     context->camera.dolly(static_cast<float>(-dy) * 0.05f);
 }
 
-ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
+const ktm::fmat4x4& to_edsl_matrix(const glm::mat4& matrix)
 {
-    static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
-    ktm::fmat4x4 result;
-    std::memcpy(&result, &matrix, sizeof(result));
-    return result;
+    return *reinterpret_cast<const ktm::fmat4x4*>(&matrix);
 }
 
 template <typename Type, size_t N>
     requires std::is_arithmetic_v<Type>
-ktm::vec<N, Type> to_edsl_vector(const glm::vec<N, Type>& vec)
+const ktm::vec<N, Type>& to_edsl_vector(const glm::vec<N, Type>& vec)
 {
-    ktm::vec<N, Type> result;
-    for (size_t i = 0; i < N; ++i)
-        result[i] = vec[i];
-    return result;
+    return *reinterpret_cast<const ktm::vec<N, Type>*>(&vec);
 }
 
 } // namespace

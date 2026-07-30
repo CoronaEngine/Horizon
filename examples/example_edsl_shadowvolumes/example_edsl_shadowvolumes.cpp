@@ -654,8 +654,8 @@ void run_example_edsl_shadowvolumes()
         auto record_scene = [&](auto& pipeline) {
             pipeline.clear_records();
             // 共享矩阵（UBO）；per-draw model 走 push constant
-            sp.proj_view   = to_edsl_matrix(transpose(view_proj));
-            sp.view_matrix = to_edsl_matrix(transpose(view));
+            sp.proj_view   = to_edsl_matrix(view_proj);
+            sp.view_matrix = to_edsl_matrix(view);
             sp.light_pos_vs = to_edsl_vec4(light_pos_vs);
             sp.light_rgb = to_edsl_vec4(light_rgb);
             sp.ambient = to_edsl_vec4(ambient_color);
@@ -670,7 +670,7 @@ void run_example_edsl_shadowvolumes()
                 params.index_type = Corona::Horizon::IndexType::UInt32;
                 params.index_count = item.mesh->index_count;
 
-                model_pc.model = to_edsl_matrix(transpose(item.model));
+                model_pc.model = to_edsl_matrix(item.model);
                 pipeline.record(item.mesh->ib, item.mesh->vb, params);
             }
         };
@@ -692,7 +692,7 @@ void run_example_edsl_shadowvolumes()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = std::min<uint32_t>(static_cast<uint32_t>(volume_positions.size()), max_volume_vertices);
 
-            vp.view_proj = to_edsl_matrix(transpose(view_proj));
+            vp.view_proj = to_edsl_matrix(view_proj);
             vp.params = to_edsl_vec4(resolution);
             volume_rasterizer.record(volume_ib, volume_vb, params);
         }

@@ -153,6 +153,7 @@ struct ShaderCodeModule
         bool compileDXBC = false;
         bool compileSpirV = true;
         bool enableBindless = true;
+        bool enableMatrixColumnMajor = false;
         std::vector<SlangModule*> slangModules;
         std::vector<Ast::BranchOutput> branches;
         std::string typeHeader;

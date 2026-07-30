@@ -1522,7 +1522,10 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         }
 	    sessionDesc.targets = targetDescs.data();
 	    sessionDesc.targetCount = static_cast<SlangInt>(targetDescs.size());
-        sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
+        if (arg0.matrixMajor == SlangMatrixMajor::RowMajor)
+            sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_ROW_MAJOR;
+        else if (arg0.matrixMajor == SlangMatrixMajor::ColumnMajor)
+            sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
 
 	    std::string_view srcStr = "slang";
 	    switch (arg0.sourceLanguage)

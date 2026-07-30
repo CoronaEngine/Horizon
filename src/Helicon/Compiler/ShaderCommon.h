@@ -108,6 +108,12 @@ namespace EmbeddedShader
 
     };
 
+    enum class SlangMatrixMajor
+    {
+        RowMajor,
+        ColumnMajor,
+    };
+
     struct SlangCompileArgs0
     {
         ShaderLanguage sourceLanguage;
@@ -116,6 +122,8 @@ namespace EmbeddedShader
         std::string entrypointName = "main";
         //当入口点通过[shader(...)]属性注解指定stage时，stage参数可选
         ShaderStage stage{};
+
+        SlangMatrixMajor matrixMajor = SlangMatrixMajor::RowMajor;
 
         bool enableReflection = false;
         std::function<void(slang::ShaderReflection*)> layoutCallback = [](slang::ProgramLayout*){};
