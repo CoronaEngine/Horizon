@@ -47,6 +47,16 @@ bool EmbeddedShader::Ast::Parser::getBindless()
 	return currentParser->bindless;
 }
 
+void EmbeddedShader::Ast::Parser::setInputPush(bool push)
+{
+    currentParser->bInputPush = push;
+}
+
+bool EmbeddedShader::Ast::Parser::getInputPush()
+{
+    return currentParser->bInputPush;
+}
+
 void EmbeddedShader::Ast::Parser::endShaderParse()
 {
     if (currentParser->isInShaderParse)
@@ -73,6 +83,7 @@ void EmbeddedShader::Ast::Parser::reset()
     resetBranchOutputs();
     typeHeader.clear();
     bIsEnabledTypeHeader = false;
+    bInputPush = true;
 }
 
 std::string EmbeddedShader::Ast::Parser::getUniqueVariateName()

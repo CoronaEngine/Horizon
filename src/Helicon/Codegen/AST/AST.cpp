@@ -254,7 +254,13 @@ void EmbeddedShader::Ast::AST::addLocalStatement(std::shared_ptr<Statement> stat
 
 void EmbeddedShader::Ast::AST::addInputStatement(std::shared_ptr<Statement> inputStatement)
 {
-	Parser::currentParser->structure.inputStatements.push_back(std::move(inputStatement));
+    if (Parser::currentParser->bInputPush)
+    {
+        Parser::currentParser->structure.inputStatements.push_back(std::move(inputStatement));
+        return;
+    }
+
+    Parser::currentParser->structure.inputStatements.push_front(std::move(inputStatement));
 }
 
 void EmbeddedShader::Ast::AST::addOutputStatement(std::shared_ptr<Statement> outputStatement)

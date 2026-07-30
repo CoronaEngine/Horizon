@@ -42,6 +42,9 @@ namespace EmbeddedShader
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const VariateProxy<T>& proxy);
 
+    template<typename T>
+    std::shared_ptr<Ast::Value> proxy_wrap(const SwizzleProxy<T>& proxy);
+
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const Texture2DProxy<T>& proxy);
 
@@ -56,6 +59,12 @@ namespace EmbeddedShader
 	{
 		using type = T;
 	};
+
+    template<typename T>
+    struct base_type<SwizzleProxy<T>>
+    {
+        using type = T;
+    };
 
 	template<typename T>
 	using base_type_t = typename base_type<std::remove_cvref_t<T>>::type;
@@ -165,6 +174,7 @@ namespace EmbeddedShader
 			//Uniform,Input,Local Variate
 			if (ParseHelper::isInInputParameter())
 			{
+			    Ast::Parser::setInputPush(false);
 				node = Ast::AST::defineInputVariate<Type>(ParseHelper::getCurrentInputIndex());
 				return;
 			}
@@ -205,6 +215,7 @@ namespace EmbeddedShader
 		            auto aggregateType = Ast::AST::createType<Type>();
 		            node = Ast::AST::defineLocalVariate(
 		                std::static_pointer_cast<Ast::Type>(aggregateType), nullptr);
+		            Ast::Parser::setInputPush(true);
 		            for (size_t loc = 0; loc < aggregateType->members.size(); ++loc)
 		            {
 		                auto& member = aggregateType->members[loc];
@@ -215,6 +226,7 @@ namespace EmbeddedShader
 		        }
 		        else
 		        {
+		            Ast::Parser::setInputPush(false);
 		            node = Ast::AST::defineInputVariate<Type>(ParseHelper::getCurrentInputIndex());
 		        }
 		    }
@@ -1103,6 +1115,12 @@ namespace EmbeddedShader
 	std::shared_ptr<Ast::Value> proxy_wrap(const VariateProxy<T>& proxy)
 	{
 		return proxy.node;
+	}
+
+    template <typename T>
+    std::shared_ptr<Ast::Value> proxy_wrap(const SwizzleProxy<T>& proxy)
+	{
+	    return proxy.node;
 	}
 
 	template<typename T>
