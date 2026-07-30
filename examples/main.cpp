@@ -15,6 +15,7 @@
 // #include "example_sky/example_sky.h"
 #include "example_edsl_sky/example_edsl_sky.h"
 #include "example_gpudrivenrendering/example_gpudrivenrendering.h"
+#include "example_disney_pbr/example_disney_pbr.h"
 
 #include <iostream>
 #include <string_view>
@@ -112,7 +113,12 @@ int main(int argc, char **argv)
         run_example_gpudrivenrendering();
         return 0;
     }
+    if (mode == "disney_pbr")
+    {
+        run_example_disney_pbr();
+        return 0;
+    }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering|disney_pbr]\n";
     return 0;
 }
