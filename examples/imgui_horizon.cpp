@@ -214,9 +214,9 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
         // 挂到 pending waits：同一 executor 上示例随后的 present commit 会等待 UI 完成。
         display_executor.wait(ui_receipt);
 
-        // CPU 节流：等 UI 提交（含其依赖的场景）在 GPU 上真正完成再返回，
-        // 把循环速率钳到 GPU 实际进度，避免提交洪水导致交换链帧槽耗尽、
-        // present 被大量跳过（表现为画面几乎不动、输入延迟极大）。
-        display_executor.wait_for_completion(ui_receipt);
+        // 这里曾有一处 wait_for_completion(ui_receipt)：把 CPU 钳到 GPU 进度，
+        // 防止提交洪水耗尽交换链帧槽。节流已上移到 DisplayManager —— present
+        // 结束时等第 N 帧前的那一帧（N = 交换链图像数），所以 CPU 可以领先
+        // GPU 至多 N 帧而不是必须逐帧同步。此处不能再等，否则退回串行。
     }
 }

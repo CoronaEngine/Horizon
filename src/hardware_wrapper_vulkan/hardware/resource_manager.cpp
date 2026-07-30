@@ -47,6 +47,9 @@ namespace Corona::Horizon
             if (has_flag(usage, BufferUsageFlags::Storage))
                 result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
+            if (has_flag(usage, BufferUsageFlags::Indirect))
+                result |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+
             return result;
         }
 

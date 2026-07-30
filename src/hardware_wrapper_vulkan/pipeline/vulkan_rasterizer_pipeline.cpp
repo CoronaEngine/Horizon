@@ -3,6 +3,7 @@
 #include "horizon_profiling.h"
 
 #include "hardware_wrapper/validation/hardware_validation.h"
+#include "hardware_wrapper_vulkan/frame_ring.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/hardware/execution_profile.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
@@ -12,7 +13,9 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <span>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <variant>
 
@@ -135,6 +138,17 @@ namespace Corona::Horizon
             case PolygonFillMode::Point: return VK_POLYGON_MODE_POINT;
             case PolygonFillMode::Fill:
             default: return VK_POLYGON_MODE_FILL;
+            }
+        }
+
+        [[nodiscard]] VkCullModeFlags to_vk_cull_mode(CullMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
+            case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
+            case CullMode::None:
+            default: return VK_CULL_MODE_NONE;
             }
         }
 
@@ -547,10 +561,10 @@ namespace Corona::Horizon
         {
             DrawIndexedDesc desc;
             desc.index_count = params.index_count;
-            desc.instance_count = 1;
+            desc.instance_count = params.instance_count;
             desc.first_index = params.first_index;
             desc.vertex_offset = params.vertex_offset;
-            desc.first_instance = 0;
+            desc.first_instance = params.first_instance;
             desc.index_type = params.index_type;
             desc.enable_scissor = params.enable_scissor;
             desc.scissor = params.scissor;
@@ -599,22 +613,9 @@ namespace Corona::Horizon
         if (constant_size != 0)
             push_constant_data_.resize(constant_size);
         uniform_buffers_ = reflected_uniform_buffers(desc_);
-
-        // 为每个 UBO binding 创建持久 GPU buffer
-        ubo_buffers_.reserve(uniform_buffers_.size());
-        for (auto& ubo : uniform_buffers_)
-        {
-            if (ubo.data.empty())
-            {
-                ubo_buffers_.emplace_back();
-                continue;
-            }
-            HardwareBuffer buf = HardwareBuffer::from_bytes(
-                std::span<const std::byte>(ubo.data),
-                1, BufferUsageFlags::Uniform, "RasterizerPipeline.ubo_persistent");
-            ubo.gpu_buffer = buf;
-            ubo_buffers_.push_back(std::move(buf));
-        }
+        // UBO 环在首次 sync_ubo_slot_unlocked() 时惰性创建：构造这里交换链可能
+        // 还没建好，frame_ring_size() 还是 1。
+        ubo_rings_.resize(uniform_buffers_.size());
     }
 
     VulkanRasterizerPipeline::~VulkanRasterizerPipeline()
@@ -655,6 +656,14 @@ namespace Corona::Horizon
 
                 for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
                 {
+                    // 销毁 pool 即隐式释放其中的 descriptor set。
+                    for (PipelineState::UniformDescriptorSet& uniform_set : set_layout.uniform_sets)
+                    {
+                        if (uniform_set.pool != VK_NULL_HANDLE)
+                            vkDestroyDescriptorPool(state.key.device, uniform_set.pool, nullptr);
+                    }
+                    set_layout.uniform_sets.clear();
+
                     if (set_layout.layout != VK_NULL_HANDLE)
                     {
                         vkDestroyDescriptorSetLayout(state.key.device, set_layout.layout, nullptr);
@@ -757,7 +766,7 @@ namespace Corona::Horizon
             rasterization.depthClampEnable = desc_.rasterizer.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
             rasterization.rasterizerDiscardEnable = desc_.rasterizer.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
             rasterization.polygonMode = to_vk_polygon_mode(desc_.rasterizer.fill_mode);
-            rasterization.cullMode = VK_CULL_MODE_NONE;
+            rasterization.cullMode = to_vk_cull_mode(desc_.rasterizer.cull_mode);
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
             rasterization.lineWidth = desc_.rasterizer.line_width;
@@ -916,9 +925,10 @@ namespace Corona::Horizon
 
                 VkDescriptorSetLayoutCreateInfo descriptor_layout_info {};
                 descriptor_layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-                // 该 set 仅承载每 draw 的 UBO，改用 push descriptor：无需 pool/allocate，
-                // 直接 vkCmdPushDescriptorSet 写入命令缓冲。
-                descriptor_layout_info.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
+                // 该 set 仅承载 UBO。UBO 是批次共享的持久 buffer，(binding, buffer, range)
+                // 在管线生命周期内恒定，值的变化走 mapped 内存写入，所以按 bindless set
+                // 0-2 的同一形式处理：分配一次普通 descriptor set、写入一次、之后只 bind。
+                descriptor_layout_info.flags = 0;
                 descriptor_layout_info.bindingCount = static_cast<uint32_t>(descriptor_bindings.size());
                 descriptor_layout_info.pBindings = descriptor_bindings.data();
 
@@ -1066,34 +1076,104 @@ namespace Corona::Horizon
         }
     }
 
-    VulkanRasterizerPipeline::GraphicsPipeline VulkanRasterizerPipeline::graphics_pipeline(VkDevice device,
-                                                                                          const std::array<VkFormat, 4>& color_formats,
-                                                                                          VkFormat depth_format,
-                                                                                          uint32_t vertex_stride)
+    VkDescriptorSet VulkanRasterizerPipeline::uniform_descriptor_set_unlocked(
+        VkDevice device,
+        PipelineState::DescriptorSetLayout& set_layout,
+        const std::vector<PipelineState::UniformDescriptorSet::Signature>& signature,
+        const std::string& debug_name)
     {
-        PipelineKey key {
-            .device = device,
-            .color_formats = color_formats,
-            .depth_format = depth_format,
-            .vertex_stride = vertex_stride,
-        };
-
-        std::lock_guard lock(mutex_);
-        auto found = std::ranges::find_if(pipeline_cache_, [&](const PipelineState& state) {
-            return state.key == key;
+        auto found = std::ranges::find_if(set_layout.uniform_sets, [&](const PipelineState::UniformDescriptorSet& candidate) {
+            return candidate.signature == signature;
         });
+        if (found != set_layout.uniform_sets.end())
+            return found->descriptor_set;
 
-        if (found == pipeline_cache_.end())
+        // 签名未见过：新分配一份并写入一次。已分配的 set 从不被重写，因为 in-flight
+        // 命令缓冲可能仍绑定着它。稳态下每个 set layout 有 N 份（N = 帧环长 = 交换链
+        // 图像数，每个 UBO 帧槽一个 buffer 句柄 = 一个签名），换交换链补齐环长后再多
+        // 出几份；rebuild_pipeline 换实现时也会多出。上限仅作兜底。
+        constexpr size_t max_uniform_sets_per_layout = 64;
+        if (set_layout.uniform_sets.size() >= max_uniform_sets_per_layout)
         {
-            pipeline_cache_.push_back(create_graphics_pipeline_unlocked(key));
-            found = std::prev(pipeline_cache_.end());
+            throw std::runtime_error("RasterizerPipeline uniform descriptor set signatures exceeded " +
+                                     std::to_string(max_uniform_sets_per_layout) + " for one set layout.");
         }
 
-        return {
-            .layout = found->layout,
-            .pipeline = found->pipeline,
-            .uses_bindless = found->uses_bindless,
-        };
+        PipelineState::UniformDescriptorSet allocated;
+        allocated.signature = signature;
+
+        VkDescriptorPoolSize pool_size {};
+        pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        pool_size.descriptorCount = static_cast<uint32_t>(signature.size());
+
+        VkDescriptorPoolCreateInfo pool_info {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.maxSets = 1;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = &pool_size;
+
+        VkResult pool_result = vkCreateDescriptorPool(device, &pool_info, nullptr, &allocated.pool);
+        if (pool_result != VK_SUCCESS)
+        {
+            throw std::runtime_error("vkCreateDescriptorPool failed for RasterizerPipeline uniform set. VkResult=" +
+                                     std::to_string(static_cast<int>(pool_result)));
+        }
+
+        try
+        {
+            VkDescriptorSetAllocateInfo alloc_info {};
+            alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            alloc_info.descriptorPool = allocated.pool;
+            alloc_info.descriptorSetCount = 1;
+            alloc_info.pSetLayouts = &set_layout.layout;
+
+            VkResult alloc_result = vkAllocateDescriptorSets(device, &alloc_info, &allocated.descriptor_set);
+            if (alloc_result != VK_SUCCESS)
+            {
+                throw std::runtime_error("vkAllocateDescriptorSets failed for RasterizerPipeline uniform set. VkResult=" +
+                                         std::to_string(static_cast<int>(alloc_result)));
+            }
+
+            std::vector<VkDescriptorBufferInfo> buffer_infos;
+            std::vector<VkWriteDescriptorSet> writes;
+            buffer_infos.reserve(signature.size());
+            writes.reserve(signature.size());
+            for (const PipelineState::UniformDescriptorSet::Signature& entry : signature)
+            {
+                buffer_infos.push_back(VkDescriptorBufferInfo {
+                    .buffer = entry.buffer,
+                    .offset = 0,
+                    .range = entry.range,
+                });
+            }
+            for (size_t i = 0; i < signature.size(); ++i)
+            {
+                VkWriteDescriptorSet write {};
+                write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                write.dstSet = allocated.descriptor_set;
+                write.dstBinding = signature[i].binding;
+                write.dstArrayElement = 0;
+                write.descriptorCount = 1;
+                write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                write.pBufferInfo = &buffer_infos[i];
+                writes.push_back(write);
+            }
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+            name_vulkan_object(device,
+                               VK_OBJECT_TYPE_DESCRIPTOR_SET,
+                               reinterpret_cast<uint64_t>(allocated.descriptor_set),
+                               debug_name + ".uniform_set" + std::to_string(set_layout.set));
+        }
+        catch (...)
+        {
+            vkDestroyDescriptorPool(device, allocated.pool, nullptr);
+            throw;
+        }
+
+        set_layout.uniform_sets.push_back(std::move(allocated));
+        return set_layout.uniform_sets.back().descriptor_set;
     }
 
     VulkanRasterizerPipeline::PreparedDraw VulkanRasterizerPipeline::prepare_draw(VkDevice device,
@@ -1131,27 +1211,14 @@ namespace Corona::Horizon
         if (found->descriptor_set_layouts.empty())
             return prepared;
 
-        // transient set 仅含 UBO（纹理已全走 bindless）。收集每个 UBO 的持久 buffer
-        // 句柄，交由 execution 侧用 vkCmdPushDescriptorSet 直接写入命令缓冲：
-        // 不再每 draw 创建/分配/销毁 descriptor pool。
-        uint32_t uniform_buffer_count = 0;
-        for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
+        // 非 bindless set 仅含 UBO（纹理已全走 bindless）。按 (binding, buffer, range)
+        // 签名取回持久 descriptor set：签名不变就是同一个句柄，execution 侧因而能像
+        // bindless set 0-2 那样只在首次 / layout 变更时 bind 一次。
+        const std::string debug_name = desc_.debug_name.empty() ? "horizon.rasterizer_pipeline" : desc_.debug_name;
+        std::vector<PipelineState::UniformDescriptorSet::Signature> signature;
+        for (PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
         {
-            for (const PipelineState::DescriptorBindingLayout& binding : set_layout.bindings)
-            {
-                if (binding.descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    ++uniform_buffer_count;
-            }
-        }
-
-        if (uniform_buffer_count == 0)
-            return prepared;
-
-        // descriptor_set_layouts 已按 set 升序、bindings 已按 binding 升序，
-        // 因此 push_uniform_buffers 天然按 (set, binding) 有序。
-        prepared.push_uniform_buffers.reserve(uniform_buffer_count);
-        for (const PipelineState::DescriptorSetLayout& set_layout : found->descriptor_set_layouts)
-        {
+            signature.clear();
             for (const PipelineState::DescriptorBindingLayout& binding_layout : set_layout.bindings)
             {
                 if (binding_layout.descriptor_type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
@@ -1168,14 +1235,21 @@ namespace Corona::Horizon
                 if (!buffer || buffer->buffer_handle == VK_NULL_HANDLE)
                     throw std::logic_error("RasterizerPipeline uniform buffer descriptor requires a valid HardwareBuffer.");
 
-                prepared.push_uniform_buffers.push_back({
-                    .set = binding_layout.set,
+                signature.push_back({
                     .binding = binding_layout.binding,
                     .buffer = buffer->buffer_handle,
                     .range = buffer->logical_size(),
                 });
                 // gpu_buffer 由 pipeline / draw 持有，无需延长 lifetime
             }
+
+            if (signature.empty())
+                continue;
+
+            prepared.uniform_sets.push_back({
+                .set = set_layout.set,
+                .descriptor_set = uniform_descriptor_set_unlocked(device, set_layout, signature, debug_name),
+            });
         }
 
         return prepared;
@@ -1209,23 +1283,10 @@ namespace Corona::Horizon
 
         if (is_uniform_buffer_member(bind_type))
         {
+            // 只写 CPU 影子并置脏。真正落到 GPU buffer 的时机是本帧构建批次时
+            // （build_draw_plan），那里才知道该写哪个帧槽。
             write_uniform_member(uniform_buffers_, set, binding, byte_offset, data, size);
-
-            // 原地 flush 到持久 GPU buffer（UBO 是批次公共数据，所有 draw 共享同一份，
-            // 批次内重复写入直接替换 byte，无需隔离）
-            auto it = std::ranges::find_if(uniform_buffers_, [&](const UniformBufferBindingData& u) {
-                return u.set == set && u.binding == binding;
-            });
-            if (it == uniform_buffers_.end() && uniform_buffers_.size() == 1)
-                it = uniform_buffers_.begin();
-            if (it != uniform_buffers_.end())
-            {
-                const size_t idx = static_cast<size_t>(std::distance(uniform_buffers_.begin(), it));
-                if (idx < ubo_buffers_.size() && ubo_buffers_[idx])
-                    ubo_buffers_[idx].write_bytes(
-                        std::span<const std::byte>(static_cast<const std::byte*>(data), size),
-                        byte_offset);
-            }
+            ubo_dirty_ = true;
             return;
         }
     }
@@ -1481,10 +1542,7 @@ namespace Corona::Horizon
 
         std::lock_guard lock(mutex_);
         draw.push_constant_data = push_constant_data_;
-        // UBO 是批次公共数据，所有 draw 共享同一持久 buffer（gpu_buffer 句柄浅拷贝）。
-        // 批次内写入直接原地替换 byte，无需隔离副本。
-        draw.uniform_buffers = uniform_buffers_;
-
+        // UBO 不再逐 draw 拷贝：它是批次公共数据，批次构建时统一取本帧槽的句柄。
         draws_.push_back(std::move(draw));
     }
 
@@ -1495,95 +1553,94 @@ namespace Corona::Horizon
         record({}, index_buffer, vertex_buffer, params);
     }
 
+    void VulkanRasterizerPipeline::record_indirect(RasterizerPipelineBase* pipeline,
+                                                   const HardwareBuffer& index_buffer,
+                                                   const HardwareBuffer& vertex_buffer,
+                                                   const HardwareBuffer& indirect_buffer,
+                                                   const DrawIndexedIndirectParams& params)
+    {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_indirect");
+
+        RecordedIndirectDraw draw;
+        draw.pipeline = pipeline;
+        draw.index_buffer = index_buffer;
+        draw.vertex_buffer = vertex_buffer;
+        draw.indirect_buffer = indirect_buffer;
+        draw.params = params;
+
+        std::lock_guard lock(mutex_);
+        draw.push_constant_data = push_constant_data_;
+        indirect_draws_.push_back(std::move(draw));
+    }
+
     void VulkanRasterizerPipeline::clear_records()
     {
         std::lock_guard lock(mutex_);
         draws_.clear();
+        indirect_draws_.clear();
     }
 
-    VulkanRasterizerPipeline::Snapshot VulkanRasterizerPipeline::snapshot() const
+    void VulkanRasterizerPipeline::sync_ubo_slot_unlocked() const
     {
-        std::lock_guard lock(mutex_);
-        return {
-            .desc = desc_,
-            .width = width_,
-            .height = height_,
-            .buffers = bound_buffers_,
-            .images = bound_images_,
-            .depth_target = depth_target_,
-            .draws = draws_,
-        };
-    }
+        if (uniform_buffers_.empty())
+            return;
 
-    CommandBatch VulkanRasterizerPipeline::command_batch() const
-    {
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
+        const uint32_t ring_size = std::max(1u, frame_ring_size());
+        const int64_t slot = static_cast<int64_t>(frame_ring_slot() % ring_size);
 
-        Snapshot state = snapshot();
-        CommandBatch batch;
+        if (ubo_rings_.size() != uniform_buffers_.size())
+            ubo_rings_.resize(uniform_buffers_.size());
 
-        std::vector<const BoundImage*> color_outputs;
-        for (const BoundImage& image : state.images)
+        // 槽没换且影子没脏 —— gpu_buffer 已经指向正确的 buffer，不用重写。
+        bool ring_ready = true;
+        for (size_t i = 0; i < uniform_buffers_.size(); ++i)
         {
-            if (!is_stage_output(image.bind_type) || !image.image)
+            if (uniform_buffers_[i].data.empty())
                 continue;
-            color_outputs.push_back(&image);
-        }
-        std::sort(color_outputs.begin(), color_outputs.end(),
-                  [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
-
-        const bool has_rendering_scope = !color_outputs.empty() && state.width != 0 && state.height != 0;
-        if (has_rendering_scope)
-        {
-            const bool has_depth = static_cast<bool>(state.depth_target);
-            RenderingDesc rendering_desc;
-            rendering_desc.color = image_ref(color_outputs[0]->image);
-            for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
-                rendering_desc.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
-            rendering_desc.depth = has_depth ? image_ref(state.depth_target) : ImageRef {};
-            rendering_desc.width = state.width;
-            rendering_desc.height = state.height;
-            rendering_desc.clear_color = state.desc.clear_color_target;
-            rendering_desc.clear_depth = has_depth && state.desc.clear_depth_target;
-            batch << begin_rendering(rendering_desc);
-        }
-
-        for (const RecordedDraw& draw : state.draws)
-        {
-            DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-            //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
-            draw_desc.pipeline = draw.pipeline;
-            auto pipelineDesc = desc();
-            if (auto object = pipelineDesc.pipelineObject; object)
+            if (ubo_rings_[i].size() < ring_size)
             {
-                draw_desc.vert_condition_info = object->vertex->getCurrentConditionInfo();
-                draw_desc.frag_condition_info = object->fragment->getCurrentConditionInfo();
+                ring_ready = false;
+                break;
             }
-            draw_desc.push_constant_data = draw.push_constant_data;
-            draw_desc.uniform_buffers = draw.uniform_buffers;
+        }
+        if (ring_ready && !ubo_dirty_ && slot == ubo_slot_)
+            return;
 
-            batch << draw_indexed(buffer_ref(draw.index_buffer),
-                                  buffer_ref(draw.vertex_buffer),
-                                  std::move(draw_desc));
+        for (size_t i = 0; i < uniform_buffers_.size(); ++i)
+        {
+            UniformBufferBindingData& ubo = uniform_buffers_[i];
+            if (ubo.data.empty())
+                continue;
+
+            std::vector<HardwareBuffer>& ring = ubo_rings_[i];
+            // 环只增不减：交换链重建后 N 变大时补齐，已有的 buffer 可能仍被在飞的
+            // 命令缓冲引用，不能重建。
+            while (ring.size() < ring_size)
+                ring.push_back(HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(ubo.data),
+                    1, BufferUsageFlags::Uniform, "RasterizerPipeline.ubo_persistent"));
+
+            HardwareBuffer& target = ring[static_cast<size_t>(slot)];
+            // 换槽时必须整份写：该槽上一次被写的是第 i-N 帧的数据。
+            (void)target.write_bytes(std::span<const std::byte>(ubo.data), 0);
+            ubo.gpu_buffer = target;
         }
 
-        if (has_rendering_scope)
-            batch << end_rendering();
-
-        return batch;
+        ubo_slot_ = slot;
+        ubo_dirty_ = false;
     }
 
-    void VulkanRasterizerPipeline::record_consuming(CommandRecorder& recorder)
+    VulkanRasterizerPipeline::DrawPlan VulkanRasterizerPipeline::build_draw_plan() const
     {
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_consuming");
-
+        // 只在锁内取真正需要的状态。原先走 snapshot()，它会把 draws_ 整份深拷贝
+        // 一遍（每 draw 两个 vector），压测下是纯浪费；这里直接在锁内构建批次。
         uint32_t width = 0;
         uint32_t height = 0;
         bool clear_color_target = true;
         bool clear_depth_target = true;
         std::vector<BoundImage> images;
         HardwareImage depth_target;
-        std::vector<RecordedDraw> draws;
+        DrawPlan plan;
         {
             std::lock_guard lock(mutex_);
             width = width_;
@@ -1592,8 +1649,68 @@ namespace Corona::Horizon
             clear_depth_target = desc_.clear_depth_target;
             images = bound_images_;
             depth_target = depth_target_;
-            draws = std::move(draws_);
-            draws_.clear();
+
+            // 本帧槽的 UBO 落盘一次，之后所有 draw 共享同一批句柄。
+            sync_ubo_slot_unlocked();
+            // 只带 execution 需要的 (set, binding, gpu_buffer)，不拷 CPU 影子数据。
+            std::vector<UniformBufferBindingData> frame_uniforms;
+            frame_uniforms.reserve(uniform_buffers_.size());
+            for (const UniformBufferBindingData& ubo : uniform_buffers_)
+            {
+                if (ubo.data.empty())
+                    continue;
+                frame_uniforms.push_back({ .set = ubo.set, .binding = ubo.binding, .data = {}, .gpu_buffer = ubo.gpu_buffer });
+            }
+
+            // 条件信息在一个批次内对所有 draw 相同（getCurrentConditionInfo 返回
+            // vector<bool>，原先每 draw 调两次 = 每 draw 两次堆分配），提到循环外。
+            EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+            EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+            if (const auto& object = desc_.pipelineObject; object)
+            {
+                vert_condition_info = object->vertex->getCurrentConditionInfo();
+                frag_condition_info = object->fragment->getCurrentConditionInfo();
+            }
+
+            plan.batch.draws.reserve(draws_.size());
+            for (const RecordedDraw& draw : draws_)
+            {
+                DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
+                draw_desc.pipeline = draw.pipeline;
+                draw_desc.vert_condition_info = vert_condition_info;
+                draw_desc.frag_condition_info = frag_condition_info;
+                draw_desc.push_constant_data = draw.push_constant_data;
+                draw_desc.uniform_buffers = frame_uniforms;
+
+                plan.batch.draws.push_back({
+                    .index = buffer_ref(draw.index_buffer),
+                    .vertex = buffer_ref(draw.vertex_buffer),
+                    .draw = std::move(draw_desc),
+                });
+            }
+
+            plan.indirect_draws.reserve(indirect_draws_.size());
+            for (const RecordedIndirectDraw& draw : indirect_draws_)
+            {
+                DrawIndexedIndirectDesc indirect_desc;
+                indirect_desc.pipeline = draw.pipeline;
+                indirect_desc.vert_condition_info = vert_condition_info;
+                indirect_desc.frag_condition_info = frag_condition_info;
+                indirect_desc.indirect_offset = draw.params.indirect_offset;
+                indirect_desc.draw_count = draw.params.draw_count;
+                indirect_desc.stride = draw.params.stride;
+                indirect_desc.index_type = draw.params.index_type;
+                indirect_desc.enable_scissor = draw.params.enable_scissor;
+                indirect_desc.scissor = draw.params.scissor;
+                indirect_desc.push_constant_data = draw.push_constant_data;
+                indirect_desc.uniform_buffers = frame_uniforms;
+                indirect_desc.debug_label = draw.params.debug_label;
+
+                plan.indirect_draws.emplace_back(buffer_ref(draw.index_buffer),
+                                                 buffer_ref(draw.vertex_buffer),
+                                                 buffer_ref(draw.indirect_buffer),
+                                                 std::move(indirect_desc));
+            }
         }
 
         std::vector<const BoundImage*> color_outputs;
@@ -1606,41 +1723,63 @@ namespace Corona::Horizon
         std::sort(color_outputs.begin(), color_outputs.end(),
                   [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
 
-        const bool has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
-        if (has_rendering_scope)
+        plan.has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
+        if (plan.has_rendering_scope)
         {
             const bool has_depth = static_cast<bool>(depth_target);
-            RenderingDesc rendering_desc;
-            rendering_desc.color = image_ref(color_outputs[0]->image);
+            plan.rendering.color = image_ref(color_outputs[0]->image);
             for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
-                rendering_desc.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
-            rendering_desc.depth = has_depth ? image_ref(depth_target) : ImageRef {};
-            rendering_desc.width = width;
-            rendering_desc.height = height;
-            rendering_desc.clear_color = clear_color_target;
-            rendering_desc.clear_depth = has_depth && clear_depth_target;
-            recorder.begin_rendering(rendering_desc);
+                plan.rendering.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
+            plan.rendering.depth = has_depth ? image_ref(depth_target) : ImageRef {};
+            plan.rendering.width = width;
+            plan.rendering.height = height;
+            plan.rendering.clear_color = clear_color_target;
+            plan.rendering.clear_depth = has_depth && clear_depth_target;
         }
 
-        DrawIndexedBatchDesc batch;
-        batch.draws.reserve(draws.size());
-        for (RecordedDraw& draw : draws)
-        {
-            DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-            draw_desc.debug_label = std::move(draw.params.debug_label);
-            //ResourceBridge::set(draw_desc.pipeline, draw.pipeline.lock());
-            draw_desc.pipeline = draw.pipeline;
-            draw_desc.push_constant_data = std::move(draw.push_constant_data);
-            draw_desc.uniform_buffers = std::move(draw.uniform_buffers);
-            batch.draws.push_back({
-                .index = buffer_ref(draw.index_buffer),
-                .vertex = buffer_ref(draw.vertex_buffer),
-                .draw = std::move(draw_desc),
-            });
-        }
-        recorder.draw_indexed_batch(std::move(batch));
+        return plan;
+    }
 
-        if (has_rendering_scope)
+    CommandBatch VulkanRasterizerPipeline::command_batch() const
+    {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
+
+        DrawPlan plan = build_draw_plan();
+        CommandBatch batch;
+
+        if (plan.has_rendering_scope)
+            batch << begin_rendering(plan.rendering);
+
+        // 一条 DrawIndexedBatch 而不是每 draw 一条 DrawIndexed：编译期的资源去重
+        // 让 64k draws 只产生 2 个唯一 resource use，而不是 128k 个，同时省掉
+        // 每 draw 一个 StreamCommand(std::function) + 一个 CommandIR。
+        if (!plan.batch.draws.empty())
+            batch << draw_indexed_batch(std::move(plan.batch));
+        for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
+            batch << draw_indexed_indirect(index, vertex, indirect, std::move(draw));
+
+        if (plan.has_rendering_scope)
+            batch << end_rendering();
+
+        return batch;
+    }
+
+    void VulkanRasterizerPipeline::record_into(CommandRecorder& recorder) const
+    {
+        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_into");
+
+        DrawPlan plan = build_draw_plan();
+
+        if (plan.has_rendering_scope)
+            recorder.begin_rendering(plan.rendering);
+
+        if (!plan.batch.draws.empty())
+            recorder.draw_indexed_batch(std::move(plan.batch));
+        for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
+            recorder.draw_indexed_indirect(index, vertex, indirect, std::move(draw));
+
+        if (plan.has_rendering_scope)
             recorder.end_rendering();
     }
+
 }

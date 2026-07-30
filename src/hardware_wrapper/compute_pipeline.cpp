@@ -12,9 +12,10 @@ namespace Corona::Horizon
     {
         using ComputePipelineStore = ResourceStore<ComputePipelineWrap, NoopReleaser>;
 
+        // 同光栅侧：只读槽位里的 impl 指针，共享锁足够，不必独占。
         [[nodiscard]] std::shared_ptr<VulkanComputePipeline> pipeline_impl(const std::shared_ptr<IResourceRef>& token)
         {
-            auto pipeline = write<ComputePipelineStore>(token);
+            auto pipeline = read<ComputePipelineStore>(token);
             if (!pipeline || !pipeline->impl)
                 throw std::logic_error("ComputePipeline does not reference a valid implementation.");
 

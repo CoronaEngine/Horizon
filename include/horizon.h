@@ -245,6 +245,14 @@ namespace Corona::Horizon
         {
             return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name));
         }
+
+        [[nodiscard]] static HardwareBufferDesc indirect(uint64_t command_count, std::string name = {})
+        {
+            return typed<DrawIndexedIndirectCommand>(
+                command_count,
+                BufferUsageFlags::TransferDst | BufferUsageFlags::Indirect | BufferUsageFlags::Storage,
+                std::move(name));
+        }
     };
 
     class HardwareBuffer : public ResourceHandle
@@ -320,6 +328,21 @@ namespace Corona::Horizon
         {
             return index<std::ranges::range_value_t<Range>>(
                 std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
+                std::move(name));
+        }
+
+        [[nodiscard]] static HardwareBuffer indirect(std::span<const DrawIndexedIndirectCommand> commands, std::string name = {})
+        {
+            return HardwareBuffer(HardwareBufferDesc::indirect(commands.size(), std::move(name)), std::as_bytes(commands));
+        }
+
+        template <std::ranges::contiguous_range Range>
+            requires std::ranges::sized_range<Range> &&
+                     std::same_as<std::remove_cvref_t<std::ranges::range_value_t<Range>>, DrawIndexedIndirectCommand>
+        [[nodiscard]] static HardwareBuffer indirect(const Range& commands, std::string name = {})
+        {
+            return indirect(
+                std::span<const DrawIndexedIndirectCommand>(std::ranges::data(commands), std::ranges::size(commands)),
                 std::move(name));
         }
 
@@ -759,6 +782,11 @@ namespace Corona::Horizon
             if constexpr (requires { key.binding; })
             {
                 slot.binding = key.binding;
+                // Legacy codegen packed descriptor binding into `location` and left
+                // `set`/`binding` unset (0). Prefer that encoding only when the
+                // explicit set/binding metadata was never populated.
+                if (slot.set == 0 && slot.binding == 0)
+                    slot.binding = slot.location;
             }
             else
             {
@@ -907,11 +935,17 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
         RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
         RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
+                                                const HardwareBuffer& vertex_buffer,
+                                                const HardwareBuffer& indirect_buffer,
+                                                const DrawIndexedIndirectParams& params);
         RasterizerPipelineBase& clear_records();
         RasterizerPipelineBase& bind_render_target(uint32_t location, HardwareImage& image);
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
+        // 与 command_batch() 等价，但直接录进 recorder，省掉中间容器与一次批次拷贝。
+        void record_into(CommandRecorder& recorder) const;
         [[nodiscard]] explicit operator bool() const noexcept;
 
         template <typename TargetProxy>
@@ -1401,6 +1435,55 @@ namespace Corona::Horizon
         }
     };
 
+    // 批量 indexed draw。payload 由 shared_ptr 持有：make_stream_command 会按值
+    // 拷贝命令对象，而一个批次可能有数万条 draw，直接内嵌 vector 会让每次
+    // StreamCommand 拷贝都变成一次深拷贝。
+    struct DrawIndexedBatchCommand
+    {
+        std::shared_ptr<DrawIndexedBatchDesc> batch {};
+        DeviceMask devices {};
+
+        void record(CommandRecorder& recorder) const
+        {
+            if (batch)
+                recorder.draw_indexed_batch(*batch, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
+    struct DrawIndexedIndirectStreamCommand
+    {
+        BufferRef index {};
+        BufferRef vertex {};
+        BufferRef indirect {};
+        DrawIndexedIndirectDesc draw {};
+        DeviceMask devices {};
+
+        void record(CommandRecorder& recorder) const
+        {
+            recorder.draw_indexed_indirect(index, vertex, indirect, draw, devices);
+        }
+
+        [[nodiscard]] StreamCommand stream_command() const
+        {
+            return CommandDetail::make_stream_command(*this);
+        }
+
+        [[nodiscard]] operator StreamCommand() const
+        {
+            return stream_command();
+        }
+    };
+
     struct PresentCommand
     {
         DisplayerRef displayer {};
@@ -1478,6 +1561,20 @@ namespace Corona::Horizon
         return { index, vertex, std::move(desc), devices };
     }
 
+    [[nodiscard]] inline DrawIndexedBatchCommand draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {})
+    {
+        return { std::make_shared<DrawIndexedBatchDesc>(std::move(batch)), devices };
+    }
+
+    [[nodiscard]] inline DrawIndexedIndirectStreamCommand draw_indexed_indirect(BufferRef index,
+                                                                               BufferRef vertex,
+                                                                               BufferRef indirect,
+                                                                               DrawIndexedIndirectDesc desc,
+                                                                               DeviceMask devices = {})
+    {
+        return { index, vertex, indirect, std::move(desc), devices };
+    }
+
     [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
     {
         return { displayer, image, present_device, allow_cpu_bridge_fallback };
@@ -1519,14 +1616,7 @@ template <typename PipelineType>
 template <typename T>
 EmbeddedShader::BoundField<PipelineType>& EmbeddedShader::BoundField<PipelineType>::operator=(const T& value)
 {
-    Corona::Horizon::BindingSlot slot;
-    slot.byte_offset = byteOffset;
-    slot.type_size = typeSize;
-    slot.bind_type = bindType;
-    slot.location = location;
-    slot.binding = location;
-
-    Corona::Horizon::ResourceProxy proxy(*pipeline_, slot);
+    Corona::Horizon::ResourceProxy proxy(*pipeline_, Corona::Horizon::BindingSlot::from(*this));
     proxy = value;
     return *this;
 }

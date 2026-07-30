@@ -11,6 +11,8 @@
 #include <memory>
 #include <mutex>
 #include <source_location>
+#include <string>
+#include <tuple>
 #include <vector>
 
 namespace Corona::Horizon
@@ -46,18 +48,16 @@ namespace Corona::Horizon
             HardwareBuffer vertex_buffer {};
             DrawIndexedParams params {};
             std::vector<std::byte> push_constant_data;
-            std::vector<UniformBufferBindingData> uniform_buffers;
         };
 
-        struct Snapshot
+        struct RecordedIndirectDraw
         {
-            RasterizerPipelineDesc desc;
-            uint32_t width { 0 };
-            uint32_t height { 0 };
-            std::vector<BoundBuffer> buffers;
-            std::vector<BoundImage> images;
-            HardwareImage depth_target {};
-            std::vector<RecordedDraw> draws;
+            RasterizerPipelineBase* pipeline;
+            HardwareBuffer index_buffer {};
+            HardwareBuffer vertex_buffer {};
+            HardwareBuffer indirect_buffer {};
+            DrawIndexedIndirectParams params {};
+            std::vector<std::byte> push_constant_data;
         };
 
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
@@ -77,47 +77,40 @@ namespace Corona::Horizon
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
         void record(RasterizerPipelineBase* pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        void record_indirect(RasterizerPipelineBase* pipeline,
+                             const HardwareBuffer& index_buffer,
+                             const HardwareBuffer& vertex_buffer,
+                             const HardwareBuffer& indirect_buffer,
+                             const DrawIndexedIndirectParams& params);
         void clear_records();
-
-        struct GraphicsPipeline
-        {
-            VkPipelineLayout layout { VK_NULL_HANDLE };
-            VkPipeline pipeline { VK_NULL_HANDLE };
-            bool uses_bindless { false };
-        };
 
         struct PreparedDraw
         {
-            // 每 draw 的非 bindless UBO 通过 push descriptor 直接写入命令缓冲，
-            // 不再分配 transient descriptor pool / set。writes 已按 set 升序、
-            // 同 set 内按 binding 升序排列，execution 侧可按 set 分组推送。
-            struct PushUniformBuffer
+            // UBO 与 bindless set 0-2 同形：管线侧按 (binding, buffer, range) 签名
+            // 分配并写入一次持久 descriptor set，execution 侧只 bind，不再每 draw
+            // push descriptor。按 set 升序排列。
+            struct UniformSet
             {
                 uint32_t set { 0 };
-                uint32_t binding { 0 };
-                VkBuffer buffer { VK_NULL_HANDLE };
-                VkDeviceSize range { 0 };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
             };
 
             VkPipelineLayout layout { VK_NULL_HANDLE };
             VkPipeline pipeline { VK_NULL_HANDLE };
             bool uses_bindless { false };
-            std::vector<PushUniformBuffer> push_uniform_buffers;
+            std::vector<UniformSet> uniform_sets;
         };
 
-        [[nodiscard]] GraphicsPipeline graphics_pipeline(VkDevice device,
-                                                         const std::array<VkFormat, 4>& color_formats,
-                                                         VkFormat depth_format,
-                                                         uint32_t vertex_stride);
         [[nodiscard]] PreparedDraw prepare_draw(VkDevice device,
                                                 const std::array<VkFormat, 4>& color_formats,
                                                 VkFormat depth_format,
                                                 uint32_t vertex_stride,
                                                 const DrawIndexedDesc& draw);
 
-        [[nodiscard]] Snapshot snapshot() const;
         [[nodiscard]] CommandBatch command_batch() const;
-        void record_consuming(CommandRecorder& recorder);
+        // 直接录进 recorder：与 command_batch() 等价，但省掉中间的 CommandBatch /
+        // StreamCommand(std::function) 以及批次 payload 的一次拷贝。
+        void record_into(CommandRecorder& recorder) const;
 
     private:
         struct PipelineKey
@@ -139,11 +132,30 @@ namespace Corona::Horizon
                 VkDescriptorType descriptor_type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
             };
 
+            // 一组已写入的 UBO descriptor：签名相同即可复用，签名不同另分配一份。
+            // 已分配的 set 从不重写——in-flight 命令缓冲可能仍在引用它。
+            struct UniformDescriptorSet
+            {
+                struct Signature
+                {
+                    uint32_t binding { 0 };
+                    VkBuffer buffer { VK_NULL_HANDLE };
+                    VkDeviceSize range { 0 };
+
+                    [[nodiscard]] friend bool operator==(const Signature&, const Signature&) noexcept = default;
+                };
+
+                std::vector<Signature> signature;
+                VkDescriptorPool pool { VK_NULL_HANDLE };
+                VkDescriptorSet descriptor_set { VK_NULL_HANDLE };
+            };
+
             struct DescriptorSetLayout
             {
                 uint32_t set { 0 };
                 std::vector<DescriptorBindingLayout> bindings;
                 VkDescriptorSetLayout layout { VK_NULL_HANDLE };
+                std::vector<UniformDescriptorSet> uniform_sets;
             };
 
             PipelineKey key {};
@@ -154,9 +166,29 @@ namespace Corona::Horizon
             VkPipeline pipeline { VK_NULL_HANDLE };
         };
 
+        // 一帧提交所需的全部内容，在一次加锁内取齐。
+        struct DrawPlan
+        {
+            bool has_rendering_scope { false };
+            RenderingDesc rendering {};
+            DrawIndexedBatchDesc batch {};
+            std::vector<std::tuple<BufferRef, BufferRef, BufferRef, DrawIndexedIndirectDesc>> indirect_draws;
+        };
+
+        [[nodiscard]] DrawPlan build_draw_plan() const;
+
         [[nodiscard]] uint32_t push_constant_size() const noexcept;
+        // 按签名取回（必要时分配并写入）该 set 的持久 UBO descriptor set。
+        [[nodiscard]] static VkDescriptorSet uniform_descriptor_set_unlocked(
+            VkDevice device,
+            PipelineState::DescriptorSetLayout& set_layout,
+            const std::vector<PipelineState::UniformDescriptorSet::Signature>& signature,
+            const std::string& debug_name);
         [[nodiscard]] PipelineState create_graphics_pipeline_unlocked(const PipelineKey& key) const;
         void destroy_pipeline_cache_unlocked() noexcept;
+        // 把 uniform_buffers_ 的 CPU 影子数据落到本帧槽的持久 buffer，并让
+        // gpu_buffer 指向该槽。槽未变且影子未脏时是空操作。
+        void sync_ubo_slot_unlocked() const;
 
         RasterizerPipelineDesc desc_;
         std::source_location source_location_;
@@ -165,13 +197,21 @@ namespace Corona::Horizon
         uint32_t width_ { 0 };
         uint32_t height_ { 0 };
         std::vector<std::byte> push_constant_data_;
-        std::vector<UniformBufferBindingData> uniform_buffers_;
-        // 与 uniform_buffers_ 同序的持久 GPU buffer，初始化时创建，批次内写入原地替换
-        std::vector<HardwareBuffer> ubo_buffers_;
+        // CPU 影子数据 + 本帧槽的 gpu_buffer 句柄。setter 只写影子并置脏，
+        // 真正的 flush 推迟到 build_draw_plan()（const，故 mutable）。
+        mutable std::vector<UniformBufferBindingData> uniform_buffers_;
+        // 与 uniform_buffers_ 同序的持久 GPU buffer 环，每条 binding 一环、
+        // 环长 = frame_ring_size()。K 帧在飞时第 i 帧写槽 i%N，不会覆写仍在飞的
+        // 第 i-1..i-N+1 帧读的槽。首次 sync 时按当时的环长惰性建好。
+        mutable std::vector<std::vector<HardwareBuffer>> ubo_rings_;
+        // 上次 sync 使用的槽；-1 表示还没 sync 过。
+        mutable int64_t ubo_slot_ { -1 };
+        mutable bool ubo_dirty_ { true };
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;
         std::vector<RecordedDraw> draws_;
+        std::vector<RecordedIndirectDraw> indirect_draws_;
         mutable std::vector<PipelineState> pipeline_cache_;
     };
 }
