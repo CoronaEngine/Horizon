@@ -70,16 +70,17 @@ constexpr uint32_t spz_shadow_map_size = 2048;
 struct Tuning
 {
     // --- sun(白天,斜射平行光)---
-    float sun_elevation_deg = 64.0f; // 仰角
-    float sun_azimuth_deg = -75.0f;  // 方位角(默认机位下阳光斜照进中殿)
-    float sun_intensity = 4.0f;
-    glm::vec3 sun_color { 1.0f, 0.90f, 0.78f };
+    // Beauty preset captured from the live ImGui session.
+    float sun_elevation_deg = 79.044f;
+    float sun_azimuth_deg = -0.333f;
+    float sun_intensity = 7.83f;
+    glm::vec3 sun_color { 0.85784316f, 0.724044f, 0.5634852f };
     bool sun_shadow = true;
-    float shadow_bias = 0.0015f;
+    float shadow_bias = 0.0027f;
 
     // --- RSM 单次弹射间接光 ---
     bool rsm_enable = true;
-    float rsm_intensity = 80.0f;
+    float rsm_intensity = 160.0f;
     float rsm_radius = 0.085f; // 采样半径(RSM uv 空间)
 
     // --- Disney BRDF 全局参数(baseColor/metallic/roughness 来自 G-buffer)---
@@ -96,20 +97,20 @@ struct Tuning
 
     // --- point lights(白天默认关,夜景可开)---
     int point_light_count = 0;
-    float point_intensity = 0.26f;
-    float point_radius = 420.0f;
-    float point_inner = 0.0f;
+    float point_intensity = 0.876f;
+    float point_radius = 7.357f;
+    float point_inner = 0.311f;
     float light_speed = 0.25f;
     bool animate_lights = true;
 
     // --- SSR ---
     bool mirror_enable = true;      // 演示镜:中殿反射池
-    float mirror_roughness = 0.02f;
+    float mirror_roughness = 0.065f;
     bool ssr_enable = true;
-    float ssr_intensity = 1.0f;
-    float ssr_max_distance = 2600.0f; // view 空间步进总长(场景 ~3700 单位跨度)
+    float ssr_intensity = 0.982f;
+    float ssr_max_distance = 26.228758f;
     int ssr_steps = 80;
-    float ssr_thickness = 40.0f;
+    float ssr_thickness = 0.16691028f;
     int ssr_refine_steps = 6;
     bool ssr_jitter = false;
     float ssr_fresnel_power = 5.0f;
@@ -117,22 +118,22 @@ struct Tuning
 
     // --- indirect light(IBL probe)---
     // 白天氛围:室外 probe 拉高一点,环境地板给一点天蓝。
-    float irradiance_scale = 0.09f;
-    float radiance_scale = 0.14f;
-    float env_rotation_deg = 49.0f; // 对齐 HDR 太阳与解析太阳
+    float irradiance_scale = 0.142f;
+    float radiance_scale = 0.573f;
+    float env_rotation_deg = 89.825f;
     glm::vec3 ambient_floor { 0.010f, 0.014f, 0.022f };
 
-    float ssao_radius = 55.0f;
-    float ssao_bias = 1.5f;
-    float ssao_intensity = 1.8f;
-    float ssao_blur_depth_sigma = 20.0f;
+    float ssao_radius = 0.875f;
+    float ssao_bias = 0.025f;
+    float ssao_intensity = 2.0f;
+    float ssao_blur_depth_sigma = 0.2861319f;
 
     // --- output ---
-    float exposure = 1.0f;
+    float exposure = 0.568f;
     float bloom_threshold = 0.85f;
-    float bloom_intensity = 0.08f;
+    float bloom_intensity = 0.108f;
     float bloom_radius = 3.0f;
-    float output_contrast = 1.05f;
+    float output_contrast = 1.023f;
     float output_saturation = 1.08f;
     float output_temperature = 0.02f;
     float vignette = 0.10f;
@@ -928,17 +929,20 @@ void run_example_sponza()
         asset.version == hzms_version_pbr ? 0.0f : camera.position.z;
     if (asset.version == hzms_version_pbr)
     {
-        camera.position = glm::vec3(scene_min.x + scene_extent.x * 0.15f,
-                                    main_floor_y + 1.72f, hall_center_z);
-        camera_target = glm::vec3(scene_min.x + scene_extent.x * 0.73f,
-                                  main_floor_y + 2.55f, hall_center_z);
+        // Beauty camera captured from the live session. Keep yaw unwrapped so
+        // this is the exact runtime state the artist approved.
+        camera.position = glm::vec3(13.3404408f, 1.889889f, -0.84720045f);
+        camera.yaw = 10.9808016f;
+        camera.pitch = 0.07695994f;
     }
+    else
     {
         const glm::vec3 dir = glm::normalize(camera_target - camera.position);
         camera.pitch = std::asin(std::clamp(dir.y, -1.0f, 1.0f));
         camera.yaw = std::atan2(dir.x, dir.z);
     }
     camera.speed = glm::length(scene_extent) * 0.12f;
+    const FlyCamera default_camera = camera;
 
     // ---- SSR 演示镜:中殿反射池 ----
     // 水平镜面能稳定反射当前屏幕里的拱廊、二层和天空。旧版额外放置的
@@ -1067,12 +1071,17 @@ void run_example_sponza()
     const float scene_diag = glm::length(scene_extent);
     const auto make_default_tuning = [&] {
         Tuning defaults;
-        defaults.ssr_max_distance = scene_diag * 0.55f;
-        defaults.ssr_thickness = scene_diag * 0.0035f;
-        defaults.point_radius = scene_diag * 0.10f;
-        defaults.ssao_radius = scene_diag * 0.015f;
-        defaults.ssao_bias = scene_diag * 0.00025f;
-        defaults.ssao_blur_depth_sigma = scene_diag * 0.006f;
+        // The Intel PBR scene uses the exact live beauty preset above. Legacy
+        // centimeter-scale assets still need world-space controls rescaled.
+        if (asset.version != hzms_version_pbr)
+        {
+            defaults.ssr_max_distance = scene_diag * 0.55f;
+            defaults.ssr_thickness = scene_diag * 0.0035f;
+            defaults.point_radius = scene_diag * 0.10f;
+            defaults.ssao_radius = scene_diag * 0.015f;
+            defaults.ssao_bias = scene_diag * 0.00025f;
+            defaults.ssao_blur_depth_sigma = scene_diag * 0.006f;
+        }
         return defaults;
     };
     Tuning tuning = make_default_tuning();
@@ -1186,7 +1195,10 @@ void run_example_sponza()
         }
 
         if (ImGui::Button("Reset to defaults"))
+        {
             tuning = make_default_tuning();
+            camera = default_camera;
+        }
         ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
