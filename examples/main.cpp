@@ -7,11 +7,13 @@
 #include "example_raymarch/example_raymarch.h"
 #include "example_bump/example_bump.h"
 #include "example_deferred/example_deferred.h"
+#include "example_sponza/example_sponza.h"
 #include "example_shadowmaps/example_shadowmaps.h"
 #include "example_edsl_shadowmaps/example_edsl_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_assao/example_assao.h"
 #include "example_sky/example_sky.h"
+#include "example_ssr/example_ssr.h"
 #include "example_edsl_sky/example_edsl_sky.h"
 #include "example_gpudrivenrendering/example_gpudrivenrendering.h"
 
@@ -20,7 +22,7 @@
 
 int main(int argc, char **argv)
 {
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("assao");
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("sponza");
 
     if (mode == "baseline")
     {
@@ -71,6 +73,11 @@ int main(int argc, char **argv)
         run_example_deferred();
         return 0;
     }
+    if (mode == "sponza")
+    {
+        run_example_sponza();
+        return 0;
+    }
     if (mode == "shadowmaps")
     {
         run_example_shadowmaps();
@@ -98,6 +105,11 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    if (mode == "ssr")
+    {
+        run_example_ssr();
+        return 0;
+    }
     if (mode == "edsl_sky")
     {
         run_example_edsl_sky();
@@ -109,6 +121,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|shadowmaps|edsl_shadowmaps|shadowvolumes|assao|sky|edsl_sky|gpudrivenrendering]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|assao|sky|ssr|edsl_sky|gpudrivenrendering]\n";
     return 0;
 }
