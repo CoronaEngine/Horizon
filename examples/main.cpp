@@ -12,6 +12,7 @@
 #include "example_edsl_shadowmaps/example_edsl_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_assao/example_assao.h"
+#include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
 #include "example_sky/example_sky.h"
 #include "example_ssr/example_ssr.h"
 #include "example_edsl_sky/example_edsl_sky.h"
@@ -93,6 +94,11 @@ int main(int argc, char **argv)
         run_example_shadowvolumes();
         return 0;
     }
+    if (mode == "edsl_shadowvolumes")
+    {
+        run_example_edsl_shadowvolumes();
+        return 0;
+    }
     if (mode == "assao")
     {
         run_example_assao();
@@ -121,6 +127,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|assao|sky|ssr|edsl_sky|gpudrivenrendering]\n";
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|edsl_shadowvolumes|assao|sky|ssr|edsl_sky|gpudrivenrendering]\n";
     return 0;
 }

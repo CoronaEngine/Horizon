@@ -7,8 +7,13 @@
 
 #include <set>
 
+namespace EmbeddedShader::Generator
+{
+    class SlangGenerator;
+}
 namespace EmbeddedShader::Ast
-{struct DefineLocalVariate;
+{
+    struct DefineLocalVariate;
 	struct Variate;
 	struct Statement;
 
@@ -30,6 +35,7 @@ namespace EmbeddedShader::Ast
 	class Parser
 	{
 		friend class AST;
+		friend class Generator::SlangGenerator;
 	public:
 		static void beginShaderParse(ShaderStage stage);
 		static std::vector<ParseOutput> endPipelineParse();
@@ -54,7 +60,9 @@ namespace EmbeddedShader::Ast
 
 	    bool bInputPush = true;
 
-		std::shared_ptr<Variate> positionOutput;
+		std::shared_ptr<Variate> vsPositionOutput;
+	    std::shared_ptr<Variate> fsPositionOutput;
+		std::shared_ptr<Variate> isFrontFaceOutput;
 		std::shared_ptr<Variate> dispatchThreadIDInput;
 
 		std::shared_ptr<Variate> globalUBO;

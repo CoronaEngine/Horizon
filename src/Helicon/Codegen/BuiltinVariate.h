@@ -9,6 +9,11 @@ namespace EmbeddedShader::BuiltinVariate
         return VariateProxy<ktm::fvec4>{Ast::AST::getPositionOutput()};
     }
 
+    inline VariateProxy<bool> isFrontFace()
+    {
+        return VariateProxy<bool>{Ast::AST::getIsFrontFaceOutput()};
+    }
+
     inline VariateProxy<ktm::uvec3> dispatchThreadID()
     {
         return VariateProxy<ktm::uvec3>{Ast::AST::getDispatchThreadIDInput()};

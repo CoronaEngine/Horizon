@@ -2,6 +2,29 @@
 #include <Codegen/AST/AST.hpp>
 #include <Codegen/AST/Parser.hpp>
 #include <Codegen/Generator/SlangGenerator.hpp>
+
+namespace
+{
+    using namespace EmbeddedShader;
+    std::string to_string(Ast::ShaderStage stage)
+    {
+        std::string stageType = "unknown";
+        switch (stage)
+        {
+        case Ast::ShaderStage::Vertex:
+            stageType = "vertex";
+            break;
+        case Ast::ShaderStage::Fragment:
+            stageType = "fragment";
+            break;
+        case Ast::ShaderStage::Compute:
+            stageType = "compute";
+            break;
+        }
+        return stageType;
+    }
+}  // namespace
+
 std::string EmbeddedShader::Generator::SlangGenerator::getShaderOutput(const Ast::EmbeddedShaderStructure& structure)
 {
 	currentStage = structure.stage;
@@ -57,19 +80,7 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 		output += statement->generate() + '\n';
 	}
 
-	std::string stageType = "unknown";
-	switch (structure.stage)
-	{
-		case Ast::ShaderStage::Vertex:
-			stageType = "vertex";
-			break;
-		case Ast::ShaderStage::Fragment:
-			stageType = "fragment";
-			break;
-		case Ast::ShaderStage::Compute:
-			stageType = "compute";
-			break;
-	}
+	std::string stageType = to_string(structure.stage);
 
 	std::string outputStructName = "void";
 	std::string inputStructName;
@@ -527,20 +538,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::StageType* node)
 {
     auto structure = Ast::AST::getEmbeddedShaderStructure();
-    std::string stageKind = "unknown";
-    switch (structure.stage)
-    {
-    case Ast::ShaderStage::Vertex:
-        stageKind = "vertex";
-        break;
-    case Ast::ShaderStage::Fragment:
-        stageKind = "fragment";
-        break;
-    case Ast::ShaderStage::Compute:
-        stageKind = "compute";
-        break;
-    }
-    return node->prefix + stageKind + node->suffix;
+    return node->prefix + to_string(structure.stage) + node->suffix;
 }
 
 EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBranchInfo(const std::vector<std::shared_ptr<Ast::Statement>>&body)
@@ -582,15 +580,47 @@ std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getPositionOutput()
 {
-	auto positionOutput = std::make_shared<Ast::OutputVariate>();
-	positionOutput->type = Ast::AST::createVecType<ktm::fvec4>();
-	positionOutput->name = "position_output";
-	positionOutput->location = 0;
+    std::shared_ptr<Ast::Variate> result;
 	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
-	defineNode->variate = positionOutput;
+
+    auto stage = Ast::AST::getEmbeddedShaderStructure().stage;
+    if (stage == Ast::ShaderStage::Vertex)
+    {
+        auto positionOutput = std::make_shared<Ast::OutputVariate>();
+        positionOutput->location = 0;
+        result = std::move(positionOutput);
+        Ast::AST::addOutputStatement(defineNode);
+    }
+    else if (stage == Ast::ShaderStage::Fragment)
+    {
+        auto positionOutput = std::make_shared<Ast::InputVariate>();
+        positionOutput->location = 0;
+        result = std::move(positionOutput);
+        Ast::AST::addInputStatement(defineNode);
+    }
+    else
+    {
+        throw std::runtime_error("Using Position Builtin-Variate in a non-supported ShaderStage:" + to_string(stage));
+    }
+    result->name = "position_output";
+    result->type = Ast::AST::createType<ktm::fvec4>();
+
+    defineNode->variate = result;
 	defineNode->semanticName = "SV_POSITION";
-	Ast::AST::addOutputStatement(defineNode);
-	return positionOutput;
+	return result;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getIsFrontFaceOutput()
+{
+    auto frontFace = std::make_shared<Ast::InputVariate>();
+    frontFace->type = Ast::AST::createType<bool>();
+    frontFace->name = "is_front_face_output";
+    frontFace->location = 0;
+    auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
+    defineNode->variate = frontFace;
+    defineNode->semanticName = "SV_IsFrontFace";
+    Ast::AST::addInputStatement(defineNode);
+    return frontFace;
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getDispatchThreadIDInput()
