@@ -27,8 +27,6 @@
 #include <string>
 #include <vector>
 
-extern size_t frameCallCount;
-
 namespace
 {
 constexpr uint32_t disney_width = 1280;
@@ -517,9 +515,8 @@ void run_example_disney_pbr()
         {
             const double fps = fps_frame_count / fps_accum_seconds;
             char title[96];
-            std::snprintf(title, sizeof(title), "Horizon Disney PBR [Vulkan] - %.1f FPS (%.2f ms) call count: %d", fps,
-                          1000.0 / fps,frameCallCount);
-            frameCallCount = 0;
+            std::snprintf(title, sizeof(title), "Horizon Disney PBR [Vulkan] - %.1f FPS (%.2f ms)", fps,
+                          1000.0 / fps);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;

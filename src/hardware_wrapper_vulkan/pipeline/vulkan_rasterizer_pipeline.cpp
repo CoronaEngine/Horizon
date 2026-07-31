@@ -21,7 +21,6 @@
 
 #include "hardware_wrapper/diagnostics.h"
 
-extern size_t frameCallCount;
 namespace Corona::Horizon
 {
     namespace
@@ -1275,7 +1274,6 @@ namespace Corona::Horizon
 
         HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::set_uniform");
 
-        ++frameCallCount;
         std::lock_guard lock(mutex_);
         if (is_push_constant_member(bind_type))
         {
