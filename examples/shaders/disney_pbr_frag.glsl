@@ -33,7 +33,6 @@ layout(set = 0, binding = 0) uniform samplerCube combinedCubeSamplerHandles[];
 layout(location = 0) in vec3 v_view;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec3 v_dir;
-layout(location = 3) in vec3 v_worldPos;
 
 layout(location = 0) out vec4 outColor;
 
