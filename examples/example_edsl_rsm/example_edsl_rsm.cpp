@@ -655,7 +655,7 @@ void run_example_edsl_rsm()
         pack_position_rasterizer.clear_records();
         pack_normal_rasterizer.clear_records();
         pack_flux_rasterizer.clear_records();
-        pk_light_view_proj = to_edsl_matrix(glm::transpose(light_view_proj));
+        pk_light_view_proj = to_edsl_matrix(light_view_proj);
         pk_light_pos_ws = ktm::fvec4(c_light_pos.x, c_light_pos.y, c_light_pos.z, 0.0f);
         pk_light_dir_ws = ktm::fvec4(c_spot_dir.x, c_spot_dir.y, c_spot_dir.z, 0.0f);
         pk_light_color = ktm::fvec4(c_light_color.x, c_light_color.y, c_light_color.z, 0.0f);
@@ -666,7 +666,7 @@ void run_example_edsl_rsm()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            pk_model = to_edsl_matrix(glm::transpose(item.model));
+            pk_model = to_edsl_matrix(item.model);
             pk_albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
             pack_position_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
             pack_normal_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
@@ -675,8 +675,8 @@ void run_example_edsl_rsm()
 
         // Pass 2：场景直接光 + 硬阴影 + RSM 间接光
         scene_rasterizer.clear_records();
-        proj_view = to_edsl_matrix(glm::transpose(view_proj));
-        light_proj_view = to_edsl_matrix(glm::transpose(shadow_mtx)); // bias * light_proj * light_view
+        proj_view = to_edsl_matrix(view_proj);
+        light_proj_view = to_edsl_matrix(shadow_mtx); // bias * light_proj * light_view
         light_pos_ws = ktm::fvec4(c_light_pos.x, c_light_pos.y, c_light_pos.z, light_power);
         light_dir_ws = ktm::fvec4(c_spot_dir.x, c_spot_dir.y, c_spot_dir.z, ambient_strength);
         light_color = ktm::fvec4(c_light_color.x, c_light_color.y, c_light_color.z, 0.0f);
@@ -689,7 +689,7 @@ void run_example_edsl_rsm()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            model = to_edsl_matrix(glm::transpose(item.model));
+            model = to_edsl_matrix(item.model);
             albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
             scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
