@@ -19,6 +19,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_assao/example_assao.cpp
     example_sky/example_sky.cpp
     example_ssr/example_ssr.cpp
+    example_edsl_ssr/example_edsl_ssr.cpp
     example_edsl_sky/example_edsl_sky.cpp
     example_gpudrivenrendering/example_gpudrivenrendering.cpp
     example_disney_pbr/example_disney_pbr.cpp
@@ -52,6 +53,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_assao/example_assao.h
     example_sky/example_sky.h
     example_ssr/example_ssr.h
+    example_edsl_ssr/example_edsl_ssr.h
     example_edsl_sky/example_edsl_sky.h
     example_gpudrivenrendering/example_gpudrivenrendering.h
     example_disney_pbr/example_disney_pbr.h

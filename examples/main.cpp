@@ -15,6 +15,7 @@
 #include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
 #include "example_sky/example_sky.h"
 #include "example_ssr/example_ssr.h"
+#include "example_edsl_ssr/example_edsl_ssr.h"
 #include "example_edsl_sky/example_edsl_sky.h"
 #include "example_gpudrivenrendering/example_gpudrivenrendering.h"
 #include "example_disney_pbr/example_disney_pbr.h"
@@ -120,6 +121,11 @@ int main(int argc, char **argv)
         run_example_ssr();
         return 0;
     }
+    if (mode == "edsl_ssr")
+    {
+        run_example_edsl_ssr();
+        return 0;
+    }
     if (mode == "edsl_sky")
     {
         run_example_edsl_sky();
@@ -151,6 +157,10 @@ int main(int argc, char **argv)
         return 0;
     }
 
+<<<<<<< .mine
     std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|edsl_shadowvolumes|assao|sky|ssr|edsl_sky|gpudrivenrendering|disney_pbr|edsl_disney_pbr|rsm|edsl_rsm]\n";
+=======
+    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|edsl_shadowvolumes|assao|sky|ssr|edsl_ssr|edsl_sky|gpudrivenrendering|disney_pbr|edsl_disney_pbr]\n";
+>>>>>>> .theirs
     return 0;
 }
