@@ -29,7 +29,6 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 0) out vec3 v_view;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec3 v_dir;
-layout(location = 3) out vec3 v_worldPos;
 
 void main()
 {
@@ -44,14 +43,13 @@ void main()
 
         v_view     = vec3(0.0);
         v_normal   = vec3(0.0, 0.0, 1.0);
-        v_worldPos = vec3(0.0);
     }
     else
     {
         mat4 mvp = vsp.proj_view * vpc.model;
         gl_Position = mvp * vec4(inPosition, 1.0);
-        v_worldPos = (vpc.model * vec4(inPosition, 1.0)).xyz;
-        v_view     = vsp.camPos.xyz - v_worldPos;
+        vec3 worldPos = (vpc.model * vec4(inPosition, 1.0)).xyz;
+        v_view     = vsp.camPos.xyz - worldPos;
         v_normal   = (vpc.model * vec4(inNormal, 0.0)).xyz;
         v_dir      = vec3(0.0);
     }
