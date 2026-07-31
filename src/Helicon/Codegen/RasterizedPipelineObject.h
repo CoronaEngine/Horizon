@@ -51,7 +51,7 @@ namespace EmbeddedShader
 								def->variate->boundValueSize
 							});
 						}
-						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
+						else if (bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name); bindInfo)
 						{
 							autoBindEntries.push_back({
 								nullptr,
@@ -88,7 +88,7 @@ namespace EmbeddedShader
 								bindInfo->location
 							});
 						}
-						if (auto* bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
+						else if (bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name); bindInfo)
 						{
 							autoBindEntries.push_back({
 								def->texture->boundResourceRef,
