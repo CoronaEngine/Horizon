@@ -219,6 +219,7 @@ namespace EmbeddedShader::Ast
 		bool pushConstant = false;
 		const void* boundValueRef = nullptr;
 		uint32_t boundValueSize = 0;
+	    size_t dirtyVersion = 0;
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
 	    const Variate* getRootVariate() const override;
@@ -265,6 +266,8 @@ namespace EmbeddedShader::Ast
         // Back-pointer to the C++ proxy's boundResource_ (void*).
         // Used by auto-bind to read the current resource at dispatch time.
         void** boundResourceRef = nullptr;
+
+        size_t dirtyVersion = 1;
 
         // Render target location assigned by Texture2DProxy::operator().
         // -1 means this texture is NOT used as a render target output.

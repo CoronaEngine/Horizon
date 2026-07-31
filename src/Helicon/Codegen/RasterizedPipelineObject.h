@@ -39,8 +39,11 @@ namespace EmbeddedShader
 				{
 					if (def->variate && def->variate->boundValueRef)
 					{
-						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->variate->name))
-						{
+					    auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->variate->name);
+					    auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name);
+					    if (vsInfo || fsInfo)
+					    {
+					        auto* bindInfo = vsInfo ? vsInfo : fsInfo;
 							autoBindEntries.push_back({
 								nullptr,
 								bindInfo->byteOffset,
@@ -48,19 +51,8 @@ namespace EmbeddedShader
 								static_cast<int32_t>(bindInfo->bindType),
 								bindInfo->location,
 								def->variate->boundValueRef,
-								def->variate->boundValueSize
-							});
-						}
-						else if (bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->variate->name); bindInfo)
-						{
-							autoBindEntries.push_back({
-								nullptr,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								static_cast<int32_t>(bindInfo->bindType),
-								bindInfo->location,
-								def->variate->boundValueRef,
-								def->variate->boundValueSize
+							    def->variate->boundValueSize,
+                                &def->variate->dirtyVersion
 							});
 						}
 					}
@@ -78,24 +70,20 @@ namespace EmbeddedShader
 							return static_cast<int32_t>(isSampled ? ShaderCodeModule::ShaderResources::sampledImages
 							                                      : ShaderCodeModule::ShaderResources::storageTexture);
 						};
-						if (auto* bindInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name))
+					    auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name);
+					    auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name);
+						if (vsInfo || fsInfo)
 						{
+						    auto* bindInfo = vsInfo ? vsInfo : fsInfo;
 							autoBindEntries.push_back({
 								def->texture->boundResourceRef,
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
 								effectiveBindType(bindInfo->bindType),
-								bindInfo->location
-							});
-						}
-						else if (bindInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name); bindInfo)
-						{
-							autoBindEntries.push_back({
-								def->texture->boundResourceRef,
-								bindInfo->byteOffset,
-								bindInfo->typeSize,
-								effectiveBindType(bindInfo->bindType),
-								bindInfo->location
+								bindInfo->location,
+							    nullptr,
+							    0,
+							    &def->texture->dirtyVersion
 							});
 						}
 					}
@@ -114,7 +102,8 @@ namespace EmbeddedShader
 							def->texture->boundResourceRef,
 							0, 0,
 							static_cast<int32_t>(ShaderCodeModule::ShaderResources::stageOutputs),
-							static_cast<uint32_t>(def->texture->renderTargetLocation)
+							static_cast<uint32_t>(def->texture->renderTargetLocation), nullptr, 0,
+						    &def->texture->dirtyVersion
 						});
 					}
 				}

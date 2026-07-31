@@ -21,6 +21,7 @@
 
 #include "hardware_wrapper/diagnostics.h"
 
+extern size_t frameCallCount;
 namespace Corona::Horizon
 {
     namespace
@@ -1274,6 +1275,7 @@ namespace Corona::Horizon
 
         HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::set_uniform");
 
+        ++frameCallCount;
         std::lock_guard lock(mutex_);
         if (is_push_constant_member(bind_type))
         {
@@ -1466,6 +1468,12 @@ namespace Corona::Horizon
 
     void VulkanRasterizerPipeline::bind_auto_resources()
     {
+        struct AutoImage
+        {
+            EmbeddedShader::AutoBindEntry entry;
+            HardwareImage image;
+        };
+
         struct AutoValue
         {
             EmbeddedShader::AutoBindEntry entry;
@@ -1478,20 +1486,22 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             images.reserve(desc_.auto_bind_entries.size());
             values.reserve(desc_.auto_bind_entries.size());
-            for (const EmbeddedShader::AutoBindEntry& entry : desc_.auto_bind_entries)
+            for (EmbeddedShader::AutoBindEntry& entry : desc_.auto_bind_entries)
             {
-                if (entry.boundResourceRef != nullptr && *entry.boundResourceRef != nullptr)
+                if (*entry.dirtyVersion != entry.currentDirtyVersion)
                 {
-                    images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
-                    continue;
-                }
-
-                if (entry.boundValueRef != nullptr && entry.boundValueSize != 0)
-                {
-                    values.push_back({
-                        entry,
-                        reflected_binding_coordinates(desc_, entry),
-                    });
+                    if (entry.boundResourceRef != nullptr && *entry.boundResourceRef != nullptr)
+                    {
+                        images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
+                    }
+                    else if (entry.boundValueRef != nullptr && entry.boundValueSize != 0)
+                    {
+                        values.push_back({
+                            entry,
+                            reflected_binding_coordinates(desc_, entry),
+                        });
+                    }
+                    entry.currentDirtyVersion = *entry.dirtyVersion;
                 }
             }
         }
