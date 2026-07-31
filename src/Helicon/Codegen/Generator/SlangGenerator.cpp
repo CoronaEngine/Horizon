@@ -267,6 +267,59 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfSta
         node->branchInfo = getBranchInfo(node->statements);
         node->importPart = getBranchImport(branchRefs.top());
         branchRefs.pop();
+
+        if (!node->hasElse)
+        {
+            branchRefs.emplace();
+            Ast::BranchInfo falseBranch{};
+            falseBranch.body = "{}";
+            auto falseIp = getBranchImport(branchRefs.top());
+            branchRefs.pop();
+
+            auto& allVarRefs = node->branchInfo.variateRefs;
+
+            std::string name = "branch_" + std::to_string(node->index);
+            //func call
+            std::string call = name + "(";
+            std::string func = "void " + name + "(";
+            if (!allVarRefs.empty())
+            {
+                for (auto i = allVarRefs.begin(); i != allVarRefs.end(); )
+                {
+                    call += (*i)->name;
+                    std::string prefix;
+                    if ((*i)->getAccessPermissions() == Ast::AccessPermissions::ReadOnly)
+                    {
+                        prefix = "in ";
+                    }
+                    else if ((*i)->getAccessPermissions() == Ast::AccessPermissions::WriteOnly)
+                    {
+                        prefix = "out ";
+                    }
+                    else if ((*i)->getAccessPermissions() == Ast::AccessPermissions::ReadAndWrite)
+                    {
+                        prefix = "inout ";
+                    }
+                    func += prefix + (*i)->type->generate() + " " + (*i)->name;
+                    ++i;
+                    if (i != allVarRefs.end())
+                    {
+                        call += ",";
+                        func += ",";
+                    }
+                }
+            }
+            call += ");";
+            func += ")";
+
+            auto& output = Ast::Parser::getBranchOutputs()[node->index];
+            output.declareBranch = "import type_header;\n" + func + ";";
+            output.trueBranch = node->importPart + func + "\n" + node->branchInfo.body;
+            output.falseBranch = falseIp + func + "\n" + falseBranch.body;
+            output.conditionDetector = node->conditionDetector.value();
+            return call;
+        }
+
         return "";
     }
 	auto result = "if (" + node->condition->generate() + ") {\n";
