@@ -109,6 +109,7 @@ namespace EmbeddedShader
 				value = std::make_unique<Type>();
 			uniform->boundValueRef = value.get();
 			uniform->boundValueSize = static_cast<uint32_t>(sizeof(Type));
+		    ++uniform->dirtyVersion;
 		}
 
 		void storeRuntimeValue(const Type& rhs)
@@ -843,7 +844,9 @@ namespace EmbeddedShader
 				return;
 			}
 
-			node = Ast::AST::defineUniversalTexture2D<Type>();
+		    auto t = Ast::AST::defineUniversalTexture2D<Type>();
+		    dirtyVersion = &t->dirtyVersion;
+		    node = std::move(t);
 			// Set back-pointer so auto-bind can read current resource at dispatch time
 			if (auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture>(node)) {
 				tex->boundResourceRef = &boundResource_;
@@ -947,7 +950,14 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		Texture2DProxy& operator=(Corona::Horizon::HardwareImage& img) { boundResource_ = &img; return *this; }
+		Texture2DProxy& operator=(Corona::Horizon::HardwareImage& img)
+	    {
+		    boundResource_ = &img;
+		    if (dirtyVersion)
+		        ++*dirtyVersion;
+		    return *this;
+	    }
+
 		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
@@ -969,6 +979,7 @@ namespace EmbeddedShader
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
 		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
+	    size_t* dirtyVersion = nullptr;
 	};
 
     template<typename Type>
@@ -989,7 +1000,9 @@ namespace EmbeddedShader
 				return;
 			}
 
-			node = Ast::AST::defineUniversalTextureCube<Type>();
+			auto t = Ast::AST::defineUniversalTextureCube<Type>();
+		    dirtyVersion = &t->dirtyVersion;
+		    node = std::move(t);
 			// Set back-pointer so auto-bind can read current resource at dispatch time
 			if (auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture>(node)) {
 				tex->boundResourceRef = &boundResource_;
@@ -1087,7 +1100,12 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		TextureCubeProxy& operator=(Corona::Horizon::HardwareImage& img) { boundResource_ = &img; return *this; }
+		TextureCubeProxy& operator=(Corona::Horizon::HardwareImage& img) {
+		    boundResource_ = &img;
+		    if (dirtyVersion)
+		        ++*dirtyVersion;
+		    return *this;
+		}
 		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
@@ -1109,6 +1127,7 @@ namespace EmbeddedShader
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
 		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
+        size_t* dirtyVersion = nullptr;
 	};
 
 	template<typename T>

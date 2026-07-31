@@ -612,6 +612,7 @@ namespace Corona::Horizon
         template <typename F>
         static ComputePipelineDesc from_edsl(F&& compute_shader_code, ktm::uvec3 numthreads = { 1, 1, 1 }, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
         {
+            options.compiler.enableMatrixColumnMajor = true;
             std::shared_ptr<EmbeddedShader::ComputePipelineObject> object{new EmbeddedShader::ComputePipelineObject(EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location))};
 
             ComputePipelineDesc desc(
@@ -705,11 +706,11 @@ namespace Corona::Horizon
                                                 EdslPipelineOptions options = {},
                                                 std::source_location source_location = std::source_location::current())
         {
+            options.compiler.enableMatrixColumnMajor = true;
             std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{new EmbeddedShader::RasterizedPipelineObject(EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
                                                                             std::forward<FS>(fragment_shader_code),
                                                                             options.compiler,
                                                                             source_location))};
-
             RasterizerPipelineDesc desc(
                 PipelineShaderDesc {
                     PipelineShaderStage::Vertex,

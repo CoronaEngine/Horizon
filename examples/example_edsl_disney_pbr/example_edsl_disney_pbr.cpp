@@ -393,22 +393,16 @@ void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
     context->camera.dolly(static_cast<float>(-dy) * 0.05f);
 }
 
-ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
+const ktm::fmat4x4& to_edsl_matrix(const glm::mat4& matrix)
 {
-    static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
-    ktm::fmat4x4 result;
-    std::memcpy(&result, &matrix, sizeof(result));
-    return result;
+    return *reinterpret_cast<const ktm::fmat4x4*>(&matrix);
 }
 
 template <typename Type, size_t N>
     requires std::is_arithmetic_v<Type>
-ktm::vec<N, Type> to_edsl_vector(const glm::vec<N, Type>& vec)
+const ktm::vec<N, Type>& to_edsl_vector(const glm::vec<N, Type>& vec)
 {
-    ktm::vec<N, Type> result;
-    for (size_t i = 0; i < N; ++i)
-        result[i] = vec[i];
-    return result;
+    return *reinterpret_cast<const ktm::vec<N, Type>*>(&vec);
 }
 
 } // namespace
@@ -758,13 +752,13 @@ void run_example_edsl_disney_pbr()
         texCube = probe.lod;
         texCubeIrr = probe.irr;
 
-        shared.proj_view = to_edsl_matrix(glm::transpose(proj * view));
+        shared.proj_view = to_edsl_matrix(proj * view);
         shared.camPos = fvec4(to_edsl_vector(cam_pos), 1.0f);
         shared.flags = fvec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
                              s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
         shared.lightDir = fvec4(to_edsl_vector(glm::normalize(s.light_dir)), 0.0f);
         shared.lightCol = fvec4(to_edsl_vector(s.light_col), 0.0f);
-        shared.envMtx = to_edsl_matrix(glm::transpose(env_rot));
+        shared.envMtx = to_edsl_matrix(env_rot);
         shared.exposurePad = fvec4(s.exposure, 0.0f, 0.0f, 0.0f);
 
         rasterizer.clear_records();
@@ -779,7 +773,7 @@ void run_example_edsl_disney_pbr()
                 const glm::mat4 model =
                     glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
 
-                per_model = to_edsl_matrix(glm::transpose(model));
+                per_model = to_edsl_matrix(model);
                 per_mat0 = fvec4(to_edsl_vector(material.base_color), material.metallic);
                 per_mat1 = fvec4(material.roughness, material.specular, material.specular_tint, material.subsurface);
                 per_mat2 = fvec4(material.anisotropic, material.sheen, material.sheen_tint, material.clearcoat);

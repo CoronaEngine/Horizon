@@ -569,16 +569,16 @@ void run_example_edsl_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            mvp = to_edsl_matrix(transpose((light_view_proj * item.model)));
+            mvp = to_edsl_matrix((light_view_proj * item.model));
             pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 
         // Pass 2：场景光照 + 硬阴影
         scene_rasterizer.clear_records();
         // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
-        proj_view       = to_edsl_matrix(transpose(view_proj));
-        view_matrix     = to_edsl_matrix(transpose(view));
-        light_proj_view = to_edsl_matrix(transpose(shadow_mtx)); // bias * light_proj * light_view
+        proj_view       = to_edsl_matrix(view_proj);
+        view_matrix     = to_edsl_matrix(view);
+        light_proj_view = to_edsl_matrix(shadow_mtx); // bias * light_proj * light_view
         light_pos_vs = ktm::fvec4(c_light_pos_vs.x,c_light_pos_vs.y,c_light_pos_vs.z,c_light_pos_vs.w);
         light_ambient = ktm::fvec4(c_light_ambient.x,c_light_ambient.y,c_light_ambient.z,c_light_ambient.w);
         light_diffuse = ktm::fvec4(c_light_diffuse.x,c_light_diffuse.y,c_light_diffuse.z,c_light_diffuse.w);
@@ -598,7 +598,7 @@ void run_example_edsl_shadowmaps()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = item.mesh->index_count;
 
-            model = to_edsl_matrix(transpose(item.model)); // per-draw；VS 从中计算 mvp/model_view/light_mtx
+            model = to_edsl_matrix(item.model); // per-draw；VS 从中计算 mvp/model_view/light_mtx
             scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 

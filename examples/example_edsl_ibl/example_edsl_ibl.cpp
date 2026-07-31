@@ -832,7 +832,7 @@ void run_example_edsl_ibl()
         texCubeIrr = probe.irr;
 
         // 帧内共享数据（UBO，batch 内不变）
-        shared.proj_view  = to_edsl_matrix(glm::transpose(proj * view));
+        shared.proj_view  = to_edsl_matrix(proj * view);
         shared.camPos     = fvec4(to_edsl_vector(cam_pos), 1.0f);
         shared.flags      = fvec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
                                   s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
@@ -840,8 +840,8 @@ void run_example_edsl_ibl()
         shared.rgbSpec    = fvec4(s.rgb_spec, 1.0f);
         shared.lightDir   = fvec4(s.light_dir, 0.0f);
         shared.lightCol   = fvec4(s.light_col, 0.0f);
-        shared.envMtx     = to_edsl_matrix(glm::transpose(env_rot));
-        shared.skyEnvMtx  = to_edsl_matrix(glm::transpose(env_rot * camera.env_view_mtx()));
+        shared.envMtx     = to_edsl_matrix(env_rot);
+        shared.skyEnvMtx  = to_edsl_matrix(env_rot * camera.env_view_mtx());
 
         rasterizer.clear_records();
 
@@ -851,7 +851,7 @@ void run_example_edsl_ibl()
             const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.8f, 0.0f)) *
                                     glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
             per_misc    = fvec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
-            per_model   = to_edsl_matrix(glm::transpose(model));
+            per_model   = to_edsl_matrix(model);
             per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
             rasterizer.record(bunny_ib, bunny_vb, bunny_params);
         }
@@ -872,7 +872,7 @@ void run_example_edsl_ibl()
                                             glm::scale(glm::mat4(1.0f), glm::vec3(scale / grid));
 
                     per_misc    = fvec4(0.0f, aspect, 0.0f, 0.0f);
-                    per_model   = to_edsl_matrix(glm::transpose(model));
+                    per_model   = to_edsl_matrix(model);
                     per_params0 = fvec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
                     rasterizer.record(orb_ib, orb_vb, orb_params);
                 }

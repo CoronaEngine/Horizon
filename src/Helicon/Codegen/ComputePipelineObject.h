@@ -22,6 +22,8 @@ namespace EmbeddedShader
 		uint32_t location = 0;
 		const void* boundValueRef = nullptr;
 		uint32_t boundValueSize = 0;
+	    size_t* dirtyVersion;
+	    size_t currentDirtyVersion = 0;
 	};
 
 	class ComputePipelineObject
@@ -64,7 +66,8 @@ namespace EmbeddedShader
                                 static_cast<int32_t>(bindInfo->bindType),
                                 bindInfo->location,
                                 def->variate->boundValueRef,
-                                def->variate->boundValueSize
+                                def->variate->boundValueSize,
+                                &def->variate->dirtyVersion
                             });
                         }
                     }
@@ -89,7 +92,10 @@ namespace EmbeddedShader
                                 bindInfo->byteOffset,
                                 bindInfo->typeSize,
                                 effectiveBindType,
-                                bindInfo->location
+                                bindInfo->location,
+                                nullptr,
+                                0,
+                                &def->texture->dirtyVersion
                             });
                         }
                     }

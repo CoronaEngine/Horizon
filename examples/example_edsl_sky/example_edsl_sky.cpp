@@ -888,7 +888,7 @@ void run_example_edsl_sky()
         computePerezCoeff(turbidity, perez);
         const glm::vec4 parameters_cpu(0.02f, 3.0f, 0.1f, time_of_day);
 
-        sky.invViewProj = to_edsl_matrix(glm::transpose(inv_view_proj));
+        sky.invViewProj = to_edsl_matrix(inv_view_proj);
         sky.sunDirection = to_edsl_vec4(glm::vec4(sun.sun_dir, 0.0f));
         sky.skyLuminanceXYZ = to_edsl_vec4(glm::vec4(sky_xyz, 0.0f));
         sky.sunLuminance = to_edsl_vec4(glm::vec4(sun_rgb, 0.0f));
@@ -899,12 +899,12 @@ void run_example_edsl_sky()
         sky.perez3 = to_edsl_vec4(perez[3]);
         sky.perez4 = to_edsl_vec4(perez[4]);
 
-        ls.viewProj = to_edsl_matrix(glm::transpose(view_proj));
+        ls.viewProj = to_edsl_matrix(view_proj);
         ls.sunDirection = to_edsl_vec4(glm::vec4(sun.sun_dir, 0.0f));
         ls.sunLuminance = to_edsl_vec4(glm::vec4(sun_rgb, 0.0f));
         ls.skyLuminance = to_edsl_vec4(glm::vec4(sky_rgb, 0.0f));
         ls.parameters = to_edsl_vec4(parameters_cpu);
-        ls_model = to_edsl_matrix(glm::transpose(glm::mat4(1.0f)));
+        ls_model = to_edsl_matrix(glm::mat4(1.0f));
         lightmap_tex = lightmap;
 
         landscape_pipeline.clear_records();

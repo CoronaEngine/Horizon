@@ -267,6 +267,7 @@ namespace EmbeddedShader
             compileArgs2.stage = inputStage;
             compileArgs2.sourceLanguage = language;
             compileArgs2.deps.swap(option.slangModules);
+            compileArgs2.matrixMajor = option.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
 
             //branches
             auto branches = getBranchModules(Ast::Parser::getBindless(), info);
@@ -293,6 +294,7 @@ namespace EmbeddedShader
             compileArgs.sourceLanguage = language;
             compileArgs.deps.swap(option.slangModules);
             compileArgs.enableReflection = true;
+            compileArgs.matrixMajor = option.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
             if (option.compileGLSL)
                 compileArgs.targetLanguages.push_back(ShaderLanguage::GLSL);
             if (option.compileHLSL)
@@ -413,6 +415,7 @@ namespace EmbeddedShader
         compileArgs2.sourceLanguage = sourceLanguage;
         compileArgs2.deps = compilerOption.slangModules;
         compileArgs2.deps.push_back(getTypeHeaderModule(bindless));
+        compileArgs2.matrixMajor = compilerOption.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
 
         //branches
         auto branches = getBranchModules(bindless, conditionInfo);
