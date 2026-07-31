@@ -642,12 +642,12 @@ void run_example_edsl_ssr()
 
         // Pass 1：几何 → G-buffer
         geom_rasterizer.clear_records();
-        u_view_proj = to_edsl_matrix(glm::transpose(view_proj));
-        u_view = to_edsl_matrix(glm::transpose(view));
+        u_view_proj = to_edsl_matrix(view_proj);
+        u_view = to_edsl_matrix(view);
         u_light_dir_vs = ktm::fvec4(light_dir_vs.x, light_dir_vs.y, light_dir_vs.z, ambient);
         for (const EssrInstance& inst : instances)
         {
-            pc_model = to_edsl_matrix(glm::transpose(inst.model));
+            pc_model = to_edsl_matrix(inst.model);
             pc_material = ktm::fvec4(inst.albedo.x, inst.albedo.y, inst.albedo.z, 0.0f);
             pc_params = ktm::fvec4(inst.reflectivity, inst.roughness, 0.0f, 0.0f);
             geom_rasterizer.record(cube_ib, cube_vb, cube_params);
