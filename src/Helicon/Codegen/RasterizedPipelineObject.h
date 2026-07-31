@@ -202,6 +202,16 @@ namespace EmbeddedShader
 
 		static_assert(ParseHelper::isMatchInputAndOutput(vsFunc,fsFunc), "The output of the vertex shader and the input of the fragment shader must match!");
 
+
+		for (auto& stmt : Ast::Parser::getGlobalStatements())
+		{
+			if (auto* def = dynamic_cast<Ast::DefineUniversalTexture*>(stmt.get()))
+			{
+				if (def->texture)
+					def->texture->renderTargetLocation = -1;
+			}
+		}
+
 		Ast::Parser::beginShaderParse(Ast::ShaderStage::Vertex);
 		auto vsParams = ParseHelper::createParamTuple(vsFunc);
 		if constexpr (ParseHelper::hasReturnValue(vsFunc))
