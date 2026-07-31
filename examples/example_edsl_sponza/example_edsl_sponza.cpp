@@ -1932,14 +1932,16 @@ void run_example_edsl_sponza()
         const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
 
         // ---- uniforms ----
-        rsm_light_view_proj = to_edsl_matrix(glm::transpose(sun_view_proj));
-        gb_view_proj = to_edsl_matrix(glm::transpose(view_proj));
+        // 引擎已在 Slang 编译层处理矩阵 major(见 edsl_performance_fix / ebc5ad3),
+        // EDSL 矩阵直接上传,不再手动转置。
+        rsm_light_view_proj = to_edsl_matrix(sun_view_proj);
+        gb_view_proj = to_edsl_matrix(view_proj);
 
-        u_inv_view_proj = to_edsl_matrix(glm::transpose(inv_view_proj));
-        u_view = to_edsl_matrix(glm::transpose(view));
-        u_proj_view = to_edsl_matrix(glm::transpose(view_proj));
-        u_sun_view_proj = to_edsl_matrix(glm::transpose(sun_view_proj));
-        u_inv_sun_view_proj = to_edsl_matrix(glm::transpose(inv_sun_view_proj));
+        u_inv_view_proj = to_edsl_matrix(inv_view_proj);
+        u_view = to_edsl_matrix(view);
+        u_proj_view = to_edsl_matrix(view_proj);
+        u_sun_view_proj = to_edsl_matrix(sun_view_proj);
+        u_inv_sun_view_proj = to_edsl_matrix(inv_sun_view_proj);
         u_camera_pos = to_edsl_vec4(glm::vec4(camera.position, 1.0f));
         u_sun_dir_ws = to_edsl_vec4(glm::vec4(sun_direction, 0.0f));
         u_sun_radiance = to_edsl_vec4(glm::vec4(tuning.sun_color * tuning.sun_intensity, 0.0f));
