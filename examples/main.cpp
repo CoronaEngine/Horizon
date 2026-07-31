@@ -22,6 +22,7 @@
 #include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
 #include "example_rsm/example_rsm.h"
 #include "example_edsl_rsm/example_edsl_rsm.h"
+#include "example_edsl_sponza/example_edsl_sponza.h"
 
 #include <iostream>
 #include <string_view>
@@ -156,6 +157,11 @@ int main(int argc, char **argv)
         run_example_edsl_rsm();
         return 0;
     }
-    
+    if (mode == "edsl_sponza")
+    {
+        run_example_edsl_sponza();
+        return 0;
+    }
+
     return 0;
 }
