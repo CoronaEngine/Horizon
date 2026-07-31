@@ -156,11 +156,6 @@ int main(int argc, char **argv)
         run_example_edsl_rsm();
         return 0;
     }
-
-<<<<<<< .mine
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|edsl_shadowvolumes|assao|sky|ssr|edsl_sky|gpudrivenrendering|disney_pbr|edsl_disney_pbr|rsm|edsl_rsm]\n";
-=======
-    std::cerr << "Usage: HorizonExamples.exe [baseline|default|edsl|glsl|branch_pruning|ibl|drawstress|raymarch|bump|deferred|sponza|shadowmaps|edsl_shadowmaps|shadowvolumes|edsl_shadowvolumes|assao|sky|ssr|edsl_ssr|edsl_sky|gpudrivenrendering|disney_pbr|edsl_disney_pbr]\n";
->>>>>>> .theirs
+    
     return 0;
 }
