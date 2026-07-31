@@ -121,6 +121,12 @@ const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::InputVariate::getRootVa
     return AST::getStageInput().get();
 }
 
+void EmbeddedShader::Ast::InputVariate::access(AccessPermissions permissions)
+{
+    Variate::access(permissions);
+    AST::getStageInput()->access(permissions);
+}
+
 std::string EmbeddedShader::Ast::DefineInputVariate::parse()
 {
 	return Generator::SlangGenerator::getParseOutput(this);
@@ -152,6 +158,12 @@ std::string EmbeddedShader::Ast::OutputVariate::parse()
 const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::OutputVariate::getRootVariate() const
 {
     return AST::getStageOutput().get();
+}
+
+void EmbeddedShader::Ast::OutputVariate::access(AccessPermissions permissions)
+{
+    Variate::access(permissions);
+    AST::getStageOutput()->access(permissions);
 }
 
 std::string EmbeddedShader::Ast::DefineOutputVariate::parse()

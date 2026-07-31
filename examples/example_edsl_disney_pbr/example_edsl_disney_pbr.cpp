@@ -498,11 +498,12 @@ void run_example_edsl_disney_pbr()
 
 
     const float fov_height = std::tan(glm::radians(45.0f) * 0.5f);
+    bool isSkyBox = false;
 
     auto edsl_vertex = [&](Aggregate<DisneyEdslVertexProxy> vertex) {
         Aggregate<DisneyEdslVaryings> out;
 
-        $IF(per_mat3->y > Float(0.5))
+        $IF(isSkyBox)
         {
             // skybox：把网格顶点当全屏坐标用，方向由 skyEnvMtx 还原
             position() = Float4(vertex->pos->x, vertex->pos->y, Float(1.0), Float(1.0));
@@ -599,16 +600,18 @@ void run_example_edsl_disney_pbr()
     TextureCube<fvec4> texCubeIrr = probes[0].irr;
     Texture2D<fvec4> final_output = final_output_image;
 
+    bool bg = false;
+    // x: doDiffuse, y: doSpecular, z: doDiffuseIbl, w: doSpecularIbl
     auto edsl_fragment = [&](Aggregate<DisneyEdslVaryings> in) {
         Float4 out_color; 
 
-        $IF(per_mat3->y > Float(0.5))
+        $IF(isSkyBox)
         {
             Float3 sky_dir;
             sky_dir = normalize(in->v_dir);
             Float bgType = per_mat3->w;
             Float3 sky_color;
-            $IF(bgType >= Float(6.5))
+            $IF(bg)
             {
                 sky_color = toLinear(Float3(texture(texCubeIrr, sky_dir)->xyz()));
             }
@@ -664,7 +667,7 @@ void run_example_edsl_disney_pbr()
             
             Float3 direct;
             direct = Float3(Float(0.0), Float(0.0), Float(0.0));
-            $IF((shared.flags->x > Float(0.5)) || (shared.flags->y > Float(0.5)))
+            $IF(input.settings.do_diffuse || input.settings.do_specular)
             {
                 Float3 brdf;
                 brdf = Float3(Float(0.0), Float(0.0), Float(0.0));
@@ -718,19 +721,23 @@ void run_example_edsl_disney_pbr()
                 direct = lit * enable;
             };
 
-            Float mip = roughness * Float(5.0);
-            Float3 vr = normalize(Float(2.0) * NdotVraw * N - V); 
-            Float3 cubeR = fixCubeLookup(normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz())), mip,
-                                         Float(256.0));
-            Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(N, Float(0.0)))->xyz()));
+            Float3 indirect;
+            $IF(input.settings.do_diffuse_ibl || input.settings.do_specular_ibl)
+            {
+                Float mip = roughness * Float(5.0);
+                Float3 vr = normalize(Float(2.0) * NdotVraw * N - V);
+                Float3 cubeR = fixCubeLookup(normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz())), mip,
+                                             Float(256.0));
+                Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(N, Float(0.0)))->xyz()));
 
-            Float3 radiance = toLinear(Float3(textureLod(texCube, cubeR, mip)->xyz()));
-            Float3 irradiance = toLinear(Float3(texture(texCubeIrr, cubeN)->xyz()));
+                Float3 radiance = toLinear(Float3(textureLod(texCube, cubeR, mip)->xyz()));
+                Float3 irradiance = toLinear(Float3(texture(texCubeIrr, cubeN)->xyz()));
 
-            Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
-            Float3 envDiffuse = diffuseAlbedo * irradiance * shared.flags->z;
-            Float3 envSpecular = Cspec0 * radiance * envFresnel * shared.flags->w;
-            Float3 indirect = envDiffuse + envSpecular;
+                Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
+                Float3 envDiffuse = diffuseAlbedo * irradiance * shared.flags->z;
+                Float3 envSpecular = Cspec0 * radiance * envFresnel * shared.flags->w;
+                indirect = envDiffuse + envSpecular;
+            }
 
             Float3 color = (direct + indirect) * exp2(shared.exposurePad->x);
             out_color = Float4(toFilmic(color), Float(1.0));

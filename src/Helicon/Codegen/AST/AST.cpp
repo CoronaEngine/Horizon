@@ -112,6 +112,7 @@ void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 {
 	auto elseStatement = std::make_shared<ElseStatement>();
     elseStatement->followIf = std::move(followIf);
+    elseStatement->followIf->hasElse = true;
 	addLocalStatement(elseStatement);
 	getLocalStatementStack().push(&elseStatement->statements);
 }
@@ -362,7 +363,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStage
     if (!input)
     {
         auto type = std::make_shared<StageType>();
-        input = std::make_shared<Variate>();
+        input = std::make_shared<LocalVariate>();
         input->type = type;
         type->suffix = "_input";
         input->name = "input";
@@ -375,7 +376,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStage
     if (!input)
     {
         auto type = std::make_shared<StageType>();
-        input = std::make_shared<Variate>();
+        input = std::make_shared<LocalVariate>();
         input->type = type;
         type->suffix = "_output";
         input->name = "output";

@@ -129,6 +129,7 @@ namespace EmbeddedShader::Ast
 		size_t location = 0;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
+	    void access(AccessPermissions permissions) override;
 	};
 
 	struct DefineInputVariate : Statement
@@ -152,6 +153,7 @@ namespace EmbeddedShader::Ast
 		size_t location = 0;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
+	    void access(AccessPermissions permissions) override;
 	};
 
 	struct DefineOutputVariate : Statement
@@ -168,6 +170,7 @@ namespace EmbeddedShader::Ast
 	    std::optional<std::function<bool()>> conditionDetector;
 	    BranchInfo branchInfo;
 	    std::string importPart;
+	    bool hasElse = false;
         std::string parse() override;
     };
 
