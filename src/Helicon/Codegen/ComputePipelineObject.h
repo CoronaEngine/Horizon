@@ -118,6 +118,9 @@ namespace EmbeddedShader
 
 		if (compilerOption.enableBindless)
 		{
+			// SlangGenerator 生成一次后会把 numthreads 复位成 (1,1,1)，
+			// bindless 重新 parse 前必须再设一次，否则 bindless 变体全部变成单线程组。
+			Generator::SlangGenerator::numthreads = numthreads;
 			Ast::Parser::setBindless(true);
 			outputs = parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
             compilerOption.branches.swap(outputs[0].branches);

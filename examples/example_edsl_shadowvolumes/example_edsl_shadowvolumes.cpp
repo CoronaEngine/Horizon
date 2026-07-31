@@ -51,7 +51,6 @@
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
-#include "dsl/api/syntax.h"
 #include "shaders/drawstress_vert.glsl.hpp"
 
 #include <glm/gtc/constants.hpp>
