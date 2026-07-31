@@ -1,22 +1,22 @@
-﻿// Deferred shading over the Khronos Sponza scene, following the three-pass
-// structure of example_deferred (G-buffer MRT -> additive light accumulation ->
-// combine).
+﻿// Deferred PBR renderer over the Sponza scene: Disney BRDF + RSM 单次弹射
+// 间接光 + SSR,白天斜射平行光。
 //
-// Assets come from tools/sponza/convert_sponza.py, which turns the upstream
-// glTF + ASTC/UASTC data into assets/sponza/{sponza.bin, textures/*.png}. See
-// tools/sponza/README.md for the container layout and the caveats.
+// 资产由 tools/sponza/convert_sponza.py 从 glTF 转成 HZMS(v3 为 PBR
+// metallic-roughness 语义;v2 旧资产仍可加载,材质退化为常量 MR)。
+// 优先加载 assets/sponza2(Intel Main Sponza 转换产物),否则回退 assets/sponza。
 //
-// Differences from example_deferred, all driven by the scene rather than by the
-// technique:
-// - geometry is one shared vertex/index buffer sliced into 25 submeshes, so the
-//   G-buffer pass rebinds only a push constant per draw and the node transforms
-//   are already baked into the vertices (no per-draw model matrix);
-// - materials carry a base colour plus optional height/specular/mask textures,
-//   all resident in the bindless table at once;
-// - the light pass also applies the scene's authored directional sun, using a
-//   full-screen rect and the negative-radius branch in sponza_light_frag.glsl;
-// - a free-fly camera replaces the fixed viewpoint, because Sponza is a
-//   walkthrough scene.
+// 渲染管线(9 段):
+//   0  太阳 RSM       正交光源视角 MRT:depth(R32F)/世界法线/flux
+//   1  G-buffer       albedo+metallic / 世界法线+roughness / device depth
+//   1.5 SSAO + blur   (不变)
+//   2  光照累积       Disney Principled BRDF(G-buffer 取 baseColor/metallic/
+//                     roughness,其余参数全局滑条);太阳分支附加 RSM gather
+//                     (32 采样,Dachsbacher & Stamminger 2005)与 3x3 PCF 阴影
+//   3  combine        直接光 + IBL/环境光×AO → 线性 HDR(a=reflectivity)
+//   4-6 SSR           线性深度 → 屏幕空间步进反射 → 合成 + 曝光 + filmic
+//
+// 交互:RMB 拖动视角,WASD/QE 移动,G 循环 debug 视图;imgui 全参数可调
+// (太阳方位/仰角、Disney 材质、RSM、SSR、IBL、SSAO、曝光)。
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
@@ -40,6 +40,9 @@
 #include GLSL(shaders/sponza_combine_frag.glsl)
 #include GLSL(shaders/sponza_ssao_frag.glsl)
 #include GLSL(shaders/sponza_ssao_blur_frag.glsl)
+#include GLSL(shaders/ssr_linear_depth_compute.glsl)
+#include GLSL(shaders/sponza_ssr_trace_compute.glsl)
+#include GLSL(shaders/sponza_ssr_composite_compute.glsl)
 
 #include <algorithm>
 #include <array>
@@ -61,90 +64,115 @@ constexpr uint32_t spz_height = 720;
 constexpr int spz_max_lights = 128;
 constexpr uint32_t spz_shadow_map_size = 2048;
 
-// Everything the ImGui panel can drive. The defaults are the calibrated values:
-// see tools/sponza/README.md for why they sit where they do -- in short, the
-// scene is ~3700 units across, accumulation is linear and tone mapped, and a
-// peak accumulated diffuse near 1.0 is what the filmic curve resolves best.
+// Everything the ImGui panel can drive. 默认值按"白天、斜射太阳"标定:
+// Disney 直接光是能量守恒的(diffuse 带 1/π),太阳强度要比旧 Blinn 版大一个
+// 量级;点光源默认关(白天场景)。
 struct Tuning
 {
-    // --- direct light ---
-    float sun_intensity = 0.40f;
-    glm::vec3 sun_color { 1.0f, 0.96f, 0.88f };
+    // --- sun(白天,斜射平行光)---
+    // Beauty preset captured from the live ImGui session.
+    float sun_elevation_deg = 79.044f;
+    float sun_azimuth_deg = -0.333f;
+    float sun_intensity = 7.83f;
+    glm::vec3 sun_color { 0.85784316f, 0.724044f, 0.5634852f };
     bool sun_shadow = true;
-    float shadow_bias = 0.0015f;
+    float shadow_bias = 0.0027f;
 
-    int point_light_count = 48;
-    float point_intensity = 0.26f;
-    // A radius much larger than this makes every light cover the whole frame,
-    // so the accumulation buffer saturates and the result flattens.
-    float point_radius = 420.0f;
-    // Fraction of the radius before falloff starts. example_deferred uses 0.8,
-    // which at this scale stacks a dozen unattenuated lights on every pixel.
-    float point_inner = 0.0f;
+    // --- RSM 单次弹射间接光 ---
+    bool rsm_enable = true;
+    float rsm_intensity = 160.0f;
+    float rsm_radius = 0.085f; // 采样半径(RSM uv 空间)
+
+    // --- Disney BRDF 全局参数(baseColor/metallic/roughness 来自 G-buffer)---
+    // Sponza mesh is deliberately diffuse-only. These zeroed specular controls
+    // stay in the UBO for the standalone metallic mirror pool.
+    float disney_specular = 0.0f;
+    float disney_specular_tint = 0.0f;
+    float disney_sheen = 0.0f;
+    float disney_sheen_tint = 0.5f;
+    float disney_clearcoat = 0.0f;
+    float disney_clearcoat_gloss = 0.8f;
+    float disney_subsurface = 0.0f;
+    float disney_anisotropic = 0.0f;
+
+    // --- point lights(白天默认关,夜景可开)---
+    int point_light_count = 0;
+    float point_intensity = 0.876f;
+    float point_radius = 7.357f;
+    float point_inner = 0.311f;
     float light_speed = 0.25f;
     bool animate_lights = true;
-    float specular_strength = 0.35f;
 
-    // --- surface response ---
-    // Every glTF material in this scene shares metallicFactor 0.588 and
-    // roughnessFactor 0.9, so those carry no per-material information. The
-    // '*_spec' textures are the only real signal, and they drive both the
-    // specular intensity and the glossiness through these ranges.
-    float spec_min = 0.02f;
-    float spec_max = 0.90f;
-    float gloss_min = 0.05f;
-    float gloss_max = 0.85f;
-    // Materials with no '*_spec' map at all (the curtains, the roof, ...).
-    float no_map_specular = 0.05f;
-    float no_map_gloss = 0.08f;
-    // Off by default: deriving metalness from the specular map does not work on
-    // this scene. The '*_spec' maps encode shininess, not metalness, and the
-    // shiniest surface in Sponza is the polished marble floor (mean 197/255)
-    // rather than any metal -- the flagpole is 76 and the metal details 53. Any
-    // threshold therefore classifies the floor as metal before it reaches a real
-    // one. Left exposed so the failure is inspectable via the "specular tint"
-    // debug view; a correct fix needs per-material metalness authored in the
-    // converter, since the glTF metallicFactor is one constant for all 25.
-    float metal_low = 0.35f;
-    float metal_high = 0.85f;
-    float metal_tint = 0.0f;
+    // --- SSR ---
+    bool mirror_enable = true;      // 演示镜:中殿反射池
+    float mirror_roughness = 0.065f;
+    bool ssr_enable = true;
+    float ssr_intensity = 0.982f;
+    float ssr_max_distance = 26.228758f;
+    int ssr_steps = 80;
+    float ssr_thickness = 0.16691028f;
+    int ssr_refine_steps = 6;
+    bool ssr_jitter = false;
+    float ssr_fresnel_power = 5.0f;
+    int ssr_debug = 0;
 
-    // --- indirect light ---
-    // The probe is an outdoor capture, so it is far brighter than this interior
-    // warrants; these scale it down to a plausible bounce.
-    float irradiance_scale = 0.45f;
-    float radiance_scale = 0.30f;
-    glm::vec3 ambient_floor { 0.045f, 0.052f, 0.070f };
+    // --- indirect light(IBL probe)---
+    // 白天氛围:室外 probe 拉高一点,环境地板给一点天蓝。
+    float irradiance_scale = 0.142f;
+    float radiance_scale = 0.573f;
+    float env_rotation_deg = 89.825f;
+    glm::vec3 ambient_floor { 0.010f, 0.014f, 0.022f };
 
-    float ssao_radius = 55.0f;
-    float ssao_bias = 1.5f;
-    float ssao_intensity = 1.0f;
-    float ssao_blur_rejection = 4000.0f;
+    float ssao_radius = 0.875f;
+    float ssao_bias = 0.025f;
+    float ssao_intensity = 2.0f;
+    float ssao_blur_depth_sigma = 0.2861319f;
 
     // --- output ---
-    float exposure = 1.15f;
+    float exposure = 0.568f;
+    float bloom_threshold = 0.85f;
+    float bloom_intensity = 0.108f;
+    float bloom_radius = 3.0f;
+    float output_contrast = 1.023f;
+    float output_saturation = 1.08f;
+    float output_temperature = 0.02f;
+    float vignette = 0.10f;
 };
 constexpr float pi_half = 1.5707963f;
 
-const std::filesystem::path spz_asset_root =
-    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "sponza";
+// 优先 Intel Main Sponza 转换产物(assets/sponza2,HZMS v3),否则回退旧资产。
+const std::filesystem::path spz_assets_dir =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
+inline std::filesystem::path pick_asset_root()
+{
+    const std::filesystem::path pbr = spz_assets_dir / "sponza2";
+    if (std::filesystem::exists(pbr / "sponza.bin"))
+        return pbr;
+    return spz_assets_dir / "sponza";
+}
+const std::filesystem::path spz_asset_root = pick_asset_root();
 
 // ============================================================================
 // HZMS container (see tools/sponza/README.md)
 // ============================================================================
 
 constexpr uint32_t hzms_magic = 0x534D5A48; // 'HZMS'
-constexpr uint32_t hzms_version = 2;
+// v2: 旧 Khronos 资产(槽位2 = specular 灰度图);v3: PBR(槽位2 = glTF
+// metallicRoughness,G=roughness B=metallic)。两版记录字节布局完全一致。
+constexpr uint32_t hzms_version_legacy = 2;
+constexpr uint32_t hzms_version_pbr = 3;
 
 // Flags stored in the HZMS material record by the converter.
 constexpr uint32_t hzms_material_double_sided = 1u << 0;
 constexpr uint32_t hzms_material_alpha_mask = 1u << 1;
+constexpr uint32_t hzms_material_mask_uses_alpha = 1u << 2; // v3: mask 在 baseColor.a
 
 // Flags passed to sponza_geom_frag.glsl. These are a different set from the
 // asset-side flags above: bit0 means "sample the normal map", not "double sided".
 constexpr uint32_t shader_material_has_normal = 1u << 0;
 constexpr uint32_t shader_material_alpha_mask = 1u << 1;
-constexpr uint32_t shader_material_has_specular = 1u << 2;
+constexpr uint32_t shader_material_has_metalrough = 1u << 2;
+constexpr uint32_t shader_material_mask_uses_alpha = 1u << 3;
 
 // Must match the vertex layout the converter writes: 48 bytes, and the input
 // declarations in sponza_geom_vert.glsl.
@@ -171,8 +199,8 @@ static_assert(sizeof(SponzaSubmesh) == 40, "SponzaSubmesh must match the HZMS su
 struct SponzaMaterial
 {
     int32_t base_color_texture;
-    int32_t bump_texture;
-    int32_t specular_texture;
+    int32_t normal_texture;      // v2 里叫 bump
+    int32_t metal_rough_texture; // v2 里是 specular 灰度图(加载后按版本重解释)
     int32_t mask_texture;
     std::array<float, 4> base_color_factor;
     float metallic;
@@ -200,6 +228,7 @@ static_assert(sizeof(SponzaScene) == 25 * sizeof(float), "SponzaScene must match
 
 struct SponzaAsset
 {
+    uint32_t version = hzms_version_pbr;
     SponzaScene scene {};
     std::vector<SponzaVertex> vertices;
     std::vector<uint32_t> indices;
@@ -247,9 +276,9 @@ SponzaAsset load_hzms(const std::filesystem::path& path)
         throw std::runtime_error("Not an HZMS file: " + path.string());
 
     const uint32_t version = read_pod<uint32_t>(bytes, cursor);
-    if (version != hzms_version)
+    if (version != hzms_version_legacy && version != hzms_version_pbr)
         throw std::runtime_error("HZMS version " + std::to_string(version) +
-                                 " is not supported, expected " + std::to_string(hzms_version));
+                                 " is not supported (expected 2 or 3)");
 
     const uint32_t vertex_count = read_pod<uint32_t>(bytes, cursor);
     const uint32_t index_count = read_pod<uint32_t>(bytes, cursor);
@@ -259,6 +288,7 @@ SponzaAsset load_hzms(const std::filesystem::path& path)
     const uint32_t string_bytes = read_pod<uint32_t>(bytes, cursor);
 
     SponzaAsset asset;
+    asset.version = version;
     asset.scene = read_pod<SponzaScene>(bytes, cursor);
 
     read_array(bytes, cursor, asset.vertices, vertex_count);
@@ -278,6 +308,18 @@ SponzaAsset load_hzms(const std::filesystem::path& path)
         if (offset >= strings.size())
             throw std::runtime_error("HZMS: texture name offset out of range");
         asset.texture_names.emplace_back(strings.data() + offset);
+    }
+
+    // v2 旧资产:槽位2 是 specular 灰度图,不是 metallicRoughness,渲染端
+    // 不再使用 —— 退化为常量 MR(石质场景的合理近似),等待 v3 资产。
+    if (version == hzms_version_legacy)
+    {
+        for (SponzaMaterial& material : asset.materials)
+        {
+            material.metal_rough_texture = -1;
+            material.metallic = 0.0f;
+            material.roughness = 0.72f;
+        }
     }
 
     return asset;
@@ -535,10 +577,9 @@ struct FlyCamera
 
 // Combine-pass inspection views, cycled with G. Kept in sync with the
 // DEBUG_* constants in sponza_combine_frag.glsl.
-constexpr std::array<const char*, 10> debug_mode_names = {
-    "final", "albedo", "normal", "diffuse light (x0.25)",
-    "specular light", "specular mask", "gloss", "ambient occlusion",
-    "indirect (IBL x AO)", "specular tint (metalness)"
+constexpr std::array<const char*, 8> debug_mode_names = {
+    "final", "albedo", "normal", "direct light (Disney)",
+    "metallic", "roughness", "ambient occlusion", "indirect (IBL x AO)"
 };
 
 struct InputState
@@ -629,7 +670,8 @@ void run_example_sponza()
     }
 
     const SponzaAsset asset = load_hzms(spz_asset_root / "sponza.bin");
-    std::printf("[sponza] %zu vertices, %zu indices, %zu submeshes, %zu materials, %zu textures\n",
+    std::printf("[sponza] %s (HZMS v%u): %zu vertices, %zu indices, %zu submeshes, %zu materials, %zu textures\n",
+                spz_asset_root.filename().string().c_str(), asset.version,
                 asset.vertices.size(), asset.indices.size(), asset.submeshes.size(),
                 asset.materials.size(), asset.texture_names.size());
 
@@ -670,17 +712,19 @@ void run_example_sponza()
         return texture_descriptors[static_cast<size_t>(texture_index)];
     };
 
-    // G-buffer: albedo + world normal + device depth (R32F colour target)
+    // G-buffer: albedo+metallic / world normal+roughness / device depth。
+    // normal 与 depthval 额外带 Storage:SSR compute 用 imageLoad 直接读。
     const auto gbuffer_usage =
         Corona::Horizon::ImageUsageFlags::ColorAttachment | Corona::Horizon::ImageUsageFlags::Sampled;
+    const auto gbuffer_storage_usage = gbuffer_usage | Corona::Horizon::ImageUsageFlags::Storage;
     Corona::Horizon::HardwareImage gbuffer_albedo(Corona::Horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, Corona::Horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_sponza.gbuffer.albedo"));
-    gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // a=metallic,清 0
     Corona::Horizon::HardwareImage gbuffer_normal(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_sponza.gbuffer.normal"));
+        spz_width, spz_height, Corona::Horizon::Format::RGBA8_UNORM, gbuffer_storage_usage, "example_sponza.gbuffer.normal"));
     gbuffer_normal.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
     Corona::Horizon::HardwareImage gbuffer_depth_val(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT, gbuffer_usage, "example_sponza.gbuffer.depthval"));
+        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT, gbuffer_storage_usage, "example_sponza.gbuffer.depthval"));
     gbuffer_depth_val.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // far plane
 
     Corona::Horizon::HardwareImage gbuffer_depth(Corona::Horizon::HardwareImageDesc::depth_attachment(
@@ -698,6 +742,22 @@ void run_example_sponza()
     // seeds every pixel with a full-strength highlight.
     light_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
 
+    // combine 的输出:线性 HDR(a=reflectivity),SSR 的采样源与合成底色。
+    Corona::Horizon::HardwareImage hdr_buffer(Corona::Horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT, gbuffer_storage_usage,
+        "example_sponza.hdr"));
+    hdr_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+
+    // SSR 中间图:view 空间线性深度 + 反射色/权重
+    Corona::Horizon::HardwareImage ssr_linear_depth(Corona::Horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT,
+        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled,
+        "example_sponza.ssr.lineardepth"));
+    Corona::Horizon::HardwareImage ssr_buffer(Corona::Horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT,
+        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled,
+        "example_sponza.ssr.buffer"));
+
     Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT,
         Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
@@ -706,37 +766,48 @@ void run_example_sponza()
         "example_sponza.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // Environment probe for indirect light, reusing the DDS cubemaps example_ibl
-    // ships. Sponza has no probe of its own, and an outdoor courtyard probe is a
-    // reasonable stand-in for an open-roofed atrium.
+    // CC0 Poly Haven "Kloppenheim 03 (Pure Sky)",预卷积为 GGX radiance +
+    // cosine-weighted irradiance。蓝天白云比旧 bolonga 城市 probe 更适合中庭。
     const std::filesystem::path env_root =
         std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
-    const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "bolonga_irr.dds");
-    const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "bolonga_lod.dds");
+    const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_irr.dds");
+    const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_lod.dds");
     Corona::Horizon::HardwareImage env_irradiance =
         create_cubemap_image(irradiance_dds, "example_sponza.env.irr");
     Corona::Horizon::HardwareImage env_radiance =
         create_cubemap_image(radiance_dds, "example_sponza.env.lod");
 
-    // Sun shadow map: depth from the light, in an R32F colour target. Full float
-    // precision avoids the RGBA8 pack/unpack that example_shadowmaps needs.
+    // Sun RSM: depth (R32F, 阴影比较) + 世界法线 + flux(albedo),三附件 MRT。
+    // 深度存 R32F 颜色目标,免去 example_shadowmaps 的 RGBA8 打包。
     Corona::Horizon::HardwareImage shadow_map(Corona::Horizon::HardwareImageDesc::texture_2d(
         spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::R32_FLOAT,
-        gbuffer_usage, "example_sponza.shadowmap"));
+        gbuffer_usage, "example_sponza.rsm.depth"));
     shadow_map.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // far plane
+
+    Corona::Horizon::HardwareImage rsm_normal_map(Corona::Horizon::HardwareImageDesc::texture_2d(
+        spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::RGBA8_UNORM,
+        gbuffer_usage, "example_sponza.rsm.normal"));
+    rsm_normal_map.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
+
+    Corona::Horizon::HardwareImage rsm_flux_map(Corona::Horizon::HardwareImageDesc::texture_2d(
+        spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::RGBA8_UNORM,
+        gbuffer_usage, "example_sponza.rsm.flux"));
+    rsm_flux_map.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // 零 flux → gather 无贡献
 
     Corona::Horizon::HardwareImage shadow_depth(Corona::Horizon::HardwareImageDesc::depth_attachment(
         spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::D32,
-        "example_sponza.shadowmap.depth"));
+        "example_sponza.rsm.zbuffer"));
     shadow_depth.set_clear_depth(1.0f, 0);
 
-    // Pass 0: sun shadow map
+    // Pass 0: sun RSM (depth / normal / flux)
     Corona::Horizon::RasterizerPipelineDesc shadow_desc;
     shadow_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipeline shadow_rasterizer(sponza_shadow_vert_glsl,
                                                           sponza_shadow_frag_glsl, shadow_desc);
     shadow_rasterizer.outDepth = shadow_map;
+    shadow_rasterizer.outNormal = rsm_normal_map;
+    shadow_rasterizer.outFlux = rsm_flux_map;
     shadow_rasterizer.bind_depth_target(shadow_depth);
 
     // Pass 1: geometry -> G-buffer (single MRT pass, three colour attachments)
@@ -765,9 +836,12 @@ void run_example_sponza()
 
     Corona::Horizon::RasterizerPipeline light_rasterizer(sponza_light_vert_glsl, sponza_light_frag_glsl, light_desc);
     light_rasterizer.outColor = light_buffer;
+    light_rasterizer.vpc.gAlbedoIndex = gbuffer_albedo.store_descriptor();
     light_rasterizer.vpc.gNormalIndex = gbuffer_normal.store_descriptor();
     light_rasterizer.vpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
     light_rasterizer.vpc.gShadowIndex = shadow_map.store_descriptor();
+    light_rasterizer.vpc.rsmNormalIndex = rsm_normal_map.store_descriptor();
+    light_rasterizer.vpc.rsmFluxIndex = rsm_flux_map.store_descriptor();
 
     // SSAO: raw occlusion then a cross-bilateral blur, both full screen.
     Corona::Horizon::HardwareImage ssao_raw(Corona::Horizon::HardwareImageDesc::texture_2d(
@@ -797,6 +871,7 @@ void run_example_sponza()
     ssao_blur_rasterizer.outAo = ssao_blurred;
     ssao_blur_rasterizer.fpc.gAoIndex = ssao_raw.store_descriptor();
     ssao_blur_rasterizer.fpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
+    ssao_blur_rasterizer.fpc.gNormalIndex = gbuffer_normal.store_descriptor();
 
     // Pass 3: combine
     Corona::Horizon::RasterizerPipelineDesc combine_desc;
@@ -804,8 +879,9 @@ void run_example_sponza()
     combine_desc.depth_stencil.depth_write_enabled = false;
     combine_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
+    // combine 渲染进线性 HDR(不再直接进 final output;SSR composite 收尾)
     Corona::Horizon::RasterizerPipeline combine_rasterizer(sponza_combine_vert_glsl, sponza_combine_frag_glsl, combine_desc);
-    combine_rasterizer.outColor = final_output_image;
+    combine_rasterizer.outColor = hdr_buffer;
     combine_rasterizer.fpc.gAlbedoIndex = gbuffer_albedo.store_descriptor();
     combine_rasterizer.fpc.gLightIndex = light_buffer.store_descriptor();
     combine_rasterizer.fpc.gNormalIndex = gbuffer_normal.store_descriptor();
@@ -813,8 +889,20 @@ void run_example_sponza()
     combine_rasterizer.fpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
     combine_rasterizer.fpc.texCubeIrrIndex = env_irradiance.store_descriptor();
     combine_rasterizer.fpc.texCubeLodIndex = env_radiance.store_descriptor();
-    // fpc.ambient (rgb: ambient floor, w: exposure) is refreshed every frame from
-    // the ImGui panel; see the combine block in the render loop.
+    // fpc.ambient (rgb: ambient floor) is refreshed every frame from the ImGui
+    // panel; see the combine block in the render loop.
+
+    // SSR compute 链:线性深度 → 步进反射 → 合成+曝光+filmic
+    Corona::Horizon::ComputePipeline ssr_linear_depth_compute(ssr_linear_depth_compute_glsl, ktm::uvec3(8, 8, 1));
+    Corona::Horizon::ComputePipeline ssr_trace_compute(sponza_ssr_trace_compute_glsl, ktm::uvec3(8, 8, 1));
+    Corona::Horizon::ComputePipeline ssr_composite_compute(sponza_ssr_composite_compute_glsl, ktm::uvec3(8, 8, 1));
+
+    const uint32_t gbuffer_depth_val_id = gbuffer_depth_val.store_descriptor();
+    const uint32_t gbuffer_normal_id = gbuffer_normal.store_descriptor();
+    const uint32_t hdr_buffer_id = hdr_buffer.store_descriptor();
+    const uint32_t ssr_linear_depth_id = ssr_linear_depth.store_descriptor();
+    const uint32_t ssr_buffer_id = ssr_buffer.store_descriptor();
+    const uint32_t final_output_id = final_output_image.store_descriptor();
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;
@@ -824,7 +912,9 @@ void run_example_sponza()
     quad_params.index_type = Corona::Horizon::IndexType::UInt32;
     quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
 
-    // Camera starts at the viewpoint authored in the glTF scene.
+    // Camera starts from the asset view, with a corrected hero shot for Intel
+    // Sponza. The converted bounds include side buildings, so their midpoint
+    // put the old camera directly behind a first-floor column.
     const glm::vec3 scene_min = to_vec3(asset.scene.min);
     const glm::vec3 scene_max = to_vec3(asset.scene.max);
     const glm::vec3 scene_center = (scene_min + scene_max) * 0.5f;
@@ -832,12 +922,103 @@ void run_example_sponza()
 
     FlyCamera camera;
     camera.position = to_vec3(asset.scene.camera_position);
+    glm::vec3 camera_target = to_vec3(asset.scene.camera_target);
+    const float main_floor_y =
+        asset.version == hzms_version_pbr ? 0.0f : camera.position.y - scene_extent.y * 0.10f;
+    const float hall_center_z =
+        asset.version == hzms_version_pbr ? 0.0f : camera.position.z;
+    if (asset.version == hzms_version_pbr)
     {
-        const glm::vec3 dir = glm::normalize(to_vec3(asset.scene.camera_target) - camera.position);
+        // Beauty camera captured from the live session. Keep yaw unwrapped so
+        // this is the exact runtime state the artist approved.
+        camera.position = glm::vec3(13.3404408f, 1.889889f, -0.84720045f);
+        camera.yaw = 10.9808016f;
+        camera.pitch = 0.07695994f;
+    }
+    else
+    {
+        const glm::vec3 dir = glm::normalize(camera_target - camera.position);
         camera.pitch = std::asin(std::clamp(dir.y, -1.0f, 1.0f));
         camera.yaw = std::atan2(dir.x, dir.z);
     }
     camera.speed = glm::length(scene_extent) * 0.12f;
+    const FlyCamera default_camera = camera;
+
+    // ---- SSR 演示镜:中殿反射池 ----
+    // 水平镜面能稳定反射当前屏幕里的拱廊、二层和天空。旧版额外放置的
+    // 斜立镜既挡构图又主要反射屏幕外内容,不适合作为 SSR 展示。
+    const float mirror_diag = glm::length(scene_extent);
+    const float mirror_y = main_floor_y + mirror_diag * 0.00045f;
+    const glm::vec3 pool_center(scene_min.x + scene_extent.x * 0.58f,
+                                mirror_y, hall_center_z);
+
+    const auto make_panel = [](std::vector<SponzaVertex>& out_v, std::vector<uint32_t>& out_i,
+                               const glm::vec3& center, const glm::vec3& normal_dir,
+                               float width, float height) {
+        const glm::vec3 n = glm::normalize(normal_dir);
+        const glm::vec3 helper_up = std::abs(n.y) > 0.9f ? glm::vec3(0.0f, 0.0f, 1.0f)
+                                                         : glm::vec3(0.0f, 1.0f, 0.0f);
+        const glm::vec3 right = glm::normalize(glm::cross(helper_up, n));
+        const glm::vec3 v_up = glm::normalize(glm::cross(n, right));
+        const uint32_t base = static_cast<uint32_t>(out_v.size());
+        const glm::vec3 corners[4] = {
+            center - right * (width * 0.5f) - v_up * (height * 0.5f),
+            center + right * (width * 0.5f) - v_up * (height * 0.5f),
+            center - right * (width * 0.5f) + v_up * (height * 0.5f),
+            center + right * (width * 0.5f) + v_up * (height * 0.5f),
+        };
+        const float uvs[4][2] = { { 0, 1 }, { 1, 1 }, { 0, 0 }, { 1, 0 } };
+        for (int i = 0; i < 4; ++i)
+        {
+            SponzaVertex v {};
+            v.position = { corners[i].x, corners[i].y, corners[i].z };
+            v.normal = { n.x, n.y, n.z };
+            v.tangent = { right.x, right.y, right.z, 1.0f };
+            v.uv = { uvs[i][0], uvs[i][1] };
+            out_v.push_back(v);
+        }
+        for (uint32_t idx : { 0u, 1u, 2u, 1u, 3u, 2u })
+            out_i.push_back(base + idx);
+    };
+
+    std::vector<SponzaVertex> mirror_vertices;
+    std::vector<uint32_t> mirror_indices;
+    // 0: 镜面;1:略低且略大的深石围边。
+    make_panel(mirror_vertices, mirror_indices, pool_center, glm::vec3(0.0f, 1.0f, 0.0f),
+               scene_extent.x * 0.19f, scene_extent.z * 0.105f);
+    make_panel(mirror_vertices, mirror_indices,
+               pool_center - glm::vec3(0.0f, mirror_diag * 0.00025f, 0.0f),
+               glm::vec3(0.0f, 1.0f, 0.0f),
+               scene_extent.x * 0.215f, scene_extent.z * 0.135f);
+    struct MirrorRange { uint32_t first; uint32_t count; };
+    const MirrorRange mirror_pool_range { 0, 6 };
+    const MirrorRange mirror_frame_range { 6, 6 };
+
+    Corona::Horizon::HardwareBuffer mirror_vb =
+        Corona::Horizon::HardwareBuffer::vertex(mirror_vertices, "example_sponza.mirror.vb");
+    Corona::Horizon::HardwareBuffer mirror_ib =
+        Corona::Horizon::HardwareBuffer::index(mirror_indices, "example_sponza.mirror.ib");
+
+    // 无贴图材质用的 1x1 白图(geom/shadow FS 无条件采样 baseColor)
+    Corona::Horizon::HardwareImage white_texture = [] {
+        Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::texture_2d(
+            1, 1, Corona::Horizon::Format::RGBA8_UNORM,
+            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst,
+            "example_sponza.white");
+        Corona::Horizon::HardwareImage image(desc);
+        const std::array<uint8_t, 4> pixel = { 255, 255, 255, 255 };
+        Corona::Horizon::HardwareBufferDesc staging_desc;
+        staging_desc.element_count = pixel.size();
+        staging_desc.element_size = 1;
+        staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
+        staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
+        Corona::Horizon::HardwareBuffer staging(staging_desc,
+                                                std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
+        Corona::Horizon::HardwareExecutor executor;
+        (void)(executor.stream() << image.copy_from(staging, 0, 0, 0) << Corona::Horizon::commit());
+        return image;
+    }();
+    const uint32_t white_descriptor = white_texture.store_descriptor();
 
     constexpr float aspect = static_cast<float>(spz_width) / static_cast<float>(spz_height);
     const float z_far = glm::length(scene_extent) * 2.0f;
@@ -851,12 +1032,10 @@ void run_example_sponza()
     const glm::vec3 light_area(scene_extent.x * 0.40f, scene_extent.y * 0.22f, scene_extent.z * 0.16f);
     const glm::vec3 light_origin(scene_center.x, scene_min.y + scene_extent.y * 0.22f, scene_center.z);
 
-    // Sun shadow matrix. Both the sun and the geometry are static, so this is
-    // built once; the shadow pass itself is still re-recorded per frame because
-    // it is cheap next to the G-buffer pass.
-    const glm::vec3 sun_direction = glm::normalize(to_vec3(asset.scene.sun_direction));
+    // Sun matrices are rebuilt per frame: the direction is imgui-driven
+    // (azimuth/elevation, 白天斜射). Ortho projection over the whole scene.
     const float scene_radius = glm::length(scene_extent) * 0.5f;
-    const glm::mat4 sun_view_proj = [&] {
+    const auto build_sun_view_proj = [&](const glm::vec3& sun_direction) {
         // Guard the up vector in case the sun ever points straight down.
         const glm::vec3 up = std::abs(sun_direction.y) > 0.99f ? glm::vec3(0.0f, 0.0f, 1.0f)
                                                                : glm::vec3(0.0f, 1.0f, 0.0f);
@@ -869,13 +1048,45 @@ void run_example_sponza()
                                             0.0f, scene_radius * 3.0f);
         light_proj[1][1] *= -1.0f; // Vulkan clip space Y flip
         return light_proj * light_view;
-    }();
+    };
     // One shadow texel covers this much world space; used for the normal offset.
     const float shadow_texel_world = (2.0f * scene_radius) / static_cast<float>(spz_shadow_map_size);
 
+    // SSR 的投影系数(同 example_ssr):
+    //   viewZ   = p32 / (device_z - p22)
+    //   view.xy = (uv * (2/p00, 2/p11) + (-1/p00, -1/p11)) * viewZ
+    const float p00 = proj[0][0];
+    const float p11 = proj[1][1];
+    const float p22 = proj[2][2];
+    const float p32 = proj[3][2];
+    const glm::vec4 ssr_depth_unpack(p32, -p22, 0.0f, 0.0f);
+    const glm::vec4 ssr_ndc_to_view(2.0f / p00, 2.0f / p11, -1.0f / p00, -1.0f / p11);
+    const uint32_t ssr_dispatch_x = (spz_width + 7) / 8;
+    const uint32_t ssr_dispatch_y = (spz_height + 7) / 8;
+
     HorizonImGuiLayer ui(window, spz_width, spz_height);
 
-    Tuning tuning;
+    // 世界空间量按场景尺度初始化:旧 Khronos 资产是 cm 级(~3700 单位跨度),
+    // Intel 资产是米级(~30 单位),写死的默认值只能对一个尺度成立。
+    const float scene_diag = glm::length(scene_extent);
+    const auto make_default_tuning = [&] {
+        Tuning defaults;
+        // The Intel PBR scene uses the exact live beauty preset above. Legacy
+        // centimeter-scale assets still need world-space controls rescaled.
+        if (asset.version != hzms_version_pbr)
+        {
+            defaults.ssr_max_distance = scene_diag * 0.55f;
+            defaults.ssr_thickness = scene_diag * 0.0035f;
+            defaults.point_radius = scene_diag * 0.10f;
+            defaults.ssao_radius = scene_diag * 0.015f;
+            defaults.ssao_bias = scene_diag * 0.00025f;
+            defaults.ssao_blur_depth_sigma = scene_diag * 0.006f;
+        }
+        return defaults;
+    };
+    Tuning tuning = make_default_tuning();
+    const float rsm_clamp_d2 = (scene_radius * 0.02f) * (scene_radius * 0.02f);
+    uint32_t frame_index = 0;
 
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
@@ -901,73 +1112,93 @@ void run_example_sponza()
                          static_cast<int>(debug_mode_names.size())))
             g_input.debug_mode = static_cast<uint32_t>(debug_mode);
 
-        if (ImGui::CollapsingHeader("Direct light", ImGuiTreeNodeFlags_DefaultOpen))
+        if (ImGui::CollapsingHeader("Sun (daylight)", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::SeparatorText("Sun");
-            ImGui::SliderFloat("sun intensity", &tuning.sun_intensity, 0.0f, 2.0f);
+            ImGui::SliderFloat("elevation", &tuning.sun_elevation_deg, 5.0f, 89.0f);
+            ImGui::SliderFloat("azimuth", &tuning.sun_azimuth_deg, -180.0f, 180.0f);
+            ImGui::SliderFloat("sun intensity", &tuning.sun_intensity, 0.0f, 10.0f);
             ImGui::ColorEdit3("sun colour", &tuning.sun_color.x);
             ImGui::Checkbox("cast shadows", &tuning.sun_shadow);
             if (tuning.sun_shadow)
                 ImGui::SliderFloat("shadow bias", &tuning.shadow_bias, 0.0f, 0.01f, "%.4f");
+        }
 
-            ImGui::SeparatorText("Point lights");
+        if (ImGui::CollapsingHeader("RSM indirect (1-bounce)", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Checkbox("enable##rsm", &tuning.rsm_enable);
+            ImGui::SliderFloat("intensity##rsm", &tuning.rsm_intensity, 0.0f, 200.0f);
+            ImGui::SliderFloat("sample radius (uv)", &tuning.rsm_radius, 0.02f, 0.5f);
+        }
+
+        if (ImGui::CollapsingHeader("Disney BRDF"))
+        {
+            ImGui::TextWrapped("Sponza mesh: Disney diffuse only. Metallic, dielectric"
+                               " specular, sheen and clearcoat are disabled; the reflection"
+                               " pool is authored separately as a metal.");
+            ImGui::SliderFloat("subsurface", &tuning.disney_subsurface, 0.0f, 1.0f);
+        }
+
+        if (ImGui::CollapsingHeader("SSR", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Checkbox("enable##ssr", &tuning.ssr_enable);
+            ImGui::Checkbox("show mirrors", &tuning.mirror_enable);
+            ImGui::SliderFloat("mirror roughness", &tuning.mirror_roughness, 0.0f, 0.5f);
+            ImGui::SliderFloat("intensity##ssr", &tuning.ssr_intensity, 0.0f, 2.0f);
+            ImGui::SliderFloat("max distance", &tuning.ssr_max_distance, scene_diag * 0.02f, scene_diag * 1.5f);
+            ImGui::SliderInt("steps", &tuning.ssr_steps, 4, 128);
+            ImGui::SliderFloat("thickness", &tuning.ssr_thickness, scene_diag * 0.0005f, scene_diag * 0.05f);
+            ImGui::SliderInt("refine steps", &tuning.ssr_refine_steps, 0, 8);
+            ImGui::Checkbox("jitter", &tuning.ssr_jitter);
+            ImGui::SliderFloat("fresnel power", &tuning.ssr_fresnel_power, 1.0f, 8.0f);
+            ImGui::Combo("SSR debug", &tuning.ssr_debug, "off\0reflection\0weight\0reflectivity\0");
+        }
+
+        if (ImGui::CollapsingHeader("Point lights"))
+        {
             ImGui::SliderInt("count", &tuning.point_light_count, 0, spz_max_lights);
             ImGui::SliderFloat("intensity", &tuning.point_intensity, 0.0f, 1.0f);
-            ImGui::SliderFloat("radius", &tuning.point_radius, 50.0f, 1500.0f);
-            // 0 falls off from the centre; 0.8 is what example_deferred uses and
-            // at this scale it saturates the accumulation buffer.
+            ImGui::SliderFloat("radius", &tuning.point_radius, scene_diag * 0.01f, scene_diag * 0.4f);
             ImGui::SliderFloat("falloff start", &tuning.point_inner, 0.0f, 0.95f);
             ImGui::Checkbox("animate", &tuning.animate_lights);
             ImGui::SameLine();
             ImGui::SliderFloat("speed", &tuning.light_speed, 0.0f, 1.5f);
-
-            ImGui::SeparatorText("Shared");
-            ImGui::SliderFloat("specular strength", &tuning.specular_strength, 0.0f, 2.0f);
         }
 
-        if (ImGui::CollapsingHeader("Surface response", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::TextWrapped("All 25 glTF materials share metallic 0.588 / roughness 0.9, "
-                               "so the '*_spec' maps are the only per-material signal. They "
-                               "drive both intensity and gloss through these ranges.");
-            ImGui::SliderFloat("specular min", &tuning.spec_min, 0.0f, 1.0f);
-            ImGui::SliderFloat("specular max", &tuning.spec_max, 0.0f, 1.0f);
-            ImGui::SliderFloat("gloss min", &tuning.gloss_min, 0.0f, 1.0f);
-            ImGui::SliderFloat("gloss max", &tuning.gloss_max, 0.0f, 1.0f);
-            ImGui::SeparatorText("No spec map (curtains, roof, ...)");
-            ImGui::SliderFloat("specular##nomap", &tuning.no_map_specular, 0.0f, 1.0f);
-            ImGui::SliderFloat("gloss##nomap", &tuning.no_map_gloss, 0.0f, 1.0f);
-
-            ImGui::SeparatorText("Metalness proxy (experimental, off)");
-            ImGui::TextWrapped("Does not work here: '*_spec' encodes shininess, not "
-                               "metalness, and the shiniest surface is the marble floor "
-                               "(197/255) not the flagpole (76). Raising this tints the "
-                               "floor first. Check the 'specular tint' view to see it.");
-            ImGui::SliderFloat("metal tint (0 = off)", &tuning.metal_tint, 0.0f, 1.0f);
-            ImGui::SliderFloat("metal low", &tuning.metal_low, 0.0f, 1.0f);
-            ImGui::SliderFloat("metal high", &tuning.metal_high, 0.0f, 1.0f);
-        }
-
-        if (ImGui::CollapsingHeader("Indirect light", ImGuiTreeNodeFlags_DefaultOpen))
+        if (ImGui::CollapsingHeader("Indirect light (IBL)", ImGuiTreeNodeFlags_DefaultOpen))
         {
             ImGui::SeparatorText("IBL probe");
             ImGui::SliderFloat("irradiance (diffuse)", &tuning.irradiance_scale, 0.0f, 2.0f);
             ImGui::SliderFloat("radiance (specular)", &tuning.radiance_scale, 0.0f, 2.0f);
+            ImGui::SliderFloat("environment rotation", &tuning.env_rotation_deg, -180.0f, 180.0f);
             ImGui::ColorEdit3("ambient floor", &tuning.ambient_floor.x);
 
             // The SSAO passes always run; strength 0 just makes the buffer
             // uniform white, which is the visual equivalent of switching it off.
             ImGui::SeparatorText("Ambient occlusion");
             ImGui::SliderFloat("AO strength (0 = off)", &tuning.ssao_intensity, 0.0f, 2.0f);
-            ImGui::SliderFloat("AO radius", &tuning.ssao_radius, 5.0f, 250.0f);
-            ImGui::SliderFloat("AO bias", &tuning.ssao_bias, 0.0f, 10.0f);
+            ImGui::SliderFloat("AO radius", &tuning.ssao_radius, scene_diag * 0.001f, scene_diag * 0.06f);
+            ImGui::SliderFloat("AO bias", &tuning.ssao_bias, 0.0f, scene_diag * 0.003f);
         }
 
-        if (ImGui::CollapsingHeader("Output"))
+        if (ImGui::CollapsingHeader("Output", ImGuiTreeNodeFlags_DefaultOpen))
+        {
             ImGui::SliderFloat("exposure", &tuning.exposure, 0.1f, 4.0f);
+            ImGui::SeparatorText("Highlight bloom");
+            ImGui::SliderFloat("bloom intensity", &tuning.bloom_intensity, 0.0f, 0.35f);
+            ImGui::SliderFloat("bloom threshold", &tuning.bloom_threshold, 0.1f, 4.0f);
+            ImGui::SliderFloat("bloom radius", &tuning.bloom_radius, 1.0f, 8.0f);
+            ImGui::SeparatorText("Color grade");
+            ImGui::SliderFloat("contrast", &tuning.output_contrast, 0.8f, 1.25f);
+            ImGui::SliderFloat("saturation", &tuning.output_saturation, 0.0f, 1.35f);
+            ImGui::SliderFloat("temperature", &tuning.output_temperature, -0.25f, 0.25f);
+            ImGui::SliderFloat("vignette", &tuning.vignette, 0.0f, 0.35f);
+        }
 
         if (ImGui::Button("Reset to defaults"))
-            tuning = Tuning {};
+        {
+            tuning = make_default_tuning();
+            camera = default_camera;
+        }
         ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
@@ -1001,10 +1232,19 @@ void run_example_sponza()
             fps_frame_count = 0;
         }
 
-        // Pass 0: sun shadow map. Alpha-masked materials need their mask here too,
-        // otherwise foliage casts the shadow of its quads instead of its silhouette.
+        // 每帧由方位/仰角滑条重建太阳方向与正交矩阵(白天斜射平行光)。
+        const float sun_el = glm::radians(tuning.sun_elevation_deg);
+        const float sun_az = glm::radians(tuning.sun_azimuth_deg);
+        const glm::vec3 sun_direction = glm::normalize(glm::vec3(
+            std::cos(sun_el) * std::sin(sun_az), -std::sin(sun_el), std::cos(sun_el) * std::cos(sun_az)));
+        const glm::mat4 sun_view_proj = build_sun_view_proj(sun_direction);
+        const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
+
+        // Pass 0: sun RSM (depth/normal/flux)。Alpha-masked materials need their
+        // mask here too, otherwise foliage casts the shadow of its quads.
         shadow_rasterizer.clear_records();
         shadow_rasterizer.vsp.light_view_proj = sun_view_proj;
+        shadow_rasterizer.vsp.sun_color = glm::vec4(tuning.sun_color, 0.0f);
         for (const SponzaSubmesh& submesh : asset.submeshes)
         {
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
@@ -1014,7 +1254,13 @@ void run_example_sponza()
             uint32_t flags = 0;
             if ((material.flags & hzms_material_alpha_mask) != 0 && material.mask_texture >= 0)
                 flags |= shader_material_alpha_mask;
+            if ((material.flags & hzms_material_mask_uses_alpha) != 0)
+                flags |= shader_material_mask_uses_alpha;
 
+            shadow_rasterizer.model_pc.base_color_factor = glm::vec4(
+                material.base_color_factor[0], material.base_color_factor[1],
+                material.base_color_factor[2], material.base_color_factor[3]);
+            shadow_rasterizer.model_pc.tex_base_color_index = descriptor_of(material.base_color_texture);
             shadow_rasterizer.model_pc.tex_mask_index = descriptor_of(material.mask_texture);
             shadow_rasterizer.model_pc.material_flags = flags;
 
@@ -1024,14 +1270,27 @@ void run_example_sponza()
             params.first_index = submesh.first_index;
             shadow_rasterizer.record(scene_ib, scene_vb, params);
         }
+        if (tuning.mirror_enable)
+        {
+            // 镜面池也进 RSM/阴影:albedo 压暗(镜面几乎不产生漫反射弹射)
+            const MirrorRange mirror_ranges[2] = { mirror_pool_range, mirror_frame_range };
+            shadow_rasterizer.model_pc.base_color_factor = glm::vec4(0.12f, 0.12f, 0.12f, 1.0f);
+            shadow_rasterizer.model_pc.tex_base_color_index = white_descriptor;
+            shadow_rasterizer.model_pc.tex_mask_index = white_descriptor;
+            shadow_rasterizer.model_pc.material_flags = 0;
+            for (const MirrorRange& range : mirror_ranges)
+            {
+                Corona::Horizon::DrawIndexedParams params;
+                params.index_type = Corona::Horizon::IndexType::UInt32;
+                params.index_count = range.count;
+                params.first_index = range.first;
+                shadow_rasterizer.record(mirror_ib, mirror_vb, params);
+            }
+        }
 
         // Pass 1: one draw per submesh, material switched through the push constant.
         geom_rasterizer.clear_records();
         geom_rasterizer.vsp.view_proj = view_proj;
-        geom_rasterizer.vsp.spec_range = glm::vec4(tuning.spec_min, tuning.spec_max,
-                                                    tuning.gloss_min, tuning.gloss_max);
-        geom_rasterizer.vsp.no_map_material = glm::vec4(tuning.no_map_specular,
-                                                         tuning.no_map_gloss, 0.0f, 0.0f);
         for (const SponzaSubmesh& submesh : asset.submeshes)
         {
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
@@ -1039,19 +1298,24 @@ void run_example_sponza()
             const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
 
             uint32_t flags = 0;
-            if (material.bump_texture >= 0)
+            if (material.normal_texture >= 0)
                 flags |= shader_material_has_normal;
             if ((material.flags & hzms_material_alpha_mask) != 0 && material.mask_texture >= 0)
                 flags |= shader_material_alpha_mask;
-            if (material.specular_texture >= 0)
-                flags |= shader_material_has_specular;
+            if (material.metal_rough_texture >= 0)
+                flags |= shader_material_has_metalrough;
+            if ((material.flags & hzms_material_mask_uses_alpha) != 0)
+                flags |= shader_material_mask_uses_alpha;
 
             geom_rasterizer.model_pc.base_color_factor = glm::vec4(
                 material.base_color_factor[0], material.base_color_factor[1],
                 material.base_color_factor[2], material.base_color_factor[3]);
+            // Sponza 的石、砖、木、灰泥统一按非金属 diffuse 材质展示;
+            // MR 贴图仍提供每像素 roughness,镜面池在下面单独写 metallic=1。
+            geom_rasterizer.model_pc.mr_factor = glm::vec4(0.0f, material.roughness, 0.0f, 0.0f);
             geom_rasterizer.model_pc.tex_base_color_index = descriptor_of(material.base_color_texture);
-            geom_rasterizer.model_pc.tex_normal_index = descriptor_of(material.bump_texture);
-            geom_rasterizer.model_pc.tex_specular_index = descriptor_of(material.specular_texture);
+            geom_rasterizer.model_pc.tex_normal_index = descriptor_of(material.normal_texture);
+            geom_rasterizer.model_pc.tex_metal_rough_index = descriptor_of(material.metal_rough_texture);
             geom_rasterizer.model_pc.tex_mask_index = descriptor_of(material.mask_texture);
             geom_rasterizer.model_pc.material_flags = flags;
 
@@ -1060,6 +1324,29 @@ void run_example_sponza()
             params.index_count = submesh.index_count;
             params.first_index = submesh.first_index;
             geom_rasterizer.record(scene_ib, scene_vb, params);
+        }
+        if (tuning.mirror_enable)
+        {
+            const auto record_panel = [&](const MirrorRange& range, const glm::vec4& color,
+                                          float metallic, float roughness) {
+                geom_rasterizer.model_pc.base_color_factor = color;
+                geom_rasterizer.model_pc.mr_factor = glm::vec4(metallic, roughness, 0.0f, 0.0f);
+                geom_rasterizer.model_pc.tex_base_color_index = white_descriptor;
+                geom_rasterizer.model_pc.tex_normal_index = white_descriptor;
+                geom_rasterizer.model_pc.tex_metal_rough_index = white_descriptor;
+                geom_rasterizer.model_pc.tex_mask_index = white_descriptor;
+                geom_rasterizer.model_pc.material_flags = 0;
+                Corona::Horizon::DrawIndexedParams params;
+                params.index_type = Corona::Horizon::IndexType::UInt32;
+                params.index_count = range.count;
+                params.first_index = range.first;
+                geom_rasterizer.record(mirror_ib, mirror_vb, params);
+            };
+            // 镜面:全金属、极低粗糙,银白底色;边框:深色粗糙
+            record_panel(mirror_pool_range, glm::vec4(0.93f, 0.95f, 0.97f, 1.0f),
+                         1.0f, tuning.mirror_roughness);
+            record_panel(mirror_frame_range, glm::vec4(0.055f, 0.045f, 0.038f, 1.0f),
+                         0.0f, 0.72f);
         }
 
         // Pass 1.5: SSAO over the G-buffer, then a cross-bilateral blur.
@@ -1074,24 +1361,31 @@ void run_example_sponza()
         ssao_blur_rasterizer.clear_records();
         ssao_blur_rasterizer.fsp.params = glm::vec4(1.0f / static_cast<float>(spz_width),
                                                      1.0f / static_cast<float>(spz_height),
-                                                     tuning.ssao_blur_rejection, 0.0f);
+                                                     tuning.ssao_blur_depth_sigma, 16.0f);
+        ssao_blur_rasterizer.fsp.depth_unpack = ssr_depth_unpack;
         ssao_blur_rasterizer.record(quad_ib, quad_vb, quad_params);
 
-        // Pass 2: the authored sun plus animated point lights, accumulated additively.
+        // Pass 2: Disney 直接光累积 —— 太阳(带 PCF 阴影 + RSM 单次弹射)+ 点光。
         light_rasterizer.clear_records();
         light_rasterizer.vsp.inv_view_proj = inv_view_proj;
         light_rasterizer.vsp.view = view;
         light_rasterizer.vsp.camera_pos = glm::vec4(camera.position, 1.0f);
         light_rasterizer.vsp.sun_view_proj = sun_view_proj;
+        light_rasterizer.vsp.inv_sun_view_proj = inv_sun_view_proj;
         light_rasterizer.vsp.shadow_params = glm::vec4(
             shadow_texel_world, tuning.shadow_bias, static_cast<float>(spz_shadow_map_size),
             tuning.sun_shadow ? 1.0f : 0.0f);
-        light_rasterizer.vsp.light_params = glm::vec4(tuning.specular_strength, 0.0f, 0.0f, 0.0f);
+        light_rasterizer.vsp.rsm_params = glm::vec4(
+            tuning.rsm_radius, tuning.rsm_intensity, tuning.rsm_enable ? 1.0f : 0.0f, rsm_clamp_d2);
+        light_rasterizer.vsp.disney0 = glm::vec4(tuning.disney_specular, tuning.disney_specular_tint,
+                                                 tuning.disney_sheen, tuning.disney_sheen_tint);
+        light_rasterizer.vsp.disney1 = glm::vec4(tuning.disney_clearcoat, tuning.disney_clearcoat_gloss,
+                                                 tuning.disney_subsurface, tuning.disney_anisotropic);
         visible_lights = 0;
 
         // Directional sun: negative radius selects the directional branch and the
         // rect covers the whole screen.
-        light_rasterizer.vpc.light_pos_radius = glm::vec4(to_vec3(asset.scene.sun_direction), -1.0f);
+        light_rasterizer.vpc.light_pos_radius = glm::vec4(sun_direction, -1.0f);
         light_rasterizer.vpc.light_rgb_inner_r =
             glm::vec4(tuning.sun_color * tuning.sun_intensity, 0.0f);
         light_rasterizer.vpc.rect = glm::vec4(-1.0f, -1.0f, 1.0f, 1.0f);
@@ -1155,18 +1449,58 @@ void run_example_sponza()
             ++visible_lights;
         }
 
-        // Pass 3: albedo x (light + ambient) + specular, tone mapped
+        // Pass 3: 直接光 + IBL/环境 × AO → 线性 HDR(a=reflectivity)
         combine_rasterizer.clear_records();
         combine_rasterizer.fpc.debugMode = g_input.debug_mode;
         combine_rasterizer.fsp.inv_view_proj = inv_view_proj;
         combine_rasterizer.fsp.camera_pos = glm::vec4(camera.position, 1.0f);
         combine_rasterizer.fsp.env_params = glm::vec4(
             tuning.irradiance_scale, tuning.radiance_scale,
-            static_cast<float>(radiance_dds.mip_count), 0.0f);
-        combine_rasterizer.fsp.metal_params = glm::vec4(tuning.metal_low, tuning.metal_high,
-                                                         tuning.metal_tint, 0.0f);
-        combine_rasterizer.fpc.ambient = glm::vec4(tuning.ambient_floor, tuning.exposure);
+            static_cast<float>(radiance_dds.mip_count),
+            glm::radians(tuning.env_rotation_deg));
+        combine_rasterizer.fpc.ambient = glm::vec4(tuning.ambient_floor, 0.0f);
         combine_rasterizer.record(quad_ib, quad_vb, quad_params);
+
+        // Pass 4-6: SSR compute 链
+        ssr_linear_depth_compute.pushConsts.depthID = gbuffer_depth_val_id;
+        ssr_linear_depth_compute.pushConsts.linearDepthID = ssr_linear_depth_id;
+        ssr_linear_depth_compute.pushConsts.depth_unpack = ssr_depth_unpack;
+        ssr_linear_depth_compute.pushConsts.params0 =
+            glm::vec4(float(spz_width), float(spz_height), z_far, 0.0f);
+
+        ssr_trace_compute.pushConsts.linearDepthID = ssr_linear_depth_id;
+        ssr_trace_compute.pushConsts.normalID = gbuffer_normal_id;
+        ssr_trace_compute.pushConsts.colorID = hdr_buffer_id;
+        ssr_trace_compute.pushConsts.ssrID = ssr_buffer_id;
+        ssr_trace_compute.pushConsts.ndc_to_view = ssr_ndc_to_view;
+        ssr_trace_compute.pushConsts.params0 =
+            glm::vec4(p00, p11, tuning.ssr_max_distance, float(tuning.ssr_steps));
+        ssr_trace_compute.pushConsts.params1 = glm::vec4(
+            tuning.ssr_thickness, float(frame_index & 63u), float(spz_width), float(spz_height));
+        ssr_trace_compute.pushConsts.params2 = glm::vec4(
+            tuning.ssr_fresnel_power, 0.0f,
+            float(tuning.ssr_refine_steps), tuning.ssr_jitter ? 1.0f : 0.0f);
+        // view 旋转的三行(世界法线 → view 空间)
+        ssr_trace_compute.pushConsts.view_row0 = glm::vec4(view[0][0], view[1][0], view[2][0], 0.0f);
+        ssr_trace_compute.pushConsts.view_row1 = glm::vec4(view[0][1], view[1][1], view[2][1], 0.0f);
+        ssr_trace_compute.pushConsts.view_row2 = glm::vec4(view[0][2], view[1][2], view[2][2], 0.0f);
+
+        const bool debug_passthrough = g_input.debug_mode != 0;
+        ssr_composite_compute.pushConsts.colorID = hdr_buffer_id;
+        ssr_composite_compute.pushConsts.ssrID = ssr_buffer_id;
+        ssr_composite_compute.pushConsts.outputID = final_output_id;
+        ssr_composite_compute.pushConsts.params0 = glm::vec4(
+            float(spz_width), float(spz_height),
+            tuning.ssr_enable ? tuning.ssr_intensity : 0.0f,
+            debug_passthrough ? 1.0f : 0.0f);
+        ssr_composite_compute.pushConsts.params1 =
+            glm::vec4(tuning.exposure, float(tuning.ssr_debug), 0.0f, 0.0f);
+        ssr_composite_compute.pushConsts.params2 =
+            glm::vec4(tuning.bloom_threshold, tuning.bloom_intensity,
+                      tuning.bloom_radius, tuning.vignette);
+        ssr_composite_compute.pushConsts.grade =
+            glm::vec4(tuning.output_contrast, tuning.output_saturation,
+                      tuning.output_temperature, 0.0f);
 
         Corona::Horizon::SubmitReceipt render_receipt =
             render_executor << shadow_rasterizer(spz_shadow_map_size, spz_shadow_map_size)
@@ -1175,18 +1509,18 @@ void run_example_sponza()
                             << ssao_blur_rasterizer(spz_width, spz_height)
                             << light_rasterizer(spz_width, spz_height)
                             << combine_rasterizer(spz_width, spz_height)
+                            << ssr_linear_depth_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
+                            << ssr_trace_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
+                            << ssr_composite_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
                             << Corona::Horizon::submit;
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
                                          << Corona::Horizon::commit());
+        ++frame_index;
     }
 
     glfwDestroyWindow(window);
     glfwTerminate();
 }
-
-
-
-

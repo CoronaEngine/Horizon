@@ -12,8 +12,11 @@ layout(set = 3, binding = 0) uniform SponzaLightShared {
     mat4 view;
     vec4 camera_pos;
     mat4 sun_view_proj;
+    mat4 inv_sun_view_proj;
     vec4 shadow_params;
-    vec4 light_params;
+    vec4 rsm_params;
+    vec4 disney0;
+    vec4 disney1;
 } vsp;
 
 // Shared with sponza_light_frag.glsl; the layout must stay identical.
@@ -21,9 +24,12 @@ layout(push_constant) uniform SponzaLightPC {
     vec4 light_pos_radius;  // xyz: position, or direction when w < 0
     vec4 light_rgb_inner_r; // rgb: colour, w: inner falloff
     vec4 rect;              // xy: NDC min, zw: NDC max
+    uint gAlbedoIndex;
     uint gNormalIndex;
     uint gDepthIndex;
     uint gShadowIndex;
+    uint rsmNormalIndex;
+    uint rsmFluxIndex;
 } vpc;
 
 layout(location = 0) in vec3 inCorner;

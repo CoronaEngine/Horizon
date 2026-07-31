@@ -34,7 +34,7 @@ layout(location = 0) in vec2 v_texcoord;
 
 layout(location = 0) out vec4 outAo;
 
-const int sample_count = 16;
+const int sample_count = 24;
 
 // Golden-spiral hemisphere directions, scaled so samples cluster near the origin
 // (equivalent to the usual lerp-weighted kernel, without a uniform buffer).
@@ -75,12 +75,15 @@ void main()
     vec3 wpos = worldFromDepth(v_texcoord, deviceDepth);
     vec3 normal = normalize(texture(gNormal, v_texcoord).xyz * 2.0 - 1.0);
 
-    // Random-rotated tangent frame, so the 16 samples decorrelate between pixels
+    // Random-rotated tangent frame, so samples decorrelate between pixels
     // and the blur pass can resolve them into smooth occlusion.
     float angle = hash12(gl_FragCoord.xy) * 6.2831853;
-    vec3 randomVec = vec3(cos(angle), sin(angle), 0.0);
-    vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
-    vec3 bitangent = cross(normal, tangent);
+    vec3 helper = abs(normal.y) < 0.999 ? vec3(0.0, 1.0, 0.0)
+                                        : vec3(1.0, 0.0, 0.0);
+    vec3 baseTangent = normalize(cross(helper, normal));
+    vec3 baseBitangent = cross(normal, baseTangent);
+    vec3 tangent = baseTangent * cos(angle) + baseBitangent * sin(angle);
+    vec3 bitangent = -baseTangent * sin(angle) + baseBitangent * cos(angle);
     mat3 tbn = mat3(tangent, bitangent, normal);
 
     float radius = fsp.params.x;
@@ -114,7 +117,8 @@ void main()
         {
             // Ignore occluders far outside the sampling radius, which would
             // otherwise draw dark halos around foreground silhouettes.
-            float rangeCheck = smoothstep(0.0, 1.0, radius / max(1e-4, abs(sampleViewZ - sceneViewZ)));
+            float separation = length(sceneWorld - samplePos);
+            float rangeCheck = 1.0 - smoothstep(radius * 0.25, radius, separation);
             occlusion += rangeCheck;
         }
     }
