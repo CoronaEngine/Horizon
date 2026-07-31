@@ -2,9 +2,10 @@
 // 白天斜射平行光,与 GLSL 版(example_sponza)同一资产、同一管线结构。
 //
 // EDSL 能力边界决定的结构性差异(其余逻辑逐段对齐 GLSL 版):
-//   - MRT:引擎 EDSL 的多目标输出(多次 tex << value)会 device lost(见
-//     example_edsl_rsm),RSM 与 G-buffer 各拆成 3 个单目标 pass,共享深度:
-//     第一趟清深度,后两趟 clear_depth_target=false + 关深度写(LessOrEqual)。
+//   - MRT:与 GLSL 版相同,RSM 与 G-buffer 各为单 pass 三附件(片元里按
+//     顺序多次 tex << value,location = 调用顺序)。历史上曾拆成单目标
+//     pass 规避 device lost,根因是引擎的 renderTargetLocation 跨管线残留
+//     (RasterizedPipelineObject::parse 已修复,解析前复位)。
 //   - 逐 draw 材质贴图:bindless 下 record() 时 auto-bind 把当前绑定纹理的
 //     描述符索引写进随 draw 深拷的 push constant,因此每次 record 前重新给
 //     Texture2D 代理赋值即可(等价 GLSL 版的 push constant 索引)。
@@ -775,7 +776,7 @@ void run_example_edsl_sponza()
     };
 
     // ========================================================================
-    // Pass 0:RSM(depth / normal / flux 三个单目标 pass)
+    // Pass 0:RSM(单 pass MRT:depth / normal / flux)
     // ========================================================================
 
     Float4x4 rsm_light_view_proj;
@@ -799,23 +800,18 @@ void run_example_edsl_sponza()
         return out;
     };
 
-    auto rsm_depth_frag = [&](Aggregate<EdslRsmVertOut> in) {
+    // MRT:三次 << 依调用顺序落在 location 0/1/2(depth / normal / flux)
+    auto rsm_frag = [&](Aggregate<EdslRsmVertOut> in) {
         auto depth = in->v_clip->z / in->v_clip->w;
         rsm_depth_out << Float4(depth, 0.f, 0.f, 1.f);
-    };
-
-    auto rsm_normal_frag = [&](Aggregate<EdslRsmVertOut> in) {
         auto n = normalize(in->v_normal);
         rsm_normal_out << Float4(n * Float(0.5f) + Float3(0.5f, 0.5f, 0.5f), 1.f);
-    };
-
-    auto rsm_flux_frag = [&](Aggregate<EdslRsmVertOut> in) {
         auto albedo = texture(rsm_base_color_tex, in->v_uv)->xyz() * rsm_albedo_factor->xyz();
         rsm_flux_out << Float4(albedo, 1.f);
     };
 
     // ========================================================================
-    // Pass 1:G-buffer(albedo+metallic / normal+roughness / depth 三个单目标 pass)
+    // Pass 1:G-buffer(单 pass MRT:albedo+metallic / normal+roughness / depth)
     // ========================================================================
 
     Float4x4 gb_view_proj;
@@ -847,24 +843,21 @@ void run_example_edsl_sponza()
         return out;
     };
 
-    auto gb_albedo_frag = [&](Aggregate<EdslGeomVertOut> in) {
+    // MRT:albedo+metallic(0) / normal+roughness(1) / device depth(2)
+    auto gb_frag = [&](Aggregate<EdslGeomVertOut> in) {
+        Float4 mr;
+        mr = texture(gb_mr_tex, in->v_uv);
         auto base = texture(gb_base_color_tex, in->v_uv)->xyz() * gb_base_factor->xyz();
-        auto mr = texture(gb_mr_tex, in->v_uv);
-        auto metallic = gb_mr_factor->x * mr->z; // glTF: B=metallic
-        gb_albedo_out << Float4(base, metallic);
-    };
+        gb_albedo_out << Float4(base, gb_mr_factor->x * mr->z); // glTF: B=metallic
 
-    auto gb_normal_frag = [&](Aggregate<EdslGeomVertOut> in) {
         Float3 tn;
         tn = texture(gb_normal_tex, in->v_uv)->xyz() * Float(2.0f) - Float3(1.0f, 1.0f, 1.0f);
         auto n = normalize(normalize(in->v_tangent) * tn->x +
                            normalize(in->v_bitangent) * tn->y +
                            normalize(in->v_normal) * tn->z);
-        auto roughness = gb_mr_factor->y * texture(gb_mr_tex, in->v_uv)->y; // glTF: G=roughness
-        gb_normal_out << Float4(n * Float(0.5f) + Float3(0.5f, 0.5f, 0.5f), roughness);
-    };
+        gb_normal_out << Float4(n * Float(0.5f) + Float3(0.5f, 0.5f, 0.5f),
+                                gb_mr_factor->y * mr->y); // glTF: G=roughness
 
-    auto gb_depth_frag = [&](Aggregate<EdslGeomVertOut> in) {
         auto depth = in->v_clip->z / in->v_clip->w;
         gb_depth_out << Float4(depth, 0.f, 0.f, 1.f);
     };
@@ -1649,32 +1642,19 @@ void run_example_edsl_sponza()
     // 管线
     // ========================================================================
 
-    Corona::Horizon::RasterizerPipelineDesc geo_first_desc; // 清深度
-    geo_first_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
-
-    Corona::Horizon::RasterizerPipelineDesc geo_overlay_desc; // 共享深度,不清不写
-    geo_overlay_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
-    geo_overlay_desc.clear_depth_target = false;
-    geo_overlay_desc.depth_stencil.depth_write_enabled = false;
+    Corona::Horizon::RasterizerPipelineDesc geo_desc; // 混合状态一份即可,运行时复制到全部附件
+    geo_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
 
     Corona::Horizon::RasterizerPipelineDesc fullscreen_desc;
     fullscreen_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
     fullscreen_desc.depth_stencil.depth_test_enabled = false;
     fullscreen_desc.depth_stencil.depth_write_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rsm_depth_pipe(rsm_vert, rsm_depth_frag, geo_first_desc);
-    rsm_depth_pipe.bind_depth_target(rsm_zbuffer);
-    Corona::Horizon::RasterizerPipeline rsm_normal_pipe(rsm_vert, rsm_normal_frag, geo_overlay_desc);
-    rsm_normal_pipe.bind_depth_target(rsm_zbuffer);
-    Corona::Horizon::RasterizerPipeline rsm_flux_pipe(rsm_vert, rsm_flux_frag, geo_overlay_desc);
-    rsm_flux_pipe.bind_depth_target(rsm_zbuffer);
+    Corona::Horizon::RasterizerPipeline rsm_pipe(rsm_vert, rsm_frag, geo_desc);
+    rsm_pipe.bind_depth_target(rsm_zbuffer);
 
-    Corona::Horizon::RasterizerPipeline gb_albedo_pipe(gb_vert, gb_albedo_frag, geo_first_desc);
-    gb_albedo_pipe.bind_depth_target(gbuffer_zbuffer);
-    Corona::Horizon::RasterizerPipeline gb_normal_pipe(gb_vert, gb_normal_frag, geo_overlay_desc);
-    gb_normal_pipe.bind_depth_target(gbuffer_zbuffer);
-    Corona::Horizon::RasterizerPipeline gb_depth_pipe(gb_vert, gb_depth_frag, geo_overlay_desc);
-    gb_depth_pipe.bind_depth_target(gbuffer_zbuffer);
+    Corona::Horizon::RasterizerPipeline gb_pipe(gb_vert, gb_frag, geo_desc);
+    gb_pipe.bind_depth_target(gbuffer_zbuffer);
 
     Corona::Horizon::RasterizerPipeline ssao_pipe(quad_vert, ssao_frag, fullscreen_desc);
     Corona::Horizon::RasterizerPipeline ssao_blur_pipe(quad_vert, ssao_blur_frag, fullscreen_desc);
@@ -1981,12 +1961,8 @@ void run_example_edsl_sponza()
         u_texel = to_edsl_vec4(glm::vec4(1.0f / spz_width, 1.0f / spz_height, 0.0f, 0.0f));
 
         // ---- 几何 pass 录制(RSM ×3 + G-buffer ×3;逐 draw 重绑材质贴图)----
-        rsm_depth_pipe.clear_records();
-        rsm_normal_pipe.clear_records();
-        rsm_flux_pipe.clear_records();
-        gb_albedo_pipe.clear_records();
-        gb_normal_pipe.clear_records();
-        gb_depth_pipe.clear_records();
+        rsm_pipe.clear_records();
+        gb_pipe.clear_records();
 
         const auto record_geometry = [&](Corona::Horizon::HardwareBuffer& ib, Corona::Horizon::HardwareBuffer& vb,
                                          uint32_t first_index, uint32_t index_count) {
@@ -1994,12 +1970,8 @@ void run_example_edsl_sponza()
             params.index_type = Corona::Horizon::IndexType::UInt32;
             params.index_count = index_count;
             params.first_index = first_index;
-            rsm_depth_pipe.record(ib, vb, params);
-            rsm_normal_pipe.record(ib, vb, params);
-            rsm_flux_pipe.record(ib, vb, params);
-            gb_albedo_pipe.record(ib, vb, params);
-            gb_normal_pipe.record(ib, vb, params);
-            gb_depth_pipe.record(ib, vb, params);
+            rsm_pipe.record(ib, vb, params);
+            gb_pipe.record(ib, vb, params);
         };
 
         for (const SponzaSubmesh& submesh : asset.submeshes)
@@ -2061,12 +2033,8 @@ void run_example_edsl_sponza()
         ssr_composite_pipe.record(quad_ib, quad_vb, quad_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rsm_depth_pipe(spz_shadow_map_size, spz_shadow_map_size)
-                            << rsm_normal_pipe(spz_shadow_map_size, spz_shadow_map_size)
-                            << rsm_flux_pipe(spz_shadow_map_size, spz_shadow_map_size)
-                            << gb_albedo_pipe(spz_width, spz_height)
-                            << gb_normal_pipe(spz_width, spz_height)
-                            << gb_depth_pipe(spz_width, spz_height)
+            render_executor << rsm_pipe(spz_shadow_map_size, spz_shadow_map_size)
+                            << gb_pipe(spz_width, spz_height)
                             << ssao_pipe(spz_width, spz_height)
                             << ssao_blur_pipe(spz_width, spz_height)
                             << light_pipe(spz_width, spz_height)

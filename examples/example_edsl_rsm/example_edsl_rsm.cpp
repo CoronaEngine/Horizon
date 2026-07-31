@@ -3,11 +3,10 @@
 //   Pass 1 光源视角生成 RSM（世界坐标+光空间深度 / 世界法线 / flux），
 //   Pass 2 直接光（世界空间 Blinn-Phong 聚光 + 硬阴影）+ RSM 单次弹射间接光。
 // EDSL 侧差异：
-//   - GLSL 版 Pass 1 是单 pass MRT 三附件；EDSL 的 MRT 输出路径（多次
-//     `texture << value`）目前在本机触发 device lost（引擎中无任何示例
-//     覆盖过 EDSL MRT），故拆成三个单目标 pass：position / normal / flux
-//     共享同一深度图 —— 第一趟清深度，后两趟 clear_depth_target=false 关
-//     深度写重绘（默认 LessOrEqual 允许相同深度通过，同 sky 示例的先例）；
+//   - Pass 1 与 GLSL 版相同：单 pass MRT 三附件，片元里按顺序三次
+//     `texture << value`（location 按调用顺序 0/1/2）。历史上这里曾拆成
+//     三个单目标 pass 规避 device lost，根因是引擎的 renderTargetLocation
+//     跨管线残留（RasterizedPipelineObject::parse 已修复,解析前复位）；
 //   - 64 个重要性采样用 C++ 循环在 codegen 期展开，黄金比例螺旋的
 //     偏移/权重直接以常量进 shader（GLSL 版是运行期循环算同一组值）；
 //   - smoothstep 库里没有，手写 t*t*(3-2t)。
@@ -337,16 +336,11 @@ void run_example_edsl_rsm()
     depth_image.set_clear_depth(1.0f, 0);
 
     // ========================================================================
-    // Pass 1：RSM 生成（EDSL，position / normal / flux 三个单目标 pass）
+    // Pass 1：RSM 生成（EDSL，单 pass MRT：position / normal / flux）
     // ========================================================================
-    // 第一趟（position）清深度；后两趟共享深度图、只读不清不写
+    // 混合状态给一份即可,运行时会复制到全部颜色附件
     Corona::Horizon::RasterizerPipelineDesc pack_desc;
     pack_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
-
-    Corona::Horizon::RasterizerPipelineDesc pack_overlay_desc;
-    pack_overlay_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
-    pack_overlay_desc.clear_depth_target = false;
-    pack_overlay_desc.depth_stencil.depth_write_enabled = false;
 
     Texture2D<ktm::fvec4> pack_out_position = rsm_position_image;
     Texture2D<ktm::fvec4> pack_out_normal = rsm_normal_image;
@@ -383,16 +377,11 @@ void run_example_edsl_rsm()
         return out;
     };
 
-    auto rsm_pack_position_frag = [&](Aggregate<RsmPackVertOut> in) {
+    // MRT:三次 << 依调用顺序落在 location 0/1/2
+    auto rsm_pack_frag = [&](Aggregate<RsmPackVertOut> in) {
         auto depth = in->v_position->z / in->v_position->w;
         pack_out_position << Float4(in->v_world_pos, depth);
-    };
-
-    auto rsm_pack_normal_frag = [&](Aggregate<RsmPackVertOut> in) {
         pack_out_normal << Float4(normalize(in->v_world_normal), 0.f);
-    };
-
-    auto rsm_pack_flux_frag = [&](Aggregate<RsmPackVertOut> in) {
         auto to_frag = normalize(in->v_world_pos - pk_light_pos_ws->xyz());
         auto cosang = dot(to_frag, pk_light_dir_ws->xyz());
         auto falloff = smoothstep_f(pk_spot_params->y, pk_spot_params->x, cosang);
@@ -518,14 +507,8 @@ void run_example_edsl_rsm()
         scene_out_color << Float4(pow(abs(final_color), Float3(t, t, t)), 1.f);
     };
 
-    Corona::Horizon::RasterizerPipeline pack_position_rasterizer(rsm_pack_vert, rsm_pack_position_frag, pack_desc);
-    pack_position_rasterizer.bind_depth_target(rsm_depth_image);
-
-    Corona::Horizon::RasterizerPipeline pack_normal_rasterizer(rsm_pack_vert, rsm_pack_normal_frag, pack_overlay_desc);
-    pack_normal_rasterizer.bind_depth_target(rsm_depth_image);
-
-    Corona::Horizon::RasterizerPipeline pack_flux_rasterizer(rsm_pack_vert, rsm_pack_flux_frag, pack_overlay_desc);
-    pack_flux_rasterizer.bind_depth_target(rsm_depth_image);
+    Corona::Horizon::RasterizerPipeline pack_rasterizer(rsm_pack_vert, rsm_pack_frag, pack_desc);
+    pack_rasterizer.bind_depth_target(rsm_depth_image);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
@@ -652,9 +635,7 @@ void run_example_edsl_rsm()
         const float cos_outer = std::cos(glm::radians(spot_outer_angle));
 
         // Pass 1：光源视角生成 RSM（position+depth / normal / flux 三个单目标 pass）
-        pack_position_rasterizer.clear_records();
-        pack_normal_rasterizer.clear_records();
-        pack_flux_rasterizer.clear_records();
+        pack_rasterizer.clear_records();
         pk_light_view_proj = to_edsl_matrix(light_view_proj);
         pk_light_pos_ws = ktm::fvec4(c_light_pos.x, c_light_pos.y, c_light_pos.z, 0.0f);
         pk_light_dir_ws = ktm::fvec4(c_spot_dir.x, c_spot_dir.y, c_spot_dir.z, 0.0f);
@@ -668,9 +649,7 @@ void run_example_edsl_rsm()
 
             pk_model = to_edsl_matrix(item.model);
             pk_albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
-            pack_position_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
-            pack_normal_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
-            pack_flux_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 
         // Pass 2：场景直接光 + 硬阴影 + RSM 间接光
@@ -695,9 +674,7 @@ void run_example_edsl_rsm()
         }
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << pack_position_rasterizer(rsm_map_size, rsm_map_size)
-                            << pack_normal_rasterizer(rsm_map_size, rsm_map_size)
-                            << pack_flux_rasterizer(rsm_map_size, rsm_map_size)
+            render_executor << pack_rasterizer(rsm_map_size, rsm_map_size)
                             << scene_rasterizer(rsm_width, rsm_height)
                             << Corona::Horizon::submit;
 
