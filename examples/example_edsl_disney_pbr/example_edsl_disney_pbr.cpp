@@ -343,6 +343,15 @@ struct OrbitCamera
                             std::sin(pitch_curr) * std::cos(yaw_curr));
         return target + dir * dist_curr;
     }
+
+    [[nodiscard]] glm::mat4 env_view_mtx() const
+    {
+        const glm::vec3 forward = glm::normalize(target - position());
+        const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), forward));
+        const glm::vec3 up = glm::normalize(glm::cross(forward, right));
+        return glm::mat4(glm::vec4(right, 0.0f), glm::vec4(up, 0.0f), glm::vec4(forward, 0.0f),
+                         glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    }
 };
 
 struct InputContext
@@ -420,11 +429,13 @@ struct DisneyEdslVaryings
 {
     Float3 v_view;
     Float3 v_normal;
+    Float3 v_dir; 
 };
 
 struct DisneyEdslSharedProxy
 {
     Float4x4 proj_view;
+    Float4x4 skyEnvMtx;
     Float4x4 envMtx;
     Float4 camPos;
     Float4 flags;
@@ -485,15 +496,32 @@ void run_example_edsl_disney_pbr()
     per_mat2.as_push_constant();
     per_mat3.as_push_constant();
 
+
+    const float fov_height = std::tan(glm::radians(45.0f) * 0.5f);
+
     auto edsl_vertex = [&](Aggregate<DisneyEdslVertexProxy> vertex) {
         Aggregate<DisneyEdslVaryings> out;
 
-        Float4 local_pos = Float4(vertex->pos, Float(1.0));
-        Float4 world_pos = mul(per_model, local_pos);
-        position() = mul(shared.proj_view, world_pos);
-
-        out->v_view = shared.camPos->xyz() - world_pos->xyz();
-        out->v_normal = mul(per_model, Float4(vertex->normal, Float(0.0)))->xyz();
+        $IF(per_mat3->y > Float(0.5))
+        {
+            // skybox：把网格顶点当全屏坐标用，方向由 skyEnvMtx 还原
+            position() = Float4(vertex->pos->x, vertex->pos->y, Float(1.0), Float(1.0));
+            Float sky_aspect = per_mat3->z;
+            Float2 tex = Float2(vertex->pos->x * (Float(fov_height) * sky_aspect),
+                                vertex->pos->y * Float(-fov_height));
+            out->v_dir = mul(shared.skyEnvMtx, Float4(tex, Float(1.0), Float(0.0)))->xyz();
+            out->v_view = Float3(Float(0.0), Float(0.0), Float(0.0));
+            out->v_normal = Float3(Float(0.0), Float(0.0), Float(1.0));
+        }
+        $ELSE
+        {
+            Float4 local_pos = Float4(vertex->pos, Float(1.0));
+            Float4 world_pos = mul(per_model, local_pos);
+            position() = mul(shared.proj_view, world_pos);
+            out->v_view = shared.camPos->xyz() - world_pos->xyz();
+            out->v_normal = mul(per_model, Float4(vertex->normal, Float(0.0)))->xyz();
+            out->v_dir = Float3(Float(0.0), Float(0.0), Float(0.0));
+        };
         return out;
     };
 
@@ -543,10 +571,12 @@ void run_example_edsl_disney_pbr()
     };
 
     auto gtr1 = [&](Float NdotH, Float a) -> Float {
-        // clearcoat uses a in [0.001, 0.1], so the a>=1 branch is unused.
         Float a2 = a * a;
         Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
-        return (a2 - Float(1.0)) / (Float(3.14159265358979323846) * edsl_log(a2) * t);
+        Float result;
+        result = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * edsl_log(a2) * t);
+        $IF(a >= Float(1.0)) { result = Float(1.0) / Float(3.14159265358979323846); };
+        return result;
     };
 
     auto gtr2_aniso = [&](Float NdotH, Float HdotX, Float HdotY, Float ax, Float ay) -> Float {
@@ -570,110 +600,143 @@ void run_example_edsl_disney_pbr()
     Texture2D<fvec4> final_output = final_output_image;
 
     auto edsl_fragment = [&](Aggregate<DisneyEdslVaryings> in) {
-        Float3 N = normalize(in->v_normal);
-        Float3 V = normalize(in->v_view);
-        Float3 L = normalize(Float3(shared.lightDir->xyz()));
+        Float4 out_color; 
 
-        Float3 X;
-        X = normalize(edsl_cross(N, Float3(Float(0.0), Float(1.0), Float(0.0))));
-        $IF(dot(X, X) < Float(1e-4))
+        $IF(per_mat3->y > Float(0.5))
         {
-            X = normalize(edsl_cross(N, Float3(Float(1.0), Float(0.0), Float(0.0))));
-        };
-        Float3 Y = normalize(edsl_cross(N, X));
-
-        Float3 baseColor = Float3(per_mat0->xyz());
-        Float metallic = per_mat0->w;
-        Float roughness = clamp(per_mat1->x, Float(0.001), Float(1.0));
-        Float specular = per_mat1->y;
-        Float specularTint = per_mat1->z;
-        Float subsurface = per_mat1->w;
-        Float anisotropic = per_mat2->x;
-        Float sheen = per_mat2->y;
-        Float sheenTint = per_mat2->z;
-        Float clearcoat = per_mat2->w;
-        Float clearcoatGloss = per_mat3->x;
-
-        Float3 Cdlin = toLinear(baseColor);
-        Float Cdlum = dot(Cdlin, Float3(Float(0.3), Float(0.6), Float(0.1)));
-        Float3 Ctint;
-        Ctint = Float3(Float(1.0), Float(1.0), Float(1.0));
-        $IF(Cdlum > Float(0.0)) { Ctint = Cdlin / Cdlum; };
-        Float3 Cspec0 =
-            mix(specular * Float(0.08) * mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, specularTint),
-                Cdlin, metallic);
-        Float3 Csheen = mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, sheenTint);
-
-        Float NdotV = clamp(dot(N, V), Float(0.0), Float(1.0));
-        Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
-
-        Float3 brdf;
-        brdf = Float3(Float(0.0), Float(0.0), Float(0.0));
-        Float NdotL = dot(N, L);
-        Float NdotVraw = dot(N, V);
-        $IF(NdotL >= Float(0.0))
-        {
-            $IF(NdotVraw >= Float(0.0))
+            Float3 sky_dir;
+            sky_dir = normalize(in->v_dir);
+            Float bgType = per_mat3->w;
+            Float3 sky_color;
+            $IF(bgType >= Float(6.5))
             {
-                Float3 H = normalize(L + V);
-                Float NdotH = dot(N, H);
-                Float LdotH = dot(L, H);
-
-                Float FL = schlickFresnel(NdotL);
-                Float FV = schlickFresnel(NdotVraw);
-                Float Fd90 = Float(0.5) + Float(2.0) * LdotH * LdotH * roughness;
-                Float Fd = mix(Float(1.0), Fd90, FL) * mix(Float(1.0), Fd90, FV);
-
-                Float Fss90 = LdotH * LdotH * roughness;
-                Float Fss = mix(Float(1.0), Fss90, FL) * mix(Float(1.0), Fss90, FV);
-                Float ss = Float(1.25) * (Fss * (Float(1.0) / (NdotL + NdotVraw) - Float(0.5)) + Float(0.5));
-
-                Float aniso_aspect = sqrt(Float(1.0) - anisotropic * Float(0.9));
-                Float ax = max(Float(0.001), sqr(roughness) / aniso_aspect);
-                Float ay = max(Float(0.001), sqr(roughness) * aniso_aspect);
-                Float Ds = gtr2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
-                Float FH = schlickFresnel(LdotH);
-                Float3 Fs = mix(Cspec0, Float3(Float(1.0), Float(1.0), Float(1.0)), FH);
-                Float Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay) *
-                           smithG_GGX_aniso(NdotVraw, dot(V, X), dot(V, Y), ax, ay);
-
-                Float3 Fsheen = FH * sheen * Csheen;
-
-                Float clearcoatAlpha =
-                    Float(0.1) * (Float(1.0) - clearcoatGloss) + Float(0.001) * clearcoatGloss;
-                Float Dr = gtr1(NdotH, clearcoatAlpha);
-                Float Fr = Float(0.04) * (Float(1.0) - FH) + Float(1.0) * FH;
-                Float Gr = smithG_GGX(NdotL, Float(0.25)) * smithG_GGX(NdotVraw, Float(0.25));
-
-                Float3 diffusePart =
-                    ((Float(1.0) / Float(3.14159265358979323846)) * mix(Fd, ss, subsurface) * Cdlin + Fsheen) *
-                    (Float(1.0) - metallic);
-                Float3 specPart = Gs * Fs * Ds + Float(0.25) * clearcoat * Gr * Fr * Dr;
-                brdf = diffusePart + specPart;
+                sky_color = toLinear(Float3(texture(texCubeIrr, sky_dir)->xyz()));
+            }
+            $ELSE
+            {
+                Float lod = bgType;
+                Float3 fixed_dir;
+                fixed_dir = fixCubeLookup(sky_dir, lod, Float(256.0));
+                sky_color = toLinear(Float3(textureLod(texCube, fixed_dir, lod)->xyz()));
             };
+            out_color = Float4(toFilmic(sky_color * exp2(shared.exposurePad->x)), Float(1.0));
+        }
+        $ELSE
+        {
+            Float3 N = normalize(in->v_normal);
+            Float3 V = normalize(in->v_view);
+            Float3 L = normalize(Float3(shared.lightDir->xyz()));
+
+            Float3 X;
+            X = normalize(edsl_cross(N, Float3(Float(0.0), Float(1.0), Float(0.0))));
+            $IF(dot(X, X) < Float(1e-4))
+            {
+                X = normalize(edsl_cross(N, Float3(Float(1.0), Float(0.0), Float(0.0))));
+            };
+            Float3 Y = normalize(edsl_cross(N, X));
+
+            Float3 baseColor = Float3(per_mat0->xyz());
+            Float metallic = per_mat0->w;
+            Float roughness = clamp(per_mat1->x, Float(0.001), Float(1.0));
+            Float specular = per_mat1->y;
+            Float specularTint = per_mat1->z;
+            Float subsurface = per_mat1->w;
+            Float anisotropic = per_mat2->x;
+            Float sheen = per_mat2->y;
+            Float sheenTint = per_mat2->z;
+            Float clearcoat = per_mat2->w;
+            Float clearcoatGloss = per_mat3->x;
+
+            Float3 Cdlin = toLinear(baseColor);
+            Float Cdlum = dot(Cdlin, Float3(Float(0.3), Float(0.6), Float(0.1)));
+            Float3 Ctint;
+            Ctint = Float3(Float(1.0), Float(1.0), Float(1.0));
+            $IF(Cdlum > Float(0.0)) { Ctint = Cdlin / Cdlum; };
+            Float3 Cspec0 =
+                mix(specular * Float(0.08) * mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, specularTint),
+                    Cdlin, metallic);
+            Float3 Csheen = mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, sheenTint);
+
+            Float NdotV = clamp(dot(N, V), Float(0.0), Float(1.0));
+            Float NdotVraw = dot(N, V); 
+            Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
+
+            
+            Float3 direct;
+            direct = Float3(Float(0.0), Float(0.0), Float(0.0));
+            $IF((shared.flags->x > Float(0.5)) || (shared.flags->y > Float(0.5)))
+            {
+                Float3 brdf;
+                brdf = Float3(Float(0.0), Float(0.0), Float(0.0));
+                Float NdotL = dot(N, L);
+                $IF(NdotL >= Float(0.0))
+                {
+                    $IF(NdotVraw >= Float(0.0))
+                    {
+                        Float3 H = normalize(L + V);
+                        Float NdotH;
+                        NdotH = dot(N, H);
+                        Float LdotH = dot(L, H);
+
+                        Float FL = schlickFresnel(NdotL);
+                        Float FV = schlickFresnel(NdotVraw);
+                        Float Fd90 = Float(0.5) + Float(2.0) * LdotH * LdotH * roughness;
+                        Float Fd = mix(Float(1.0), Fd90, FL) * mix(Float(1.0), Fd90, FV);
+
+                        Float Fss90 = LdotH * LdotH * roughness;
+                        Float Fss = mix(Float(1.0), Fss90, FL) * mix(Float(1.0), Fss90, FV);
+                        Float ss = Float(1.25) * (Fss * (Float(1.0) / (NdotL + NdotVraw) - Float(0.5)) + Float(0.5));
+
+                        Float aniso_aspect = sqrt(Float(1.0) - anisotropic * Float(0.9));
+                        Float ax = max(Float(0.001), sqr(roughness) / aniso_aspect);
+                        Float ay = max(Float(0.001), sqr(roughness) * aniso_aspect);
+                        Float Ds = gtr2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
+                        Float FH = schlickFresnel(LdotH);
+                        Float3 Fs = mix(Cspec0, Float3(Float(1.0), Float(1.0), Float(1.0)), FH);
+                        Float Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay) *
+                                   smithG_GGX_aniso(NdotVraw, dot(V, X), dot(V, Y), ax, ay);
+
+                        Float3 Fsheen = FH * sheen * Csheen;
+
+                        Float clearcoatAlpha =
+                            Float(0.1) * (Float(1.0) - clearcoatGloss) + Float(0.001) * clearcoatGloss;
+                        Float Dr = gtr1(NdotH, clearcoatAlpha);
+                        Float Fr = Float(0.04) * (Float(1.0) - FH) + Float(1.0) * FH;
+                        Float Gr = smithG_GGX(NdotL, Float(0.25)) * smithG_GGX(NdotVraw, Float(0.25));
+
+                        Float3 diffusePart =
+                            ((Float(1.0) / Float(3.14159265358979323846)) * mix(Fd, ss, subsurface) * Cdlin + Fsheen) *
+                            (Float(1.0) - metallic);
+                        Float3 specPart = Gs * Fs * Ds + Float(0.25) * clearcoat * Gr * Fr * Dr;
+                        brdf = diffusePart + specPart;
+                    };
+                };
+
+                Float NdotLclamped = clamp(dot(N, L), Float(0.0), Float(1.0));
+                Float3 lit = brdf * NdotLclamped * Float3(shared.lightCol->xyz());
+                Float enable = max(shared.flags->x + shared.flags->y, Float(0.0));
+                direct = lit * enable;
+            };
+
+            Float mip = roughness * Float(5.0);
+            Float3 vr = normalize(Float(2.0) * NdotVraw * N - V); 
+            Float3 cubeR = fixCubeLookup(normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz())), mip,
+                                         Float(256.0));
+            Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(N, Float(0.0)))->xyz()));
+
+            Float3 radiance = toLinear(Float3(textureLod(texCube, cubeR, mip)->xyz()));
+            Float3 irradiance = toLinear(Float3(texture(texCubeIrr, cubeN)->xyz()));
+
+            Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
+            Float3 envDiffuse = diffuseAlbedo * irradiance * shared.flags->z;
+            Float3 envSpecular = Cspec0 * radiance * envFresnel * shared.flags->w;
+            Float3 indirect = envDiffuse + envSpecular;
+
+            Float3 color = (direct + indirect) * exp2(shared.exposurePad->x);
+            out_color = Float4(toFilmic(color), Float(1.0));
         };
 
-        Float NdotLclamped = clamp(dot(N, L), Float(0.0), Float(1.0));
-        Float3 lit = brdf * NdotLclamped * Float3(shared.lightCol->xyz());
-        Float enable = max(shared.flags->x + shared.flags->y, Float(0.0));
-        Float3 direct = lit * enable;
-
-        Float mip = roughness * Float(5.0);
-        Float3 vr = normalize(Float(2.0) * NdotV * N - V);
-        Float3 cubeR = fixCubeLookup(normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz())), mip,
-                                     Float(256.0));
-        Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(N, Float(0.0)))->xyz()));
-
-        Float3 radiance = toLinear(Float3(textureLod(texCube, cubeR, mip)->xyz()));
-        Float3 irradiance = toLinear(Float3(texture(texCubeIrr, cubeN)->xyz()));
-
-        Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
-        Float3 envDiffuse = diffuseAlbedo * irradiance * shared.flags->z;
-        Float3 envSpecular = Cspec0 * radiance * envFresnel * shared.flags->w;
-        Float3 indirect = envDiffuse + envSpecular;
-
-        Float3 color = (direct + indirect) * exp2(shared.exposurePad->x);
-        final_output << Float4(toFilmic(color), Float(1.0));
+        final_output << out_color;
     };
 
     Corona::Horizon::RasterizerPipeline rasterizer(edsl_vertex, edsl_fragment, desc);
@@ -759,6 +822,7 @@ void run_example_edsl_disney_pbr()
         shared.lightDir = fvec4(to_edsl_vector(glm::normalize(s.light_dir)), 0.0f);
         shared.lightCol = fvec4(to_edsl_vector(s.light_col), 0.0f);
         shared.envMtx = to_edsl_matrix(env_rot);
+        shared.skyEnvMtx = to_edsl_matrix(env_rot * camera.env_view_mtx());
         shared.exposurePad = fvec4(s.exposure, 0.0f, 0.0f, 0.0f);
 
         rasterizer.clear_records();
