@@ -6,21 +6,25 @@
 // 因此 G-buffer 输出 view 空间法线，并把 view 空间坐标传给 FS 做基础光照。
 //
 // 拆分策略（同 deferred_geom_vert.glsl）：
-//   - UBO vsp：view_proj + view + light_dir_vs（相机/光照，批次共享）144 bytes
-//   - PC  vpc：model + material + params（per-draw）                   96 bytes
+//   - UBO vsp：view_proj + view + light_dir_vs + 完整 Disney 参数（批次共享）
+//   - PC  vpc：model + material.rgb（per-draw）96→80 bytes
 
 // set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
 layout(set = 3, binding = 0) uniform SsrGeomShared {
     mat4 view_proj;
     mat4 view;
-    vec4 light_dir_vs; // xyz: view 空间指向光源的方向, w: 环境光强度
+    vec4 light_dir_vs;  // xyz: view 空间指向光源的方向, w: 环境光强度
+    // Disney Principled BRDF 参数（批次共享，所有物体相同；仅 albedo 随 per-draw 变化）
+    vec4 disney_a;      // x=metallic, y=roughness, z=specular, w=specular_tint
+    vec4 disney_b;      // x=subsurface, y=anisotropic, z=sheen, w=sheen_tint
+    vec4 disney_c;      // x=clearcoat, y=clearcoat_gloss
 } vsp;
 
 // vert/frag 共享同一 push constant 块，布局必须一致。
+// params（原 metallic/roughness）已移入 vsp，PC 仅保留几何变换与 albedo。
 layout(push_constant) uniform SsrGeomPC {
-    mat4 model;    // per-draw 变换
-    vec4 material; // rgb: albedo, w: 未用
-    vec4 params;   // x: reflectivity, y: roughness, zw: 未用
+    mat4 model;     // per-draw 变换
+    vec4 material;  // rgb: albedo, w: 未用
 } vpc;
 
 layout(location = 0) in vec3 inPosition;
