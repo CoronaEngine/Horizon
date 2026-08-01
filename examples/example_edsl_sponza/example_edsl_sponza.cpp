@@ -742,8 +742,8 @@ void run_example_edsl_sponza()
 
     // 环境 probe
     const std::filesystem::path env_root = spz_assets_dir / "env";
-    const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "bolonga_irr.dds");
-    const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "bolonga_lod.dds");
+    const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_irr.dds");
+    const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_lod.dds");
     Corona::Horizon::HardwareImage env_irradiance = create_cubemap_image(irradiance_dds, "edsl_sponza.env.irr");
     Corona::Horizon::HardwareImage env_radiance = create_cubemap_image(radiance_dds, "edsl_sponza.env.lod");
 
@@ -774,6 +774,23 @@ void run_example_edsl_sponza()
                       av->z * bv->x - av->x * bv->z,
                       av->x * bv->y - av->y * bv->x);
     };
+
+    // 定妆值按 Intel PBR 场景(米制);旧 cm 级资产在下面按场景尺度重标定。
+    // 必须声明在所有 shader lambda 之前:$IF 的编译期剪枝 detector 是 [&] 捕获、
+    // 与管线同寿命、每帧求值,所以条件变量要看得见且活得比管线长。
+    Tuning tuning;
+
+    // 编译期剪枝用的 CPU 侧开关。每帧从 tuning 同步一次(在 record 之前),
+    // 供 $IF(cpu_xxx) 走剪枝重载 —— 注意 $IF 的重载决议:裸 bool 走剪枝,
+    // VariateProxy<bool> 走运行时分支,两者外观相同但语义完全不同。
+    struct PruneFlags
+    {
+        bool sun_shadow = true;   // 关闭时整段 PCF 采样被编译掉
+        bool rsm = true;          // 关闭时整段 RSM gather(32 次采样)被编译掉
+        bool ssr = true;          // 关闭时整段 SSR march 被编译掉
+        bool ssr_jitter = false;  // 默认 false → 默认就能剪掉抖动计算
+        bool disney_extra = false; // sheen/clearcoat/subsurface/aniso 任一非零时才需要
+    } prune;
 
     // ========================================================================
     // Pass 0:RSM(单 pass MRT:depth / normal / flux)
@@ -983,7 +1000,7 @@ void run_example_edsl_sponza()
 
         Float occlusion;
         occlusion = Float(0.0f);
-        constexpr int kSsaoSamples = 16;
+        constexpr int kSsaoSamples = 24; // 对齐 GLSL sponza_ssao_frag.glsl:37
         for (int i = 0; i < kSsaoSamples; ++i)
         {
             const float fi = static_cast<float>(i) + 0.5f;
@@ -1053,11 +1070,11 @@ void run_example_edsl_sponza()
         total = Float(0.0f);
         Float weight_sum;
         weight_sum = Float(1e-4f);
-        for (int y = -1; y <= 1; ++y)
+        for (int y = -2; y <= 2; ++y) // 5x5,对齐 GLSL sponza_ssao_blur_frag.glsl:53
         {
-            for (int x = -1; x <= 1; ++x)
+            for (int x = -2; x <= 2; ++x)
             {
-                const float spatial = std::exp(-0.5f * float(x * x + y * y) / 2.0f);
+                const float spatial = std::exp(-0.5f * float(x * x + y * y) / 4.0f);
                 Float2 suv;
                 suv = min(max(uv + Float2(float(x), float(y)) * blur_texel,
                               Float2(0.f, 0.f)), Float2(1.f, 1.f));
@@ -1275,50 +1292,64 @@ void run_example_edsl_sponza()
 
         Float3 rsm_sum;
         rsm_sum = Float3(0.f, 0.f, 0.f);
-        constexpr int kRsmSamples = 24;
+
+        // GLSL 版这里是 `if (fsp.rsm_params.z < 0.5) return vec3(0);`
+        // (sponza_light_frag.glsl:222) —— 关闭 RSM 时整段 32x3 次采样根本不执行。
+        // 这里用**编译期剪枝**做得更彻底:条件是裸 C++ bool,关闭时这段代码不会出现在
+        // 最终 shader 里(而不是运行时跳过)。$ELSE 必须写,否则分支体被静默丢弃。
+        constexpr int kRsmSamples = 32; // 对齐 GLSL sponza_light_frag.glsl:63
         constexpr float kGolden = 0.61803398875f;
         constexpr float kTwoPi = 6.28318530718f;
-        Float3 sun_travel;
-        sun_travel = normalize(u_sun_dir_ws->xyz());
-        Float rsm_radius_uv;
-        rsm_radius_uv = u_rsm_params->x;
-        Float rsm_clamp;
-        rsm_clamp = u_rsm_params->w;
-        for (int i = 0; i < kRsmSamples; ++i)
+
+        $IF(prune.rsm)
         {
-            const float xi1 = (static_cast<float>(i) + 0.5f) / kRsmSamples;
-            const float xi2 = std::fmod(static_cast<float>(i) * kGolden, 1.0f);
-            const float ox = xi1 * std::cos(kTwoPi * xi2);
-            const float oy = xi1 * std::sin(kTwoPi * xi2);
-            const float weight = xi1 * xi1;
+            Float3 sun_travel;
+            sun_travel = normalize(u_sun_dir_ws->xyz());
+            Float rsm_radius_uv;
+            rsm_radius_uv = u_rsm_params->x;
+            Float rsm_clamp;
+            rsm_clamp = u_rsm_params->w;
+            for (int i = 0; i < kRsmSamples; ++i)
+            {
+                const float xi1 = (static_cast<float>(i) + 0.5f) / kRsmSamples;
+                const float xi2 = std::fmod(static_cast<float>(i) * kGolden, 1.0f);
+                const float ox = xi1 * std::cos(kTwoPi * xi2);
+                const float oy = xi1 * std::sin(kTwoPi * xi2);
+                const float weight = xi1 * xi1;
 
-            Float2 ruv_raw;
-            ruv_raw = ruv_center + Float2(ox, oy) * rsm_radius_uv;
-            // 出界采样整个作废(GLSL 版为 continue),不 clamp 以免边缘重复计入
-            auto ruv_in = step(0.0f, ruv_raw->x) * step(ruv_raw->x, Float(1.0f)) *
-                          step(0.0f, ruv_raw->y) * step(ruv_raw->y, Float(1.0f));
-            Float2 ruv;
-            ruv = min(max(ruv_raw, Float2(0.f, 0.f)), Float2(1.f, 1.f));
-            Float rdepth;
-            rdepth = texture(s_rsm_depth, ruv)->x;
-            auto valid = (Float(1.0f) - step(0.9999f, rdepth)) * ruv_in;
+                Float2 ruv_raw;
+                ruv_raw = ruv_center + Float2(ox, oy) * rsm_radius_uv;
+                // 出界采样整个作废(GLSL 版为 continue),不 clamp 以免边缘重复计入
+                auto ruv_in = step(0.0f, ruv_raw->x) * step(ruv_raw->x, Float(1.0f)) *
+                              step(0.0f, ruv_raw->y) * step(ruv_raw->y, Float(1.0f));
+                Float2 ruv;
+                ruv = min(max(ruv_raw, Float2(0.f, 0.f)), Float2(1.f, 1.f));
+                Float rdepth;
+                rdepth = texture(s_rsm_depth, ruv)->x;
+                auto valid = (Float(1.0f) - step(0.9999f, rdepth)) * ruv_in;
 
-            Float4 xp4;
-            xp4 = mul(u_inv_sun_view_proj, Float4(ruv * Float(2.0f) - Float2(1.0f, 1.0f), rdepth, 1.f));
-            Float3 np;
-            np = normalize(texture(s_rsm_normal, ruv)->xyz() * Float(2.0f) - Float3(1.0f, 1.0f, 1.0f));
-            // flux 图经 sRGB 视图采样后已是线性 albedo,不再 pow;乘 VPL 的
-            // 原始受光余弦,否则背光 texel 也当满能量像素光弹射。
-            auto source_ndotl = max(0.f, dot(np, -sun_travel));
-            auto flux = Float3(texture(s_rsm_flux, ruv)->xyz()) * source_ndotl;
+                Float4 xp4;
+                xp4 = mul(u_inv_sun_view_proj, Float4(ruv * Float(2.0f) - Float2(1.0f, 1.0f), rdepth, 1.f));
+                Float3 np;
+                np = normalize(texture(s_rsm_normal, ruv)->xyz() * Float(2.0f) - Float3(1.0f, 1.0f, 1.0f));
+                // flux 图经 sRGB 视图采样后已是线性 albedo,不再 pow;乘 VPL 的
+                // 原始受光余弦,否则背光 texel 也当满能量像素光弹射。
+                auto source_ndotl = max(0.f, dot(np, -sun_travel));
+                auto flux = Float3(texture(s_rsm_flux, ruv)->xyz()) * source_ndotl;
 
-            Float3 w;
-            w = wpos - xp4->xyz() / xp4->w;
-            Float d2;
-            d2 = max(dot(w, w), rsm_clamp);
-            auto e = max(0.f, dot(np, w)) * max(0.f, dot(N, -w)) / (d2 * d2);
-            rsm_sum = rsm_sum + flux * (e * Float(weight)) * valid;
+                Float3 w;
+                w = wpos - xp4->xyz() / xp4->w;
+                Float d2;
+                d2 = max(dot(w, w), rsm_clamp);
+                auto e = max(0.f, dot(np, w)) * max(0.f, dot(N, -w)) / (d2 * d2);
+                rsm_sum = rsm_sum + flux * (e * Float(weight)) * valid;
+            }
         }
+        $ELSE
+        {
+            rsm_sum = Float3(0.f, 0.f, 0.f);
+        };
+
         // 增益与采样数解耦(× intensity / N),同 GLSL 版
         auto rsm_indirect = rsm_sum * u_sun_radiance->xyz() *
                             (u_rsm_params->y * Float(1.0f / float(kRsmSamples))) *
@@ -1427,129 +1458,156 @@ void run_example_edsl_sponza()
         uv = in->v_uv;
         Float surface_f0;
         surface_f0 = texture(s_hdr, uv)->w;
-        auto active = step(0.001f, surface_f0);
 
-        Float view_z;
-        view_z = texture(s_ssr_lin, uv)->x;
-        Float3 view_pos;
-        view_pos = Float3((uv->x * u_ndc_to_view->x + u_ndc_to_view->z) * view_z,
-                          (uv->y * u_ndc_to_view->y + u_ndc_to_view->w) * view_z,
-                          view_z);
+        // GLSL 版在这里是 `if (surface_f0 <= 0.001) return;`(sponza_ssr_trace_compute.glsl:65),
+        // 约 97% 的像素直接退出。EDSL 原先改写成 step() 掩码,导致 80 步 march 对每个像素
+        // 全跑。这里用运行时 $IF 复原早退语义:条件是 VariateProxy<bool>,走运行时分支重载。
+        // 结果量必须声明在分支外 —— 分支内只能给块外已声明的局部量赋值。
+        Float3 out_color;
+        out_color = Float3(0.f, 0.f, 0.f);
+        Float out_weight;
+        out_weight = Float(0.0f);
 
-        Float4 packed_normal;
-        packed_normal = texture(s_gb_normal, uv);
-        Float3 n_world;
-        n_world = normalize(packed_normal->xyz() * Float(2.0f) - Float3(1.0f, 1.0f, 1.0f));
-        Float3 n;
-        n = normalize(Float3(dot(u_view_r0->xyz(), n_world),
-                             dot(u_view_r1->xyz(), n_world),
-                             dot(u_view_r2->xyz(), n_world)));
-        Float roughness;
-        roughness = packed_normal->w;
-
-        Float3 v;
-        v = normalize(view_pos);
-        constexpr int kSteps = 24;
-        Float step_len;
-        step_len = u_ssr0->z / Float(float(kSteps));
-        Float3 ray_step;
-        ray_step = (v - n * (dot(n, v) * Float(2.0f))) * step_len; // reflect(v, n) * step
-        Float thickness;
-        thickness = u_ssr0->w;
-
-        // interleaved gradient noise 抖动
-        auto ign = fract(Float(52.9829189f) *
-                         fract(dot(uv * Float2(float(spz_width), float(spz_height)) +
-                                       Float2(314.0f, 159.0f) * u_ssr1->w,
-                                   Float2(0.06711056f, 0.00583715f))));
-        auto initial_offset = mix(Float(1.0f), Float(0.5f) + ign, u_ssr1->z);
-
-        Float3 ray_origin;
-        ray_origin = view_pos + n * max(thickness * Float(0.35f), step_len * Float(0.12f));
-
-        Float3 sample_pos;
-        sample_pos = ray_origin + ray_step * initial_offset;
-        Float3 prev_pos;
-        prev_pos = ray_origin;
-        Float prev_delta;
-        prev_delta = Float(-1.0f);
-        Float found;
-        found = Float(0.0f);
-        Float alive;
-        alive = Float(1.0f);
-        Float3 hit_lo;
-        hit_lo = ray_origin;
-        Float3 hit_hi;
-        hit_hi = sample_pos;
-        Float hit_step;
-        hit_step = Float(float(kSteps));
-
-        for (int i = 0; i < kSteps; ++i)
+        $IF(surface_f0 > Float(0.001f))
         {
-            auto frontal = step(0.01f, sample_pos->z);
-            Float2 s_uv;
-            s_uv = view_to_uv(sample_pos);
-            auto inx = step(0.0f, s_uv->x) * step(s_uv->x, Float(1.0f));
-            auto iny = step(0.0f, s_uv->y) * step(s_uv->y, Float(1.0f));
-            alive = alive * frontal * inx * iny;
 
-            Float2 suv_c;
-            suv_c = min(max(s_uv, Float2(0.f, 0.f)), Float2(1.f, 1.f));
-            Float delta;
-            delta = sample_pos->z - texture(s_ssr_lin, suv_c)->x;
+            Float view_z;
+            view_z = texture(s_ssr_lin, uv)->x;
+            Float3 view_pos;
+            view_pos = Float3((uv->x * u_ndc_to_view->x + u_ndc_to_view->z) * view_z,
+                              (uv->y * u_ndc_to_view->y + u_ndc_to_view->w) * view_z,
+                              view_z);
 
-            auto crossed = step(prev_delta, Float(1e-4f)) * step(1e-4f, delta);
-            const float allow_close = (i > 0) ? 1.0f : 0.0f;
-            auto close_hit = Float(allow_close) * step(1e-4f, delta) * step(delta, thickness);
-            Float hit_now;
-            hit_now = min(crossed + close_hit, Float(1.0f)) * alive * (Float(1.0f) - found);
+            Float4 packed_normal;
+            packed_normal = texture(s_gb_normal, uv);
+            Float3 n_world;
+            n_world = normalize(packed_normal->xyz() * Float(2.0f) - Float3(1.0f, 1.0f, 1.0f));
+            Float3 n;
+            n = normalize(Float3(dot(u_view_r0->xyz(), n_world),
+                                 dot(u_view_r1->xyz(), n_world),
+                                 dot(u_view_r2->xyz(), n_world)));
+            Float roughness;
+            roughness = packed_normal->w;
 
-            hit_lo = mix(hit_lo, prev_pos, hit_now);
-            hit_hi = mix(hit_hi, sample_pos, hit_now);
-            hit_step = mix(hit_step, Float(float(i)), hit_now);
-            found = max(found, hit_now);
+            Float3 v;
+            v = normalize(view_pos);
+            constexpr int kSteps = 80; // 对齐 GLSL 默认 ssr_steps(example_sponza.cpp:112)
+            Float step_len;
+            step_len = u_ssr0->z / Float(float(kSteps));
+            Float3 ray_step;
+            ray_step = (v - n * (dot(n, v) * Float(2.0f))) * step_len; // reflect(v, n) * step
+            Float thickness;
+            thickness = u_ssr0->w;
 
-            prev_pos = sample_pos;
-            prev_delta = delta;
-            sample_pos = sample_pos + ray_step;
-        }
+            // interleaved gradient noise 抖动。
+            // $IF 的条件是**裸 C++ bool** → 走剪枝重载:关闭抖动时整段 IGN 计算不会
+            // 出现在最终 shader 里(而不是算完乘 0)。必须配 $ELSE,否则分支体会被
+            // 静默丢弃并在 getCurrentConditionInfo() 抛 bad_function_call。
+            // 分支内只赋值给块外已声明的局部量 initial_offset。
+            Float initial_offset;
+            initial_offset = Float(1.0f);
+            $IF(prune.ssr_jitter)
+            {
+                auto ign = fract(Float(52.9829189f) *
+                                 fract(dot(uv * Float2(float(spz_width), float(spz_height)) +
+                                               Float2(314.0f, 159.0f) * u_ssr1->w,
+                                           Float2(0.06711056f, 0.00583715f))));
+                initial_offset = Float(0.5f) + ign;
+            }
+            $ELSE
+            {
+                initial_offset = Float(1.0f);
+            };
 
-        // binary search 精修(4 次;mid 先落变量,同 edsl_ssr 的 review 修法)
-        Float3 lo;
-        lo = hit_lo;
-        Float3 hi;
-        hi = hit_hi;
-        for (int k = 0; k < 4; ++k)
-        {
-            Float3 mid;
-            mid = (lo + hi) * Float(0.5f);
-            Float2 mid_uv;
-            mid_uv = min(max(view_to_uv(mid), Float2(0.f, 0.f)), Float2(1.f, 1.f));
-            Float cond;
-            cond = step(texture(s_ssr_lin, mid_uv)->x, mid->z); // mid 在表面之后 → hi=mid
-            hi = mix(hi, mid, cond);
-            lo = mix(lo, mid, Float(1.0f) - cond);
-        }
-        Float2 hit_uv;
-        hit_uv = min(max(view_to_uv(hi), Float2(0.f, 0.f)), Float2(1.f, 1.f));
-        auto keep = step(hi->z - texture(s_ssr_lin, hit_uv)->x, thickness);
+            Float3 ray_origin;
+            ray_origin = view_pos + n * max(thickness * Float(0.35f), step_len * Float(0.12f));
 
-        Float3 refl_color;
-        refl_color = texture(s_hdr, hit_uv)->xyz();
+            Float3 sample_pos;
+            sample_pos = ray_origin + ray_step * initial_offset;
+            Float3 prev_pos;
+            prev_pos = ray_origin;
+            Float prev_delta;
+            prev_delta = Float(-1.0f);
+            Float found;
+            found = Float(0.0f);
+            Float alive;
+            alive = Float(1.0f);
+            Float3 hit_lo;
+            hit_lo = ray_origin;
+            Float3 hit_hi;
+            hit_hi = sample_pos;
+            Float hit_step;
+            hit_step = Float(float(kSteps));
 
-        auto ndotv2 = clamp(dot(n, -v), 0.f, 1.f);
-        auto fresnel = surface_f0 + (Float(1.0f) - surface_f0) * pow(Float(1.0f) - ndotv2, u_ssr1->y);
+            for (int i = 0; i < kSteps; ++i)
+            {
+                auto frontal = step(0.01f, sample_pos->z);
+                Float2 s_uv;
+                s_uv = view_to_uv(sample_pos);
+                auto inx = step(0.0f, s_uv->x) * step(s_uv->x, Float(1.0f));
+                auto iny = step(0.0f, s_uv->y) * step(s_uv->y, Float(1.0f));
+                alive = alive * frontal * inx * iny;
 
-        auto edge_fade = smoothstep_f(Float(0.0f), Float(0.12f), hit_uv->x) *
-                         smoothstep_f(Float(0.0f), Float(0.12f), hit_uv->y) *
-                         (Float(1.0f) - smoothstep_f(Float(0.88f), Float(1.0f), hit_uv->x)) *
-                         (Float(1.0f) - smoothstep_f(Float(0.88f), Float(1.0f), hit_uv->y));
+                Float2 suv_c;
+                suv_c = min(max(s_uv, Float2(0.f, 0.f)), Float2(1.f, 1.f));
+                Float delta;
+                delta = sample_pos->z - texture(s_ssr_lin, suv_c)->x;
 
-        auto dist_fade = Float(1.0f) - smoothstep_f(Float(0.35f), Float(1.0f), hit_step / Float(float(kSteps))) * Float(0.65f);
-        auto rough_fade = Float(1.0f) - smoothstep_f(Float(0.08f), Float(0.50f), roughness);
+                auto crossed = step(prev_delta, Float(1e-4f)) * step(1e-4f, delta);
+                const float allow_close = (i > 0) ? 1.0f : 0.0f;
+                auto close_hit = Float(allow_close) * step(1e-4f, delta) * step(delta, thickness);
+                Float hit_now;
+                hit_now = min(crossed + close_hit, Float(1.0f)) * alive * (Float(1.0f) - found);
 
-        auto weight = clamp(fresnel * edge_fade * dist_fade * rough_fade * found * keep * active, 0.f, 1.f);
-        ssr_trace_out << Float4(refl_color->x, refl_color->y, refl_color->z, weight);
+                hit_lo = mix(hit_lo, prev_pos, hit_now);
+                hit_hi = mix(hit_hi, sample_pos, hit_now);
+                hit_step = mix(hit_step, Float(float(i)), hit_now);
+                found = max(found, hit_now);
+
+                prev_pos = sample_pos;
+                prev_delta = delta;
+                sample_pos = sample_pos + ray_step;
+            }
+
+            // binary search 精修(6 次,对齐 GLSL 默认 ssr_refine_steps;mid 先落变量)
+            Float3 lo;
+            lo = hit_lo;
+            Float3 hi;
+            hi = hit_hi;
+            for (int k = 0; k < 6; ++k)
+            {
+                Float3 mid;
+                mid = (lo + hi) * Float(0.5f);
+                Float2 mid_uv;
+                mid_uv = min(max(view_to_uv(mid), Float2(0.f, 0.f)), Float2(1.f, 1.f));
+                Float cond;
+                cond = step(texture(s_ssr_lin, mid_uv)->x, mid->z); // mid 在表面之后 → hi=mid
+                hi = mix(hi, mid, cond);
+                lo = mix(lo, mid, Float(1.0f) - cond);
+            }
+            Float2 hit_uv;
+            hit_uv = min(max(view_to_uv(hi), Float2(0.f, 0.f)), Float2(1.f, 1.f));
+            auto keep = step(hi->z - texture(s_ssr_lin, hit_uv)->x, thickness);
+
+            Float3 refl_color;
+            refl_color = texture(s_hdr, hit_uv)->xyz();
+
+            auto ndotv2 = clamp(dot(n, -v), 0.f, 1.f);
+            auto fresnel = surface_f0 + (Float(1.0f) - surface_f0) * pow(Float(1.0f) - ndotv2, u_ssr1->y);
+
+            auto edge_fade = smoothstep_f(Float(0.0f), Float(0.12f), hit_uv->x) *
+                             smoothstep_f(Float(0.0f), Float(0.12f), hit_uv->y) *
+                             (Float(1.0f) - smoothstep_f(Float(0.88f), Float(1.0f), hit_uv->x)) *
+                             (Float(1.0f) - smoothstep_f(Float(0.88f), Float(1.0f), hit_uv->y));
+
+            auto dist_fade = Float(1.0f) - smoothstep_f(Float(0.35f), Float(1.0f), hit_step / Float(float(kSteps))) * Float(0.65f);
+            auto rough_fade = Float(1.0f) - smoothstep_f(Float(0.08f), Float(0.50f), roughness);
+
+            out_weight = clamp(fresnel * edge_fade * dist_fade * rough_fade * found * keep, 0.f, 1.f);
+            out_color = refl_color->xyz();
+        };
+
+        ssr_trace_out << Float4(out_color, out_weight);
     };
 
     // 合成 + bloom(13 taps)+ ACES + 调色 + vignette
@@ -1778,7 +1836,7 @@ void run_example_edsl_sponza()
 
     HorizonImGuiLayer ui(window, spz_width, spz_height);
 
-    Tuning tuning; // 定妆值按 Intel PBR 场景(米制);旧 cm 级资产重标定世界空间量
+    // tuning 已在 shader lambda 之前声明(剪枝 detector 需要),这里只做资产相关的重标定。
     const float scene_diag = glm::length(scene_extent);
     if (asset.version != hzms_version_pbr)
     {
@@ -1919,6 +1977,16 @@ void run_example_edsl_sponza()
         u_view = to_edsl_matrix(view);
         u_proj_view = to_edsl_matrix(view_proj);
         u_sun_view_proj = to_edsl_matrix(sun_view_proj);
+        // 同步编译期剪枝开关。必须在 record 之前:ConditionInfo 在 build_draw_plan()
+        // 里每帧每管线求值一次,值变了就会切到另一个 shader 变体(首次切换要付一次
+        // Slang link + 建管线的开销,之后命中 pipeline_pool_)。
+        prune.sun_shadow = tuning.sun_shadow;
+        prune.rsm = tuning.rsm_enable;
+        prune.ssr = tuning.ssr_enable;
+        prune.ssr_jitter = tuning.ssr_jitter;
+        prune.disney_extra = tuning.disney_sheen > 0.0f || tuning.disney_clearcoat > 0.0f ||
+                             tuning.disney_subsurface > 0.0f || tuning.disney_anisotropic > 0.0f;
+
         u_inv_sun_view_proj = to_edsl_matrix(inv_sun_view_proj);
         u_camera_pos = to_edsl_vec4(glm::vec4(camera.position, 1.0f));
         u_sun_dir_ws = to_edsl_vec4(glm::vec4(sun_direction, 0.0f));
