@@ -53,6 +53,9 @@ namespace
 constexpr uint32_t essr_width = 1280;
 constexpr uint32_t essr_height = 720;
 constexpr float essr_near = 0.1f;
+// SSSR 实验:所有物体共用同一组 Disney BRDF 参数,只有 albedo(颜色)不同
+constexpr float kUniformMetallic = 0.5f;
+constexpr float kUniformRoughness = 0.25f;
 constexpr float essr_far = 100.0f;
 
 // EDSL 无循环 AST，步进次数只能是编译期常量（C++ 侧展开）
@@ -270,9 +273,10 @@ void run_example_edsl_ssr()
 
         Float3 albedo;
         albedo = Float3(in->v_material->xyz());
-        Float metallic = in->v_material->w;
-        Float roughness;
-        roughness = clamp(in->v_params->x, Float(0.05f), Float(1.0f));
+        // SSSR 实验:除 albedo 外的 BRDF 参数为宿主 C++ 原生常量(不走 proxy),
+        // 派生量在 C++ 侧折叠,生成的 shader 里只剩字面量
+        constexpr float metallic = kUniformMetallic;
+        constexpr float roughness = kUniformRoughness < 0.05f ? 0.05f : kUniformRoughness;
 
         Float NoL;
         NoL = max(dot(n, l), Float(0.f));
@@ -285,31 +289,31 @@ void run_example_edsl_ssr()
         Float LoH;
         LoH = max(dot(l, h), Float(0.f));
 
-        Float ga;
-        ga = roughness * roughness;
+        // 所有 roughness/metallic 派生量在 C++ 侧折叠
+        constexpr float ga = roughness * roughness;
+        constexpr float a2 = ga * ga;
+        constexpr float f0_dielec = 0.04f * (1.0f - metallic);
         Float3 f0;
-        f0 = mix(Float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+        f0 = albedo * Float(metallic) + Float3(f0_dielec, f0_dielec, f0_dielec);
         Float3 F;
         F = f0 + (Float3(1.f, 1.f, 1.f) - f0) * schlick5g(LoH);
 
         Float FD90;
-        FD90 = Float(0.5f) + Float(2.f) * roughness * LoH * LoH;
+        FD90 = Float(0.5f) + Float(2.0f * roughness) * LoH * LoH;
         Float fd;
         fd = (Float(1.f) + (FD90 - Float(1.f)) * schlick5g(NoL)) *
              (Float(1.f) + (FD90 - Float(1.f)) * schlick5g(NoV));
         Float3 diffuse;
-        diffuse = albedo * (fd * Float(0.31830988618f)) * (Float(1.f) - metallic);
+        diffuse = albedo * (fd * Float(0.31830988618f * (1.0f - metallic)));
 
-        Float a2;
-        a2 = ga * ga;
         Float dt;
-        dt = Float(1.f) + (a2 - Float(1.f)) * NoH * NoH;
+        dt = Float(1.f) + Float(a2 - 1.0f) * NoH * NoH;
         Float D;
-        D = a2 / (Float(3.14159265359f) * dt * dt);
+        D = Float(a2 / 3.14159265359f) / (dt * dt);
         Float g1l;
-        g1l = Float(2.f) * NoL / (NoL + sqrt(a2 + (Float(1.f) - a2) * NoL * NoL));
+        g1l = Float(2.f) * NoL / (NoL + sqrt(Float(a2) + Float(1.0f - a2) * NoL * NoL));
         Float g1v;
-        g1v = Float(2.f) * NoV / (NoV + sqrt(a2 + (Float(1.f) - a2) * NoV * NoV));
+        g1v = Float(2.f) * NoV / (NoV + sqrt(Float(a2) + Float(1.0f - a2) * NoV * NoV));
         Float3 spec;
         spec = F * (D * (g1l * g1v) / max(Float(4.f) * NoL * NoV, Float(1e-4f)));
 
@@ -317,9 +321,9 @@ void run_example_edsl_ssr()
         lit = (diffuse * (Float3(1.f, 1.f, 1.f) - F) + spec) * NoL + albedo * u_light_dir_vs->w;
 
         gbuf_out_color << Float4(lit, Float(1.0f)); // a=1:有几何标记(清屏 0 → trace 跳过天空)
-        gbuf_out_normal << Float4(n * Float(0.5f) + Float(0.5f), roughness);
+        gbuf_out_normal << Float4(n * Float(0.5f) + Float(0.5f), Float(roughness));
         gbuf_out_depthval << (in->v_clip->z / in->v_clip->w);
-        gbuf_out_albedo_met << Float4(albedo, metallic);
+        gbuf_out_albedo_met << Float4(albedo, Float(metallic)); // .a 仍写常量,保持与 GLSL 版布局一致
     };
 
     // ================================================================
@@ -415,13 +419,13 @@ void run_example_edsl_ssr()
             packed_normal = tr_normal[tid];
             Float3 n;
             n = normalize(packed_normal->xyz() * Float(2.0f) - Float3(1.f, 1.f, 1.f));
-            Float roughness = packed_normal->w;
+            constexpr float roughness = kUniformRoughness; // 宿主常量(GLSL 版仍从 normal.w 读)
 
             Float4 albedo_met;
             albedo_met = tr_albedo_met[tid];
             Float3 albedo;
             albedo = Float3(albedo_met->xyz());
-            Float metallic = albedo_met->w;
+            constexpr float metallic = kUniformMetallic; // 宿主常量(GLSL 版仍从 albedoMet.a 读)
 
             Float3 v;
             v = normalize(view_pos); // 相机在原点，view_pos 即视线方向(指向表面)
@@ -459,8 +463,7 @@ void run_example_edsl_ssr()
                 return cc;
             };
 
-            Float aa;
-            aa = max(roughness * roughness, Float(1e-3f));
+            constexpr float aa = (roughness * roughness > 1e-3f) ? roughness * roughness : 1e-3f;
 
             // basis(n)
             Float3 upv;
@@ -479,7 +482,7 @@ void run_example_edsl_ssr()
             Float r2;
             r2 = frand(seed);
             Float3 Vh;
-            Vh = normalize(Float3(Vl->x * aa, Vl->y * aa, Vl->z));
+            Vh = normalize(Float3(Vl->x * Float(aa), Vl->y * Float(aa), Vl->z));
             Float lq;
             lq = Vh->x * Vh->x + Vh->y * Vh->y;
             Float3 T1;
@@ -508,25 +511,26 @@ void run_example_edsl_ssr()
             Float3 Nh;
             Nh = T1 * t1 + T2 * t2 + Vh * nzc;
             Float3 hl;
-            hl = normalize(Float3(Nh->x * aa, Nh->y * aa, max(Float(0.f), Nh->z)));
+            hl = normalize(Float3(Nh->x * Float(aa), Nh->y * Float(aa), max(Float(0.f), Nh->z)));
             $IF(hl->z < Float(0.f)) { hl = Float3(0.f, 0.f, 0.f) - hl; };
             Float3 hw;
             hw = tb * hl->x + bb * hl->y + n * hl->z;
 
             // Fresnel 与 lobe 权重
+            constexpr float f0_dielec = 0.04f * (1.0f - metallic);
             Float3 f0v;
-            f0v = mix(Float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+            f0v = albedo * Float(metallic) + Float3(f0_dielec, f0_dielec, f0_dielec);
             Float vhd;
             vhd = dot(wo, hw);
             Float3 Fr;
             Fr = f0v + (Float3(1.f, 1.f, 1.f) - f0v) * schlick5(vhd);
-            Float diffW;
-            diffW = Float(1.f) - metallic;
+            constexpr float diffw_base = 1.0f - metallic; // lobe 概率底数:C++ 折叠
             Float specW;
             specW = dot(Fr, Float3(0.299f, 0.587f, 0.114f));
             Float invWt;
-            invWt = Float(1.f) / (diffW + specW);
-            diffW = diffW * invWt;
+            invWt = Float(1.f) / (Float(diffw_base) + specW);
+            Float diffW;
+            diffW = Float(diffw_base) * invWt;
             specW = specW * invWt;
 
             Float3 ray_dir;
@@ -563,7 +567,7 @@ void run_example_edsl_ssr()
                     Float pdf;
                     pdf = NoL * Float(0.31830988618f);
                     Float FD90;
-                    FD90 = Float(0.5f) + Float(2.f) * roughness * LoH * LoH;
+                    FD90 = Float(0.5f) + Float(2.0f * roughness) * LoH * LoH;
                     Float fa;
                     fa = Float(1.f) + (FD90 - Float(1.f)) * schlick5(NoL);
                     Float fb;
@@ -591,18 +595,17 @@ void run_example_edsl_ssr()
                 {
                     Float NoH;
                     NoH = min(dot(n, hw), Float(0.99f));
-                    Float a2s;
-                    a2s = aa * aa;
+                    constexpr float a2s = aa * aa; // 全部派生量 C++ 折叠
                     Float dts;
-                    dts = Float(1.f) + (a2s - Float(1.f)) * NoH * NoH;
+                    dts = Float(1.f) + Float(a2s - 1.0f) * NoH * NoH;
                     Float Dg;
-                    Dg = a2s / (Float(3.14159265359f) * dts * dts);
+                    Dg = Float(a2s / 3.14159265359f) / (dts * dts);
                     Float pdf;
                     pdf = Dg * NoH / max(Float(4.f) * NoV, Float(1e-5f));
                     Float g1l;
-                    g1l = Float(2.f) * NoL / (NoL + sqrt(a2s + (Float(1.f) - a2s) * NoL * NoL));
+                    g1l = Float(2.f) * NoL / (NoL + sqrt(Float(a2s) + Float(1.0f - a2s) * NoL * NoL));
                     Float g1v;
-                    g1v = Float(2.f) * NoV / (NoV + sqrt(a2s + (Float(1.f) - a2s) * NoV * NoV));
+                    g1v = Float(2.f) * NoV / (NoV + sqrt(Float(a2s) + Float(1.0f - a2s) * NoV * NoV));
                     Float3 specv;
                     specv = Fr * (Dg * (g1l * g1v) / max(Float(4.f) * NoL * NoV, Float(1e-5f)));
                     brdfRGB = specv * NoL;
@@ -1249,7 +1252,7 @@ void run_example_edsl_ssr()
         instances.push_back({
             glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.2f, 0.0f)) *
                 glm::scale(glm::mat4(1.0f), glm::vec3(16.0f, 0.2f, 16.0f)),
-            glm::vec3(0.10f, 0.11f, 0.13f), 0.88f, 0.05f });
+            glm::vec3(0.10f, 0.11f, 0.13f), kUniformMetallic, kUniformRoughness });
 
         constexpr int dim = 4;
         constexpr float spacing = 2.9f;
@@ -1270,7 +1273,7 @@ void run_example_edsl_ssr()
                 model = glm::translate(glm::mat4(1.0f),
                                        glm::vec3(-grid_offset + xx * spacing, height, -grid_offset + zz * spacing)) *
                         model * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f));
-                instances.push_back({ model, palette[idx & 3], 0.14f, 0.38f });
+                instances.push_back({ model, palette[idx & 3], kUniformMetallic, kUniformRoughness });
             }
         }
 
@@ -1281,7 +1284,7 @@ void run_example_edsl_ssr()
             instances.push_back({
                 glm::translate(glm::mat4(1.0f), glm::vec3(x, 2.2f, 2.0f)) *
                     glm::scale(glm::mat4(1.0f), glm::vec3(0.42f, 2.2f, 0.42f)),
-                glm::vec3(0.82f, 0.80f, 0.76f), 0.10f, 0.30f });
+                glm::vec3(0.82f, 0.80f, 0.76f), kUniformMetallic, kUniformRoughness });
         }
 
         // Pass 1：几何 → G-buffer

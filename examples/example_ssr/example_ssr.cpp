@@ -59,6 +59,9 @@ namespace
 constexpr uint32_t ssr_width = 1280;
 constexpr uint32_t ssr_height = 720;
 constexpr float ssr_near = 0.1f;
+// SSSR 实验:所有物体共用同一组 Disney BRDF 参数,只有 albedo(颜色)不同
+constexpr float kUniformMetallic = 0.5f;
+constexpr float kUniformRoughness = 0.25f;
 constexpr float ssr_far = 100.0f;
 
 struct SsrVertex
@@ -323,7 +326,7 @@ void run_example_ssr()
         instances.push_back({
             glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.2f, 0.0f)) *
                 glm::scale(glm::mat4(1.0f), glm::vec3(16.0f, 0.2f, 16.0f)),
-            glm::vec3(0.10f, 0.11f, 0.13f), 0.88f, 0.05f });
+            glm::vec3(0.10f, 0.11f, 0.13f), kUniformMetallic, kUniformRoughness });
 
         constexpr int dim = 4;
         constexpr float spacing = 2.9f;
@@ -344,7 +347,7 @@ void run_example_ssr()
                 model = glm::translate(glm::mat4(1.0f),
                                        glm::vec3(-grid_offset + xx * spacing, height, -grid_offset + zz * spacing)) *
                         model * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f));
-                instances.push_back({ model, palette[idx & 3], 0.14f, 0.38f });
+                instances.push_back({ model, palette[idx & 3], kUniformMetallic, kUniformRoughness });
             }
         }
 
@@ -355,7 +358,7 @@ void run_example_ssr()
             instances.push_back({
                 glm::translate(glm::mat4(1.0f), glm::vec3(x, 2.2f, 2.0f)) *
                     glm::scale(glm::mat4(1.0f), glm::vec3(0.42f, 2.2f, 0.42f)),
-                glm::vec3(0.82f, 0.80f, 0.76f), 0.10f, 0.30f });
+                glm::vec3(0.82f, 0.80f, 0.76f), kUniformMetallic, kUniformRoughness });
         }
 
         // Pass 1：几何 → G-buffer（MRT 三附件）
