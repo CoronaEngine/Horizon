@@ -41,12 +41,14 @@
 #include GLSL(shaders/ssr_linear_depth_compute.glsl)
 #include GLSL(shaders/ssr_trace_compute.glsl)
 #include GLSL(shaders/ssr_composite_compute.glsl)
+#include GLSL(shaders/ssr_pathtrace_compute.glsl)
 
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -152,6 +154,11 @@ void run_example_ssr()
         ssr_width, ssr_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.normal"));
     normal_image.set_clear_color(0.5f, 0.5f, 1.0f, 1.0f);
 
+    // SSSR:albedo + metallic(trace 需要重建 Disney 材质)
+    Corona::Horizon::HardwareImage albedo_met_image(Corona::Horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.albedo_met"));
+    albedo_met_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+
     Corona::Horizon::HardwareImage depth_val_image(Corona::Horizon::HardwareImageDesc::texture_2d(
         ssr_width, ssr_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_ssr.depthval"));
     depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // 远平面
@@ -185,16 +192,19 @@ void run_example_ssr()
     geom_rasterizer.outColor = color_image;
     geom_rasterizer.outNormal = normal_image;
     geom_rasterizer.outDepthVal = depth_val_image;
+    geom_rasterizer.outAlbedoMet = albedo_met_image;
     geom_rasterizer.bind_depth_target(scene_depth);
 
     Corona::Horizon::ComputePipeline linear_depth_compute(ssr_linear_depth_compute_glsl, ktm::uvec3(8, 8, 1));
     Corona::Horizon::ComputePipeline trace_compute(ssr_trace_compute_glsl, ktm::uvec3(8, 8, 1));
     Corona::Horizon::ComputePipeline composite_compute(ssr_composite_compute_glsl, ktm::uvec3(8, 8, 1));
+    Corona::Horizon::ComputePipeline pathtrace_compute(ssr_pathtrace_compute_glsl, ktm::uvec3(8, 8, 1));
 
     // bindless 索引取一次即可（图像本身不变）
     const uint32_t color_id = color_image.store_descriptor();
     const uint32_t normal_id = normal_image.store_descriptor();
     const uint32_t depth_val_id = depth_val_image.store_descriptor();
+    const uint32_t albedo_met_id = albedo_met_image.store_descriptor();
     const uint32_t linear_depth_id = linear_depth_image.store_descriptor();
     const uint32_t ssr_id = ssr_image.store_descriptor();
     const uint32_t output_id = final_output_image.store_descriptor();
@@ -250,6 +260,16 @@ void run_example_ssr()
     float intensity = 1.0f;
     int debug_mode = 0;
 
+    // ---- Path Trace 模式(Disney BRDF 路径追踪基准,SSR_PATHTRACE=1 或复选框开启)----
+    bool pathtrace_mode = std::getenv("SSR_PATHTRACE") != nullptr;
+    // 相机基向量在 CPU 端算好传 shader(免 shader 侧 cross)
+    const glm::vec3 pt_ro(0.0f, 3.2f, -9.0f);
+    const glm::vec3 pt_ta(0.0f, 1.0f, 0.0f);
+    const glm::vec3 pt_fwd = glm::normalize(pt_ta - pt_ro);
+    const glm::vec3 pt_right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), pt_fwd));
+    const glm::vec3 pt_up = glm::cross(pt_fwd, pt_right);
+    constexpr float pt_focal = 1.6f;
+
     HorizonImGuiLayer ui(window, ssr_width, ssr_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
@@ -279,6 +299,7 @@ void run_example_ssr()
         ImGui::SliderFloat("Fresnel F0", &fresnel_f0, 0.0f, 1.0f);
         ImGui::SliderFloat("Intensity", &intensity, 0.0f, 2.0f);
         ImGui::Combo("Debug View", &debug_mode, "Final\0SSR Color\0SSR Weight\0Reflectivity\0");
+        ImGui::Checkbox("Path Trace (Disney)", &pathtrace_mode);
         ImGui::End();
 
         fps_accum_seconds += dt;
@@ -287,8 +308,8 @@ void run_example_ssr()
         {
             const double fps = fps_frame_count / fps_accum_seconds;
             char title[160];
-            std::snprintf(title, sizeof(title), "Horizon SSR [Vulkan] - %d steps - %.1f FPS (%.2f ms)",
-                          num_steps, fps, 1000.0 / fps);
+            std::snprintf(title, sizeof(title), "Horizon SSR [Vulkan]%s - %d steps - %.1f FPS (%.2f ms)",
+                          pathtrace_mode ? " PT" : "", num_steps, fps, 1000.0 / fps);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
@@ -362,10 +383,11 @@ void run_example_ssr()
         trace_compute.pushConsts.normalID = normal_id;
         trace_compute.pushConsts.colorID = color_id;
         trace_compute.pushConsts.ssrID = ssr_id;
+        trace_compute.pushConsts.albedoMetID = albedo_met_id;
         trace_compute.pushConsts.ndc_to_view = ndc_to_view;
         trace_compute.pushConsts.params0 = glm::vec4(p00, p11, max_distance, float(num_steps));
         trace_compute.pushConsts.params1 =
-            glm::vec4(thickness, float(frame_index & 63u), float(ssr_width), float(ssr_height));
+            glm::vec4(thickness, float(frame_index), float(ssr_width), float(ssr_height));
         trace_compute.pushConsts.params2 =
             glm::vec4(fresnel_power, fresnel_f0, float(refine_steps), use_jitter ? 1.0f : 0.0f);
 
@@ -376,12 +398,27 @@ void run_example_ssr()
         composite_compute.pushConsts.params0 = glm::vec4(
             float(ssr_width), float(ssr_height), ssr_enabled ? intensity : 0.0f, float(debug_mode));
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << geom_rasterizer(ssr_width, ssr_height)
-                            << linear_depth_compute(dispatch_x, dispatch_y, 1)
-                            << trace_compute(dispatch_x, dispatch_y, 1)
-                            << composite_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::submit;
+        // Path Trace 模式:单 compute pass 直写输出,替代整条 SSR 链
+        pathtrace_compute.pushConsts.outputID = output_id;
+        pathtrace_compute.pushConsts.pt0 = glm::vec4(pt_ro, float(frame_index));
+        pathtrace_compute.pushConsts.pt1 = glm::vec4(pt_fwd, pt_focal);
+        pathtrace_compute.pushConsts.pt2 = glm::vec4(pt_right, float(ssr_width));
+        pathtrace_compute.pushConsts.pt3 = glm::vec4(pt_up, float(ssr_height));
+
+        Corona::Horizon::SubmitReceipt render_receipt;
+        if (pathtrace_mode)
+        {
+            render_receipt = render_executor.stream() << pathtrace_compute(dispatch_x, dispatch_y, 1)
+                                                      << Corona::Horizon::submit;
+        }
+        else
+        {
+            render_receipt = render_executor << geom_rasterizer(ssr_width, ssr_height)
+                                             << linear_depth_compute(dispatch_x, dispatch_y, 1)
+                                             << trace_compute(dispatch_x, dispatch_y, 1)
+                                             << composite_compute(dispatch_x, dispatch_y, 1)
+                                             << Corona::Horizon::submit;
+        }
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

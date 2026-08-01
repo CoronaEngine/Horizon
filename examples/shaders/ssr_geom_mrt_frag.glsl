@@ -32,6 +32,11 @@ layout(location = 1) in vec3 v_pos_vs;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outNormal;
 layout(location = 2) out vec4 outDepthVal;
+layout(location = 3) out vec4 outAlbedoMet;
+
+const float PI = 3.14159265359;
+
+float schlick5(float u) { float m = clamp(1.0 - u, 0.0, 1.0); return m * m * m * m * m; }
 
 void main()
 {
@@ -40,17 +45,35 @@ void main()
     vec3 v = normalize(-v_pos_vs); // 相机在 view 空间原点
 
     vec3 albedo = vpc_fs.material.rgb;
-    float reflectivity = vpc_fs.params.x;
-    float roughness = vpc_fs.params.y;
+    float metallic = vpc_fs.params.x;   // SSSR:params.x 语义改为 metallic
+    float roughness = clamp(vpc_fs.params.y, 0.05, 1.0);
 
-    // Lambert + Blinn-Phong 高光（原版同为最简光照，不是本例重点）
-    float ndotl = max(0.0, dot(n, l));
+    // Disney 直射(diffuse*(1-F) + GGX specular),光色白光,ambient 沿用 light_dir_vs.w
+    float NoL = max(dot(n, l), 0.0);
+    float NoV = max(dot(n, v), 1e-4);
     vec3 h = normalize(l + v);
-    float spec = pow(max(0.0, dot(n, h)), mix(128.0, 8.0, roughness));
+    float NoH = max(dot(n, h), 0.0);
+    float LoH = max(dot(l, h), 0.0);
 
-    vec3 lit = albedo * (fsp.light_dir_vs.w + ndotl) + vec3(spec * (1.0 - roughness) * 0.35);
+    float a = roughness * roughness;
+    vec3 f0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = f0 + (vec3(1.0) - f0) * schlick5(LoH);
 
-    outColor = vec4(lit, reflectivity);
+    float FD90 = 0.5 + 2.0 * roughness * LoH * LoH;
+    float fd = (1.0 + (FD90 - 1.0) * schlick5(NoL)) * (1.0 + (FD90 - 1.0) * schlick5(NoV));
+    vec3 diffuse = albedo * (fd / PI) * (1.0 - metallic);
+
+    float a2 = a * a;
+    float dt = 1.0 + (a2 - 1.0) * NoH * NoH;
+    float D = a2 / (PI * dt * dt);
+    float g1l = 2.0 * NoL / (NoL + sqrt(a2 + (1.0 - a2) * NoL * NoL));
+    float g1v = 2.0 * NoV / (NoV + sqrt(a2 + (1.0 - a2) * NoV * NoV));
+    vec3 spec = D * F * (g1l * g1v) / max(4.0 * NoL * NoV, 1e-4);
+
+    vec3 lit = (diffuse * (vec3(1.0) - F) + spec) * NoL + albedo * fsp.light_dir_vs.w;
+
+    outColor = vec4(lit, 1.0); // a=1:标记「有几何」(清屏为 0,trace 据此跳过天空)
     outNormal = vec4(n * 0.5 + 0.5, roughness);
     outDepthVal = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);
+    outAlbedoMet = vec4(albedo, metallic); // SSSR:trace 需要 albedo/metallic 建 Disney 材质
 }

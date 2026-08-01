@@ -40,6 +40,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -180,6 +182,11 @@ void run_example_edsl_ssr()
         essr_width, essr_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_edsl_ssr.depthval"));
     depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // 远平面
 
+    // SSSR:albedo + metallic(trace 需要重建 Disney 材质)
+    Corona::Horizon::HardwareImage albedo_met_image(Corona::Horizon::HardwareImageDesc::texture_2d(
+        essr_width, essr_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_edsl_ssr.albedo_met"));
+    albedo_met_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+
     Corona::Horizon::HardwareImage linear_depth_image(Corona::Horizon::HardwareImageDesc::texture_2d(
         essr_width, essr_height, Corona::Horizon::Format::R32_FLOAT,
         Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled,
@@ -240,8 +247,20 @@ void run_example_edsl_ssr()
     Texture2D<ktm::fvec4> gbuf_out_color = color_image;
     Texture2D<ktm::fvec4> gbuf_out_normal = normal_image;
     Texture2D<float> gbuf_out_depthval = depth_val_image;
+    Texture2D<ktm::fvec4> gbuf_out_albedo_met = albedo_met_image;
 
     auto geom_frag = [&](Aggregate<EssrVertOut> in) {
+        // SSSR:直射光换 Disney(diffuse*(1-F)+GGX spec),v_material.w 语义改为 metallic
+        auto schlick5g = [&](Float u) {
+            Float m;
+            m = clamp(Float(1.f) - u, Float(0.f), Float(1.f));
+            Float m2;
+            m2 = m * m;
+            Float r;
+            r = m2 * m2 * m;
+            return r;
+        };
+
         Float3 n;
         n = normalize(in->v_normal_vs);
         Float3 l;
@@ -249,21 +268,58 @@ void run_example_edsl_ssr()
         Float3 v;
         v = -normalize(in->v_pos_vs); // 相机在 view 空间原点
 
-        auto albedo = in->v_material->xyz();
-        Float reflectivity = in->v_material->w;
-        Float roughness = in->v_params->x;
+        Float3 albedo;
+        albedo = Float3(in->v_material->xyz());
+        Float metallic = in->v_material->w;
+        Float roughness;
+        roughness = clamp(in->v_params->x, Float(0.05f), Float(1.0f));
 
-        // Lambert + Blinn-Phong 高光（与 GLSL 版一致）
-        auto ndotl = max(0.f, dot(n, l));
-        auto h = normalize(l + v);
-        auto spec = pow(max(0.f, dot(n, h)), mix(Float(128.f), Float(8.f), roughness));
+        Float NoL;
+        NoL = max(dot(n, l), Float(0.f));
+        Float NoV;
+        NoV = max(dot(n, v), Float(1e-4f));
+        Float3 h;
+        h = normalize(l + v);
+        Float NoH;
+        NoH = max(dot(n, h), Float(0.f));
+        Float LoH;
+        LoH = max(dot(l, h), Float(0.f));
 
-        auto spec_term = spec * (Float(1.f) - roughness) * Float(0.35f);
-        auto lit_c = albedo * (u_light_dir_vs->w + ndotl) + spec_term * Float3(1.f, 1.f, 1.f);
+        Float ga;
+        ga = roughness * roughness;
+        Float3 f0;
+        f0 = mix(Float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+        Float3 F;
+        F = f0 + (Float3(1.f, 1.f, 1.f) - f0) * schlick5g(LoH);
 
-        gbuf_out_color << Float4(lit_c, reflectivity);
+        Float FD90;
+        FD90 = Float(0.5f) + Float(2.f) * roughness * LoH * LoH;
+        Float fd;
+        fd = (Float(1.f) + (FD90 - Float(1.f)) * schlick5g(NoL)) *
+             (Float(1.f) + (FD90 - Float(1.f)) * schlick5g(NoV));
+        Float3 diffuse;
+        diffuse = albedo * (fd * Float(0.31830988618f)) * (Float(1.f) - metallic);
+
+        Float a2;
+        a2 = ga * ga;
+        Float dt;
+        dt = Float(1.f) + (a2 - Float(1.f)) * NoH * NoH;
+        Float D;
+        D = a2 / (Float(3.14159265359f) * dt * dt);
+        Float g1l;
+        g1l = Float(2.f) * NoL / (NoL + sqrt(a2 + (Float(1.f) - a2) * NoL * NoL));
+        Float g1v;
+        g1v = Float(2.f) * NoV / (NoV + sqrt(a2 + (Float(1.f) - a2) * NoV * NoV));
+        Float3 spec;
+        spec = F * (D * (g1l * g1v) / max(Float(4.f) * NoL * NoV, Float(1e-4f)));
+
+        Float3 lit;
+        lit = (diffuse * (Float3(1.f, 1.f, 1.f) - F) + spec) * NoL + albedo * u_light_dir_vs->w;
+
+        gbuf_out_color << Float4(lit, Float(1.0f)); // a=1:有几何标记(清屏 0 → trace 跳过天空)
         gbuf_out_normal << Float4(n * Float(0.5f) + Float(0.5f), roughness);
         gbuf_out_depthval << (in->v_clip->z / in->v_clip->w);
+        gbuf_out_albedo_met << Float4(albedo, metallic);
     };
 
     // ================================================================
@@ -295,7 +351,8 @@ void run_example_edsl_ssr()
     Texture2D<float> tr_linear_depth = linear_depth_image; // storage 读（[coord]）
     Texture2D<ktm::fvec4> tr_normal = normal_image;        // storage 读
     Texture2D<ktm::fvec4> tr_color = color_image;          // storage 读
-    Texture2D<ktm::fvec4> tr_ssr_out = ssr_image;          // storage 写
+    Texture2D<ktm::fvec4> tr_ssr_out = ssr_image;
+    Texture2D<ktm::fvec4> tr_albedo_met = albedo_met_image; // storage 读(SSSR Disney 材质)          // storage 写
     // 打包沿用 GLSL 版 pushConsts 布局；步数/精修/分辨率已编译进 shader，
     // 对应分量（params0.w / params1.zw / params2.z）保留但未使用
     Float4 u_ndc_to_view; // xy: mul, zw: add（uv → view.xy / viewZ）
@@ -342,9 +399,9 @@ void run_example_edsl_ssr()
         // reflectivity 存在颜色图 alpha；清屏 alpha=0，天空/空白处天然被跳过
         Float4 center_color;
         center_color = tr_color[tid];
-        Float reflectivity = center_color->w;
+        Float has_geo = center_color->w;
 
-        $IF(reflectivity > 0.001f)
+        $IF(has_geo > 0.5f)
         {
             // 重建 view 空间坐标（同 GLSL 版 / example_assao 的 load_view_pos）
             Float view_z;
@@ -360,10 +417,207 @@ void run_example_edsl_ssr()
             n = normalize(packed_normal->xyz() * Float(2.0f) - Float3(1.f, 1.f, 1.f));
             Float roughness = packed_normal->w;
 
+            Float4 albedo_met;
+            albedo_met = tr_albedo_met[tid];
+            Float3 albedo;
+            albedo = Float3(albedo_met->xyz());
+            Float metallic = albedo_met->w;
+
             Float3 v;
-            v = normalize(view_pos); // 相机在原点，view_pos 即视线方向
+            v = normalize(view_pos); // 相机在原点，view_pos 即视线方向(指向表面)
+            Float3 wo;
+            wo = Float3(0.f, 0.f, 0.f) - v; // BRDF 的观察方向
+
+            // ---- SSSR:弹射方向按 Disney BRDF lobe 概率采样(参考 sampleDisneyBRDF) ----
+            Float seed;
+            {
+                Float2 pixc;
+                pixc = Float2(tid->x, tid->y);
+                seed = fract(sin(pixc->x * Float(12.9898f) + pixc->y * Float(78.233f)) * Float(43758.5453f) +
+                             u_tr_params1->y * Float(0.6180339887f));
+            }
+            auto frand = [&](Float& st) {
+                st = fract(sin(st * Float(91.3458f) + Float(47.9898f)) * Float(43758.5453123f));
+                Float r;
+                r = st;
+                return r;
+            };
+            auto schlick5 = [&](Float u) {
+                Float m;
+                m = clamp(Float(1.f) - u, Float(0.f), Float(1.f));
+                Float m2;
+                m2 = m * m;
+                Float r;
+                r = m2 * m2 * m;
+                return r;
+            };
+            auto cross3 = [&](Float3 ca, Float3 cb) {
+                Float3 cc;
+                cc = Float3(ca->y * cb->z - ca->z * cb->y,
+                            ca->z * cb->x - ca->x * cb->z,
+                            ca->x * cb->y - ca->y * cb->x);
+                return cc;
+            };
+
+            Float aa;
+            aa = max(roughness * roughness, Float(1e-3f));
+
+            // basis(n)
+            Float3 upv;
+            upv = Float3(0.f, 1.f, 0.f);
+            $IF(abs(n->y) > Float(0.99f)) { upv = Float3(1.f, 0.f, 0.f); };
+            Float3 tb;
+            tb = normalize(cross3(upv, n));
+            Float3 bb;
+            bb = cross3(n, tb);
+
+            // VNDF 采样半向量
+            Float3 Vl;
+            Vl = Float3(dot(wo, tb), dot(wo, bb), dot(wo, n));
+            Float r1;
+            r1 = frand(seed);
+            Float r2;
+            r2 = frand(seed);
+            Float3 Vh;
+            Vh = normalize(Float3(Vl->x * aa, Vl->y * aa, Vl->z));
+            Float lq;
+            lq = Vh->x * Vh->x + Vh->y * Vh->y;
+            Float3 T1;
+            T1 = Float3(1.f, 0.f, 0.f);
+            $IF(lq > Float(1e-7f))
+            {
+                Float invl;
+                invl = Float(1.f) / sqrt(lq);
+                T1 = Float3(Float(0.f) - Vh->y, Vh->x, Float(0.f)) * invl;
+            };
+            Float3 T2;
+            T2 = cross3(Vh, T1);
+            Float rrs;
+            rrs = sqrt(r1);
+            Float phi;
+            phi = r2 * Float(6.28318530718f);
+            Float t1;
+            t1 = rrs * cos(phi);
+            Float t2;
+            t2 = rrs * sin(phi);
+            Float sblend;
+            sblend = Float(0.5f) * (Float(1.f) + Vh->z);
+            t2 = (Float(1.f) - sblend) * sqrt(max(Float(0.f), Float(1.f) - t1 * t1)) + sblend * t2;
+            Float nzc;
+            nzc = sqrt(max(Float(0.f), Float(1.f) - t1 * t1 - t2 * t2));
+            Float3 Nh;
+            Nh = T1 * t1 + T2 * t2 + Vh * nzc;
+            Float3 hl;
+            hl = normalize(Float3(Nh->x * aa, Nh->y * aa, max(Float(0.f), Nh->z)));
+            $IF(hl->z < Float(0.f)) { hl = Float3(0.f, 0.f, 0.f) - hl; };
+            Float3 hw;
+            hw = tb * hl->x + bb * hl->y + n * hl->z;
+
+            // Fresnel 与 lobe 权重
+            Float3 f0v;
+            f0v = mix(Float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+            Float vhd;
+            vhd = dot(wo, hw);
+            Float3 Fr;
+            Fr = f0v + (Float3(1.f, 1.f, 1.f) - f0v) * schlick5(vhd);
+            Float diffW;
+            diffW = Float(1.f) - metallic;
+            Float specW;
+            specW = dot(Fr, Float3(0.299f, 0.587f, 0.114f));
+            Float invWt;
+            invWt = Float(1.f) / (diffW + specW);
+            diffW = diffW * invWt;
+            specW = specW * invWt;
+
             Float3 ray_dir;
-            ray_dir = v - n * (Float(2.0f) * dot(n, v)); // reflect(v, n) 手写
+            ray_dir = v - n * (Float(2.0f) * dot(n, v)); // 兜底(pdfW<=0 时不会用于输出)
+            Float3 brdfRGB;
+            brdfRGB = Float3(0.f, 0.f, 0.f);
+            Float pdfW;
+            pdfW = Float(0.f);
+
+            Float rnd;
+            rnd = frand(seed);
+            $IF(rnd < diffW)
+            {
+                // diffuse lobe:余弦半球
+                Float zc;
+                zc = frand(seed) * Float(2.f) - Float(1.f);
+                Float phid;
+                phid = frand(seed) * Float(6.28318530718f);
+                Float rc;
+                rc = sqrt(max(Float(0.f), Float(1.f) - zc * zc));
+                Float3 sp;
+                sp = Float3(rc * cos(phid), rc * sin(phid), zc);
+                ray_dir = normalize(n * Float(1.0001f) + sp);
+                Float3 hh;
+                hh = normalize(ray_dir + wo);
+                Float NoL;
+                NoL = dot(n, ray_dir);
+                Float NoV;
+                NoV = dot(n, wo);
+                $IF((NoL > Float(0.f)) && (NoV > Float(0.f)))
+                {
+                    Float LoH;
+                    LoH = dot(ray_dir, hh);
+                    Float pdf;
+                    pdf = NoL * Float(0.31830988618f);
+                    Float FD90;
+                    FD90 = Float(0.5f) + Float(2.f) * roughness * LoH * LoH;
+                    Float fa;
+                    fa = Float(1.f) + (FD90 - Float(1.f)) * schlick5(NoL);
+                    Float fb;
+                    fb = Float(1.f) + (FD90 - Float(1.f)) * schlick5(NoV);
+                    Float3 diffv;
+                    diffv = albedo * (fa * fb * Float(0.31830988618f));
+                    diffv = diffv * (Float3(1.f, 1.f, 1.f) - Fr);
+                    brdfRGB = diffv * NoL;
+                    pdfW = diffW * pdf;
+                };
+            }
+            $ELSE
+            {
+                // specular lobe:reflect(-wo, hw)
+                Float3 Iv;
+                Iv = Float3(0.f, 0.f, 0.f) - wo;
+                Float dnh;
+                dnh = dot(hw, Iv);
+                ray_dir = Iv - hw * (Float(2.f) * dnh);
+                Float NoL;
+                NoL = dot(n, ray_dir);
+                Float NoV;
+                NoV = dot(n, wo);
+                $IF((NoL > Float(0.f)) && (NoV > Float(0.f)))
+                {
+                    Float NoH;
+                    NoH = min(dot(n, hw), Float(0.99f));
+                    Float a2s;
+                    a2s = aa * aa;
+                    Float dts;
+                    dts = Float(1.f) + (a2s - Float(1.f)) * NoH * NoH;
+                    Float Dg;
+                    Dg = a2s / (Float(3.14159265359f) * dts * dts);
+                    Float pdf;
+                    pdf = Dg * NoH / max(Float(4.f) * NoV, Float(1e-5f));
+                    Float g1l;
+                    g1l = Float(2.f) * NoL / (NoL + sqrt(a2s + (Float(1.f) - a2s) * NoL * NoL));
+                    Float g1v;
+                    g1v = Float(2.f) * NoV / (NoV + sqrt(a2s + (Float(1.f) - a2s) * NoV * NoV));
+                    Float3 specv;
+                    specv = Fr * (Dg * (g1l * g1v) / max(Float(4.f) * NoL * NoV, Float(1e-5f)));
+                    brdfRGB = specv * NoL;
+                    pdfW = specW * pdf;
+                };
+            };
+
+            $IF(pdfW > Float(0.f))
+            {
+            Float3 throughput;
+            {
+                Float invp;
+                invp = Float(1.f) / pdfW;
+                throughput = min(brdfRGB * invp, Float3(4.f, 4.f, 4.f));
+            }
 
             Float step_len;
             step_len = u_tr_params0->z * Float(1.0f / float(kTraceSteps));
@@ -446,12 +700,7 @@ void run_example_edsl_ssr()
                 Float3 refl_color;
                 refl_color = tr_color[uv_to_coord(hit_uv)]->xyz();
 
-                // Fresnel（Schlick）
-                Float ndotv = clamp(dot(n, -v), 0.f, 1.f);
-                Float f0 = u_tr_params2->y;
-                Float fresnel = f0 + (Float(1.f) - f0) * pow(Float(1.f) - ndotv, Float(u_tr_params2->x));
-
-                // 屏幕边缘淡出
+                // ---- SSSR:BRDF 吞吐已含 Fresnel/lobe 权重,这里只叠屏幕空间置信度 ----
                 Float fade_x = edge01(hit_uv->x, 0.0f, 0.12f) * (Float(1.f) - edge01(hit_uv->x, 0.88f, 1.0f));
                 Float fade_y = edge01(hit_uv->y, 0.0f, 0.12f) * (Float(1.f) - edge01(hit_uv->y, 0.88f, 1.0f));
                 Float edge_fade = fade_x * fade_y;
@@ -460,9 +709,13 @@ void run_example_edsl_ssr()
                 Float dist_fade = mix(Float(0.45f), Float(1.f),
                                       Float(1.f) - clamp(hit_step * Float(1.0f / float(kTraceSteps)), 0.f, 1.f));
 
-                Float weight = reflectivity * fresnel * edge_fade * dist_fade * (Float(1.f) - roughness);
-                tr_ssr_out[tid] = Float4(refl_color, clamp(weight, 0.f, 1.f));
+                Float confidence;
+                confidence = edge_fade * dist_fade;
+                Float3 bounce;
+                bounce = refl_color * throughput * confidence;
+                tr_ssr_out[tid] = Float4(bounce, clamp(confidence, 0.f, 1.f));
             }
+            }; // $IF(pdfW > 0)
         }
     };
 
@@ -482,17 +735,393 @@ void run_example_edsl_ssr()
         Float4 ssr;
         ssr = cp_ssr[coord];
 
-        Float weight;
-        weight = clamp(ssr->w * u_cp_params->z, 0.f, 1.f);
+        // SSSR:弹射贡献是加性的一次间接光(吞吐/置信度已折进 rgb)
         Float3 result; // 默认构造：$IF 分支里会重赋值
-        result = mix(base->xyz(), ssr->xyz(), weight);
+        result = Float3(base->xyz()) + Float3(ssr->xyz()) * u_cp_params->z;
 
         Float mode = u_cp_params->w;
         $IF((mode > 0.5f) && (mode < 1.5f)) result = ssr->xyz();
-        $IF((mode > 1.5f) && (mode < 2.5f)) result = Float3(weight, weight, weight);
-        $IF(mode > 2.5f) result = Float3(base->w, base->w, base->w);
+        $IF((mode > 1.5f) && (mode < 2.5f)) result = Float3(ssr->w, ssr->w, ssr->w);
+        $IF(mode > 2.5f) result = Float3(base->xyz());
 
         cp_output[coord] = Float4(result, 1.f);
+    };
+
+
+    // ================================================================
+    // Pass PT:Disney BRDF 路径追踪(compute,SSR_PATHTRACE 模式)
+    // 与 GLSL 版 ssr_pathtrace_compute.glsl 逐行同构;差异声明:
+    // GLSL 版为运行期循环 + break/early-return,本版因 EDSL 无运行期循环,
+    // 为定长展开(5 弹跳 × 16 球)+ alive/命中掩码(同 trace_cs 的既有不对称)。
+    // ================================================================
+
+    Texture2D<ktm::fvec4> pt_output = final_output_image;
+    Float4 u_pt0; // xyz: ro, w: frameIdx
+    Float4 u_pt1; // xyz: cam_fwd, w: focal
+    Float4 u_pt2; // xyz: cam_right, w: width
+    Float4 u_pt3; // xyz: cam_up, w: height
+
+    constexpr int kPtBounces = 5;
+    constexpr int kPtSphereDim = 4;
+
+    auto pathtrace_cs = [&] {
+        Uint2 tid = dispatchThreadID()->xy();
+        Float2 pix;
+        pix = Float2(tid->x, tid->y);
+
+        // ---- PRNG:浮点 hash 链(与 GLSL 版一致) ----
+        Float seed;
+        seed = fract(sin(pix->x * Float(12.9898f) + pix->y * Float(78.233f)) * Float(43758.5453f) +
+                     u_pt0->w * Float(0.6180339887f));
+
+        auto frand = [&](Float& st) {
+            st = fract(sin(st * Float(91.3458f) + Float(47.9898f)) * Float(43758.5453123f));
+            Float r;
+            r = st;
+            return r;
+        };
+
+        auto schlick5 = [&](Float u) {
+            Float m;
+            m = clamp(Float(1.f) - u, Float(0.f), Float(1.f));
+            Float m2;
+            m2 = m * m;
+            Float r;
+            r = m2 * m2 * m;
+            return r;
+        };
+
+        auto cross3 = [&](Float3 a, Float3 b) {
+            Float3 c;
+            c = Float3(a->y * b->z - a->z * b->y,
+                       a->z * b->x - a->x * b->z,
+                       a->x * b->y - a->y * b->x);
+            return c;
+        };
+
+        auto sky_color = [&](Float3 rdir) {
+            Float tt;
+            tt = clamp(rdir->y * Float(0.5f) + Float(0.5f), Float(0.f), Float(1.f));
+            Float3 sky;
+            sky = mix(Float3(0.55f, 0.62f, 0.75f), Float3(0.15f, 0.28f, 0.55f), tt);
+            Float sd;
+            sd = dot(rdir, Float3(0.98058067f, 0.19611613f, 0.f)); // normalize(5,1,0)
+            Float sun;
+            sun = pow(max(sd, Float(0.f)), Float(96.f));
+            Float3 res;
+            res = sky * Float(1.1f) + Float3(1.0f, 0.85f, 0.6f) * (sun * Float(8.f));
+            return res;
+        };
+
+        auto cosine_sample = [&](Float3 nrm) {
+            Float z;
+            z = frand(seed) * Float(2.f) - Float(1.f);
+            Float phi;
+            phi = frand(seed) * Float(6.28318530718f);
+            Float rr;
+            rr = sqrt(max(Float(0.f), Float(1.f) - z * z));
+            Float3 sp;
+            sp = Float3(rr * cos(phi), rr * sin(phi), z);
+            Float3 res;
+            res = normalize(nrm * Float(1.0001f) + sp);
+            return res;
+        };
+
+        // ---- 光线生成:抖动像素中心 → CPU 端算好的相机基向量 ----
+        Float jx;
+        jx = frand(seed);
+        Float jy;
+        jy = frand(seed);
+        Float uu;
+        uu = (pix->x + jx) * Float(1.0f / float(essr_width));
+        Float vv0;
+        vv0 = (pix->y + jy) * Float(1.0f / float(essr_height));
+        Float ndcx;
+        ndcx = (uu * Float(2.f) - Float(1.f)) * Float(float(essr_width) / float(essr_height));
+        Float ndcy;
+        ndcy = Float(1.f) - vv0 * Float(2.f); // Vulkan 图像 Y 向下
+        Float3 rd;
+        rd = normalize(Float3(u_pt1->x, u_pt1->y, u_pt1->z) * u_pt1->w +
+                       Float3(u_pt2->x, u_pt2->y, u_pt2->z) * ndcx +
+                       Float3(u_pt3->x, u_pt3->y, u_pt3->z) * ndcy);
+        Float3 ro;
+        ro = Float3(u_pt0->x, u_pt0->y, u_pt0->z);
+        Float3 rd0;
+        rd0 = rd;
+
+        Float3 acc;
+        acc = Float3(0.f, 0.f, 0.f);
+        Float3 abso;
+        abso = Float3(1.f, 1.f, 1.f);
+        Float firstDepth;
+        firstDepth = Float(1000.f);
+        Bool alive = true;
+
+        // ---- 5 次弹跳:定长展开 + alive 掩码 ----
+        for (int bounce = 0; bounce < kPtBounces; ++bounce)
+        {
+            $IF(alive)
+            {
+                // -- trace:地板 + 16 球,全部展开,材质常量烙进每个展开块 --
+                Float bestT;
+                bestT = Float(1e30f);
+                Float3 hn;
+                hn = Float3(0.f, 1.f, 0.f);
+                Float3 halb;
+                halb = Float3(0.f, 0.f, 0.f);
+                Float hmet;
+                hmet = Float(0.f);
+                Float hrgh;
+                hrgh = Float(0.5f);
+
+                // 地板 y=0:金属棋盘格
+                $IF(rd->y < Float(-1e-6f))
+                {
+                    Float tf;
+                    tf = (Float(0.f) - ro->y) / rd->y;
+                    $IF((tf > Float(0.001f)) && (tf < bestT))
+                    {
+                        bestT = tf;
+                        hn = Float3(0.f, 1.f, 0.f);
+                        halb = Float3(0.75f, 0.75f, 0.75f);
+                        hmet = Float(1.f);
+                        Float px;
+                        px = ro->x + rd->x * tf;
+                        Float pz;
+                        pz = ro->z + rd->z * tf;
+                        // floor(x) = x - fract(x);mod(fx+fz,2) = fract((fx+fz)*0.5)*2
+                        Float fx;
+                        fx = px - fract(px);
+                        Float fz;
+                        fz = pz - fract(pz);
+                        Float ck;
+                        ck = fract((fx + fz) * Float(0.5f)) * Float(2.f);
+                        hrgh = ck * Float(0.25f) + Float(0.25f);
+                    };
+                };
+
+                // 球阵:roughness 沿 z 轴,metallic 沿 x 轴(常量展开)
+                for (int iz = 0; iz < kPtSphereDim; ++iz)
+                {
+                    for (int ix = 0; ix < kPtSphereDim; ++ix)
+                    {
+                        const float scx = -4.5f + float(ix) * 3.0f;
+                        const float scz = -4.5f + float(iz) * 3.0f;
+                        const float smet = float(ix) / 3.0f;
+                        const float srgh = 0.05f + (float(iz) / 3.0f) * 0.9f;
+                        Float3 oc;
+                        oc = ro - Float3(scx, 1.0f, scz);
+                        Float bq;
+                        bq = dot(oc, rd);
+                        Float disc;
+                        disc = bq * bq - dot(oc, oc) + Float(1.0f); // r=1
+                        $IF(disc > Float(0.f))
+                        {
+                            Float tt;
+                            tt = Float(0.f) - bq - sqrt(disc);
+                            $IF((tt > Float(0.001f)) && (tt < bestT))
+                            {
+                                bestT = tt;
+                                Float3 hp;
+                                hp = ro + rd * tt;
+                                hn = normalize(hp - Float3(scx, 1.0f, scz));
+                                halb = Float3(0.9f, 0.9f, 0.9f);
+                                hmet = Float(smet);
+                                hrgh = Float(srgh);
+                            };
+                        };
+                    }
+                }
+
+                if (bounce == 0)
+                {
+                    firstDepth = min(bestT, Float(1000.f));
+                }
+
+                $IF(bestT > Float(999.f))
+                {
+                    acc = acc + sky_color(rd) * abso;
+                    alive = Float(1.f) < Float(0.f); // false
+                }
+                $ELSE
+                {
+                    Float3 hp;
+                    hp = ro + rd * bestT;
+                    Float3 wo;
+                    wo = Float3(0.f, 0.f, 0.f) - rd;
+
+                    // ---- sampleDisneyBRDF(照搬参考 lobe 概率结构) ----
+                    Float aa;
+                    aa = max(hrgh * hrgh, Float(1e-3f));
+
+                    // basis(hn) → t/b(cross 手写)
+                    Float3 upv;
+                    upv = Float3(0.f, 1.f, 0.f);
+                    $IF(abs(hn->y) > Float(0.99f)) { upv = Float3(1.f, 0.f, 0.f); };
+                    Float3 tb;
+                    tb = normalize(cross3(upv, hn));
+                    Float3 bb;
+                    bb = cross3(hn, tb);
+
+                    // toLocal(v) → VNDF 采样 → toWorld
+                    Float3 Vl;
+                    Vl = Float3(dot(wo, tb), dot(wo, bb), dot(wo, hn));
+                    Float r1;
+                    r1 = frand(seed);
+                    Float r2;
+                    r2 = frand(seed);
+                    Float3 Vh;
+                    Vh = normalize(Float3(Vl->x * aa, Vl->y * aa, Vl->z));
+                    Float lq;
+                    lq = Vh->x * Vh->x + Vh->y * Vh->y;
+                    Float3 T1;
+                    T1 = Float3(1.f, 0.f, 0.f);
+                    $IF(lq > Float(1e-7f))
+                    {
+                        Float invl;
+                        invl = Float(1.f) / sqrt(lq);
+                        T1 = Float3(Float(0.f) - Vh->y, Vh->x, Float(0.f)) * invl;
+                    };
+                    Float3 T2;
+                    T2 = cross3(Vh, T1);
+                    Float rr;
+                    rr = sqrt(r1);
+                    Float phi;
+                    phi = r2 * Float(6.28318530718f);
+                    Float t1;
+                    t1 = rr * cos(phi);
+                    Float t2;
+                    t2 = rr * sin(phi);
+                    Float sblend;
+                    sblend = Float(0.5f) * (Float(1.f) + Vh->z);
+                    t2 = (Float(1.f) - sblend) * sqrt(max(Float(0.f), Float(1.f) - t1 * t1)) + sblend * t2;
+                    Float nz;
+                    nz = sqrt(max(Float(0.f), Float(1.f) - t1 * t1 - t2 * t2));
+                    Float3 Nh;
+                    Nh = T1 * t1 + T2 * t2 + Vh * nz;
+                    Float3 hl;
+                    hl = normalize(Float3(Nh->x * aa, Nh->y * aa, max(Float(0.f), Nh->z)));
+                    // h.z < 0 翻转(局部空间)
+                    $IF(hl->z < Float(0.f)) { hl = Float3(0.f, 0.f, 0.f) - hl; };
+                    // toWorld
+                    Float3 hw;
+                    hw = tb * hl->x + bb * hl->y + hn * hl->z;
+
+                    // Fresnel 与 lobe 权重
+                    Float3 f0;
+                    f0 = mix(Float3(0.04f, 0.04f, 0.04f), halb, hmet);
+                    Float vh;
+                    vh = dot(wo, hw);
+                    Float3 Fr;
+                    Fr = f0 + (Float3(1.f, 1.f, 1.f) - f0) * schlick5(vh);
+                    Float diffW;
+                    diffW = Float(1.f) - hmet;
+                    Float specW;
+                    specW = dot(Fr, Float3(0.299f, 0.587f, 0.114f));
+                    Float invW;
+                    invW = Float(1.f) / (diffW + specW);
+                    diffW = diffW * invW;
+                    specW = specW * invW;
+
+                    Float3 outDir;
+                    outDir = rd;
+                    Float3 brdfRGB;
+                    brdfRGB = Float3(0.f, 0.f, 0.f);
+                    Float pdfW;
+                    pdfW = Float(0.f);
+
+                    Float rnd;
+                    rnd = frand(seed);
+                    $IF(rnd < diffW)
+                    {
+                        // diffuse lobe
+                        outDir = cosine_sample(hn);
+                        Float3 hh;
+                        hh = normalize(outDir + wo);
+                        Float NoL;
+                        NoL = dot(hn, outDir);
+                        Float NoV;
+                        NoV = dot(hn, wo);
+                        $IF((NoL > Float(0.f)) && (NoV > Float(0.f)))
+                        {
+                            Float LoH;
+                            LoH = dot(outDir, hh);
+                            Float pdf;
+                            pdf = NoL * Float(0.31830988618f); // NoL/PI
+                            Float FD90;
+                            FD90 = Float(0.5f) + Float(2.f) * hrgh * LoH * LoH;
+                            Float fa;
+                            fa = Float(1.f) + (FD90 - Float(1.f)) * schlick5(NoL);
+                            Float fb;
+                            fb = Float(1.f) + (FD90 - Float(1.f)) * schlick5(NoV);
+                            Float3 diff;
+                            diff = halb * (fa * fb * Float(0.31830988618f));
+                            diff = diff * (Float3(1.f, 1.f, 1.f) - Fr);
+                            brdfRGB = diff * NoL;
+                            pdfW = diffW * pdf;
+                        };
+                    }
+                    $ELSE
+                    {
+                        // specular lobe:reflect(-wo, hw)
+                        Float3 Iv;
+                        Iv = Float3(0.f, 0.f, 0.f) - wo;
+                        Float dnh;
+                        dnh = dot(hw, Iv);
+                        outDir = Iv - hw * (Float(2.f) * dnh);
+                        Float NoL;
+                        NoL = dot(hn, outDir);
+                        Float NoV;
+                        NoV = dot(hn, wo);
+                        $IF((NoL > Float(0.f)) && (NoV > Float(0.f)))
+                        {
+                            Float NoH;
+                            NoH = min(dot(hn, hw), Float(0.99f));
+                            Float a2;
+                            a2 = aa * aa;
+                            Float dt;
+                            dt = Float(1.f) + (a2 - Float(1.f)) * NoH * NoH;
+                            Float Dg;
+                            Dg = a2 / (Float(3.14159265359f) * dt * dt);
+                            Float pdf;
+                            pdf = Dg * NoH / max(Float(4.f) * NoV, Float(1e-5f));
+                            Float g1l;
+                            g1l = Float(2.f) * NoL / (NoL + sqrt(a2 + (Float(1.f) - a2) * NoL * NoL));
+                            Float g1v;
+                            g1v = Float(2.f) * NoV / (NoV + sqrt(a2 + (Float(1.f) - a2) * NoV * NoV));
+                            Float Gg;
+                            Gg = g1l * g1v;
+                            Float3 spec;
+                            spec = Fr * (Dg * Gg / max(Float(4.f) * NoL * NoV, Float(1e-5f)));
+                            brdfRGB = spec * NoL;
+                            pdfW = specW * pdf;
+                        };
+                    };
+
+                    // 吸收(pdf 在 pdfW)
+                    $IF(pdfW > Float(0.f))
+                    {
+                        Float invp;
+                        invp = Float(1.f) / pdfW;
+                        abso = abso * (brdfRGB * invp);
+                    };
+
+                    // 续方向
+                    ro = hp + hn * Float(0.01f);
+                    rd = outDir;
+                };
+            };
+        }
+
+        // 雾(exp 用 exp2 表达,与 GLSL 版一致)
+        Float fog;
+        fog = Float(1.f) - exp2((Float(0.f) - firstDepth) * Float(0.004f * 1.442695f));
+        Float3 sk;
+        sk = sky_color(rd0);
+        Float3 outc;
+        outc = mix(acc, sk, fog);
+        outc = min(outc, Float3(10.f, 10.f, 10.f));
+        pt_output[tid] = Float4(outc, Float(1.f));
     };
 
     // ---- 管线 ----
@@ -507,6 +1136,11 @@ void run_example_edsl_ssr()
     Corona::Horizon::ComputePipeline linear_depth_compute(linear_depth_cs, ktm::uvec3(8, 8, 1));
     Corona::Horizon::ComputePipeline trace_compute(trace_cs, ktm::uvec3(8, 8, 1));
     Corona::Horizon::ComputePipeline composite_compute(composite_cs, ktm::uvec3(8, 8, 1));
+    // PT 管线只在 SSR_PATHTRACE 模式下构造(codegen 成本/风险与 SSSR 解耦)
+    const bool pathtrace_env = std::getenv("SSR_PATHTRACE") != nullptr;
+    std::optional<decltype(Corona::Horizon::ComputePipeline(pathtrace_cs, ktm::uvec3(8, 8, 1)))> pathtrace_pipe;
+    if (pathtrace_env)
+        pathtrace_pipe.emplace(pathtrace_cs, ktm::uvec3(8, 8, 1));
 
     Corona::Horizon::HardwareExecutor render_executor;
     Corona::Horizon::HardwareExecutor display_executor;
@@ -554,6 +1188,15 @@ void run_example_edsl_ssr()
     float intensity = 1.0f;
     int debug_mode = 0;
 
+    // ---- Path Trace 模式(与 GLSL 版对应)----
+    bool pathtrace_mode = std::getenv("SSR_PATHTRACE") != nullptr;
+    const glm::vec3 pt_ro(0.0f, 3.2f, -9.0f);
+    const glm::vec3 pt_ta(0.0f, 1.0f, 0.0f);
+    const glm::vec3 pt_fwd = glm::normalize(pt_ta - pt_ro);
+    const glm::vec3 pt_right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), pt_fwd));
+    const glm::vec3 pt_up = glm::cross(pt_fwd, pt_right);
+    constexpr float pt_focal = 1.6f;
+
     HorizonImGuiLayer ui(window, essr_width, essr_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
@@ -581,6 +1224,7 @@ void run_example_edsl_ssr()
         ImGui::SliderFloat("Fresnel F0", &fresnel_f0, 0.0f, 1.0f);
         ImGui::SliderFloat("Intensity", &intensity, 0.0f, 2.0f);
         ImGui::Combo("Debug View", &debug_mode, "Final\0SSR Color\0SSR Weight\0Reflectivity\0");
+        ImGui::Checkbox("Path Trace (Disney)", &pathtrace_mode);
         ImGui::Text("Steps: %d  Refine: %d (compiled in)", kTraceSteps, kRefineSteps);
         ImGui::End();
 
@@ -590,8 +1234,8 @@ void run_example_edsl_ssr()
         {
             const double fps = fps_frame_count / fps_accum_seconds;
             char title[160];
-            std::snprintf(title, sizeof(title), "Horizon SSR [EDSL] - %d steps - %.1f FPS (%.2f ms)",
-                          kTraceSteps, fps, 1000.0 / fps);
+            std::snprintf(title, sizeof(title), "Horizon SSR [EDSL]%s - %d steps - %.1f FPS (%.2f ms)",
+                          pathtrace_mode ? " PT" : "", kTraceSteps, fps, 1000.0 / fps);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
@@ -660,19 +1304,33 @@ void run_example_edsl_ssr()
         // Pass 3：屏幕空间射线步进
         u_ndc_to_view = ktm::fvec4(2.0f / p00, 2.0f / p11, -1.0f / p00, -1.0f / p11);
         u_tr_params0 = ktm::fvec4(p00, p11, max_distance, float(kTraceSteps));
-        u_tr_params1 = ktm::fvec4(thickness, float(frame_index & 63u), float(essr_width), float(essr_height));
+        u_tr_params1 = ktm::fvec4(thickness, float(frame_index), float(essr_width), float(essr_height));
         u_tr_params2 = ktm::fvec4(fresnel_power, fresnel_f0, float(kRefineSteps), use_jitter ? 1.0f : 0.0f);
 
         // Pass 4：合成（SSR 关闭时 intensity 置 0，链路照跑便于对比开销）
         u_cp_params = ktm::fvec4(float(essr_width), float(essr_height),
                                  ssr_enabled ? intensity : 0.0f, float(debug_mode));
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << geom_rasterizer(essr_width, essr_height)
-                            << linear_depth_compute(dispatch_x, dispatch_y, 1)
-                            << trace_compute(dispatch_x, dispatch_y, 1)
-                            << composite_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::submit;
+        // Path Trace 模式:单 compute pass 直写输出
+        u_pt0 = ktm::fvec4(pt_ro.x, pt_ro.y, pt_ro.z, float(frame_index));
+        u_pt1 = ktm::fvec4(pt_fwd.x, pt_fwd.y, pt_fwd.z, pt_focal);
+        u_pt2 = ktm::fvec4(pt_right.x, pt_right.y, pt_right.z, float(essr_width));
+        u_pt3 = ktm::fvec4(pt_up.x, pt_up.y, pt_up.z, float(essr_height));
+
+        Corona::Horizon::SubmitReceipt render_receipt;
+        if (pathtrace_mode && pathtrace_pipe.has_value())
+        {
+            render_receipt = render_executor.stream() << (*pathtrace_pipe)(dispatch_x, dispatch_y, 1)
+                                                      << Corona::Horizon::submit;
+        }
+        else
+        {
+            render_receipt = render_executor << geom_rasterizer(essr_width, essr_height)
+                                             << linear_depth_compute(dispatch_x, dispatch_y, 1)
+                                             << trace_compute(dispatch_x, dispatch_y, 1)
+                                             << composite_compute(dispatch_x, dispatch_y, 1)
+                                             << Corona::Horizon::submit;
+        }
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

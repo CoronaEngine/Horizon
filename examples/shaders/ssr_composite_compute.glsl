@@ -27,16 +27,16 @@ void main()
     vec4 base = imageLoad(imagesRGBA16F[pushConsts.colorID], coord);
     vec4 ssr = imageLoad(imagesRGBA16F[pushConsts.ssrID], coord);
 
-    float weight = clamp(ssr.w * pushConsts.params0.z, 0.0, 1.0);
-    vec3 result = mix(base.xyz, ssr.xyz, weight);
+    // SSSR:弹射贡献是加性的一次间接光(吞吐/置信度已折进 rgb)
+    vec3 result = base.xyz + ssr.xyz * pushConsts.params0.z;
 
     int mode = int(pushConsts.params0.w + 0.5);
     if (mode == 1)
         result = ssr.xyz;
     else if (mode == 2)
-        result = vec3(weight);
+        result = vec3(ssr.w);
     else if (mode == 3)
-        result = vec3(base.w);
+        result = base.xyz;
 
     imageStore(imagesRGBA16F[pushConsts.outputID], coord, vec4(result, 1.0));
 }
