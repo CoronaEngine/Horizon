@@ -1,15 +1,8 @@
+include(windows-msvc-base)
+
 [settings]
-os=Windows
-arch=x86_64
-compiler=msvc
-compiler.version=195
-compiler.cppstd=20
-compiler.runtime=dynamic
 compiler.runtime_type=Release
 build_type=Release
 
 [options]
 *:shared=False
-
-[conf]
-tools.cmake.cmaketoolchain:generator=Ninja Multi-Config
