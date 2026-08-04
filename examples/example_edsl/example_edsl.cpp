@@ -9,7 +9,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
-#include GLSL(shaders/edsl_header.glsl)
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include <chrono>
 #include <cstdint>
@@ -82,7 +84,7 @@ void run_example_edsl()
 
     auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
         position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-        Float color_weight = edsl_header_glsl.get_color_weight(vertex->color);
+        Float color_weight = (vertex->color->x + vertex->color->y + vertex->color->z) / Float(3.0f);
         return Float4(vertex->tex_coord, color_weight, 1.0f);
     };
 
@@ -92,7 +94,6 @@ void run_example_edsl()
     };
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_edsl.depth");
 
     Corona::Horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
     rasterizer.bind_depth_target(depth_image);
@@ -101,27 +102,70 @@ void run_example_edsl()
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+    HorizonImGuiLayer ui(window, edsl_width, edsl_height);
+
+    // VP 不随帧变化（相机固定），在循环外赋值一次
+    view = to_edsl_matrix(
+        glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                    glm::vec3(0.0f, 0.0f, 0.0f),
+                    glm::vec3(0.0f, 0.0f, 1.0f)));
+    {
+        glm::mat4 proj_mat = glm::perspective(glm::pi<float>() * 0.25f,
+                                              edsl_width / static_cast<float>(edsl_height),
+                                              0.1f, 10.0f);
+        proj_mat[1][1] *= -1.0f; // Vulkan 裁剪空间 Y 翻转
+        proj = to_edsl_matrix(proj_mat);
+    }
+
     const auto start_time = std::chrono::high_resolution_clock::now();
+    auto prev_time = start_time;
+    double fps_accum_seconds = 0.0;
+    int fps_frame_count = 0;
+
+    Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
-        baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, edsl_width / static_cast<float>(edsl_height));
-        model = to_edsl_matrix(glm::transpose(ubo.model));
-        view = to_edsl_matrix(glm::transpose(ubo.view));
-        proj = to_edsl_matrix(glm::transpose(ubo.proj));
+
+        const auto now = std::chrono::high_resolution_clock::now();
+        const float dt = std::chrono::duration<float>(now - prev_time).count();
+        prev_time = now;
+
+        fps_accum_seconds += dt;
+        ++fps_frame_count;
+        if (fps_accum_seconds >= 0.5)
+        {
+            const double fps = fps_frame_count / fps_accum_seconds;
+            char title[160];
+            std::snprintf(title, sizeof(title), "Horizon Baseline [EDSL] %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            glfwSetWindowTitle(window, title);
+            fps_accum_seconds = 0.0;
+            fps_frame_count = 0;
+        }
+
+        // Model 每帧更新（push constant）；VP 已在循环外绑定
+        model = to_edsl_matrix(
+            glm::rotate(glm::mat4(1.0f),
+                        time_seconds * glm::pi<float>() * 0.5f,
+                        glm::vec3(0.0f, 0.0f, 1.0f)));
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::submit;
+        render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
     }
-
+    display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);
     glfwTerminate();
 }

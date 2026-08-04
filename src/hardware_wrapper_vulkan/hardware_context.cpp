@@ -644,6 +644,8 @@ namespace Corona::Horizon
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageExtendedFormats", features.features.shaderStorageImageExtendedFormats);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageReadWithoutFormat", features.features.shaderStorageImageReadWithoutFormat);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageWriteWithoutFormat", features.features.shaderStorageImageWriteWithoutFormat);
+        add_required_feature(status, "Vulkan 1.0", "multiDrawIndirect", features.features.multiDrawIndirect);
+        add_required_feature(status, "Vulkan 1.0", "drawIndirectFirstInstance", features.features.drawIndirectFirstInstance);
         add_required_feature(status, "Vulkan 1.1", "multiview", features11.multiview);
         add_required_feature(status, "Vulkan 1.2", "bufferDeviceAddress", features12.bufferDeviceAddress);
         add_required_feature(status, "Vulkan 1.2", "shaderFloat16", features12.shaderFloat16);
@@ -663,7 +665,8 @@ namespace Corona::Horizon
         add_required_feature(status, "Vulkan 1.3", "synchronization2", features13.synchronization2);
         add_required_feature(status, "Vulkan 1.3", "dynamicRendering", features13.dynamicRendering);
 
-        (void)features14;
+        // pushDescriptor 不再是硬依赖：UBO 已改为管线侧分配、写入一次的持久
+        // descriptor set（与 bindless set 0-2 同形），全仓无 vkCmdPushDescriptorSet。
         return status;
     }
 
@@ -1320,6 +1323,9 @@ namespace Corona::Horizon
             features.shaderStorageImageExtendedFormats = VK_TRUE;
             features.shaderStorageImageReadWithoutFormat = VK_TRUE;
             features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+            // MultiDrawIndirect (drawCount > 1) and non-zero firstInstance in indirect commands.
+            features.multiDrawIndirect = VK_TRUE;
+            features.drawIndirectFirstInstance = VK_TRUE;
 
             VkPhysicalDeviceVulkan11Features features11 {};
             features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
@@ -1353,6 +1359,8 @@ namespace Corona::Horizon
             // features_swapchain_maintenance1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
             // features_swapchain_maintenance1.swapchainMaintenance1 = VK_TRUE;
 
+            // pushDescriptor 已无需请求：UBO 走管线侧持久 descriptor set，
+            // 全仓无 vkCmdPushDescriptorSet。
             return (DeviceFeaturesChain() | features | features11 | features12 | features13);
         };
     }

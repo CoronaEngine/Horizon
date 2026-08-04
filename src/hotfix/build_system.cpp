@@ -7,7 +7,9 @@
 
 namespace vision::inline hotfix {
 
-BuildSystem::BuildSystem() = default;
+BuildSystem::BuildSystem() {
+    DynamicModule::add_search_path(directory() / "bin");
+}
 
 
 Compiler::Handle &BuildSystem::compiler() const noexcept {
@@ -39,8 +41,10 @@ void BuildSystem::compile(const Target &target) const noexcept {
 }
 
 void BuildSystem::link(const Target &target, const CmdProcess::callback_t &callback) const noexcept {
-    fs::path fn("bin");
-    fn = fn / target.name;
+    fs::path fn(target.name);
+    if (!fn.has_parent_path()) {
+        fn = fs::path("bin") / fn;
+    }
     const LinkOptions &options = build_rules()->link_options(fn.string());
     vector<string> extension_objs = build_rules()->obj_paths(ModuleInterface::src_path());
     compiler()->link(options, target, FileTool::files_string(extension_objs), callback);

@@ -15,6 +15,7 @@
 // horizon.h 会自动包含本头，无需单独引入。
 // ====================================================================
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -29,6 +30,8 @@
 
 namespace Corona::Horizon
 {
+    class RasterizerPipelineBase;
+    class ComputePipelineBase;
     // ================================================================
     // Execution / Command Public Types
     // ================================================================
@@ -63,6 +66,7 @@ namespace Corona::Horizon
         EndRendering,
         DrawIndexed,
         DrawIndexedBatch,
+        DrawIndexedIndirect,
         Present,
         HostCallback,
         KeepAlive,
@@ -170,10 +174,16 @@ namespace Corona::Horizon
         uint32_t set { 0 };
         uint32_t binding { 0 };
         std::vector<std::byte> data;
+        // 持久化 GPU buffer，在管线初始化时通过反射创建一次，之后只 write_bytes。
+        // 使用 ResourceHandle（基类）存储句柄，避免与 horizon.h 的循环依赖。
+        ResourceHandle gpu_buffer {};
     };
 
     struct DispatchDesc
     {
+        ComputePipelineBase* pipeline;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo comp_condition_info;
+
         uint32_t groups_x { 1 };
         uint32_t groups_y { 1 };
         uint32_t groups_z { 1 };
@@ -184,23 +194,10 @@ namespace Corona::Horizon
         std::string debug_label;
     };
 
-    enum class DrawBindingKind
-    {
-        SampledImage
-    };
-
-    struct DrawResourceBinding
-    {
-        uint32_t set { 0 };
-        uint32_t binding { 0 };
-        ResourceHandle resource {};
-        DrawBindingKind kind { DrawBindingKind::SampledImage };
-        AccessKind access { AccessKind::Read };
-    };
-
     struct RenderingDesc
     {
         ImageRef color {};
+        std::array<ImageRef, 3> extra_colors {};
         ImageRef depth {};
         uint32_t width { 0 };
         uint32_t height { 0 };
@@ -210,7 +207,10 @@ namespace Corona::Horizon
 
     struct DrawIndexedDesc
     {
-        ResourceHandle pipeline {};
+        RasterizerPipelineBase* pipeline {};
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+
         uint32_t index_count { 0 };
         uint32_t instance_count { 1 };
         uint32_t first_index { 0 };
@@ -219,7 +219,6 @@ namespace Corona::Horizon
         IndexType index_type { IndexType::Auto };
         bool enable_scissor { false };
         ScissorRect scissor {};
-        std::vector<DrawResourceBinding> bindings;
         std::vector<ResourceUse> resource_uses;
         std::vector<std::byte> push_constant_data;
         std::vector<UniformBufferBindingData> uniform_buffers;
@@ -236,6 +235,25 @@ namespace Corona::Horizon
     struct DrawIndexedBatchDesc
     {
         std::vector<DrawIndexedBatchItem> draws;
+    };
+
+    struct DrawIndexedIndirectDesc
+    {
+        RasterizerPipelineBase* pipeline {};
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+
+        uint64_t indirect_offset { 0 };
+        uint32_t draw_count { 0 };
+        // 0 means sizeof(DrawIndexedIndirectCommand).
+        uint32_t stride { 0 };
+        IndexType index_type { IndexType::Auto };
+        bool enable_scissor { false };
+        ScissorRect scissor {};
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+        std::string debug_label;
     };
 
     struct PresentDesc
@@ -256,6 +274,7 @@ namespace Corona::Horizon
         RenderingDesc rendering {};
         DrawIndexedDesc draw_indexed {};
         DrawIndexedBatchDesc draw_indexed_batch {};
+        DrawIndexedIndirectDesc draw_indexed_indirect {};
         PresentDesc present {};
     };
 
@@ -279,12 +298,12 @@ namespace Corona::Horizon
         if (command.op == CommandOp::DrawIndexed)
         {
             const DrawIndexedDesc& draw = command.payload.draw_indexed;
-            const std::size_t buffer_offset = draw.pipeline ? 1u : 0u;
-            const BufferRef index = command.resources.size() > buffer_offset
-                ? BufferRef{command.resources[buffer_offset].handle}
+            //const std::size_t buffer_offset = draw.pipeline ? 1u : 0u;
+            const BufferRef index = command.resources.size() > 0
+                ? BufferRef{command.resources[0].handle}
                 : BufferRef{};
-            const BufferRef vertex = command.resources.size() > buffer_offset + 1u
-                ? BufferRef{command.resources[buffer_offset + 1u].handle}
+            const BufferRef vertex = command.resources.size() > 1
+                ? BufferRef{command.resources[1].handle}
                 : BufferRef{};
             std::forward<Visitor>(visitor)(index, vertex, draw);
             return true;
@@ -362,7 +381,6 @@ namespace Corona::Horizon
     public:
         void add_resource(std::shared_ptr<const IResourceRef> resource);
         void add_object(std::shared_ptr<void> object);
-        void merge(SubmissionKeepAlive&& other);
         void clear() noexcept;
 
         [[nodiscard]] size_t resource_count() const noexcept { return resources_.size(); }
@@ -443,11 +461,16 @@ namespace Corona::Horizon
         void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
         void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
         void copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-        void dispatch(ShaderRef shader, DispatchDesc desc, DeviceMask devices = {});
+        void dispatch(DispatchDesc desc, DeviceMask devices = {});
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});
         void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
         void draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {});
+        void draw_indexed_indirect(BufferRef index,
+                                   BufferRef vertex,
+                                   BufferRef indirect,
+                                   DrawIndexedIndirectDesc desc,
+                                   DeviceMask devices = {});
         void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
         void host_callback(std::function<void()> callback);
         void keep_alive(std::shared_ptr<void> object);

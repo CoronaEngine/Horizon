@@ -21,6 +21,8 @@ class HorizonConan(ConanFile):
         "with_benchmarks": [True, False],
         "with_ocarina_tests": [True, False],
         "with_hardcode_shaders": [True, False],
+        "with_tracy": [True, False],
+        "enable_imgui_render": [True, False],
         "enable_debug_validation": [True, False],
         "enable_relwithdebinfo_validation": [True, False],
         "enable_release_validation": [True, False],
@@ -37,7 +39,9 @@ class HorizonConan(ConanFile):
         "with_benchmarks": False,
         "with_ocarina_tests": False,
         "with_hardcode_shaders": False,
-        "enable_debug_validation": True,
+        "with_tracy": True,
+        "enable_imgui_render": True,
+        "enable_debug_validation": False,
         "enable_relwithdebinfo_validation": False,
         "enable_release_validation": False,
         "spirv-tools/*:shared": False,
@@ -59,11 +63,15 @@ class HorizonConan(ConanFile):
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
         self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
 
+        if bool(self.options.with_tracy):
+            self.requires("tracy/0.13.1", options={"on_demand": True})
+
         if bool(self.options.with_examples):
             self.requires("stb/cci.20240531")
             self.requires("glfw/3.4")
             self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
+            self.requires("imgui/1.92.8")
 
         if bool(self.options.with_ocarina) and bool(self.options.with_cuda):
             self.requires("fmt/12.1.0")
@@ -93,9 +101,17 @@ class HorizonConan(ConanFile):
         variables["HORIZON_BUILD_BENCHMARKS"] = bool(self.options.with_benchmarks)
         variables["HORIZON_BUILD_OCARINA_TESTS"] = bool(self.options.with_ocarina_tests)
         variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
+        variables["HORIZON_ENABLE_TRACY"] = bool(self.options.with_tracy)
+        variables["HORIZON_ENABLE_IMGUI_RENDER"] = bool(self.options.enable_imgui_render)
         variables["HORIZON_ENABLE_DEBUG_VALIDATION"] = bool(self.options.enable_debug_validation)
         variables["HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION"] = bool(
             self.options.enable_relwithdebinfo_validation
         )
         variables["HORIZON_ENABLE_RELEASE_VALIDATION"] = bool(self.options.enable_release_validation)
+        if bool(self.options.with_examples):
+            variables["HORIZON_IMGUI_BINDINGS_DIR"] = os.path.join(
+                self.dependencies["imgui"].package_folder,
+                "res",
+                "bindings",
+            ).replace("\\", "/")
         toolchain.generate()

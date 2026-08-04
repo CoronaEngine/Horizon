@@ -37,6 +37,11 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+    struct PushConstantType : NameType
+    {
+        std::string parse() override;
+    };
+
     struct StageType : Type
     {
         std::string suffix;
@@ -52,6 +57,7 @@ namespace EmbeddedShader::Ast
 		virtual void access(AccessPermissions permissions);
 		virtual std::string accessPath();
 	    virtual const Variate *getRootVariate() const { return nullptr; }
+	    virtual AccessPermissions getAccessPermissions() const { return AccessPermissions::None; }
 	};
 
 	struct Variate : Value
@@ -65,7 +71,9 @@ namespace EmbeddedShader::Ast
 
 	struct LocalVariate : Variate
 	{
-
+        AccessPermissions permissions = AccessPermissions::None;
+	    void access(AccessPermissions permissions) override;
+	    AccessPermissions getAccessPermissions() const override;
 	};
 
 	struct BasicType : NameType
@@ -85,7 +93,7 @@ namespace EmbeddedShader::Ast
 
 	struct VecValue : Value
 	{
-		std::string value;
+		std::vector<std::shared_ptr<Value>> values;
 		std::string parse() override;
 	};
 
@@ -121,6 +129,7 @@ namespace EmbeddedShader::Ast
 		size_t location = 0;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
+	    void access(AccessPermissions permissions) override;
 	};
 
 	struct DefineInputVariate : Statement
@@ -144,6 +153,7 @@ namespace EmbeddedShader::Ast
 		size_t location = 0;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
+	    void access(AccessPermissions permissions) override;
 	};
 
 	struct DefineOutputVariate : Statement
@@ -160,6 +170,7 @@ namespace EmbeddedShader::Ast
 	    std::optional<std::function<bool()>> conditionDetector;
 	    BranchInfo branchInfo;
 	    std::string importPart;
+	    bool hasElse = false;
         std::string parse() override;
     };
 
@@ -170,12 +181,19 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+    struct StringStatement : Statement
+    {
+        std::string content;
+        std::string parse() override;
+    };
+
 	//StructuredBuffer or RWStructuredBuffer
 	struct UniversalArray : Variate
 	{
 		//Variate::type 将被解释为元素类型
 
 		AccessPermissions permissions = AccessPermissions::None;
+	    AccessPermissions getAccessPermissions() const override;
 		void access(AccessPermissions permissions) override;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
@@ -200,9 +218,11 @@ namespace EmbeddedShader::Ast
 	struct UniformVariate : Variate
 	{
 		AccessPermissions permissions = AccessPermissions::None;
+	    AccessPermissions getAccessPermissions() const override;
 		bool pushConstant = false;
 		const void* boundValueRef = nullptr;
 		uint32_t boundValueSize = 0;
+	    size_t dirtyVersion = 0;
 		std::string parse() override;
 		void access(AccessPermissions permissions) override;
 	    const Variate* getRootVariate() const override;
@@ -236,12 +256,13 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
-    //RWTexture2D/Texture2D
-    struct UniversalTexture2D : Variate
+    //RWTexture2D/Texture2D/RWTextureCube/TextureCube
+    struct UniversalTexture : Variate
     {
         //Variate::type 将被解释为元素类型
 
         AccessPermissions permissions = AccessPermissions::None;
+        AccessPermissions getAccessPermissions() const override;
         void access(AccessPermissions permissions) override;
     	std::string parse() override;
 
@@ -249,15 +270,17 @@ namespace EmbeddedShader::Ast
         // Used by auto-bind to read the current resource at dispatch time.
         void** boundResourceRef = nullptr;
 
+        size_t dirtyVersion = 1;
+
         // Render target location assigned by Texture2DProxy::operator().
         // -1 means this texture is NOT used as a render target output.
         int32_t renderTargetLocation = -1;
         const Variate* getRootVariate() const override;
     };
 
-    struct DefineUniversalTexture2D : Statement
+    struct DefineUniversalTexture : Statement
     {
-        std::shared_ptr<UniversalTexture2D> texture;
+        std::shared_ptr<UniversalTexture> texture;
         std::string parse() override;
         void resetAccessPermissions() override;
     };
@@ -295,7 +318,7 @@ namespace EmbeddedShader::Ast
 		void access(AccessPermissions permissions) override;
 	};
 
-	struct Texture2DType : Type
+	struct TextureType : Type
 	{
 		std::shared_ptr<Type> texelType;
 		std::string name = "Texture2D";

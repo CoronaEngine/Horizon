@@ -112,6 +112,7 @@ void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 {
 	auto elseStatement = std::make_shared<ElseStatement>();
     elseStatement->followIf = std::move(followIf);
+    elseStatement->followIf->hasElse = true;
 	addLocalStatement(elseStatement);
 	getLocalStatementStack().push(&elseStatement->statements);
 }
@@ -119,6 +120,16 @@ void EmbeddedShader::Ast::AST::beginElse(std::shared_ptr<IfStatement> followIf)
 void EmbeddedShader::Ast::AST::endElse()
 {
 	getLocalStatementStack().pop();
+}
+
+void EmbeddedShader::Ast::AST::discard()
+{
+    thread_local auto discardStatement = [] {
+        auto p =std::make_shared<StringStatement>();
+        p->content = "discard";
+        return std::move(p);
+    }();
+    addLocalStatement(discardStatement);
 }
 
 std::shared_ptr<EmbeddedShader::Ast::UniversalArray> EmbeddedShader::Ast::AST::defineUniversalArray(std::shared_ptr<Type> elementType)
@@ -134,14 +145,28 @@ std::shared_ptr<EmbeddedShader::Ast::UniversalArray> EmbeddedShader::Ast::AST::d
 	return variate;
 }
 
-std::shared_ptr<EmbeddedShader::Ast::UniversalTexture2D> EmbeddedShader::Ast::AST::defineUniversalTexture2D(std::shared_ptr<Type> texelType)
+std::shared_ptr<EmbeddedShader::Ast::UniversalTexture> EmbeddedShader::Ast::AST::defineUniversalTexture2D(std::shared_ptr<Type> texelType)
 {
-	auto textureType = std::make_shared<Texture2DType>();
+	auto textureType = std::make_shared<TextureType>();
 	textureType->texelType = std::move(texelType);
-    auto variate = std::make_shared<UniversalTexture2D>();
+    auto variate = std::make_shared<UniversalTexture>();
     variate->type = textureType;
     variate->name = Parser::getUniqueGlobalVariateName();
-    auto defineNode = std::make_shared<DefineUniversalTexture2D>();
+    auto defineNode = std::make_shared<DefineUniversalTexture>();
+    defineNode->texture = variate;
+    addGlobalStatement(defineNode);
+    return variate;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::UniversalTexture> EmbeddedShader::Ast::AST::defineUniversalTextureCube(std::shared_ptr<Type> texelType)
+{
+    auto textureType = std::make_shared<TextureType>();
+    textureType->name = "TextureCube";
+    textureType->texelType = std::move(texelType);
+    auto variate = std::make_shared<UniversalTexture>();
+    variate->type = textureType;
+    variate->name = Parser::getUniqueGlobalVariateName();
+    auto defineNode = std::make_shared<DefineUniversalTexture>();
     defineNode->texture = variate;
     addGlobalStatement(defineNode);
     return variate;
@@ -162,11 +187,28 @@ std::shared_ptr<EmbeddedShader::Ast::UniformVariate> EmbeddedShader::Ast::AST::d
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getPositionOutput()
 {
-	auto& posOutput = Parser::currentParser->positionOutput;
-	if (posOutput)
-		return posOutput;
-	posOutput = Generator::SlangGenerator::getPositionOutput();
-	return posOutput;
+	std::shared_ptr<Variate>* posOutput = nullptr;
+    if (getEmbeddedShaderStructure().stage == ShaderStage::Fragment) {
+        posOutput = &Parser::currentParser->fsPositionOutput;
+    } else if (getEmbeddedShaderStructure().stage == ShaderStage::Vertex) {
+        posOutput = &Parser::currentParser->vsPositionOutput;
+    } else {
+        throw std::runtime_error("Using Position Builtin-Variate in a non-supported ShaderStage");
+    }
+
+	if (*posOutput)
+		return *posOutput;
+	*posOutput = Generator::SlangGenerator::getPositionOutput();
+	return *posOutput;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getIsFrontFaceOutput()
+{
+    auto& frontFace = Parser::currentParser->isFrontFaceOutput;
+    if (frontFace)
+        return frontFace;
+    frontFace = Generator::SlangGenerator::getIsFrontFaceOutput();
+    return frontFace;
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getDispatchThreadIDInput()
@@ -240,7 +282,13 @@ void EmbeddedShader::Ast::AST::addLocalStatement(std::shared_ptr<Statement> stat
 
 void EmbeddedShader::Ast::AST::addInputStatement(std::shared_ptr<Statement> inputStatement)
 {
-	Parser::currentParser->structure.inputStatements.push_back(std::move(inputStatement));
+    if (Parser::currentParser->bInputPush)
+    {
+        Parser::currentParser->structure.inputStatements.push_back(std::move(inputStatement));
+        return;
+    }
+
+    Parser::currentParser->structure.inputStatements.push_front(std::move(inputStatement));
 }
 
 void EmbeddedShader::Ast::AST::addOutputStatement(std::shared_ptr<Statement> outputStatement)
@@ -296,7 +344,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGloba
     auto& pc = Parser::currentParser->globalPushConstant;
     if (!pc)
     {
-        auto type = std::make_shared<NameType>();
+        auto type = std::make_shared<PushConstantType>();
         pc = std::make_shared<Variate>();
         pc->type = type;
         // push constant 必须是裸 struct 类型:[[vk::push_constant]] T name;
@@ -315,7 +363,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStage
     if (!input)
     {
         auto type = std::make_shared<StageType>();
-        input = std::make_shared<Variate>();
+        input = std::make_shared<LocalVariate>();
         input->type = type;
         type->suffix = "_input";
         input->name = "input";
@@ -328,7 +376,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getStage
     if (!input)
     {
         auto type = std::make_shared<StageType>();
-        input = std::make_shared<Variate>();
+        input = std::make_shared<LocalVariate>();
         input->type = type;
         type->suffix = "_output";
         input->name = "output";

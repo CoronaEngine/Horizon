@@ -646,16 +646,6 @@ namespace Corona::Horizon
         if (!optional_validation_enabled())
             return true;
 
-        if (desc.depth_attachment.enabled)
-        {
-            if (!is_depth_stencil_format(desc.depth_attachment.format))
-                return validation_error("RasterizerPipelineDesc depth_attachment requires a depth/stencil format.");
-        }
-        else if (desc.depth_stencil.depth_test_enabled || desc.depth_stencil.stencil_test_enabled)
-        {
-            validation_warning("RasterizerPipelineDesc enables depth/stencil tests without a depth attachment.");
-        }
-
         if (desc.blend.attachments.empty())
             validation_warning("RasterizerPipelineDesc has no color blend attachments; bind render targets before recording draw work.");
 

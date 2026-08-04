@@ -13,9 +13,12 @@ namespace Corona::Horizon
     {
         using RasterizerPipelineStore = ResourceStore<RasterizerPipelineWrap, NoopReleaser>;
 
+        // 只读槽位里的 impl 指针（VulkanRasterizerPipeline 自身有内部锁负责状态变更），
+        // 因此取共享锁即可。原先用 write<> 拿独占锁：每次 record / 每次 reflected
+        // binding 赋值都要独占一次槽位，既是纯开销也让并发录制互相串行化。
         [[nodiscard]] std::shared_ptr<VulkanRasterizerPipeline> pipeline_impl(const std::shared_ptr<IResourceRef>& token)
         {
-            auto pipeline = write<RasterizerPipelineStore>(token);
+            auto pipeline = read<RasterizerPipelineStore>(token);
             if (!pipeline || !pipeline->impl)
                 throw std::logic_error("RasterizerPipeline does not reference a valid implementation.");
 
@@ -47,12 +50,16 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase::RasterizerPipelineBase() = default;
 
-    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location)
+    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        if (!validate_rasterizer_pipeline_desc(desc))
+        if (desc.pipelineObject)
+        {
+            const auto& vi = desc.pipelineObject->vertex->getCurrentConditionInfo();
+            const auto& fi = desc.pipelineObject->fragment->getCurrentConditionInfo();
+            rebuild_pipeline(std::move(desc),vi,fi);
             return;
-
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
+        }
+        rebuild_pipeline(std::move(desc), {}, {});
     }
 
     RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
@@ -118,7 +125,24 @@ namespace Corona::Horizon
 
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
         bind_auto_resources(impl);
-        impl->record(*this, index_buffer, vertex_buffer, params);
+        impl->record(this, index_buffer, vertex_buffer, params);
+        return *this;
+    }
+
+    RasterizerPipelineBase& RasterizerPipelineBase::record_indirect(const HardwareBuffer& index_buffer,
+                                                                   const HardwareBuffer& vertex_buffer,
+                                                                   const HardwareBuffer& indirect_buffer,
+                                                                   const DrawIndexedIndirectParams& params)
+    {
+        if (!index_buffer || !vertex_buffer || !indirect_buffer || params.draw_count == 0)
+            return *this;
+
+        std::shared_ptr<IResourceRef> token;
+        token = ResourceBridge::token(*this);
+
+        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
+        bind_auto_resources(impl);
+        impl->record_indirect(this, index_buffer, vertex_buffer, indirect_buffer, params);
         return *this;
     }
 
@@ -162,10 +186,49 @@ namespace Corona::Horizon
         return pipeline_impl(token)->command_batch();
     }
 
-    void RasterizerPipelineBase::record_consuming(CommandRecorder& recorder)
+    void RasterizerPipelineBase::record_into(CommandRecorder& recorder) const
     {
-        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
-        pipeline_impl(token)->record_consuming(recorder);
+        std::shared_ptr<IResourceRef> token;
+        token = ResourceBridge::token(*this);
+
+        pipeline_impl(token)->record_into(recorder);
+    }
+
+    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
+                                                  ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
+    {
+        if (!validate_rasterizer_pipeline_desc(desc))
+            return;
+        auto object = desc.pipelineObject;
+        std::string key;
+        if (object)
+        {
+            vert_condition_info_ = object->vertex->getCurrentConditionInfo();
+            frag_condition_info_ = object->fragment->getCurrentConditionInfo();
+            key = object->getCombinedKey(vertConditionInfo, fragConditionInfo);
+            auto it = pipeline_pool_.find(key);
+            if (it != pipeline_pool_.end())
+            {
+                ResourceBridge::set(*this, it->second);
+                return;
+            }
+        }
+        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        if (object)
+        {
+            pipeline_pool_.insert({ std::move(key), pipeline });
+        }
+        ResourceBridge::set(*this, std::move(pipeline));
+    }
+
+    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& RasterizerPipelineBase::vertex_condition_info() const
+    {
+        return vert_condition_info_;
+    }
+
+    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& RasterizerPipelineBase::fragment_condition_info() const
+    {
+        return frag_condition_info_;
     }
 
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

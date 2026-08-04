@@ -147,12 +147,6 @@ enum class PrimitiveType : uint8_t
     TRIANGLE_STRIP = 5//!< triangle strip
 };
 
-enum class CullingMode : uint8_t {
-    NONE,         //!< No culling, front and back faces are visible
-    FRONT,        //!< Front face culling, only back faces are visible
-    BACK,         //!< Back face culling, only front faces are visible
-    FRONT_AND_BACK//!< Front and Back, geometry is not visible
-};
 
 enum class FilterMode : uint8_t {
     POINT,     //!< Point filtering, also known as nearest neighbor filtering

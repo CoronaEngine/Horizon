@@ -75,14 +75,19 @@ namespace EmbeddedShader::Ast
 		static void endIf();
 		static void beginElse(std::shared_ptr<Ast::IfStatement> followIf);
 		static void endElse();
+		static void discard();
 
 		static std::shared_ptr<UniversalArray> defineUniversalArray(std::shared_ptr<Type> elementType);
 		template<typename ElementType>
 		static std::shared_ptr<UniversalArray> defineUniversalArray();
 
-	    static std::shared_ptr<UniversalTexture2D> defineUniversalTexture2D(std::shared_ptr<Type> texelType);
+	    static std::shared_ptr<UniversalTexture> defineUniversalTexture2D(std::shared_ptr<Type> texelType);
 	    template<typename ElementType>
-        static std::shared_ptr<UniversalTexture2D> defineUniversalTexture2D();
+        static std::shared_ptr<UniversalTexture> defineUniversalTexture2D();
+
+	    static std::shared_ptr<UniversalTexture> defineUniversalTextureCube(std::shared_ptr<Type> texelType);
+	    template<typename ElementType>
+        static std::shared_ptr<UniversalTexture> defineUniversalTextureCube();
 
 		static std::shared_ptr<UniformVariate> defineUniformVariate(std::shared_ptr<Type> type, bool pushConstant = false);
 		template<typename VariateType>
@@ -92,6 +97,7 @@ namespace EmbeddedShader::Ast
 		static std::shared_ptr<AggregateType> createAggregateType(const T& value);
 
 		static std::shared_ptr<Variate> getPositionOutput();
+		static std::shared_ptr<Variate> getIsFrontFaceOutput();
 		static std::shared_ptr<Variate> getDispatchThreadIDInput();
 
 		static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, uint32_t index);
@@ -197,12 +203,14 @@ namespace EmbeddedShader::Ast
 	template<typename VariateType> requires ktm::is_vector_v<VariateType>
 	std::shared_ptr<VecValue> AST::createValue(const VariateType& value)
 	{
-		auto type = createVecType<VariateType>();
-		auto vecValue = std::make_shared<VecValue>();
-		vecValue->type = type;
-
-		vecValue->value = Generator::SlangGenerator::getValueOutput<VariateType>(value);
-		return vecValue;
+	    auto type = createVecType<VariateType>();
+	    auto vecValue = std::make_shared<VecValue>();
+	    vecValue->type = type;
+        for (auto element : value.to_array())
+        {
+            vecValue->values.push_back(valueConverter(element));
+        }
+	    return vecValue;
 	}
 
 	template<typename VariateType> requires ktm::is_matrix_v<VariateType>
@@ -231,11 +239,9 @@ namespace EmbeddedShader::Ast
 		auto type = createVecType<ValueType>();
 		auto vecValue = std::make_shared<VecValue>();
 		vecValue->type = type;
-
-		bool first = true;
-		//ide可能会误报警告
-		vecValue->value = Generator::SlangGenerator::getVariateTypeName<ValueType>() + "(" + ((first? (first = false,valueConverter(std::forward<Args>(args))->parse()) :
-				valueConverter(std::forward<Args>(args))->parse() + ",") + ...) + ")";
+	    vecValue->values = std::vector{
+	        valueConverter(std::forward<Args>(args))...
+        };
 		return vecValue;
 	}
 
@@ -274,9 +280,15 @@ namespace EmbeddedShader::Ast
 	}
 
     template <typename ElementType>
-    std::shared_ptr<UniversalTexture2D> AST::defineUniversalTexture2D()
+    std::shared_ptr<UniversalTexture> AST::defineUniversalTexture2D()
 	{
 	    return defineUniversalTexture2D(createType<std::remove_cvref_t<ElementType>>());
+	}
+
+    template <typename ElementType>
+    std::shared_ptr<UniversalTexture> AST::defineUniversalTextureCube()
+	{
+	    return defineUniversalTextureCube(createType<std::remove_cvref_t<ElementType>>());
 	}
 
     template<typename VariateType>
@@ -314,7 +326,7 @@ namespace EmbeddedShader::Ast
 			}
 			else if constexpr (ParseHelper::isTexture2DProxy<MemberType>())
 			{
-				auto texture2DType = std::make_shared<Texture2DType>();
+				auto texture2DType = std::make_shared<TextureType>();
 				texture2DType->texelType = createType<std::remove_cvref_t<typename MemberType::value_type>>();
 				member->type = std::move(texture2DType);
 			}

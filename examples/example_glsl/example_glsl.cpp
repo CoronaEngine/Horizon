@@ -6,6 +6,9 @@
 #include "common.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
+#include "imgui_horizon.h"
+
+#include <imgui.h>
 
 #include GLSL(shaders/baseline_vert.glsl)
 #include GLSL(shaders/baseline_frag.glsl)
@@ -53,38 +56,79 @@ void run_example_glsl()
     Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.depth_attachment = Corona::Horizon::DepthAttachmentDesc::with_format(Corona::Horizon::Format::D32, "example_glsl.depth");
 
     Corona::Horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
-    rasterizer.texSampler = texture_image;
+    // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经 push constant 传入 shader。
+    rasterizer.pc.texIndex = texture_image.store_descriptor();
+
+    // VP 不随帧变化（相机固定），绑定一次即可
+    rasterizer.vp.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                                     glm::vec3(0.0f, 0.0f, 0.0f),
+                                     glm::vec3(0.0f, 0.0f, 1.0f));
+    {
+        glm::mat4 proj = glm::perspective(glm::pi<float>() * 0.25f,
+                                          glsl_width / static_cast<float>(glsl_height),
+                                          0.1f, 10.0f);
+        proj[1][1] *= -1.0f; // Vulkan 裁剪空间 Y 翻转
+        rasterizer.vp.proj = proj;
+    }
 
     Corona::Horizon::DrawIndexedParams draw_params;
     draw_params.index_type = Corona::Horizon::IndexType::UInt32;
     draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
 
+    HorizonImGuiLayer ui(window, glsl_width, glsl_height);
+
     const auto start_time = std::chrono::high_resolution_clock::now();
+    auto prev_time = start_time;
+    double fps_accum_seconds = 0.0;
+    int fps_frame_count = 0;
+
+    Corona::Horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        ui.new_frame();
+        ImGui::Begin("Hello");
+        ImGui::Text("hello world!");
+        ImGui::End();
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
-        baseline::UniformBufferObject ubo = baseline::make_ubo(time_seconds, glsl_width / static_cast<float>(glsl_height));
-        rasterizer.ubo.model = ubo.model;
-        rasterizer.ubo.view = ubo.view;
-        rasterizer.ubo.proj = ubo.proj;
+
+        const auto now = std::chrono::high_resolution_clock::now();
+        const float dt = std::chrono::duration<float>(now - prev_time).count();
+        prev_time = now;
+
+        fps_accum_seconds += dt;
+        ++fps_frame_count;
+        if (fps_accum_seconds >= 0.5)
+        {
+            const double fps = fps_frame_count / fps_accum_seconds;
+            char title[160];
+            std::snprintf(title, sizeof(title), "Horizon Baseline [GLSL] %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            glfwSetWindowTitle(window, title);
+            fps_accum_seconds = 0.0;
+            fps_frame_count = 0;
+        }
+
+        // Model 每帧更新（push constant，64 bytes）；VP 已在循环外绑定
+        rasterizer.pc.model = glm::rotate(glm::mat4(1.0f),
+                                          time_seconds * glm::pi<float>() * 0.5f,
+                                          glm::vec3(0.0f, 0.0f, 1.0f));
 
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::submit;
+        render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::submit;
 
+        ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
         (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
     }
-
+    display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);
     glfwTerminate();
 }

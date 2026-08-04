@@ -278,53 +278,6 @@ namespace Corona::Horizon
             (void)write_bytes(upload_data);
     }
 
-    HardwareImage HardwareImage::whole() const
-    {
-        HardwareImage image = *this;
-        image.range_ = ImageSubresourceRange::whole();
-        return image;
-    }
-
-    HardwareImage HardwareImage::layer(uint32_t layer_index) const
-    {
-        const auto image = read_image(*this);
-        if (!image)
-            return {};
-
-        const ImageSubresourceRange current = resolve_range(range_, image->desc);
-        if (layer_index >= current.layer_count)
-            return {};
-
-        HardwareImage view = *this;
-        view.range_ = {
-            .base_layer = current.base_layer + layer_index,
-            .layer_count = 1,
-            .base_mip = current.base_mip,
-            .mip_count = current.mip_count,
-        };
-        return view;
-    }
-
-    HardwareImage HardwareImage::mip(uint32_t mip_index) const
-    {
-        const auto image = read_image(*this);
-        if (!image)
-            return {};
-
-        const ImageSubresourceRange current = resolve_range(range_, image->desc);
-        if (mip_index >= current.mip_count)
-            return {};
-
-        HardwareImage view = *this;
-        view.range_ = {
-            .base_layer = current.base_layer,
-            .layer_count = current.layer_count,
-            .base_mip = current.base_mip + mip_index,
-            .mip_count = 1,
-        };
-        return view;
-    }
-
     HardwareImage HardwareImage::subresource(uint32_t layer_index, uint32_t mip_index) const
     {
         const auto image = read_image(*this);
@@ -338,35 +291,6 @@ namespace Corona::Horizon
         HardwareImage view = *this;
         view.range_ = ImageSubresourceRange::single(current.base_layer + layer_index, current.base_mip + mip_index);
         return view;
-    }
-
-    uint32_t HardwareImage::subresource_index(uint32_t layer_index, uint32_t mip_index) const
-    {
-        const auto image = read_image(*this);
-        if (!image)
-            return 0;
-
-        const ImageSubresourceRange current = resolve_range(range_, image->desc);
-        if (layer_index >= current.layer_count || mip_index >= current.mip_count)
-            return 0;
-
-        return ImageSubresource { current.base_layer + layer_index, current.base_mip + mip_index }.index(image->desc.mip_levels);
-    }
-
-    uint32_t HardwareImage::subresource_count() const noexcept
-    {
-        const auto image = read_image(*this);
-        if (!image)
-            return 0;
-
-        const ImageSubresourceRange current = resolve_range(range_, image->desc);
-        if (current.layer_count == 0 || current.mip_count == 0)
-            return 0;
-
-        if (current.layer_count > std::numeric_limits<uint32_t>::max() / current.mip_count)
-            return 0;
-
-        return current.layer_count * current.mip_count;
     }
 
     ImageExtent HardwareImage::mip_extent(uint32_t mip_index) const
@@ -496,93 +420,6 @@ namespace Corona::Horizon
         image->clear_value.depthStencil = { depth, stencil };
     }
 
-    CommandBatch HardwareImage::upload(std::span<const std::byte> data, uint32_t image_layer, uint32_t image_mip) const
-    {
-        CommandBatch batch;
-        if (data.empty())
-            return batch;
-
-        const auto image = read_image(*this);
-        if (!image)
-            return batch;
-
-        if (!validate_image_upload(image->desc, range_, image_layer, image_mip, data))
-            return batch;
-
-        ImageSubresource absolute {};
-        if (!resolve_absolute_subresource(image->desc, range_, image_layer, image_mip, absolute))
-            return batch;
-
-        std::string staging_name;
-        if (!image->desc.debug_name.empty())
-            staging_name = image->desc.debug_name + ".upload";
-
-        HardwareBufferDesc staging_desc;
-        staging_desc.element_count = static_cast<uint64_t>(data.size_bytes());
-        staging_desc.element_size = 1;
-        staging_desc.usage = BufferUsageFlags::TransferSrc;
-        staging_desc.cpu_access = CpuAccessMode::Write;
-        staging_desc.debug_name = std::move(staging_name);
-
-        HardwareBuffer staging(staging_desc, data);
-        if (!staging)
-            return batch;
-
-        batch << copy_to_image(buffer_ref(staging), image_ref(*this), { 0, absolute.layer, absolute.mip });
-        batch << keep_alive(std::move(staging));
-        return batch;
-    }
-
-    CopyImageCommand HardwareImage::copy_to(const HardwareImage& dst,
-                                            uint32_t src_layer,
-                                            uint32_t dst_layer,
-                                            uint32_t src_mip,
-                                            uint32_t dst_mip) const
-    {
-        if (!*this || !dst)
-            return {};
-
-        const auto src_image = read_image(*this);
-        const auto dst_image = read_image(dst);
-        if (!src_image || !dst_image)
-            return {};
-
-        if (!validate_image_copy(src_image->desc, range_, src_layer, src_mip, dst_image->desc, dst.range_, dst_layer, dst_mip))
-            return {};
-
-        ImageSubresource absolute_src {};
-        ImageSubresource absolute_dst {};
-        if (!resolve_absolute_subresource(src_image->desc, range_, src_layer, src_mip, absolute_src) ||
-            !resolve_absolute_subresource(dst_image->desc, dst.range_, dst_layer, dst_mip, absolute_dst))
-        {
-            return {};
-        }
-
-        return copy_image(image_ref(*this), image_ref(dst), { absolute_src.layer, absolute_dst.layer, absolute_src.mip, absolute_dst.mip });
-    }
-
-    CopyImageToBufferCommand HardwareImage::copy_to(const HardwareBuffer& dst,
-                                                    uint32_t image_layer,
-                                                    uint32_t image_mip,
-                                                    uint64_t buffer_offset) const
-    {
-        if (!*this || !dst)
-            return {};
-
-        const auto image = read_image(*this);
-        if (!image)
-            return {};
-
-        if (!validate_image_to_buffer_copy(image->desc, range_, image_layer, image_mip, dst, buffer_offset))
-            return {};
-
-        ImageSubresource absolute {};
-        if (!resolve_absolute_subresource(image->desc, range_, image_layer, image_mip, absolute))
-            return {};
-
-        return copy_to_buffer(image_ref(*this), buffer_ref(dst), { buffer_offset, absolute.layer, absolute.mip });
-    }
-
     CopyBufferToImageCommand HardwareImage::copy_from(const HardwareBuffer& src,
                                                       uint64_t buffer_offset,
                                                       uint32_t image_layer,
@@ -616,24 +453,6 @@ namespace Corona::Horizon
             throw std::invalid_argument("HardwareImage::store_descriptor requires a valid image.");
 
         return resource_manager().store_descriptor(*image);
-    }
-
-    uint32_t HardwareImage::store_sampled_descriptor() const
-    {
-        const auto image = write_image(*this);
-        if (!image)
-            throw std::invalid_argument("HardwareImage::store_sampled_descriptor requires a valid image.");
-
-        return resource_manager().store_sampled_descriptor(*image);
-    }
-
-    uint32_t HardwareImage::store_storage_descriptor() const
-    {
-        const auto image = write_image(*this);
-        if (!image)
-            throw std::invalid_argument("HardwareImage::store_storage_descriptor requires a valid image.");
-
-        return resource_manager().store_storage_descriptor(*image);
     }
 
     HardwareImage HardwareImage::import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size)

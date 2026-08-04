@@ -12,9 +12,10 @@ namespace Corona::Horizon
     {
         using ComputePipelineStore = ResourceStore<ComputePipelineWrap, NoopReleaser>;
 
+        // 同光栅侧：只读槽位里的 impl 指针，共享锁足够，不必独占。
         [[nodiscard]] std::shared_ptr<VulkanComputePipeline> pipeline_impl(const std::shared_ptr<IResourceRef>& token)
         {
-            auto pipeline = write<ComputePipelineStore>(token);
+            auto pipeline = read<ComputePipelineStore>(token);
             if (!pipeline || !pipeline->impl)
                 throw std::logic_error("ComputePipeline does not reference a valid implementation.");
 
@@ -46,9 +47,15 @@ namespace Corona::Horizon
 
     ComputePipelineBase::ComputePipelineBase() = default;
 
-    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location)
+    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location) : location_(source_location)
     {
-        ResourceBridge::set(*this, make_pipeline_token(std::move(desc), source_location));
+        if (desc.pipelineObject)
+        {
+            const auto& info = desc.pipelineObject->compute->getCurrentConditionInfo();
+            rebuild_pipeline(std::move(desc), info);
+            return;
+        }
+        rebuild_pipeline(std::move(desc), {});
     }
 
     ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
@@ -86,6 +93,32 @@ namespace Corona::Horizon
         return ResourceHandle::operator bool();
     }
 
+    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo)
+    {
+        auto object = desc.pipelineObject;
+        if (object)
+        {
+            condition_info_ = conditionInfo;
+            auto it = pipeline_pool_.find(object->getCombinedKey(conditionInfo));
+            if (it != pipeline_pool_.end())
+            {
+                ResourceBridge::set(*this, it->second);
+                return;
+            }
+        }
+        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        if (object)
+        {
+            pipeline_pool_.insert({ object->getCombinedKey(conditionInfo), pipeline });
+        }
+        ResourceBridge::set(*this, std::move(pipeline));
+    }
+
+    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& ComputePipelineBase::compute_condition_info()
+    {
+        return condition_info_;
+    }
+
     ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
@@ -100,24 +133,12 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipelineBase& ComputePipelineBase::bind_storage_buffer(uint32_t binding, const HardwareBuffer& buffer)
-    {
-        pipeline_impl(ResourceBridge::token(*this))->bind_storage_buffer(binding, buffer);
-        return *this;
-    }
-
-    ComputePipelineBase& ComputePipelineBase::bind_storage_image(uint32_t binding, const HardwareImage& image)
-    {
-        pipeline_impl(ResourceBridge::token(*this))->bind_storage_image(binding, image);
-        return *this;
-    }
-
     ComputePipelineDesc ComputePipelineBase::desc() const
     {
         return pipeline_impl(ResourceBridge::token(*this))->desc();
     }
 
-    CommandBatch ComputePipelineBase::command_batch() const
+    CommandBatch ComputePipelineBase::command_batch()
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);

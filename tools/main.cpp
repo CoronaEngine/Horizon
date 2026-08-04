@@ -167,7 +167,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCo
 			if (info.bindType == ShaderCodeModule::ShaderResources::uniformBufferMembers)
 				out << "\tstatic inline ::EmbeddedShader::BindingKey " << info.variateName
 				    << "{" << info.byteOffset << ", " << info.typeSize
-				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << "};\n";
+				    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+				    << ", " << info.set << ", " << info.binding << "};\n";
 		}
 		out << "};\n";
 	}
@@ -196,7 +197,8 @@ std::set<std::string> generateBindingKeys(std::stringstream& out, const ShaderCo
 		if (isDirectResourceBindType(info.bindType))
 			out << "static inline ::EmbeddedShader::BindingKey " << info.variateName
 			    << "{" << info.byteOffset << ", " << info.typeSize
-			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding << "};\n";
+			    << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding
+			    << ", " << info.set << ", " << info.binding << "};\n";
 	}
 
 	return bindingBlockNames;
@@ -220,7 +222,8 @@ static std::string emitBlockProxy(std::stringstream& out,
 			out << "\t::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
 			ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location << ")";
+			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.location
+			   << ", " << info.set << ", " << info.binding << ")";
 			fieldInits.push_back(ss.str());
 		}
 	}
@@ -284,7 +287,8 @@ void generateBindings(std::stringstream& out, const ShaderCodeModule::ShaderReso
 			out << "::EmbeddedShader::BoundField<P> " << info.variateName << ";\n";
 			std::stringstream ss;
 			ss << info.variateName << "(p, " << info.byteOffset << ", " << info.typeSize
-			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding << ")";
+			   << ", " << static_cast<int32_t>(info.bindType) << ", " << info.binding
+			   << ", " << info.set << ", " << info.binding << ")";
 			initList.push_back(ss.str());
 		}
 
@@ -554,10 +558,18 @@ int main(int argc, char** argv)
 			++i;
 			arg = argv[i];
 			if (arg == "glsl")
-				inputLanguage = ShaderLanguage::GLSL;
-			else if (arg == "hlsl")
-				inputLanguage = ShaderLanguage::HLSL;
-			else
+			{
+			    inputLanguage = ShaderLanguage::GLSL;
+			}
+            else if (arg == "hlsl")
+			{
+                inputLanguage = ShaderLanguage::HLSL;
+            }
+            else if (arg == "slang")
+		    {
+		        inputLanguage = ShaderLanguage::Slang;
+		    }
+            else
 			{
 				std::cout << "ERROR:Unrecognized Shader Language.\n";
 				return 1;
@@ -691,6 +703,8 @@ int main(int argc, char** argv)
         auto i = info.variateName.find_last_of('.');
         if (i != std::string::npos)
             info.variateName = info.variateName.substr(i + 1);
+        if (info.variateName == "return")
+            info.variateName = "RETURN";
     }
 
     if (moduleOnly)

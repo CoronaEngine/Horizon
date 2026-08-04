@@ -1,0 +1,13 @@
+{
+  "format": "HZMS",
+  "version": 3,
+  "source": "E:\\LYH\\edsl\\_sponza_download\\main_sponza\\main_sponza\\NewSponza_Main_glTF_003.gltf",
+  "vertexCount": 2049137,
+  "indexCount": 11241054,
+  "submeshCount": 401,
+  "materialCount": 28,
+  "textureCount": 72,
+  "textures": "BC7 KTX1",
+  "maxTextureSize": 2048,
+  "materialSemantics": "slot2 = glTF metallicRoughness (G=roughness, B=metallic)"
+}

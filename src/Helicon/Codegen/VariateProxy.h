@@ -42,6 +42,9 @@ namespace EmbeddedShader
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const VariateProxy<T>& proxy);
 
+    template<typename T>
+    std::shared_ptr<Ast::Value> proxy_wrap(const SwizzleProxy<T>& proxy);
+
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const Texture2DProxy<T>& proxy);
 
@@ -56,6 +59,12 @@ namespace EmbeddedShader
 	{
 		using type = T;
 	};
+
+    template<typename T>
+    struct base_type<SwizzleProxy<T>>
+    {
+        using type = T;
+    };
 
 	template<typename T>
 	using base_type_t = typename base_type<std::remove_cvref_t<T>>::type;
@@ -100,6 +109,7 @@ namespace EmbeddedShader
 				value = std::make_unique<Type>();
 			uniform->boundValueRef = value.get();
 			uniform->boundValueSize = static_cast<uint32_t>(sizeof(Type));
+		    ++uniform->dirtyVersion;
 		}
 
 		void storeRuntimeValue(const Type& rhs)
@@ -165,6 +175,7 @@ namespace EmbeddedShader
 			//Uniform,Input,Local Variate
 			if (ParseHelper::isInInputParameter())
 			{
+			    Ast::Parser::setInputPush(false);
 				node = Ast::AST::defineInputVariate<Type>(ParseHelper::getCurrentInputIndex());
 				return;
 			}
@@ -205,6 +216,7 @@ namespace EmbeddedShader
 		            auto aggregateType = Ast::AST::createType<Type>();
 		            node = Ast::AST::defineLocalVariate(
 		                std::static_pointer_cast<Ast::Type>(aggregateType), nullptr);
+		            Ast::Parser::setInputPush(true);
 		            for (size_t loc = 0; loc < aggregateType->members.size(); ++loc)
 		            {
 		                auto& member = aggregateType->members[loc];
@@ -215,6 +227,7 @@ namespace EmbeddedShader
 		        }
 		        else
 		        {
+		            Ast::Parser::setInputPush(false);
 		            node = Ast::AST::defineInputVariate<Type>(ParseHelper::getCurrentInputIndex());
 		        }
 		    }
@@ -277,7 +290,14 @@ namespace EmbeddedShader
 		        node = Ast::AST::defineLocalVariate(value.node->type, value.node);
 		}
 
-		VariateProxy(VariateProxy&& value) = default;
+	    VariateProxy(VariateProxy&& value) = default;
+		// VariateProxy(VariateProxy&& value) : node(std::move(value.node)),value(std::move(value.value)),
+	 //        isNeedUniversalStatementCheck(value.isNeedUniversalStatementCheck)
+		// {
+		//     //Local Variate
+		//     if (ParseHelper::isInShaderCodeLambda())
+		//         node = Ast::AST::defineLocalVariate(node->type, node);
+		// }
 
 		~VariateProxy()
 		{
@@ -317,6 +337,20 @@ namespace EmbeddedShader
 			Ast::AST::assign(node,rhs.node);
 		    return *this;
 		}
+
+	 //    VariateProxy& operator=(VariateProxy&& rhs) noexcept
+  //       {
+		//     if (this == &rhs)
+		//         return *this;
+		//     if (!ParseHelper::isInShaderCodeLambda())
+		//     {
+		//         if (rhs.value)
+		//             value = std::move(rhs.value);
+		//         return *this;
+		//     }
+		//     Ast::AST::assign(node,std::move(rhs.node));
+		//     return *this;
+		// }
 
 		VariateProxy& operator=(const Type& rhs)
 		{
@@ -373,67 +407,67 @@ namespace EmbeddedShader
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"+"));
 		}
 
-		VariateProxy operator-(const VariateProxy& rhs)
+		VariateProxy operator-(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"-"));
 		}
 
-		VariateProxy operator*(const VariateProxy& rhs)
+		VariateProxy operator*(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"*"));
 		}
 
-		VariateProxy operator/(const VariateProxy& rhs)
+		VariateProxy operator/(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"/"));
 		}
 
-		VariateProxy operator%(const VariateProxy& rhs)
+		VariateProxy operator%(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"%"));
 		}
 
-		VariateProxy operator!()
+		VariateProxy operator!() const
 		{
 			return VariateProxy(Ast::AST::unaryOperator(node,"!"));
 		}
 
-		VariateProxy operator||(const VariateProxy& rhs)
+		VariateProxy operator||(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"||"));
 		}
 
-		VariateProxy operator&&(const VariateProxy& rhs)
+		VariateProxy operator&&(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"&&"));
 		}
 
-		VariateProxy operator~()
+		VariateProxy operator~() const
 		{
 			return VariateProxy(Ast::AST::unaryOperator(node,"~"));
 		}
 
-		VariateProxy operator&(const VariateProxy& rhs)
+		VariateProxy operator&(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"&"));
 		}
 
-		VariateProxy operator|(const VariateProxy& rhs)
+		VariateProxy operator|(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"|"));
 		}
 
-		VariateProxy operator^(const VariateProxy& rhs)
+		VariateProxy operator^(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"^"));
 		}
 
-		VariateProxy operator<<(const VariateProxy& rhs)
+		VariateProxy operator<<(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,"<<"));
 		}
 
-		VariateProxy operator>>(const VariateProxy& rhs)
+		VariateProxy operator>>(const VariateProxy& rhs) const
 		{
 			return VariateProxy(Ast::AST::binaryOperator(node,rhs.node,">>"));
 		}
@@ -583,8 +617,18 @@ namespace EmbeddedShader
 		//VariateProxy<bool>& operator!=(const VariateProxy& rhs) { return *(new VariateProxy<bool>(true)); }
 		//VariateProxy<bool>& operator==(const VariateProxy& rhs) { return *(new VariateProxy<bool>(true)); }
 
-		VariateProxy(std::shared_ptr<Ast::Value> node) : node(std::move(node))//,value(std::make_unique<Type>())
+		VariateProxy(std::shared_ptr<Ast::Value> node) : node(std::move(node))
 	    {
+	    }
+
+	    // 将该 uniform 变量标记为 push constant，而非 UBO 成员。
+	    // 仅对 UBO uniform 有效（在流水线创建前调用），之后每次 record() 会独立快照，
+	    // 实现真正的 per-draw 隔离。
+	    VariateProxy& as_push_constant() &
+	    {
+	        if (auto u = std::dynamic_pointer_cast<Ast::UniformVariate>(node))
+	            u->pushConstant = true;
+	        return *this;
 	    }
 
 	    std::unique_ptr<Type> value{};
@@ -613,7 +657,7 @@ namespace EmbeddedShader
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator+(const VariateProxy<Type>& a,const VariateProxy<ktm::vec<N,Type>>& b)
 	{
-		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"+"));
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"+", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
@@ -625,37 +669,37 @@ namespace EmbeddedShader
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator-(const VariateProxy<Type>& a,const VariateProxy<ktm::vec<N,Type>>& b)
 	{
-		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"-"));
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"-", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator-(const VariateProxy<ktm::vec<N,Type>>& a,const VariateProxy<Type>& b)
 	{
-		return b - a;
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"-", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator*(const VariateProxy<Type>& a,const VariateProxy<ktm::vec<N,Type>>& b)
 	{
-		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"*"));
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"*", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator*(const VariateProxy<ktm::vec<N,Type>>& a,const VariateProxy<Type>& b)
 	{
-		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"*"));
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"*", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator*=(const VariateProxy<ktm::vec<N,Type>>& a,const VariateProxy<Type>& b)
 	{
-		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"*="));
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"*=", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<size_t N,typename Type> requires std::is_arithmetic_v<Type>
 	VariateProxy<ktm::vec<N,Type>> operator/(const VariateProxy<ktm::vec<N,Type>>& a,const VariateProxy<Type>& b)
 	{
-		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"/"));
+		return VariateProxy<ktm::vec<N,Type>>(Ast::AST::binaryOperator(a.node,b.node,"/", Ast::AST::createType<ktm::vec<N,Type>>()));
 	}
 
 	template<typename Type>
@@ -690,7 +734,7 @@ namespace EmbeddedShader
 
 			if constexpr (Texture2DProxyTraits<Type>::value)
 			{
-				auto textureType = std::make_shared<Ast::Texture2DType>();
+				auto textureType = std::make_shared<Ast::TextureType>();
 				textureType->texelType = Ast::AST::createType<Type::value_type>();
 				node = Ast::AST::defineUniversalArray(std::move(textureType));
 			}
@@ -748,6 +792,10 @@ namespace EmbeddedShader
 		std::shared_ptr<Ast::Value> node;
 	};
 
+	// Codegen emits ::EmbeddedShader::Array<T>; qualified lookup ignores TypeAlias using-directives.
+	template<typename ElementType>
+	using Array = ArrayProxy<ElementType>;
+
 	struct SamplerProxy
 	{
 		SamplerProxy()
@@ -796,9 +844,11 @@ namespace EmbeddedShader
 				return;
 			}
 
-			node = Ast::AST::defineUniversalTexture2D<Type>();
+		    auto t = Ast::AST::defineUniversalTexture2D<Type>();
+		    dirtyVersion = &t->dirtyVersion;
+		    node = std::move(t);
 			// Set back-pointer so auto-bind can read current resource at dispatch time
-			if (auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture2D>(node)) {
+			if (auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture>(node)) {
 				tex->boundResourceRef = &boundResource_;
 			}
 		}
@@ -883,7 +933,7 @@ namespace EmbeddedShader
 		{
 			node->access(Ast::AccessPermissions::ReadOnly);
 			location.node->access(Ast::AccessPermissions::ReadOnly);
-			if (auto textureType = std::dynamic_pointer_cast<Ast::Texture2DType>(node->type))
+			if (auto textureType = std::dynamic_pointer_cast<Ast::TextureType>(node->type))
 			{
 				textureType->name = "Sampler2D";
 			}
@@ -900,7 +950,14 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		Texture2DProxy& operator=(Corona::Horizon::HardwareImage& img) { boundResource_ = &img; return *this; }
+		Texture2DProxy& operator=(Corona::Horizon::HardwareImage& img)
+	    {
+		    boundResource_ = &img;
+		    if (dirtyVersion)
+		        ++*dirtyVersion;
+		    return *this;
+	    }
+
 		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
@@ -908,7 +965,7 @@ namespace EmbeddedShader
 		// Emits DefineOutputVariate + assign at incremental SV_TARGET location.
 		void operator<<(const VariateProxy<Type>& value)
 		{
-			auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture2D>(node);
+			auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture>(node);
 			size_t location = Ast::Parser::getNextRenderTargetLocation();
 			auto outputVar = Ast::AST::defineOutputVariate<Type>(location);
 			Ast::AST::assign(outputVar, value.node);
@@ -922,12 +979,167 @@ namespace EmbeddedShader
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
 		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
+	    size_t* dirtyVersion = nullptr;
+	};
+
+    template<typename Type>
+	struct TextureCubeProxy
+	{
+		using value_type = Type;
+		TextureCubeProxy()
+		{
+			if (ParseHelper::notInitNode())
+				return;
+
+			if (auto parent = ParseHelper::getAggregateParent())
+			{
+				auto index = ParseHelper::getAggregateMemberIndex();
+				auto aggregateType = reinterpret_cast<Ast::AggregateType*>(parent->type.get());
+				auto member = aggregateType->members[index];
+				node = Ast::AST::access(parent,member->name, member->type);
+				return;
+			}
+
+			auto t = Ast::AST::defineUniversalTextureCube<Type>();
+		    dirtyVersion = &t->dirtyVersion;
+		    node = std::move(t);
+			// Set back-pointer so auto-bind can read current resource at dispatch time
+			if (auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture>(node)) {
+				tex->boundResourceRef = &boundResource_;
+			}
+		}
+
+		// Owning constructor: creates proxy + GPU resource in one step.
+		// Definition is in horizon.h (after HardwareImage is complete).
+		void createResource(const Corona::Horizon::HardwareImageDesc& createInfo);
+
+		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
+		TextureCubeProxy(Corona::Horizon::HardwareImage& img) : TextureCubeProxy()
+		{
+			boundResource_ = &img;
+		}
+
+		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
+		TextureCubeProxy(Corona::Horizon::HardwareImage&& img) : TextureCubeProxy()
+		{
+			ownedResource_ = std::make_unique<Corona::Horizon::HardwareImage>(std::move(img));
+			boundResource_ = ownedResource_.get();
+		}
+
+		// Texture2DProxy(SamplerProxy&& sampler)
+		// {
+		// 	isHybrid = true;
+		// 	if (ParseHelper::notInitNode())
+		// 		return;
+		//
+		// 	if (auto parent = ParseHelper::getAggregateParent())
+		// 	{
+		// 		auto index = ParseHelper::getAggregateMemberIndex();
+		// 		auto aggregateType = reinterpret_cast<Ast::AggregateType*>(parent->type.get());
+		// 		auto member = aggregateType->members[index];
+		// 		std::reinterpret_pointer_cast<Ast::Texture2DType>(member->type)->name = "Sampler2D";
+		// 		node = Ast::AST::access(parent,member->name, member->type);
+		// 		return;
+		// 	}
+		//
+		// 	node = Ast::AST::defineUniversalTexture2D<Type>();
+		// 	std::reinterpret_pointer_cast<Ast::Texture2DType>(node->type)->name = "Sampler2D";
+		// }
+
+		VariateProxy<Type> sample(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir)
+		{
+			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
+			assert(!isHybrid);
+			sampler.init("SamplerState");
+			sampler.node->access(Ast::AccessPermissions::ReadOnly);
+			node->access(Ast::AccessPermissions::ReadOnly);
+			auto func = Ast::AST::callFunc("Sample",Ast::AST::createType<Type>(),{sampler.node,dir.node});
+			return {Ast::AST::access(node,func->parse(), func->type)};
+		}
+
+        VariateProxy<Type> sampleLevel(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
+		{
+		    assert(!isHybrid);
+		    sampler.init("SamplerState");
+		    sampler.node->access(Ast::AccessPermissions::ReadOnly);
+		    node->access(Ast::AccessPermissions::ReadOnly);
+		    auto func = Ast::AST::callFunc("SampleLevel",Ast::AST::createType<Type>(),{sampler.node,dir.node,lod.node});
+		    return {Ast::AST::access(node,func->parse(), func->type)};
+		}
+
+		VariateProxy<Type> sample(const VariateProxy<ktm::fvec3>& dir)
+		{
+			node->access(Ast::AccessPermissions::ReadOnly);
+			dir.node->access(Ast::AccessPermissions::ReadOnly);
+			if (auto textureType = std::dynamic_pointer_cast<Ast::TextureType>(node->type))
+			{
+				textureType->name = "SamplerCube";
+			}
+			auto func = Ast::AST::callFunc("Sample",Ast::AST::createType<Type>(),{dir.node});
+			return {Ast::AST::access(node,func->parse(), func->type)};
+		}
+
+        VariateProxy<Type> sampleLevel(const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
+		{
+		    node->access(Ast::AccessPermissions::ReadOnly);
+		    lod.node->access(Ast::AccessPermissions::ReadOnly);
+		    if (auto textureType = std::dynamic_pointer_cast<Ast::TextureType>(node->type))
+		    {
+		        textureType->name = "SamplerCube";
+		    }
+		    auto func = Ast::AST::callFunc("SampleLevel",Ast::AST::createType<Type>(),{dir.node,lod.node});
+		    return {Ast::AST::access(node,func->parse(), func->type)};
+		}
+
+		TextureCubeProxy(std::shared_ptr<Ast::Value> node) : node(std::move(node)) {}
+
+		std::string getAstName() const
+		{
+			if (auto v = std::dynamic_pointer_cast<Ast::Variate>(node)) return v->name;
+			return "";
+		}
+
+		// --- Level 2/3: Resource binding ---
+		TextureCubeProxy& operator=(Corona::Horizon::HardwareImage& img) {
+		    boundResource_ = &img;
+		    if (dirtyVersion)
+		        ++*dirtyVersion;
+		    return *this;
+		}
+		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
+
+		// --- Render target output via operator<< ---
+		// Usage in FS lambda: outputImage << Float4(r, g, b, a);
+		// Emits DefineOutputVariate + assign at incremental SV_TARGET location.
+		void operator<<(const VariateProxy<Type>& value)
+		{
+			auto tex = std::dynamic_pointer_cast<Ast::UniversalTexture>(node);
+			size_t location = Ast::Parser::getNextRenderTargetLocation();
+			auto outputVar = Ast::AST::defineOutputVariate<Type>(location);
+			Ast::AST::assign(outputVar, value.node);
+			if (tex) tex->renderTargetLocation = static_cast<int32_t>(location);
+		}
+
+		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
+		Corona::Horizon::HardwareImage& image() const { return *static_cast<Corona::Horizon::HardwareImage*>(ownedResource_.get()); }
+
+		std::shared_ptr<Ast::Value> node;
+		bool isHybrid = false;
+		void* boundResource_ = nullptr;
+		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
+        size_t* dirtyVersion = nullptr;
 	};
 
 	template<typename T>
 	std::shared_ptr<Ast::Value> proxy_wrap(const VariateProxy<T>& proxy)
 	{
 		return proxy.node;
+	}
+
+    template <typename T>
+    std::shared_ptr<Ast::Value> proxy_wrap(const SwizzleProxy<T>& proxy)
+	{
+	    return proxy.node;
 	}
 
 	template<typename T>
@@ -1020,6 +1232,8 @@ namespace EmbeddedShader
 		uint32_t typeSize = 0;
 		int32_t  bindType = -1;   // mirrors ShaderResources::BindType; -1 = no metadata
 		uint32_t location = 0;
+		uint32_t set = 0;
+		uint32_t binding = 0;
 
 		bool hasMetadata() const { return bindType >= 0; }
 
@@ -1045,11 +1259,18 @@ namespace EmbeddedShader
 		uint32_t typeSize;
 		int32_t  bindType;
 		uint32_t location;
+		uint32_t set;
+		uint32_t binding;
 
-		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc)
-			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc) {}
+		BoundField(PipelineType* p, uint64_t off, uint32_t sz, int32_t bt, uint32_t loc,
+		           uint32_t set_ = 0, uint32_t binding_ = 0)
+			: pipeline_(p), byteOffset(off), typeSize(sz), bindType(bt), location(loc),
+			  set(set_), binding(binding_) {}
 
 		template<typename T>
 		BoundField& operator=(const T& value);
 	};
+
+	template<typename ElementType>
+	using Array = ArrayProxy<ElementType>;
 }

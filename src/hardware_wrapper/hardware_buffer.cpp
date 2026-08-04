@@ -37,11 +37,6 @@ namespace Corona::Horizon
             return static_cast<uint64_t>(byte_count) <= total_size - byte_offset;
         }
 
-        [[nodiscard]] bool fits_range_u64(uint64_t total_size, uint64_t byte_offset, uint64_t byte_count) noexcept
-        {
-            return byte_offset <= total_size && byte_count <= total_size - byte_offset;
-        }
-
         [[nodiscard]] bool offset_to_size_t(uint64_t byte_offset, size_t& out) noexcept
         {
             if (byte_offset > std::numeric_limits<size_t>::max())
@@ -51,15 +46,6 @@ namespace Corona::Horizon
             return true;
         }
 
-        [[nodiscard]] BufferRef buffer_ref(const HardwareBuffer& buffer)
-        {
-            return { static_cast<const ResourceHandle&>(buffer) };
-        }
-
-        [[nodiscard]] ImageRef image_ref(const HardwareImage& image)
-        {
-            return { static_cast<const ResourceHandle&>(image) };
-        }
     }
 
     HardwareBuffer::HardwareBuffer(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data)
@@ -190,72 +176,6 @@ namespace Corona::Horizon
 
         std::memcpy(output.data(), mapped + mapped_offset, output.size_bytes());
         return true;
-    }
-
-    CommandBatch HardwareBuffer::upload(std::span<const std::byte> data, uint64_t dst_offset) const
-    {
-        CommandBatch batch;
-        if (data.empty())
-            return batch;
-
-        if (!validate_buffer_upload(*this, data, dst_offset))
-            return batch;
-
-        if (data.data() == nullptr || !*this)
-            return batch;
-
-        const uint64_t byte_size = static_cast<uint64_t>(data.size_bytes());
-        if (!fits_range_u64(get_byte_size(), dst_offset, byte_size))
-            return batch;
-
-        std::string staging_name;
-        {
-            const auto dst = read_buffer(*this);
-            if (dst && !dst->desc.debug_name.empty())
-                staging_name = dst->desc.debug_name + ".upload";
-        }
-
-        HardwareBufferDesc staging_desc;
-        staging_desc.element_count = byte_size;
-        staging_desc.element_size = 1;
-        staging_desc.usage = BufferUsageFlags::TransferSrc;
-        staging_desc.cpu_access = CpuAccessMode::Write;
-        staging_desc.debug_name = std::move(staging_name);
-
-        HardwareBuffer staging(staging_desc, data);
-        if (!staging)
-            return batch;
-
-        batch << staging.copy_to(*this, { 0, byte_size }, dst_offset);
-        batch << keep_alive(std::move(staging));
-        return batch;
-    }
-
-    CopyBufferCommand HardwareBuffer::copy_to(const HardwareBuffer& dst, BufferRange src, uint64_t dst_offset) const
-    {
-        if (!validate_buffer_copy(*this, dst, src, dst_offset))
-            return {};
-
-        if (!*this || !dst)
-            return {};
-
-        const uint64_t src_size = get_byte_size();
-        const BufferRange resolved = src.resolve(src_size);
-        if (resolved.byte_size == 0)
-            return {};
-
-        if (!fits_range_u64(src_size, resolved.byte_offset, resolved.byte_size))
-            return {};
-
-        if (!fits_range_u64(dst.get_byte_size(), dst_offset, resolved.byte_size))
-            return {};
-
-        return copy(buffer_ref(*this), buffer_ref(dst), { resolved.byte_offset, dst_offset, resolved.byte_size });
-    }
-
-    CopyBufferToImageCommand HardwareBuffer::copy_to(const HardwareImage& dst, uint64_t buffer_offset, uint32_t image_layer, uint32_t image_mip) const
-    {
-        return dst.copy_from(*this, buffer_offset, image_layer, image_mip);
     }
 
     uint32_t HardwareBuffer::store_descriptor() const

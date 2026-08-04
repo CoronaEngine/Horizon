@@ -20,10 +20,12 @@ option(HORIZON_BUILD_BENCHMARKS "Build Horizon performance benchmarks" OFF)
 option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module when CUDA is available" OFF)
 option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
 option(HORIZON_BUILD_VISION_HOTFIX "Build Vision hotfix support targets" OFF)
-option(HORIZON_ENABLE_DEBUG_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Debug builds" ON)
+option(HORIZON_ENABLE_DEBUG_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Debug builds" OFF)
 option(HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in RelWithDebInfo builds" OFF)
 option(HORIZON_ENABLE_RELEASE_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Release and MinSizeRel builds" OFF)
 option(HORIZON_ENABLE_HARDCODE_SHADERS "Compile and use generated Helicon hardcoded shader cache" OFF)
+option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
+option(HORIZON_ENABLE_IMGUI_RENDER "Render the ImGui overlay in Horizon examples" ON)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -47,6 +49,7 @@ add_compile_definitions(
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_tracy.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_corona.cmake)
 
@@ -79,7 +82,7 @@ if (MSVC)
     add_compile_options(/Zi)
     add_link_options(/INCREMENTAL:NO)
 
-    target_compile_options(Helicon PUBLIC /source-charset:utf-8 /execution-charset:utf-8)
+    target_compile_options(Helicon PUBLIC /utf-8)
 endif()
 
 find_package(Python)
@@ -99,5 +102,9 @@ if(HORIZON_BUILD_VISION_HOTFIX)
     target_include_directories(ocarina-include INTERFACE
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
     add_subdirectory(src/hotfix)
-    target_link_libraries(ocarina-include INTERFACE vision-hotfix)
+    target_link_libraries(ocarina-include INTERFACE horizon-hotfix)
+
+    if(TARGET HorizonExamples)
+        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-all)
+    endif()
 endif()

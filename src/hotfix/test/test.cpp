@@ -52,6 +52,6 @@ string Test::get_string() const {
 
 }// namespace vision::inline hotfix
 
-VS_REGISTER_CURRENT_PATH(1, "vision-hotfix-test.dll")
+VS_REGISTER_CURRENT_PATH(1, "horizon-hotfix-test.dll")
 
 VS_REGISTER_HOTFIX(vision, Test)

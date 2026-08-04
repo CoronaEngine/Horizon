@@ -1,5 +1,6 @@
 #include "device_manager.h"
 #include "execution_profile.h"
+#include "horizon_profiling.h"
 
 #include <algorithm>
 #include <atomic>
@@ -334,6 +335,7 @@ namespace Corona::Horizon
 
     void TrackedCommandBuffer::retire() noexcept
     {
+        HORIZON_PROFILE_SCOPE_N("cmdbuf::retire_keep_alive");
         keep_alive_.clear();
         debug_summary_.clear();
         recording_id_ = 0;
@@ -494,6 +496,7 @@ namespace Corona::Horizon
 
     std::shared_ptr<TrackedCommandBuffer> Queue::acquire(ExecutionCommitProfileSample* profile)
     {
+        HORIZON_PROFILE_SCOPE_N("queue::acquire");
         {
             std::lock_guard lock(mutex_);
             if (device_lost_)
@@ -544,6 +547,7 @@ namespace Corona::Horizon
                                   std::span<const SubmitSignal> signals,
                                   ExecutionCommitProfileSample* profile)
     {
+        HORIZON_PROFILE_SCOPE_N("Horizon::queue_submit");
         std::vector<VkSemaphoreSubmitInfo> wait_infos;
         wait_infos.reserve(waits.size());
         for (const SubmitWait& wait : waits)
@@ -934,6 +938,7 @@ namespace Corona::Horizon
 
     void Queue::retire_completed(ExecutionCommitProfileSample* profile)
     {
+        HORIZON_PROFILE_SCOPE_N("queue::retire_completed");
         const auto retire_start = std::chrono::steady_clock::now();
         std::deque<std::shared_ptr<TrackedCommandBuffer>> completed;
         {

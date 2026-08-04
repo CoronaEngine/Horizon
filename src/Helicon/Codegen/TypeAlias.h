@@ -176,6 +176,8 @@ namespace EmbeddedShader::TypeAlias
 
 	template<typename TexelType>
 	using Texture2D = Texture2DProxy<TexelType>;
+    template<typename TexelType>
+    using TextureCube = TextureCubeProxy<TexelType>;
 	using Sampler = SamplerProxy;
 	template<typename ElementType>
 	using Array = ArrayProxy<ElementType>;

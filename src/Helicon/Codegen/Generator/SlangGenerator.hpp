@@ -83,6 +83,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		template<typename T> requires std::is_aggregate_v<T>
 		static std::string getValueOutput(const T& value);
 
+		static std::string getParseOutput(const Ast::VecValue* node);
 		static std::string getParseOutput(const Ast::DefineLocalVariate* node);
 		static std::string getParseOutput(const Ast::DefineInputVariate* node);
 		static std::string getParseOutput(const Ast::Assign* node);
@@ -96,23 +97,25 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::DefineUniversalArray* node);
 		static std::string getParseOutput(const Ast::DefineUniformVariate* node);
 		static std::string getParseOutput(const Ast::UniformVariate* node);
-		static std::string getParseOutput(const Ast::UniversalTexture2D* node);
+		static std::string getParseOutput(const Ast::UniversalTexture* node);
 		static std::string getParseOutput(const Ast::UniversalArray* node);
 		static std::string getParseOutput(const Ast::DefineAggregateType* node);
-		static std::string getParseOutput(const Ast::DefineUniversalTexture2D* node);
+		static std::string getParseOutput(const Ast::DefineUniversalTexture* node);
 		static std::string getParseOutput(const Ast::UnaryOperator* node);
 		static std::string getParseOutput(const Ast::ArrayType* node);
-		static std::string getParseOutput(const Ast::Texture2DType* node);
+		static std::string getParseOutput(const Ast::TextureType* node);
 		static std::string getParseOutput(const Ast::CallFunc* node);
 		static std::string getParseOutput(const Ast::SamplerType* node);
 		static std::string getParseOutput(const Ast::FunctionDeclaration* node);
 		static std::string getParseOutput(const Ast::ElementValue* node);
+		static std::string getParseOutput(const Ast::PushConstantType* node);
 		static std::string getParseOutput(const Ast::StageType* node);
 
 	    static Ast::BranchInfo getBranchInfo( const std::vector<std::shared_ptr<Ast::Statement>>&body);
 	    static std::string getBranchImport(const std::vector<size_t>& refs);
 
 		static std::shared_ptr<Ast::Variate> getPositionOutput();
+		static std::shared_ptr<Ast::Variate> getIsFrontFaceOutput();
 		static std::shared_ptr<Ast::Variate> getDispatchThreadIDInput();
 	private:
 		static bool bindless();

@@ -63,7 +63,7 @@ void MSVCompiler::link(const vision::LinkOptions &options,
                        const Target &target,
                        const string &extension_objs,
                        const CmdProcess::callback_t &callback) noexcept {
-    static constexpr string_view cmd_template = "link {} /out:{} /implib:{} /pdb:{} /dll {} {}";
+    static constexpr string_view cmd_template = "link {} /out:{} /implib:{} /pdb:{} /dll {} {} {}";
 
     auto delete_def = [](string str) {
         std::regex def_regex(R"(/DEF:[^\s]+)");
@@ -77,6 +77,7 @@ void MSVCompiler::link(const vision::LinkOptions &options,
                                       target.lib_path().string(),
                                       target.pdb_path().string(),
                                       link_flag,
+                                      options.link_path,
                                       options.link_libraries);
     cmd_process_.write_input(link_cmd, callback);
 }

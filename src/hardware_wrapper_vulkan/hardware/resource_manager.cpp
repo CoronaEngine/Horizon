@@ -47,6 +47,9 @@ namespace Corona::Horizon
             if (has_flag(usage, BufferUsageFlags::Storage))
                 result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
+            if (has_flag(usage, BufferUsageFlags::Indirect))
+                result |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+
             return result;
         }
 
@@ -1032,7 +1035,7 @@ namespace Corona::Horizon
                                          descriptor_limit,
                                          features12.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE,
                                          "combined texture");
-        next_combined_texture_descriptor_ = 0;
+        combined_texture_descriptors_.reset_allocation();
     }
 
     void ResourceManager::create_storage_buffer_descriptors()
@@ -1084,7 +1087,7 @@ namespace Corona::Horizon
                                          descriptor_limit,
                                          features12.descriptorBindingStorageBufferUpdateAfterBind == VK_TRUE,
                                          "storage buffer");
-        next_storage_buffer_descriptor_ = 0;
+        storage_buffer_descriptors_.reset_allocation();
     }
 
     void ResourceManager::create_storage_image_descriptors()
@@ -1136,7 +1139,7 @@ namespace Corona::Horizon
                                          descriptor_limit,
                                          features12.descriptorBindingStorageImageUpdateAfterBind == VK_TRUE,
                                          "storage image");
-        next_storage_image_descriptor_ = 0;
+        storage_image_descriptors_.reset_allocation();
     }
 
     void ResourceManager::ensure_bindless_descriptors_unlocked()
@@ -1187,12 +1190,10 @@ namespace Corona::Horizon
         }
 
         default_sampler_ = VK_NULL_HANDLE;
+        // 整体重置会一并清空 next 游标与 free_list。
         combined_texture_descriptors_ = {};
         storage_buffer_descriptors_ = {};
         storage_image_descriptors_ = {};
-        next_combined_texture_descriptor_ = 0;
-        next_storage_buffer_descriptor_ = 0;
-        next_storage_image_descriptor_ = 0;
     }
 
     BufferWrap ResourceManager::create_buffer(const HardwareBufferDesc& desc)
@@ -1464,12 +1465,13 @@ namespace Corona::Horizon
 
         if (buffer.bindless_index < 0)
         {
-            if (next_storage_buffer_descriptor_ >= storage_buffer_descriptors_.capacity)
+            const uint32_t slot = storage_buffer_descriptors_.allocate();
+            if (slot == DescriptorArray::invalid_slot)
             {
                 throw std::runtime_error("Storage buffer descriptor array is full.");
             }
 
-            buffer.bindless_index = static_cast<std::int32_t>(next_storage_buffer_descriptor_++);
+            buffer.bindless_index = static_cast<std::int32_t>(slot);
         }
 
         const uint32_t descriptor_index = static_cast<uint32_t>(buffer.bindless_index);
@@ -1959,11 +1961,14 @@ namespace Corona::Horizon
         create_combined_texture_descriptors();
         create_storage_image_descriptors();
 
+        // dual-usage 图像需在两个数组占用同一 index，故不走各自的 free_list（否则两边
+        // 弹出的槽位可能不同），而用两个游标的最大值 bump 分配：该 index 必 >= 两数组
+        // 的 next，故不与任一数组已回收的低位槽位冲突。
         const bool has_shared_index = image.sampled_bindless_index >= 0 &&
                                       image.sampled_bindless_index == image.storage_bindless_index;
         uint32_t descriptor_index = has_shared_index
                                         ? static_cast<uint32_t>(image.sampled_bindless_index)
-                                        : std::max(next_combined_texture_descriptor_, next_storage_image_descriptor_);
+                                        : std::max(combined_texture_descriptors_.next, storage_image_descriptors_.next);
 
         if (descriptor_index >= combined_texture_descriptors_.capacity)
         {
@@ -1976,8 +1981,8 @@ namespace Corona::Horizon
 
         image.sampled_bindless_index = static_cast<std::int32_t>(descriptor_index);
         image.storage_bindless_index = static_cast<std::int32_t>(descriptor_index);
-        next_combined_texture_descriptor_ = std::max(next_combined_texture_descriptor_, descriptor_index + 1);
-        next_storage_image_descriptor_ = std::max(next_storage_image_descriptor_, descriptor_index + 1);
+        combined_texture_descriptors_.next = std::max(combined_texture_descriptors_.next, descriptor_index + 1);
+        storage_image_descriptors_.next = std::max(storage_image_descriptors_.next, descriptor_index + 1);
 
         VkDescriptorImageInfo sampled_info {};
         sampled_info.sampler = default_sampler_;
@@ -2034,12 +2039,13 @@ namespace Corona::Horizon
 
         if (image.sampled_bindless_index < 0)
         {
-            if (next_combined_texture_descriptor_ >= combined_texture_descriptors_.capacity)
+            const uint32_t slot = combined_texture_descriptors_.allocate();
+            if (slot == DescriptorArray::invalid_slot)
             {
                 throw std::runtime_error("Combined texture descriptor array is full.");
             }
 
-            image.sampled_bindless_index = static_cast<std::int32_t>(next_combined_texture_descriptor_++);
+            image.sampled_bindless_index = static_cast<std::int32_t>(slot);
         }
 
         const uint32_t descriptor_index = static_cast<uint32_t>(image.sampled_bindless_index);
@@ -2089,12 +2095,13 @@ namespace Corona::Horizon
 
         if (image.storage_bindless_index < 0)
         {
-            if (next_storage_image_descriptor_ >= storage_image_descriptors_.capacity)
+            const uint32_t slot = storage_image_descriptors_.allocate();
+            if (slot == DescriptorArray::invalid_slot)
             {
                 throw std::runtime_error("Storage image descriptor array is full.");
             }
 
-            image.storage_bindless_index = static_cast<std::int32_t>(next_storage_image_descriptor_++);
+            image.storage_bindless_index = static_cast<std::int32_t>(slot);
         }
 
         const uint32_t descriptor_index = static_cast<uint32_t>(image.storage_bindless_index);
@@ -2188,6 +2195,13 @@ namespace Corona::Horizon
     {
         std::lock_guard lock(mutex_);
 
+        // 归还 bindless 槽位供后续复用（P0：避免 create/destroy 单调耗尽数组）。
+        // 必须在 clear_handles() 之前，后者会把 bindless_index 重置为 -1。
+        if (buffer.bindless_index >= 0)
+        {
+            storage_buffer_descriptors_.release(static_cast<uint32_t>(buffer.bindless_index));
+        }
+
 #if defined(_WIN32) || defined(_WIN64)
         if (buffer.desc.exportable)
         {
@@ -2227,6 +2241,18 @@ namespace Corona::Horizon
     void ResourceManager::destroy_image(ImageWrap& image) noexcept
     {
         std::lock_guard lock(mutex_);
+
+        // 归还 bindless 槽位供后续复用（P0）。dual-usage 图像 sampled/storage index 相同，
+        // 但分属两个独立数组，各归各的 free_list（同一数组内不会重复归还）。
+        // 必须在 clear_handles() 之前，后者会把索引重置为 -1。
+        if (image.sampled_bindless_index >= 0)
+        {
+            combined_texture_descriptors_.release(static_cast<uint32_t>(image.sampled_bindless_index));
+        }
+        if (image.storage_bindless_index >= 0)
+        {
+            storage_image_descriptors_.release(static_cast<uint32_t>(image.storage_bindless_index));
+        }
 
 #if defined(_WIN32) || defined(_WIN64)
         if (image.desc.exportable)

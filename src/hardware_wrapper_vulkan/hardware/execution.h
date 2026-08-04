@@ -70,7 +70,6 @@ namespace Corona::Horizon
     class ExecutionCompiler
     {
     public:
-        [[nodiscard]] ExecutionPlan compile(const RecordedTask& task, ExecutionCommitProfileSample* profile = nullptr) const;
         [[nodiscard]] ExecutionPlan compile(RecordedTask&& task, ExecutionCommitProfileSample* profile = nullptr) const;
 
     private:

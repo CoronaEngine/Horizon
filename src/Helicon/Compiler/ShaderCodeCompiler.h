@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <source_location>
 #include <string>
 #include <unordered_map>
@@ -152,6 +153,7 @@ struct ShaderCodeModule
         bool compileDXBC = false;
         bool compileSpirV = true;
         bool enableBindless = true;
+        bool enableMatrixColumnMajor = false;
         std::vector<SlangModule*> slangModules;
         std::vector<Ast::BranchOutput> branches;
         std::string typeHeader;
@@ -160,6 +162,7 @@ struct ShaderCodeModule
     struct ShaderCodeCompiler
     {
     public:
+        using ConditionInfo = std::vector<bool>;
         // ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
         // ShaderCodeCompiler(const std::vector<uint32_t> &shaderCode, ShaderStage inputStage, ShaderLanguage language = ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
 
@@ -168,12 +171,17 @@ struct ShaderCodeModule
         ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
         ~ShaderCodeCompiler() = default;
 
-        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false);
+        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false, ConditionInfo conditionInfo = {});
         void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
+        CompilerOption getCompilerOption() const;
+        static std::string getCombinedKey(const ConditionInfo& conditionInfo);
+
+        ConditionInfo getCurrentConditionInfo() const;
+
     private:
-        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection) const;
-        void combine(bool bindless);
-        std::vector<SlangModule*> getCurrentBranchModules(bool bindless) const;
+        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const;
+        void combine(bool bindless, ConditionInfo conditionInfo);
+        std::vector<SlangModule*> getBranchModules(bool bindless, ConditionInfo conditionInfo) const;
         SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
         SlangModule* getCoreBranchModule(bool bindless) const;
         SlangModule* getTypeHeaderModule(bool bindless) const;

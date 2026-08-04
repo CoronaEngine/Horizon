@@ -43,6 +43,6 @@ VS_EXPORT_API void destroy(vision::hotfix::LLVMCompiler *obj) {
     ocarina::delete_with_allocator(obj);
 }
 
-VS_REGISTER_CURRENT_PATH(0, "vision-hotfix-compiler-llvm.dll")
+VS_REGISTER_CURRENT_PATH(0, "horizon-hotfix-compiler-llvm.dll")
 
 VS_REGISTER_HOTFIX(vision::hotfix, LLVMCompiler)

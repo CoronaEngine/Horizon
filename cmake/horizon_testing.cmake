@@ -2,7 +2,7 @@ function(horizon_add_test target)
     add_executable(${target} ${ARGN})
 
     if(MSVC)
-        target_compile_options(${target} PRIVATE /source-charset:utf-8 /execution-charset:utf-8)
+        target_compile_options(${target} PRIVATE /utf-8)
     endif()
 
     target_link_libraries(${target} PRIVATE Horizon)

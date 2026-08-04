@@ -1,0 +1,65 @@
+#version 450
+
+// 移植自 bgfx examples/18-ibl 的 vs_ibl_mesh.sc + vs_ibl_skybox.sc。
+// 单 shader 同时承担网格与天空盒两条路径（pc.misc.x 区分）。
+//
+// 拆分策略：
+//   - UBO  vsp：批次共享（proj_view、skyEnvMtx、envMtx、camPos、flags、
+//               rgbDiff、rgbSpec、lightDir、lightCol）288 bytes
+//   - PC   vpc：per-draw（model、params0、misc）96 bytes（VS 用 vpc，FS 用 fpc 避免歧义）
+// mvp 在 VS 内由 vsp.proj_view * vpc.model 现场计算，不再存储。
+
+// set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
+layout(set = 3, binding = 0) uniform IblShared {
+    mat4 proj_view;  // proj * view，由 C++ 每帧写入
+    mat4 skyEnvMtx;  // 天空盒路径：相机基向量 × 环境旋转
+    mat4 envMtx;     // 网格路径：cube 采样方向的环境旋转
+    vec4 camPos;     // xyz: 世界空间相机位置
+    vec4 flags;      // x: doDiffuse, y: doSpecular, z: doDiffuseIbl, w: doSpecularIbl
+    vec4 rgbDiff;
+    vec4 rgbSpec;
+    vec4 lightDir;
+    vec4 lightCol;
+} vsp;
+
+// vert/frag 共享同一 push constant 块，布局必须一致。
+// texCubeIndex/texCubeIrrIndex 为 bindless combined-texture 表（set 0）索引，仅 FS 使用。
+layout(push_constant) uniform IblPC {
+    mat4 model;    // 网格：per-draw model；天空盒：identity（不使用）
+    vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
+    vec4 misc;     // x: isSkybox, y: viewport 宽高比(w/h), z: metalOrSpec, w: unused
+    uint texCubeIndex;
+    uint texCubeIrrIndex;
+} vpc;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+
+layout(location = 0) out vec3 v_view;
+layout(location = 1) out vec3 v_normal;
+layout(location = 2) out vec3 v_dir;
+
+void main()
+{
+    if (vpc.misc.x > 0.5)
+    {
+        // 天空盒：全屏三角形顶点已是 NDC 坐标，钉在远平面 (z=1)。
+        gl_Position = vec4(inPosition.xy, 1.0, 1.0);
+
+        float fovHeight = tan(radians(45.0) * 0.5);
+        float aspect    = vpc.misc.y;
+        vec2 tex = inPosition.xy * vec2(fovHeight * aspect, -fovHeight);
+        v_dir = (vsp.skyEnvMtx * vec4(tex, 1.0, 0.0)).xyz;
+
+        v_view   = vec3(0.0);
+        v_normal = vec3(0.0, 0.0, 1.0);
+    }
+    else
+    {
+        mat4 mvp = vsp.proj_view * vpc.model;
+        gl_Position = mvp * vec4(inPosition, 1.0);
+        v_view   = vsp.camPos.xyz - (vpc.model * vec4(inPosition, 1.0)).xyz;
+        v_normal = (vpc.model * vec4(inNormal, 0.0)).xyz;
+        v_dir    = vec3(0.0);
+    }
+}
