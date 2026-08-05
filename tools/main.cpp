@@ -4,6 +4,7 @@
 #include <sstream>
 #include <fstream>
 #include <algorithm>
+#include <regex>
 #include <set>
 #include <Compiler/ShaderUtils.h>
 #include <Compiler/ShaderTypeMapping.h>
@@ -94,6 +95,12 @@ std::string sanitizeToIdentifier(const std::filesystem::path& p)
 	if (!s.empty() && std::isdigit(static_cast<unsigned char>(s[0])))
 		s = "_" + s;
 	return s;
+}
+
+bool hasShaderEntryPoint(const std::string& code)
+{
+    static const std::regex mainPattern(R"(\bmain\s*\()");
+    return std::regex_search(code, mainPattern) || code.find("[shader") != std::string::npos;
 }
 
 std::string extractMemberName(const std::string& qualifiedKey)
@@ -635,6 +642,8 @@ int main(int argc, char** argv)
 	std::string code = (std::stringstream{} << file.rdbuf()).str();
 	file.close();
 
+    bool stageDetected = stageExplicit;
+
 	// 如果未显式指定 stage，则根据文件名后缀或内容推断
 	if (!stageExplicit)
 	{
@@ -643,27 +652,34 @@ int main(int argc, char** argv)
 		// 检查常见命名: xxx.vert, xxx.frag, xxx.comp, xxx.vert.glsl 等
 		if (extension == ".frag" || extension == ".fs" || stem.ends_with(".frag") ||
 		    stem.find("frag") != std::string::npos)
-			inputStage = ShaderStage::FragmentShader;
+			inputStage = ShaderStage::FragmentShader, stageDetected = true;
 		else if (extension == ".comp" || extension == ".cs" || stem.ends_with(".comp") ||
 		         stem.find("compute") != std::string::npos)
-			inputStage = ShaderStage::ComputeShader;
+			inputStage = ShaderStage::ComputeShader, stageDetected = true;
 		else if (extension == ".vert" || extension == ".vs" || stem.ends_with(".vert"))
-			inputStage = ShaderStage::VertexShader;
+			inputStage = ShaderStage::VertexShader, stageDetected = true;
 		else
 		{
 			// 扫描代码中的 gl_FragCoord / gl_Position / gl_GlobalInvocationID 等内置变量
 			if (code.find("gl_FragCoord") != std::string::npos ||
 			    code.find("gl_SampleID") != std::string::npos ||
 			    (code.find("out vec4") != std::string::npos && code.find("gl_Position") == std::string::npos))
-				inputStage = ShaderStage::FragmentShader;
+				inputStage = ShaderStage::FragmentShader, stageDetected = true;
 			else if (code.find("gl_GlobalInvocationID") != std::string::npos ||
 			         code.find("gl_WorkGroupID") != std::string::npos ||
 			         code.find("gl_LocalInvocationID") != std::string::npos)
-				inputStage = ShaderStage::ComputeShader;
+				inputStage = ShaderStage::ComputeShader, stageDetected = true;
 			// else default remains VertexShader
 		}
-		std::cout << "INFO:Auto-detected shader stage: " << static_cast<int>(inputStage) << "\n";
+		if (stageDetected)
+			std::cout << "INFO:Auto-detected shader stage: " << static_cast<int>(inputStage) << "\n";
 	}
+
+    const bool moduleOnly = !stageDetected && !hasShaderEntryPoint(code);
+    if (moduleOnly)
+    {
+        std::cout << "INFO:No shader entry point detected; generating Slang module wrapper only.\n";
+    }
 
     SlangModuleCompileArgs args;
     args.moduleName = path.stem().string();
@@ -672,10 +688,14 @@ int main(int argc, char** argv)
     args.sourceLanguage = inputLanguage;
     auto slangModule = ShaderLanguageConverter::slangModuleCompiler(args);
 
-    SlangModuleReflectShaderResourceArgs shaderResourceArgs;
-    shaderResourceArgs.module = &slangModule;
-    shaderResourceArgs.stage = inputStage;
-    ShaderCodeModule::ShaderResources resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
+    ShaderCodeModule::ShaderResources resources;
+    if (!moduleOnly)
+    {
+        SlangModuleReflectShaderResourceArgs shaderResourceArgs;
+        shaderResourceArgs.module = &slangModule;
+        shaderResourceArgs.stage = inputStage;
+        resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
+    }
 
     //提取成员名，删去路径前缀
     for (auto& info : resources.bindInfoPool)
@@ -687,7 +707,10 @@ int main(int argc, char** argv)
             info.variateName = "RETURN";
     }
 
-	std::cout << "SUCCESS:Obtain reflection information from SPIR-V IR through SPIRV-CROSS.\n";
+    if (moduleOnly)
+        std::cout << "SUCCESS:Generated Slang module reflection.\n";
+    else
+	    std::cout << "SUCCESS:Obtained shader reflection information through Slang.\n";
 
 	std::cout << "INFO:Generate the final C++ shader...\n";
 	std::stringstream out;

@@ -80,15 +80,14 @@ endif()
 
 target_include_directories(HorizonExamples PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${glfw_SOURCE_DIR}/include"
-    "${stb_SOURCE_DIR}"
-    "${tinyobjloader_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/src"
 )
 
 target_link_libraries(HorizonExamples PRIVATE
-    glm
-    glfw
+    horizon::glm
+    horizon::glfw
+    horizon::stb
+    horizon::tinyobjloader
     horizon_imgui
     Horizon)
 

@@ -1,6 +1,3 @@
-
-include(FetchContent)
-
 add_library(ocarina-ext SHARED empty.cpp)
 set_target_properties(ocarina-ext PROPERTIES
         PUBLIC_HEADER "${HEADER_FILES}"
@@ -9,8 +6,8 @@ set_target_properties(ocarina-ext PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         FOLDER "ocarina")
 
-# ---- xxhash / fmt / spdlog 由根 Horizon CMakeLists.txt 通过 FetchContent 提供，
-#      并由根级直接 target_link_libraries 到 ocarina-ext，本文件不再处理。
+# fmt, spdlog, and xxHash are provided by the root Conan dependency graph and
+# linked to ocarina-ext from the Horizon root.
 
 add_subdirectory(EASTL)
 target_include_directories(EASTL PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/EASTL/include)

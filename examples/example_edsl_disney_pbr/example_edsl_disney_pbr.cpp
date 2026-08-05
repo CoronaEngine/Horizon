@@ -429,7 +429,7 @@ struct DisneyEdslVaryings
 {
     Float3 v_view;
     Float3 v_normal;
-    Float3 v_dir; 
+    Float3 v_dir;
 };
 
 struct DisneyEdslSharedProxy
@@ -603,7 +603,7 @@ void run_example_edsl_disney_pbr()
     bool bg = false;
     // x: doDiffuse, y: doSpecular, z: doDiffuseIbl, w: doSpecularIbl
     auto edsl_fragment = [&](Aggregate<DisneyEdslVaryings> in) {
-        Float4 out_color; 
+        Float4 out_color;
 
         $IF(isSkyBox)
         {
@@ -661,10 +661,10 @@ void run_example_edsl_disney_pbr()
             Float3 Csheen = mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, sheenTint);
 
             Float NdotV = clamp(dot(N, V), Float(0.0), Float(1.0));
-            Float NdotVraw = dot(N, V); 
+            Float NdotVraw = dot(N, V);
             Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
 
-            
+
             Float3 direct;
             direct = Float3(Float(0.0), Float(0.0), Float(0.0));
             $IF(input.settings.do_diffuse || input.settings.do_specular)
