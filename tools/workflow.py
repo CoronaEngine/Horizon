@@ -9,6 +9,15 @@ from typing import Iterable, Mapping, Sequence
 
 CONFIGURATIONS = ("Debug", "Release", "RelWithDebInfo", "MinSizeRel")
 DEFAULT_CONFIGURATION = "RelWithDebInfo"
+TARGET_FAMILIES = (
+    "core",
+    "tools",
+    "examples",
+    "ocarina",
+    "ocarina-tests",
+    "vision-hotfix",
+)
+DEFAULT_TARGET_FAMILY = "examples"
 BOOTSTRAP_ENV = "CORONA_DEV_BOOTSTRAP_ACTIVE"
 
 
@@ -25,12 +34,30 @@ def configuration_slug(configuration: str) -> str:
     return configuration.lower()
 
 
-def build_dir(repo_root: Path, configuration: str) -> Path:
-    return repo_root / "build" / "conan" / configuration_slug(configuration)
+def target_family_slug(target_family: str) -> str:
+    if target_family not in TARGET_FAMILIES:
+        raise ValueError(f"Unsupported target family: {target_family}")
+    return target_family
 
 
-def generators_dir(repo_root: Path, configuration: str) -> Path:
-    return build_dir(repo_root, configuration) / "generators"
+def preset_name(target_family: str, configuration: str) -> str:
+    return f"{target_family_slug(target_family)}-{configuration_slug(configuration)}"
+
+
+def build_dir(
+    repo_root: Path,
+    configuration: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> Path:
+    return repo_root / "build" / "conan" / target_family_slug(target_family) / configuration_slug(configuration)
+
+
+def generators_dir(
+    repo_root: Path,
+    configuration: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> Path:
+    return build_dir(repo_root, configuration, target_family) / "generators"
 
 
 def profile_path(repo_root: Path, configuration: str) -> Path:
@@ -81,12 +108,14 @@ def conan_install(
     repo_root: Path,
     configuration: str,
     *,
+    target_family: str,
     options: Iterable[str],
     recipes: Iterable[str],
     recipe_toggle_env: str,
     update: bool = False,
 ) -> None:
     export_local_recipes(repo_root, recipes, toggle_env=recipe_toggle_env)
+    target_family = target_family_slug(target_family)
     profile = profile_path(repo_root, configuration)
     if not profile.is_file():
         raise RuntimeError(f"Conan profile was not found: {profile}")
@@ -99,6 +128,8 @@ def conan_install(
         profile,
         "-pr:b",
         profile,
+        "-c:h",
+        f"user.horizon:target_family={target_family}",
     ]
     for option in options:
         command.extend(("-o", option))
@@ -106,12 +137,16 @@ def conan_install(
     if update:
         command.append("--update")
     run_command(command, cwd=repo_root)
-    write_cmake_build_environment(repo_root, configuration)
+    write_cmake_build_environment(repo_root, configuration, target_family)
 
 
-def load_conan_build_environment(repo_root: Path, configuration: str) -> dict[str, str]:
+def load_conan_build_environment(
+    repo_root: Path,
+    configuration: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> dict[str, str]:
     environment = dict(os.environ)
-    batch_file = generators_dir(repo_root, configuration) / "conanbuild.bat"
+    batch_file = generators_dir(repo_root, configuration, target_family) / "conanbuild.bat"
     if not batch_file.is_file():
         raise RuntimeError(f"Conan build environment was not found: {batch_file}")
 
@@ -158,9 +193,13 @@ def _cmake_bracket(value: str) -> str:
     return f"[{equals}[{value}]{equals}]"
 
 
-def write_cmake_build_environment(repo_root: Path, configuration: str) -> Path:
-    environment = load_conan_build_environment(repo_root, configuration)
-    output = generators_dir(repo_root, configuration) / "dev_build_environment.cmake"
+def write_cmake_build_environment(
+    repo_root: Path,
+    configuration: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> Path:
+    environment = load_conan_build_environment(repo_root, configuration, target_family)
+    output = generators_dir(repo_root, configuration, target_family) / "dev_build_environment.cmake"
     names = (
         "PATH", "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir",
         "VSINSTALLDIR", "WindowsSdkDir", "WindowsSDKVersion", "UniversalCRTSdkDir", "UCRTVersion",
@@ -174,10 +213,14 @@ def write_cmake_build_environment(repo_root: Path, configuration: str) -> Path:
     return output
 
 
-def cmake_configure(repo_root: Path, configuration: str) -> None:
-    environment = load_conan_build_environment(repo_root, configuration)
+def cmake_configure(
+    repo_root: Path,
+    configuration: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> None:
+    environment = load_conan_build_environment(repo_root, configuration, target_family)
     environment[BOOTSTRAP_ENV] = "1"
-    run_command(("cmake", "--preset", configuration_slug(configuration)), cwd=repo_root, env=environment)
+    run_command(("cmake", "--preset", preset_name(target_family, configuration)), cwd=repo_root, env=environment)
 
 
 def _cache_value(cache_file: Path, name: str) -> str | None:
@@ -188,8 +231,12 @@ def _cache_value(cache_file: Path, name: str) -> str | None:
     return None
 
 
-def assert_cache_matches_repo(repo_root: Path, configuration: str) -> None:
-    expected_build = build_dir(repo_root, configuration).resolve()
+def assert_cache_matches_repo(
+    repo_root: Path,
+    configuration: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> None:
+    expected_build = build_dir(repo_root, configuration, target_family).resolve()
     cache_file = expected_build / "CMakeCache.txt"
     if not cache_file.is_file():
         raise RuntimeError(
@@ -209,11 +256,16 @@ def assert_cache_matches_repo(repo_root: Path, configuration: str) -> None:
         )
 
 
-def cmake_build(repo_root: Path, configuration: str, target: str) -> None:
-    assert_cache_matches_repo(repo_root, configuration)
-    environment = load_conan_build_environment(repo_root, configuration)
+def cmake_build(
+    repo_root: Path,
+    configuration: str,
+    target: str,
+    target_family: str = DEFAULT_TARGET_FAMILY,
+) -> None:
+    assert_cache_matches_repo(repo_root, configuration, target_family)
+    environment = load_conan_build_environment(repo_root, configuration, target_family)
     run_command(
-        ("cmake", "--build", "--preset", configuration_slug(configuration), "--target", target),
+        ("cmake", "--build", "--preset", preset_name(target_family, configuration), "--target", target),
         cwd=repo_root,
         env=environment,
     )

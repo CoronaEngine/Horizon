@@ -12,6 +12,8 @@
 #include "core/util/util.h"
 #include "dsl/dsl.h"
 
+#include <io.h>
+
 namespace ocarina {
 
 namespace {

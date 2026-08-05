@@ -9,6 +9,14 @@ class HorizonConan(ConanFile):
     name = "horizon"
     version = "0.5.0"
     settings = "os", "arch", "compiler", "build_type"
+    _target_families = (
+        "core",
+        "tools",
+        "examples",
+        "ocarina",
+        "ocarina-tests",
+        "vision-hotfix",
+    )
 
     options = {
         "shared": [True, False],
@@ -51,7 +59,13 @@ class HorizonConan(ConanFile):
 
     def layout(self):
         configuration = str(self.settings.build_type).lower()
-        cmake_layout(self, build_folder=f"build/conan/{configuration}")
+        target_family = self.conf.get("user.horizon:target_family", default="examples")
+        if target_family not in self._target_families:
+            raise ConanInvalidConfiguration(
+                f"Unsupported user.horizon:target_family='{target_family}'. "
+                f"Expected one of: {', '.join(self._target_families)}"
+            )
+        cmake_layout(self, build_folder=f"build/conan/{target_family}/{configuration}")
 
     def requirements(self):
         self.requires("ktm/0.2.14", transitive_headers=True)
@@ -91,6 +105,7 @@ class HorizonConan(ConanFile):
     def generate(self):
         CMakeDeps(self).generate()
         toolchain = CMakeToolchain(self)
+        toolchain.user_presets_path = None
         variables = toolchain.variables
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
         variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina and self.options.with_cuda)
