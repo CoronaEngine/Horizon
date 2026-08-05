@@ -85,6 +85,23 @@ uv run --frozen python tools/dev.py build-fast all --configuration Debug --targe
 
 把 `examples` 换成 `core`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
 
+### 4. 新增 target 和依赖
+
+先确定新 target 属于哪个现有目标族。修改后必须重新执行 Configure，CMake Tools 才会显示新 target。
+
+- **只新增 target，或只使用项目内/已存在的依赖**：只修改对应的 `CMakeLists.txt`，添加 target 并链接已有库；不需要修改 Conan。
+- **新增第三方依赖**：同时修改两处。先在 `conanfile.py` 用 `self.requires(...)` 声明依赖，并让它只在需要的目标族启用；再在 CMake 中 `find_package(...)` 并用 `target_link_libraries(...)` 链接。不要在 CMake 中用 `FetchContent` 下载第三方库。
+- **希望用脚本直接构建新 target**：若它不符合现有名称规则，还要在 `tools/dev.py` 的 target 到目标族映射中登记；否则脚本可能选择错误的 preset。
+- **新增一个完整的目标族**：除 CMake 和 Conan 外，还要新增 CMake preset、Conan 选项、脚本的目标族选项和 target 映射，确保它使用独立的构建目录。
+
+例如，新增一个不引入第三方库的 Ocarina 测试，只需在 `modules/ocarina/tests/CMakeLists.txt` 增加：
+
+```cmake
+ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
+```
+
+重新配置 `ocarina-tests-debug` 后，`test-core-my-check` 会出现在 target 列表中；不需要修改 Conan。
+
 ### 常见问题
 
 - **VS Code 中找不到标准头文件**：确认 `cmake.useVsDeveloperEnvironment` 已手动设置为 `always`，然后重新打开 VS Code 并重新 Configure。
