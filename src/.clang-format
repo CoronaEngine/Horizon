@@ -1,0 +1,90 @@
+Corona / Vision C++ Engine Style
+
+Based on LLVM, customized for rendering engine code.
+
+Naming convention:
+
+TypeName
+
+function_name()
+
+variable_name
+
+member_name_
+
+kConstantName
+
+MACRO_NAME
+
+namespace_name
+
+EnumType::EnumValue
+
+BasedOnStyle: LLVM
+
+AccessModifierOffset: -4 AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: None AlignOperands: Align
+
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+AllowAllArgumentsOnNextLine: true
+AllowAllConstructorInitializersOnNextLine: true
+AllowAllParametersOnNextLine: true
+
+Avoid overly compressed code.
+
+AllowShortBlocksOnASingleLine: Never AllowShortCaseLabelsOnASingleLine:
+false AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Empty AllowShortLoopsOnASingleLine:
+false AllowShortEnumsOnASingleLine: false
+
+AlwaysBreakTemplateDeclarations: MultiLine
+
+Allman brace style.
+
+BreakBeforeBraces: Allman
+
+Cpp11BracedListStyle: true
+
+BraceWrapping: AfterCaseLabel: false AfterClass: true
+AfterControlStatement: Always AfterEnum: true AfterFunction: true
+AfterNamespace: true AfterStruct: true AfterUnion: true BeforeCatch:
+true BeforeElse: true BeforeLambdaBody: true IndentBraces: false
+SplitEmptyFunction: false SplitEmptyRecord: false SplitEmptyNamespace:
+false
+
+BreakBeforeBinaryOperators: None BreakBeforeTernaryOperators: true
+
+BreakConstructorInitializersBeforeComma: false
+
+ColumnLimit: 120
+
+Do not indent namespace content.
+
+NamespaceIndentation: None CompactNamespaces: false
+
+ContinuationIndentWidth: 4 IndentCaseLabels: true IndentPPDirectives:
+None IndentWidth: 4 TabWidth: 4 UseTab: Never
+
+KeepEmptyLinesAtTheStartOfBlocks: false MaxEmptyLinesToKeep: 1
+
+Type *name / Type &name
+
+PointerAlignment: Right
+
+ReflowComments: true
+
+SpaceAfterCStyleCast: false SpaceAfterLogicalNot: false
+SpaceBeforeAssignmentOperators: true SpaceBeforeCtorInitializerColon:
+true SpaceBeforeInheritanceColon: true SpaceBeforeParens:
+ControlStatements SpaceBeforeRangeBasedForLoopColon: true
+
+SpacesBeforeTrailingComments: 2 SpacesInAngles: false
+SpacesInParentheses: false SpacesInSquareBrackets: false
+
+SortIncludes: true SortUsingDeclarations: true
+
+IndentExternBlock: NoIndent IndentRequires: false
+SpacesInConditionalStatement: false
+
+InsertNewlineAtEOF: true
