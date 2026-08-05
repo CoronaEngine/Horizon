@@ -16,6 +16,11 @@ add_subdirectory(Helicon)
 
 add_library(Horizon STATIC ${SOURCE_FILES} ${PUBLIC_HEADERS})
 
+add_subdirectory(core)
+add_subdirectory(math)
+add_subdirectory(ast)
+add_subdirectory(dsl)
+
 target_include_directories(Horizon
     PUBLIC
     "${PROJECT_SOURCE_DIR}/include"
@@ -38,6 +43,10 @@ target_compile_definitions(Horizon
 target_link_libraries(volk PUBLIC Vulkan-Headers)
 
 target_link_libraries(Horizon PUBLIC
+    horizon-core
+    horizon-math
+    horizon-ast
+    horizon-dsl
     Helicon
     corona::kernel
     volk
