@@ -53,6 +53,9 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 _horizon_alias_target(horizon::vma GPUOpen::VulkanMemoryAllocator vulkan-memory-allocator::vulkan-memory-allocator VulkanMemoryAllocator)
 _horizon_require_target(horizon::vma "Vulkan Memory Allocator is required by the Vulkan backend")
 
+find_package(quill CONFIG REQUIRED)
+_horizon_require_target(quill::quill "Quill is required by Horizon kernel logging")
+
 if(HORIZON_BUILD_OCARINA AND DEFINED ENV{CUDA_PATH})
     find_package(fmt CONFIG REQUIRED)
     find_package(spdlog CONFIG REQUIRED)

@@ -8,9 +8,21 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
+
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.h"
 )
 
-set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/horizon.h")
+set(PUBLIC_HEADERS
+    "${PROJECT_SOURCE_DIR}/include/horizon.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/callback_sink.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/i_logger.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/utils/stack_trace.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/utils/storage.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/pal/cfw_platform.h"
+)
 
 add_subdirectory(Helicon)
 
@@ -36,7 +48,7 @@ target_compile_definitions(Horizon
 
 target_link_libraries(Horizon PUBLIC
     Helicon
-    corona::kernel
+    quill::quill
     horizon::volk
     horizon::vulkan_headers
     horizon::vma

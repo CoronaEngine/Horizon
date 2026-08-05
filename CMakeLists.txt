@@ -51,7 +51,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_tracy.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_corona.cmake)
 
 # ======================== Shader 自动编译模块 ========================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
