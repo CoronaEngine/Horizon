@@ -6,21 +6,37 @@
 
 ### 1. 准备工具
 
-安装并确认以下工具可以在终端中运行：
+本项目目前只支持 **Windows x64**。推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
 
-- Git：用于获取代码。
-- Python 3.11 或更高版本，以及 [uv](https://docs.astral.sh/uv/)：管理本项目的 Conan 环境。
-- CMake 和 Ninja：CMake 负责生成构建文件，Ninja 负责实际编译。
-- Visual Studio：安装“使用 C++ 的桌面开发”和 Windows SDK。项目会自动识别本机已安装的 VS/MSVC，不限定某个 VS 年份。
+- Git：用于克隆和更新代码。
+- [uv](https://docs.astral.sh/uv/)：管理本项目的 Python、虚拟环境和 Conan。**不需要单独安装 Python 或 Conan。**
+- CMake **4.0 或更高版本**和 Ninja：所有 preset 使用 Ninja；两者都必须能在终端中运行。
+- Visual Studio 或 Visual Studio Build Tools：安装“使用 C++ 的桌面开发”、MSVC x64/x86 生成工具和 Windows SDK。项目会自动识别本机已安装的 VS/MSVC，不限定某个 VS 年份。
 - CUDA Toolkit：仅构建 Ocarina、Ocarina 测试或 Vision Hotfix 时需要；安装后应存在 `CUDA_PATH` 环境变量。
+- VS Code 和 **CMake Tools** 扩展：仅在使用 VS Code 构建时需要。
 
-克隆项目后，先执行一次：
+先在 PowerShell 运行以下命令。它们都能显示版本号，就说明基础工具已准备好：
+
+```powershell
+git --version
+uv --version
+cmake --version
+ninja --version
+```
+
+如果提示“找不到命令”，请检查对应工具是否已安装并加入 `PATH`，然后重新打开终端。克隆项目后，进入仓库根目录并执行一次：
 
 ```powershell
 uv sync --frozen
 ```
 
-第一次配置会下载或编译 Conan 依赖，耗时较长是正常现象。
+若本机没有符合项目 `>=3.11` 要求的 Python，uv 会自动下载；只有离线环境，或手动禁用了 uv 的自动下载时，才先执行：
+
+```powershell
+uv python install 3.11
+```
+
+第一次同步和配置会下载或编译 Conan 依赖，耗时较长是正常现象。
 
 ### 2. VS Code / CMake Tools 构建
 
