@@ -8,9 +8,21 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
+
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.h"
 )
 
-set(PUBLIC_HEADERS "${PROJECT_SOURCE_DIR}/include/horizon.h")
+set(PUBLIC_HEADERS
+    "${PROJECT_SOURCE_DIR}/include/horizon.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/callback_sink.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/i_logger.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/utils/stack_trace.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/kernel/utils/storage.h"
+    "${PROJECT_SOURCE_DIR}/include/corona/pal/cfw_platform.h"
+)
 
 add_subdirectory(Helicon)
 
@@ -39,19 +51,16 @@ target_compile_definitions(Horizon
     HORIZON_ENABLE_VULKAN_VALIDATION=${HORIZON_VALIDATION_DEFINE}
 )
 
-# 链接库依赖
-target_link_libraries(volk PUBLIC Vulkan-Headers)
-
 target_link_libraries(Horizon PUBLIC
     horizon-core
     horizon-math
     horizon-ast
     horizon-dsl
     Helicon
-    corona::kernel
-    volk
-    Vulkan-Headers
-    VulkanMemoryAllocator
+    quill::quill
+    horizon::volk
+    horizon::vulkan_headers
+    horizon::vma
 )
 
 # Tracy 采集客户端；PUBLIC 传递给 examples 等下游目标，

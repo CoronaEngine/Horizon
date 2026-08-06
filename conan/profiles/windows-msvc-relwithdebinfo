@@ -1,0 +1,8 @@
+include(windows-msvc-base)
+
+[settings]
+compiler.runtime_type=Release
+build_type=RelWithDebInfo
+
+[options]
+*:shared=False

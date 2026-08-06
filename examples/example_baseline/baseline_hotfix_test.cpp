@@ -5,7 +5,7 @@
 namespace horizon::example_baseline {
 
 
-    
+
 void BaselineHotfixTest::restore(vision::RuntimeObject* oldObject) noexcept
 {
     const auto* oldTest = dynamic_cast<const BaselineHotfixTest*>(oldObject);

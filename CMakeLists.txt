@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 4.0)
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_dev_bootstrap.cmake)
+    horizon_dev_bootstrap()
+endif()
+
 project(
     Horizon
     VERSION 0.5.0
@@ -11,14 +16,10 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(HORIZON_BUILD_TOOLS "Build Horizon tool executables" OFF)
 option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
 option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" OFF)
-#option(HORIZON_BUILD_EXAMPLES "Build Horizon examples" OFF)
-#option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" OFF)
 option(HORIZON_BUILD_BENCHMARKS "Build Horizon performance benchmarks" OFF)
 option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module when CUDA is available" OFF)
 option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
 option(HORIZON_BUILD_VISION_HOTFIX "Build Vision hotfix support targets" OFF)
-option(HORIZON_BUILD_DEPENDENCY_TOOLS "Build third-party command line tool executables" OFF)
-option(HORIZON_ENABLE_DEPENDENCY_INSTALL "Enable third-party dependency install rules" OFF)
 option(HORIZON_ENABLE_DEBUG_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Debug builds" OFF)
 option(HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in RelWithDebInfo builds" OFF)
 option(HORIZON_ENABLE_RELEASE_VALIDATION "Enable Horizon hardware checks and Vulkan validation layers in Release and MinSizeRel builds" OFF)
@@ -46,13 +47,10 @@ add_compile_definitions(
     $<$<CONFIG:MinSizeRel>:CABBAGE_ENGINE_RELEASE>
 )
 
-include(FetchContent)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonFetchContent.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonSlang.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCoreDependencies.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonTracy.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonRuntimeDeps.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonCorona.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_tracy.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
 
 # ======================== Shader 自动编译模块 ========================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
@@ -65,17 +63,17 @@ endif()
 
 if(HORIZON_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
     enable_testing()
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonTesting.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_testing.cmake)
     add_subdirectory(tests)
 endif()
 
 if(HORIZON_BUILD_BENCHMARKS)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonBenchmarking.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_benchmarking.cmake)
     add_subdirectory(benchmarks)
 endif()
 
 if(HORIZON_BUILD_EXAMPLES)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonExampleDependencies.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_example_dependencies.cmake)
     add_subdirectory(examples)
 endif()
 
@@ -94,7 +92,7 @@ else()
     message(WARNING "Python not found. Please install Python or set the Python_ROOT_DIR to proceed.")
 endif()
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HorizonOcarina.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_ocarina.cmake)
 
 if(HORIZON_BUILD_VISION_HOTFIX)
     if(NOT TARGET ocarina OR NOT TARGET ocarina-include)
