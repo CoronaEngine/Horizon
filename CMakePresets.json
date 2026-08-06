@@ -1,47 +1,300 @@
 {
   "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
   "configurePresets": [
     {
-      "name": "relwithdebinfo",
-      "displayName": "RelWithDebInfo (default)",
+      "name": "core-debug",
+      "displayName": "Core - Debug",
       "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/relwithdebinfo",
+      "binaryDir": "${sourceDir}/build/conan/core/debug",
       "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo"
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "core"
+      }
+    },
+    {
+      "name": "core-relwithdebinfo",
+      "displayName": "Core - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/core/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "core"
+      }
+    },
+    {
+      "name": "core-release",
+      "displayName": "Core - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/core/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "core"
+      }
+    },
+    {
+      "name": "core-minsizerel",
+      "displayName": "Core - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/core/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "core"
+      }
+    },
+    {
+      "name": "tools-debug",
+      "displayName": "Tools - Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/tools/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "tools"
+      }
+    },
+    {
+      "name": "tools-relwithdebinfo",
+      "displayName": "Tools - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/tools/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "tools"
+      }
+    },
+    {
+      "name": "tools-release",
+      "displayName": "Tools - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/tools/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "tools"
+      }
+    },
+    {
+      "name": "tools-minsizerel",
+      "displayName": "Tools - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/tools/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "tools"
+      }
+    },
+    {
+      "name": "examples-debug",
+      "displayName": "Examples - Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/examples/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "examples"
+      }
+    },
+    {
+      "name": "examples-relwithdebinfo",
+      "displayName": "Examples - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/examples/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "examples"
+      }
+    },
+    {
+      "name": "examples-release",
+      "displayName": "Examples - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/examples/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "examples"
+      }
+    },
+    {
+      "name": "examples-minsizerel",
+      "displayName": "Examples - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/examples/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "examples"
+      }
+    },
+    {
+      "name": "ocarina-debug",
+      "displayName": "Ocarina - Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina"
+      }
+    },
+    {
+      "name": "ocarina-relwithdebinfo",
+      "displayName": "Ocarina - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina"
+      }
+    },
+    {
+      "name": "ocarina-release",
+      "displayName": "Ocarina - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina"
+      }
+    },
+    {
+      "name": "ocarina-minsizerel",
+      "displayName": "Ocarina - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina"
+      }
+    },
+    {
+      "name": "ocarina-tests-debug",
+      "displayName": "Ocarina Tests - Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina-tests/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina-tests"
+      }
+    },
+    {
+      "name": "ocarina-tests-relwithdebinfo",
+      "displayName": "Ocarina Tests - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina-tests/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina-tests"
+      }
+    },
+    {
+      "name": "ocarina-tests-release",
+      "displayName": "Ocarina Tests - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina-tests/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina-tests"
+      }
+    },
+    {
+      "name": "ocarina-tests-minsizerel",
+      "displayName": "Ocarina Tests - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/ocarina-tests/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "ocarina-tests"
+      }
+    },
+    {
+      "name": "vision-hotfix-debug",
+      "displayName": "Vision Hotfix - Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
+      }
+    },
+    {
+      "name": "vision-hotfix-relwithdebinfo",
+      "displayName": "Vision Hotfix - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
+      }
+    },
+    {
+      "name": "vision-hotfix-release",
+      "displayName": "Vision Hotfix - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
+      }
+    },
+    {
+      "name": "vision-hotfix-minsizerel",
+      "displayName": "Vision Hotfix - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
       }
     },
     {
       "name": "debug",
-      "displayName": "Debug",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/debug",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "Debug"
-      }
+      "displayName": "Examples - Debug (legacy default)",
+      "inherits": "examples-debug"
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "Examples - RelWithDebInfo (legacy default)",
+      "inherits": "examples-relwithdebinfo"
     },
     {
       "name": "release",
-      "displayName": "Release",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/release",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "Release"
-      }
+      "displayName": "Examples - Release (legacy default)",
+      "inherits": "examples-release"
     },
     {
       "name": "minsizerel",
-      "displayName": "MinSizeRel",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/minsizerel",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "MinSizeRel"
-      }
+      "displayName": "Examples - MinSizeRel (legacy default)",
+      "inherits": "examples-minsizerel"
     }
   ],
   "buildPresets": [
-    { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo", "configuration": "RelWithDebInfo" },
-    { "name": "debug", "configurePreset": "debug", "configuration": "Debug" },
-    { "name": "release", "configurePreset": "release", "configuration": "Release" },
-    { "name": "minsizerel", "configurePreset": "minsizerel", "configuration": "MinSizeRel" }
+    { "name": "core-debug", "configurePreset": "core-debug", "configuration": "Debug" },
+    { "name": "core-relwithdebinfo", "configurePreset": "core-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "core-release", "configurePreset": "core-release", "configuration": "Release" },
+    { "name": "core-minsizerel", "configurePreset": "core-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "tools-debug", "configurePreset": "tools-debug", "configuration": "Debug" },
+    { "name": "tools-relwithdebinfo", "configurePreset": "tools-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "tools-release", "configurePreset": "tools-release", "configuration": "Release" },
+    { "name": "tools-minsizerel", "configurePreset": "tools-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "examples-debug", "configurePreset": "examples-debug", "configuration": "Debug" },
+    { "name": "examples-relwithdebinfo", "configurePreset": "examples-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "examples-release", "configurePreset": "examples-release", "configuration": "Release" },
+    { "name": "examples-minsizerel", "configurePreset": "examples-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "ocarina-debug", "configurePreset": "ocarina-debug", "configuration": "Debug" },
+    { "name": "ocarina-relwithdebinfo", "configurePreset": "ocarina-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "ocarina-release", "configurePreset": "ocarina-release", "configuration": "Release" },
+    { "name": "ocarina-minsizerel", "configurePreset": "ocarina-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "ocarina-tests-debug", "configurePreset": "ocarina-tests-debug", "configuration": "Debug" },
+    { "name": "ocarina-tests-relwithdebinfo", "configurePreset": "ocarina-tests-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "ocarina-tests-release", "configurePreset": "ocarina-tests-release", "configuration": "Release" },
+    { "name": "ocarina-tests-minsizerel", "configurePreset": "ocarina-tests-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "vision-hotfix-debug", "configurePreset": "vision-hotfix-debug", "configuration": "Debug" },
+    { "name": "vision-hotfix-relwithdebinfo", "configurePreset": "vision-hotfix-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "vision-hotfix-release", "configurePreset": "vision-hotfix-release", "configuration": "Release" },
+    { "name": "vision-hotfix-minsizerel", "configurePreset": "vision-hotfix-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "debug", "configurePreset": "examples-debug", "configuration": "Debug" },
+    { "name": "relwithdebinfo", "configurePreset": "examples-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "release", "configurePreset": "examples-release", "configuration": "Release" },
+    { "name": "minsizerel", "configurePreset": "examples-minsizerel", "configuration": "MinSizeRel" }
   ]
 }

@@ -2,18 +2,32 @@ function(horizon_dev_bootstrap)
     if(NOT DEFINED HORIZON_DEV_CONFIGURATION OR HORIZON_DEV_CONFIGURATION STREQUAL "")
         set(HORIZON_DEV_CONFIGURATION "RelWithDebInfo" CACHE STRING "Horizon developer configuration")
     endif()
+    if(NOT DEFINED HORIZON_DEV_TARGET_FAMILY OR HORIZON_DEV_TARGET_FAMILY STREQUAL "")
+        set(HORIZON_DEV_TARGET_FAMILY "examples" CACHE STRING "Horizon developer target family")
+    endif()
+
+    set_property(CACHE HORIZON_DEV_TARGET_FAMILY PROPERTY STRINGS
+        core tools examples ocarina ocarina-tests vision-hotfix)
+    set(_horizon_target_families core tools examples ocarina ocarina-tests vision-hotfix)
+    list(FIND _horizon_target_families "${HORIZON_DEV_TARGET_FAMILY}" _horizon_target_family_index)
+    if(_horizon_target_family_index EQUAL -1)
+        message(FATAL_ERROR
+            "Unsupported HORIZON_DEV_TARGET_FAMILY='${HORIZON_DEV_TARGET_FAMILY}'. "
+            "Expected one of: ${_horizon_target_families}")
+    endif()
 
     string(TOLOWER "${HORIZON_DEV_CONFIGURATION}" _horizon_configuration_slug)
     set(_horizon_toolchain
-        "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${_horizon_configuration_slug}/generators/conan_toolchain.cmake")
+        "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/conan_toolchain.cmake")
     set(_horizon_build_environment
-        "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
+        "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
 
     if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE})
         find_program(_horizon_uv uv REQUIRED)
         execute_process(
             COMMAND "${_horizon_uv}" run --frozen python tools/dev.py _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
+                    --target-family "${HORIZON_DEV_TARGET_FAMILY}"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             RESULT_VARIABLE _horizon_bootstrap_result
             OUTPUT_VARIABLE _horizon_bootstrap_stdout

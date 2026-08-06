@@ -8,7 +8,9 @@ from pathlib import Path
 from workflow import (
     CONFIGURATIONS,
     DEFAULT_CONFIGURATION,
+    DEFAULT_TARGET_FAMILY,
     CommandError,
+    TARGET_FAMILIES,
     build_dir,
     clean_repo,
     cmake_build,
@@ -30,44 +32,67 @@ LOCAL_RECIPES = (
 RECIPE_TOGGLE_ENV = "HORIZON_CONAN_EXPORT_LOCAL_RECIPES"
 
 
-def conan_options(targets: list[str]) -> list[str]:
-    options: list[str] = []
-    requires_ocarina = False
-    requires_ocarina_tests = False
-    requires_vision_hotfix = False
-
-    if "ShaderCompileScripts" in targets:
-        options.append("&:with_tools=True")
-    if "HorizonExamples" in targets:
-        options.append("&:with_examples=True")
-    if "HorizonTests" in targets:
-        options.append("&:with_tests=True")
-    if "HorizonSmokeBenchmarks" in targets:
-        options.append("&:with_benchmarks=True")
-
-    for target in targets:
-        if target.startswith("ocarina"):
-            requires_ocarina = True
-        if target.startswith("ocarina-test-"):
-            requires_ocarina_tests = True
-        if target.startswith("vision-hotfix"):
-            requires_ocarina = True
-            requires_vision_hotfix = True
-
-    if requires_ocarina:
-        options.extend(("&:with_ocarina=True", "&:with_cuda=True"))
-    if requires_ocarina_tests:
-        options.append("&:with_ocarina_tests=True")
-    if requires_vision_hotfix:
-        options.append("&:with_vision_hotfix=True")
-    return options
+TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
+    "core": (),
+    "tools": ("&:with_tools=True",),
+    "examples": ("&:with_examples=True",),
+    "ocarina": ("&:with_ocarina=True", "&:with_cuda=True"),
+    "ocarina-tests": (
+        "&:with_ocarina=True",
+        "&:with_cuda=True",
+        "&:with_ocarina_tests=True",
+    ),
+    "vision-hotfix": (
+        "&:with_ocarina=True",
+        "&:with_cuda=True",
+        "&:with_vision_hotfix=True",
+    ),
+}
 
 
-def install(configuration: str, targets: list[str], *, update: bool = False) -> None:
+def target_family_for_target(target: str) -> str:
+    if target == "ShaderCompileScripts":
+        return "tools"
+    if target == "HorizonExamples":
+        return "examples"
+    if target.startswith("test-"):
+        return "ocarina-tests"
+    if target.startswith("horizon-hotfix"):
+        return "vision-hotfix"
+    if target in {"EABase", "EASTL", "mimalloc", "mimalloc-obj", "mimalloc-static"}:
+        return "ocarina"
+    if target == "copy_cuda_headers" or target.startswith("ocarina"):
+        return "ocarina"
+    return "core"
+
+
+def target_family_for_targets(targets: list[str]) -> str:
+    if not targets:
+        return DEFAULT_TARGET_FAMILY
+
+    families = {target_family_for_target(target) for target in targets}
+    if len(families) != 1:
+        choices = ", ".join(sorted(families))
+        raise ValueError(
+            f"Targets require different dependency families ({choices}). "
+            "Configure and build one target family at a time."
+        )
+    return families.pop()
+
+
+def conan_options(target_family: str) -> list[str]:
+    try:
+        return list(TARGET_FAMILY_OPTIONS[target_family])
+    except KeyError as error:
+        raise ValueError(f"Unsupported target family: {target_family}") from error
+
+
+def install(configuration: str, target_family: str, *, update: bool = False) -> None:
     conan_install(
         REPO_ROOT,
         configuration,
-        options=conan_options(targets),
+        target_family=target_family,
+        options=conan_options(target_family),
         recipes=LOCAL_RECIPES,
         recipe_toggle_env=RECIPE_TOGGLE_ENV,
         update=update,
@@ -78,30 +103,31 @@ def execute(args: argparse.Namespace) -> None:
     targets = args.targets or [DEFAULT_TARGET]
     target = targets[0]
     configuration = args.configuration
+    target_family = args.target_family or target_family_for_targets(targets)
 
     if args.command == "status":
         run_command(("git", "status", "--short", "--branch"), cwd=REPO_ROOT)
         run_command(("conan", "--version"), cwd=REPO_ROOT)
         run_command(("cmake", "--list-presets"), cwd=REPO_ROOT)
     elif args.command in {"install", "_bootstrap"}:
-        install(configuration, targets)
+        install(configuration, target_family)
     elif args.command == "configure":
-        install(configuration, targets)
-        cmake_configure(REPO_ROOT, configuration)
+        install(configuration, target_family)
+        cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "build":
-        install(configuration, targets)
-        cmake_configure(REPO_ROOT, configuration)
-        cmake_build(REPO_ROOT, configuration, target)
+        install(configuration, target_family)
+        cmake_configure(REPO_ROOT, configuration, target_family)
+        cmake_build(REPO_ROOT, configuration, target, target_family)
     elif args.command == "build-fast":
-        cmake_build(REPO_ROOT, configuration, target)
+        cmake_build(REPO_ROOT, configuration, target, target_family)
     elif args.command == "rebuild":
-        safe_remove(REPO_ROOT, build_dir(REPO_ROOT, configuration))
-        install(configuration, targets)
-        cmake_configure(REPO_ROOT, configuration)
-        cmake_build(REPO_ROOT, configuration, target)
+        safe_remove(REPO_ROOT, build_dir(REPO_ROOT, configuration, target_family))
+        install(configuration, target_family)
+        cmake_configure(REPO_ROOT, configuration, target_family)
+        cmake_build(REPO_ROOT, configuration, target, target_family)
     elif args.command == "update":
-        install(configuration, targets, update=True)
-        cmake_configure(REPO_ROOT, configuration)
+        install(configuration, target_family, update=True)
+        cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "clean":
         clean_repo(REPO_ROOT)
     else:
@@ -121,6 +147,11 @@ def create_parser() -> argparse.ArgumentParser:
         "--configuration",
         choices=CONFIGURATIONS,
         default=DEFAULT_CONFIGURATION,
+    )
+    parser.add_argument(
+        "--target-family",
+        choices=TARGET_FAMILIES,
+        help="Configure a named target family instead of inferring it from the build target.",
     )
     return parser
 
