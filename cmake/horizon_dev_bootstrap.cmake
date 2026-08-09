@@ -1,4 +1,7 @@
 function(horizon_dev_bootstrap)
+    if(NOT DEFINED HORIZON_CONDA_ENV OR HORIZON_CONDA_ENV STREQUAL "")
+        set(HORIZON_CONDA_ENV "horizon-dev" CACHE STRING "Conda environment used by Horizon development tools")
+    endif()
     if(NOT DEFINED HORIZON_DEV_CONFIGURATION OR HORIZON_DEV_CONFIGURATION STREQUAL "")
         set(HORIZON_DEV_CONFIGURATION "RelWithDebInfo" CACHE STRING "Horizon developer configuration")
     endif()
@@ -23,9 +26,10 @@ function(horizon_dev_bootstrap)
         "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
 
     if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE})
-        find_program(_horizon_uv uv REQUIRED)
+        find_program(_horizon_conda NAMES conda REQUIRED)
         execute_process(
-            COMMAND "${_horizon_uv}" run --frozen python tools/dev.py _bootstrap
+            COMMAND "${_horizon_conda}" run --name "${HORIZON_CONDA_ENV}" --no-capture-output
+                    python tools/dev.py _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -36,6 +40,8 @@ function(horizon_dev_bootstrap)
         if(NOT _horizon_bootstrap_result EQUAL 0)
             message(FATAL_ERROR
                 "Horizon dependency bootstrap failed (${_horizon_bootstrap_result}).\n"
+                "Ensure the '${HORIZON_CONDA_ENV}' Conda environment exists: "
+                "conda create --yes --name ${HORIZON_CONDA_ENV} --override-channels --channel conda-forge \"python>=3.11\" \"conan>=2.28,<3\".\n"
                 "${_horizon_bootstrap_stdout}\n${_horizon_bootstrap_stderr}")
         endif()
     endif()
