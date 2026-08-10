@@ -9,7 +9,7 @@
 本项目目前只支持 **Windows x64**。推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
 
 - Git：用于克隆和更新代码。
-- [uv](https://docs.astral.sh/uv/)：管理本项目的 Python、虚拟环境和 Conan。**不需要单独安装 Python 或 Conan。**
+- [Miniconda / Conda](https://docs.conda.io/)：管理本项目的开发工具 Python 环境和 Conan。**不需要单独安装 Python 或 Conan。**
 - CMake **4.0 或更高版本**和 Ninja：所有 preset 使用 Ninja；两者都必须能在终端中运行。
 - Visual Studio 或 Visual Studio Build Tools：安装“使用 C++ 的桌面开发”、MSVC x64/x86 生成工具和 Windows SDK。项目会自动识别本机已安装的 VS/MSVC，不限定某个 VS 年份。
 - CUDA Toolkit：仅构建 Ocarina、Ocarina 测试或 Vision Hotfix 时需要；安装后应存在 `CUDA_PATH` 环境变量。
@@ -19,7 +19,7 @@
 
 ```powershell
 git --version
-uv --version
+conda --version
 cmake --version
 ninja --version
 ```
@@ -27,16 +27,10 @@ ninja --version
 如果提示“找不到命令”，请检查对应工具是否已安装并加入 `PATH`，然后重新打开终端。克隆项目后，进入仓库根目录并执行一次：
 
 ```powershell
-uv sync --frozen
+conda create --yes --name horizon-dev --override-channels --channel conda-forge "python>=3.11" "conan>=2.28,<3"
 ```
 
-若本机没有符合项目 `>=3.11` 要求的 Python，uv 会自动下载；只有离线环境，或手动禁用了 uv 的自动下载时，才先执行：
-
-```powershell
-uv python install 3.11
-```
-
-第一次同步和配置会下载或编译 Conan 依赖，耗时较长是正常现象。
+第一次创建环境和配置会下载或编译 Conan 依赖，耗时较长是正常现象。
 
 ### 2. VS Code / CMake Tools 构建
 
@@ -74,13 +68,13 @@ uv python install 3.11
 
 ```powershell
 # 配置 Examples 的 Debug 构建
-uv run --frozen python tools/dev.py configure --configuration Debug --target-family examples
+conda run -n horizon-dev --no-capture-output python tools/dev.py configure --configuration Debug --target-family examples
 
 # 配置并构建一个目标；脚本会从目标名自动判断目标族
-uv run --frozen python tools/dev.py build HorizonExamples --configuration Debug
+conda run -n horizon-dev --no-capture-output python tools/dev.py build HorizonExamples --configuration Debug
 
 # 已配置过时，快速构建该目标族的全部 target
-uv run --frozen python tools/dev.py build-fast all --configuration Debug --target-family examples
+conda run -n horizon-dev --no-capture-output python tools/dev.py build-fast all --configuration Debug --target-family examples
 ```
 
 把 `examples` 换成 `core`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
