@@ -1,0 +1,247 @@
+//
+// Created by Zero on 21/04/2022.
+//
+
+#pragma once
+
+#include "math/basic_types.h"
+
+namespace ocarina {
+
+enum struct UnaryOp : uint32_t {
+    POSITIVE,
+    NEGATIVE,
+    NOT,
+    BIT_NOT
+};
+
+enum struct CastOp : uint32_t {
+    STATIC,
+    BITWISE
+};
+
+enum struct BinaryOp : uint32_t {
+    // arithmetic
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    MOD,
+    BIT_AND,
+    BIT_OR,
+    BIT_XOR,
+    SHL,
+    SHR,
+    AND,
+    OR,
+
+    // relational
+    LESS,
+    GREATER,
+    LESS_EQUAL,
+    GREATER_EQUAL,
+    EQUAL,
+    NOT_EQUAL
+};
+
+enum struct CallOp : uint32_t {
+    CUSTOM,
+
+    ALL,
+    ANY,
+    NONE,
+
+    SELECT,
+    CLAMP,
+    LERP,
+    INVERSE_LERP,
+
+    ABS,
+    MIN,
+    MAX,
+
+    IS_INF,
+    IS_NAN,
+
+    ACOS,
+    ASIN,
+    ATAN,
+    ACOSH,
+    ASINH,
+    ATANH,
+    ATAN2,
+    COPYSIGN,
+
+    COS,
+    SIN,
+    TAN,
+    COSH,
+    SINH,
+    TANH,
+
+    EXP,
+    EXP2,
+    EXP10,
+    LOG,
+    LOG2,
+    LOG10,
+    POW,
+    FMOD,
+    MOD,
+    FRACT,
+
+    SQRT,
+    RSQRT,
+    SQR,
+    RCP,
+    SIGN,
+
+    CEIL,
+    FLOOR,
+    ROUND,
+
+    DEGREES,
+    RADIANS,
+    SATURATE,
+
+    FMA,
+
+    CROSS,
+    DOT,
+    DISTANCE,
+    DISTANCE_SQUARED,
+    LENGTH,
+    LENGTH_SQUARED,
+    NORMALIZE,
+    FACE_FORWARD,
+    COORDINATE_SYSTEM,
+    MAKE_NORMAL_TANGENT,
+
+    DETERMINANT,
+    TRANSPOSE,
+    INVERSE,
+
+    IS_NULL_BUFFER,
+    IS_NULL_TEXTURE,
+
+    BUFFER_SIZE,
+
+    TEX3D_SAMPLE,
+    TEX3D_READ,
+    TEX3D_WRITE,
+
+    TEX2D_SAMPLE,
+    TEX2D_READ,
+    TEX2D_WRITE,
+
+    BYTE_BUFFER_READ,
+    BYTE_BUFFER_WRITE,
+    BYTE_BUFFER_SIZE,
+
+    BINDLESS_ARRAY_BUFFER_READ,
+    BINDLESS_ARRAY_BUFFER_WRITE,
+    BINDLESS_ARRAY_BUFFER_SIZE,
+    BINDLESS_ARRAY_BYTE_BUFFER_READ,
+    BINDLESS_ARRAY_BYTE_BUFFER_WRITE,
+    BINDLESS_ARRAY_TEX3D_SAMPLE,
+    BINDLESS_ARRAY_TEX2D_SAMPLE,
+
+    MAKE_BOOL2,
+    MAKE_BOOL3,
+    MAKE_BOOL4,
+
+    MAKE_INT2,
+    MAKE_INT3,
+    MAKE_INT4,
+
+    MAKE_UINT2,
+    MAKE_UINT3,
+    MAKE_UINT4,
+
+    MAKE_UCHAR2,
+    MAKE_UCHAR3,
+    MAKE_UCHAR4,
+
+    MAKE_FLOAT2,
+    MAKE_FLOAT3,
+    MAKE_FLOAT4,
+
+    MAKE_REAL2,
+    MAKE_REAL3,
+    MAKE_REAL4,
+
+    MAKE_HALF2,
+    MAKE_HALF3,
+    MAKE_HALF4,
+
+    MAKE_ULONG2,
+    MAKE_ULONG3,
+    MAKE_ULONG4,
+
+    MAKE_FLOAT2X2,
+    MAKE_FLOAT2X3,
+    MAKE_FLOAT2X4,
+
+    MAKE_FLOAT3X2,
+    MAKE_FLOAT3X3,
+    MAKE_FLOAT3X4,
+
+    MAKE_FLOAT4X2,
+    MAKE_FLOAT4X3,
+    MAKE_FLOAT4X4,
+
+    MAKE_REAL2X2,
+    MAKE_REAL2X3,
+    MAKE_REAL2X4,
+
+    MAKE_REAL3X2,
+    MAKE_REAL3X3,
+    MAKE_REAL3X4,
+
+    MAKE_REAL4X2,
+    MAKE_REAL4X3,
+    MAKE_REAL4X4,
+
+    MAKE_HALF2X2,
+    MAKE_HALF2X3,
+    MAKE_HALF2X4,
+
+    MAKE_HALF3X2,
+    MAKE_HALF3X3,
+    MAKE_HALF3X4,
+
+    MAKE_HALF4X2,
+    MAKE_HALF4X3,
+    MAKE_HALF4X4,
+
+    GEMM,
+
+    UNREACHABLE,
+
+    ATOMIC_EXCH,
+    ATOMIC_ADD,
+    ATOMIC_SUB,
+    ATOMIC_CAS,
+
+    HALF2FLOAT,
+    FLOAT2HALF,
+
+    // ray tracing
+    MAKE_RAY,
+    RAY_OFFSET_ORIGIN,
+    TRACE_CLOSEST,
+    TRACE_OCCLUSION,
+
+    SYNCHRONIZE_BLOCK,
+    WARP_ACTIVE_COUNT_BITS, //WaveActiveCountBits
+    WARP_ACTIVE_BIT_MASK,  //WaveActiveBallot
+    WARP_PREFIX_COUNT_BITS, //WavePrefixCountBits
+    WARP_LANE_ID,
+    WARP_SIZE,
+    WARP_FIRST_ACTIVE_LANE,
+    WARP_IS_FIRST_ACTIVE_LANE,
+
+    COUNT
+};
+
+}// namespace ocarina
