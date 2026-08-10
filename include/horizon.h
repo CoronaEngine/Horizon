@@ -526,51 +526,6 @@ namespace Corona::Horizon
         EmbeddedShader::ShaderCodeModule module;
 
         PipelineShaderDesc(PipelineShaderStage stage, EmbeddedShader::ShaderCodeModule module) : stage(stage), module(std::move(module)) {}
-
-        static PipelineShaderDesc from_slang_module(PipelineShaderStage stage,
-                                                    EmbeddedShader::SlangModule& module,
-                                                    EmbeddedShader::CompilerOption compiler_option = {})
-        {
-            EmbeddedShader::SlangCompileArgs2 args;
-            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-            args.stage = [&] {
-                switch (stage)
-                {
-                case PipelineShaderStage::Vertex:
-                    return EmbeddedShader::ShaderStage::VertexShader;
-                case PipelineShaderStage::Fragment:
-                    return EmbeddedShader::ShaderStage::FragmentShader;
-                case PipelineShaderStage::Compute:
-                    return EmbeddedShader::ShaderStage::ComputeShader;
-                default:
-                    throw std::invalid_argument("PipelineShaderDesc::from_slang_module only supports vertex, fragment, and compute stages.");
-                }
-            }();
-            args.module = &module;
-            args.deps = std::move(compiler_option.slangModules);
-            args.enableReflection = true;
-
-            EmbeddedShader::SlangCompileResult result = EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
-            if (spirv == result.binaryTargets.end())
-                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
-
-            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
-            if (reflection != result.reflections.end())
-                resources = std::move(reflection->second);
-
-            // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
-            // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
-            for (auto& info : resources.bindInfoPool)
-            {
-                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
-                    info.variateName = info.variateName.substr(pos + 1);
-            }
-
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
-        }
     };
 
     struct EdslPipelineOptions
@@ -607,24 +562,6 @@ namespace Corona::Horizon
                     return entry.numthreads;
             }
             return thread_group_size;
-        }
-
-        template <typename F>
-        static ComputePipelineDesc from_edsl(F&& compute_shader_code, ktm::uvec3 numthreads = { 1, 1, 1 }, EdslPipelineOptions options = {}, std::source_location source_location = std::source_location::current())
-        {
-            options.compiler.enableMatrixColumnMajor = true;
-            std::shared_ptr<EmbeddedShader::ComputePipelineObject> object{new EmbeddedShader::ComputePipelineObject(EmbeddedShader::ComputePipelineObject::compile(std::forward<F>(compute_shader_code), numthreads, options.compiler, source_location))};
-
-            ComputePipelineDesc desc(
-                 PipelineShaderDesc{
-                    PipelineShaderStage::Compute,
-                    object->compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless) },
-                numthreads);
-            desc.pipelineObject = object;
-
-            if (options.auto_bind)
-                desc.auto_bind_entries = object->autoBindEntries;
-            return desc;
         }
     };
 
@@ -688,6 +625,63 @@ namespace Corona::Horizon
             fragment_shader = std::move(fragment);
         }
 
+        void set_shaders_from_slang(EmbeddedShader::SlangModule& vs_module,
+                                    EmbeddedShader::SlangModule& fs_module,
+                                    EmbeddedShader::CompilerOption compiler_option = {})
+        {
+            vertex_shader = compile_slang_to_shader_desc(
+                PipelineShaderStage::Vertex, vs_module, compiler_option);
+            fragment_shader = compile_slang_to_shader_desc(
+                PipelineShaderStage::Fragment, fs_module, compiler_option);
+        }
+
+    private:
+        static PipelineShaderDesc compile_slang_to_shader_desc(
+            PipelineShaderStage stage,
+            EmbeddedShader::SlangModule& module,
+            EmbeddedShader::CompilerOption compiler_option = {})
+        {
+            EmbeddedShader::SlangCompileArgs2 args;
+            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
+            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
+            args.stage = [&] {
+                switch (stage)
+                {
+                case PipelineShaderStage::Vertex:
+                    return EmbeddedShader::ShaderStage::VertexShader;
+                case PipelineShaderStage::Fragment:
+                    return EmbeddedShader::ShaderStage::FragmentShader;
+                case PipelineShaderStage::Compute:
+                    return EmbeddedShader::ShaderStage::ComputeShader;
+                default:
+                    throw std::invalid_argument("compile_slang_to_shader_desc only supports vertex, fragment, and compute stages.");
+                }
+            }();
+            args.module = &module;
+            args.deps = std::move(compiler_option.slangModules);
+            args.enableReflection = true;
+
+            EmbeddedShader::SlangCompileResult result = EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
+            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
+            if (spirv == result.binaryTargets.end())
+                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
+
+            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
+            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
+            if (reflection != result.reflections.end())
+                resources = std::move(reflection->second);
+
+            // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
+            // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
+            for (auto& info : resources.bindInfoPool)
+            {
+                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
+                    info.variateName = info.variateName.substr(pos + 1);
+            }
+
+            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
+        }
+
         void apply_state(RasterizerPipelineDesc state)
         {
             rasterizer = std::move(state.rasterizer);
@@ -699,35 +693,6 @@ namespace Corona::Horizon
             clear_depth_target = state.clear_depth_target;
             debug_name = std::move(state.debug_name);
         }
-
-        template <typename VS, typename FS>
-        static RasterizerPipelineDesc from_edsl(VS&& vertex_shader_code,
-                                                FS&& fragment_shader_code,
-                                                EdslPipelineOptions options = {},
-                                                std::source_location source_location = std::source_location::current())
-        {
-            options.compiler.enableMatrixColumnMajor = true;
-            std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{new EmbeddedShader::RasterizedPipelineObject(EmbeddedShader::RasterizedPipelineObject::compile(std::forward<VS>(vertex_shader_code),
-                                                                            std::forward<FS>(fragment_shader_code),
-                                                                            options.compiler,
-                                                                            source_location))};
-            RasterizerPipelineDesc desc(
-                PipelineShaderDesc {
-                    PipelineShaderStage::Vertex,
-                    object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                 options.compiler.enableBindless) },
-                PipelineShaderDesc {
-                    PipelineShaderStage::Fragment,
-                    object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                   options.compiler.enableBindless) });
-            desc.pipelineObject = object;
-
-            if (options.auto_bind)
-                desc.auto_bind_entries = object->autoBindEntries;
-
-            return desc;
-        }
-
     };
 
     // ================================================================
@@ -1057,13 +1022,41 @@ namespace Corona::Horizon
                                  EdslPipelineOptions options = {},
                                  const std::source_location& source_location = std::source_location::current())
             : ComputePipelineBase(
-                  ComputePipelineDesc::from_edsl(std::forward<F>(compute_shader_code),
-                                                 numthreads,
-                                                 std::move(options),
-                                                 source_location),
+                  make_desc_from_edsl(std::forward<F>(compute_shader_code),
+                                     numthreads,
+                                     std::move(options),
+                                     source_location),
                   source_location)
         {
         }
+
+    private:
+        template <typename F>
+        static ComputePipelineDesc make_desc_from_edsl(F&& compute_shader_code,
+                                                       ktm::uvec3 numthreads,
+                                                       EdslPipelineOptions options,
+                                                       std::source_location source_location)
+        {
+            options.compiler.enableMatrixColumnMajor = true;
+            std::shared_ptr<EmbeddedShader::ComputePipelineObject> object{
+                new EmbeddedShader::ComputePipelineObject(
+                    EmbeddedShader::ComputePipelineObject::compile(
+                        std::forward<F>(compute_shader_code), numthreads,
+                        options.compiler, source_location))};
+
+            ComputePipelineDesc desc(
+                PipelineShaderDesc{
+                    PipelineShaderStage::Compute,
+                    object->compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                   options.compiler.enableBindless) },
+                numthreads);
+            desc.pipelineObject = object;
+
+            if (options.auto_bind)
+                desc.auto_bind_entries = object->autoBindEntries;
+            return desc;
+        }
+    public:
 
         template <PipelineDetail::EdslComputeShaderCode F>
         explicit ComputePipeline(F&& compute_shader_code,
@@ -1082,8 +1075,35 @@ namespace Corona::Horizon
 
         static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
         {
+            // Compile Slang module inline
+            EmbeddedShader::SlangCompileArgs2 args;
+            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
+            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
+            args.stage = EmbeddedShader::ShaderStage::ComputeShader;
+            args.module = &CS::slangModule;
+            args.enableReflection = true;
+
+            EmbeddedShader::SlangCompileResult result =
+                EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
+            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
+            if (spirv == result.binaryTargets.end())
+                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
+
+            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
+            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
+            if (reflection != result.reflections.end())
+                resources = std::move(reflection->second);
+
+            for (auto& info : resources.bindInfoPool)
+            {
+                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
+                    info.variateName = info.variateName.substr(pos + 1);
+            }
+
             return ComputePipelineDesc(
-                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Compute, CS::slangModule),
+                PipelineShaderDesc(PipelineShaderStage::Compute,
+                                  EmbeddedShader::ShaderCodeModule(std::move(spirv->second),
+                                                                  std::move(resources))),
                 numthreads);
         }
 
@@ -1168,11 +1188,30 @@ namespace Corona::Horizon
                                                 EdslPipelineOptions options = {},
                                                 std::source_location source_location = std::source_location::current())
         {
-            RasterizerPipelineDesc desc =
-                RasterizerPipelineDesc::from_edsl(std::forward<VS>(vertex_shader_code),
-                                                  std::forward<FS>(fragment_shader_code),
-                                                  std::move(options),
-                                                  source_location);
+            // Inline from_edsl logic
+            options.compiler.enableMatrixColumnMajor = true;
+            std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{
+                new EmbeddedShader::RasterizedPipelineObject(
+                    EmbeddedShader::RasterizedPipelineObject::compile(
+                        std::forward<VS>(vertex_shader_code),
+                        std::forward<FS>(fragment_shader_code),
+                        options.compiler,
+                        source_location))};
+
+            RasterizerPipelineDesc desc(
+                PipelineShaderDesc {
+                    PipelineShaderStage::Vertex,
+                    object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                 options.compiler.enableBindless) },
+                PipelineShaderDesc {
+                    PipelineShaderStage::Fragment,
+                    object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                   options.compiler.enableBindless) });
+            desc.pipelineObject = object;
+
+            if (options.auto_bind)
+                desc.auto_bind_entries = object->autoBindEntries;
+
             desc.apply_state(std::move(state));
             return desc;
         }
@@ -1208,9 +1247,7 @@ namespace Corona::Horizon
 
         static RasterizerPipelineDesc make_desc(RasterizerPipelineDesc desc = {})
         {
-            desc.set_shaders(
-                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Vertex, VS::slangModule),
-                PipelineShaderDesc::from_slang_module(PipelineShaderStage::Fragment, FS::slangModule));
+            desc.set_shaders_from_slang(VS::slangModule, FS::slangModule);
             return desc;
         }
 
