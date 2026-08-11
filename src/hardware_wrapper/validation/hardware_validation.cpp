@@ -396,23 +396,6 @@ namespace Corona::Horizon
         return validate_range(buffer.get_byte_size(), offset, data.size_bytes(), "HardwareBuffer write range exceeds buffer size.");
     }
 
-    bool validate_buffer_host_read(const HardwareBuffer& buffer, std::span<std::byte> output, uint64_t offset)
-    {
-        if (!optional_validation_enabled() || output.empty())
-            return true;
-
-        if (output.data() == nullptr)
-            return validation_error("HardwareBuffer read output must not be null.");
-
-        if (!buffer)
-            return validation_error("HardwareBuffer read requires a valid buffer.");
-
-        if (buffer.get_mapped_data() == nullptr)
-            return validation_error("HardwareBuffer read requires host-mapped memory.");
-
-        return validate_range(buffer.get_byte_size(), offset, output.size_bytes(), "HardwareBuffer read range exceeds buffer size.");
-    }
-
     bool validate_image_desc(const HardwareImageDesc& desc, std::span<const std::byte> upload_data)
     {
         if (desc.format == Format::UNKNOWN || desc.format == Format::COUNT)
@@ -587,29 +570,6 @@ namespace Corona::Horizon
             return validation_error("HardwareImage write requires host-write image memory.");
 
         return validate_image_host_layout(desc, range, layer_index, mip_index, data.size_bytes(), row_pitch, slice_pitch, "write");
-    }
-
-    bool validate_image_host_read(const HardwareImageDesc& desc,
-                                  ImageSubresourceRange range,
-                                  uint32_t layer_index,
-                                  uint32_t mip_index,
-                                  std::span<std::byte> output,
-                                  uint64_t row_pitch,
-                                  uint64_t slice_pitch)
-    {
-        if (output.empty())
-            return true;
-
-        if (output.data() == nullptr)
-            return validation_error("HardwareImage read output must not be null.");
-
-        if (!optional_validation_enabled())
-            return true;
-
-        if (desc.cpu_access != CpuAccessMode::Read && desc.cpu_access != CpuAccessMode::ReadWrite)
-            return validation_error("HardwareImage read requires host-readable image memory.");
-
-        return validate_image_host_layout(desc, range, layer_index, mip_index, output.size_bytes(), row_pitch, slice_pitch, "read");
     }
 
     bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc)

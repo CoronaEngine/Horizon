@@ -1182,11 +1182,6 @@ namespace Corona::Horizon
         return main_device_context().resource_manager;
     }
 
-    std::uint64_t query_device_memory_size()
-    {
-        return resource_manager().device_local_memory_size();
-    }
-
     DeviceManager& device_manager()
     {
         return main_device_context().device_manager;

@@ -47,7 +47,6 @@ namespace Corona::Horizon
     struct HardwareValidationConfig;
     class HardwareBuffer;
     class HardwareImage;
-    class HardwareImageLayerSelector;
 
     struct CopyBufferToImageCommand;
 
@@ -69,10 +68,6 @@ namespace Corona::Horizon
     // ================================================================
     // Device memory query (VRAM capacity)
     // ================================================================
-
-    /// 查询当前设备 DEVICE_LOCAL 显存总容量（字节，= 各 DEVICE_LOCAL 堆 size 之和）。
-    /// 仅返回容量；实际用量由上层（GeometrySystem）自行统计。设备未就绪时返回 0。
-    [[nodiscard]] std::uint64_t query_device_memory_size();
 
     struct BindingSlot;
 
@@ -151,8 +146,6 @@ namespace Corona::Horizon
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
-        /// Waits for exactly the receipt's timeline values, then retires them.
-        HardwareExecutor& wait_for_completion(const SubmitReceipt& receipt);
 
     private:
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan,
@@ -284,19 +277,11 @@ namespace Corona::Horizon
         [[nodiscard]] void* get_mapped_data() const;
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
-        [[nodiscard]] bool read_bytes(std::span<std::byte> output, uint64_t byte_offset = 0) const;
 
         template <HardwareTransferable T>
         [[nodiscard]] bool write(std::span<const T> data, uint64_t byte_offset = 0) const
         {
             return write_bytes(std::as_bytes(data), byte_offset);
-        }
-
-        template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        [[nodiscard]] bool read(std::span<T> output, uint64_t byte_offset = 0) const
-        {
-            return read_bytes(std::as_writable_bytes(output), byte_offset);
         }
 
         [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
@@ -448,14 +433,9 @@ namespace Corona::Horizon
         HardwareImage& operator=(HardwareImage&& other) noexcept = default;
 
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
-        [[nodiscard]] HardwareImageLayerSelector operator[](uint32_t layer) const;
         [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const;
-        [[nodiscard]] ImageExtent mip_extent(uint32_t mip_index) const;
-        [[nodiscard]] ImageExtent extent() const;
         bool write_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-        bool read_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-        bool read_bytes(std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
 
         template <HardwareTransferable T>
         bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
@@ -464,23 +444,9 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        bool read_subresource(uint32_t layer_index, uint32_t mip_index, std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return read_subresource_bytes(layer_index, mip_index, std::as_writable_bytes(output), row_pitch, slice_pitch);
-        }
-
-        template <HardwareTransferable T>
         bool write(std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return write_bytes(std::as_bytes(data), row_pitch, slice_pitch);
-        }
-
-        template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        bool read(std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return read_bytes(std::as_writable_bytes(output), row_pitch, slice_pitch);
         }
 
         void set_clear_color(float r, float g, float b, float a);
@@ -494,27 +460,10 @@ namespace Corona::Horizon
     private:
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
 
-        friend class HardwareImageLayerSelector;
         friend class HardwareBuffer;
     };
 
-    class HardwareImageLayerSelector
-    {
-    public:
-        HardwareImageLayerSelector(const HardwareImage& image, uint32_t layer_index) : image_(image), layer_(layer_index) {}
-        [[nodiscard]] HardwareImage operator[](uint32_t mip_index) const;
 
-    private:
-        HardwareImage image_;
-        uint32_t layer_ = 0;
-    };
-
-    inline HardwareImageLayerSelector HardwareImage::operator[](uint32_t layer_index) const
-    {
-        return HardwareImageLayerSelector(*this, layer_index);
-    }
-
-    
 
     // ================================================================
     // Pipeline Descriptors
@@ -635,6 +584,21 @@ namespace Corona::Horizon
                 PipelineShaderStage::Fragment, fs_module, compiler_option);
         }
 
+        // 用另一个 desc 的状态字段覆盖当前 desc（不透传 shader）。
+        // 公开：EDSL 路径（RasterizerPipeline<void,void>::make_desc）在编译 shader 后用
+        // 调用方传入的 RasterizerPipelineDesc 状态覆盖 EDSL 派生的默认状态。
+        void apply_state(RasterizerPipelineDesc state)
+        {
+            rasterizer = std::move(state.rasterizer);
+            depth_stencil = std::move(state.depth_stencil);
+            blend = std::move(state.blend);
+            multisample = std::move(state.multisample);
+            multiview_count = state.multiview_count;
+            clear_color_target = state.clear_color_target;
+            clear_depth_target = state.clear_depth_target;
+            debug_name = std::move(state.debug_name);
+        }
+
     private:
         static PipelineShaderDesc compile_slang_to_shader_desc(
             PipelineShaderStage stage,
@@ -680,18 +644,6 @@ namespace Corona::Horizon
             }
 
             return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
-        }
-
-        void apply_state(RasterizerPipelineDesc state)
-        {
-            rasterizer = std::move(state.rasterizer);
-            depth_stencil = std::move(state.depth_stencil);
-            blend = std::move(state.blend);
-            multisample = std::move(state.multisample);
-            multiview_count = state.multiview_count;
-            clear_color_target = state.clear_color_target;
-            clear_depth_target = state.clear_depth_target;
-            debug_name = std::move(state.debug_name);
         }
     };
 
@@ -930,14 +882,6 @@ namespace Corona::Horizon
                 location,
             });
             bind_render_target(location, *image);
-            return *this;
-        }
-
-        template <typename... TargetProxies>
-        RasterizerPipelineBase& bind_output_targets(TargetProxies&... targets)
-        {
-            uint32_t location = 0;
-            (bind_render_target(location++, targets), ...);
             return *this;
         }
 

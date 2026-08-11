@@ -2846,47 +2846,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    HardwareExecutor& HardwareExecutor::wait_for_completion(const SubmitReceipt& receipt)
-    {
-        for (const SubmissionToken& token : receipt.tokens)
-        {
-            if (token.value == 0)
-            {
-                continue;
-            }
-
-            Queue* queue = nullptr;
-            if (queue_resolver_)
-            {
-                queue = &queue_resolver_(token.device, token.queue.capability);
-            }
-            else
-            {
-                if (token.device.value != 0)
-                {
-                    throw std::logic_error("Default HardwareExecutor currently waits only on the main device.");
-                }
-                queue = main_device_context().device_manager.queue_by_id(token.queue);
-            }
-
-            if (queue == nullptr)
-            {
-                throw std::runtime_error("HardwareExecutor could not resolve a queue for receipt completion wait.");
-            }
-
-            const QueueId resolved_id = queue->id();
-            if (resolved_id.device.value != token.queue.device.value ||
-                resolved_id.family_index != token.queue.family_index ||
-                resolved_id.queue_index != token.queue.queue_index) {
-                throw std::runtime_error("HardwareExecutor resolved the wrong queue for receipt completion wait.");
-            }
-
-            queue->wait_for(token);
-            queue->retire_completed();
-        }
-        return *this;
-    }
-
     std::vector<SubmissionToken> HardwareExecutor::consume_pending_waits()
     {
         std::lock_guard lock(mutex_);
