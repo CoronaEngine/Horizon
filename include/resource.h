@@ -20,44 +20,21 @@ namespace Corona::Horizon
     {
     public:
         ResourceHandle() noexcept = default;
-
-        ResourceHandle(const ResourceHandle& other) noexcept
-            : resource_(other.resource_)
-        {
-        }
-
-        ResourceHandle(ResourceHandle&& other) noexcept
-            : resource_(std::move(other.resource_))
-        {
-        }
-
-        ResourceHandle& operator=(const ResourceHandle& other) noexcept
-        {
-            if (this != &other)
-                resource_ = other.resource_;
-
-            return *this;
-        }
-
-        ResourceHandle& operator=(ResourceHandle&& other) noexcept
-        {
-            if (this != &other)
-                resource_ = std::move(other.resource_);
-
-            return *this;
-        }
+        ResourceHandle(const ResourceHandle&) noexcept = default;
+        ResourceHandle(ResourceHandle&&) noexcept = default;
+        ResourceHandle& operator=(const ResourceHandle&) noexcept = default;
+        ResourceHandle& operator=(ResourceHandle&&) noexcept = default;
 
         [[nodiscard]] explicit operator bool() const noexcept
         {
-            auto resource = resource_;
-            return resource && resource->valid();
+            // Avoid shared_ptr copy to prevent refcount operation
+            return resource_ != nullptr && resource_->valid();
         }
 
     protected:
         [[nodiscard]] std::uintptr_t resource_id() const noexcept
         {
-            auto resource = resource_;
-            return resource ? resource->id() : 0;
+            return resource_ ? resource_->id() : 0;
         }
 
     private:
