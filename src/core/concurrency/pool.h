@@ -8,7 +8,7 @@
 #include "core/concepts.h"
 #include "thread_safety.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 template<typename T>
 class Pool : public concepts::Noncopyable,
@@ -19,11 +19,11 @@ public:
     static constexpr bool trivially = std::is_trivially_destructible_v<element_type>;
 
 private:
-    ocarina::vector<T *> blocks_;
-    ocarina::vector<T *> available_objects_;
+    horizon::core::vector<T *> blocks_;
+    horizon::core::vector<T *> available_objects_;
 
     void _enlarge() {
-        T *ptr = ocarina::allocate<T>(element_count);
+        T *ptr = horizon::core::allocate<T>(element_count);
         blocks_.push_back(ptr);
         available_objects_.reserve(element_count);
         for (int i = 0; i < element_count; ++i) {
@@ -37,7 +37,7 @@ public:
             return;
         }
         for (auto &ptr : blocks_) {
-            ocarina::deallocate(ptr);
+            horizon::core::deallocate(ptr);
         }
     }
 
@@ -63,4 +63,4 @@ public:
     }
 };
 
-}// namespace ocarina
+}// namespace horizon::core

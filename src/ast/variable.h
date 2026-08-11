@@ -10,7 +10,9 @@
 #include "core/util/hash.h"
 #include "core/type.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 enum struct Usage : uint32_t {
     NONE = 0u,
@@ -103,4 +105,4 @@ public:
     [[nodiscard]] bool used() const noexcept;
 };
 
-}// namespace ocarina
+}// namespace horizon::ast

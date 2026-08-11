@@ -18,9 +18,9 @@
 #include "ext/tinyexr/tinyexr.h"
 #include "core/util/logging.h"
 
-namespace ocarina {
+namespace horizon::core {
 
-ImageView::ImageView(ocarina::PixelStorage pixel_storage, const std::byte *pixel, ocarina::uint2 res)
+ImageView::ImageView(horizon::core::PixelStorage pixel_storage, const std::byte *pixel, horizon::core::uint2 res)
     : ImageBase(pixel_storage, res), pixel_(pixel) {}
 
 Image::Image(PixelStorage pixel_storage, const std::byte *pixel, uint2 res, const fs::path &path)
@@ -39,9 +39,9 @@ Image::Image(PixelStorage pixel_storage, const std::byte *pixel, uint2 res)
 }
 
 Image::Image(Image &&other) noexcept
-    : ImageBase(ocarina::move(other)) {
-    pixel_ = ocarina::move(other.pixel_);
-    path_ = ocarina::move(other.path_);
+    : ImageBase(horizon::core::move(other)) {
+    pixel_ = horizon::core::move(other.pixel_);
+    path_ = horizon::core::move(other.path_);
 }
 
 Image &Image::operator=(Image &&rhs) noexcept {
@@ -70,7 +70,7 @@ Image Image::pure_color(float4 color, ColorSpace color_space, uint2 res) {
     return ret;
 }
 
-Image Image::create_empty(ocarina::PixelStorage pixel_format, ocarina::uint2 res) {
+Image Image::create_empty(horizon::core::PixelStorage pixel_format, horizon::core::uint2 res) {
     size_t size_in_bytes = pixel_size(pixel_format) * res.x * res.y;
     auto pixel = new_array<std::byte>(size_in_bytes);
     return {pixel_format, pixel, res};
@@ -341,15 +341,15 @@ void Image::save_exr(const fs::path &fn, PixelStorage pixel_storage,
     int c = 4;
     InitEXRImage(&image);
     int count = res.x * res.y;
-    ocarina::array<float *, 4> image_ptr{nullptr, nullptr, nullptr, nullptr};
+    horizon::core::array<float *, 4> image_ptr{nullptr, nullptr, nullptr, nullptr};
     image.num_channels = 4;
     image.width = res.x;
     image.height = res.y;
     image.images = reinterpret_cast<uint8_t **>(image_ptr.data());
 
-    ocarina::array<int, 4> pixel_types{TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT,
+    horizon::core::array<int, 4> pixel_types{TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT,
                                        TINYEXR_PIXELTYPE_FLOAT};
-    ocarina::array<EXRChannelInfo, 4> channels{};
+    horizon::core::array<EXRChannelInfo, 4> channels{};
     header.num_channels = c;
     header.channels = channels.data();
     header.pixel_types = pixel_types.data();
@@ -548,4 +548,4 @@ Image::convert_to_8bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 r
     return {pixel_storage, pixel};
 }
 
-}// namespace ocarina
+}// namespace horizon::core

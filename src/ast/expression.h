@@ -8,7 +8,9 @@
 
 #include "ast_node.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 class UnaryExpr;
 class BinaryExpr;
@@ -153,7 +155,7 @@ private:
 
 private:
     [[nodiscard]] uint64_t compute_hash() const noexcept override;
-    void _mark(ocarina::Usage usage) const noexcept override {
+    void _mark(horizon::ast::Usage usage) const noexcept override {
         range_->mark(usage);
     }
 
@@ -166,7 +168,7 @@ public:
         return detail::check_context((range_), ctx) && detail::check_context((indexes_), ctx);
     }
     SubscriptExpr(const Type *type, const Expression *range, IndexVector indexes)
-        : Expression(Tag::SUBSCRIPT, type), range_(range), indexes_(ocarina::move(indexes)) {
+        : Expression(Tag::SUBSCRIPT, type), range_(range), indexes_(horizon::ast::move(indexes)) {
     }
 
     template<typename Func>
@@ -270,11 +272,11 @@ public:
     using Template = std::variant<const Type *, uint>;
 
 private:
-    ocarina::list<const Expression *> arguments_;
+    horizon::ast::list<const Expression *> arguments_;
     const Function *function_{};
     CallOp call_op_{CallOp::CUSTOM};
     string_view function_name_{};
-    ocarina::list<Template> template_args_;
+    horizon::ast::list<Template> template_args_;
 
 private:
     void _mark(Usage) const noexcept override {}
@@ -282,16 +284,16 @@ private:
 
 public:
     CallExpr(const Type *type, const Function *func,
-             ocarina::list<const Expression *> &&args);
+             horizon::ast::list<const Expression *> &&args);
     CallExpr(const Type *type, CallOp op,
-             ocarina::list<const Expression *> &&args,
-             ocarina::list<Template> &&t_args = {})
+             horizon::ast::list<const Expression *> &&args,
+             horizon::ast::list<Template> &&t_args = {})
         : Expression(Tag::CALL, type), call_op_(op),
-          arguments_(std::move(args)), template_args_(ocarina::move(t_args)) {}
+          arguments_(std::move(args)), template_args_(horizon::ast::move(t_args)) {}
     CallExpr(const Type *type, string_view func_name,
-             ocarina::list<const Expression *> &&args)
-        : Expression(Tag::CALL, type), function_name_(ocarina::move(func_name)),
-          arguments_(ocarina::move(args)) {}
+             horizon::ast::list<const Expression *> &&args)
+        : Expression(Tag::CALL, type), function_name_(horizon::ast::move(func_name)),
+          arguments_(horizon::ast::move(args)) {}
     OC_MAKE_CHECK_CONTEXT(Expression, arguments_)
     [[nodiscard]] auto arguments() const noexcept { return arguments_; }
     [[nodiscard]] const Expression *argument(uint index) const noexcept;
@@ -307,4 +309,4 @@ public:
 
 #undef OC_MAKE_EXPRESSION_COMMON
 
-}// namespace ocarina
+}// namespace horizon::ast

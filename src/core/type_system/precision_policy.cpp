@@ -4,7 +4,7 @@
 
 #include "precision_policy.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace {
 
@@ -48,4 +48,4 @@ StoragePrecisionPolicy global_storage_policy() noexcept {
     return global_storage_policy_impl();
 }
 
-}// namespace ocarina
+}// namespace horizon::core

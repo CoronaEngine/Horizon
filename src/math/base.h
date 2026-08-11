@@ -11,7 +11,7 @@
 
 #define MAKE_VECTOR_OP(op)                                                           \
     template<typename T>                                                             \
-    requires ocarina::concepts::iterable<T>                                          \
+    requires horizon::math::concepts::iterable<T>                                          \
     [[nodiscard]] T operator op(const T &lhs, const T &rhs) noexcept {               \
         OC_ASSERT((lhs.size() == rhs.size()) || lhs.size() == 1 || rhs.size() == 1); \
         T ret;                                                                       \
@@ -37,7 +37,9 @@ MAKE_VECTOR_OP(*)
 MAKE_VECTOR_OP(/)
 #undef MAKE_VECTOR_OP
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
+using namespace horizon::dsl;
 
 template<int n, typename T, typename ret_type = condition_t<expr_value_t<T>, T>>
 requires requires(T a, T b) { a *b; }
@@ -67,7 +69,7 @@ requires is_all_floating_point_expr_v<T, U>
 }
 
 template<typename T, typename U>
-requires ocarina::is_all_scalar_expr_v<T, U>
+requires horizon::math::is_all_scalar_expr_v<T, U>
 auto divide(T &&t, U &&u) noexcept {
     return OC_FORWARD(t) * rcp(OC_FORWARD(u));
 }
@@ -192,13 +194,13 @@ template<typename T>
 }
 
 template<typename T>
-requires(ocarina::is_general_vector3_v<ocarina::remove_device_t<T>> && !ocarina::is_half_v<type_element_t<ocarina::remove_device_t<T>>>)
+requires(horizon::math::is_general_vector3_v<horizon::math::remove_device_t<T>> && !horizon::math::is_half_v<type_element_t<horizon::math::remove_device_t<T>>>)
 [[nodiscard]] auto luminance(const T &v) {
     return dot(make_float3(0.212671f, 0.715160f, 0.072169f), v);
 }
 
 template<typename T>
-requires(ocarina::is_general_vector3_v<ocarina::remove_device_t<T>> && ocarina::is_half_v<type_element_t<ocarina::remove_device_t<T>>>)
+requires(horizon::math::is_general_vector3_v<horizon::math::remove_device_t<T>> && horizon::math::is_half_v<type_element_t<horizon::math::remove_device_t<T>>>)
 [[nodiscard]] auto luminance(const T &v) {
     return dot(make_half3(0.212671f, 0.715160f, 0.072169f), v);
 }
@@ -271,7 +273,7 @@ OC_NODISCARD auto max_comp(const T &v) noexcept {
 }
 
 template<typename V>
-requires ocarina::is_vector3_v<expr_value_t<V>>
+requires horizon::math::is_vector3_v<expr_value_t<V>>
 [[nodiscard]] inline uint32_t make_rgba(const V &color) {
     return (make_8bit(color.x) << 0) +
            (make_8bit(color.y) << 8) +
@@ -280,7 +282,7 @@ requires ocarina::is_vector3_v<expr_value_t<V>>
 }
 
 template<typename V>
-requires ocarina::is_vector4_v<expr_value_t<V>>
+requires horizon::math::is_vector4_v<expr_value_t<V>>
 [[nodiscard]] inline uint32_t make_rgba(const V &color) {
     return (make_8bit(color.x) << 0) +
            (make_8bit(color.y) << 8) +
@@ -288,4 +290,4 @@ requires ocarina::is_vector4_v<expr_value_t<V>>
            (make_8bit(color.w) << 24);
 }
 #include "common_lib.inl.h"
-}// namespace ocarina
+}// namespace horizon::math

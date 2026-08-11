@@ -4,7 +4,10 @@
 
 #include "../dsl.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 OC_MAKE_INSTANCE_FUNC_DEF(Env, s_env)
 
@@ -17,7 +20,7 @@ namespace detail {
                                       const string &tb) noexcept {
     if (Env::valid_check()) {
         if_(index >= size, [&] {
-            string tips = ocarina::format("buffer access over boundary : {}, ", desc.c_str());
+            string tips = horizon::dsl::format("buffer access over boundary : {}, ", desc.c_str());
             $warn_with_location(tips + "index = {}, size = {}, current thread will be terminated \n" + tb, index, size);
             index = 0;
             $return();
@@ -30,7 +33,7 @@ namespace detail {
                                       const string &tb) noexcept {
     if (Env::valid_check()) {
         if_(index >= size, [&] {
-            string tips = ocarina::format("buffer access over boundary : {}, ", desc.c_str());
+            string tips = horizon::dsl::format("buffer access over boundary : {}, ", desc.c_str());
             $warn_with_location(tips + "index = {}, size = {}, current thread will be terminated \n" + tb, index, size);
             index = 0;
             $return();
@@ -44,4 +47,4 @@ namespace detail {
 }
 
 }// namespace detail
-}// namespace ocarina
+}// namespace horizon::dsl

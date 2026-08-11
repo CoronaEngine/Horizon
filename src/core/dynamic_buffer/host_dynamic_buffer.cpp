@@ -4,7 +4,7 @@
 
 #include "host_dynamic_buffer.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace {
 
@@ -91,4 +91,4 @@ void detail::HostDynamicBufferStorage::clear() noexcept {
     generation_++;
 }
 
-}// namespace ocarina
+}// namespace horizon::core

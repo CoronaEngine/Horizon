@@ -9,7 +9,10 @@
 #include "rhi/device.h"
 #include "rhi/resources/shader.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 
@@ -123,4 +126,4 @@ namespace detail {
     return commands;
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

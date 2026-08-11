@@ -5,7 +5,9 @@
 #include "statement.h"
 #include "expression.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 uint64_t ScopeStmt::compute_hash() const noexcept {
     auto h = Hash64::default_seed;
@@ -14,7 +16,7 @@ uint64_t ScopeStmt::compute_hash() const noexcept {
     return h;
 }
 
-void ScopeStmt::add_var(const ocarina::Variable &variable) noexcept {
+void ScopeStmt::add_var(const horizon::ast::Variable &variable) noexcept {
     local_vars_.push_back(variable);
 }
 
@@ -48,7 +50,7 @@ uint64_t SwitchStmt::compute_hash() const noexcept {
     return hash64(ret, body_.hash());
 }
 
-SwitchCaseStmt::SwitchCaseStmt(const ocarina::Expression *expression)
+SwitchCaseStmt::SwitchCaseStmt(const horizon::ast::Expression *expression)
     : Statement(Tag::SWITCH_CASE),
       expr_(dynamic_cast<const LiteralExpr *>(expression)) {
     OC_ASSERT(expr_ != nullptr);
@@ -82,4 +84,4 @@ uint64_t PrintStmt::compute_hash() const noexcept {
     return ret;
 }
 
-}// namespace ocarina
+}// namespace horizon::ast

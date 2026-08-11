@@ -4,7 +4,9 @@
 
 #include "layout_resolver.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 LayoutResolver::LayoutResolver(StoragePrecisionPolicy policy) noexcept : policy_(policy) {}
 
@@ -75,7 +77,7 @@ string LayoutResolver::resolve_vector_description(const Type *type) const noexce
 	if (elem == nullptr) {
 		return {};
 	}
-	return ocarina::format("vector<{},{}>", elem->description(), type->dimension());
+	return horizon::ast::format("vector<{},{}>", elem->description(), type->dimension());
 }
 
 string LayoutResolver::resolve_matrix_description(const Type *type) const noexcept {
@@ -88,7 +90,7 @@ string LayoutResolver::resolve_matrix_description(const Type *type) const noexce
 	if (scalar == nullptr) {
 		return {};
 	}
-	return ocarina::format("matrix<{},{},{}>", scalar->description(), type->dimension(), col->dimension());
+	return horizon::ast::format("matrix<{},{},{}>", scalar->description(), type->dimension(), col->dimension());
 }
 
 string LayoutResolver::resolve_array_description(const Type *type) const noexcept {
@@ -97,7 +99,7 @@ string LayoutResolver::resolve_array_description(const Type *type) const noexcep
 	if (elem == nullptr) {
 		return {};
 	}
-	return ocarina::format("array<{},{}>", elem->description(), type->dimension());
+	return horizon::ast::format("array<{},{}>", elem->description(), type->dimension());
 }
 
 string LayoutResolver::resolve_buffer_description(const Type *type) const noexcept {
@@ -106,7 +108,7 @@ string LayoutResolver::resolve_buffer_description(const Type *type) const noexce
 	if (elem == nullptr) {
 		return {};
 	}
-	string ret = ocarina::format("buffer<{}>", elem->description());
+	string ret = horizon::ast::format("buffer<{}>", elem->description());
 	return ret;
 }
 
@@ -142,7 +144,7 @@ size_t LayoutResolver::resolved_alignment(const Type *type) const noexcept {
 string LayoutResolver::resolve_structure_description(const Type *type) const noexcept {
 	OC_ASSERT(type != nullptr && type->is_structure());
 
-	string ret = ocarina::format("struct<{},{},{},{}",
+	string ret = horizon::ast::format("struct<{},{},{},{}",
 								 type->cname(),
 								 resolved_alignment(type),
 								 type->is_builtin_struct(),

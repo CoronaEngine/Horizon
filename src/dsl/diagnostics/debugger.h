@@ -12,18 +12,24 @@
 #include "math/box.h"
 #include "../api/stmt_builder.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 struct DebugData {
     Box2u range{};
     int enabled{1};
 };
-}// namespace ocarina
+}// namespace horizon::dsl
 
 // clang-format off
-OC_STRUCT(ocarina,DebugData, range, enabled){};
+OC_STRUCT(horizon::dsl,DebugData, range, enabled){};
 // clang-format on
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 class Debugger {
 private:
@@ -89,4 +95,4 @@ public:
     }
 };
 
-}// namespace ocarina
+}// namespace horizon::dsl

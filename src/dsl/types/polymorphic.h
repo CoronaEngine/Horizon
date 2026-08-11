@@ -13,7 +13,10 @@
 #include "../data/registrable.h"
 #include "../diagnostics/env.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 enum PolymorphicMode {
     EInstance = 0,
@@ -42,7 +45,7 @@ public:
 
 protected:
     Uint tag_{};
-    ocarina::unordered_map<uint64_t, uint> tags_;
+    horizon::dsl::unordered_map<uint64_t, uint> tags_;
 
 public:
     template<typename Derive>
@@ -54,7 +57,7 @@ public:
         Derive *ret = nullptr;
         if (first) {
             ret = elm.get();
-            Super::push_back(ocarina::move(elm));
+            Super::push_back(horizon::dsl::move(elm));
         } else {
             ret = dynamic_cast<Derive *>(Super::at(index).get());
             OC_ASSERT(ret != nullptr);
@@ -72,14 +75,14 @@ public:
     requires std::is_base_of_v<element_ty, Derive>
     Derive *link(UP<Derive> elm) noexcept {
         uint64_t hash = elm->topology_hash();
-        return link(hash, ocarina::move(elm));
+        return link(hash, horizon::dsl::move(elm));
     }
 
     template<typename Func>
     void dispatch(Func &&func) const noexcept {
-        comment(ocarina::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
+        comment(horizon::dsl::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
         auto index = detail::correct_index(tag_, static_cast<uint>(Super::size()),
-                                           ocarina::format("PolyEvaluator dispatch {}", typeid(*this).name()),
+                                           horizon::dsl::format("PolyEvaluator dispatch {}", typeid(*this).name()),
                                            traceback_string(1));
         if (Super::size() == 1) {
             comment(typeid(*Super::at(0u)).name());
@@ -103,9 +106,9 @@ public:
 
     template<typename Func>
     void dispatch(Func &&func) noexcept {
-        comment(ocarina::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
+        comment(horizon::dsl::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
         auto index = detail::correct_index(tag_, static_cast<uint>(Super::size()),
-                                           ocarina::format("PolyEvaluator dispatch {}", typeid(*this).name()),
+                                           horizon::dsl::format("PolyEvaluator dispatch {}", typeid(*this).name()),
                                            traceback_string(1));
         if (Super::size() == 1) {
             comment(typeid(*Super::at(0u)).name());
@@ -352,7 +355,7 @@ public:
     }
     [[nodiscard]] uint data_index(const ptr_type *object) const noexcept {
         uint64_t hash_code = object->topology_hash();
-        return ocarina::get_index(group_mgr_.group_map.at(hash_code).objects, [&](auto obj) {
+        return horizon::dsl::get_index(group_mgr_.group_map.at(hash_code).objects, [&](auto obj) {
             return object == raw_ptr(obj);
         });
     }
@@ -420,16 +423,16 @@ public:
     }
 
     void set_datas(const ptr_type *object, datas_type &&datas) noexcept {
-        group_mgr_.group_map.at(object->topology_hash()).data_set = ocarina::move(datas);
+        group_mgr_.group_map.at(object->topology_hash()).data_set = horizon::dsl::move(datas);
     }
     void set_mode(PolymorphicMode mode) noexcept { mode_ = mode; }
     [[nodiscard]] PolymorphicMode mode() const noexcept { return mode_; }
     [[nodiscard]] uint encode_id(uint id, const ptr_type *object) const noexcept {
         switch (mode_) {
             case EInstance:
-                return ocarina::encode_id<H>(id, topology_index(object));
+                return horizon::dsl::encode_id<H>(id, topology_index(object));
             case ETopology:
-                return ocarina::encode_id<H>(data_index(object), topology_index(object));
+                return horizon::dsl::encode_id<H>(data_index(object), topology_index(object));
         }
         OC_ASSERT(false);
         return InvalidUI32;
@@ -452,7 +455,7 @@ public:
                     for (ptr_type *object : group_data.objects) {
                         object->encode(group_data.data_set);
                     }
-                    auto desc = ocarina::format("polymorphic: {}::type_buffer", group_data.class_name.c_str());
+                    auto desc = horizon::dsl::format("polymorphic: {}::type_buffer", group_data.class_name.c_str());
                     group_data.data_set.reset_device_buffer_immediately(device, desc);
                     group_data.data_set.register_self();
                     if (!group_data.data_set.empty()) {
@@ -468,7 +471,7 @@ public:
     template<typename ObjectID, typename Func>
     requires is_integral_expr_v<ObjectID>
     void dispatch(ObjectID &&object_id, const Func &func) const noexcept {
-        auto [inst_id, type_id] = ocarina::decode_id<D>(OC_FORWARD(object_id));
+        auto [inst_id, type_id] = horizon::dsl::decode_id<D>(OC_FORWARD(object_id));
         dispatch(type_id, inst_id, func);
     }
 
@@ -503,9 +506,9 @@ public:
             return;
         }
         Uint corrected = detail::correct_index(index, all_instance_num(),
-                                               ocarina::format("dispatch_instance {}", typeid(*this).name()),
+                                               horizon::dsl::format("dispatch_instance {}", typeid(*this).name()),
                                                traceback_string(1));
-        comment(ocarina::format("const dispatch_instance, case num = {}", Super::size()));
+        comment(horizon::dsl::format("const dispatch_instance, case num = {}", Super::size()));
         comment(typeid(*this).name());
         if (Super::size() == 1) {
             comment(typeid(*Super::at(0u)).name());
@@ -534,9 +537,9 @@ public:
             return;
         }
         Uint corrected = detail::correct_index(index, topology_num(),
-                                               ocarina::format("dispatch_topology {}", typeid(*this).name()),
+                                               horizon::dsl::format("dispatch_topology {}", typeid(*this).name()),
                                                traceback_string(1));
-        comment(ocarina::format("const dispatch_topology, case num = {}", topology_num()));
+        comment(horizon::dsl::format("const dispatch_topology, case num = {}", topology_num()));
         comment(typeid(*this).name());
         if (group_mgr_.size() == 1) {
             ptr_type *elm = group_mgr_.group_map.begin()->second.objects[0];
@@ -574,7 +577,7 @@ public:
 
     template<typename Func>
     [[nodiscard]] uint get_index(Func &&func) const noexcept {
-        return ocarina::get_index(*this, OC_FORWARD(func));
+        return horizon::dsl::get_index(*this, OC_FORWARD(func));
     }
 
     template<typename Func>
@@ -601,4 +604,4 @@ public:
     }
 };
 
-}// namespace ocarina
+}// namespace horizon::dsl

@@ -4,7 +4,7 @@
 
 #include "core/util/logging.h"
 
-namespace ocarina {
+namespace horizon::core {
 inline namespace core {
 spdlog::logger &logger() noexcept {
     static auto logger = [] {
@@ -28,4 +28,4 @@ void log_level_error() noexcept { logger().set_level(spdlog::level::err); }
 
 void log_flush() noexcept { logger().flush(); }
 }
-}// namespace ocarina::core
+}// namespace horizon::core

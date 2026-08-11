@@ -8,7 +8,7 @@
 #include "math/basic_types.h"
 #include "core/concepts.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 enum ColorSpace {
     LINEAR,
@@ -108,22 +108,22 @@ OC_NDSC_INLINE size_t channel_num(PixelStorage pixel_storage) {
 
 OC_NDSC_INLINE uint32_t format_size_in_bytes(PixelStorage pixel_storage) {
     switch (pixel_storage) {
-        case ocarina::PixelStorage::BYTE1:
+        case horizon::core::PixelStorage::BYTE1:
             return 1;
-        case ocarina::PixelStorage::BYTE2:
+        case horizon::core::PixelStorage::BYTE2:
             return 2;
-        case ocarina::PixelStorage::BYTE4:
+        case horizon::core::PixelStorage::BYTE4:
             return 4;
-        case ocarina::PixelStorage::UINT1:
-        case ocarina::PixelStorage::FLOAT1:
+        case horizon::core::PixelStorage::UINT1:
+        case horizon::core::PixelStorage::FLOAT1:
             return 4;
-        case ocarina::PixelStorage::UINT2:
-        case ocarina::PixelStorage::FLOAT2:
+        case horizon::core::PixelStorage::UINT2:
+        case horizon::core::PixelStorage::FLOAT2:
             return 8;
-        case ocarina::PixelStorage::UINT4:
-        case ocarina::PixelStorage::FLOAT4:
+        case horizon::core::PixelStorage::UINT4:
+        case horizon::core::PixelStorage::FLOAT4:
             return 16;
-        case ocarina::PixelStorage::UNKNOWN:
+        case horizon::core::PixelStorage::UNKNOWN:
             return 0;
         default:
             return 4;
@@ -145,11 +145,11 @@ public:
     ImageBase(ImageBase &&other) noexcept {
         pixel_storage_ = other.pixel_storage_;
         resolution_ = other.resolution_;
-        average_ = ocarina::move(other.average_);
+        average_ = horizon::core::move(other.average_);
     }
     ImageBase() = default;
     ImageBase &operator=(ImageBase &&) = default;
-    [[nodiscard]] int channel_num() const { return ::ocarina::channel_num(pixel_storage_); }
+    [[nodiscard]] int channel_num() const { return ::horizon::core::channel_num(pixel_storage_); }
     [[nodiscard]] uint2 resolution() const { return resolution_; }
     [[nodiscard]] uint width() const { return resolution_.x; }
     [[nodiscard]] uint height() const { return resolution_.y; }
@@ -181,4 +181,4 @@ public:
     }
 };
 
-}// namespace ocarina
+}// namespace horizon::core

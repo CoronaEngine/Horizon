@@ -10,7 +10,8 @@
 #include "core/concepts.h"
 #include <numeric>
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 #define OC_WRAP_STD_UNARY_SCALAR_FUNC(func)                  \
     template<typename T>                                     \
@@ -84,7 +85,7 @@ OC_WRAP_STD_TERNARY_SCALAR_FUNC(fma)
 using std::roundf;
 
 template<typename T>
-requires ocarina::is_scalar_v<T>
+requires horizon::math::is_scalar_v<T>
 [[nodiscard]] constexpr T max(T a, T b) noexcept {
     return std::max(a, b);
 }
@@ -98,7 +99,7 @@ requires ocarina::is_scalar_v<T>
 }
 
 template<typename T>
-requires ocarina::is_scalar_v<T>
+requires horizon::math::is_scalar_v<T>
 [[nodiscard]] constexpr auto min(T a, T b) noexcept {
     return std::min(a, b);
 }
@@ -245,4 +246,4 @@ requires is_all_basic_v<X, A, B>
     return (x - a) / (b - a);
 }
 
-}// namespace ocarina
+}// namespace horizon::math

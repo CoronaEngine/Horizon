@@ -12,7 +12,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-namespace ocarina::inline core {
+namespace horizon::core {
 OC_CORE_API spdlog::logger &logger() noexcept;
 
 OC_CORE_API void log_level_debug() noexcept;
@@ -76,53 +76,53 @@ template<typename... Args>
 inline void error_if_not(bool predicate, Args &&...args) {
     error_if(!predicate, std::forward<Args>(args)...);
 }
-}// namespace ocarina::inline core
+}// namespace horizon::core
 
 #define OC_SOURCE_LOCATION "\n", __FILE__, ":", __LINE__
 
 #define OC_DEBUG(...) \
-    ::ocarina::core::debug(__VA_ARGS__)
+    ::horizon::core::debug(__VA_ARGS__)
 #define OC_DEBUG_FORMAT(FMT, ...) \
-    OC_DEBUG(ocarina::format(FMT, __VA_ARGS__))
+    OC_DEBUG(horizon::core::format(FMT, __VA_ARGS__))
 #define OC_DEBUG_WITH_LOCATION(...) \
     OC_DEBUG(__VA_ARGS__, OC_SOURCE_LOCATION)
 #define OC_DEBUG_FORMAT_WITH_LOCATION(FMT, ...) \
-    OC_DEBUG(ocarina::format(FMT, __VA_ARGS__), OC_SOURCE_LOCATION)
+    OC_DEBUG(horizon::core::format(FMT, __VA_ARGS__), OC_SOURCE_LOCATION)
 
 #define OC_INFO(...) \
-    ::ocarina::core::info(__VA_ARGS__)
+    ::horizon::core::info(__VA_ARGS__)
 #define OC_INFO_FORMAT(FMT, ...) \
-    OC_INFO(ocarina::format(FMT, __VA_ARGS__))
+    OC_INFO(horizon::core::format(FMT, __VA_ARGS__))
 #define OC_INFO_WITH_LOCATION(...) \
     OC_INFO(__VA_ARGS__, OC_SOURCE_LOCATION)
 #define OC_INFO_FORMAT_WITH_LOCATION(FMT, ...) \
-    OC_INFO(ocarina::format(FMT, __VA_ARGS__), OC_SOURCE_LOCATION)
+    OC_INFO(horizon::core::format(FMT, __VA_ARGS__), OC_SOURCE_LOCATION)
 
 #define OC_WARNING(...) \
-    ::ocarina::core::warning(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::warning(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_WARNING_IF(...) \
-    ::ocarina::core::warning_if(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::warning_if(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_WARNING_IF_NOT(...) \
-    ::ocarina::core::warning_if_not(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::warning_if_not(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_WARNING_FORMAT(FMT, ...) \
-    OC_WARNING(ocarina::format(FMT, __VA_ARGS__));
+    OC_WARNING(horizon::core::format(FMT, __VA_ARGS__));
 
 #define OC_EXCEPTION(...) \
-    ::ocarina::core::exception(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::exception(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_EXCEPTION_IF(...) \
-    ::ocarina::core::exception_if(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::exception_if(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_EXCEPTION_IF_NOT(...) \
-    ::ocarina::core::exception_if_not(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::exception_if_not(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_EXCEPTION_FORMAT(FMT, ...) \
-    OC_EXCEPTION(ocarina::format(FMT, __VA_ARGS__))
+    OC_EXCEPTION(horizon::core::format(FMT, __VA_ARGS__))
 
 #define OC_ERROR(...) \
-    ::ocarina::core::error(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::error(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_ERROR_IF(...) \
-    ::ocarina::core::error_if(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::error_if(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_ERROR_IF_NOT(...) \
-    ::ocarina::core::error_if_not(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
+    ::horizon::core::error_if_not(__VA_ARGS__, "\n    Source: ", OC_SOURCE_LOCATION)
 #define OC_ERROR_FORMAT(FMT, ...) \
-    OC_ERROR(ocarina::format(FMT, __VA_ARGS__));
+    OC_ERROR(horizon::core::format(FMT, __VA_ARGS__));
 
 #define OC_NOT_IMPLEMENT_ERROR(func_name) OC_ERROR(#func_name " is not implemented")

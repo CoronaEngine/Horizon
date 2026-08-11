@@ -9,7 +9,7 @@
 #include "math/base.h"
 #include "core/util/logging.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 template<typename T, typename U>
 requires is_integral_v<T> && is_integral_v<U>
@@ -18,7 +18,7 @@ mem_offset(T offset, U alignment) noexcept {
     return (offset + alignment - 1u) / alignment * alignment;
 }
 
-inline size_t structure_size(ocarina::span<const MemoryBlock> members) noexcept {
+inline size_t structure_size(horizon::core::span<const MemoryBlock> members) noexcept {
     size_t size = 0;
     size_t alignment = 0;
     for (const MemoryBlock block : members) {
@@ -86,13 +86,13 @@ inline namespace size_literals {
 
 [[nodiscard]] inline string bytes_string(size_t bytes) noexcept {
     if (bytes > 1_gb) {
-        return ocarina::format("{:.2f} gb", to_gb(bytes));
+        return horizon::core::format("{:.2f} gb", to_gb(bytes));
     } else if (bytes > 1_mb) {
-        return ocarina::format("{:.2f} mb", to_mb(bytes));
+        return horizon::core::format("{:.2f} mb", to_mb(bytes));
     } else if (bytes > 1_kb) {
-        return ocarina::format("{:.2f} kb", to_kb(bytes));
+        return horizon::core::format("{:.2f} kb", to_kb(bytes));
     } else {
-        return ocarina::format("{} byte", bytes);
+        return horizon::core::format("{} byte", bytes);
     }
 }
 
@@ -115,7 +115,7 @@ public:
 
 private:
     Tick _last;
-    ocarina::string _tag;
+    horizon::core::string _tag;
 
 public:
     explicit Clock(const string &tag) noexcept
@@ -163,7 +163,7 @@ public:
     }
 };
 
-#define TIMER(task_name) ocarina::Guard<Clock> __##task_name(Clock(#task_name));
-#define TIMER_TAG(task_name, tag) ocarina::Guard<Clock> __##task_name(Clock(tag));
+#define TIMER(task_name) horizon::core::Guard<Clock> __##task_name(Clock(#task_name));
+#define TIMER_TAG(task_name, tag) horizon::core::Guard<Clock> __##task_name(Clock(tag));
 
-}// namespace ocarina
+}// namespace horizon::core

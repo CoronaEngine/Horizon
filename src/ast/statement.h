@@ -6,7 +6,9 @@
 
 #include "ast_node.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 class ScopeStmt;
 class BreakStmt;
@@ -80,8 +82,8 @@ public:
 
 class OC_AST_API ScopeStmt : public Statement {
 private:
-    ocarina::vector<Variable> local_vars_;
-    ocarina::vector<const Statement *> statements_;
+    horizon::ast::vector<Variable> local_vars_;
+    horizon::ast::vector<const Statement *> statements_;
     bool is_func_body_{};
 
 private:
@@ -93,9 +95,9 @@ public:
     bool check_context(const Function *ctx) const noexcept override {
         return detail::check_context((statements_), ctx);
     }
-    [[nodiscard]] ocarina::span<const Variable> local_vars() const noexcept { return local_vars_; }
+    [[nodiscard]] horizon::ast::span<const Variable> local_vars() const noexcept { return local_vars_; }
     [[nodiscard]] bool is_func_body() const noexcept { return is_func_body_; }
-    [[nodiscard]] ocarina::span<const Statement *const> statements() const noexcept { return statements_; }
+    [[nodiscard]] horizon::ast::span<const Statement *const> statements() const noexcept { return statements_; }
     [[nodiscard]] bool empty() const noexcept { return statements_.empty(); }
     [[nodiscard]] auto size() const noexcept { return statements_.size(); }
     void add_stmt(const Statement *stmt) noexcept;
@@ -295,8 +297,8 @@ public:
 
 class OC_AST_API PrintStmt : public Statement {
 private:
-    ocarina::string fmt_;
-    ocarina::vector<const Expression *> args_;
+    horizon::ast::string fmt_;
+    horizon::ast::vector<const Expression *> args_;
 
 private:
     [[nodiscard]] uint64_t compute_hash() const noexcept override;
@@ -305,9 +307,9 @@ public:
     explicit PrintStmt(string fmt, const vector<const Expression *> &args)
         : Statement(Tag::PRINT), fmt_(fmt), args_(args) {}
     OC_MAKE_CHECK_CONTEXT(Statement, args_)
-    [[nodiscard]] ocarina::string fmt() const noexcept { return fmt_; }
+    [[nodiscard]] horizon::ast::string fmt() const noexcept { return fmt_; }
     [[nodiscard]] span<const Expression *const> args() const noexcept { return args_; }
     OC_MAKE_STATEMENT_COMMON
 };
 
-}// namespace ocarina
+}// namespace horizon::ast

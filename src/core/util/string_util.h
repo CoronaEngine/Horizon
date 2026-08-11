@@ -16,7 +16,7 @@
 #include "math/basic_types.h"
 #include "core/stl.h"
 
-namespace ocarina::inline core {
+namespace horizon::core {
 template<typename... Args>
 inline std::string serialize(Args &&...args) noexcept {
     std::ostringstream ss;
@@ -174,16 +174,16 @@ inline std::string string_printf(const char *fmt, Args... args) {
 
 template<typename FMT, typename... Args>
 [[nodiscard]] inline auto format(FMT &&f, Args &&...args) noexcept {
-    using memory_buffer = fmt::basic_memory_buffer<char, fmt::inline_buffer_size, ocarina::allocator<char>>;
+    using memory_buffer = fmt::basic_memory_buffer<char, fmt::inline_buffer_size, horizon::core::allocator<char>>;
     memory_buffer buffer;
     fmt::format_to(std::back_inserter(buffer),
                    fmt::runtime(std::forward<FMT>(f)),
                    std::forward<Args>(args)...);
-    return ocarina::string{buffer.data(), buffer.size()};
+    return horizon::core::string{buffer.data(), buffer.size()};
 }
 
-[[nodiscard]] inline auto string_split(ocarina::string_view str, char ch) {
-    ocarina::vector<ocarina::string_view> ret;
+[[nodiscard]] inline auto string_split(horizon::core::string_view str, char ch) {
+    horizon::core::vector<horizon::core::string_view> ret;
     int prev_cursor = 0;
     for (int i = 0; i < str.size(); ++i) {
         if (str[i] == ch) {
@@ -228,4 +228,4 @@ template<typename FMT, typename... Args>
     std::string str = buffer.str();
     return str;
 }
-}// namespace ocarina::inline core
+}// namespace horizon::core

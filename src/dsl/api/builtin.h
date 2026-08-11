@@ -13,7 +13,10 @@
 #include "../core/var.h"
 #include "../data/dynamic_array.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 #define OC_MAKE_BUILTIN_FUNC(func, type)                \
     [[nodiscard]] inline auto func() noexcept {         \
@@ -41,7 +44,7 @@ requires concepts::all_integral<vector_element_t<expr_value_t<DispatchIdx>>>
 }
 
 template<typename DispatchId>
-requires ocarina::is_integral_expr_v<DispatchId>
+requires horizon::dsl::is_integral_expr_v<DispatchId>
 [[nodiscard]] auto dispatch_idx(DispatchId &&id) {
     Uint2 dim = dispatch_dim().xy();
     return make_uint2(id % dim.x, id / dim.x);
@@ -458,13 +461,13 @@ auto atomic_CAS(T &ref, U &&compare, V &&val) {
 template<typename T>
 requires is_vector_v<expr_value_t<T>> || is_scalar_v<expr_value_t<T>>
 [[nodiscard]] T zero_if_nan(T t) noexcept {
-    return ocarina::select(ocarina::isnan(t), T{}, t);
+    return horizon::dsl::select(horizon::dsl::isnan(t), T{}, t);
 }
 
 template<typename T>
 requires is_vector_v<expr_value_t<T>> || is_scalar_v<expr_value_t<T>>
 [[nodiscard]] T zero_if_nan_inf(T t) noexcept {
-    return ocarina::select(ocarina::isnan(t) || ocarina::isinf(t), T{}, t);
+    return horizon::dsl::select(horizon::dsl::isnan(t) || horizon::dsl::isinf(t), T{}, t);
 }
 
 inline void unreachable() noexcept {
@@ -477,7 +480,7 @@ inline void synchronize_block() noexcept {
 
 #define OC_MAKE_WARP_FUNC(func_name, Tag, ret_type)                                                \
     template<typename T>                                                                           \
-    requires ocarina::is_boolean_expr_v<T>                                                         \
+    requires horizon::dsl::is_boolean_expr_v<T>                                                         \
     [[nodiscard]] auto func_name(const T &pred) {                                                  \
         const Expression *expr = Function::current()->call_builtin(Type::of<ret_type>(),           \
                                                                    CallOp::WARP_ACTIVE_COUNT_BITS, \
@@ -498,28 +501,28 @@ OC_MAKE_WARP_FUNC(warp_is_first_active_lane, WARP_IS_FIRST_ACTIVE_LANE, uint)
 template<typename T>
 void DynamicArray<T>::sanitize() noexcept {
     *this = map([&](const Var<T> &val) {
-        return ocarina::select(ocarina::isnan(val) || ocarina::isinf(val), Var<T>(0), val);
+        return horizon::dsl::select(horizon::dsl::isnan(val) || horizon::dsl::isinf(val), Var<T>(0), val);
     });
 }
 
 template<typename T>
 Var<T> DynamicArray<T>::max() const noexcept {
     return reduce(0.f, [](auto r, auto x) noexcept {
-        return ocarina::max(r, x);
+        return horizon::dsl::max(r, x);
     });
 }
 template<typename T>
 Var<T> DynamicArray<T>::min() const noexcept {
     return reduce(std::numeric_limits<float>::max(), [](auto r, auto x) noexcept {
-        return ocarina::min(r, x);
+        return horizon::dsl::min(r, x);
     });
 }
 
 template<typename T>
 DynamicArray<T> DynamicArray<T>::clamp(const Var<T> &min_, const Var<T> &max_) const noexcept {
     return map([&](const Var<T> &val) {
-        return ocarina::clamp(val, min_, max_);
+        return horizon::dsl::clamp(val, min_, max_);
     });
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

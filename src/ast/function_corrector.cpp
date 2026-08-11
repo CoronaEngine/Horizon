@@ -4,7 +4,9 @@
 
 #include "function_corrector.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 void FunctionCorrector::traverse(Function &function) noexcept {
     visit(function.body());
@@ -431,4 +433,4 @@ void FunctionCorrector::visit(const UnaryExpr *expr) {
     visit_expr(expr->operand_);
 }
 
-}// namespace ocarina
+}// namespace horizon::ast

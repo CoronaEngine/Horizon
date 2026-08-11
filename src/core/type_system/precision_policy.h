@@ -6,7 +6,7 @@
 
 #include "core/stl.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 enum class PrecisionPolicy : uint8_t {
     force_f32,
@@ -32,4 +32,4 @@ struct StoragePrecisionPolicy {
 void set_global_storage_policy(StoragePrecisionPolicy policy) noexcept;
 [[nodiscard]] StoragePrecisionPolicy global_storage_policy() noexcept;
 
-}// namespace ocarina
+}// namespace horizon::core

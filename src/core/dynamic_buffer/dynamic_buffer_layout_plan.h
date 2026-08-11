@@ -10,7 +10,7 @@
 #include "core/type_system/precision_policy.h"
 #include "core/type.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 /// Continuous byte range in canonical host storage.
 struct ByteRegion {
@@ -131,7 +131,7 @@ struct TypedFieldPathStaticStep<FieldComponentStep<Index>> {
 template<typename... Steps>
 class StaticTypedFieldPath {
 private:
-    inline static constexpr ocarina::array<TypedFieldPath::Step, sizeof...(Steps)> steps_{
+    inline static constexpr horizon::core::array<TypedFieldPath::Step, sizeof...(Steps)> steps_{
         detail::TypedFieldPathStaticStep<Steps>::value...
     };
 
@@ -246,4 +246,4 @@ public:
     }
 };
 
-}// namespace ocarina
+}// namespace horizon::core

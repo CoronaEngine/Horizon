@@ -5,7 +5,7 @@
 #include "stl.h"
 #include "EASTL/allocator.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 fs::path parent_path(const fs::path &p, int levels) {
     fs::path cur_path = p;
@@ -66,4 +66,4 @@ void *allocator_reallocate(void *p, size_t size, size_t alignment) noexcept {
     return allocator->allocate(size, alignment, 0u);
 }
 }// namespace detail
-}// namespace ocarina
+}// namespace horizon::core

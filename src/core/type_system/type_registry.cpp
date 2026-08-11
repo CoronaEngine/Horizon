@@ -5,7 +5,7 @@
 #include "core/type_system/type_registry.h"
 #include "core/util/logging.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace detail {
 
@@ -75,7 +75,7 @@ namespace {
     }
     if (type->is_vector()) {
         const auto *elem = type_registry().resolve_type(type->element(), policy);
-        return elem == nullptr ? string{} : ocarina::format("vector<{},{}>", elem->description(), type->dimension());
+        return elem == nullptr ? string{} : horizon::core::format("vector<{},{}>", elem->description(), type->dimension());
     }
     if (type->is_matrix()) {
         const auto *col = type_registry().resolve_type(type->element(), policy);
@@ -83,18 +83,18 @@ namespace {
             return {};
         }
         const auto *scalar = col->element();
-        return scalar == nullptr ? string{} : ocarina::format("matrix<{},{},{}>", scalar->description(), type->dimension(), col->dimension());
+        return scalar == nullptr ? string{} : horizon::core::format("matrix<{},{},{}>", scalar->description(), type->dimension(), col->dimension());
     }
     if (type->is_array()) {
         const auto *elem = type_registry().resolve_type(type->element(), policy);
-        return elem == nullptr ? string{} : ocarina::format("array<{},{}>", elem->description(), type->dimension());
+        return elem == nullptr ? string{} : horizon::core::format("array<{},{}>", elem->description(), type->dimension());
     }
     if (type->is_buffer()) {
         const auto *elem = type_registry().resolve_type(type->element(), policy);
-        return elem == nullptr ? string{} : ocarina::format("buffer<{}>", elem->description());
+        return elem == nullptr ? string{} : horizon::core::format("buffer<{}>", elem->description());
     }
     if (type->is_structure()) {
-        string ret = ocarina::format("struct<{},{},{},{}",
+        string ret = horizon::core::format("struct<{},{},{},{}",
                                      type->cname(),
                                      resolved_alignment_locked(type, policy),
                                      type->is_builtin_struct(),
@@ -125,14 +125,14 @@ namespace {
     return nullptr;
 }
 
-[[nodiscard]] const Type *TypeRegistry::emplace_type_locked(ocarina::unique_ptr<Type> type) noexcept {
+[[nodiscard]] const Type *TypeRegistry::emplace_type_locked(horizon::core::unique_ptr<Type> type) noexcept {
     const Type *ret = type.get();
     by_hash_.emplace(compute_type_hash(type->description()), ret);
-    types_.push_back(ocarina::move(type));
+    types_.push_back(horizon::core::move(type));
     return ret;
 }
 
-[[nodiscard]] bool TypeRegistry::register_type(ocarina::unique_ptr<Type> type) noexcept {
+[[nodiscard]] bool TypeRegistry::register_type(horizon::core::unique_ptr<Type> type) noexcept {
     std::unique_lock lock{mutex_};
     const auto hash = type->hash();
     if (by_hash_.contains(hash)) {
@@ -149,9 +149,9 @@ namespace {
     return find_by_hash_locked(hash);
 }
 
-[[nodiscard]] const Type *TypeRegistry::emplace_type(ocarina::unique_ptr<Type> type) noexcept {
+[[nodiscard]] const Type *TypeRegistry::emplace_type(horizon::core::unique_ptr<Type> type) noexcept {
     std::unique_lock lock{mutex_};
-    return emplace_type_locked(ocarina::move(type));
+    return emplace_type_locked(horizon::core::move(type));
 }
 
 [[nodiscard]] const Type *TypeRegistry::resolve_type(const Type *type,
@@ -196,9 +196,9 @@ namespace {
     return by_hash_.find(hash) != by_hash_.cend();
 }
 
-[[nodiscard]] ocarina::vector<const Type *> TypeRegistry::snapshot() noexcept {
+[[nodiscard]] horizon::core::vector<const Type *> TypeRegistry::snapshot() noexcept {
     std::unique_lock lock{mutex_};
-    ocarina::vector<const Type *> snapshot;
+    horizon::core::vector<const Type *> snapshot;
     snapshot.reserve(types_.size());
     for (const auto &type : types_) {
         snapshot.push_back(type.get());
@@ -211,7 +211,7 @@ namespace {
     return registry;
 }
 
-[[nodiscard]] uint64_t compute_type_hash(ocarina::string_view desc) noexcept {
+[[nodiscard]] uint64_t compute_type_hash(horizon::core::string_view desc) noexcept {
     return Hashable::compute_hash<Type>(hash64(desc));
 }
 
@@ -225,4 +225,4 @@ void notify_type_access(const Type *type) noexcept {
     }
 }
 
-}// namespace ocarina
+}// namespace horizon::core

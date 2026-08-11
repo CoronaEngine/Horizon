@@ -10,7 +10,8 @@
 #include "half.h"
 #include "real.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 namespace detail {
 
 template<typename T>
@@ -32,9 +33,10 @@ struct valid_vector_impl : public std::disjunction<
 template<typename T>
 static constexpr auto valid_vector_v = detail::valid_vector_impl<std::remove_cvref_t<T>>::value;
 
-}// namespace ocarina
+}// namespace horizon::math
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 template<typename T, size_t N, size_t... Indices>
 struct Swizzle {
@@ -48,8 +50,8 @@ struct Swizzle {
     };
 
     template<typename Scalar>
-    struct vec<ocarina::Var<Scalar>> {
-        using type = ocarina::Var<Vector<Scalar, num_component>>;
+    struct vec<horizon::math::Var<Scalar>> {
+        using type = horizon::math::Var<Vector<Scalar, num_component>>;
     };
 
     using vec_type = typename vec<T>::type;
@@ -68,7 +70,7 @@ private:
     }
 
 public:
-    ocarina::array<T, N> data_{};
+    horizon::math::array<T, N> data_{};
 
 public:
     Swizzle &operator=(const vec_type &vec) noexcept {
@@ -181,21 +183,22 @@ public:
         return decay() op rhs;                                                    \
     }
 
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(||, ocarina::is_all_boolean_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(&&, ocarina::is_all_boolean_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(==, ocarina::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(!=, ocarina::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(<, ocarina::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(>, ocarina::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(<=, ocarina::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
-    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(>=, ocarina::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(||, horizon::math::is_all_boolean_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(&&, horizon::math::is_all_boolean_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(==, horizon::math::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(!=, horizon::math::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(<, horizon::math::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(>, horizon::math::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(<=, horizon::math::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
+    OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP(>=, horizon::math::is_all_number_v<remove_device_t<T>, remove_device_t<U>>)
 
 #undef OC_MAKE_SWIZZLE_MEMBER_LOGIC_OP
 };
 
-}// namespace ocarina
+}// namespace horizon::math
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 namespace detail {
 template<typename T, size_t N>
@@ -389,16 +392,16 @@ struct Vector : public detail::VectorStorage<T, N> {
         return (lhs op## = Vector<U, N>{rhs});                                                         \
     }
 
-    OC_MAKE_VECTOR_BINARY_OPERATOR(+, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(-, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(*, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(/, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(%, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(>>, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(<<, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(|, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(&, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(^, ocarina::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(+, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(-, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(*, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(/, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(%, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(>>, horizon::math::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(<<, horizon::math::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(|, horizon::math::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(&, horizon::math::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(^, horizon::math::is_all_integral_v<T, U>)
 
 #undef OC_MAKE_VECTOR_BINARY_OPERATOR
 
@@ -434,14 +437,14 @@ struct Vector : public detail::VectorStorage<T, N> {
         return this_type{lhs} op rhs;                                                         \
     }
 
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(||, ocarina::is_all_boolean_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(&&, ocarina::is_all_boolean_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(==, ocarina::is_all_scalar_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(!=, ocarina::is_all_scalar_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(<, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(>, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(<=, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_LOGIC_OPERATOR(>=, ocarina::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(||, horizon::math::is_all_boolean_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(&&, horizon::math::is_all_boolean_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(==, horizon::math::is_all_scalar_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(!=, horizon::math::is_all_scalar_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(<, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(>, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(<=, horizon::math::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_LOGIC_OPERATOR(>=, horizon::math::is_all_number_v<T, U>)
 
 #undef OC_MAKE_VECTOR_LOGIC_OPERATOR
 
@@ -798,12 +801,12 @@ OC_MAKE_SWIZZLE_LOGIC_FUNC(none)
     }                                                                                                                        \
     template<typename T, size_t N, size_t... Indices>                                                                        \
     requires(sizeof...(Indices) >= 2)                                                                                        \
-    [[nodiscard]] constexpr auto make_##type##2(ocarina::Swizzle<T, N, Indices...> v) noexcept {                             \
+    [[nodiscard]] constexpr auto make_##type##2(horizon::math::Swizzle<T, N, Indices...> v) noexcept {                             \
         return make_##type##2(v.decay());                                                                                    \
     }                                                                                                                        \
     template<typename T, size_t N>                                                                                           \
     requires(N >= 2)                                                                                                         \
-    [[nodiscard]] constexpr auto make_##type##2(ocarina::array<T, N> v) noexcept {                                           \
+    [[nodiscard]] constexpr auto make_##type##2(horizon::math::array<T, N> v) noexcept {                                           \
         return type##2(                                                                                                      \
             static_cast<type>(v[0]),                                                                                         \
             static_cast<type>(v[1]));                                                                                        \
@@ -821,12 +824,12 @@ OC_MAKE_SWIZZLE_LOGIC_FUNC(none)
     }                                                                                                                        \
     template<typename T, size_t N, size_t... Indices>                                                                        \
     requires(sizeof...(Indices) >= 3)                                                                                        \
-    [[nodiscard]] constexpr auto make_##type##3(ocarina::Swizzle<T, N, Indices...> v) noexcept {                             \
+    [[nodiscard]] constexpr auto make_##type##3(horizon::math::Swizzle<T, N, Indices...> v) noexcept {                             \
         return make_##type##3(v.decay());                                                                                    \
     }                                                                                                                        \
     template<typename T, size_t N>                                                                                           \
     requires(N >= 3)                                                                                                         \
-    [[nodiscard]] constexpr auto make_##type##3(ocarina::array<T, N> v) noexcept {                                           \
+    [[nodiscard]] constexpr auto make_##type##3(horizon::math::array<T, N> v) noexcept {                                           \
         return type##3(                                                                                                      \
             static_cast<type>(v[0]),                                                                                         \
             static_cast<type>(v[1]),                                                                                         \
@@ -849,12 +852,12 @@ OC_MAKE_SWIZZLE_LOGIC_FUNC(none)
     }                                                                                                                        \
     template<typename T, size_t N, size_t... Indices>                                                                        \
     requires(sizeof...(Indices) >= 4)                                                                                        \
-    [[nodiscard]] constexpr auto make_##type##4(ocarina::Swizzle<T, N, Indices...> v) noexcept {                             \
+    [[nodiscard]] constexpr auto make_##type##4(horizon::math::Swizzle<T, N, Indices...> v) noexcept {                             \
         return make_##type##4(v.decay());                                                                                    \
     }                                                                                                                        \
     template<typename T, size_t N>                                                                                           \
     requires(N == 4)                                                                                                         \
-    [[nodiscard]] constexpr auto make_##type##4(ocarina::array<T, N> v) noexcept {                                           \
+    [[nodiscard]] constexpr auto make_##type##4(horizon::math::array<T, N> v) noexcept {                                           \
         return type##4(                                                                                                      \
             static_cast<type>(v[0]),                                                                                         \
             static_cast<type>(v[1]),                                                                                         \
@@ -882,4 +885,4 @@ OC_MAKE_TYPE_N(char)
 
 #undef OC_MAKE_TYPE_N
 
-}// namespace ocarina
+}// namespace horizon::math

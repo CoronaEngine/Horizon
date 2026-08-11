@@ -9,7 +9,7 @@
 #include "core/dynamic_buffer/dynamic_buffer_layout_plan.h"
 #include "core/dynamic_buffer/host_byte_buffer.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 struct DirtyByteRange {
     bool dirty{false};
@@ -376,4 +376,4 @@ void detail::HostDynamicBufferStorage::patch(size_t index,
     generation_++;
 }
 
-}// namespace ocarina
+}// namespace horizon::core

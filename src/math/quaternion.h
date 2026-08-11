@@ -8,7 +8,8 @@
 #include "dsl/dsl.h"
 #include "geometry.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 template<EPort p>
 class oc_quaternion {
@@ -22,8 +23,8 @@ public:
 
     static oc_quaternion<p> from_axis_angle(oc_float3<p> axis, oc_float<p> theta) {
         oc_float<p> half_theta = theta * 0.5f;
-        oc_float3<p> v = ocarina::sin(half_theta) * axis;
-        oc_float<p> w = ocarina::cos(half_theta);
+        oc_float3<p> v = horizon::math::sin(half_theta) * axis;
+        oc_float<p> w = horizon::math::cos(half_theta);
         return oc_quaternion<p>(v, w);
     }
 
@@ -140,4 +141,4 @@ public:
 using quaternion = oc_quaternion<H>;
 using Quaternion = oc_quaternion<D>;
 
-}// namespace ocarina
+}// namespace horizon::math

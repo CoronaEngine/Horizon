@@ -6,55 +6,55 @@
 
 #include "stmt_builder.h"
 
-#define $source_location ocarina::format("{},{}", __FILE__, __LINE__)
+#define $source_location horizon::dsl::format("{},{}", __FILE__, __LINE__)
 
-#define $sign_source_location ocarina::comment($source_location);
+#define $sign_source_location horizon::dsl::comment($source_location);
 
-#define $if(...) ::ocarina::detail::IfStmtBuilder::create_with_source_location("if: " + $source_location, __VA_ARGS__) / [&]() noexcept
+#define $if(...) ::horizon::dsl::detail::IfStmtBuilder::create_with_source_location("if: " + $source_location, __VA_ARGS__) / [&]() noexcept
 #define $else % [&]() noexcept
 #define $elif(...) *[&] {                                                                                           \
-    return ::ocarina::detail::IfStmtBuilder::create_with_source_location("elif: " + $source_location, __VA_ARGS__); \
+    return ::horizon::dsl::detail::IfStmtBuilder::create_with_source_location("elif: " + $source_location, __VA_ARGS__); \
 } / [&]
 
-#define $comment(...) ::ocarina::comment(#__VA_ARGS__);
+#define $comment(...) ::horizon::dsl::comment(#__VA_ARGS__);
 
-#define $switch(...) ::ocarina::detail::SwitchStmtBuilder::create_with_source_location("switch: " + $source_location, __VA_ARGS__) \
-    *[&](::ocarina::Case case_,                                                                                                    \
-         ::ocarina::Default default_) noexcept
+#define $switch(...) ::horizon::dsl::detail::SwitchStmtBuilder::create_with_source_location("switch: " + $source_location, __VA_ARGS__) \
+    *[&](::horizon::dsl::Case case_,                                                                                                    \
+         ::horizon::dsl::Default default_) noexcept
 
 #define $case(...) case_("switch case: " + $source_location, __VA_ARGS__) \
-    *[&](::ocarina::Break break_) noexcept
+    *[&](::horizon::dsl::Break break_) noexcept
 
 #define $break break_("break: " + $source_location)
-#define $default default_("default: " + $source_location) *[&](::ocarina::Break break_) noexcept
+#define $default default_("default: " + $source_location) *[&](::horizon::dsl::Break break_) noexcept
 #define $continue continue_("continue: " + $source_location)
 
-#define $super_break ::ocarina::syntax::break_("break: " + $source_location)
-#define $super_continue ::ocarina::syntax::continue_("break: " + $source_location)
+#define $super_break ::horizon::dsl::syntax::break_("break: " + $source_location)
+#define $super_continue ::horizon::dsl::syntax::continue_("break: " + $source_location)
 
-#define $loop ::ocarina::detail::LoopStmtBuilder::create_with_source_location("loop: " + $source_location) \
-    *[&](::ocarina::Continue continue_,                                                                    \
-         ::ocarina::Break break_) noexcept
+#define $loop ::horizon::dsl::detail::LoopStmtBuilder::create_with_source_location("loop: " + $source_location) \
+    *[&](::horizon::dsl::Continue continue_,                                                                    \
+         ::horizon::dsl::Break break_) noexcept
 
-#define $while(...) ::ocarina::detail::LoopStmtBuilder::create_with_source_location("while: " + $source_location) / \
+#define $while(...) ::horizon::dsl::detail::LoopStmtBuilder::create_with_source_location("while: " + $source_location) / \
                         [&]() noexcept {                                                                            \
-                            ::ocarina::if_(!(__VA_ARGS__), [&] {                                                    \
-                                ocarina::syntax::break_();                                                          \
+                            ::horizon::dsl::if_(!(__VA_ARGS__), [&] {                                                    \
+                                horizon::dsl::syntax::break_();                                                          \
                             });                                                                                     \
-                        } *[&](::ocarina::Continue continue_,                                                       \
-                               ::ocarina::Break break_) noexcept
+                        } *[&](::horizon::dsl::Continue continue_,                                                       \
+                               ::horizon::dsl::Break break_) noexcept
 
-#define $for(v, ...) ::ocarina::detail::range_with_source_location("for: " + $source_location, __VA_ARGS__) \
+#define $for(v, ...) ::horizon::dsl::detail::range_with_source_location("for: " + $source_location, __VA_ARGS__) \
                              .set_var_symbol(#v) /                                                          \
                          [&](auto v,                                                                        \
-                             ::ocarina::Continue continue_,                                                 \
-                             ::ocarina::Break break_) noexcept
+                             ::horizon::dsl::Continue continue_,                                                 \
+                             ::horizon::dsl::Break break_) noexcept
 
-#define $return(...) ::ocarina::return_(__VA_ARGS__)
+#define $return(...) ::horizon::dsl::return_(__VA_ARGS__)
 
-#define $scope ::ocarina::detail::ScopeStmtBuilder("scope " + $source_location) + [&]() noexcept
+#define $scope ::horizon::dsl::detail::ScopeStmtBuilder("scope " + $source_location) + [&]() noexcept
 
-#define $outline ::ocarina::detail::CallableOutlineBuilder("callable " + $source_location) % [&]() noexcept
+#define $outline ::horizon::dsl::detail::CallableOutlineBuilder("callable " + $source_location) % [&]() noexcept
 
 #define $debug(...) Env::printer().set_description("debug " + $source_location).debug(__VA_ARGS__);
 #define $info(...) Env::printer().set_description("info " + $source_location).info(__VA_ARGS__);

@@ -7,30 +7,32 @@
 #include "variable.h"
 #include "core/util/string_util.h"
 
-namespace ocarina::detail {
+namespace horizon::ast::detail {
+using namespace horizon::core;
+using namespace horizon::math;
 
 template<typename T>
 [[nodiscard]] auto to_string(T &&t) noexcept {
-    static thread_local ocarina::array<char, 128u> s{};
+    static thread_local horizon::ast::array<char, 128u> s{};
     auto [iter, size] = fmt::format_to_n(s.data(), s.size(), FMT_STRING("{}"), t);
     string ret(s.data(), size);
     return ret;
 }
 
 [[nodiscard]] inline string struct_name(uint64_t hash) {
-    return "structure_" + ocarina::format("{:016x}", hash);
+    return "structure_" + horizon::ast::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string func_name(uint64_t hash) {
-    return "function_" + ocarina::format("{:016x}", hash);
+    return "function_" + horizon::ast::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string kernel_name(uint64_t hash, string desc = "") {
-    return "kernel_" + ocarina::move(desc) + "_" + ocarina::format("{:016x}", hash);
+    return "kernel_" + horizon::ast::move(desc) + "_" + horizon::ast::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string raygen_name(uint64_t hash, string desc = "") {
-    return "__raygen__" + ocarina::move(desc) + "_" + ocarina::format("{:016x}", hash);
+    return "__raygen__" + horizon::ast::move(desc) + "_" + horizon::ast::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string member_name(uint index) {
@@ -74,4 +76,4 @@ template<typename T>
     return "";
 }
 
-}// namespace ocarina::detail
+}// namespace horizon::ast::detail

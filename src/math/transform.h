@@ -10,7 +10,8 @@
 #include "math/box.h"
 #include "quaternion.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 inline namespace transform {
 
@@ -51,7 +52,7 @@ template<EPort p = D>
 template<EPort p = D>
 [[nodiscard]] inline oc_float4x4<p> perspective(oc_float<p> fov_y, const oc_float<p> &z_near,
                                                 const oc_float<p> &z_far, oc_bool<p> radian = false) {
-    fov_y = ocarina::select(radian, fov_y, radians(fov_y));
+    fov_y = horizon::math::select(radian, fov_y, radians(fov_y));
     oc_float<p> inv_tan = 1 / tan(fov_y / 2.f);
     oc_float4x4<p> mat = make_float4x4(
         inv_tan, 0, 0, 0,
@@ -64,7 +65,7 @@ template<EPort p = D>
 template<EPort p = D>
 [[nodiscard]] oc_float4x4<p> rotation(const oc_float3<p> &axis, oc_float<p> angle,
                                       oc_bool<p> radian = false) noexcept {
-    angle = ocarina::select(radian, angle, radians(angle));
+    angle = horizon::math::select(radian, angle, radians(angle));
     oc_float<p> c = cos(angle);
     oc_float<p> s = sin(angle);
     oc_float3<p> a = normalize(axis);
@@ -220,4 +221,4 @@ public:
     [[nodiscard]] auto apply_ray(T &&ray) noexcept { return transform_ray<port_v<TMat, T>>(_mat, OC_FORWARD(ray)); }
 };
 
-}// namespace ocarina
+}// namespace horizon::math

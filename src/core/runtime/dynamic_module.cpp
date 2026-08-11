@@ -6,7 +6,7 @@
 #include "core/runtime/platform.h"
 #include "core/util/logging.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace {
 
@@ -18,8 +18,8 @@ fs::path normalize_path(fs::path path) noexcept {
 
 }// namespace
 
-ocarina::vector<fs::path> &DynamicModule::search_path() {
-    static ocarina::vector<fs::path> ret;
+horizon::core::vector<fs::path> &DynamicModule::search_path() {
+    static horizon::core::vector<fs::path> ret;
     return ret;
 }
 
@@ -74,4 +74,4 @@ void *DynamicModule::function_ptr(const string &func_name) const noexcept {
     return dynamic_module_find_symbol(const_cast<void*>(handle_), func_name);
 }
 
-}// namespace ocarina
+}// namespace horizon::core

@@ -10,7 +10,9 @@
 #include "core/stl.h"
 #include "core/type_system/type_desc.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 class LayoutResolver {
 private:
@@ -37,4 +39,4 @@ private:
     [[nodiscard]] string resolve_structure_description(const Type *type) const noexcept;
 };
 
-}// namespace ocarina
+}// namespace horizon::ast

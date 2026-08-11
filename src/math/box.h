@@ -12,7 +12,8 @@
 #include "dsl/types/struct.h"
 #include "dsl/api/builtin.h"
 
-namespace ocarina::inline math {
+namespace horizon::math {
+using namespace horizon::core;
 template<typename T, size_t N>
 struct TBox {
 public:
@@ -75,7 +76,7 @@ public:
     }
 
     [[nodiscard]] vector_t lerp(vector_t t) const noexcept {
-        return ocarina::lerp(t, lower, upper);
+        return horizon::math::lerp(t, lower, upper);
     }
 
     [[nodiscard]] vector_t center() const noexcept {
@@ -91,7 +92,7 @@ public:
     }
 
     [[nodiscard]] scalar_t volume() const noexcept {
-        return ocarina::volume(upper - lower);
+        return horizon::math::volume(upper - lower);
     }
 
     [[nodiscard]] scalar_t area() const noexcept {
@@ -150,12 +151,12 @@ template<EPort p = D>
 
 }
 
-// namespace ocarina::math
+// namespace horizon::math
 
 // clang-format off
-OC_STRUCT(ocarina, Box2u, lower, upper) {
+OC_STRUCT(horizon::math, Box2u, lower, upper) {
     [[nodiscard]] Bool contains(const Uint2 &point) const noexcept {
-        return ocarina::all(point >= lower) && ocarina::all(upper >= point);
+        return horizon::math::all(point >= lower) && horizon::math::all(upper >= point);
     }
 };
 // clang-format on

@@ -8,7 +8,14 @@
 #include "core/stl.h"
 #include "core/util/element_trait.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+template<typename T>
+struct Var;
+}
+
+namespace horizon::math {
+using namespace horizon::core;
+using horizon::dsl::Var;
 
 template<typename T>
 requires std::is_enum_v<T>
@@ -87,14 +94,14 @@ constexpr auto is_unsigned_v = is_unsigned<T>::value;
 template<typename T>
 using is_scalar = std::disjunction<is_integral<T>,
                                    is_boolean<T>,
-                                   ocarina::is_floating_point<T>>;
+                                   horizon::math::is_floating_point<T>>;
 
 template<typename T>
 constexpr auto is_scalar_v = is_scalar<T>::value;
 
 template<typename T>
 using is_number = std::disjunction<is_integral<T>,
-                                   ocarina::is_floating_point<T>>;
+                                   horizon::math::is_floating_point<T>>;
 
 template<typename T>
 constexpr auto is_number_v = is_number<T>::value;
@@ -164,9 +171,6 @@ template<typename T, size_t N = 0>
 using is_swizzle = detail::is_swizzle_dim_impl<std::remove_cvref_t<T>, N>;
 template<typename T, size_t N = 0>
 constexpr auto is_swizzle_v = is_swizzle<T, N>::value;
-
-template<typename T>
-struct Var;
 
 namespace detail {
 
@@ -506,7 +510,7 @@ OC_DEFINE_TEMPLATE_VALUE_MULTI(is_same_type_dimension)
 
 namespace detail {
 template<typename... Ts>
-struct is_same_type_element_impl : ocarina::is_same<type_element_t<Ts>...> {};
+struct is_same_type_element_impl : horizon::math::is_same<type_element_t<Ts>...> {};
 
 }// namespace detail
 
@@ -709,7 +713,7 @@ template<typename T>
 struct is_std_vector_impl : std::false_type {};
 
 template<typename T>
-struct is_std_vector_impl<ocarina::vector<T>> : std::true_type {};
+struct is_std_vector_impl<horizon::math::vector<T>> : std::true_type {};
 }// namespace detail
 
 template<typename T>
@@ -748,4 +752,4 @@ template<typename... Ts>
 using match_basic_func = detail::match_basic_func_impl<std::remove_cvref_t<Ts>...>;
 OC_DEFINE_TEMPLATE_VALUE_MULTI(match_basic_func)
 
-}// namespace ocarina
+}// namespace horizon::math

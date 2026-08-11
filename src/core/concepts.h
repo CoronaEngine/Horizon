@@ -7,7 +7,7 @@
 #include "math/basic_traits.h"
 #include "stl.h"
 
-namespace ocarina::concepts {
+namespace horizon::core::concepts {
 
 struct Noncopyable {
     Noncopyable() noexcept = default;
@@ -31,7 +31,7 @@ concept subscriptable = requires(T v) {
 
 template<typename T>
 concept string_viewable = requires(T v) {
-    ocarina::string_view{v};
+    horizon::core::string_view{v};
 };
 
 template<typename... Ts>
@@ -39,7 +39,7 @@ concept all_string_viewable = (string_viewable<Ts> && ...);
 
 template<typename T>
 concept string_convertible = requires(T v) {
-    ocarina::string{v};
+    horizon::core::string{v};
 };
 
 template<typename... Ts>
@@ -47,7 +47,7 @@ concept all_string_convertible = (string_convertible<Ts> && ...);
 
 template<typename T>
 concept span_convertible = requires(T v) {
-    ocarina::span{v};
+    horizon::core::span{v};
 };
 
 template<typename T, typename... Args>
@@ -153,7 +153,7 @@ template<typename T>
 concept bool_able = requires(T t) { bool(t); };
 
 template<typename T>
-concept switch_able = std::is_enum_v<T> || ocarina::is_integral_v<T>;
+concept switch_able = std::is_enum_v<T> || horizon::core::is_integral_v<T>;
 
 #define OC_MAKE_UNARY_CHECK(concept_name, op) \
     template<typename T>                      \
@@ -203,4 +203,4 @@ OC_MAKE_BINARY_CHECK(right_left_assgin, >>=)
 
 #undef OC_MAKE_BINARY_CHECK
 
-}// namespace ocarina::concepts
+}// namespace horizon::core::concepts

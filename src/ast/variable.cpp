@@ -6,7 +6,9 @@
 #include "symbol_name.h"
 #include "function.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 Variable::Variable(const Function *context,
                    const Type *type,
@@ -48,7 +50,7 @@ void Variable::set_suffix(std::string suffix) noexcept {
     const_cast<Function *>(context_)->variable_data(uid_).suffix = std::move(suffix);
 }
 
-void Variable::mark_usage(ocarina::Usage usage) const noexcept {
+void Variable::mark_usage(horizon::ast::Usage usage) const noexcept {
     const_cast<Function *>(context_)->mark_variable_usage(uid_, usage);
 }
 
@@ -68,7 +70,7 @@ Variable::Tag Variable::tag() const noexcept {
     return context_->variable_data(uid_).tag;
 }
 
-void Variable::set_tag(ocarina::Variable::Tag tag) noexcept {
+void Variable::set_tag(horizon::ast::Variable::Tag tag) noexcept {
     const_cast<Function *>(context_)->variable_data(uid_).tag = tag;
 }
 
@@ -81,4 +83,4 @@ string Variable::final_name() const noexcept {
     return raw_name;
 }
 
-}// namespace ocarina
+}// namespace horizon::ast

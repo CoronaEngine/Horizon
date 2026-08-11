@@ -12,7 +12,10 @@
 #include "type_trait.h"
 #include <source_location>
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 struct ArgumentCreation {};
@@ -29,17 +32,17 @@ public:
     using Ref<T>::Ref;
     using dsl_type = Var<T>;
     friend class MemberAccessor;
-    explicit Var(const ocarina::Expression *expression) noexcept
-        : ocarina::detail::Ref<org_type>(expression) {}
+    explicit Var(const horizon::dsl::Expression *expression) noexcept
+        : horizon::dsl::detail::Ref<org_type>(expression) {}
     Var(OC_APPEND_SRC_LOCATION) noexcept
-        : Var(ocarina::Function::current()->local(ocarina::Type::of<org_type>(), OC_SRC_LOCATION)) {
+        : Var(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<org_type>(), OC_SRC_LOCATION)) {
         static_assert(!is_param_struct_v<T>);
         if constexpr (is_struct_v<T>) {
             Ref<T>::set(T{});
         }
     }
     Var(Var &&another) noexcept
-        : Ref<T>(ocarina::move(another)) {}
+        : Ref<T>(horizon::dsl::move(another)) {}
 
     Var<T> &set_symbol(const string &name) {
         auto variable_expr = static_cast<const VariableExpr *>(Super::expression());
@@ -48,20 +51,20 @@ public:
     }
 
     Var(const Var &another) noexcept
-        : Var() { ocarina::detail::assign(*this, another); }
+        : Var() { horizon::dsl::detail::assign(*this, another); }
     template<typename Arg>
-    requires ocarina::concepts::non_pointer<std::remove_cvref_t<Arg>> &&
+    requires horizon::dsl::concepts::non_pointer<std::remove_cvref_t<Arg>> &&
              concepts::different<std::remove_cvref_t<Arg>, Var<org_type>> &&
-             requires(ocarina::expr_value_t<org_type> a, ocarina::expr_value_t<Arg> b) { a = b; }
+             requires(horizon::dsl::expr_value_t<org_type> a, horizon::dsl::expr_value_t<Arg> b) { a = b; }
     Var(Arg &&arg, OC_APPEND_SRC_LOCATION)
-        : Var(OC_SRC_LOCATION) { ocarina::detail::assign(*this, std::forward<Arg>(arg)); }
-    explicit Var(ocarina::detail::ArgumentCreation,
+        : Var(OC_SRC_LOCATION) { horizon::dsl::detail::assign(*this, std::forward<Arg>(arg)); }
+    explicit Var(horizon::dsl::detail::ArgumentCreation,
                  OC_APPEND_SRC_LOCATION) noexcept
-        : Var(ocarina::Function::current()->argument(ocarina::Type::of<org_type>())) {}
-    explicit Var(ocarina::detail::ReferenceArgumentCreation, OC_APPEND_SRC_LOCATION) noexcept
-        : Var(ocarina::Function::current()->reference_argument(ocarina::Type::of<org_type>())) {}
+        : Var(horizon::dsl::Function::current()->argument(horizon::dsl::Type::of<org_type>())) {}
+    explicit Var(horizon::dsl::detail::ReferenceArgumentCreation, OC_APPEND_SRC_LOCATION) noexcept
+        : Var(horizon::dsl::Function::current()->reference_argument(horizon::dsl::Type::of<org_type>())) {}
     template<typename Arg>
-    requires requires(ocarina::expr_value_t<org_type> a, ocarina::remove_device_t<Arg> b) { a = b; }
+    requires requires(horizon::dsl::expr_value_t<org_type> a, horizon::dsl::remove_device_t<Arg> b) { a = b; }
     void operator=(Arg &&arg) {
         if constexpr (is_struct_v<Arg>) {
             Super::set(OC_FORWARD(arg));
@@ -70,10 +73,10 @@ public:
             *this = decay_swizzle(OC_FORWARD(arg));
         }
         else {
-            ocarina::detail::assign(*this, std::forward<Arg>(arg));
+            horizon::dsl::detail::assign(*this, std::forward<Arg>(arg));
         }
     }
-    void operator=(const Var &other) { ocarina::detail::assign(*this, other); }
+    void operator=(const Var &other) { horizon::dsl::detail::assign(*this, other); }
     OC_MAKE_GET_PROXY
 private:
 #define OC_MAKE_VAR_UNARY_FUNC(func, tag)                                           \
@@ -302,4 +305,4 @@ Var(const Buffer<T> &) -> Var<Buffer<T>>;
     Type var_name;          \
     var_name.set_symbol(#var_name)
 
-}// namespace ocarina
+}// namespace horizon::dsl

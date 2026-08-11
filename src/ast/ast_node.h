@@ -11,7 +11,9 @@
 #include "variable.h"
 #include "op.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 class Function;
 
 class ASTNode {
@@ -66,4 +68,4 @@ bool check_context(const T &t, const Function *ctx) {
         return Super::check_context(ctx) MAP(OC_MAKE_CHECK_CONTEXT_ELEMENT, __VA_ARGS__); \
     }
 
-}// namespace ocarina
+}// namespace horizon::ast

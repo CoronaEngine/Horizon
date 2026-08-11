@@ -11,9 +11,10 @@
 #include "half.h"
 #include "real.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
-using basic_types = ocarina::tuple<
+using basic_types = horizon::math::tuple<
     bool, float, real, int, uint, ulong, half,
     bool2, float2, real2, int2, uint2, ulong2, half2,
     bool3, float3, real3, int3, uint3, ulong3, half3,
@@ -32,8 +33,8 @@ struct tuple_to_variant_impl {
 };
 
 template<typename... Ts>
-struct tuple_to_variant_impl<ocarina::tuple<Ts...>> {
-    using type = ocarina::variant<Ts...>;
+struct tuple_to_variant_impl<horizon::math::tuple<Ts...>> {
+    using type = horizon::math::variant<Ts...>;
 };
 }// namespace detail
 
@@ -43,9 +44,9 @@ using tuple_to_variant_t = typename detail::tuple_to_variant_impl<T>::type;
 using basic_variant_t = tuple_to_variant_t<basic_types>;
 
 namespace detail {
-using texture_elements = ocarina::tuple<uchar, uchar2, uchar4, float, float2, float4>;
+using texture_elements = horizon::math::tuple<uchar, uchar2, uchar4, float, float2, float4>;
 template<typename T, typename... Ts>
-[[nodiscard]] constexpr bool is_contain(const ocarina::tuple<Ts...> *tp) noexcept {
+[[nodiscard]] constexpr bool is_contain(const horizon::math::tuple<Ts...> *tp) noexcept {
     return std::disjunction_v<std::is_same<T, Ts>...>;
 }
 
@@ -113,8 +114,8 @@ struct literal_value {
 };
 
 template<typename... T>
-struct literal_value<ocarina::tuple<T...>> {
-    using type = ocarina::variant<T...>;
+struct literal_value<horizon::math::tuple<T...>> {
+    using type = horizon::math::variant<T...>;
 };
 }// namespace detail
 
@@ -123,4 +124,4 @@ using literal_value_t = typename detail::literal_value<T>::type;
 
 using basic_literal_t = literal_value_t<basic_types>;
 
-}// namespace ocarina
+}// namespace horizon::math

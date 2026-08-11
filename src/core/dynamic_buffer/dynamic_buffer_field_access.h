@@ -7,7 +7,7 @@
 #include "core/dynamic_buffer/dynamic_buffer_layout_common.h"
 #include "core/dynamic_buffer/dynamic_buffer_layout_plan.h"
 
-namespace ocarina::detail {
+namespace horizon::core::detail {
 
 [[nodiscard]] inline StoragePrecisionPolicy runtime_field_policy() noexcept {
     return StoragePrecisionPolicy{.policy = PrecisionPolicy::force_f32,
@@ -231,4 +231,4 @@ inline void collect_runtime_soa_field_segments(const RuntimeFieldAccessInfo &inf
                                  segments);
 }
 
-}// namespace ocarina::detail
+}// namespace horizon::core::detail

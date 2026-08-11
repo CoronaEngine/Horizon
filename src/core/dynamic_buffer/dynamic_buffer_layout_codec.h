@@ -11,7 +11,7 @@
 #include "math/half.h"
 #include "math/real.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 enum class DynamicBufferLayout : uint8_t {
     AOS,
@@ -542,4 +542,4 @@ struct DynamicBufferLayoutCodec {
     }
 };
 
-}// namespace ocarina
+}// namespace horizon::core

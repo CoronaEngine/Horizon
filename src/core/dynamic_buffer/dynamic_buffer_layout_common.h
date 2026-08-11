@@ -9,7 +9,7 @@
 #include "math/half.h"
 #include "math/real.h"
 
-namespace ocarina::detail {
+namespace horizon::core::detail {
 
 template<typename T>
 struct StaticTypeKey {
@@ -371,4 +371,4 @@ struct CompileTimeTypeLayoutAdapter {
     }
 };
 
-}// namespace ocarina::detail
+}// namespace horizon::core::detail

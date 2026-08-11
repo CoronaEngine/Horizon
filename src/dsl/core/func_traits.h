@@ -9,7 +9,10 @@
 #include "core/stl.h"
 #include "math/basic_types.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 namespace detail {
 template<typename R, typename... Args>
 using function_signature = R(Args...);
@@ -71,4 +74,4 @@ struct dsl_function {
         canonical_signature_t<std::remove_cvref_t<T>>>::type;
 };
 }// namespace detail
-}// namespace ocarina
+}// namespace horizon::dsl

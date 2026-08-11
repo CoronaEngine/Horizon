@@ -9,9 +9,10 @@
 #include "ref.h"
 #include "ast/function.h"
 
-namespace ocarina {
-
-struct Expression;
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 
@@ -20,7 +21,7 @@ template<typename T>
     if constexpr (is_dsl_v<T>) {
         return std::forward<T>(v).expression();
     } else {
-        return ocarina::Function::current()->literal(Type::of<T>(), std::forward<T>(v));
+        return horizon::dsl::Function::current()->literal(Type::of<T>(), std::forward<T>(v));
     }
 }
 
@@ -51,4 +52,4 @@ Expr(const Var<T> &) -> Expr<T>;
 template<typename T>
 Expr(const Buffer<T> &) -> Expr<Buffer<T>>;
 
-}// namespace ocarina
+}// namespace horizon::dsl

@@ -6,8 +6,11 @@
 
 #include "rhi/tensor/tensor.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 using TensorDSLView = TensorView;
 
-}// namespace ocarina
+}// namespace horizon::dsl

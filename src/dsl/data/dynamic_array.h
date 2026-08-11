@@ -10,7 +10,10 @@
 #include "core/type_system/type_desc.h"
 #include "../api/syntax.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 template<typename T>
 class DynamicArray : public detail::EnableSubscriptAccess<DynamicArray<T>, T> {
@@ -70,7 +73,7 @@ public:
     static DynamicArray<T> one(uint size) noexcept { return DynamicArray<T>{size, static_cast<T>(1)}; }
     [[nodiscard]] bool valid() const noexcept { return size_ > 0; }
     [[nodiscard]] static const Type *type(uint size) noexcept {
-        return Type::from(ocarina::format("array<{},{}>",
+        return Type::from(horizon::dsl::format("array<{},{}>",
                                           TypeDesc<T>::description(),
                                           size));
     }
@@ -119,7 +122,7 @@ public:
 
     template<typename... Args>
     static DynamicArray<T> create(Args &&...args) noexcept {
-        return create(ocarina::array<Var<T>, sizeof...(args)>{OC_FORWARD(args)...});
+        return create(horizon::dsl::array<Var<T>, sizeof...(args)>{OC_FORWARD(args)...});
     }
 
     [[nodiscard]] Var<T> as_scalar() const noexcept {
@@ -472,4 +475,4 @@ DynamicArray<float> BindlessArrayTexture<Dim>::sample(uint channel_num, const UV
     }(decay_swizzle(uv));
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

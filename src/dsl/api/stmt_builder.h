@@ -10,9 +10,12 @@
 #include "ast/function.h"
 #include "operators.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
-inline void comment(const ocarina::string &str) noexcept {
+inline void comment(const horizon::dsl::string &str) noexcept {
     Function::current()->comment(str);
 }
 
@@ -458,7 +461,7 @@ public:
 }// namespace detail
 
 template<typename... Args, EPort p = port_v<Args...>>
-void print(ocarina::string f, Args &&...args) {
+void print(horizon::dsl::string f, Args &&...args) {
     if constexpr (p == D) {
         size_t num = sizeof...(Args);
         OC_ASSERT(num == substr_count(f, "{}"));
@@ -489,23 +492,23 @@ template<typename T>
 }// namespace detail
 
 template<typename... Args>
-void prints(ocarina::string f, Args &&...args) {
+void prints(horizon::dsl::string f, Args &&...args) {
     auto all_tuple = std::tuple_cat(detail::to_tuple(args)...);
     auto func = [&]<typename... A, size_t... i>(std::tuple<A...> &&tp, std::index_sequence<i...>) {
         print(f, std::get<i>(OC_FORWARD(tp))...);
     };
-    func(ocarina::move(all_tuple), std::make_index_sequence<std::tuple_size_v<decltype(all_tuple)>>());
+    func(horizon::dsl::move(all_tuple), std::make_index_sequence<std::tuple_size_v<decltype(all_tuple)>>());
 }
 
 namespace detail {
 template<typename Count>
-requires ocarina::is_all_integral_expr_v<Count>
+requires horizon::dsl::is_all_integral_expr_v<Count>
 auto range(Count &&count) noexcept {
     return detail::ForStmtBuilder<expr_value_t<Count>>(0, make_expr(std::forward<Count>(count)), 1);
 }
 
 template<typename Begin, typename End>
-requires ocarina::is_all_integral_expr_v<Begin, End>
+requires horizon::dsl::is_all_integral_expr_v<Begin, End>
 auto range(Begin &&begin, End &&end) noexcept {
     return detail::ForStmtBuilder<expr_value_t<Begin>,
                                   expr_value_t<End>>(make_expr(std::forward<Begin>(begin)),
@@ -514,7 +517,7 @@ auto range(Begin &&begin, End &&end) noexcept {
 }
 
 template<typename Begin, typename End, typename Step>
-requires ocarina::is_all_integral_expr_v<Begin, End, Step>
+requires horizon::dsl::is_all_integral_expr_v<Begin, End, Step>
 auto range(Begin &&begin, End &&end, Step &&step) noexcept {
     return detail::ForStmtBuilder<expr_value_t<Begin>, expr_value_t<End>,
                                   expr_value_t<Step>>(make_expr(std::forward<Begin>(begin)),
@@ -537,7 +540,7 @@ void for_range(Count &&count, Body &&body) noexcept {
 }
 
 template<typename Begin, typename End, typename Body>
-requires ocarina::is_all_integral_expr_v<Begin, End>
+requires horizon::dsl::is_all_integral_expr_v<Begin, End>
 void for_range(Begin &&begin, End &&end, Body &&body) noexcept {
     detail::range(std::forward<Begin>(begin),
                   std::forward<End>(end)) /
@@ -545,7 +548,7 @@ void for_range(Begin &&begin, End &&end, Body &&body) noexcept {
 }
 
 template<typename Begin, typename End, typename Step, typename Body>
-requires ocarina::is_all_integral_expr_v<Begin, End, Step>
+requires horizon::dsl::is_all_integral_expr_v<Begin, End, Step>
 void for_range(Begin &&begin, End &&end, Step &&step, Body &&body) noexcept {
     detail::range(std::forward<Begin>(begin),
                   std::forward<End>(end),
@@ -581,4 +584,4 @@ inline void return_() noexcept {
     Function::current()->return_(nullptr);
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

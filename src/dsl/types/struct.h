@@ -10,7 +10,7 @@
 
 #define OC_STRUCT_ALIAS(NS, S)      \
     namespace NS {                  \
-    using S##Var = ocarina::Var<S>; \
+    using S##Var = horizon::dsl::Var<S>; \
     }
 
 #define OC_STRUCT_IMPL(NS, S, ...)                                            \

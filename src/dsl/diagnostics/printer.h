@@ -15,7 +15,10 @@
 #include "../api/builtin.h"
 #include "../api/operators.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 template<typename Current>
@@ -44,7 +47,7 @@ public:
     using OutputFunc = std::function<void(int, const char *)>;
 
     struct Item {
-        ocarina::move_only_function<void(const uint *, const OutputFunc &)> func;
+        horizon::dsl::move_only_function<void(const uint *, const OutputFunc &)> func;
         uint size;
     };
 
@@ -107,7 +110,7 @@ public:
     }                                                                                                         \
     template<typename... Args>                                                                                \
     void level_name##_with_traceback(const string &fmt, const Args &...args) noexcept {                       \
-        string tb = ocarina::format(" traceback is :\n {}", traceback_string(1));                             \
+        string tb = horizon::dsl::format(" traceback is :\n {}", traceback_string(1));                             \
         level_name##_with_location(fmt + tb, OC_FORWARD(args)...);                                            \
     }                                                                                                         \
     template<typename... Args>                                                                                \
@@ -124,7 +127,7 @@ public:
     }                                                                                                         \
     template<typename... Args>                                                                                \
     void level_name##_with_traceback_if(const Bool &cond, const string &fmt, const Args &...args) noexcept {  \
-        string tb = ocarina::format(" traceback is :\n {}", traceback_string(1));                             \
+        string tb = horizon::dsl::format(" traceback is :\n {}", traceback_string(1));                             \
         level_name##_with_location##_if(cond, fmt + tb, OC_FORWARD(args)...);                                 \
     }
 
@@ -241,7 +244,7 @@ void Printer::_log(spdlog::level::level_enum level, const string &fmt, const Arg
             }
         };
         auto format = [&]<size_t... i>(std::index_sequence<i...>) -> string {
-            return ocarina::format(fmt, decode_arg.template operator()<i>()...);
+            return horizon::dsl::format(fmt, decode_arg.template operator()<i>()...);
         };
         string content = format(std::index_sequence_for<Args...>());
         if (func) {
@@ -253,4 +256,4 @@ void Printer::_log(spdlog::level::level_enum level, const string &fmt, const Arg
     items_.push_back({decode, total_size});
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

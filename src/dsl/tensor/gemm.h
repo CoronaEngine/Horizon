@@ -7,7 +7,10 @@
 #include "common.h"
 #include "dsl/api/func.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 struct GemmOp {
     uint id{};
@@ -26,4 +29,4 @@ struct GemmOp {
     return GemmOp{id, std::move(desc)};
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

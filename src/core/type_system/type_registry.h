@@ -4,7 +4,7 @@
 
 #include <mutex>
 
-namespace ocarina {
+namespace horizon::core {
 
 class TypeRegistry {
 private:
@@ -30,38 +30,38 @@ private:
     };
 
 private:
-    ocarina::vector<ocarina::unique_ptr<Type>> types_;
-    ocarina::unordered_map<uint64_t, const Type *> by_hash_;
-    ocarina::unordered_map<ResolvedTypeKey, const Type *, ResolvedTypeKeyHash> resolved_types_;
+    horizon::core::vector<horizon::core::unique_ptr<Type>> types_;
+    horizon::core::unordered_map<uint64_t, const Type *> by_hash_;
+    horizon::core::unordered_map<ResolvedTypeKey, const Type *, ResolvedTypeKeyHash> resolved_types_;
     std::recursive_mutex mutex_;
 
 private:
     [[nodiscard]] const Type *find_by_hash_locked(uint64_t hash) const noexcept;
-    [[nodiscard]] const Type *emplace_type_locked(ocarina::unique_ptr<Type> type) noexcept;
+    [[nodiscard]] const Type *emplace_type_locked(horizon::core::unique_ptr<Type> type) noexcept;
 
 public:
-    [[nodiscard]] bool register_type(ocarina::unique_ptr<Type> type) noexcept;
+    [[nodiscard]] bool register_type(horizon::core::unique_ptr<Type> type) noexcept;
     [[nodiscard]] const Type *find_by_hash(uint64_t hash) noexcept;
-    [[nodiscard]] const Type *emplace_type(ocarina::unique_ptr<Type> type) noexcept;
+    [[nodiscard]] const Type *emplace_type(horizon::core::unique_ptr<Type> type) noexcept;
     [[nodiscard]] const Type *resolve_type(const Type *type,
                                            StoragePrecisionPolicy policy) noexcept;
     [[nodiscard]] const Type *parse_type(std::string_view description) noexcept;
     [[nodiscard]] size_t count() noexcept;
     [[nodiscard]] const Type *at(uint32_t uid) noexcept;
     [[nodiscard]] bool exists(uint64_t hash) noexcept;
-    [[nodiscard]] ocarina::vector<const Type *> snapshot() noexcept;
+    [[nodiscard]] horizon::core::vector<const Type *> snapshot() noexcept;
 };
 
 [[nodiscard]] TypeRegistry &type_registry() noexcept;
 
-[[nodiscard]] uint64_t compute_type_hash(ocarina::string_view desc) noexcept;
+[[nodiscard]] uint64_t compute_type_hash(horizon::core::string_view desc) noexcept;
 
 void notify_type_access(const Type *type) noexcept;
 
 namespace detail {
 
-[[nodiscard]] const Type *parse_type_locked(ocarina::string_view desc) noexcept;
+[[nodiscard]] const Type *parse_type_locked(horizon::core::string_view desc) noexcept;
 
 }
 
-}// namespace ocarina
+}// namespace horizon::core

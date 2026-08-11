@@ -6,7 +6,10 @@
 
 #include "common.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 struct PoolOp {
     PoolDesc desc;
@@ -21,4 +24,4 @@ struct PoolOp {
     return PoolOp{std::move(desc)};
 }
 
-}// namespace ocarina
+}// namespace horizon::dsl

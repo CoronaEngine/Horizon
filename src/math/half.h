@@ -7,7 +7,8 @@
 #include "core/stl.h"
 #include "basic_traits.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 class half;
 
@@ -280,4 +281,4 @@ static constexpr half float2half(float f) {
     return half(f);
 }
 
-}// namespace ocarina
+}// namespace horizon::math

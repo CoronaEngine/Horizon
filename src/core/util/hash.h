@@ -10,7 +10,7 @@
 #include "math/basic_types.h"
 #include "core/concepts.h"
 
-namespace ocarina {
+namespace horizon::core {
 namespace detail {
 
 template<typename T>
@@ -65,7 +65,7 @@ public:
 
     template<typename T>
     [[nodiscard]] uint64_t operator()(T &&s) const noexcept {
-        if constexpr (ocarina::detail::hashable_with_hash_method<T>) {
+        if constexpr (horizon::core::detail::hashable_with_hash_method<T>) {
             return (*this)(std::forward<T>(s).hash());
         } else if constexpr (detail::hashable_ptr_with_hash_method<T>) {
             return (*this)(std::forward<T>(s)->hash());
@@ -175,4 +175,4 @@ public:
     virtual ~Hashable() = default;
 };
 
-}// namespace ocarina
+}// namespace horizon::core

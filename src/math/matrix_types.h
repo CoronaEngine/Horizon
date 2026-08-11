@@ -6,7 +6,8 @@
 
 #include "vector_types.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 template<typename T, size_t N, size_t M>
 struct Matrix {
@@ -65,7 +66,7 @@ public:
     template<typename T, size_t N, size_t M>                         \
     [[nodiscard]] Matrix<T, N, M> func(Matrix<T, N, M> m) noexcept { \
         return [&]<size_t... i>(std::index_sequence<i...>) {         \
-            return ocarina::Matrix<T, N, M>(func(m[i])...);          \
+            return horizon::math::Matrix<T, N, M>(func(m[i])...);          \
         }(std::make_index_sequence<M>());                            \
     }
 
@@ -108,7 +109,7 @@ OC_MATRIX_UNARY_FUNC(copysign)
     [[nodiscard]] Matrix<T, N, M> func(Matrix<T, N, M> lhs,            \
                                        Matrix<T, N, M> rhs) noexcept { \
         return [&]<size_t... i>(std::index_sequence<i...>) {           \
-            return ocarina::Matrix<T, N, M>(func(lhs[i], rhs[i])...);  \
+            return horizon::math::Matrix<T, N, M>(func(lhs[i], rhs[i])...);  \
         }(std::make_index_sequence<N>());                              \
     }
 
@@ -124,7 +125,7 @@ OC_MATRIX_BINARY_FUNC(atan2)
     [[nodiscard]] Matrix<T, N, M> func(Matrix<T, N, M> t, Matrix<T, N, M> u, \
                                        Matrix<T, N, M> v) noexcept {         \
         return [&]<size_t... i>(std::index_sequence<i...>) {                 \
-            return ocarina::Matrix<T, N, M>(func(t[i], u[i], v[i])...);      \
+            return horizon::math::Matrix<T, N, M>(func(t[i], u[i], v[i])...);      \
         }(std::make_index_sequence<N>());                                    \
     }
 
@@ -134,69 +135,70 @@ OC_MATRIX_TRIPLE_FUNC(lerp)
 
 #undef OC_MATRIX_TRIPLE_FUNC
 
-}// namespace ocarina
+}// namespace horizon::math
 
 template<typename T, size_t N, size_t M>
-[[nodiscard]] constexpr auto operator-(ocarina::Matrix<T, N, M> m) {
+[[nodiscard]] constexpr auto operator-(horizon::math::Matrix<T, N, M> m) {
     return [&]<size_t... i>(std::index_sequence<i...>) {
-        return ocarina::Matrix<T, N, M>((-m[i])...);
+        return horizon::math::Matrix<T, N, M>((-m[i])...);
     }(std::make_index_sequence<M>());
 }
 
 template<typename T, typename S, size_t N, size_t M>
-requires ocarina::is_scalar_v<S>
-[[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, M> m, S s) {
+requires horizon::math::is_scalar_v<S>
+[[nodiscard]] constexpr auto operator*(horizon::math::Matrix<T, N, M> m, S s) {
     using scalar_type = decltype(T{} * s);
     return [&]<size_t... i>(std::index_sequence<i...>) {
-        return ocarina::Matrix<scalar_type, N, M>((m[i] * s)...);
+        return horizon::math::Matrix<scalar_type, N, M>((m[i] * s)...);
     }(std::make_index_sequence<M>());
 }
 
 template<typename S, typename T, size_t N, size_t M>
-requires ocarina::is_scalar_v<S>
-[[nodiscard]] constexpr auto operator*(S s, ocarina::Matrix<T, N, M> m) {
+requires horizon::math::is_scalar_v<S>
+[[nodiscard]] constexpr auto operator*(S s, horizon::math::Matrix<T, N, M> m) {
     return m * s;
 }
 
 template<typename T, typename S, size_t N, size_t M>
-requires ocarina::is_scalar_v<S>
-[[nodiscard]] constexpr auto operator/(ocarina::Matrix<T, N, M> m, S s) {
+requires horizon::math::is_scalar_v<S>
+[[nodiscard]] constexpr auto operator/(horizon::math::Matrix<T, N, M> m, S s) {
     return m * S(1.0f / s);
 }
 
 template<typename T, typename S, size_t N, size_t M>
-[[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, M> m,
-                                       ocarina::Vector<S, M> v) noexcept {
+[[nodiscard]] constexpr auto operator*(horizon::math::Matrix<T, N, M> m,
+                                       horizon::math::Vector<S, M> v) noexcept {
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ((v[i] * m[i]) + ...);
     }(std::make_index_sequence<M>());
 }
 
 template<typename T, typename S, size_t N, size_t M, size_t Dim>
-[[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, Dim> lhs,
-                                       ocarina::Matrix<S, Dim, M> rhs) noexcept {
+[[nodiscard]] constexpr auto operator*(horizon::math::Matrix<T, N, Dim> lhs,
+                                       horizon::math::Matrix<S, Dim, M> rhs) noexcept {
     using scalar_type = decltype(T{} * S{});
     return [&]<size_t... i>(std::index_sequence<i...>) {
-        return ocarina::Matrix<scalar_type, N, M>((lhs * rhs[i])...);
+        return horizon::math::Matrix<scalar_type, N, M>((lhs * rhs[i])...);
     }(std::make_index_sequence<M>());
 }
 
 template<typename T, typename S, size_t N, size_t M>
-[[nodiscard]] constexpr auto operator+(ocarina::Matrix<T, N, M> lhs,
-                                       ocarina::Matrix<S, N, M> rhs) noexcept {
+[[nodiscard]] constexpr auto operator+(horizon::math::Matrix<T, N, M> lhs,
+                                       horizon::math::Matrix<S, N, M> rhs) noexcept {
     using scalar_type = decltype(T{} + S{});
     return [&]<size_t... i>(std::index_sequence<i...>) {
-        return ocarina::Matrix<scalar_type, N, M>(lhs[i] + rhs[i]...);
+        return horizon::math::Matrix<scalar_type, N, M>(lhs[i] + rhs[i]...);
     }(std::make_index_sequence<M>());
 }
 
 template<typename T, typename S, size_t N, size_t M>
-[[nodiscard]] constexpr auto operator-(ocarina::Matrix<T, N, M> lhs,
-                                       ocarina::Matrix<S, N, M> rhs) noexcept {
+[[nodiscard]] constexpr auto operator-(horizon::math::Matrix<T, N, M> lhs,
+                                       horizon::math::Matrix<S, N, M> rhs) noexcept {
     return lhs + (-rhs);
 }
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 
 template<typename T, size_t N, size_t M, typename... Args>
 requires is_all_basic_v<Args...>
@@ -339,4 +341,4 @@ requires is_floating_point_v<T>
 OC_MAKE_MATRIX_CONVERTERS(float)
 OC_MAKE_MATRIX_CONVERTERS(half)
 
-}// namespace ocarina
+}// namespace horizon::math

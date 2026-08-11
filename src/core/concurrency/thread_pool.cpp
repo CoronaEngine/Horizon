@@ -13,7 +13,7 @@
 #include <barrier>
 #endif
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace detail {
 
@@ -154,4 +154,4 @@ uint ThreadPool::worker_thread_index() noexcept {
     return detail::worker_thread_index();
 }
 
-}// namespace ocarina
+}// namespace horizon::core

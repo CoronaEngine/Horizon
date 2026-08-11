@@ -105,7 +105,12 @@
 
 #define OC_ASSERT(...) assert(__VA_ARGS__)
 
-namespace ocarina {
+namespace horizon::math {}
+namespace horizon::ast {}
+namespace horizon::dsl {}
+
+namespace horizon::core {
+using namespace horizon::math;
 using handle_ty = uint64_t;
 }
 
@@ -120,7 +125,7 @@ using handle_ty = uint64_t;
 
 #define OC_MAKE_MEMBER_SETTER(member)                     \
     void set_##member(decltype(member##_) val) noexcept { \
-        member##_ = ocarina::move(val);                   \
+        member##_ = horizon::core::move(val);                   \
     }
 
 #define OC_MAKE_MEMBER_GETTER_SETTER(member, modifier) \
@@ -131,7 +136,7 @@ using handle_ty = uint64_t;
 
 #define OC_MAKE_ENUM_BIT_OPS_IMPL(op, type)                                                   \
     inline auto operator op(type lhs, type rhs) {                                             \
-        return static_cast<type>(ocarina::to_underlying(lhs) op ocarina::to_underlying(rhs)); \
+        return static_cast<type>(horizon::core::to_underlying(lhs) op horizon::core::to_underlying(rhs)); \
     }
 
 #define OC_MAKE_ENUM_BIT_OPS(type, ...) \
@@ -149,7 +154,7 @@ using handle_ty = uint64_t;
                              }) {                                \
             return obj->func(OC_FORWARD(args)...);               \
         } else {                                                 \
-            static_assert(ocarina::always_false_v<T>);           \
+            static_assert(horizon::core::always_false_v<T>);           \
         }                                                        \
     }
 

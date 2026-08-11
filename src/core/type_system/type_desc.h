@@ -7,7 +7,7 @@
 #include "core/type.h"
 #include "core/util/string_util.h"
 
-namespace ocarina {
+namespace horizon::core {
 template<typename T>
 class Buffer;
 
@@ -53,22 +53,22 @@ struct TypeDesc<T> {
 #define OC_MAKE_VECTOR_DESC_NAME(S, N)                                 \
     template<>                                                         \
     struct TypeDesc<Vector<S, N>> {                                    \
-        static constexpr ocarina::string_view description() noexcept { \
-            return ocarina::string_view("vector<" #S "," #N ">");      \
+        static constexpr horizon::core::string_view description() noexcept { \
+            return horizon::core::string_view("vector<" #S "," #N ">");      \
         }                                                              \
-        static constexpr ocarina::string_view name() noexcept {        \
-            return ocarina::string_view(#S #N);                        \
+        static constexpr horizon::core::string_view name() noexcept {        \
+            return horizon::core::string_view(#S #N);                        \
         }                                                              \
     };
 
 #define OC_MAKE_SCALAR_AND_VECTOR_TYPE_DESC_SPECIALIZATION(S)          \
     template<>                                                         \
     struct TypeDesc<S> {                                               \
-        static constexpr ocarina::string_view description() noexcept { \
+        static constexpr horizon::core::string_view description() noexcept { \
             using namespace std::string_view_literals;                 \
             return #S##sv;                                             \
         }                                                              \
-        static constexpr ocarina::string_view name() noexcept {        \
+        static constexpr horizon::core::string_view name() noexcept {        \
             return description();                                      \
         }                                                              \
     };                                                                 \
@@ -92,26 +92,26 @@ OC_MAKE_SCALAR_AND_VECTOR_TYPE_DESC_SPECIALIZATION(ushort)
 
 template<>
 struct TypeDesc<void> {
-    static constexpr ocarina::string_view description() noexcept {
+    static constexpr horizon::core::string_view description() noexcept {
         using namespace std::string_view_literals;
         return "void"sv;
     }
 
-    static constexpr ocarina::string_view name() noexcept {
+    static constexpr horizon::core::string_view name() noexcept {
         return description();
     }
 };
 
 template<typename T, size_t N, size_t M>
-struct TypeDesc<ocarina::Matrix<T, N, M>> {
-    static ocarina::string &description() noexcept {
-        static thread_local auto s = ocarina::format(
+struct TypeDesc<horizon::core::Matrix<T, N, M>> {
+    static horizon::core::string &description() noexcept {
+        static thread_local auto s = horizon::core::format(
             "matrix<{},{},{}>", TypeDesc<T>::description(),
             N, M);
         return s;
     }
-    static ocarina::string &name() noexcept {
-        static thread_local auto s = ocarina::format(
+    static horizon::core::string &name() noexcept {
+        static thread_local auto s = horizon::core::format(
             "{}{}x{}", TypeDesc<T>::name(),
             N, M);
         return s;
@@ -119,16 +119,16 @@ struct TypeDesc<ocarina::Matrix<T, N, M>> {
 };
 
 template<typename T, size_t N>
-struct TypeDesc<ocarina::array<T, N>> {
+struct TypeDesc<horizon::core::array<T, N>> {
     static_assert(alignof(T) >= 4u);
-    static ocarina::string &description() noexcept {
-        static thread_local auto s = ocarina::format(
+    static horizon::core::string &description() noexcept {
+        static thread_local auto s = horizon::core::format(
             "array<{},{}>",
             TypeDesc<T>::description(), N);
         return s;
     }
 
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
@@ -136,11 +136,11 @@ struct TypeDesc<ocarina::array<T, N>> {
 template<typename T>
 struct TypeDesc<Buffer<T>> {
     static_assert(alignof(T) >= 4u);
-    static ocarina::string &description() noexcept {
-        static thread_local string str = ocarina::format("buffer<{}>", TypeDesc<T>::description());
+    static horizon::core::string &description() noexcept {
+        static thread_local string str = horizon::core::format("buffer<{}>", TypeDesc<T>::description());
         return str;
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
@@ -150,10 +150,10 @@ struct TypeDesc<BufferDesc<T>> : public TypeDesc<Buffer<T>> {};
 
 template<>
 struct TypeDesc<ByteBuffer> {
-    static ocarina::string_view description() noexcept {
+    static horizon::core::string_view description() noexcept {
         return "bytebuffer";
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
@@ -163,49 +163,49 @@ struct TypeDesc<BufferDesc<>> : public TypeDesc<ByteBuffer> {};
 
 template<>
 struct TypeDesc<Texture3D> {
-    static ocarina::string_view description() noexcept {
+    static horizon::core::string_view description() noexcept {
         return "texture3d";
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
 
 template<>
 struct TypeDesc<Texture2D> {
-    static ocarina::string_view description() noexcept {
+    static horizon::core::string_view description() noexcept {
         return "texture2d";
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
 
 template<>
 struct TypeDesc<Accel> {
-    static ocarina::string_view description() noexcept {
+    static horizon::core::string_view description() noexcept {
         return "accel";
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
 
 template<typename T, size_t N>
-struct TypeDesc<T[N]> : public TypeDesc<ocarina::array<T, N>> {};
+struct TypeDesc<T[N]> : public TypeDesc<horizon::core::array<T, N>> {};
 
 template<typename... T>
-struct TypeDesc<ocarina::tuple<T...>> {
-    static ocarina::string &description() noexcept {
-        static thread_local ocarina::string str = []() -> ocarina::string {
-            auto ret = ocarina::format("struct<_Tuple,{},false,false", alignof(ocarina::tuple<T...>));
+struct TypeDesc<horizon::core::tuple<T...>> {
+    static horizon::core::string &description() noexcept {
+        static thread_local horizon::core::string str = []() -> horizon::core::string {
+            auto ret = horizon::core::format("struct<_Tuple,{},false,false", alignof(horizon::core::tuple<T...>));
             (ret.append(",").append(TypeDesc<T>::description()), ...);
             ret.append(">");
             return ret;
         }();
         return str;
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
@@ -213,17 +213,17 @@ struct TypeDesc<ocarina::tuple<T...>> {
 #define OC_MAKE_STRUCT_MEMBER_FMT(member) ",{}"
 
 #define OC_MAKE_STRUCT_MEMBER_DESC(member) \
-    ocarina::TypeDesc<std::remove_cvref_t<decltype(this_type::member)>>::description()
+    horizon::core::TypeDesc<std::remove_cvref_t<decltype(this_type::member)>>::description()
 
 #define OC_MAKE_STRUCT_DESC(S, ...)                                                         \
     template<>                                                                              \
-    struct ocarina::TypeDesc<S> {                                                           \
+    struct horizon::core::TypeDesc<S> {                                                           \
         using this_type = S;                                                                \
-        static ocarina::string description() noexcept {                                     \
-            static thread_local ocarina::string s = ocarina::format(                        \
+        static horizon::core::string description() noexcept {                                     \
+            static thread_local horizon::core::string s = horizon::core::format(                        \
                 "struct<" #S ",{},{},{}" MAP(OC_MAKE_STRUCT_MEMBER_FMT, ##__VA_ARGS__) ">", \
-                alignof(this_type), ocarina::is_builtin_struct_v<this_type>,                \
-                ocarina::is_param_struct_v<this_type>,                                      \
+                alignof(this_type), horizon::core::is_builtin_struct_v<this_type>,                \
+                horizon::core::is_param_struct_v<this_type>,                                      \
                 MAP_LIST(OC_MAKE_STRUCT_MEMBER_DESC, ##__VA_ARGS__));                       \
             return s;                                                                       \
         }                                                                                   \
@@ -234,34 +234,34 @@ struct TypeDesc<ocarina::tuple<T...>> {
 
 template<>
 struct TypeDesc<BindlessArray> {
-    static ocarina::string_view description() noexcept {
+    static horizon::core::string_view description() noexcept {
         return "bindlessArray";
     }
-    static ocarina::string_view name() noexcept {
+    static horizon::core::string_view name() noexcept {
         return description();
     }
 };
 
 #define OC_IS_DYNAMIC_SIZE(member, S) \
-    ocarina::is_dynamic_size<std::remove_cvref_t<decltype(S::member)>>
+    horizon::core::is_dynamic_size<std::remove_cvref_t<decltype(S::member)>>
 
 #define OC_MAKE_STRUCT_IS_DYNAMIC(S, ...) \
     template<>                            \
-    struct ocarina::is_dynamic_size<S> : std::disjunction<MAP_LIST_UD(OC_IS_DYNAMIC_SIZE, S, ##__VA_ARGS__)> {};
+    struct horizon::core::is_dynamic_size<S> : std::disjunction<MAP_LIST_UD(OC_IS_DYNAMIC_SIZE, S, ##__VA_ARGS__)> {};
 
 template<typename T>
 const Type *Type::of() noexcept {
     using raw_type = std::remove_cvref_t<T>;
     const Type *ret = Type::from(TypeDesc<raw_type>::description());
-    if constexpr (ocarina::is_struct_v<T>) {
+    if constexpr (horizon::core::is_struct_v<T>) {
         if constexpr (requires {
-                          ocarina::struct_member_tuple<raw_type>::members;
+                          horizon::core::struct_member_tuple<raw_type>::members;
                       }) {
-            constexpr auto arr = ocarina::struct_member_tuple<raw_type>::members;
-            constexpr int num = sizeof(ocarina::struct_member_tuple<raw_type>::members) / sizeof(arr[0]);
+            constexpr auto arr = horizon::core::struct_member_tuple<raw_type>::members;
+            constexpr int num = sizeof(horizon::core::struct_member_tuple<raw_type>::members) / sizeof(arr[0]);
             const_cast<Type *>(ret)->update_member_name(arr, num);
         }
-        using member_tuple = typename ocarina::struct_member_tuple<raw_type>::type;
+        using member_tuple = typename horizon::core::struct_member_tuple<raw_type>::type;
         for_each_struct_member_type<raw_type>([&](auto elm) {
             using elm_t = decltype(elm);
             auto t = Type::of<elm_t>();
@@ -274,17 +274,17 @@ template<typename T>
 [[nodiscard]] string to_str(const T &val) noexcept {
     static string type_string = string(TypeDesc<T>::name());
     if constexpr (is_vector2_v<T>) {
-        return ocarina::format(type_string + "({}, {})", to_str(val.x), to_str(val.y));
+        return horizon::core::format(type_string + "({}, {})", to_str(val.x), to_str(val.y));
     } else if constexpr (is_vector3_v<T>) {
-        return ocarina::format(type_string + "({}, {}, {})", to_str(val.x), to_str(val.y), to_str(val.z));
+        return horizon::core::format(type_string + "({}, {}, {})", to_str(val.x), to_str(val.y), to_str(val.z));
     } else if constexpr (is_vector4_v<T>) {
-        return ocarina::format(type_string + "({}, {}, {}, {})", to_str(val.x), to_str(val.y), to_str(val.z), to_str(val.w));
+        return horizon::core::format(type_string + "({}, {}, {}, {})", to_str(val.x), to_str(val.y), to_str(val.z), to_str(val.w));
     } else if constexpr (is_matrix2_v<T>) {
-        return ocarina::format("[{},\n {}]", to_str(val[0]), to_str(val[1]));
+        return horizon::core::format("[{},\n {}]", to_str(val[0]), to_str(val[1]));
     } else if constexpr (is_matrix3_v<T>) {
-        return ocarina::format("[{},\n {},\n {}]", to_str(val[0]), to_str(val[1]), to_str(val[2]));
+        return horizon::core::format("[{},\n {},\n {}]", to_str(val[0]), to_str(val[1]), to_str(val[2]));
     } else if constexpr (is_matrix4_v<T>) {
-        return ocarina::format("[{},\n {},\n {},\n {}]", to_str(val[0]), to_str(val[1]), to_str(val[2]), to_str(val[3]));
+        return horizon::core::format("[{},\n {},\n {},\n {}]", to_str(val[0]), to_str(val[1]), to_str(val[2]), to_str(val[3]));
     } else if constexpr (is_scalar_v<T>) {
         if constexpr (is_half_v<T>) {
             return std::to_string(half2float(val));
@@ -292,7 +292,7 @@ template<typename T>
             return std::to_string(val);
         }
     } else if constexpr (is_struct_v<T>) {
-        string ret = ocarina::format("{}[", struct_member_tuple<T>::struct_name);
+        string ret = horizon::core::format("{}[", struct_member_tuple<T>::struct_name);
         for_each_struct_member(val, [&](const auto &elm, uint index) {
             if (index == struct_member_tuple<T>::offset_array.size() - 1) {
                 ret += to_str(elm);
@@ -307,4 +307,4 @@ template<typename T>
     }
 }
 
-}// namespace ocarina
+}// namespace horizon::core

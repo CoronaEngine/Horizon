@@ -8,9 +8,11 @@
 #include "generator/source_emitter.h"
 #include "function_corrector.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
-void Function::StructureSet::add(const ocarina::Type *type) noexcept {
+void Function::StructureSet::add(const horizon::ast::Type *type) noexcept {
     for (const Type *m : type->members()) {
         add(m);
     }
@@ -35,7 +37,7 @@ const Type *Function::resolve_ast_type(const Type *type) const noexcept {
     return Type::resolve(type, storage_policy_);
 }
 
-ocarina::list<CallExpr::Template> Function::resolve_ast_templates(ocarina::list<CallExpr::Template> t_args) const noexcept {
+horizon::ast::list<CallExpr::Template> Function::resolve_ast_templates(horizon::ast::list<CallExpr::Template> t_args) const noexcept {
     for (auto &t_arg : t_args) {
         if (std::holds_alternative<const Type *>(t_arg)) {
             t_arg = resolve_ast_type(std::get<const Type *>(t_arg));
@@ -49,7 +51,7 @@ void Function::correct() noexcept {
     FunctionCorrector().apply(this);
 }
 
-void Function::mark_variable_usage(ocarina::uint uid, ocarina::Usage usage) noexcept {
+void Function::mark_variable_usage(horizon::ast::uint uid, horizon::ast::Usage usage) noexcept {
     OC_ASSERT(uid < variable_datas_.size());
     auto old_usage = to_underlying(variable_datas_[uid].usage);
     auto new_usage = to_underlying(usage);
@@ -136,7 +138,7 @@ void Function::append_output_argument(const Expression *expression, bool *contai
 namespace detail {
 
 [[nodiscard]] string path_key(const vector<int> &path) noexcept {
-    string ret = ocarina::format("{}", path[0]);
+    string ret = horizon::ast::format("{}", path[0]);
     for (int i = 1; i < path.size(); ++i) {
         ret += "_" + to_string(path[i]);
     }
@@ -165,7 +167,7 @@ void Function::process_param_struct_member(const Variable &arg, const Type *type
     }
 }
 
-void Function::splitting_param_struct(const ocarina::Variable &arg, const Type *type,
+void Function::splitting_param_struct(const horizon::ast::Variable &arg, const Type *type,
                                       vector<int> &path) noexcept {
     for (int i = 0; i < type->members().size(); ++i) {
         path.push_back(i);
@@ -221,7 +223,7 @@ const CallExpr *Function::current_call_expr() const noexcept {
     return all_call_expr_.back();
 }
 
-const RefExpr *Function::_ref(const ocarina::Variable &variable) noexcept {
+const RefExpr *Function::_ref(const horizon::ast::Variable &variable) noexcept {
     return create_expression<RefExpr>(variable);
 }
 
@@ -232,11 +234,11 @@ uint Function::_next_variable_uid() noexcept {
 }
 
 Variable Function::create_variable(const Type *type, Variable::Tag tag, std::string name, std::string suffix) noexcept {
-    Variable ret{this, resolve_ast_type(type), tag, _next_variable_uid(), ocarina::move(name), ocarina::move(suffix)};
+    Variable ret{this, resolve_ast_type(type), tag, _next_variable_uid(), horizon::ast::move(name), horizon::ast::move(suffix)};
     return ret;
 }
 
-void Function::add_used_structure(const ocarina::Type *type) noexcept {
+void Function::add_used_structure(const horizon::ast::Type *type) noexcept {
     used_struct_.add(type);
 }
 
@@ -250,12 +252,12 @@ Usage &Function::variable_usage(uint uid) noexcept {
     return variable_datas_[uid].usage;
 }
 
-Variable::Data &Function::variable_data(ocarina::uint uid) noexcept {
+Variable::Data &Function::variable_data(horizon::ast::uint uid) noexcept {
     OC_ASSERT(uid < variable_datas_.size());
     return variable_datas_[uid];
 }
 
-const Variable::Data &Function::variable_data(ocarina::uint uid) const noexcept {
+const Variable::Data &Function::variable_data(horizon::ast::uint uid) const noexcept {
     OC_ASSERT(uid < variable_datas_.size());
     return variable_datas_[uid];
 }
@@ -416,20 +418,20 @@ const MemberExpr *Function::member(const Type *type, const Expression *obj, int 
 }
 
 const CallExpr *Function::call(const Type *type, SP<const Function> func,
-                               ocarina::list<const Expression *> args) noexcept {
+                               horizon::ast::list<const Expression *> args) noexcept {
     const Function *ptr = add_used_function(func);
     const Type *resolved = ptr->return_type() != nullptr ? ptr->return_type() : resolve_ast_type(type);
     return create_expression<CallExpr>(resolved, ptr, std::move(args));
 }
 
-const CallExpr *Function::call(const ocarina::Type *type, string_view func_name,
-                               ocarina::list<const Expression *> args) noexcept {
-    return create_expression<CallExpr>(resolve_ast_type(type), func_name, ocarina::move(args));
+const CallExpr *Function::call(const horizon::ast::Type *type, string_view func_name,
+                               horizon::ast::list<const Expression *> args) noexcept {
+    return create_expression<CallExpr>(resolve_ast_type(type), func_name, horizon::ast::move(args));
 }
 
 const CallExpr *Function::call_builtin(const Type *type, CallOp op,
-                                       ocarina::list<const Expression *> args,
-                                       ocarina::list<CallExpr::Template> t_args) noexcept {
+                                       horizon::ast::list<const Expression *> args,
+                                       horizon::ast::list<CallExpr::Template> t_args) noexcept {
     if (op == CallOp::TRACE_CLOSEST || op == CallOp::TRACE_OCCLUSION) {
         set_raytracing(true);
     }
@@ -551,7 +553,7 @@ void Function::break_() noexcept {
     create_statement<BreakStmt>();
 }
 
-void Function::comment(const ocarina::string &string) noexcept {
+void Function::comment(const horizon::ast::string &string) noexcept {
     create_statement<CommentStmt>(string);
 }
 
@@ -559,25 +561,25 @@ void Function::print(string fmt, const vector<const Expression *> &args) noexcep
     create_statement<PrintStmt>(fmt, args);
 }
 
-ocarina::span<const Variable> Function::arguments() const noexcept {
+horizon::ast::span<const Variable> Function::arguments() const noexcept {
     return arguments_;
 }
 
-ocarina::span<const Variable> Function::appended_arguments() const noexcept {
+horizon::ast::span<const Variable> Function::appended_arguments() const noexcept {
     return appended_arguments_;
 }
 
-ocarina::span<const Variable> Function::builtin_vars() const noexcept {
+horizon::ast::span<const Variable> Function::builtin_vars() const noexcept {
     return builtin_vars_;
 }
 
-ocarina::string Function::func_name(uint64_t ext_hash, string ext_name) const noexcept {
+horizon::ast::string Function::func_name(uint64_t ext_hash, string ext_name) const noexcept {
     uint64_t final_hash = ext_hash == 0 ? hash() : hash64(hash(), ext_hash);
     if (is_kernel()) {
         if (is_raytracing()) {
-            return detail::raygen_name(final_hash, ocarina::move(ext_name));
+            return detail::raygen_name(final_hash, horizon::ast::move(ext_name));
         } else {
-            return detail::kernel_name(final_hash, ocarina::move(ext_name));
+            return detail::kernel_name(final_hash, horizon::ast::move(ext_name));
         }
     } else {
         return detail::func_name(final_hash);
@@ -622,4 +624,4 @@ uint64_t Function::compute_hash() const noexcept {
     return ret;
 }
 
-}// namespace ocarina
+}// namespace horizon::ast

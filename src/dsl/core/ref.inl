@@ -6,7 +6,10 @@
 #include "../api/stmt_builder.h"
 #include "../diagnostics/printer.h"
 
-namespace ocarina::detail {
+namespace horizon::dsl::detail {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 Var<bool> Ref<Accel>::trace_occlusion(const Var<Ray> &ray) const noexcept {
     const CallExpr *expr = Function::current()->call_builtin(Type::of<bool>(),
@@ -22,4 +25,4 @@ Var<TriangleHit> Ref<Accel>::trace_closest(const Var<Ray> &ray) const noexcept {
     return eval<TriangleHit>(expr);
 }
 
-}// namespace ocarina::detail
+}// namespace horizon::dsl::detail

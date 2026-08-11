@@ -8,11 +8,11 @@
 #include "core/stl.h"
 #include "core/concepts.h"
 
-namespace ocarina {
+namespace horizon::core {
 class OC_CORE_API DynamicModule : public concepts::Noncopyable {
 private:
     void *handle_{};
-    static ocarina::vector<fs::path> &search_path();
+    static horizon::core::vector<fs::path> &search_path();
 
 public:
     static void add_search_path(fs::path path) noexcept;
@@ -27,4 +27,4 @@ public:
         return reinterpret_cast<T>(function_ptr(func_name));
     }
 };
-}// namespace ocarina
+}// namespace horizon::core

@@ -7,7 +7,8 @@
 #include "core/header.h"
 #include "basic_traits.h"
 
-namespace ocarina {
+namespace horizon::math {
+using namespace horizon::core;
 inline namespace constants {
 /// pi
 constexpr float Pi = 3.14159265358979323846264338327950288f;
@@ -101,4 +102,4 @@ struct UlpTy {
 
 }// namespace constants
 
-}// namespace ocarina
+}// namespace horizon::math

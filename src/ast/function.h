@@ -14,7 +14,9 @@
 #include "ast_node.h"
 #include "op.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 class Statement;
 class ScopeStmt;
@@ -56,7 +58,7 @@ public:
     };
 
     struct StructureSet {
-        ocarina::map<uint64_t, const Type *> struct_map;
+        horizon::ast::map<uint64_t, const Type *> struct_map;
         vector<const Type *> struct_lst;
         void add(const Type *type) noexcept;
     };
@@ -64,41 +66,41 @@ public:
     using stack_type = stack<SP<Function>>;
 
 private:
-    ocarina::vector<ocarina::unique_ptr<Expression>> all_expressions_;
-    ocarina::vector<ocarina::unique_ptr<Statement>> all_statements_;
+    horizon::ast::vector<horizon::ast::unique_ptr<Expression>> all_expressions_;
+    horizon::ast::vector<horizon::ast::unique_ptr<Statement>> all_statements_;
 
 private:
     mutable string description_{};
     const Type *ret_{nullptr};
     vector<const CallExpr *> all_call_expr_;
 
-    ocarina::map<const Expression *, uint> expr_to_argument_index_;
+    horizon::ast::map<const Expression *, uint> expr_to_argument_index_;
 
-    ocarina::vector<string_view> headers_;
+    horizon::ast::vector<string_view> headers_;
 
     /// appended argument for output
-    ocarina::vector<Variable> appended_arguments_;
+    horizon::ast::vector<Variable> appended_arguments_;
 
     /// key : expression from other function , value : expression belong current function
     /// use for kernel
-    ocarina::map<const Expression *, const RefExpr *> outer_to_local_;
+    horizon::ast::map<const Expression *, const RefExpr *> outer_to_local_;
 
-    ocarina::vector<Variable> arguments_;
+    horizon::ast::vector<Variable> arguments_;
 
     /// use for splitting parameter structure start
-    ocarina::map<string, Variable> argument_map_;
-    ocarina::vector<Variable> splitted_arguments_;
+    horizon::ast::map<string, Variable> argument_map_;
+    horizon::ast::vector<Variable> splitted_arguments_;
     /// use for splitting parameter structure end
 
-    ocarina::vector<CapturedResource> captured_resources_;
-    ocarina::vector<Variable> builtin_vars_;
-    ocarina::vector<Variable::Data> variable_datas_;
-    ocarina::vector<ScopeStmt *> scope_stack_;
+    horizon::ast::vector<CapturedResource> captured_resources_;
+    horizon::ast::vector<Variable> builtin_vars_;
+    horizon::ast::vector<Variable::Data> variable_datas_;
+    horizon::ast::vector<ScopeStmt *> scope_stack_;
     /// use for assignment subscript access
-    ocarina::vector<ocarina::pair<std::byte *, size_t>> temp_memory_;
+    horizon::ast::vector<horizon::ast::pair<std::byte *, size_t>> temp_memory_;
     ScopeStmt body_{true};
     Tag tag_{Tag::CALLABLE};
-    ocarina::vector<SP<const Function>> used_custom_func_;
+    horizon::ast::vector<SP<const Function>> used_custom_func_;
     StructureSet used_struct_;
     bool allow_dsl_capture_{false};
     mutable bool raytracing_{false};
@@ -112,13 +114,13 @@ private:
 private:
     static stack_type &_function_stack() noexcept;
     [[nodiscard]] const Type *resolve_ast_type(const Type *type) const noexcept;
-    [[nodiscard]] ocarina::list<CallExpr::Template> resolve_ast_templates(ocarina::list<CallExpr::Template> t_args) const noexcept;
+    [[nodiscard]] horizon::ast::list<CallExpr::Template> resolve_ast_templates(horizon::ast::list<CallExpr::Template> t_args) const noexcept;
 
     [[nodiscard]] uint _next_variable_uid() noexcept;
     void mark_variable_usage(uint uid, Usage usage) noexcept;
     template<typename Func>
     static shared_ptr<Function> _define(Function::Tag tag, Func &&func) noexcept {
-        shared_ptr<Function> ret = ocarina::make_shared<Function>(tag);
+        shared_ptr<Function> ret = horizon::ast::make_shared<Function>(tag);
         push(ret);
         ret->with(ret->body(), std::forward<Func>(func));
         pop(ret);
@@ -142,7 +144,7 @@ private:
 
     template<typename Expr, typename Tuple, size_t... i>
     [[nodiscard]] auto _create_expression(Tuple &&tuple, std::index_sequence<i...>) {
-        auto expr = ocarina::make_unique<Expr>(std::get<i>(OC_FORWARD(tuple))...);
+        auto expr = horizon::ast::make_unique<Expr>(std::get<i>(OC_FORWARD(tuple))...);
         auto ret = expr.get();
         expr->set_context(this);
         all_expressions_.push_back(std::move(expr));
@@ -161,7 +163,7 @@ private:
 
     template<typename Stmt, typename Tuple, size_t... i>
     [[nodiscard]] auto _create_statement(Tuple &&tuple, std::index_sequence<i...>) {
-        auto stmt = ocarina::make_unique<Stmt>(std::get<i>(OC_FORWARD(tuple))...);
+        auto stmt = horizon::ast::make_unique<Stmt>(std::get<i>(OC_FORWARD(tuple))...);
         auto ret = stmt.get();
         stmt->set_context(this);
         all_statements_.push_back(std::move(stmt));
@@ -182,10 +184,10 @@ private:
 
     class ScopeGuard {
     private:
-        ocarina::vector<ScopeStmt *> &scope_stack_;
+        horizon::ast::vector<ScopeStmt *> &scope_stack_;
 
     public:
-        ScopeGuard(ocarina::vector<ScopeStmt *> &stack, ScopeStmt *scope)
+        ScopeGuard(horizon::ast::vector<ScopeStmt *> &stack, ScopeStmt *scope)
             : scope_stack_(stack) {
             scope_stack_.push_back(scope);
         }
@@ -200,7 +202,7 @@ public:
     void record_call_expression(const CallExpr *call_expr) noexcept;
     [[nodiscard]] const CallExpr *current_call_expr() const noexcept;
     OC_MAKE_MEMBER_GETTER(all_call_expr, &)
-    void set_description(string desc) const noexcept { description_ = ocarina::move(desc); }
+    void set_description(string desc) const noexcept { description_ = horizon::ast::move(desc); }
     [[nodiscard]] string &description() const noexcept { return description_; }
     void set_allow_dsl_capture(bool v) noexcept { allow_dsl_capture_ = v; }
     [[nodiscard]] bool allow_dsl_capture() const noexcept { return allow_dsl_capture_; }
@@ -286,7 +288,7 @@ public:
     [[nodiscard]] bool has_configure() const noexcept { return all(block_dim() != 0u) || all(grid_dim() != 0u); }
     void set_storage_policy(StoragePrecisionPolicy policy) noexcept { storage_policy_ = policy; }
     [[nodiscard]] StoragePrecisionPolicy storage_policy() const noexcept { return storage_policy_; }
-    [[nodiscard]] ocarina::string func_name(uint64_t ext_hash = 0u, string ext_name = "") const noexcept;
+    [[nodiscard]] horizon::ast::string func_name(uint64_t ext_hash = 0u, string ext_name = "") const noexcept;
     void assign(const Expression *lhs, const Expression *rhs) noexcept;
     void return_(const Expression *expression) noexcept;
     [[nodiscard]] const RefExpr *block_idx() noexcept;
@@ -308,10 +310,10 @@ public:
                                                  vector<const Expression *> indexes) noexcept;
     [[nodiscard]] const MemberExpr *swizzle(const Type *type, const Expression *obj, uint16_t mask, uint16_t swizzle_size) noexcept;
     [[nodiscard]] const MemberExpr *member(const Type *type, const Expression *obj, int index) noexcept;
-    const CallExpr *call(const Type *type, SP<const Function> func, ocarina::list<const Expression *> args) noexcept;
-    const CallExpr *call(const Type *type, string_view func_name, ocarina::list<const Expression *> args) noexcept;
-    const CallExpr *call_builtin(const Type *type, CallOp op, ocarina::list<const Expression *> args,
-                                 ocarina::list<CallExpr::Template> t_args = {}) noexcept;
+    const CallExpr *call(const Type *type, SP<const Function> func, horizon::ast::list<const Expression *> args) noexcept;
+    const CallExpr *call(const Type *type, string_view func_name, horizon::ast::list<const Expression *> args) noexcept;
+    const CallExpr *call_builtin(const Type *type, CallOp op, horizon::ast::list<const Expression *> args,
+                                 horizon::ast::list<CallExpr::Template> t_args = {}) noexcept;
     void add_header(string_view fn) noexcept;
     [[nodiscard]] ScopeStmt *scope() noexcept;
     [[nodiscard]] IfStmt *if_(const Expression *expr) noexcept;
@@ -323,13 +325,13 @@ public:
     [[nodiscard]] LoopStmt *loop() noexcept;
     [[nodiscard]] ForStmt *for_(const Expression *init, const Expression *cond, const Expression *step) noexcept;
     void continue_() noexcept;
-    void comment(const ocarina::string &string) noexcept;
+    void comment(const horizon::ast::string &string) noexcept;
     void print(string fmt, const vector<const Expression *> &args) noexcept;
     [[nodiscard]] const ScopeStmt *body() const noexcept;
     [[nodiscard]] ScopeStmt *body() noexcept;
-    [[nodiscard]] ocarina::span<const Variable> arguments() const noexcept;
-    [[nodiscard]] ocarina::span<const Variable> appended_arguments() const noexcept;
-    [[nodiscard]] ocarina::span<const Variable> builtin_vars() const noexcept;
+    [[nodiscard]] horizon::ast::span<const Variable> arguments() const noexcept;
+    [[nodiscard]] horizon::ast::span<const Variable> appended_arguments() const noexcept;
+    [[nodiscard]] horizon::ast::span<const Variable> builtin_vars() const noexcept;
     [[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
     [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::CALLABLE; }
     [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::KERNEL; }
@@ -339,4 +341,4 @@ public:
     [[nodiscard]] constexpr const Type *return_type() const noexcept { return ret_; }
     constexpr void set_raytracing(bool val) const noexcept { raytracing_ = val; }
 };
-}// namespace ocarina
+}// namespace horizon::ast

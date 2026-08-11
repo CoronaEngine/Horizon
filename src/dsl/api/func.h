@@ -14,7 +14,10 @@
 #include "stmt_builder.h"
 #include "../core/type_trait.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 template<typename T>
@@ -93,25 +96,25 @@ struct is_callable<Callable<T>> : std::true_type {};
 namespace detail {
 
 template<typename T, typename... A>
-[[nodiscard]] auto tuple_insert(ocarina::tuple<A...> &&lst, T &&t) {
-    using ret_type = ocarina::tuple<T, A...>;
+[[nodiscard]] auto tuple_insert(horizon::dsl::tuple<A...> &&lst, T &&t) {
+    using ret_type = horizon::dsl::tuple<T, A...>;
     auto func = []<typename TT, typename... AA, size_t... i>(TT &&t,
-                                                             ocarina::tuple<AA...> &&lst,
+                                                             horizon::dsl::tuple<AA...> &&lst,
                                                              std::index_sequence<i...>)
         -> ret_type {
-        return ret_type(OC_FORWARD(t), std::move(ocarina::get<i>(OC_FORWARD(lst)))...);
+        return ret_type(OC_FORWARD(t), std::move(horizon::dsl::get<i>(OC_FORWARD(lst)))...);
     };
     return func(OC_FORWARD(t), OC_FORWARD(lst), std::index_sequence_for<A...>());
 }
 
-[[nodiscard]] inline ocarina::tuple<> create_argument_definition_impl(ocarina::tuple<> *var_tuple,
-                                                                      ocarina::tuple<> *tag_tuple) {
+[[nodiscard]] inline horizon::dsl::tuple<> create_argument_definition_impl(horizon::dsl::tuple<> *var_tuple,
+                                                                      horizon::dsl::tuple<> *tag_tuple) {
     return {};
 }
 
 template<typename Var, typename... RestVar, typename Tag, typename... RestTag>
-[[nodiscard]] auto create_argument_definition_impl(ocarina::tuple<Var, RestVar...> *var_tuple,
-                                                   ocarina::tuple<Tag, RestTag...> *tag_tuple) {
+[[nodiscard]] auto create_argument_definition_impl(horizon::dsl::tuple<Var, RestVar...> *var_tuple,
+                                                   horizon::dsl::tuple<Tag, RestTag...> *tag_tuple) {
     return tuple_insert(create_argument_definition_impl(static_cast<tuple<RestVar...> *>(nullptr),
                                                         static_cast<tuple<RestTag...> *>(nullptr)),
                         Var{Tag{}});
@@ -126,23 +129,23 @@ template<typename VarTuple, typename TagTuple>
 
 namespace detail {
 template<typename... Args, typename Func, size_t... i>
-auto create(Func &&func, ocarina::index_sequence<i...>) {
+auto create(Func &&func, horizon::dsl::index_sequence<i...>) {
     static_assert(std::is_invocable_v<Func, detail::prototype_to_var_t<Args>...>);
-    using var_tuple = ocarina::tuple<Var<std::remove_cvref_t<Args>>...>;
-    using tag_tuple = ocarina::tuple<detail::prototype_to_creation_tag_t<Args>...>;
+    using var_tuple = horizon::dsl::tuple<Var<std::remove_cvref_t<Args>>...>;
+    using tag_tuple = horizon::dsl::tuple<detail::prototype_to_creation_tag_t<Args>...>;
     auto args = create_argument_definition<var_tuple, tag_tuple>();
-    return func(std::forward<detail::prototype_to_var_t<Args>>(ocarina::get<i>(args))...);
+    return func(std::forward<detail::prototype_to_var_t<Args>>(horizon::dsl::get<i>(args))...);
 }
 }// namespace detail
 
 class FuncWrapper {
 protected:
-    mutable ocarina::shared_ptr<Function> function_;
+    mutable horizon::dsl::shared_ptr<Function> function_;
     FuncWrapper() = default;
-    explicit FuncWrapper(ocarina::shared_ptr<Function> f) : function_(std::move(f)) {}
+    explicit FuncWrapper(horizon::dsl::shared_ptr<Function> f) : function_(std::move(f)) {}
 
 public:
-    [[nodiscard]] ocarina::shared_ptr<Function> &function() const noexcept { return function_; }
+    [[nodiscard]] horizon::dsl::shared_ptr<Function> &function() const noexcept { return function_; }
     void set_description(const std::string &desc) noexcept {
         function()->set_description(desc);
     }
@@ -182,9 +185,9 @@ private:
     void _init(Func &&func) noexcept {
         function_ = Function::define_callable([&] {
             if constexpr (std::is_same_v<void, Ret>) {
-                detail::create<Args...>(OC_FORWARD(func), ocarina::index_sequence_for<Args...>());
+                detail::create<Args...>(OC_FORWARD(func), horizon::dsl::index_sequence_for<Args...>());
             } else {
-                decltype(auto) ret = detail::create<Args...>(OC_FORWARD(func), ocarina::index_sequence_for<Args...>());
+                decltype(auto) ret = detail::create<Args...>(OC_FORWARD(func), horizon::dsl::index_sequence_for<Args...>());
                 Function::current()->return_(ret.expression());
             }
         });
@@ -214,7 +217,7 @@ public:
         });
 
         const CallExpr *expr = Function::current()->call(Type::of<Ret>(), function_, arguments);
-        comment(ocarina::format("call function {}", function()->description()));
+        comment(horizon::dsl::format("call function {}", function()->description()));
         if constexpr (!std::is_same_v<std::remove_cvref_t<Ret>, void>) {
             return eval<Ret>(expr);
         } else {
@@ -328,7 +331,7 @@ public:
     template<typename Func>
     Kernel(Func &&func) noexcept
         : FuncWrapper(std::move(Function::define_kernel([&] {
-              detail::create<Args...>(OC_FORWARD(func), ocarina::index_sequence_for<Args...>());
+              detail::create<Args...>(OC_FORWARD(func), horizon::dsl::index_sequence_for<Args...>());
               clear_global_vars();
           }))) {}
 
@@ -343,4 +346,4 @@ public:
 template<typename T>
 Kernel(T &&) -> Kernel<detail::dsl_function_t<std::remove_cvref_t<T>>>;
 
-}// namespace ocarina
+}// namespace horizon::dsl

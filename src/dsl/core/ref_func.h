@@ -12,7 +12,10 @@
 #include <utility>
 #include "core/runtime/platform.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 template<typename Lhs, typename Rhs>
@@ -55,7 +58,7 @@ namespace detail {
 template<typename T>
 [[nodiscard]] decltype(auto) extract_expression(T &&v) noexcept;// implement in dsl/expr.h
 
-#define OC_EXPR(arg) ocarina::detail::extract_expression(OC_FORWARD(arg))
+#define OC_EXPR(arg) horizon::dsl::detail::extract_expression(OC_FORWARD(arg))
 
 template<typename T,
          typename element_type = std::remove_cvref_t<expr_value_t<decltype(std::declval<expr_value_t<T>>()[0])>>>
@@ -166,7 +169,7 @@ struct EnableReadAndWrite {
 
     template<typename Index, typename Val>
     requires is_integral_expr_v<Index> &&
-             ocarina::is_same_v<element_type, expr_value_t<Val>>
+             horizon::dsl::is_same_v<element_type, expr_value_t<Val>>
     void write_and_check(Index &&index, Val &&elm, uint size, const string &desc) {
         if constexpr (is_integral_v<Index>) {
             OC_ASSERT(index <= size);
@@ -496,4 +499,4 @@ struct EnableBitwiseCast {
     }
 };
 }// namespace detail
-}// namespace ocarina
+}// namespace horizon::dsl

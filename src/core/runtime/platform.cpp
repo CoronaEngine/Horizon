@@ -9,10 +9,10 @@
 #include "core/util/logging.h"
 #include "core/util/util.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace detail {
-[[nodiscard]] ocarina::string win32_last_error_message() {
+[[nodiscard]] horizon::core::string win32_last_error_message() {
     void *buffer = nullptr;
     auto err_code = GetLastError();
     FormatMessage(
@@ -22,7 +22,7 @@ namespace detail {
         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
         (LPTSTR)&buffer,
         0, nullptr);
-    ocarina::string err_msg{fmt::format("{} (code = 0x{:x}).", static_cast<char *>(buffer), err_code)};
+    horizon::core::string err_msg{fmt::format("{} (code = 0x{:x}).", static_cast<char *>(buffer), err_code)};
     LocalFree(buffer);
     return err_msg;
 }
@@ -46,8 +46,8 @@ void dynamic_module_destroy(void *handle) noexcept {
     }
 }
 
-void *dynamic_module_find_symbol(void *handle, ocarina::string_view name_view) noexcept {
-    static thread_local ocarina::string name;
+void *dynamic_module_find_symbol(void *handle, horizon::core::string_view name_view) noexcept {
+    static thread_local horizon::core::string name;
     name = name_view;
     OC_DEBUG_FORMAT("Loading dynamic symbol: {}.", name);
     auto symbol = GetProcAddress(reinterpret_cast<HMODULE>(handle), name.c_str());
@@ -58,8 +58,8 @@ void *dynamic_module_find_symbol(void *handle, ocarina::string_view name_view) n
     return reinterpret_cast<void *>(symbol);
 }
 
-ocarina::string dynamic_module_name(ocarina::string_view name) noexcept {
-    return ocarina::string(name) + ".dll";
+horizon::core::string dynamic_module_name(horizon::core::string_view name) noexcept {
+    return horizon::core::string(name) + ".dll";
 }
 
 string demangle(const char *name) noexcept {
@@ -120,4 +120,4 @@ string traceback_string(int top) noexcept {
     return ret;
 }
 
-}// namespace ocarina
+}// namespace horizon::core

@@ -6,7 +6,9 @@
 
 #include "math/basic_types.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 enum struct UnaryOp : uint32_t {
     POSITIVE,
@@ -244,4 +246,4 @@ enum struct CallOp : uint32_t {
     COUNT
 };
 
-}// namespace ocarina
+}// namespace horizon::ast

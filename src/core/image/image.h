@@ -6,7 +6,7 @@
 
 #include "core/image/image_base.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 class OC_CORE_API ImageView : public ImageBase {
 private:
@@ -107,4 +107,4 @@ public:
     static void save_other(const fs::path &fn, PixelStorage pixel_format,
                            uint2 res, const std::byte *ptr);
 };
-}// namespace ocarina
+}// namespace horizon::core

@@ -8,7 +8,7 @@
 #include "core/dynamic_buffer/dynamic_buffer_layout_common.h"
 #include "core/type_system/type_desc.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace {
 
@@ -81,7 +81,7 @@ namespace {
     }
     if (type->is_vector()) {
         const auto *elem = resolve_type_description(type->element(), policy);
-        return elem == nullptr ? string{} : ocarina::format("vector<{},{}>", elem->description(), type->dimension());
+        return elem == nullptr ? string{} : horizon::core::format("vector<{},{}>", elem->description(), type->dimension());
     }
     if (type->is_matrix()) {
         const auto *col = resolve_type_description(type->element(), policy);
@@ -89,21 +89,21 @@ namespace {
             return {};
         }
         const auto *scalar = col->element();
-        return scalar == nullptr ? string{} : ocarina::format("matrix<{},{},{}>",
+        return scalar == nullptr ? string{} : horizon::core::format("matrix<{},{},{}>",
                                                                scalar->description(),
                                                                type->dimension(),
                                                                col->dimension());
     }
     if (type->is_array()) {
         const auto *elem = resolve_real_container_element(type->element(), policy);
-        return elem == nullptr ? string{} : ocarina::format("array<{},{}>", elem->description(), type->dimension());
+        return elem == nullptr ? string{} : horizon::core::format("array<{},{}>", elem->description(), type->dimension());
     }
     if (type->is_buffer()) {
         const auto *elem = resolve_real_container_element(type->element(), policy);
-        return elem == nullptr ? string{} : ocarina::format("buffer<{}>", elem->description());
+        return elem == nullptr ? string{} : horizon::core::format("buffer<{}>", elem->description());
     }
     if (type->is_structure()) {
-        string ret = ocarina::format("struct<{},{},{},{}",
+        string ret = horizon::core::format("struct<{},{},{},{}",
                                      type->cname(),
                                      resolved_alignment(type, policy),
                                      type->is_builtin_struct(),
@@ -279,4 +279,4 @@ const Type *DynamicBufferLayoutPlan::field_resolved_type(span<const TypedFieldPa
     return info.resolved_type;
 }
 
-}// namespace ocarina
+}// namespace horizon::core

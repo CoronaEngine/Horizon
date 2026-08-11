@@ -6,7 +6,7 @@
 
 #include "core/stl.h"
 
-namespace ocarina {
+namespace horizon::core {
 
 namespace detail {
 
@@ -152,4 +152,4 @@ template<typename T>
 using pointer_category = detail::pointer_category_impl<std::remove_cvref_t<T>>;
 OC_DEFINE_TEMPLATE_VALUE(pointer_category)
 
-}// namespace ocarina
+}// namespace horizon::core

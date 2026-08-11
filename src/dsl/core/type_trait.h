@@ -10,7 +10,10 @@
 #include "core/type.h"
 #include "math/basic_traits.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 template<typename T>
 struct Var;
@@ -127,17 +130,24 @@ using is_valid_dsl_type = detail::is_valid_dsl_type_impl<std::remove_cvref_t<T>>
 template<typename T>
 constexpr bool is_valid_dsl_type_v = is_valid_dsl_type<T>::value;
 
-namespace detail {
+}// namespace horizon::dsl
+
+namespace horizon::math::detail {
 template<typename T>
 struct remove_device_impl {
-    using type = expr_value_t<T>;
+    using type = horizon::dsl::expr_value_t<T>;
 };
 
 template<typename T, size_t N, size_t... Indices>
-struct remove_device_impl<Swizzle<Var<T>, N, Indices...>> {
+struct remove_device_impl<Swizzle<horizon::dsl::Var<T>, N, Indices...>> {
     using type = Swizzle<T, N, Indices...>;
 };
-}// namespace detail
+}// namespace horizon::math::detail
+
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace detail {
 template<typename T>
@@ -189,7 +199,7 @@ template<typename... T>
 constexpr auto is_vector_expr_same_dimension_v = is_vector_expr_same_dimension<T...>::value;
 
 template<typename... T>
-using is_vector_expr_same_element = ocarina::is_same<vector_expr_element_t<T>...>;
+using is_vector_expr_same_element = horizon::dsl::is_same<vector_expr_element_t<T>...>;
 
 template<typename... T>
 constexpr auto is_vector_expr_same_element_v = is_vector_expr_same_element<T...>::value;
@@ -323,7 +333,7 @@ template<typename T>
 using dynamic_array_element_t = typename detail::dynamic_array_element_impl<std::remove_cvref_t<T>>::type;
 
 template<typename... T>
-using is_same_expr = ocarina::is_same<expr_value_t<T>...>;
+using is_same_expr = horizon::dsl::is_same<expr_value_t<T>...>;
 
 template<typename... T>
 constexpr auto is_same_expr_v = is_same_expr<T...>::value;
@@ -417,7 +427,7 @@ using is_dsl_scalar = std::disjunction<is_dsl_integral<T>,
                                        is_boolean<T>,
                                        is_char<T>,
                                        is_uchar<T>,
-                                       ocarina::is_floating_point<T>>;
+                                       horizon::dsl::is_floating_point<T>>;
 OC_DEFINE_TEMPLATE_VALUE(is_dsl_scalar)
 
 template<typename T>
@@ -629,7 +639,7 @@ using is_bindless_array = detail::is_bindless_array_impl<std::remove_cvref_t<T>>
 OC_DEFINE_TEMPLATE_VALUE(is_bindless_array)
 
 template<typename T>
-using is_array_expr = ocarina::is_array<expr_value_t<T>>;
+using is_array_expr = horizon::dsl::is_array<expr_value_t<T>>;
 
 OC_DEFINE_TEMPLATE_VALUE(is_array_expr)
 
@@ -640,17 +650,20 @@ struct variant_var_impl {
 };
 
 template<typename... Ts>
-struct variant_var_impl<ocarina::variant<Ts...>> {
-    using type = ocarina::variant<Var<Ts>...>;
+struct variant_var_impl<horizon::dsl::variant<Ts...>> {
+    using type = horizon::dsl::variant<Var<Ts>...>;
 };
 
 }// namespace detail
 
 using basic_variant_var_t = typename detail::variant_var_impl<basic_variant_t>::type;
 
-}// namespace ocarina
+}// namespace horizon::dsl
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 class Ray;
 
@@ -718,9 +731,12 @@ struct scalar {
 template<typename T>
 using scalar_t = typename detail::scalar<T>::type;
 
-}// namespace ocarina
+}// namespace horizon::dsl
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 // Used to determine where the function runs (host or device)
 enum EPort {
@@ -802,4 +818,4 @@ OC_MAKE_VAR_MAT(4)
 #undef OC_MAKE_VAR_TYPE
 #undef OC_MAKE_VAR_TYPE_IMPL
 
-}// namespace ocarina
+}// namespace horizon::dsl

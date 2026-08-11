@@ -7,7 +7,10 @@
 #include "printer.h"
 #include "debugger.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 enum class ShaderCodegenPath : uint8_t {
     EAstToSource,
@@ -20,7 +23,7 @@ class OC_DSL_API Env {
 private:
     Printer printer_;
     Debugger debugger_;
-    mutable ocarina::map<string, basic_variant_var_t> global_vars_;
+    mutable horizon::dsl::map<string, basic_variant_var_t> global_vars_;
 
     /// Check if the array or buffer is over boundary
     bool valid_check_{true};
@@ -72,29 +75,29 @@ public:
         T ret = value;
         string tb = traceback_string(-1);
         if constexpr (is_scalar_expr_v<T>) {
-            string content = ocarina::format("traceback is {}", tb.c_str());
-            if_(ocarina::isnan(value) || ocarina::isinf(value), [&] {
+            string content = horizon::dsl::format("traceback is {}", tb.c_str());
+            if_(horizon::dsl::isnan(value) || horizon::dsl::isinf(value), [&] {
                 $err_with_location("invalid value : {} \n" + content, value);
                 ret = 0.f;
             });
             return ret;
         } else if constexpr (is_vector2_expr_v<T>) {
-            string content = ocarina::format("traceback is {}", tb.c_str());
-            if_(ocarina::has_nan(value) || ocarina::has_inf(value), [&] {
+            string content = horizon::dsl::format("traceback is {}", tb.c_str());
+            if_(horizon::dsl::has_nan(value) || horizon::dsl::has_inf(value), [&] {
                 $err_with_location("invalid value : ({}, {}) \n" + content, value);
                 ret = make_float2(0.f);
             });
             return ret;
         } else if constexpr (is_vector3_expr_v<T>) {
-            string content = ocarina::format("traceback is {}", tb.c_str());
-            if_(ocarina::has_nan(value) || ocarina::has_inf(value), [&] {
+            string content = horizon::dsl::format("traceback is {}", tb.c_str());
+            if_(horizon::dsl::has_nan(value) || horizon::dsl::has_inf(value), [&] {
                 $err_with_location("invalid value : ({}, {}, {}) \n" + content, value);
                 ret = make_float3(0.f);
             });
             return ret;
         } else if constexpr (is_vector4_expr_v<T>) {
-            string content = ocarina::format("traceback is {}", tb.c_str());
-            if_(ocarina::has_nan(value) || ocarina::has_inf(value), [&] {
+            string content = horizon::dsl::format("traceback is {}", tb.c_str());
+            if_(horizon::dsl::has_nan(value) || horizon::dsl::has_inf(value), [&] {
                 $err_with_location("invalid value : ({}, {}, {}, {}) \n" + content, value);
                 ret = make_float4(0.f);
             });
@@ -110,4 +113,4 @@ public:
     static void set_shader_codegen_path(ShaderCodegenPath path) noexcept { instance().shader_codegen_path_ = path; }
 };
 
-}// namespace ocarina
+}// namespace horizon::dsl

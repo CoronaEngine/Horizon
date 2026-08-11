@@ -6,7 +6,10 @@
 
 #include "ref_func.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 namespace detail {
 
 #define OC_REF_COMMON(...)                                                              \
@@ -54,7 +57,7 @@ struct Ref<Vector<T, 2>>
     OC_MAKE_ASSIGNMENT_FUNC
 public:
     explicit Ref(const Var<T> &arg) noexcept
-        : expression_(ocarina::Function::current()->local(ocarina::Type::of<this_type>())) {
+        : expression_(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<this_type>())) {
         x = arg;
         y = arg;
     }
@@ -80,7 +83,7 @@ struct Ref<Vector<T, 3>>
     OC_MAKE_ASSIGNMENT_FUNC
 public:
     explicit Ref(const Var<T> &arg) noexcept
-        : expression_(ocarina::Function::current()->local(ocarina::Type::of<this_type>())) {
+        : expression_(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<this_type>())) {
         x = arg;
         y = arg;
         z = arg;
@@ -108,7 +111,7 @@ struct Ref<Vector<T, 4>>
     OC_MAKE_ASSIGNMENT_FUNC
 public:
     explicit Ref(const Var<T> &arg) noexcept
-        : expression_(ocarina::Function::current()->local(ocarina::Type::of<this_type>())) {
+        : expression_(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<this_type>())) {
         x = arg;
         y = arg;
         z = arg;
@@ -135,11 +138,11 @@ struct Ref<Matrix<T, N, M>>
 };
 
 template<typename T, size_t N>
-struct Ref<ocarina::array<T, N>>
-    : detail::EnableSubscriptAccess<Ref<ocarina::array<T, N>>>,
-      detail::EnableGetMemberByIndex<Ref<ocarina::array<T, N>>> {
-    using this_type = ocarina::array<T, N>;
-    OC_REF_COMMON(Ref<ocarina::array<T, N>>)
+struct Ref<horizon::dsl::array<T, N>>
+    : detail::EnableSubscriptAccess<Ref<horizon::dsl::array<T, N>>>,
+      detail::EnableGetMemberByIndex<Ref<horizon::dsl::array<T, N>>> {
+    using this_type = horizon::dsl::array<T, N>;
+    OC_REF_COMMON(Ref<horizon::dsl::array<T, N>>)
 public:
     void set(const this_type &t) {
         for (int i = 0; i < N; ++i) {
@@ -267,9 +270,9 @@ public:
 };
 
 template<typename... T>
-struct Ref<ocarina::tuple<T...>> {
-    using Tuple = ocarina::tuple<T...>;
-    OC_REF_COMMON(Ref<ocarina::tuple<T...>>)
+struct Ref<horizon::dsl::tuple<T...>> {
+    using Tuple = horizon::dsl::tuple<T...>;
+    OC_REF_COMMON(Ref<horizon::dsl::tuple<T...>>)
 
 private:
     template<uint i>
@@ -278,17 +281,17 @@ private:
     template<uint i = 0>
     requires(i < sizeof...(T))
     void _assignment(const Tuple &t) noexcept {
-        set<i>(ocarina::get<i>(t));
+        set<i>(horizon::dsl::get<i>(t));
         _assignment<i + 1>(t);
     }
 
 public:
     template<size_t i>
     [[nodiscard]] auto get() const noexcept {
-        using Elm = ocarina::tuple_element_t<i, Tuple>;
+        using Elm = horizon::dsl::tuple_element_t<i, Tuple>;
         return eval<Elm>(Function::current()->member(Type::of<Elm>(), expression(), i));
     }
-    template<size_t i, typename elm_ty = ocarina::tuple_element_t<i, Tuple>>
+    template<size_t i, typename elm_ty = horizon::dsl::tuple_element_t<i, Tuple>>
     void set(elm_ty val) noexcept {
         auto expr = Function::current()->member(Type::of<expr_value_t<elm_ty>>(), expression(), i);
         assign(expr, val);
@@ -338,7 +341,7 @@ public:
     }
 
     template<typename Index, typename Val>
-    requires concepts::integral<expr_value_t<Index>> && ocarina::is_same_v<T, expr_value_t<Val>>
+    requires concepts::integral<expr_value_t<Index>> && horizon::dsl::is_same_v<T, expr_value_t<Val>>
     void write(Index index, Val &&elm) {
         if constexpr (is_dsl_v<Index>) {
             index = detail::correct_index(index, size(), typeid(*this).name(), traceback_string());
@@ -527,13 +530,13 @@ public:
 #define OC_MAKE_STRUCT_MEMBER(m)                                                                                          \
     dsl_t<std::remove_cvref_t<decltype(this_type::m)>>(m){Function::current()->member(Type::of<decltype(this_type::m)>(), \
                                                                                       expression(),                       \
-                                                                                      ocarina::struct_member_tuple<this_type>::member_index(#m))};
+                                                                                      horizon::dsl::struct_member_tuple<this_type>::member_index(#m))};
 
 #define OC_MAKE_MEMBER_ASSIGNMENT(m) \
     m.set(_t_.m);
 
 #define OC_MAKE_COMPUTABLE_BODY(S, ...)                   \
-    namespace ocarina {                                   \
+    namespace horizon::dsl {                             \
     namespace detail {                                    \
     template<>                                            \
     struct Ref<S> {                                       \
@@ -556,16 +559,16 @@ public:
 }// namespace detail
 
 template<typename T>
-struct Proxy : public ocarina::detail::Ref<T> {
-    static_assert(ocarina::always_false_v<T>, "proxy is invalid !");
+struct Proxy : public horizon::dsl::detail::Ref<T> {
+    static_assert(horizon::dsl::always_false_v<T>, "proxy is invalid !");
 };
 
 #define OC_MAKE_GET_PROXY                                                                     \
-    auto operator->() noexcept { return reinterpret_cast<ocarina::Proxy<org_type> *>(this); } \
-    auto operator->() const noexcept { return reinterpret_cast<const ocarina::Proxy<org_type> *>(this); }
+    auto operator->() noexcept { return reinterpret_cast<horizon::dsl::Proxy<org_type> *>(this); } \
+    auto operator->() const noexcept { return reinterpret_cast<const horizon::dsl::Proxy<org_type> *>(this); }
 
 #define OC_MAKE_PROXY(S) \
     template<>           \
-    struct ocarina::Proxy<S> : public ocarina::detail::Ref<S>
+    struct horizon::dsl::Proxy<S> : public horizon::dsl::detail::Ref<S>
 
-}// namespace ocarina
+}// namespace horizon::dsl

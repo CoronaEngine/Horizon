@@ -5,7 +5,9 @@
 #include "core/type.h"
 #include "function.h"
 
-namespace ocarina {
+namespace horizon::ast {
+using namespace horizon::core;
+using namespace horizon::math;
 
 namespace {
 
@@ -18,7 +20,7 @@ void on_type_access_bridge(const Type *type) noexcept {
 
 void register_type_system_callbacks_once() noexcept {
     static bool registered = [] {
-        detail::register_type_system_callbacks(detail::TypeSystemCallbacks{
+        horizon::core::detail::register_type_system_callbacks(horizon::core::detail::TypeSystemCallbacks{
             .on_type_access = &on_type_access_bridge,
         });
         return true;
@@ -33,4 +35,4 @@ void register_type_system_callbacks_once() noexcept {
 
 }// namespace
 
-}// namespace ocarina
+}// namespace horizon::ast

@@ -4,7 +4,10 @@
 
 #include "printer.h"
 
-namespace ocarina {
+namespace horizon::dsl {
+using namespace horizon::core;
+using namespace horizon::math;
+using namespace horizon::ast;
 
 namespace {
 
@@ -102,4 +105,4 @@ void Printer::retrieve_immediately(const OutputFunc &func) noexcept {
     output_log(func);
     reset();
 }
-}// namespace ocarina
+}// namespace horizon::dsl
