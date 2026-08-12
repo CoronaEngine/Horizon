@@ -53,7 +53,6 @@ namespace Corona::Horizon
         std::vector<SubmitWait> waits;
         std::vector<SubmitSignal> signals;
         std::vector<PresentDesc> presents;
-        std::vector<std::function<void()>> host_callbacks;
         SubmissionKeepAlive keep_alive;
         std::shared_ptr<TrackedCommandBuffer> command_buffer;
     };
@@ -64,7 +63,6 @@ namespace Corona::Horizon
         std::vector<SubmissionDependency> dependencies;
         std::vector<CrossDeviceDependency> cross_device_dependencies;
 
-        [[nodiscard]] bool empty() const noexcept { return submissions.empty(); }
     };
 
     class ExecutionCompiler

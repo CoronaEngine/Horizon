@@ -115,14 +115,12 @@ namespace Corona::Horizon
             case CommandOp::CopyBuffer: return "CopyBuffer";
             case CommandOp::CopyImage: return "CopyImage";
             case CommandOp::CopyBufferToImage: return "CopyBufferToImage";
-            case CommandOp::CopyImageToBuffer: return "CopyImageToBuffer";
             case CommandOp::Dispatch: return "Dispatch";
             case CommandOp::BeginRendering: return "BeginRendering";
             case CommandOp::EndRendering: return "EndRendering";
             case CommandOp::DrawIndexed: return "DrawIndexed";
             case CommandOp::DrawIndexedBatch: return "DrawIndexedBatch";
             case CommandOp::Present: return "Present";
-            case CommandOp::HostCallback: return "HostCallback";
             case CommandOp::KeepAlive: return "KeepAlive";
             default: return "Unknown";
             }
@@ -768,24 +766,6 @@ namespace Corona::Horizon
             static ResourceSubmissionTracker tracker;
             return tracker;
         }
-
-        struct RetireCallback
-        {
-            explicit RetireCallback(std::function<void()> callback)
-                : callback_(std::move(callback))
-            {
-            }
-
-            ~RetireCallback()
-            {
-                if (callback_)
-                {
-                    callback_();
-                }
-            }
-
-            std::function<void()> callback_;
-        };
     }
 
     CommitCommand commit() noexcept
@@ -883,23 +863,6 @@ namespace Corona::Horizon
 
         CommandIR command;
         command.op = CommandOp::CopyBufferToImage;
-        command.devices = devices;
-        command.queue = QueueCapability::Transfer;
-        command.payload.buffer_image_copy = region;
-        command.sequence = next_sequence();
-        command.resources.push_back({ src.handle, AccessKind::Read, 0 });
-        command.resources.push_back({ dst.handle, AccessKind::Write, 0 });
-        mark_device_requirements(devices);
-        commands_.push_back(std::move(command));
-    }
-
-    void CommandRecorder::copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices)
-    {
-        ensure_open();
-        mark_requirement(QueueCapability::Transfer);
-
-        CommandIR command;
-        command.op = CommandOp::CopyImageToBuffer;
         command.devices = devices;
         command.queue = QueueCapability::Transfer;
         command.payload.buffer_image_copy = region;
@@ -1086,19 +1049,6 @@ namespace Corona::Horizon
         commands_.push_back(std::move(command));
     }
 
-    void CommandRecorder::host_callback(std::function<void()> callback)
-    {
-        ensure_open();
-        mark_requirement(QueueCapability::Transfer);
-
-        CommandIR command;
-        command.op = CommandOp::HostCallback;
-        command.queue = QueueCapability::Transfer;
-        command.sequence = next_sequence();
-        command.host_callback = std::move(callback);
-        commands_.push_back(std::move(command));
-    }
-
     void CommandRecorder::keep_alive(std::shared_ptr<void> object)
     {
         ensure_open();
@@ -1110,12 +1060,6 @@ namespace Corona::Horizon
         command.sequence = next_sequence();
         command.keep_alive = std::move(object);
         commands_.push_back(std::move(command));
-    }
-
-    void CommandRecorder::require_feature(FeatureRequirement feature)
-    {
-        ensure_open();
-        mark_requirement(feature);
     }
 
     RecordedTask CommandRecorder::close()
@@ -1285,10 +1229,6 @@ namespace Corona::Horizon
                 {
                     submission.presents.push_back(command.payload.present);
                 }
-                if (command.host_callback)
-                {
-                    submission.host_callbacks.push_back(command.host_callback);
-                }
             }
 
             for (size_t device_index = 0; device_index < devices.size(); ++device_index)
@@ -1333,11 +1273,6 @@ namespace Corona::Horizon
         if (command.keep_alive)
         {
             submission.keep_alive.add_object(command.keep_alive);
-        }
-
-        if (command.host_callback)
-        {
-            submission.keep_alive.add_object(std::make_shared<RetireCallback>(command.host_callback));
         }
     }
 
@@ -1965,35 +1900,6 @@ namespace Corona::Horizon
                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                1,
                                &copy);
-                break;
-            }
-            case CommandOp::CopyImageToBuffer:
-            {
-                if (command.resources.size() < 2u)
-                    throw std::logic_error("CopyImageToBuffer command is missing source image or destination buffer.");
-
-                ImageStore::Write src = write_image(command.resources[0].handle);
-                BufferStore::Write dst = write_buffer(command.resources[1].handle);
-                if (!src || src->image_handle == VK_NULL_HANDLE)
-                    throw std::logic_error("CopyImageToBuffer requires a valid source HardwareImage.");
-                if (!dst || dst->buffer_handle == VK_NULL_HANDLE)
-                    throw std::logic_error("CopyImageToBuffer requires a valid destination HardwareBuffer.");
-
-                VkBufferImageCopy copy = buffer_image_region(*src, command.payload.buffer_image_copy);
-                if (copy.imageExtent.width == 0 || copy.imageExtent.height == 0 || copy.imageExtent.depth == 0)
-                    break;
-
-                transition_image(command_buffer,
-                                 *src,
-                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                 VK_ACCESS_2_TRANSFER_READ_BIT);
-                vkCmdCopyImageToBuffer(command_buffer,
-                                       src->image_handle,
-                                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                       dst->buffer_handle,
-                                       1,
-                                       &copy);
                 break;
             }
             case CommandOp::Dispatch:

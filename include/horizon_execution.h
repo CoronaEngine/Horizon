@@ -68,10 +68,8 @@ namespace Corona::Horizon
         DrawIndexedBatch,
         DrawIndexedIndirect,
         Present,
-        HostCallback,
         KeepAlive,
-        CopyImage,
-        CopyImageToBuffer
+        CopyImage
     };
 
     enum class FeatureRequirement
@@ -106,11 +104,6 @@ namespace Corona::Horizon
     };
 
     struct BufferRef
-    {
-        ResourceHandle handle {};
-    };
-
-    struct ShaderRef
     {
         ResourceHandle handle {};
     };
@@ -284,9 +277,7 @@ namespace Corona::Horizon
         DeviceMask devices {};
         QueueCapability queue { QueueCapability::Transfer };
         std::vector<ResourceUse> resources;
-        std::vector<FeatureRequirement> features;
         CommandPayload payload {};
-        std::function<void()> host_callback {};
         std::shared_ptr<void> keep_alive {};
         uint64_t sequence { 0 };
         std::string debug_label;
@@ -332,8 +323,6 @@ namespace Corona::Horizon
     {
         std::vector<CommandIR> commands;
         RequirementSet requirements {};
-
-        [[nodiscard]] bool empty() const noexcept { return commands.empty(); }
     };
 
     struct ResourceBarrier
@@ -383,10 +372,6 @@ namespace Corona::Horizon
         void add_object(std::shared_ptr<void> object);
         void clear() noexcept;
 
-        [[nodiscard]] size_t resource_count() const noexcept { return resources_.size(); }
-        [[nodiscard]] size_t object_count() const noexcept { return objects_.size(); }
-        [[nodiscard]] bool empty() const noexcept { return resources_.empty() && objects_.empty(); }
-
     private:
         std::vector<std::shared_ptr<const IResourceRef>> resources_;
         std::unordered_set<std::uintptr_t> resource_ids_;
@@ -415,11 +400,6 @@ namespace Corona::Horizon
         uint64_t serial { 0 };
         std::vector<SubmissionToken> tokens;
         std::vector<PresentResult> presents;
-
-        [[nodiscard]] bool empty() const noexcept
-        {
-            return tokens.empty() && presents.empty();
-        }
     };
 
     struct CommitCommand
@@ -446,7 +426,6 @@ namespace Corona::Horizon
     public:
         CommandBatch& operator<<(StreamCommand command);
         [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
-        [[nodiscard]] bool empty() const noexcept { return commands_.empty(); }
 
     private:
         std::vector<StreamCommand> commands_;
@@ -460,7 +439,6 @@ namespace Corona::Horizon
         void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
         void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
         void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-        void copy_to_buffer(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
         void dispatch(DispatchDesc desc, DeviceMask devices = {});
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});
@@ -472,9 +450,7 @@ namespace Corona::Horizon
                                    DrawIndexedIndirectDesc desc,
                                    DeviceMask devices = {});
         void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
-        void host_callback(std::function<void()> callback);
         void keep_alive(std::shared_ptr<void> object);
-        void require_feature(FeatureRequirement feature);
         [[nodiscard]] RecordedTask close();
 
     private:
