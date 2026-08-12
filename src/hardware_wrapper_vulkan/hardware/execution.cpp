@@ -2400,35 +2400,6 @@ namespace Corona::Horizon
         }
     }
 
-    void CrossDeviceSync::remember_imported_timeline(DeviceId local_device, VkSemaphore foreign, VkSemaphore imported)
-    {
-        if (foreign == VK_NULL_HANDLE || imported == VK_NULL_HANDLE)
-        {
-            return;
-        }
-
-        auto found = std::find_if(imported_timelines_.begin(), imported_timelines_.end(), [local_device, foreign](const ImportedTimeline& item) {
-            return item.local_device == local_device && item.foreign == foreign;
-        });
-
-        if (found != imported_timelines_.end())
-        {
-            found->imported = imported;
-            return;
-        }
-
-        imported_timelines_.push_back({ local_device, foreign, imported });
-    }
-
-    VkSemaphore CrossDeviceSync::resolve_imported_timeline(DeviceId local_device, VkSemaphore foreign) const noexcept
-    {
-        auto found = std::find_if(imported_timelines_.begin(), imported_timelines_.end(), [local_device, foreign](const ImportedTimeline& item) {
-            return item.local_device == local_device && item.foreign == foreign;
-        });
-
-        return found == imported_timelines_.end() ? VK_NULL_HANDLE : found->imported;
-    }
-
     HardwareStream::HardwareStream(HardwareExecutor& executor)
         : executor_(&executor)
     {

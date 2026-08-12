@@ -341,44 +341,6 @@ namespace Corona::Horizon
         return true;
     }
 
-    bool validate_buffer_upload(const HardwareBuffer& dst, std::span<const std::byte> data, uint64_t dst_offset)
-    {
-        if (data.empty())
-            return true;
-
-        if (data.data() == nullptr)
-            return validation_error("HardwareBuffer upload data must not be null.", true);
-
-        if (!optional_validation_enabled())
-            return true;
-
-        if (!dst)
-            return validation_error("HardwareBuffer upload requires a valid destination buffer.");
-
-        return validate_range(dst.get_byte_size(), dst_offset, data.size_bytes(), "HardwareBuffer upload range exceeds destination buffer size.");
-    }
-
-    bool validate_buffer_copy(const HardwareBuffer& src, const HardwareBuffer& dst, BufferRange src_range, uint64_t dst_offset)
-    {
-        if (!optional_validation_enabled())
-            return true;
-
-        if (!src || !dst)
-            return validation_error("Buffer copy requires valid source and destination buffers.");
-
-        const BufferRange resolved = src_range.resolve(src.get_byte_size());
-        if (resolved.byte_size == 0)
-            return validation_error("Buffer copy size must be greater than zero.");
-
-        if (!validate_range(src.get_byte_size(), resolved.byte_offset, resolved.byte_size, "Buffer copy source range exceeds source buffer size."))
-            return false;
-
-        if (!validate_range(dst.get_byte_size(), dst_offset, resolved.byte_size, "Buffer copy destination range exceeds destination buffer size."))
-            return false;
-
-        return true;
-    }
-
     bool validate_buffer_host_write(const HardwareBuffer& buffer, std::span<const std::byte> data, uint64_t offset)
     {
         if (!optional_validation_enabled() || data.empty())
@@ -451,58 +413,6 @@ namespace Corona::Horizon
         return true;
     }
 
-    bool validate_image_upload(const HardwareImageDesc& desc,
-                               ImageSubresourceRange range,
-                               uint32_t layer_index,
-                               uint32_t mip_index,
-                               std::span<const std::byte> data)
-    {
-        if (data.empty())
-            return true;
-
-        if (data.data() == nullptr)
-            return validation_error("HardwareImage upload data must not be null.", true);
-
-        if (!optional_validation_enabled())
-            return true;
-
-        uint64_t required_size = 0;
-        if (!validate_copyable_image_subresource(desc, range, layer_index, mip_index, ImageUsageFlags::TransferDst, "upload") ||
-            !resolve_tightly_packed_image_bytes(desc, range, layer_index, mip_index, required_size, "upload"))
-        {
-            return false;
-        }
-
-        if (data.size_bytes() < required_size)
-            return validation_error("HardwareImage upload data is smaller than the requested subresource.");
-
-        return true;
-    }
-
-    bool validate_image_copy(const HardwareImageDesc& src_desc,
-                             ImageSubresourceRange src_range,
-                             uint32_t src_layer,
-                             uint32_t src_mip,
-                             const HardwareImageDesc& dst_desc,
-                             ImageSubresourceRange dst_range,
-                             uint32_t dst_layer,
-                             uint32_t dst_mip)
-    {
-        if (!optional_validation_enabled())
-            return true;
-
-        if (src_desc.format != dst_desc.format)
-            return validation_error("HardwareImage copy requires source and destination images with the same Format.");
-
-        if (!validate_copyable_image_subresource(src_desc, src_range, src_layer, src_mip, ImageUsageFlags::TransferSrc, "copy source"))
-            return false;
-
-        if (!validate_copyable_image_subresource(dst_desc, dst_range, dst_layer, dst_mip, ImageUsageFlags::TransferDst, "copy destination"))
-            return false;
-
-        return true;
-    }
-
     bool validate_buffer_to_image_copy(const HardwareBuffer& src,
                                        uint64_t buffer_offset,
                                        const HardwareImageDesc& dst_desc,
@@ -524,29 +434,6 @@ namespace Corona::Horizon
         }
 
         return validate_range(src.get_byte_size(), buffer_offset, required_size, "Buffer-to-image copy source range exceeds source buffer size.");
-    }
-
-    bool validate_image_to_buffer_copy(const HardwareImageDesc& src_desc,
-                                       ImageSubresourceRange src_range,
-                                       uint32_t src_layer,
-                                       uint32_t src_mip,
-                                       const HardwareBuffer& dst,
-                                       uint64_t buffer_offset)
-    {
-        if (!optional_validation_enabled())
-            return true;
-
-        if (!dst)
-            return validation_error("Image-to-buffer copy requires a valid destination HardwareBuffer.");
-
-        uint64_t required_size = 0;
-        if (!validate_copyable_image_subresource(src_desc, src_range, src_layer, src_mip, ImageUsageFlags::TransferSrc, "copy source") ||
-            !resolve_tightly_packed_image_bytes(src_desc, src_range, src_layer, src_mip, required_size, "copy source"))
-        {
-            return false;
-        }
-
-        return validate_range(dst.get_byte_size(), buffer_offset, required_size, "Image-to-buffer copy destination range exceeds destination buffer size.");
     }
 
     bool validate_image_host_write(const HardwareImageDesc& desc,

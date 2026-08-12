@@ -570,43 +570,6 @@ namespace Corona::Horizon
     // Ray Tracing
     // ================================================================
 
-    enum class RayTracingShaderStage : uint16_t
-    {
-        RayGeneration = 0,
-        Miss = 1,
-        ClosestHit = 2,
-        AnyHit = 3,
-        Intersection = 4,
-        Callable = 5,
-    };
-
-    enum class RayTracingHitGroupKind : uint16_t
-    {
-        Triangles = 0,
-        Procedural = 1,
-    };
-
-    enum class RayTracingGeometryKind : uint16_t
-    {
-        Triangles = 0,
-        Aabbs = 1,
-    };
-
-    enum class AccelerationStructureBuildMode : uint16_t
-    {
-        Build = 0,
-        Update = 1,
-    };
-
-    struct RayDispatchDesc
-    {
-        uint32_t width = 1;
-        uint32_t height = 1;
-        uint32_t depth = 1;
-    };
-
-
-
     // ================================================================
     // Validation
     // ================================================================

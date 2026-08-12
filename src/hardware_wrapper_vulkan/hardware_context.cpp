@@ -1106,60 +1106,7 @@ namespace Corona::Horizon
                            "VULKAN PROFILE",
                            stream.str());
     }
-
-    VulkanValidationReport make_validation_report()
-    {
-        VulkanValidationReport report;
-        report.compiled = true;
-
-        configure_vulkan_layer_isolation();
-        if (volkInitialize() != VK_SUCCESS)
-        {
-            report.missing_requirements.emplace_back("Vulkan loader is not available.");
-            return report;
-        }
-
-        report.layer_available = validation_layer_available();
-        if (!report.layer_available)
-        {
-            report.missing_requirements.emplace_back("VK_LAYER_KHRONOS_validation is not available.");
-            return report;
-        }
-
-        std::set<const char*> requested_extensions {
-            VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-            VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME,
-        };
-        std::vector<const char*> requested_layers { validation_layer_name };
-        const auto enabled_extensions = supported_instance_extensions(std::move(requested_extensions), requested_layers);
-        report.debug_utils_enabled = contains_name(enabled_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        report.validation_features_enabled = contains_name(enabled_extensions, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
-        report.enabled_features = validation_feature_names();
-
-        if (!report.debug_utils_enabled)
-        {
-            report.missing_requirements.emplace_back("VK_EXT_debug_utils is not available from global or validation-layer extensions.");
-        }
-        if (!report.validation_features_enabled)
-        {
-            report.missing_requirements.emplace_back("VK_EXT_validation_features is not available from global or validation-layer extensions.");
-        }
-
-        return report;
-    }
 #endif
-
-    VulkanValidationReport vulkan_validation_report()
-    {
-#if HORIZON_ENABLE_VULKAN_VALIDATION
-        return make_validation_report();
-#else
-        VulkanValidationReport report;
-        report.compiled = false;
-        report.missing_requirements.emplace_back("HORIZON_ENABLE_VULKAN_VALIDATION is disabled at compile time.");
-        return report;
-#endif
-    }
 
     HardwareContext& hardware_context()
     {
@@ -1190,11 +1137,6 @@ namespace Corona::Horizon
     VkInstance vulkan_instance()
     {
         return hardware_context().instance();
-    }
-
-    std::vector<std::shared_ptr<HardwareContext::DeviceContext>> all_devices()
-    {
-        return hardware_context().devices();
     }
 
     HardwareContext::HardwareContext()

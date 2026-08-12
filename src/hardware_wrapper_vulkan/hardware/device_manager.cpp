@@ -607,12 +607,6 @@ namespace Corona::Horizon
 
         const uint64_t signal_value = last_submitted_value_ + 1;
 
-        if (fail_next_submit_)
-        {
-            fail_next_submit_ = false;
-            throw std::runtime_error("Injected queue submit failure.");
-        }
-
         if (device_ != VK_NULL_HANDLE && queue_ != VK_NULL_HANDLE && submission.command_buffer->vk() != VK_NULL_HANDLE)
         {
             if (timeline_ != VK_NULL_HANDLE)
@@ -1033,12 +1027,6 @@ namespace Corona::Horizon
     void Queue::mark_completed_for_tests(uint64_t value) noexcept
     {
         last_completed_value_.store(value, std::memory_order_release);
-    }
-
-    void Queue::fail_next_submit_for_tests() noexcept
-    {
-        std::lock_guard lock(mutex_);
-        fail_next_submit_ = true;
     }
 
     // ================================================================
