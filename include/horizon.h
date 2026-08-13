@@ -1628,6 +1628,13 @@ namespace Corona::Horizon
         std::vector<BlendAttachmentDesc> attachments = { alpha_blend_attachment() };
     };
 
+    // 前置声明：真正的定义在下方 RasterizerPipelineDesc 之后，但 set_shaders_from_slang
+    // 的内联成员函数体会先于它被编译，必须先看到签名。
+    [[nodiscard]] inline PipelineShaderDesc compile_slang_stage(
+        PipelineShaderStage stage,
+        EmbeddedShader::SlangModule& module,
+        EmbeddedShader::CompilerOption compiler_option = {});
+
     struct RasterizerPipelineDesc
     {
         PipelineShaderDesc vertex_shader { PipelineShaderStage::Vertex, EmbeddedShader::ShaderCodeModule {} };
@@ -1672,10 +1679,8 @@ namespace Corona::Horizon
                                     EmbeddedShader::SlangModule& fs_module,
                                     EmbeddedShader::CompilerOption compiler_option = {})
         {
-            vertex_shader = compile_slang_to_shader_desc(
-                PipelineShaderStage::Vertex, vs_module, compiler_option);
-            fragment_shader = compile_slang_to_shader_desc(
-                PipelineShaderStage::Fragment, fs_module, compiler_option);
+            vertex_shader = compile_slang_stage(PipelineShaderStage::Vertex, vs_module, compiler_option);
+            fragment_shader = compile_slang_stage(PipelineShaderStage::Fragment, fs_module, compiler_option);
         }
 
         // 用另一个 desc 的状态字段覆盖当前 desc（不透传 shader）。
@@ -1693,53 +1698,62 @@ namespace Corona::Horizon
             debug_name = std::move(state.debug_name);
         }
 
-    private:
-        static PipelineShaderDesc compile_slang_to_shader_desc(
-            PipelineShaderStage stage,
-            EmbeddedShader::SlangModule& module,
-            EmbeddedShader::CompilerOption compiler_option = {})
-        {
-            EmbeddedShader::SlangCompileArgs2 args;
-            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-            args.stage = [&] {
-                switch (stage)
-                {
-                case PipelineShaderStage::Vertex:
-                    return EmbeddedShader::ShaderStage::VertexShader;
-                case PipelineShaderStage::Fragment:
-                    return EmbeddedShader::ShaderStage::FragmentShader;
-                case PipelineShaderStage::Compute:
-                    return EmbeddedShader::ShaderStage::ComputeShader;
-                default:
-                    throw std::invalid_argument("compile_slang_to_shader_desc only supports vertex, fragment, and compute stages.");
-                }
-            }();
-            args.module = &module;
-            args.deps = std::move(compiler_option.slangModules);
-            args.enableReflection = true;
-
-            EmbeddedShader::SlangCompileResult result = EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
-            if (spirv == result.binaryTargets.end())
-                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
-
-            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
-            if (reflection != result.reflections.end())
-                resources = std::move(reflection->second);
-
-            // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
-            // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
-            for (auto& info : resources.bindInfoPool)
-            {
-                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
-                    info.variateName = info.variateName.substr(pos + 1);
-            }
-
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
-        }
     };
+
+    // ================================================================
+    // Slang 编译
+    // ================================================================
+
+    // 编译单个 Slang shader module 为 PipelineShaderDesc。EDSL 路径（栅格 + compute）
+    // 共用：填 SlangCompileArgs2 → slangCompilerWithModules → 取 SPIR-V → 反射短名裁剪。
+    // 集中成一处，避免两份手抄在改约定（短名裁剪）时静默漂移。
+    [[nodiscard]] inline PipelineShaderDesc compile_slang_stage(
+        PipelineShaderStage stage,
+        EmbeddedShader::SlangModule& module,
+        EmbeddedShader::CompilerOption compiler_option)
+    {
+        EmbeddedShader::SlangCompileArgs2 args;
+        args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
+        args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
+        args.stage = [&] {
+            switch (stage)
+            {
+            case PipelineShaderStage::Vertex:
+                return EmbeddedShader::ShaderStage::VertexShader;
+            case PipelineShaderStage::Fragment:
+                return EmbeddedShader::ShaderStage::FragmentShader;
+            case PipelineShaderStage::Compute:
+                return EmbeddedShader::ShaderStage::ComputeShader;
+            default:
+                throw std::invalid_argument("compile_slang_stage only supports vertex, fragment, and compute stages.");
+            }
+        }();
+        args.module = &module;
+        args.deps = std::move(compiler_option.slangModules);
+        args.enableReflection = true;
+
+        EmbeddedShader::SlangCompileResult result =
+            EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
+        auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
+        if (spirv == result.binaryTargets.end())
+            throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
+
+        auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
+        EmbeddedShader::ShaderCodeModule::ShaderResources resources;
+        if (reflection != result.reflections.end())
+            resources = std::move(reflection->second);
+
+        // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
+        // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
+        for (auto& info : resources.bindInfoPool)
+        {
+            if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
+                info.variateName = info.variateName.substr(pos + 1);
+        }
+
+        return PipelineShaderDesc(
+            stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
+    }
 
     // ================================================================
     // Pipeline Binding
@@ -2113,35 +2127,8 @@ namespace Corona::Horizon
 
         static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
         {
-            // Compile Slang module inline
-            EmbeddedShader::SlangCompileArgs2 args;
-            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-            args.stage = EmbeddedShader::ShaderStage::ComputeShader;
-            args.module = &CS::slangModule;
-            args.enableReflection = true;
-
-            EmbeddedShader::SlangCompileResult result =
-                EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
-            if (spirv == result.binaryTargets.end())
-                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
-
-            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
-            if (reflection != result.reflections.end())
-                resources = std::move(reflection->second);
-
-            for (auto& info : resources.bindInfoPool)
-            {
-                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
-                    info.variateName = info.variateName.substr(pos + 1);
-            }
-
             return ComputePipelineDesc(
-                PipelineShaderDesc(PipelineShaderStage::Compute,
-                                  EmbeddedShader::ShaderCodeModule(std::move(spirv->second),
-                                                                  std::move(resources))),
+                compile_slang_stage(PipelineShaderStage::Compute, CS::slangModule),
                 numthreads);
         }
 
