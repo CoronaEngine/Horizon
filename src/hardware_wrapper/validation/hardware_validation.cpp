@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <limits>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,8 +16,16 @@ namespace Corona::Horizon
 {
     namespace
     {
-        std::mutex validation_config_mutex;
-        HardwareValidationConfig validation_config;
+        // 校验模式固定为 Throw：公开的 set/get 配置接口与配置结构无任何调用者，
+        // 已随 API 简化从 horizon.h 移除，模式枚举也随之内部化。
+        enum class HardwareValidationMode : uint8_t
+        {
+            Disabled,
+            Log,
+            Throw,
+        };
+
+        constexpr HardwareValidationMode validation_mode = HardwareValidationMode::Throw;
 
         [[nodiscard]] bool validation_compiled() noexcept
         {
@@ -73,27 +80,20 @@ namespace Corona::Horizon
             return spirv != nullptr && !spirv->empty();
         }
 
-        [[nodiscard]] HardwareValidationConfig read_validation_config()
-        {
-            std::lock_guard lock(validation_config_mutex);
-            return validation_config;
-        }
-
         [[nodiscard]] bool optional_validation_enabled()
         {
-            return validation_compiled() && read_validation_config().mode != HardwareValidationMode::Disabled;
+            return validation_compiled() && validation_mode != HardwareValidationMode::Disabled;
         }
 
         bool validation_error(std::string_view message, bool hard_error = false)
         {
-            const HardwareValidationConfig config = read_validation_config();
             Diagnostics::write(Diagnostics::Level::Error, "HORIZON VALIDATION", message);
 
-            if (hard_error || (validation_compiled() && config.mode == HardwareValidationMode::Throw))
+            if (hard_error || (validation_compiled() && validation_mode == HardwareValidationMode::Throw))
                 throw std::invalid_argument(std::string(message));
 
 #if HORIZON_ENABLE_HARDWARE_VALIDATION
-            if (config.mode == HardwareValidationMode::Log)
+            if (validation_mode == HardwareValidationMode::Log)
                 CFW_LOG_ERROR("[Horizon validation] {}", message);
 #else
             (void)message;
@@ -107,7 +107,7 @@ namespace Corona::Horizon
             Diagnostics::write(Diagnostics::Level::Warning, "HORIZON VALIDATION", message);
 
 #if HORIZON_ENABLE_HARDWARE_VALIDATION
-            if (read_validation_config().mode != HardwareValidationMode::Disabled)
+            if (validation_mode != HardwareValidationMode::Disabled)
                 CFW_LOG_WARNING("[Horizon validation] {}", message);
 #else
             (void)message;
@@ -269,28 +269,6 @@ namespace Corona::Horizon
             uint64_t unused_size = 0;
             return resolve_tightly_packed_image_bytes(desc, range, layer_index, mip_index, unused_size, operation);
         }
-    }
-
-    void set_hardware_validation_config(HardwareValidationConfig config)
-    {
-        if (!validation_compiled())
-            config.mode = HardwareValidationMode::Disabled;
-
-        std::lock_guard lock(validation_config_mutex);
-        validation_config = config;
-    }
-
-    HardwareValidationConfig get_hardware_validation_config()
-    {
-        HardwareValidationConfig config = read_validation_config();
-        if (!validation_compiled())
-            config.mode = HardwareValidationMode::Disabled;
-        return config;
-    }
-
-    bool is_hardware_validation_enabled()
-    {
-        return optional_validation_enabled();
     }
 
     bool validate_buffer_source_data(std::span<const std::byte> data, uint32_t element_size)

@@ -75,16 +75,6 @@ namespace Corona::Horizon
     private:
         friend struct ResourceBridge;
 
-        void set_resource(std::shared_ptr<IResourceRef> resource) noexcept
-        {
-            resource_ = std::move(resource);
-        }
-
-        [[nodiscard]] std::shared_ptr<IResourceRef> resource_ref() const noexcept
-        {
-            return resource_;
-        }
-
         std::shared_ptr<IResourceRef> resource_{};
     };
 
@@ -92,17 +82,17 @@ namespace Corona::Horizon
     {
         static void set(ResourceHandle& owner, std::shared_ptr<IResourceRef> resource) noexcept
         {
-            owner.set_resource(std::move(resource));
+            owner.resource_ = std::move(resource);
         }
 
         [[nodiscard]] static std::shared_ptr<IResourceRef> token(const ResourceHandle& owner) noexcept
         {
-            return owner.resource_ref();
+            return owner.resource_;
         }
 
         [[nodiscard]] static std::shared_ptr<const IResourceRef> keep_alive(const ResourceHandle& owner) noexcept
         {
-            return std::static_pointer_cast<const IResourceRef>(owner.resource_ref());
+            return owner.resource_;
         }
     };
 
@@ -673,22 +663,9 @@ namespace Corona::Horizon
     // ================================================================
 
     // ================================================================
-    // Validation
-    // ================================================================
-
-    enum class HardwareValidationMode : uint8_t
-    {
-        Disabled,
-        Log,
-        Throw,
-    };
-
-
-    // ================================================================
     // Forward Declarations
     // ================================================================
 
-    struct HardwareValidationConfig;
     class HardwareBuffer;
     class HardwareImage;
 
@@ -942,21 +919,6 @@ namespace Corona::Horizon
     // 隐式提交标记：`stream << pipeline << H::submit` 等价于 `<< H::commit()`。
     // 复用既有的 `operator<<(CommitCommand)`，不引入新算子。
     inline constexpr CommitCommand submit {};
-
-
-
-    // ================================================================
-    // Validation
-    // ================================================================
-
-    struct HardwareValidationConfig
-    {
-        HardwareValidationMode mode = HardwareValidationMode::Throw;
-    };
-
-    void set_hardware_validation_config(HardwareValidationConfig config);
-    [[nodiscard]] HardwareValidationConfig get_hardware_validation_config();
-    [[nodiscard]] bool is_hardware_validation_enabled();
 
 
 
@@ -1307,11 +1269,6 @@ namespace Corona::Horizon
 
         RasterizerPipelineDesc(PipelineShaderDesc vertex, PipelineShaderDesc fragment)
         {
-            set_shaders(std::move(vertex), std::move(fragment));
-        }
-
-        void set_shaders(PipelineShaderDesc vertex, PipelineShaderDesc fragment)
-        {
             if (vertex.stage != PipelineShaderStage::Vertex)
                 throw std::invalid_argument("RasterizerPipelineDesc requires a vertex shader.");
 
@@ -1321,30 +1278,6 @@ namespace Corona::Horizon
             vertex_shader = std::move(vertex);
             fragment_shader = std::move(fragment);
         }
-
-        void set_shaders_from_slang(EmbeddedShader::SlangModule& vs_module,
-                                    EmbeddedShader::SlangModule& fs_module,
-                                    EmbeddedShader::CompilerOption compiler_option = {})
-        {
-            vertex_shader = compile_slang_stage(PipelineShaderStage::Vertex, vs_module, compiler_option);
-            fragment_shader = compile_slang_stage(PipelineShaderStage::Fragment, fs_module, compiler_option);
-        }
-
-        // 用另一个 desc 的状态字段覆盖当前 desc（不透传 shader）。
-        // 公开：EDSL 路径（RasterizerPipeline<void,void>::make_desc）在编译 shader 后用
-        // 调用方传入的 RasterizerPipelineDesc 状态覆盖 EDSL 派生的默认状态。
-        void apply_state(RasterizerPipelineDesc state)
-        {
-            rasterizer = std::move(state.rasterizer);
-            depth_stencil = std::move(state.depth_stencil);
-            blend = std::move(state.blend);
-            multisample = std::move(state.multisample);
-            multiview_count = state.multiview_count;
-            clear_color_target = state.clear_color_target;
-            clear_depth_target = state.clear_depth_target;
-            debug_name = std::move(state.debug_name);
-        }
-
     };
 
     // ================================================================
@@ -1845,7 +1778,15 @@ namespace Corona::Horizon
             if (options.auto_bind)
                 desc.auto_bind_entries = object->autoBindEntries;
 
-            desc.apply_state(std::move(state));
+            // 用调用方传入的状态覆盖 EDSL 派生的默认状态（不透传 shader）。
+            desc.rasterizer = std::move(state.rasterizer);
+            desc.depth_stencil = std::move(state.depth_stencil);
+            desc.blend = std::move(state.blend);
+            desc.multisample = std::move(state.multisample);
+            desc.multiview_count = state.multiview_count;
+            desc.clear_color_target = state.clear_color_target;
+            desc.clear_depth_target = state.clear_depth_target;
+            desc.debug_name = std::move(state.debug_name);
             return desc;
         }
 
@@ -1880,7 +1821,8 @@ namespace Corona::Horizon
 
         static RasterizerPipelineDesc make_desc(RasterizerPipelineDesc desc = {})
         {
-            desc.set_shaders_from_slang(VS::slangModule, FS::slangModule);
+            desc.vertex_shader = compile_slang_stage(PipelineShaderStage::Vertex, VS::slangModule, {});
+            desc.fragment_shader = compile_slang_stage(PipelineShaderStage::Fragment, FS::slangModule, {});
             return desc;
         }
 
