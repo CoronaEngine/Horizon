@@ -58,13 +58,18 @@ namespace Corona::Horizon
             std::vector<UniformSet> uniform_sets;
         };
 
-        explicit VulkanComputePipeline(ComputePipelineDesc desc,
-                                       std::source_location source_location = std::source_location::current());
+        VulkanComputePipeline(ComputePipelineDesc desc,
+                              ComputePipelineShaders shaders,
+                              std::source_location source_location = std::source_location::current());
         ~VulkanComputePipeline();
 
         [[nodiscard]] ComputePipelineDesc desc() const;
-        // 只取 pipelineObject（shared_ptr 浅拷贝），避免 desc() 的整份深拷贝。
+        // shader 侧独立取用：rebuild 时需要原样搬运，不必连状态一起深拷贝。
+        [[nodiscard]] ComputePipelineShaders shaders() const;
+        // 只取 pipelineObject（shared_ptr 浅拷贝），避免整份深拷贝。
         [[nodiscard]] std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipeline_object() const;
+        // 反射里的 workgroup local size，缺失时回落到 desc_.thread_group_size。
+        [[nodiscard]] ktm::uvec3 resolved_thread_group_size() const;
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void bind_auto_resources();
@@ -147,6 +152,7 @@ namespace Corona::Horizon
         void sync_ubo_slot_unlocked() const;
 
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries_;
+        ComputePipelineShaders shaders_;
         ComputePipelineDesc desc_;
         std::source_location source_location_;
 

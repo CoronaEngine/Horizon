@@ -61,10 +61,12 @@ namespace Corona::Horizon
         };
 
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
+                                          RasterizerPipelineShaders shaders,
                                           std::source_location source_location = std::source_location::current());
         ~VulkanRasterizerPipeline();
 
         [[nodiscard]] RasterizerPipelineDesc desc() const;
+        [[nodiscard]] RasterizerPipelineShaders shaders() const;
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void set_extent(uint16_t width, uint16_t height);
@@ -191,6 +193,7 @@ namespace Corona::Horizon
         void sync_ubo_slot_unlocked() const;
 
         RasterizerPipelineDesc desc_;
+        RasterizerPipelineShaders shaders_;
         std::source_location source_location_;
 
         mutable std::mutex mutex_;

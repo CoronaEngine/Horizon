@@ -26,6 +26,21 @@ namespace Corona::Horizon
         using BufferStore = ResourceStore<BufferWrap, BufferReleaser>;
         using ImageStore = ResourceStore<ImageWrap, ImageReleaser>;
 
+        // 默认构造的 ShaderCodeModule 持有空 SPIR-V，代表"调用方没给 shader"。
+        // SlangModule 一侧无法为空，视为始终有效。
+        [[nodiscard]] bool shader_code_empty(const EmbeddedShader::ShaderCodeModule& module) noexcept
+        {
+            if (const auto* spirv = std::get_if<std::vector<uint32_t>>(&module.shaderCode))
+            {
+                return spirv->empty();
+            }
+            if (const auto* source = std::get_if<std::string>(&module.shaderCode))
+            {
+                return source->empty();
+            }
+            return false;
+        }
+
         void name_vulkan_object(VkDevice device, VkObjectType object_type, uint64_t object_handle, const std::string& name) noexcept
         {
             if (vkSetDebugUtilsObjectNameEXT == nullptr || device == VK_NULL_HANDLE || object_handle == 0 || name.empty())
@@ -426,14 +441,16 @@ namespace Corona::Horizon
     }
 
     VulkanComputePipeline::VulkanComputePipeline(ComputePipelineDesc desc,
+                                                 ComputePipelineShaders shaders,
                                                  std::source_location source_location)
-        : auto_bind_entries_(std::move(desc.auto_bind_entries)),
+        : auto_bind_entries_(std::move(shaders.auto_bind_entries)),
+          shaders_(std::move(shaders)),
           desc_(std::move(desc)),
           source_location_(source_location)
     {
-        desc_.auto_bind_entries.clear();
+        shaders_.auto_bind_entries.clear();
 
-        if (desc_.compute_shader.stage != PipelineShaderStage::Compute)
+        if (shader_code_empty(shaders_.compute))
         {
             throw std::invalid_argument("VulkanComputePipeline requires a compute shader.");
         }
@@ -445,7 +462,7 @@ namespace Corona::Horizon
         const uint32_t constant_size = push_constant_size();
         if (constant_size != 0)
             push_constant_data_.resize(constant_size);
-        uniform_buffers_ = reflected_uniform_buffers(desc_.compute_shader.module);
+        uniform_buffers_ = reflected_uniform_buffers(shaders_.compute);
 
         // UBO 环在首次 sync_ubo_slot_unlocked() 时惰性创建：构造这里交换链可能
         // 还没建好，frame_ring_size() 还是 1。
@@ -464,10 +481,32 @@ namespace Corona::Horizon
         return desc_;
     }
 
+    ComputePipelineShaders VulkanComputePipeline::shaders() const
+    {
+        std::lock_guard lock(mutex_);
+        return shaders_;
+    }
+
     std::shared_ptr<EmbeddedShader::ComputePipelineObject> VulkanComputePipeline::pipeline_object() const
     {
         std::lock_guard lock(mutex_);
-        return desc_.pipelineObject;
+        return shaders_.object;
+    }
+
+    // 优先取反射(entryPointInfoPool 里 compute entry 的 numthreads)——这是编译进 shader 的真实值
+    // (源码路径下也正确);反射缺失(旧 hardcode 表未序列化该字段)时回退到 desc_.thread_group_size
+    // 覆盖值(EDSL 由构造参数喂入,与 codegen 一致)。
+    ktm::uvec3 VulkanComputePipeline::resolved_thread_group_size() const
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& entry : shaders_.compute.shaderResources.entryPointInfoPool)
+        {
+            if (entry.stage != EmbeddedShader::ShaderStage::ComputeShader)
+                continue;
+            if (entry.numthreads.x != 0 && entry.numthreads.y != 0 && entry.numthreads.z != 0)
+                return entry.numthreads;
+        }
+        return desc_.thread_group_size;
     }
 
     void VulkanComputePipeline::bind_auto_resources()
@@ -496,7 +535,7 @@ namespace Corona::Horizon
                 {
                     values.push_back({
                         entry,
-                        reflected_binding_coordinates(desc_.compute_shader.module, entry),
+                        reflected_binding_coordinates(shaders_.compute, entry),
                     });
                 }
             }
@@ -535,7 +574,7 @@ namespace Corona::Horizon
 
     uint32_t VulkanComputePipeline::push_constant_size() const noexcept
     {
-        return desc_.compute_shader.module.shaderResources.pushConstantSize;
+        return shaders_.compute.shaderResources.pushConstantSize;
     }
 
     void VulkanComputePipeline::destroy_pipeline_cache_unlocked() noexcept
@@ -595,8 +634,8 @@ namespace Corona::Horizon
         PipelineState state;
         state.device = device;
         state.bindings = std::move(bindings);
-        state.uses_bindless = uses_bindless_descriptors(desc_.compute_shader.module);
-        diagnose_bindless_reflection(desc_.compute_shader.module, state.uses_bindless);
+        state.uses_bindless = uses_bindless_descriptors(shaders_.compute);
+        diagnose_bindless_reflection(shaders_.compute, state.uses_bindless);
 
         auto add_descriptor_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType descriptor_type) {
             if (state.uses_bindless && set < ResourceManager::bindless_descriptor_set_count)
@@ -628,7 +667,7 @@ namespace Corona::Horizon
             set_found->bindings.push_back({ set, binding, descriptor_type });
         };
 
-        for (const UniformBufferBindingData& uniform_buffer : reflected_uniform_buffers(desc_.compute_shader.module))
+        for (const UniformBufferBindingData& uniform_buffer : reflected_uniform_buffers(shaders_.compute))
         {
             add_descriptor_binding(uniform_buffer.set, uniform_buffer.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         }
@@ -766,7 +805,7 @@ namespace Corona::Horizon
                                reinterpret_cast<uint64_t>(state.layout),
                                pipeline_name + ".layout");
 
-            VkShaderModule shader = create_shader_module(device, desc_.compute_shader.module);
+            VkShaderModule shader = create_shader_module(device, shaders_.compute);
             try
             {
                 VkPipelineShaderStageCreateInfo shader_stage {};
@@ -887,7 +926,7 @@ namespace Corona::Horizon
         if (!is_storage_buffer_bind(bind_type))
             return;
 
-        if (uses_bindless_descriptors(desc_.compute_shader.module))
+        if (uses_bindless_descriptors(shaders_.compute))
         {
             const uint32_t descriptor_index = store_storage_buffer_descriptor(buffer);
             std::lock_guard lock(mutex_);
@@ -944,7 +983,7 @@ namespace Corona::Horizon
         if (!is_direct_resource_bind(bind_type))
             return;
 
-        if (uses_bindless_descriptors(desc_.compute_shader.module))
+        if (uses_bindless_descriptors(shaders_.compute))
         {
             uint32_t descriptor_index = 0;
             if (is_storage_image_bind(bind_type))

@@ -1523,39 +1523,17 @@ namespace Corona::Horizon
             }
 
             auto rasterizerPipeline = draw.pipeline;
-            // desc() 深拷贝整个 RasterizerPipelineDesc（含两份 SPIR-V + 反射表），
-            // 每 draw 一次在压测下是主要开销。条件信息比较不需要 desc，先比较、
-            // 只有真的要 rebuild 时才付这份拷贝。条件相同（或无 pipelineObject，
-            // 此时两边都是默认值）时原本也不会 rebuild，语义不变。
-            const bool vertex_condition_changed =
-                rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info;
-            const bool fragment_condition_changed =
-                rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info;
-            if (vertex_condition_changed || fragment_condition_changed)
+            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info, draw.frag_condition_info))
             {
-                auto desc = rasterizerPipeline->desc();
-                if (desc.pipelineObject)
-                {
-                    auto& vc = desc.pipelineObject->vertex;
-                    auto& fc = desc.pipelineObject->fragment;
-                    if (vertex_condition_changed)
-                        desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
-                    if (fragment_condition_changed)
-                        desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
-
-                    desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless,  draw.vert_condition_info, draw.frag_condition_info);
-                    desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                    rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
-                    // 重建可能销毁旧 VulkanRasterizerPipeline 连带其 VkPipelineLayout，
-                    // 新建的 layout 有可能复用同一句柄值（ABA）。缓存按句柄相等判定，
-                    // 故此处必须整体作废，两个绑定点都清（句柄池是设备级共享的）。
-                    graphics_descriptors.reset();
-                    compute_descriptors.reset();
-                    // rebuild 换掉了 impl 与 layout，memo 里的 pipeline/prepared 全部失效。
-                    draw_cache.pipeline_key = nullptr;
-                    draw_cache.pipeline_impl.reset();
-                    draw_cache.invalidate_prepared();
-                }
+                // 重建可能销毁旧 VulkanRasterizerPipeline 连带其 VkPipelineLayout，
+                // 新建的 layout 有可能复用同一句柄值（ABA）。缓存按句柄相等判定，
+                // 故此处必须整体作废，两个绑定点都清（句柄池是设备级共享的）。
+                graphics_descriptors.reset();
+                compute_descriptors.reset();
+                // rebuild 换掉了 impl 与 layout，memo 里的 pipeline/prepared 全部失效。
+                draw_cache.pipeline_key = nullptr;
+                draw_cache.pipeline_impl.reset();
+                draw_cache.invalidate_prepared();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1702,31 +1680,14 @@ namespace Corona::Horizon
                 throw std::logic_error("DrawIndexedIndirect requires a valid indirect HardwareBuffer.");
 
             auto rasterizerPipeline = draw.pipeline;
-            const bool vertex_condition_changed =
-                rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info;
-            const bool fragment_condition_changed =
-                rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info;
-            if (vertex_condition_changed || fragment_condition_changed)
+            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info, draw.frag_condition_info))
             {
-                auto desc = rasterizerPipeline->desc();
-                if (desc.pipelineObject)
-                {
-                    auto& vc = desc.pipelineObject->vertex;
-                    auto& fc = desc.pipelineObject->fragment;
-                    if (vertex_condition_changed)
-                        desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
-                    if (fragment_condition_changed)
-                        desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
-
-                    desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless, draw.vert_condition_info, draw.frag_condition_info);
-                    desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                    rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
-                    graphics_descriptors.reset();
-                    compute_descriptors.reset();
-                    draw_cache.pipeline_key = nullptr;
-                    draw_cache.pipeline_impl.reset();
-                    draw_cache.invalidate_prepared();
-                }
+                // 同上：layout 句柄可能 ABA 复用，缓存整体作废。
+                graphics_descriptors.reset();
+                compute_descriptors.reset();
+                draw_cache.pipeline_key = nullptr;
+                draw_cache.pipeline_impl.reset();
+                draw_cache.invalidate_prepared();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1936,23 +1897,12 @@ namespace Corona::Horizon
                 }
 
                 auto computePipeline = command.payload.dispatch.pipeline;
-                // 同光栅路径：desc() 深拷贝整个 ComputePipelineDesc（SPIR-V + 反射），
-                // 先比条件、只有要 rebuild 时才付这份拷贝。
-                if (dispatch.comp_condition_info != computePipeline->compute_condition_info())
+                if (computePipeline->sync_shader_conditions(dispatch.comp_condition_info))
                 {
-                    auto desc = computePipeline->desc();
-                    if (desc.pipelineObject)
-                    {
-                        auto& cc = desc.pipelineObject->compute;
-                        desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
-                        desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless, dispatch.comp_condition_info);
-                        desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                        computePipeline->rebuild_pipeline(std::move(desc), dispatch.comp_condition_info);
-                        // 同光栅路径：layout 句柄可能被回收复用，缓存整体作废。
-                        graphics_descriptors.reset();
-                        compute_descriptors.reset();
-                        draw_cache.reset();
-                    }
+                    // 同光栅路径：layout 句柄可能被回收复用，缓存整体作废。
+                    graphics_descriptors.reset();
+                    compute_descriptors.reset();
+                    draw_cache.reset();
                 }
 
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);

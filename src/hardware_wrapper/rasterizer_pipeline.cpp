@@ -30,12 +30,13 @@ namespace Corona::Horizon
         }
 
         [[nodiscard]] std::shared_ptr<IResourceRef> make_pipeline_token(RasterizerPipelineDesc desc,
+                                                                        RasterizerPipelineShaders shaders,
                                                                         const std::source_location& source_location)
         {
             auto handle = resource_pool().rasterizer_pipelines.create(
-                [desc = std::move(desc), source_location]() mutable {
+                [desc = std::move(desc), shaders = std::move(shaders), source_location]() mutable {
                     RasterizerPipelineWrap wrap;
-                    wrap.impl = std::make_shared<VulkanRasterizerPipeline>(std::move(desc), source_location);
+                    wrap.impl = std::make_shared<VulkanRasterizerPipeline>(std::move(desc), std::move(shaders), source_location);
                     return wrap;
                 });
 
@@ -50,16 +51,19 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase::RasterizerPipelineBase() = default;
 
-    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location) : location_(source_location)
+    RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineDesc desc,
+                                                   RasterizerPipelineShaders shaders,
+                                                   const std::source_location& source_location)
+        : location_(source_location)
     {
-        if (desc.pipelineObject)
+        if (shaders.object)
         {
-            const auto& vi = desc.pipelineObject->vertex->getCurrentConditionInfo();
-            const auto& fi = desc.pipelineObject->fragment->getCurrentConditionInfo();
-            rebuild_pipeline(std::move(desc),vi,fi);
+            const auto& vi = shaders.object->vertex->getCurrentConditionInfo();
+            const auto& fi = shaders.object->fragment->getCurrentConditionInfo();
+            rebuild_pipeline(std::move(desc), std::move(shaders), vi, fi);
             return;
         }
-        rebuild_pipeline(std::move(desc), {}, {});
+        rebuild_pipeline(std::move(desc), std::move(shaders), {}, {});
     }
 
     RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
@@ -157,11 +161,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipelineDesc RasterizerPipelineBase::desc() const
-    {
-        return pipeline_impl(ResourceBridge::token(*this))->desc();
-    }
-
     CommandBatch RasterizerPipelineBase::command_batch() const
     {
         std::shared_ptr<IResourceRef> token;
@@ -178,12 +177,14 @@ namespace Corona::Horizon
         pipeline_impl(token)->record_into(recorder);
     }
 
-    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
-                                                  ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
+    void RasterizerPipelineBase::rebuild_pipeline(RasterizerPipelineDesc desc,
+                                                  RasterizerPipelineShaders shaders,
+                                                  const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
+                                                  const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
     {
-        if (!validate_rasterizer_pipeline_desc(desc))
+        if (!validate_rasterizer_pipeline_desc(desc, shaders))
             return;
-        auto object = desc.pipelineObject;
+        auto object = shaders.object;
         std::string key;
         if (object)
         {
@@ -197,7 +198,7 @@ namespace Corona::Horizon
                 return;
             }
         }
-        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        auto pipeline = make_pipeline_token(std::move(desc), std::move(shaders), location_);
         if (object)
         {
             pipeline_pool_.insert({ std::move(key), pipeline });
@@ -205,14 +206,34 @@ namespace Corona::Horizon
         ResourceBridge::set(*this, std::move(pipeline));
     }
 
-    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& RasterizerPipelineBase::vertex_condition_info() const
+    bool RasterizerPipelineBase::sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
+                                                        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo)
     {
-        return vert_condition_info_;
-    }
+        // shaders() 深拷贝两份 SPIR-V + 反射表,每 draw 一次在压测下是主要开销。条件比较不需要
+        // shader 载荷,先比、只有真要 rebuild 时才付这份拷贝。
+        // 条件相同(或无 pipelineObject,此时两边都是默认值)时本就不该 rebuild。
+        const bool vertex_changed = vert_condition_info_ != vertConditionInfo;
+        const bool fragment_changed = frag_condition_info_ != fragConditionInfo;
+        if (!vertex_changed && !fragment_changed)
+            return false;
 
-    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& RasterizerPipelineBase::fragment_condition_info() const
-    {
-        return frag_condition_info_;
+        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(ResourceBridge::token(*this));
+        RasterizerPipelineShaders shaders = impl->shaders();
+        if (!shaders.object)
+            return false;
+
+        auto& vc = shaders.object->vertex;
+        auto& fc = shaders.object->fragment;
+        const bool bindless = vc->getCompilerOption().enableBindless;
+        if (vertex_changed)
+            shaders.vertex = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, bindless);
+        if (fragment_changed)
+            shaders.fragment = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
+
+        shaders.object->updateAutoBind(bindless, vertConditionInfo, fragConditionInfo);
+        shaders.auto_bind_entries = shaders.object->autoBindEntries;
+        rebuild_pipeline(impl->desc(), std::move(shaders), vertConditionInfo, fragConditionInfo);
+        return true;
     }
 
     void RasterizerPipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

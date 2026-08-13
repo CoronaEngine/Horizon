@@ -74,9 +74,9 @@ namespace Corona::Horizon
             }
         }
 
-        [[nodiscard]] bool shader_has_spirv(const PipelineShaderDesc& shader) noexcept
+        [[nodiscard]] bool shader_has_spirv(const EmbeddedShader::ShaderCodeModule& module) noexcept
         {
-            const auto* spirv = std::get_if<std::vector<uint32_t>>(&shader.module.shaderCode);
+            const auto* spirv = std::get_if<std::vector<uint32_t>>(&module.shaderCode);
             return spirv != nullptr && !spirv->empty();
         }
 
@@ -437,19 +437,15 @@ namespace Corona::Horizon
         return validate_image_host_layout(desc, range, layer_index, mip_index, data.size_bytes(), row_pitch, slice_pitch, "write");
     }
 
-    bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc)
+    bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc, const RasterizerPipelineShaders& shaders)
     {
-        if (desc.vertex_shader.stage != PipelineShaderStage::Vertex)
-            return validation_error("RasterizerPipelineDesc requires a vertex shader.", true);
+        // stage 字段随 PipelineShaderDesc 一并移除；"这一 stage 到位了吗" 现在等价于
+        // "对应槽位里有非空 SPIR-V"。
+        if (!shader_has_spirv(shaders.vertex))
+            return validation_error("RasterizerPipeline requires a vertex shader with SPIR-V code.", true);
 
-        if (desc.fragment_shader.stage != PipelineShaderStage::Fragment)
-            return validation_error("RasterizerPipelineDesc requires a fragment shader.", true);
-
-        if (!shader_has_spirv(desc.vertex_shader))
-            return validation_error("RasterizerPipelineDesc vertex shader must contain SPIR-V code.", true);
-
-        if (!shader_has_spirv(desc.fragment_shader))
-            return validation_error("RasterizerPipelineDesc fragment shader must contain SPIR-V code.", true);
+        if (!shader_has_spirv(shaders.fragment))
+            return validation_error("RasterizerPipeline requires a fragment shader with SPIR-V code.", true);
 
         if (desc.multiview_count == 0)
             return validation_error("RasterizerPipelineDesc multiview_count must be greater than zero.", true);

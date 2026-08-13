@@ -27,12 +27,13 @@ namespace Corona::Horizon
         }
 
         [[nodiscard]] std::shared_ptr<IResourceRef> make_pipeline_token(ComputePipelineDesc desc,
+                                                                        ComputePipelineShaders shaders,
                                                                         const std::source_location& source_location)
         {
             auto handle = resource_pool().compute_pipelines.create(
-                [desc = std::move(desc), source_location]() mutable {
+                [desc = std::move(desc), shaders = std::move(shaders), source_location]() mutable {
                     ComputePipelineWrap wrap;
-                    wrap.impl = std::make_shared<VulkanComputePipeline>(std::move(desc), source_location);
+                    wrap.impl = std::make_shared<VulkanComputePipeline>(std::move(desc), std::move(shaders), source_location);
                     return wrap;
                 });
 
@@ -47,15 +48,18 @@ namespace Corona::Horizon
 
     ComputePipelineBase::ComputePipelineBase() = default;
 
-    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location) : location_(source_location)
+    ComputePipelineBase::ComputePipelineBase(ComputePipelineDesc desc,
+                                             ComputePipelineShaders shaders,
+                                             const std::source_location& source_location)
+        : location_(source_location)
     {
-        if (desc.pipelineObject)
+        if (shaders.object)
         {
-            const auto& info = desc.pipelineObject->compute->getCurrentConditionInfo();
-            rebuild_pipeline(std::move(desc), info);
+            const auto& info = shaders.object->compute->getCurrentConditionInfo();
+            rebuild_pipeline(std::move(desc), std::move(shaders), info);
             return;
         }
-        rebuild_pipeline(std::move(desc), {});
+        rebuild_pipeline(std::move(desc), std::move(shaders), {});
     }
 
     ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
@@ -93,9 +97,11 @@ namespace Corona::Horizon
         return ResourceHandle::operator bool();
     }
 
-    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo)
+    void ComputePipelineBase::rebuild_pipeline(ComputePipelineDesc desc,
+                                               ComputePipelineShaders shaders,
+                                               const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo)
     {
-        auto object = desc.pipelineObject;
+        auto object = shaders.object;
         if (object)
         {
             condition_info_ = conditionInfo;
@@ -106,7 +112,7 @@ namespace Corona::Horizon
                 return;
             }
         }
-        auto pipeline = make_pipeline_token(std::move(desc),location_);
+        auto pipeline = make_pipeline_token(std::move(desc), std::move(shaders), location_);
         if (object)
         {
             pipeline_pool_.insert({ object->getCombinedKey(conditionInfo), pipeline });
@@ -114,9 +120,25 @@ namespace Corona::Horizon
         ResourceBridge::set(*this, std::move(pipeline));
     }
 
-    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& ComputePipelineBase::compute_condition_info()
+    bool ComputePipelineBase::sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo)
     {
-        return condition_info_;
+        // shaders() 深拷贝 SPIR-V + 反射,每 dispatch 一次在压测下是主要开销。条件比较不需要
+        // shader 载荷,先比、只有真要 rebuild 时才付这份拷贝。
+        if (conditionInfo == condition_info_)
+            return false;
+
+        std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
+        ComputePipelineShaders shaders = impl->shaders();
+        if (!shaders.object)
+            return false;
+
+        auto& cc = shaders.object->compute;
+        const bool bindless = cc->getCompilerOption().enableBindless;
+        shaders.compute = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, bindless);
+        shaders.object->updateAutoBind(bindless, conditionInfo);
+        shaders.auto_bind_entries = shaders.object->autoBindEntries;
+        rebuild_pipeline(impl->desc(), std::move(shaders), conditionInfo);
+        return true;
     }
 
     ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
@@ -127,9 +149,14 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipelineDesc ComputePipelineBase::desc() const
+    ComputePipelineBase::DispatchGroups ComputePipelineBase::dispatch_groups(uint32_t width, uint32_t height) const
     {
-        return pipeline_impl(ResourceBridge::token(*this))->desc();
+        const ktm::uvec3 tgs = pipeline_impl(ResourceBridge::token(*this))->resolved_thread_group_size();
+        if (tgs.x == 0 || tgs.y == 0)
+            throw std::logic_error("ComputePipeline workgroup local size is zero; reflection failed and no override was provided.");
+
+        return { (width + tgs.x - 1u) / tgs.x,
+                 (height + tgs.y - 1u) / tgs.y };
     }
 
     CommandBatch ComputePipelineBase::command_batch()
