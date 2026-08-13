@@ -696,9 +696,6 @@ namespace Corona::Horizon
 
     class CommandBatch;
 
-    class PipelineBindingScope;
-    class ResourceProxy;
-
     class ComputePipelineBase;
     class RasterizerPipelineBase;
     template <typename CS = void>
@@ -1059,47 +1056,24 @@ namespace Corona::Horizon
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
 
-        template <HardwareTransferable T>
-        [[nodiscard]] bool write(std::span<const T> data, uint64_t byte_offset = 0) const
-        {
-            return write_bytes(std::as_bytes(data), byte_offset);
-        }
-
         [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
-
-        template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer vertex(std::span<const T> data, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name)), std::as_bytes(data));
-        }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {})
         {
-            return vertex<std::ranges::range_value_t<Range>>(
-                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name));
-        }
-
-        template <HardwareIndexType T>
-        [[nodiscard]] static HardwareBuffer index(std::span<const T> data, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name)), std::as_bytes(data));
+            using T = std::ranges::range_value_t<Range>;
+            return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name)),
+                                  std::as_bytes(std::span<const T>(std::ranges::data(data), std::ranges::size(data))));
         }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {})
         {
-            return index<std::ranges::range_value_t<Range>>(
-                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name));
-        }
-
-        [[nodiscard]] static HardwareBuffer indirect(std::span<const DrawIndexedIndirectCommand> commands, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::indirect(commands.size(), std::move(name)), std::as_bytes(commands));
+            using T = std::ranges::range_value_t<Range>;
+            return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name)),
+                                  std::as_bytes(std::span<const T>(std::ranges::data(data), std::ranges::size(data))));
         }
 
         template <std::ranges::contiguous_range Range>
@@ -1107,9 +1081,8 @@ namespace Corona::Horizon
                      std::same_as<std::remove_cvref_t<std::ranges::range_value_t<Range>>, DrawIndexedIndirectCommand>
         [[nodiscard]] static HardwareBuffer indirect(const Range& commands, std::string name = {})
         {
-            return indirect(
-                std::span<const DrawIndexedIndirectCommand>(std::ranges::data(commands), std::ranges::size(commands)),
-                std::move(name));
+            return HardwareBuffer(HardwareBufferDesc::indirect(commands.size(), std::move(name)),
+                                  std::as_bytes(std::span<const DrawIndexedIndirectCommand>(std::ranges::data(commands), std::ranges::size(commands))));
         }
 
         [[nodiscard]] uint32_t store_descriptor() const;
@@ -1215,20 +1188,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
         [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const;
-        bool write_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-
-        template <HardwareTransferable T>
-        bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return write_subresource_bytes(layer_index, mip_index, std::as_bytes(data), row_pitch, slice_pitch);
-        }
-
-        template <HardwareTransferable T>
-        bool write(std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return write_bytes(std::as_bytes(data), row_pitch, slice_pitch);
-        }
 
         void set_clear_color(float r, float g, float b, float a);
         void set_clear_depth(float depth, uint32_t stencil = 0);
@@ -1510,23 +1470,13 @@ namespace Corona::Horizon
         }
     };
 
-    class PipelineBindingScope
-    {
-    protected:
-        virtual ~PipelineBindingScope() = default;
-
-    private:
-        friend class ResourceProxy;
-
-        virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
-        virtual void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) = 0;
-        virtual void bind_image(const BindingSlot& slot, const HardwareImage& image) = 0;
-    };
-
+    // 非虚绑定分派 (旧 friend 两指针设计): ResourceProxy 模板持具体管线引用,
+    // 直接调基类的 public bind_* 成员, 无抽象基、无 virtual、无继承。
+    template <typename Pipeline>
     class ResourceProxy
     {
     public:
-        ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
+        ResourceProxy(Pipeline& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
 
         ResourceProxy& operator=(const ResourceProxy&) = delete;
         ResourceProxy& operator=(ResourceProxy&&) = delete;
@@ -1553,29 +1503,18 @@ namespace Corona::Horizon
         }
 
     private:
-        PipelineBindingScope& pipeline_;
+        Pipeline& pipeline_;
         BindingSlot slot_;
-    };
-
-    template <typename Derived>
-    struct ReflectedPipelineBindings
-    {
-        template <ReflectedBindingKey ProxyType>
-        [[nodiscard]]
-        ResourceProxy operator[](const ProxyType& proxy)
-        {
-            return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
-        }
     };
 
     // ================================================================
     // Pipeline Runtime
     // ================================================================
 
-    class ComputePipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipelineBase>
+    class ComputePipelineBase : public ResourceHandle
     {
-        friend class HardwareExecutor;
     public:
+        friend class HardwareExecutor;
         ComputePipelineBase();
         explicit ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
 
@@ -1607,34 +1546,36 @@ namespace Corona::Horizon
 
         void rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
         const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& compute_condition_info();
-    private:
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
-        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
-        std::source_location location_;
-        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
+    public:
+        // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_image(const BindingSlot& slot, const HardwareImage& image) override
+        void bind_image(const BindingSlot& slot, const HardwareImage& image)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.set, slot.binding);
         }
 
+    private:
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
+        std::source_location location_;
     };
 
-    class RasterizerPipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipelineBase>
+    class RasterizerPipelineBase : public ResourceHandle
     {
-        friend class HardwareExecutor;
     public:
+        friend class HardwareExecutor;
         RasterizerPipelineBase();
         explicit RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
 
@@ -1684,30 +1625,32 @@ namespace Corona::Horizon
                               ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
         const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertex_condition_info() const;
         const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragment_condition_info() const;
-    private:
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
-        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
-        std::source_location location_;
-        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
+    public:
+        // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_image(const BindingSlot& slot, const HardwareImage& image) override
+        void bind_image(const BindingSlot& slot, const HardwareImage& image)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location, slot.set, slot.binding);
         }
 
+    private:
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
         void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
+        std::source_location location_;
     };
 
     namespace PipelineDetail

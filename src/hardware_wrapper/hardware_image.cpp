@@ -246,11 +246,7 @@ namespace Corona::Horizon
         return view;
     }
 
-    bool HardwareImage::write_subresource_bytes(uint32_t layer_index,
-                                                uint32_t mip_index,
-                                                std::span<const std::byte> data,
-                                                uint64_t row_pitch,
-                                                uint64_t slice_pitch) const
+    bool HardwareImage::write_bytes(std::span<const std::byte> data, uint64_t row_pitch, uint64_t slice_pitch) const
     {
         if (data.empty())
             return true;
@@ -259,6 +255,8 @@ namespace Corona::Horizon
         if (!image)
             return false;
 
+        constexpr uint32_t layer_index = 0;
+        constexpr uint32_t mip_index = 0;
         if (!validate_image_host_write(image->desc, range_, layer_index, mip_index, data, row_pitch, slice_pitch))
             return false;
 
@@ -287,11 +285,6 @@ namespace Corona::Horizon
             image->resource_manager->flush_image(*image, layout.byte_offset, layout.byte_size);
 
         return true;
-    }
-
-    bool HardwareImage::write_bytes(std::span<const std::byte> data, uint64_t row_pitch, uint64_t slice_pitch) const
-    {
-        return write_subresource_bytes(0, 0, data, row_pitch, slice_pitch);
     }
 
     void HardwareImage::set_clear_color(float r, float g, float b, float a)
