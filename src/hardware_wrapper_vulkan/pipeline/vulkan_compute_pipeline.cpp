@@ -1125,7 +1125,7 @@ namespace Corona::Horizon
         }
 
         CommandBatch batch;
-        batch << dispatch(std::move(state.dispatch));
+        batch << ShaderDispatchCommand{ std::move(state.dispatch) };
         return batch;
     }
 

@@ -13,7 +13,6 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon_profiling.h"
 #include "horizon.h"
 #include "imgui_horizon.h"
 

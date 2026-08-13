@@ -1,6 +1,6 @@
 #pragma once
 
-#include "format.h"
+#include <horizon.h>  // Format / ImageExtent (format.h merged into horizon.h)
 
 #include <cstdint>
 #include <limits>
