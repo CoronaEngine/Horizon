@@ -309,7 +309,7 @@ void run_example_rsm()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc pack_desc;
-    pack_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    pack_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline pack_rasterizer(rsm_pack_vert_glsl, rsm_pack_frag_glsl, pack_desc);
     pack_rasterizer.outPosition = rsm_position_image;
@@ -318,7 +318,7 @@ void run_example_rsm()
     pack_rasterizer.bind_depth_target(rsm_depth_image);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    scene_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline scene_rasterizer(rsm_scene_vert_glsl, rsm_scene_frag_glsl, scene_desc);
     scene_rasterizer.outColor = final_output_image;

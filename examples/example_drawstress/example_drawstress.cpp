@@ -127,7 +127,7 @@ void run_example_drawstress()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline rasterizer(drawstress_vert_glsl, drawstress_frag_glsl, desc);
     rasterizer.outColor = final_output_image;

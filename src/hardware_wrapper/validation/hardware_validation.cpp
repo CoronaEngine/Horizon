@@ -454,25 +454,18 @@ namespace Corona::Horizon
         if (desc.multiview_count == 0)
             return validation_error("RasterizerPipelineDesc multiview_count must be greater than zero.", true);
 
-        const uint32_t sample_count = static_cast<uint32_t>(desc.multisample.sample_count);
-        if (!is_supported_sample_count(sample_count))
-            return validation_error("RasterizerPipelineDesc multisample sample_count is not supported.", true);
+        if (!is_supported_sample_count(static_cast<uint32_t>(desc.sample_count)))
+            return validation_error("RasterizerPipelineDesc sample_count is not supported.", true);
 
-        if (!std::isfinite(desc.rasterizer.line_width) || desc.rasterizer.line_width <= 0.0f)
-            return validation_error("RasterizerPipelineDesc rasterizer line_width must be finite and greater than zero.", true);
+        if (!std::isfinite(desc.line_width) || desc.line_width <= 0.0f)
+            return validation_error("RasterizerPipelineDesc line_width must be finite and greater than zero.", true);
 
-        if (!std::isfinite(desc.multisample.min_sample_shading) ||
-            desc.multisample.min_sample_shading < 0.0f ||
-            desc.multisample.min_sample_shading > 1.0f)
+        if (!std::isfinite(desc.min_sample_shading) ||
+            desc.min_sample_shading < 0.0f ||
+            desc.min_sample_shading > 1.0f)
         {
             return validation_error("RasterizerPipelineDesc min_sample_shading must be in [0, 1].", true);
         }
-
-        if (!optional_validation_enabled())
-            return true;
-
-        if (desc.blend.attachments.empty())
-            validation_warning("RasterizerPipelineDesc has no color blend attachments; bind render targets before recording draw work.");
 
         return true;
     }

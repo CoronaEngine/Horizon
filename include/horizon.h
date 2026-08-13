@@ -600,60 +600,15 @@ namespace Corona::Horizon
     // Pipeline State
     // ================================================================
 
-    struct RasterizerStateDesc
-    {
-        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-        PolygonFillMode fill_mode = PolygonFillMode::Fill;
-        CullMode cull_mode = CullMode::None;
-
-        bool depth_clamp_enabled = false;
-        bool rasterizer_discard_enabled = false;
-
-        float line_width = 1.0f;
-    };
-
+    // 光栅/深度/混合/多重采样状态一律直接摊在 RasterizerPipelineDesc 上，不再分组成
+    // 独立的 *StateDesc。这里只留 DepthStencilOpDesc —— 它是唯一被实例化两次
+    // (stencil_front / stencil_back) 的分组，有真实复用价值。
     struct DepthStencilOpDesc
     {
         StencilOp fail_op = StencilOp::Keep;
         StencilOp pass_op = StencilOp::Keep;
         StencilOp depth_fail_op = StencilOp::Keep;
         CompareOp compare_op = CompareOp::Always;
-    };
-
-    struct DepthStencilStateDesc
-    {
-        bool depth_test_enabled = true;
-        bool depth_write_enabled = true;
-        CompareOp depth_compare_op = CompareOp::LessOrEqual;
-
-        bool stencil_test_enabled = false;
-        DepthStencilOpDesc front;
-        DepthStencilOpDesc back;
-        uint32_t stencil_read_mask = 0xff;
-        uint32_t stencil_write_mask = 0xff;
-        uint32_t stencil_reference = 0;
-    };
-
-    struct BlendAttachmentDesc
-    {
-        bool blend_enabled = false;
-
-        BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
-        BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
-        BlendOp color_blend_op = BlendOp::Add;
-
-        BlendFactor src_alpha_blend_factor = BlendFactor::One;
-        BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
-        BlendOp alpha_blend_op = BlendOp::Add;
-
-        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
-    };
-
-    struct MultisampleStateDesc
-    {
-        SampleCount sample_count = SampleCount::Count1;
-        bool sample_shading_enabled = false;
-        float min_sample_shading = 1.0f;
     };
 
 
@@ -1217,26 +1172,6 @@ namespace Corona::Horizon
         }
     };
 
-    struct BlendStateDesc
-    {
-        static constexpr BlendAttachmentDesc opaque_attachment() noexcept
-        {
-            BlendAttachmentDesc desc;
-            desc.blend_enabled = false;
-            return desc;
-        }
-
-        static constexpr BlendAttachmentDesc alpha_blend_attachment() noexcept
-        {
-            BlendAttachmentDesc desc;
-            desc.blend_enabled = true;
-            return desc;
-        }
-
-        bool logic_op_enabled = false;
-        std::vector<BlendAttachmentDesc> attachments = { alpha_blend_attachment() };
-    };
-
     // 前置声明：真正的定义在下方 RasterizerPipelineDesc 之后，但 set_shaders_from_slang
     // 的内联成员函数体会先于它被编译，必须先看到签名。
     [[nodiscard]] inline PipelineShaderDesc compile_slang_stage(
@@ -1250,10 +1185,42 @@ namespace Corona::Horizon
         PipelineShaderDesc fragment_shader { PipelineShaderStage::Fragment, EmbeddedShader::ShaderCodeModule {} };
         std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> pipelineObject;
 
-        RasterizerStateDesc rasterizer;
-        DepthStencilStateDesc depth_stencil;
-        BlendStateDesc blend;
-        MultisampleStateDesc multisample;
+        // --- 光栅 ---
+        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+        PolygonFillMode fill_mode = PolygonFillMode::Fill;
+        CullMode cull_mode = CullMode::None;
+        bool depth_clamp_enabled = false;
+        bool rasterizer_discard_enabled = false;
+        float line_width = 1.0f;
+
+        // --- 深度/模板 ---
+        bool depth_test_enabled = true;
+        bool depth_write_enabled = true;
+        CompareOp depth_compare_op = CompareOp::LessOrEqual;
+        bool stencil_test_enabled = false;
+        DepthStencilOpDesc stencil_front;
+        DepthStencilOpDesc stencil_back;
+        uint32_t stencil_read_mask = 0xff;
+        uint32_t stencil_write_mask = 0xff;
+        uint32_t stencil_reference = 0;
+
+        // --- 混合 ---
+        // 后端把这一份状态广播给全部颜色附件（从来没有过 per-attachment 独立混合），
+        // 所以这里是单份值而非 vector。默认开 alpha 混合，与摊平前的默认行为一致。
+        bool blend_enabled = true;
+        BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
+        BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp color_blend_op = BlendOp::Add;
+        BlendFactor src_alpha_blend_factor = BlendFactor::One;
+        BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp alpha_blend_op = BlendOp::Add;
+        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
+        bool logic_op_enabled = false;
+
+        // --- 多重采样 ---
+        SampleCount sample_count = SampleCount::Count1;
+        bool sample_shading_enabled = false;
+        float min_sample_shading = 1.0f;
 
         uint32_t multiview_count = 1;
 
@@ -1750,11 +1717,10 @@ namespace Corona::Horizon
             requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
         static RasterizerPipelineDesc make_desc(VS&& vertex_shader_code,
                                                 FS&& fragment_shader_code,
-                                                RasterizerPipelineDesc state = {},
+                                                RasterizerPipelineDesc desc = {},
                                                 EdslPipelineOptions options = {},
                                                 std::source_location source_location = std::source_location::current())
         {
-            // Inline from_edsl logic
             options.compiler.enableMatrixColumnMajor = true;
             std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{
                 new EmbeddedShader::RasterizedPipelineObject(
@@ -1764,29 +1730,21 @@ namespace Corona::Horizon
                         options.compiler,
                         source_location))};
 
-            RasterizerPipelineDesc desc(
-                PipelineShaderDesc {
-                    PipelineShaderStage::Vertex,
-                    object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                 options.compiler.enableBindless) },
-                PipelineShaderDesc {
-                    PipelineShaderStage::Fragment,
-                    object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                   options.compiler.enableBindless) });
+            // 调用方传入的 desc 直接沿用（状态已摊平，无需逐字段搬运），只覆盖 EDSL 产出的
+            // shader 相关字段。
+            desc.vertex_shader = PipelineShaderDesc {
+                PipelineShaderStage::Vertex,
+                object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                              options.compiler.enableBindless) };
+            desc.fragment_shader = PipelineShaderDesc {
+                PipelineShaderStage::Fragment,
+                object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                options.compiler.enableBindless) };
             desc.pipelineObject = object;
 
             if (options.auto_bind)
                 desc.auto_bind_entries = object->autoBindEntries;
 
-            // 用调用方传入的状态覆盖 EDSL 派生的默认状态（不透传 shader）。
-            desc.rasterizer = std::move(state.rasterizer);
-            desc.depth_stencil = std::move(state.depth_stencil);
-            desc.blend = std::move(state.blend);
-            desc.multisample = std::move(state.multisample);
-            desc.multiview_count = state.multiview_count;
-            desc.clear_color_target = state.clear_color_target;
-            desc.clear_depth_target = state.clear_depth_target;
-            desc.debug_name = std::move(state.debug_name);
             return desc;
         }
 

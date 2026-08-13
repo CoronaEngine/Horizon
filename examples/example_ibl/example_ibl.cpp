@@ -527,7 +527,7 @@ void run_example_ibl()
 
     // ---- Pipeline ----
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline rasterizer(ibl_vert_glsl, ibl_frag_glsl, desc);
     rasterizer.outColor = final_output_image;

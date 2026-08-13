@@ -454,7 +454,7 @@ void run_example_disney_pbr()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline rasterizer(disney_pbr_vert_glsl, disney_pbr_frag_glsl, desc);
     rasterizer.outColor = final_output_image;

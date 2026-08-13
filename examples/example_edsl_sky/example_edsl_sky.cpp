@@ -780,7 +780,7 @@ void run_example_edsl_sky()
 
     // Landscape first (clears color+depth), then sky into remaining far-plane pixels.
     Corona::Horizon::RasterizerPipelineDesc landscape_desc;
-    landscape_desc.blend.attachments = {Corona::Horizon::BlendStateDesc::opaque_attachment()};
+    landscape_desc.blend_enabled = false;
     landscape_desc.clear_color_target = true;
     landscape_desc.clear_depth_target = true;
 
@@ -788,11 +788,11 @@ void run_example_edsl_sky()
     landscape_pipeline.bind_depth_target(depth_image);
 
     Corona::Horizon::RasterizerPipelineDesc sky_desc;
-    sky_desc.blend.attachments = {Corona::Horizon::BlendStateDesc::opaque_attachment()};
-    sky_desc.depth_stencil.depth_test_enabled = true;
-    sky_desc.depth_stencil.depth_write_enabled = false;
+    sky_desc.blend_enabled = false;
+    sky_desc.depth_test_enabled = true;
+    sky_desc.depth_write_enabled = false;
     // Match bgfx: fill only uncleared depth (== 1) so landscape is preserved.
-    sky_desc.depth_stencil.depth_compare_op = Corona::Horizon::CompareOp::Equal;
+    sky_desc.depth_compare_op = Corona::Horizon::CompareOp::Equal;
     sky_desc.clear_color_target = false;
     sky_desc.clear_depth_target = false;
 

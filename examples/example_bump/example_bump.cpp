@@ -261,8 +261,8 @@ void run_example_bump()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
-    desc.depth_stencil.depth_compare_op = Corona::Horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
+    desc.blend_enabled = false;
+    desc.depth_compare_op = Corona::Horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
 
     Corona::Horizon::RasterizerPipeline rasterizer(bump_vert_glsl, bump_frag_glsl, desc);
     rasterizer.outColor = final_output_image;

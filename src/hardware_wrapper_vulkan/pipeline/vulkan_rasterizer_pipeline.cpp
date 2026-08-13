@@ -247,7 +247,7 @@ namespace Corona::Horizon
             return flags;
         }
 
-        [[nodiscard]] VkPipelineColorBlendAttachmentState to_vk_blend_attachment(const BlendAttachmentDesc& desc) noexcept
+        [[nodiscard]] VkPipelineColorBlendAttachmentState to_vk_blend_attachment(const RasterizerPipelineDesc& desc) noexcept
         {
             VkPipelineColorBlendAttachmentState state {};
             state.blendEnable = desc.blend_enabled ? VK_TRUE : VK_FALSE;
@@ -753,7 +753,7 @@ namespace Corona::Horizon
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly {};
             input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-            input_assembly.topology = to_vk_topology(desc_.rasterizer.topology);
+            input_assembly.topology = to_vk_topology(desc_.topology);
             input_assembly.primitiveRestartEnable = VK_FALSE;
 
             VkPipelineViewportStateCreateInfo viewport_state {};
@@ -763,40 +763,37 @@ namespace Corona::Horizon
 
             VkPipelineRasterizationStateCreateInfo rasterization {};
             rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-            rasterization.depthClampEnable = desc_.rasterizer.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
-            rasterization.rasterizerDiscardEnable = desc_.rasterizer.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
-            rasterization.polygonMode = to_vk_polygon_mode(desc_.rasterizer.fill_mode);
-            rasterization.cullMode = to_vk_cull_mode(desc_.rasterizer.cull_mode);
+            rasterization.depthClampEnable = desc_.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
+            rasterization.rasterizerDiscardEnable = desc_.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
+            rasterization.polygonMode = to_vk_polygon_mode(desc_.fill_mode);
+            rasterization.cullMode = to_vk_cull_mode(desc_.cull_mode);
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
-            rasterization.lineWidth = desc_.rasterizer.line_width;
+            rasterization.lineWidth = desc_.line_width;
 
             VkPipelineMultisampleStateCreateInfo multisample {};
             multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-            multisample.rasterizationSamples = to_vk_sample_count(desc_.multisample.sample_count);
-            multisample.sampleShadingEnable = desc_.multisample.sample_shading_enabled ? VK_TRUE : VK_FALSE;
-            multisample.minSampleShading = desc_.multisample.min_sample_shading;
+            multisample.rasterizationSamples = to_vk_sample_count(desc_.sample_count);
+            multisample.sampleShadingEnable = desc_.sample_shading_enabled ? VK_TRUE : VK_FALSE;
+            multisample.minSampleShading = desc_.min_sample_shading;
 
             VkPipelineDepthStencilStateCreateInfo depth_stencil {};
             depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-            depth_stencil.depthTestEnable = desc_.depth_stencil.depth_test_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
-            depth_stencil.depthWriteEnable = desc_.depth_stencil.depth_write_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
-            depth_stencil.depthCompareOp = to_vk_compare_op(desc_.depth_stencil.depth_compare_op);
+            depth_stencil.depthTestEnable = desc_.depth_test_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
+            depth_stencil.depthWriteEnable = desc_.depth_write_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
+            depth_stencil.depthCompareOp = to_vk_compare_op(desc_.depth_compare_op);
             depth_stencil.depthBoundsTestEnable = VK_FALSE;
-            depth_stencil.stencilTestEnable = desc_.depth_stencil.stencil_test_enabled ? VK_TRUE : VK_FALSE;
-            depth_stencil.front = to_vk_stencil_state(desc_.depth_stencil.front,
-                                                      desc_.depth_stencil.stencil_read_mask,
-                                                      desc_.depth_stencil.stencil_write_mask,
-                                                      desc_.depth_stencil.stencil_reference);
-            depth_stencil.back = to_vk_stencil_state(desc_.depth_stencil.back,
-                                                     desc_.depth_stencil.stencil_read_mask,
-                                                     desc_.depth_stencil.stencil_write_mask,
-                                                     desc_.depth_stencil.stencil_reference);
+            depth_stencil.stencilTestEnable = desc_.stencil_test_enabled ? VK_TRUE : VK_FALSE;
+            depth_stencil.front = to_vk_stencil_state(desc_.stencil_front,
+                                                      desc_.stencil_read_mask,
+                                                      desc_.stencil_write_mask,
+                                                      desc_.stencil_reference);
+            depth_stencil.back = to_vk_stencil_state(desc_.stencil_back,
+                                                     desc_.stencil_read_mask,
+                                                     desc_.stencil_write_mask,
+                                                     desc_.stencil_reference);
 
-            const BlendAttachmentDesc blend_desc = desc_.blend.attachments.empty()
-                ? BlendStateDesc::alpha_blend_attachment()
-                : desc_.blend.attachments.front();
-            VkPipelineColorBlendAttachmentState blend_attachment = to_vk_blend_attachment(blend_desc);
+            VkPipelineColorBlendAttachmentState blend_attachment = to_vk_blend_attachment(desc_);
 
             // If blending is requested but the color attachment format does not advertise
             // VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT (e.g. integer render targets like
@@ -836,7 +833,7 @@ namespace Corona::Horizon
 
             VkPipelineColorBlendStateCreateInfo color_blend {};
             color_blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-            color_blend.logicOpEnable = desc_.blend.logic_op_enabled ? VK_TRUE : VK_FALSE;
+            color_blend.logicOpEnable = desc_.logic_op_enabled ? VK_TRUE : VK_FALSE;
             color_blend.logicOp = VK_LOGIC_OP_COPY;
             color_blend.attachmentCount = color_attachment_count;
             color_blend.pAttachments = color_attachment_count != 0 ? blend_attachments.data() : nullptr;

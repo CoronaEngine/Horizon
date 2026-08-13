@@ -297,7 +297,7 @@ void run_example_assao()
     depth_d.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    scene_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline color_rasterizer(assao_scene_vert_glsl, assao_color_frag_glsl, scene_desc);
     color_rasterizer.outColor = scene_color_image;

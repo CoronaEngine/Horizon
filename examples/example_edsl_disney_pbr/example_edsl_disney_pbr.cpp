@@ -479,7 +479,7 @@ void run_example_edsl_disney_pbr()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     DisneyEdslSharedProxy shared;
 

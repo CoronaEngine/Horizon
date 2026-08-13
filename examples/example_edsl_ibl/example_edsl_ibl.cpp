@@ -582,7 +582,7 @@ void run_example_edsl_ibl()
 
     // ---- Pipeline ----
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     // 共享 UBO（批次内所有 draw 相同，288 bytes → UBO）
     IblEdslSharedProxy shared;
