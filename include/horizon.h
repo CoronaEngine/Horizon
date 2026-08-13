@@ -733,44 +733,36 @@ namespace Corona::Horizon
     class ExecutionCompiler;
     struct ExecutionPlan;
     class SubmissionSync;
-
-    enum class QueueCapability
-    {
-        Graphics,
-        Compute,
-        Transfer,
-        Present
-    };
-
-    enum class AccessKind
-    {
-        Read,
-        Write,
-        ReadWrite
-    };
-
-    enum class CommandOp
-    {
-        CopyBuffer,
-        CopyBufferToImage,
-        Dispatch,
-        BeginRendering,
-        EndRendering,
-        DrawIndexed,
-        DrawIndexedBatch,
-        DrawIndexedIndirect,
-        Present,
-        KeepAlive,
-        CopyImage
-    };
-
-    enum class FeatureRequirement
-    {
-        TimelineSemaphore,
-        Synchronization2,
-        DeferredHostOperations,
-        DeviceGroup
-    };
+    enum class QueueCapability;
+    enum class AccessKind;
+    enum class CommandOp;
+    enum class FeatureRequirement;
+    enum class DispatchBindingKind;
+    enum class PresentStatus;
+    struct QueueId;
+    struct CopyRegion;
+    struct ImageCopyRegion;
+    struct ResourceUse;
+    struct DispatchResourceBinding;
+    struct UniformBufferBindingData;
+    struct DispatchDesc;
+    struct RenderingDesc;
+    struct DrawIndexedDesc;
+    struct DrawIndexedBatchItem;
+    struct DrawIndexedBatchDesc;
+    struct DrawIndexedIndirectDesc;
+    struct PresentDesc;
+    struct CommandPayload;
+    struct CommandIR;
+    struct RequirementSet;
+    struct RecordedTask;
+    struct ResourceBarrier;
+    struct PresentResult;
+    struct CrossDeviceDependency;
+    struct SubmissionDependency;
+    class SubmissionKeepAlive;
+    struct SubmissionToken;
+    struct QueueSubmission;
 
     struct DeviceId
     {
@@ -785,14 +777,6 @@ namespace Corona::Horizon
     struct DeviceMask
     {
         uint32_t bits { 1 };
-    };
-
-    struct QueueId
-    {
-        DeviceId device {};
-        uint32_t family_index { 0 };
-        uint32_t queue_index { 0 };
-        QueueCapability capability { QueueCapability::Transfer };
     };
 
     struct BufferRef
@@ -810,13 +794,6 @@ namespace Corona::Horizon
         std::uintptr_t id { 0 };
     };
 
-    struct CopyRegion
-    {
-        uint64_t src_offset { 0 };
-        uint64_t dst_offset { 0 };
-        uint64_t size { 0 };
-    };
-
     struct BufferImageCopyRegion
     {
         uint64_t buffer_offset { 0 };
@@ -824,273 +801,13 @@ namespace Corona::Horizon
         uint32_t image_mip { 0 };
     };
 
-    struct ImageCopyRegion
-    {
-        uint32_t src_layer { 0 };
-        uint32_t dst_layer { 0 };
-        uint32_t src_mip { 0 };
-        uint32_t dst_mip { 0 };
-    };
-
-    struct ResourceUse
-    {
-        ResourceHandle handle {};
-        AccessKind access { AccessKind::Read };
-        uint64_t stages { 0 };
-    };
-
-    enum class DispatchBindingKind
-    {
-        StorageBuffer,
-        StorageImage
-    };
-
-    struct DispatchResourceBinding
-    {
-        uint32_t set { 0 };
-        uint32_t binding { 0 };
-        ResourceHandle resource {};
-        DispatchBindingKind kind { DispatchBindingKind::StorageBuffer };
-        AccessKind access { AccessKind::ReadWrite };
-    };
-
-    struct UniformBufferBindingData
-    {
-        uint32_t set { 0 };
-        uint32_t binding { 0 };
-        std::vector<std::byte> data;
-        // 持久化 GPU buffer，在管线初始化时通过反射创建一次，之后只 write_bytes。
-        // 使用 ResourceHandle（基类）存储句柄，避免与 horizon.h 的循环依赖。
-        ResourceHandle gpu_buffer {};
-    };
-
-    struct DispatchDesc
-    {
-        ComputePipelineBase* pipeline;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo comp_condition_info;
-
-        uint32_t groups_x { 1 };
-        uint32_t groups_y { 1 };
-        uint32_t groups_z { 1 };
-        std::vector<DispatchResourceBinding> bindings;
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
-        std::string debug_label;
-    };
-
-    struct RenderingDesc
-    {
-        ImageRef color {};
-        std::array<ImageRef, 3> extra_colors {};
-        ImageRef depth {};
-        uint32_t width { 0 };
-        uint32_t height { 0 };
-        bool clear_color { false };
-        bool clear_depth { false };
-    };
-
-    struct DrawIndexedDesc
-    {
-        RasterizerPipelineBase* pipeline {};
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
-
-        uint32_t index_count { 0 };
-        uint32_t instance_count { 1 };
-        uint32_t first_index { 0 };
-        int32_t vertex_offset { 0 };
-        uint32_t first_instance { 0 };
-        IndexType index_type { IndexType::Auto };
-        bool enable_scissor { false };
-        ScissorRect scissor {};
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
-        std::string debug_label;
-    };
-
-    struct DrawIndexedBatchItem
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        DrawIndexedDesc draw {};
-    };
-
-    struct DrawIndexedBatchDesc
-    {
-        std::vector<DrawIndexedBatchItem> draws;
-    };
-
-    struct DrawIndexedIndirectDesc
-    {
-        RasterizerPipelineBase* pipeline {};
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
-
-        uint64_t indirect_offset { 0 };
-        uint32_t draw_count { 0 };
-        // 0 means sizeof(DrawIndexedIndirectCommand).
-        uint32_t stride { 0 };
-        IndexType index_type { IndexType::Auto };
-        bool enable_scissor { false };
-        ScissorRect scissor {};
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
-        std::string debug_label;
-    };
-
-    struct PresentDesc
-    {
-        DisplayerRef displayer {};
-        ImageRef image {};
-        ImageRef swapchain_image {};
-        DeviceId present_device {};
-        bool allow_cpu_bridge_fallback { true };
-    };
-
-    struct CommandPayload
-    {
-        CopyRegion copy {};
-        ImageCopyRegion image_copy {};
-        BufferImageCopyRegion buffer_image_copy {};
-        DispatchDesc dispatch {};
-        RenderingDesc rendering {};
-        DrawIndexedDesc draw_indexed {};
-        DrawIndexedBatchDesc draw_indexed_batch {};
-        DrawIndexedIndirectDesc draw_indexed_indirect {};
-        PresentDesc present {};
-    };
-
-    struct CommandIR
-    {
-        CommandOp op { CommandOp::CopyBuffer };
-        DeviceMask devices {};
-        QueueCapability queue { QueueCapability::Transfer };
-        std::vector<ResourceUse> resources;
-        CommandPayload payload {};
-        std::shared_ptr<void> keep_alive {};
-        uint64_t sequence { 0 };
-        std::string debug_label;
-    };
-
-    template<typename Visitor>
-    [[nodiscard]] bool visit_indexed_draws(const CommandIR& command, Visitor&& visitor)
-    {
-        if (command.op == CommandOp::DrawIndexed)
-        {
-            const DrawIndexedDesc& draw = command.payload.draw_indexed;
-            const BufferRef index = command.resources.size() > 0
-                ? BufferRef{command.resources[0].handle}
-                : BufferRef{};
-            const BufferRef vertex = command.resources.size() > 1
-                ? BufferRef{command.resources[1].handle}
-                : BufferRef{};
-            std::forward<Visitor>(visitor)(index, vertex, draw);
-            return true;
-        }
-        if (command.op == CommandOp::DrawIndexedBatch)
-        {
-            for (const DrawIndexedBatchItem& item : command.payload.draw_indexed_batch.draws)
-                visitor(item.index, item.vertex, item.draw);
-            return true;
-        }
-        return false;
-    }
-
-    struct RequirementSet
-    {
-        bool graphics { false };
-        bool compute { false };
-        bool transfer { false };
-        bool timeline_semaphore { true };
-        bool synchronization_2 { true };
-        bool deferred_host_operations { false };
-        bool device_group { false };
-    };
-
-    struct RecordedTask
-    {
-        std::vector<CommandIR> commands;
-        RequirementSet requirements {};
-    };
-
-    struct ResourceBarrier
-    {
-        std::uintptr_t resource_id { 0 };
-        AccessKind before { AccessKind::Read };
-        AccessKind after { AccessKind::Read };
-    };
-
-    enum class PresentStatus
-    {
-        None,
-        Presented,
-        Suboptimal,
-        OutOfDate,
-        Skipped
-    };
-
-    struct PresentResult
-    {
-        PresentStatus status { PresentStatus::None };
-        DisplayerRef displayer {};
-        ImageRef image {};
-        std::string message;
-    };
-
-    struct CrossDeviceDependency
-    {
-        std::uintptr_t resource_id { 0 };
-        DeviceId producer {};
-        DeviceId consumer {};
-        bool present_cpu_bridge_fallback { false };
-        bool imported_timeline_required { false };
-    };
-
-    struct SubmissionDependency
-    {
-        size_t producer { 0 };
-        size_t consumer { 0 };
-        std::uintptr_t resource_id { 0 };
-    };
-
-    class SubmissionKeepAlive
-    {
-    public:
-        void add_resource(std::shared_ptr<const IResourceRef> resource);
-        void add_object(std::shared_ptr<void> object);
-        void clear() noexcept;
-
-    private:
-        std::vector<std::shared_ptr<const IResourceRef>> resources_;
-        std::unordered_set<std::uintptr_t> resource_ids_;
-        std::vector<std::shared_ptr<void>> objects_;
-    };
-
-    struct SubmissionToken
-    {
-        DeviceId device {};
-        QueueId queue {};
-        uint64_t value { 0 };
-        std::shared_ptr<const SubmissionSync> sync {};
-
-        [[nodiscard]] bool has_sync() const noexcept { return sync != nullptr; }
-    };
-
-    struct QueueSubmission
-    {
-        std::shared_ptr<class TrackedCommandBuffer> command_buffer;
-        SubmissionKeepAlive keep_alive;
-        std::string debug_summary;
-    };
-
+    // SubmitReceipt 的完整载荷（SubmissionToken / PresentResult 序列）由内部
+    // SubmitReceiptData 持有，经 shared_ptr<const void> 不透明传递。公共用户只
+    // 能读 serial、并把它当作 wait / wait_idle 的参数，不触达内部 token。
     struct SubmitReceipt
     {
         uint64_t serial { 0 };
-        std::vector<SubmissionToken> tokens;
-        std::vector<PresentResult> presents;
+        std::shared_ptr<const void> data {};
     };
 
     struct CommitCommand
@@ -1139,41 +856,6 @@ namespace Corona::Horizon
         std::vector<StreamCommand> commands_;
     };
 
-    class CommandRecorder
-    {
-    public:
-        CommandRecorder() = default;
-
-        void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
-        void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
-        void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-        void dispatch(DispatchDesc desc, DeviceMask devices = {});
-        void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
-        void end_rendering(DeviceMask devices = {});
-        void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
-        void draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {});
-        void draw_indexed_indirect(BufferRef index,
-                                   BufferRef vertex,
-                                   BufferRef indirect,
-                                   DrawIndexedIndirectDesc desc,
-                                   DeviceMask devices = {});
-        void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
-        void keep_alive(std::shared_ptr<void> object);
-        [[nodiscard]] RecordedTask close();
-
-    private:
-        void ensure_open() const;
-        void mark_requirement(QueueCapability capability);
-        void mark_requirement(FeatureRequirement feature);
-        [[nodiscard]] uint64_t next_sequence() noexcept;
-        void mark_device_requirements(DeviceMask devices);
-
-        bool closed_ { false };
-        uint64_t next_sequence_ { 0 };
-        std::vector<CommandIR> commands_;
-        RequirementSet requirements_ {};
-    };
-
 
     class HardwareDisplayer
     {
@@ -1205,6 +887,8 @@ namespace Corona::Horizon
         HardwareStream(HardwareStream&&) noexcept = default;
         HardwareStream& operator=(HardwareStream&&) noexcept = default;
 
+        ~HardwareStream();
+
         HardwareStream& operator<<(const StreamCommand& command);
         HardwareStream& operator<<(const CommandBatch& commands);
         // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
@@ -1217,7 +901,9 @@ namespace Corona::Horizon
         void ensure_open() const;
 
         HardwareExecutor* executor_ {};
-        CommandRecorder recorder_ {};
+        // CommandRecorder 定义在内部 command_ir.h；公共头只反声明，故按值成员改为
+        // 独占指针，实例化与 reset 都发生在硬件层。
+        std::unique_ptr<CommandRecorder> recorder_ {};
         bool committed_ { false };
     };
 
@@ -1246,13 +932,14 @@ namespace Corona::Horizon
                                                           std::vector<PresentResult>* present_results,
                                                           std::span<const SubmissionToken> wait_tokens,
                                                           struct ExecutionCommitProfileSample* profile = nullptr) const;
-        [[nodiscard]] std::vector<SubmissionToken> consume_pending_waits();
+        [[nodiscard]] std::vector<std::shared_ptr<SubmissionToken>> consume_pending_waits();
 
         std::shared_ptr<ExecutionCompiler> compiler_;
         QueueResolver queue_resolver_ {};
         mutable std::mutex mutex_;
         uint64_t next_submit_serial_ { 0 };
-        std::vector<SubmissionToken> pending_waits_;
+        // SubmissionToken 定义在内部 command_ir.h，公共头不可按值持有，故用 shared_ptr。
+        std::vector<std::shared_ptr<SubmissionToken>> pending_waits_;
     };
 
     // 隐式提交标记：`stream << pipeline << H::submit` 等价于 `<< H::commit()`。
@@ -2367,71 +2054,8 @@ namespace Corona::Horizon
         BufferImageCopyRegion region {};
         DeviceMask devices {};
 
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.copy_to_image(src, dst, region, devices);
-        }
-    };
-
-    struct ShaderDispatchCommand
-    {
-        DispatchDesc dispatch {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.dispatch(dispatch, devices);
-        }
-    };
-
-    struct BeginRenderingCommand
-    {
-        RenderingDesc rendering {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.begin_rendering(rendering, devices);
-        }
-    };
-
-    struct EndRenderingCommand
-    {
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.end_rendering(devices);
-        }
-    };
-
-    // 批量 indexed draw。payload 由 shared_ptr 持有：StreamCommand 的转换构造会按值
-    // 拷贝命令对象，而一个批次可能有数万条 draw，直接内嵌 vector 会让每次
-    // StreamCommand 拷贝都变成一次深拷贝。
-    struct DrawIndexedBatchCommand
-    {
-        std::shared_ptr<DrawIndexedBatchDesc> batch {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            if (batch)
-                recorder.draw_indexed_batch(*batch, devices);
-        }
-    };
-
-    struct DrawIndexedIndirectStreamCommand
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        BufferRef indirect {};
-        DrawIndexedIndirectDesc draw {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.draw_indexed_indirect(index, vertex, indirect, draw, devices);
-        }
+        // 定义移入硬件层 execution.cpp（command_ir.h 内的 CommandRecorder 可见）。
+        void record(CommandRecorder& recorder) const;
     };
 
     struct PresentCommand
@@ -2441,29 +2065,8 @@ namespace Corona::Horizon
         DeviceId present_device {};
         bool allow_cpu_bridge_fallback { true };
 
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
-        }
-    };
-
-    class KeepAliveCommand
-    {
-    public:
-        KeepAliveCommand() = default;
-
-        explicit KeepAliveCommand(std::shared_ptr<void> object)
-            : object_(std::move(object))
-        {
-        }
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.keep_alive(object_);
-        }
-
-    private:
-        std::shared_ptr<void> object_ {};
+        // 定义移入硬件层 execution.cpp（command_ir.h 内的 CommandRecorder 可见）。
+        void record(CommandRecorder& recorder) const;
     };
 
     [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
