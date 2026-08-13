@@ -29,15 +29,11 @@ namespace Corona::Horizon
             return read<ResourceStore<BufferWrap, BufferReleaser>>(ResourceBridge::token(buffer));
         }
 
-        [[nodiscard]] BufferRef buffer_ref(const HardwareBuffer& buffer)
+        struct ImageSubresource
         {
-            return { static_cast<const ResourceHandle&>(buffer) };
-        }
-
-        [[nodiscard]] ImageRef image_ref(const HardwareImage& image)
-        {
-            return { static_cast<const ResourceHandle&>(image) };
-        }
+            uint32_t layer { 0 };
+            uint32_t mip { 0 };
+        };
 
         [[nodiscard]] ImageSubresourceRange resolve_range(ImageSubresourceRange range, const HardwareImageDesc& desc) noexcept
         {
@@ -328,7 +324,7 @@ namespace Corona::Horizon
         if (!resolve_absolute_subresource(image->desc, range_, image_layer, image_mip, absolute))
             return {};
 
-        return copy_to_image(buffer_ref(src), image_ref(*this), { buffer_offset, absolute.layer, absolute.mip });
+        return copy_to_image(src, *this, { buffer_offset, absolute.layer, absolute.mip });
     }
 
     uint32_t HardwareImage::store_descriptor() const

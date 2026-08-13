@@ -109,9 +109,6 @@ namespace Corona::Horizon
                                                 uint32_t vertex_stride,
                                                 const DrawIndexedDesc& draw);
 
-        [[nodiscard]] CommandBatch command_batch() const;
-        // 直接录进 recorder：与 command_batch() 等价，但省掉中间的 CommandBatch /
-        // StreamCommand(std::function) 以及批次 payload 的一次拷贝。
         void record_into(CommandRecorder& recorder) const;
 
     private:

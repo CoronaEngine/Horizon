@@ -15,12 +15,9 @@
 
 // 内部 Command IR 层。
 //
-// 这些类型曾经全部内嵌在公共头 include/horizon.h 里，把内部执行层推到了公共 API 表面。
-// P0 的目标是把整个 IR 层移出公共头：horizon.h 只对 CommandRecorder / Queue /
-// ExecutionPlan / ExecutionCompiler / SubmissionSync / RecordedTask / SubmissionToken /
-// PresentResult / QueueCapability 反声明，并保留 StreamCommand / CommandBatch /
-// 值命令门面与 shared leaf 引用类型（BufferRef / ImageRef / DisplayerRef / DeviceId /
-// DeviceMask / BufferImageCopyRegion），它们被公共门面按值持有，必须留在公共头。
+// 这些类型曾经内嵌在公共头 include/horizon.h 里。P0/P1 把整个 IR 层移出公共头：
+// horizon.h 只按值持有三个叶子类型（DeviceId / DisplayerRef / BufferImageCopyRegion），
+// 其余引用/IR 类型均在此文件。
 //
 // 本文件仅被硬件层（hardware_wrapper_vulkan/）内部 include：command.h 在 horizon.h
 // 之后包含它，execution.h / 各 pipeline / display_manager / device_manager 也依赖它。
@@ -108,6 +105,33 @@ namespace Corona::Horizon
         Present,
         KeepAlive,
         CopyImage
+    };
+
+    // DeviceId / DisplayerRef / BufferImageCopyRegion 定义在 horizon.h（公共头按值持有）。
+    // 以下是仅内部使用的引用/掩码类型。
+
+    struct DeviceMask
+    {
+        uint32_t bits { 1 };
+    };
+
+    struct BufferRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct ImageRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct ImageSubresourceLayout
+    {
+        uint64_t byte_offset = 0;
+        uint64_t byte_size = 0;
+        uint64_t row_pitch = 0;
+        uint64_t slice_pitch = 0;
+        ImageExtent extent {};
     };
 
     enum class FeatureRequirement
@@ -440,6 +464,40 @@ namespace Corona::Horizon
         uint64_t next_sequence_ { 0 };
         std::vector<CommandIR> commands_;
         RequirementSet requirements_ {};
+    };
+
+    class StreamCommand
+    {
+    public:
+        StreamCommand() = default;
+        explicit StreamCommand(std::function<void(CommandRecorder&)> recorder);
+
+        template <typename Command>
+            requires(!std::is_same_v<std::remove_cvref_t<Command>, StreamCommand> &&
+                     requires(const std::remove_cvref_t<Command>& command, CommandRecorder& recorder) {
+                         command.record(recorder);
+                     })
+        StreamCommand(Command&& command)
+            : recorder_([command = std::remove_cvref_t<Command>(std::forward<Command>(command))](
+                            CommandRecorder& recorder) { command.record(recorder); })
+        {
+        }
+
+        void record(CommandRecorder& recorder) const;
+        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(recorder_); }
+
+    private:
+        std::function<void(CommandRecorder&)> recorder_ {};
+    };
+
+    class CommandBatch
+    {
+    public:
+        CommandBatch& operator<<(StreamCommand command);
+        [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
+
+    private:
+        std::vector<StreamCommand> commands_;
     };
 
     // ================================================================

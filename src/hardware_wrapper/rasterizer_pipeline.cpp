@@ -161,14 +161,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    CommandBatch RasterizerPipelineBase::command_batch() const
-    {
-        std::shared_ptr<IResourceRef> token;
-        token = ResourceBridge::token(*this);
-
-        return pipeline_impl(token)->command_batch();
-    }
-
     void RasterizerPipelineBase::record_into(CommandRecorder& recorder) const
     {
         std::shared_ptr<IResourceRef> token;

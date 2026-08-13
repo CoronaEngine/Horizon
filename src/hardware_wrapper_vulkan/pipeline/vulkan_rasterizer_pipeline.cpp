@@ -1753,30 +1753,6 @@ namespace Corona::Horizon
         return plan;
     }
 
-    CommandBatch VulkanRasterizerPipeline::command_batch() const
-    {
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
-
-        DrawPlan plan = build_draw_plan();
-        CommandBatch batch;
-
-        if (plan.has_rendering_scope)
-            batch << BeginRenderingCommand{ plan.rendering };
-
-        // 一条 DrawIndexedBatch 而不是每 draw 一条 DrawIndexed：编译期的资源去重
-        // 让 64k draws 只产生 2 个唯一 resource use，而不是 128k 个，同时省掉
-        // 每 draw 一个 StreamCommand(std::function) + 一个 CommandIR。
-        if (!plan.batch.draws.empty())
-            batch << DrawIndexedBatchCommand{ std::make_shared<DrawIndexedBatchDesc>(std::move(plan.batch)) };
-        for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
-            batch << DrawIndexedIndirectStreamCommand{ index, vertex, indirect, std::move(draw) };
-
-        if (plan.has_rendering_scope)
-            batch << EndRenderingCommand{};
-
-        return batch;
-    }
-
     void VulkanRasterizerPipeline::record_into(CommandRecorder& recorder) const
     {
         HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record_into");

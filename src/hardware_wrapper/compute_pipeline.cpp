@@ -159,11 +159,11 @@ namespace Corona::Horizon
                  (height + tgs.y - 1u) / tgs.y };
     }
 
-    CommandBatch ComputePipelineBase::command_batch()
+    void ComputePipelineBase::record_into(CommandRecorder& recorder)
     {
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);
-        return impl->command_batch(*this);
+        impl->record_into(*this, recorder);
     }
 
     void ComputePipelineBase::set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set, uint32_t binding)

@@ -274,12 +274,6 @@ namespace Corona::Horizon
 
     struct ExternalMemoryHandle
     {
-#if defined(_WIN32) || defined(_WIN64)
-        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueWin32;
-#else
-        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueFd;
-#endif
-
         ExternalMemoryHandleType type = ExternalMemoryHandleType::None;
 
         void* handle = nullptr;
@@ -364,17 +358,6 @@ namespace Corona::Horizon
         uint32_t depth = 1;
     };
 
-    struct ImageSubresource
-    {
-        uint32_t layer = 0;
-        uint32_t mip = 0;
-
-        [[nodiscard]] constexpr uint32_t index(uint32_t mip_levels) const noexcept
-        {
-            return layer * mip_levels + mip;
-        }
-    };
-
     struct ImageSubresourceRange
     {
         static constexpr uint32_t remaining = ~0u;
@@ -399,20 +382,6 @@ namespace Corona::Horizon
                 .mip_count = 1,
             };
         }
-
-        [[nodiscard]] constexpr bool is_single() const noexcept
-        {
-            return layer_count == 1 && mip_count == 1;
-        }
-    };
-
-    struct ImageSubresourceLayout
-    {
-        uint64_t byte_offset = 0;
-        uint64_t byte_size = 0;
-        uint64_t row_pitch = 0;
-        uint64_t slice_pitch = 0;
-        ImageExtent extent {};
     };
 
     // ================================================================
@@ -613,8 +582,6 @@ namespace Corona::Horizon
 
     struct CopyBufferToImageCommand;
 
-    class CommandBatch;
-
     class ComputePipelineBase;
     class RasterizerPipelineBase;
     template <typename CS = void>
@@ -625,60 +592,16 @@ namespace Corona::Horizon
     class HardwareExecutor;
     class HardwareDisplayer;
 
-    // ================================================================
-    // Device memory query (VRAM capacity)
-    // ================================================================
-
-    struct BindingSlot;
-
-    // ================================================================
-    // Execution / Command Public Types
-    // ================================================================
-    //
-    // 执行 / 命令 IR 层（QueueCapability、DeviceMask、CommandIR、
-    // RecordedTask、SubmissionToken、SubmitReceipt、CommandRecorder 等）。
-    // 原 horizon_execution.h 已并入本文件（内部 / 高级 API）。普通用户
-    // 无需直接接触这些类型；下方的资源 / 管线 / 命令门面会在内部使用它们。
-    // ================================================================
-
-    class RasterizerPipelineBase;
-    class ComputePipelineBase;
-
-    class Queue;
+    // 执行层与资源引用类型由内部 command IR 头定义；这里只保留公共 API 签名里
+    // 按值出现的三个叶子类型，以及 recorder / pipeline / executor 依赖的前置声明。
     class CommandRecorder;
+    class Queue;
     class ExecutionCompiler;
     struct ExecutionPlan;
-    class SubmissionSync;
     enum class QueueCapability;
-    enum class AccessKind;
-    enum class CommandOp;
-    enum class FeatureRequirement;
-    enum class DispatchBindingKind;
-    enum class PresentStatus;
-    struct QueueId;
-    struct CopyRegion;
-    struct ImageCopyRegion;
-    struct ResourceUse;
-    struct DispatchResourceBinding;
-    struct UniformBufferBindingData;
-    struct DispatchDesc;
-    struct RenderingDesc;
-    struct DrawIndexedDesc;
-    struct DrawIndexedBatchItem;
-    struct DrawIndexedBatchDesc;
-    struct DrawIndexedIndirectDesc;
-    struct PresentDesc;
-    struct CommandPayload;
-    struct CommandIR;
-    struct RequirementSet;
     struct RecordedTask;
-    struct ResourceBarrier;
     struct PresentResult;
-    struct CrossDeviceDependency;
-    struct SubmissionDependency;
-    class SubmissionKeepAlive;
     struct SubmissionToken;
-    struct QueueSubmission;
 
     struct DeviceId
     {
@@ -688,21 +611,6 @@ namespace Corona::Horizon
         {
             return left.value == right.value;
         }
-    };
-
-    struct DeviceMask
-    {
-        uint32_t bits { 1 };
-    };
-
-    struct BufferRef
-    {
-        ResourceHandle handle {};
-    };
-
-    struct ImageRef
-    {
-        ResourceHandle handle {};
     };
 
     struct DisplayerRef
@@ -716,6 +624,7 @@ namespace Corona::Horizon
         uint32_t image_layer { 0 };
         uint32_t image_mip { 0 };
     };
+
 
     // SubmitReceipt 的完整载荷（SubmissionToken / PresentResult 序列）由内部
     // SubmitReceiptData 持有，经 shared_ptr<const void> 不透明传递。公共用户只
@@ -731,47 +640,6 @@ namespace Corona::Horizon
     };
 
     [[nodiscard]] CommitCommand commit() noexcept;
-
-    class StreamCommand
-    {
-    public:
-        StreamCommand() = default;
-        explicit StreamCommand(std::function<void(CommandRecorder&)> recorder);
-
-        // 任何提供 record(CommandRecorder&) const 的值命令都可隐式转成 StreamCommand。
-        // 这是唯一的折叠点：此前 horizon.h 里 9 个值命令各自手抄一遍
-        // stream_command() + operator StreamCommand()，做的都是这同一件事。
-        //
-        // 排除 StreamCommand 自身是必须的：它自己也有 record(CommandRecorder&) const，
-        // 不排除则该模板会与拷贝/移动构造函数竞争。
-        template <typename Command>
-            requires(!std::is_same_v<std::remove_cvref_t<Command>, StreamCommand> &&
-                     requires(const std::remove_cvref_t<Command>& command, CommandRecorder& recorder) {
-                         command.record(recorder);
-                     })
-        StreamCommand(Command&& command)
-            : recorder_([command = std::remove_cvref_t<Command>(std::forward<Command>(command))](
-                            CommandRecorder& recorder) { command.record(recorder); })
-        {
-        }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(recorder_); }
-
-    private:
-        std::function<void(CommandRecorder&)> recorder_ {};
-    };
-
-    class CommandBatch
-    {
-    public:
-        CommandBatch& operator<<(StreamCommand command);
-        [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
-
-    private:
-        std::vector<StreamCommand> commands_;
-    };
-
 
     class HardwareDisplayer
     {
@@ -805,13 +673,25 @@ namespace Corona::Horizon
 
         ~HardwareStream();
 
-        HardwareStream& operator<<(const StreamCommand& command);
-        HardwareStream& operator<<(const CommandBatch& commands);
-        // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
-        // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
+        // 便捷门面：pipeline 直接录进当前 recorder。
         HardwareStream& operator<<(ComputePipelineBase& pipeline);
         HardwareStream& operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
+
+        // 值命令门面（CopyBufferToImageCommand、PresentCommand 等）直接录进 recorder。
+        template <typename Command>
+            requires(!std::is_same_v<std::remove_cvref_t<Command>, CommitCommand> &&
+                     !std::is_same_v<std::remove_cvref_t<Command>, ComputePipelineBase> &&
+                     !std::is_same_v<std::remove_cvref_t<Command>, RasterizerPipelineBase> &&
+                     requires(const std::remove_cvref_t<Command>& cmd, CommandRecorder& rec) {
+                         cmd.record(rec);
+                     })
+        HardwareStream& operator<<(Command&& command)
+        {
+            ensure_open();
+            command.record(*recorder_);
+            return *this;
+        }
 
     private:
         void ensure_open() const;
@@ -1368,8 +1248,8 @@ namespace Corona::Horizon
         struct DispatchGroups { uint32_t x; uint32_t y; };
         [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const;
 
-        [[nodiscard]] CommandBatch command_batch();
         [[nodiscard]] explicit operator bool() const noexcept;
+        void record_into(CommandRecorder& recorder);
 
         // 条件信息(EDSL 条件编译)与上次构建不同时重编译 shader 并重建管线,相同则什么都不做。
         // 返回是否真的重建过：调用方据此作废自己缓存的 pipeline / layout 句柄(重建销毁旧
@@ -1428,8 +1308,6 @@ namespace Corona::Horizon
                                                 const DrawIndexedIndirectParams& params);
         RasterizerPipelineBase& clear_records();
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
-        [[nodiscard]] CommandBatch command_batch() const;
-        // 与 command_batch() 等价，但直接录进 recorder，省掉中间容器与一次批次拷贝。
         void record_into(CommandRecorder& recorder) const;
         [[nodiscard]] explicit operator bool() const noexcept;
 
@@ -1772,42 +1650,40 @@ namespace Corona::Horizon
 
     struct CopyBufferToImageCommand
     {
-        BufferRef src {};
-        ImageRef dst {};
-        BufferImageCopyRegion region {};
-        DeviceMask devices {};
+        HardwareBuffer src {};
+        HardwareImage dst {};
+        uint64_t buffer_offset { 0 };
+        uint32_t image_layer { 0 };
+        uint32_t image_mip { 0 };
+        uint32_t device_mask_bits { 1 };
 
-        // 定义移入硬件层 execution.cpp（command_ir.h 内的 CommandRecorder 可见）。
         void record(CommandRecorder& recorder) const;
     };
 
     struct PresentCommand
     {
-        DisplayerRef displayer {};
-        ImageRef image {};
+        HardwareDisplayer displayer {};
+        HardwareImage image {};
         DeviceId present_device {};
         bool allow_cpu_bridge_fallback { true };
 
-        // 定义移入硬件层 execution.cpp（command_ir.h 内的 CommandRecorder 可见）。
         void record(CommandRecorder& recorder) const;
     };
 
-    [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
+    [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(const HardwareBuffer& src,
+                                                                 const HardwareImage& dst,
+                                                                 BufferImageCopyRegion region,
+                                                                 uint32_t device_mask_bits = 1)
     {
-        return { src, dst, region, devices };
+        return { src, dst, region.buffer_offset, region.image_layer, region.image_mip, device_mask_bits };
     }
 
-    [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
+    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer,
+                                                const HardwareImage& image,
+                                                DeviceId present_device = {},
+                                                bool allow_cpu_bridge_fallback = true)
     {
         return { displayer, image, present_device, allow_cpu_bridge_fallback };
-    }
-
-    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer, const HardwareImage& image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
-    {
-        return present(displayer.displayer_ref(),
-                       { static_cast<const ResourceHandle&>(image) },
-                       present_device,
-                       allow_cpu_bridge_fallback);
     }
 
 }

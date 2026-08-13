@@ -786,12 +786,18 @@ namespace Corona::Horizon
 
     void CopyBufferToImageCommand::record(CommandRecorder& recorder) const
     {
-        recorder.copy_to_image(src, dst, region, devices);
+        recorder.copy_to_image(BufferRef{ static_cast<const ResourceHandle&>(src) },
+                               ImageRef{ static_cast<const ResourceHandle&>(dst) },
+                               { buffer_offset, image_layer, image_mip },
+                               DeviceMask{ device_mask_bits });
     }
 
     void PresentCommand::record(CommandRecorder& recorder) const
     {
-        recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
+        recorder.present(displayer.displayer_ref(),
+                         ImageRef{ static_cast<const ResourceHandle&>(image) },
+                         present_device,
+                         allow_cpu_bridge_fallback);
     }
 
     CommandBatch& CommandBatch::operator<<(StreamCommand command)
@@ -2276,26 +2282,11 @@ namespace Corona::Horizon
     // 否则例子里 unique_ptr<CommandRecorder> 会在不完整类型上实例化 default_delete。
     HardwareStream::~HardwareStream() = default;
 
-    HardwareStream& HardwareStream::operator<<(const StreamCommand& command)
-    {
-        ensure_open();
-        command.record(*recorder_);
-        return *this;
-    }
-
-    HardwareStream& HardwareStream::operator<<(const CommandBatch& commands)
-    {
-        ensure_open();
-        for (const StreamCommand& command : commands.commands())
-        {
-            command.record(*recorder_);
-        }
-        return *this;
-    }
-
     HardwareStream& HardwareStream::operator<<(ComputePipelineBase& pipeline)
     {
-        return *this << pipeline.command_batch();
+        ensure_open();
+        pipeline.record_into(*recorder_);
+        return *this;
     }
 
     HardwareStream& HardwareStream::operator<<(RasterizerPipelineBase& pipeline)

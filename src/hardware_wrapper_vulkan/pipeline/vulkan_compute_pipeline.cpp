@@ -1112,7 +1112,7 @@ namespace Corona::Horizon
         };
     }
 
-    CommandBatch VulkanComputePipeline::command_batch(ComputePipelineBase& pipeline) const
+    void VulkanComputePipeline::record_into(ComputePipelineBase& pipeline, CommandRecorder& recorder) const
     {
         Snapshot state = snapshot();
         state.dispatch.pipeline = &pipeline;
@@ -1157,9 +1157,7 @@ namespace Corona::Horizon
             add_resource_use(state.dispatch.resource_uses, handle, image.access);
         }
 
-        CommandBatch batch;
-        batch << ShaderDispatchCommand{ std::move(state.dispatch) };
-        return batch;
+        recorder.dispatch(std::move(state.dispatch));
     }
 
     VkDescriptorSet VulkanComputePipeline::uniform_descriptor_set_unlocked(
