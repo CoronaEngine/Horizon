@@ -14,7 +14,6 @@
 
 #include "corona/kernel/core/i_logger.h"
 #include "corona/pal/cfw_platform.h"
-#include "stack_trace.h"
 
 // 超时锁配置（用于死锁检测）
 #ifndef CFW_LOCK_TIMEOUT_MS
@@ -29,6 +28,12 @@
 // 锁超时功能开关
 #ifndef CFW_ENABLE_LOCK_TIMEOUT
 #define CFW_ENABLE_LOCK_TIMEOUT 0  // 默认关闭，设为 1 则使用超时锁
+#endif
+
+// stack_trace.h 仅被 CFW_ENABLE_LOCK_TIMEOUT 下的超时诊断使用；
+// 它会拖入 <dbghelp.h>，默认构建不应为此付代价。
+#if CFW_ENABLE_LOCK_TIMEOUT
+#include "stack_trace.h"
 #endif
 
 // #define CFW_ENABLE_LOCK_LOGGING 1

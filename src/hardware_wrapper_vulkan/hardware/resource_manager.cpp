@@ -23,7 +23,6 @@
 #include <vulkan/vulkan_win32.h>
 #endif
 
-#include "corona/kernel/core/i_logger.h"
 #include "device_manager.h"
 #include "hardware_wrapper/diagnostics.h"
 
