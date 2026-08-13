@@ -107,12 +107,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipelineBase& RasterizerPipelineBase::record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer)
-    {
-        DrawIndexedParams params;
-        return record(index_buffer, vertex_buffer, params);
-    }
-
     RasterizerPipelineBase& RasterizerPipelineBase::record(const HardwareBuffer& index_buffer,
                                                            const HardwareBuffer& vertex_buffer,
                                                            const DrawIndexedParams& params)
@@ -152,16 +146,6 @@ namespace Corona::Horizon
         token = ResourceBridge::token(*this);
 
         pipeline_impl(token)->clear_records();
-        return *this;
-    }
-
-    RasterizerPipelineBase& RasterizerPipelineBase::bind_render_target(uint32_t location, HardwareImage& image)
-    {
-        set_resource_direct(0,
-                            0,
-                            image,
-                            static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
-                            location);
         return *this;
     }
 

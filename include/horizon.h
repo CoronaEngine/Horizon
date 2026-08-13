@@ -1525,7 +1525,6 @@ namespace Corona::Horizon
         ComputePipelineBase& operator=(const ComputePipelineBase& other);
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
         ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
-        ComputePipelineBase& set_debug_label(std::string label);
         [[nodiscard]] ComputePipelineDesc desc() const;
 
         // 根据管线自身的 workgroup local size 将像素尺寸换算为 dispatch group 数。
@@ -1587,39 +1586,18 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
         RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
-        RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
         RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
                                                 const HardwareBuffer& indirect_buffer,
                                                 const DrawIndexedIndirectParams& params);
         RasterizerPipelineBase& clear_records();
-        RasterizerPipelineBase& bind_render_target(uint32_t location, HardwareImage& image);
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] CommandBatch command_batch() const;
         // 与 command_batch() 等价，但直接录进 recorder，省掉中间容器与一次批次拷贝。
         void record_into(CommandRecorder& recorder) const;
         [[nodiscard]] explicit operator bool() const noexcept;
-
-        template <typename TargetProxy>
-            requires requires(TargetProxy& proxy) { proxy.boundResource_; }
-        RasterizerPipelineBase& bind_render_target(uint32_t location, TargetProxy& proxy)
-        {
-            auto* image = static_cast<HardwareImage*>(proxy.boundResource_);
-            if (image == nullptr)
-                throw std::logic_error("RasterizerPipeline render target proxy is not bound to a HardwareImage.");
-
-            add_auto_bind_entry({
-                &proxy.boundResource_,
-                0,
-                0,
-                static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
-                location,
-            });
-            bind_render_target(location, *image);
-            return *this;
-        }
 
         void rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
                               ShaderCodeCompiler::ConditionInfo& fragConditionInfo);

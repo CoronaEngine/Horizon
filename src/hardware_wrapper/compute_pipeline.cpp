@@ -127,12 +127,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    ComputePipelineBase& ComputePipelineBase::set_debug_label(std::string label)
-    {
-        pipeline_impl(ResourceBridge::token(*this))->set_debug_label(std::move(label));
-        return *this;
-    }
-
     ComputePipelineDesc ComputePipelineBase::desc() const
     {
         return pipeline_impl(ResourceBridge::token(*this))->desc();
