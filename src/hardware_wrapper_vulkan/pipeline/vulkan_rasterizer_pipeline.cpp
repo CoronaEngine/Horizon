@@ -1756,18 +1756,18 @@ namespace Corona::Horizon
         CommandBatch batch;
 
         if (plan.has_rendering_scope)
-            batch << begin_rendering(plan.rendering);
+            batch << BeginRenderingCommand{ plan.rendering };
 
         // 一条 DrawIndexedBatch 而不是每 draw 一条 DrawIndexed：编译期的资源去重
         // 让 64k draws 只产生 2 个唯一 resource use，而不是 128k 个，同时省掉
         // 每 draw 一个 StreamCommand(std::function) + 一个 CommandIR。
         if (!plan.batch.draws.empty())
-            batch << draw_indexed_batch(std::move(plan.batch));
+            batch << DrawIndexedBatchCommand{ std::make_shared<DrawIndexedBatchDesc>(std::move(plan.batch)) };
         for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
-            batch << draw_indexed_indirect(index, vertex, indirect, std::move(draw));
+            batch << DrawIndexedIndirectStreamCommand{ index, vertex, indirect, std::move(draw) };
 
         if (plan.has_rendering_scope)
-            batch << end_rendering();
+            batch << EndRenderingCommand{};
 
         return batch;
     }

@@ -2373,28 +2373,6 @@ namespace Corona::Horizon
     // Value Command Facades
     // ================================================================
 
-    namespace CommandDetail
-    {
-        template <typename T>
-        struct IsSharedPtr : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct IsSharedPtr<std::shared_ptr<T>> : std::true_type
-        {
-        };
-
-        template <typename T>
-        inline constexpr bool is_shared_ptr_v = IsSharedPtr<std::remove_cvref_t<T>>::value;
-
-        template <typename...>
-        inline constexpr bool single_shared_ptr_v = false;
-
-        template <typename T>
-        inline constexpr bool single_shared_ptr_v<T> = is_shared_ptr_v<T>;
-    }
-
     struct CopyBufferToImageCommand
     {
         BufferRef src {};
@@ -2437,19 +2415,6 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const
         {
             recorder.end_rendering(devices);
-        }
-    };
-
-    struct DrawIndexedCommand
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        DrawIndexedDesc draw {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.draw_indexed(index, vertex, draw, devices);
         }
     };
 
@@ -2519,40 +2484,6 @@ namespace Corona::Horizon
         return { src, dst, region, devices };
     }
 
-    [[nodiscard]] inline ShaderDispatchCommand dispatch(DispatchDesc desc, DeviceMask devices = {})
-    {
-        return { std::move(desc), devices };
-    }
-
-    [[nodiscard]] inline BeginRenderingCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {})
-    {
-        return { desc, devices };
-    }
-
-    [[nodiscard]] inline EndRenderingCommand end_rendering(DeviceMask devices = {})
-    {
-        return { devices };
-    }
-
-    [[nodiscard]] inline DrawIndexedCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {})
-    {
-        return { index, vertex, std::move(desc), devices };
-    }
-
-    [[nodiscard]] inline DrawIndexedBatchCommand draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {})
-    {
-        return { std::make_shared<DrawIndexedBatchDesc>(std::move(batch)), devices };
-    }
-
-    [[nodiscard]] inline DrawIndexedIndirectStreamCommand draw_indexed_indirect(BufferRef index,
-                                                                               BufferRef vertex,
-                                                                               BufferRef indirect,
-                                                                               DrawIndexedIndirectDesc desc,
-                                                                               DeviceMask devices = {})
-    {
-        return { index, vertex, indirect, std::move(desc), devices };
-    }
-
     [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
     {
         return { displayer, image, present_device, allow_cpu_bridge_fallback };
@@ -2566,28 +2497,6 @@ namespace Corona::Horizon
                        allow_cpu_bridge_fallback);
     }
 
-    [[nodiscard]] inline KeepAliveCommand keep_alive(std::shared_ptr<void> object)
-    {
-        return KeepAliveCommand(std::move(object));
-    }
-
-    template <typename T>
-        requires(!std::is_void_v<T>)
-    [[nodiscard]] KeepAliveCommand keep_alive(std::shared_ptr<T> object)
-    {
-        return keep_alive(std::static_pointer_cast<void>(std::move(object)));
-    }
-
-    template <typename... Args>
-        requires(sizeof...(Args) > 0u &&
-                 (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...) &&
-                 !CommandDetail::single_shared_ptr_v<Args...>)
-    [[nodiscard]] KeepAliveCommand keep_alive(Args&&... args)
-    {
-        using Storage = std::tuple<std::remove_cvref_t<Args>...>;
-        return keep_alive(std::static_pointer_cast<void>(
-            std::make_shared<Storage>(std::forward<Args>(args)...)));
-    }
 }
 
 template <typename PipelineType>
