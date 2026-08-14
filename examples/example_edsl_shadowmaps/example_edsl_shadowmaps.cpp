@@ -604,7 +604,7 @@ void run_example_edsl_shadowmaps()
         Corona::Horizon::SubmitReceipt render_receipt =
             render_executor << pack_rasterizer(shadow_map_size, shadow_map_size)
                             << scene_rasterizer(smx_width, smx_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

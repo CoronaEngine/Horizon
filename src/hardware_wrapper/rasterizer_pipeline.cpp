@@ -262,12 +262,4 @@ namespace Corona::Horizon
 
         pipeline_impl(token)->set_resource_direct(byte_offset, type_size, image, bind_type, location, set, binding);
     }
-
-    void RasterizerPipelineBase::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
-    {
-        std::shared_ptr<IResourceRef> token;
-        token = ResourceBridge::token(*this);
-
-        pipeline_impl(token)->add_auto_bind_entry(std::move(entry));
-    }
 }

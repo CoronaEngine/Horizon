@@ -216,7 +216,7 @@ void run_example_drawstress()
         Corona::Horizon::SubmitReceipt render_receipt;
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
-            render_receipt = render_executor << rasterizer(stress_width, stress_height) << Corona::Horizon::submit;
+            render_receipt = render_executor << rasterizer(stress_width, stress_height) << Corona::Horizon::commit();
         }
 
         {

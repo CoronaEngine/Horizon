@@ -1,7 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -14,8 +12,8 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -25,7 +23,6 @@
 #include "Codegen/RasterizedPipelineObject.h"
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
-#include "Compiler/ShaderLanguageConverter.h"
 
 #ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
 #if defined(NDEBUG)
@@ -479,18 +476,6 @@ namespace Corona::Horizon
         Always,
     };
 
-    enum class StencilOp : uint16_t
-    {
-        Keep = 0,
-        Zero,
-        Replace,
-        IncrementAndClamp,
-        DecrementAndClamp,
-        Invert,
-        IncrementAndWrap,
-        DecrementAndWrap,
-    };
-
     enum class BlendFactor : uint16_t
     {
         Zero = 0,
@@ -553,28 +538,10 @@ namespace Corona::Horizon
 
 
     // ================================================================
-    // Pipeline State
-    // ================================================================
-
+    // Execution Front End
+    // ----------------------------------------------------------------
     // 光栅/深度/混合/多重采样状态一律直接摊在 RasterizerPipelineDesc 上，不再分组成
-    // 独立的 *StateDesc。这里只留 DepthStencilOpDesc —— 它是唯一被实例化两次
-    // (stencil_front / stencil_back) 的分组，有真实复用价值。
-    struct DepthStencilOpDesc
-    {
-        StencilOp fail_op = StencilOp::Keep;
-        StencilOp pass_op = StencilOp::Keep;
-        StencilOp depth_fail_op = StencilOp::Keep;
-        CompareOp compare_op = CompareOp::Always;
-    };
-
-
-
-    // ================================================================
-    // Ray Tracing
-    // ================================================================
-
-    // ================================================================
-    // Forward Declarations
+    // 独立的 *StateDesc。
     // ================================================================
 
     class HardwareBuffer;
@@ -597,6 +564,7 @@ namespace Corona::Horizon
     class CommandRecorder;
     class Queue;
     class ExecutionCompiler;
+    class VulkanCommandEncoder;
     struct ExecutionPlan;
     enum class QueueCapability;
     struct RecordedTask;
@@ -718,7 +686,9 @@ namespace Corona::Horizon
 
         [[nodiscard]] HardwareStream stream();
         // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
+        // 光栅与计算两条路径对称提供，否则 `executor << compute` 会莫名编译不过。
         [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
@@ -737,11 +707,6 @@ namespace Corona::Horizon
         // SubmissionToken 定义在内部 command_ir.h，公共头不可按值持有，故用 shared_ptr。
         std::vector<std::shared_ptr<SubmissionToken>> pending_waits_;
     };
-
-    // 隐式提交标记：`stream << pipeline << H::submit` 等价于 `<< H::commit()`。
-    // 复用既有的 `operator<<(CommitCommand)`，不引入新算子。
-    inline constexpr CommitCommand submit {};
-
 
 
     // ================================================================
@@ -1035,16 +1000,13 @@ namespace Corona::Horizon
         bool rasterizer_discard_enabled = false;
         float line_width = 1.0f;
 
-        // --- 深度/模板 ---
+        // --- 深度 ---
+        // 没有模板状态：动态渲染路径把 stencilAttachmentFormat 恒定写成 UNDEFINED
+        // (vulkan_rasterizer_pipeline.cpp)，从来绑不上模板附件，所以不暴露永远
+        // 无效果的模板旋钮。需要模板效果的例子(shadowvolumes)走 R32F 计数纹理。
         bool depth_test_enabled = true;
         bool depth_write_enabled = true;
         CompareOp depth_compare_op = CompareOp::LessOrEqual;
-        bool stencil_test_enabled = false;
-        DepthStencilOpDesc stencil_front;
-        DepthStencilOpDesc stencil_back;
-        uint32_t stencil_read_mask = 0xff;
-        uint32_t stencil_write_mask = 0xff;
-        uint32_t stencil_reference = 0;
 
         // --- 混合 ---
         // 后端把这一份状态广播给全部颜色附件（从来没有过 per-attachment 独立混合），
@@ -1081,40 +1043,12 @@ namespace Corona::Horizon
     // 编译单个 Slang shader module 为 ShaderCodeModule。EDSL 路径（栅格 + compute）
     // 共用：填 SlangCompileArgs2 → slangCompilerWithModules → 取 SPIR-V → 反射短名裁剪。
     // 集中成一处，避免两份手抄在改约定（短名裁剪）时静默漂移。
-    [[nodiscard]] inline EmbeddedShader::ShaderCodeModule compile_slang_stage(
+    // 实现在 src/hardware_wrapper/slang_stage.cpp —— 留在头里会把
+    // ShaderLanguageConverter.h (slang-com-ptr / slang-com-helper) 塞给每个消费者。
+    [[nodiscard]] EmbeddedShader::ShaderCodeModule compile_slang_stage(
         EmbeddedShader::ShaderStage stage,
         EmbeddedShader::SlangModule& module,
-        EmbeddedShader::CompilerOption compiler_option = {})
-    {
-        EmbeddedShader::SlangCompileArgs2 args;
-        args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-        args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-        args.stage = stage;
-        args.module = &module;
-        args.deps = std::move(compiler_option.slangModules);
-        args.enableReflection = true;
-
-        EmbeddedShader::SlangCompileResult result =
-            EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-        auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
-        if (spirv == result.binaryTargets.end())
-            throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
-
-        auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-        EmbeddedShader::ShaderCodeModule::ShaderResources resources;
-        if (reflection != result.reflections.end())
-            resources = std::move(reflection->second);
-
-        // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
-        // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
-        for (auto& info : resources.bindInfoPool)
-        {
-            if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
-                info.variateName = info.variateName.substr(pos + 1);
-        }
-
-        return EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources));
-    }
+        EmbeddedShader::CompilerOption compiler_option = {});
 
     // ================================================================
     // Pipeline Binding
@@ -1228,7 +1162,11 @@ namespace Corona::Horizon
     class ComputePipelineBase : public ResourceHandle
     {
     public:
+        // record_into / sync_shader_conditions 的签名引用内部 IR 类型，只给执行层看。
         friend class HardwareExecutor;
+        friend class HardwareStream;
+        friend class VulkanCommandEncoder;
+
         ComputePipelineBase();
         ComputePipelineBase(ComputePipelineDesc desc,
                             ComputePipelineShaders shaders,
@@ -1249,13 +1187,7 @@ namespace Corona::Horizon
         [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const;
 
         [[nodiscard]] explicit operator bool() const noexcept;
-        void record_into(CommandRecorder& recorder);
 
-        // 条件信息(EDSL 条件编译)与上次构建不同时重编译 shader 并重建管线,相同则什么都不做。
-        // 返回是否真的重建过：调用方据此作废自己缓存的 pipeline / layout 句柄(重建销毁旧
-        // layout,新句柄可能复用同一地址值)。
-        bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
-    public:
         // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
@@ -1273,6 +1205,13 @@ namespace Corona::Horizon
         }
 
     private:
+        void record_into(CommandRecorder& recorder);
+
+        // 条件信息(EDSL 条件编译)与上次构建不同时重编译 shader 并重建管线,相同则什么都不做。
+        // 返回是否真的重建过：调用方据此作废自己缓存的 pipeline / layout 句柄(重建销毁旧
+        // layout,新句柄可能复用同一地址值)。
+        bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
+
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
@@ -1287,7 +1226,11 @@ namespace Corona::Horizon
     class RasterizerPipelineBase : public ResourceHandle
     {
     public:
+        // 同 ComputePipelineBase：内部 IR 入口只对执行层开放。
         friend class HardwareExecutor;
+        friend class HardwareStream;
+        friend class VulkanCommandEncoder;
+
         RasterizerPipelineBase();
         RasterizerPipelineBase(RasterizerPipelineDesc desc,
                                RasterizerPipelineShaders shaders,
@@ -1308,13 +1251,8 @@ namespace Corona::Horizon
                                                 const DrawIndexedIndirectParams& params);
         RasterizerPipelineBase& clear_records();
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
-        void record_into(CommandRecorder& recorder) const;
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        // 同 ComputePipelineBase::sync_shader_conditions，只重编译条件真的变了的那个 stage。
-        bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
-                                    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
-    public:
         // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
@@ -1332,10 +1270,15 @@ namespace Corona::Horizon
         }
 
     private:
+        void record_into(CommandRecorder& recorder) const;
+
+        // 同 ComputePipelineBase::sync_shader_conditions，只重编译条件真的变了的那个 stage。
+        bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
+                                    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
+
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
-        void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
         void rebuild_pipeline(RasterizerPipelineDesc desc,
                               RasterizerPipelineShaders shaders,
                               const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
@@ -1488,6 +1431,10 @@ namespace Corona::Horizon
         }
     };
 
+    // 别想着用 `(CS, Rest...)` 变参尾巴合并成两条：主模板的构造函数会生成隐式推导
+    // 指引，它是定参的，在偏序上比变参 guide 更特化，于是 EDSL lambda 会被推成
+    // RasterizerPipeline<lambda,lambda> / ComputePipeline<lambda> 而不是空参特化。
+    // 显式 guide 只有在与隐式 guide 同样好时才优先，所以必须逐个 arity 写死。
     ComputePipeline() -> ComputePipeline<>;
     template <PipelineDetail::GeneratedComputeShaderObject CS>
     ComputePipeline(CS) -> ComputePipeline<std::remove_cvref_t<CS>>;
@@ -1621,6 +1568,7 @@ namespace Corona::Horizon
         }
     };
 
+    // 同上，不能用变参尾巴合并——见 ComputePipeline 推导指引处的说明。
     RasterizerPipeline() -> RasterizerPipeline<>;
     template <typename VS, typename FS>
         requires PipelineDetail::GeneratedRasterizerShaderObjects<VS, FS>

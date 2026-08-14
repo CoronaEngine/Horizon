@@ -581,7 +581,7 @@ void run_example_shadowvolumes()
                             << depthval_rasterizer(sv_width, sv_height)
                             << volume_rasterizer(sv_width, sv_height)
                             << lit_rasterizer(sv_width, sv_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

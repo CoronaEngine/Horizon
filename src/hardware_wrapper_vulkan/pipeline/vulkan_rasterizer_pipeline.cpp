@@ -170,36 +170,6 @@ namespace Corona::Horizon
             return VK_COMPARE_OP_ALWAYS;
         }
 
-        [[nodiscard]] VkStencilOp to_vk_stencil_op(StencilOp op) noexcept
-        {
-            switch (op)
-            {
-            case StencilOp::Keep: return VK_STENCIL_OP_KEEP;
-            case StencilOp::Zero: return VK_STENCIL_OP_ZERO;
-            case StencilOp::Replace: return VK_STENCIL_OP_REPLACE;
-            case StencilOp::IncrementAndClamp: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
-            case StencilOp::DecrementAndClamp: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
-            case StencilOp::Invert: return VK_STENCIL_OP_INVERT;
-            case StencilOp::IncrementAndWrap: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
-            case StencilOp::DecrementAndWrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
-            }
-
-            return VK_STENCIL_OP_KEEP;
-        }
-
-        [[nodiscard]] VkStencilOpState to_vk_stencil_state(const DepthStencilOpDesc& desc, uint32_t read_mask, uint32_t write_mask, uint32_t reference) noexcept
-        {
-            return {
-                .failOp = to_vk_stencil_op(desc.fail_op),
-                .passOp = to_vk_stencil_op(desc.pass_op),
-                .depthFailOp = to_vk_stencil_op(desc.depth_fail_op),
-                .compareOp = to_vk_compare_op(desc.compare_op),
-                .compareMask = read_mask,
-                .writeMask = write_mask,
-                .reference = reference,
-            };
-        }
-
         [[nodiscard]] VkBlendFactor to_vk_blend_factor(BlendFactor factor) noexcept
         {
             switch (factor)
@@ -791,15 +761,9 @@ namespace Corona::Horizon
             depth_stencil.depthWriteEnable = desc_.depth_write_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
             depth_stencil.depthCompareOp = to_vk_compare_op(desc_.depth_compare_op);
             depth_stencil.depthBoundsTestEnable = VK_FALSE;
-            depth_stencil.stencilTestEnable = desc_.stencil_test_enabled ? VK_TRUE : VK_FALSE;
-            depth_stencil.front = to_vk_stencil_state(desc_.stencil_front,
-                                                      desc_.stencil_read_mask,
-                                                      desc_.stencil_write_mask,
-                                                      desc_.stencil_reference);
-            depth_stencil.back = to_vk_stencil_state(desc_.stencil_back,
-                                                     desc_.stencil_read_mask,
-                                                     desc_.stencil_write_mask,
-                                                     desc_.stencil_reference);
+            // 模板恒关：rendering_info.stencilAttachmentFormat 恒为 UNDEFINED，
+            // 开启模板测试而无模板附件是无意义的（且会触发验证层告警）。
+            depth_stencil.stencilTestEnable = VK_FALSE;
 
             VkPipelineColorBlendAttachmentState blend_attachment = to_vk_blend_attachment(desc_);
 
@@ -1452,21 +1416,6 @@ namespace Corona::Horizon
     {
         std::lock_guard lock(mutex_);
         depth_target_ = image;
-    }
-
-    void VulkanRasterizerPipeline::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
-    {
-        std::lock_guard lock(mutex_);
-        auto found = std::ranges::find_if(shaders_.auto_bind_entries, [&](const EmbeddedShader::AutoBindEntry& existing) {
-            return existing.boundResourceRef == entry.boundResourceRef &&
-                   existing.bindType == entry.bindType &&
-                   existing.location == entry.location;
-        });
-
-        if (found == shaders_.auto_bind_entries.end())
-            shaders_.auto_bind_entries.push_back(std::move(entry));
-        else
-            *found = std::move(entry);
     }
 
     void VulkanRasterizerPipeline::bind_auto_resources()

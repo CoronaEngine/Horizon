@@ -365,7 +365,7 @@ void run_example_bump()
         }
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(bump_width, bump_height) << Corona::Horizon::submit;
+            render_executor << rasterizer(bump_width, bump_height) << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

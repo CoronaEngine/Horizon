@@ -807,7 +807,7 @@ void run_example_gpudrivenrendering()
             stream << occlude(occlude_groups_x, 1, 1) << compact(1, 1, 1);
         }
 
-        render_receipt = (stream << main_rasterizer(gdr_width, gdr_height) << Corona::Horizon::submit);
+        render_receipt = (stream << main_rasterizer(gdr_width, gdr_height) << Corona::Horizon::commit());
 
         first_frame = false;
 

@@ -448,7 +448,7 @@ void run_example_assao()
                             << blur_compute_ab(dispatch_x, dispatch_y, 1)
                             << blur_compute_ba(dispatch_x, dispatch_y, 1)
                             << apply_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

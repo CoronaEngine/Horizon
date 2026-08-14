@@ -488,7 +488,7 @@ void run_example_rsm()
         Corona::Horizon::SubmitReceipt render_receipt =
             render_executor << pack_rasterizer(rsm_map_size, rsm_map_size)
                             << scene_rasterizer(rsm_width, rsm_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

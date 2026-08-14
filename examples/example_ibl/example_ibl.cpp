@@ -661,7 +661,7 @@ void run_example_ibl()
         rasterizer.record(sky_ib, sky_vb, sky_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::submit;
+            render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

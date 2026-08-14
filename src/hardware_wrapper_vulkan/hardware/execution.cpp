@@ -2334,6 +2334,13 @@ namespace Corona::Horizon
         return s;
     }
 
+    HardwareStream HardwareExecutor::operator<<(ComputePipelineBase& pipeline)
+    {
+        HardwareStream s(*this);
+        s << pipeline;
+        return s;
+    }
+
     std::vector<SubmissionToken> HardwareExecutor::submit(ExecutionPlan& plan,
                                                           std::vector<PresentResult>* present_results,
                                                           std::span<const SubmissionToken> wait_tokens,

@@ -2109,7 +2109,7 @@ void run_example_edsl_sponza()
                             << ssr_lin_pipe(spz_width, spz_height)
                             << ssr_trace_pipe(spz_width, spz_height)
                             << ssr_composite_pipe(spz_width, spz_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

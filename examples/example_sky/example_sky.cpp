@@ -695,7 +695,7 @@ void run_example_sky()
 
         render_receipt = render_executor << landscape_pipeline(sky_width, sky_height)
                                          << sky_pipeline(sky_width, sky_height)
-                                         << Corona::Horizon::submit;
+                                         << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

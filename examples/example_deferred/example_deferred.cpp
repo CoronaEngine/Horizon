@@ -498,7 +498,7 @@ void run_example_deferred()
             render_executor << geom_rasterizer(dfr_width, dfr_height)
                             << light_rasterizer(dfr_width, dfr_height)
                             << combine_rasterizer(dfr_width, dfr_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

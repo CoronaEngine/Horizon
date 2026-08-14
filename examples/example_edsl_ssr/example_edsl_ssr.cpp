@@ -873,7 +873,7 @@ void run_example_edsl_ssr()
                             << linear_depth_compute(dispatch_x, dispatch_y, 1)
                             << trace_compute(dispatch_x, dispatch_y, 1)
                             << composite_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

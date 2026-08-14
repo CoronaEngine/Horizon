@@ -1509,7 +1509,7 @@ void run_example_sponza()
                             << ssr_linear_depth_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
                             << ssr_trace_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
                             << ssr_composite_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
