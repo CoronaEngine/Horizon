@@ -256,7 +256,7 @@ TextureLoadResult loadTextureWithMipmapAndLayers(const std::string &texturePath,
 
     result.texture = create_uploaded_image(createInfo, byte_span(layerData));
 
-    auto textureView = result.texture[static_cast<uint32_t>(viewLayer)][static_cast<uint32_t>(viewMip)];
+    auto textureView = result.texture.subresource(static_cast<uint32_t>(viewLayer), static_cast<uint32_t>(viewMip));
     result.descriptorID = textureView.store_descriptor();
     result.success = true;
 

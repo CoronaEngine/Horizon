@@ -142,42 +142,6 @@ namespace Corona::Horizon
         return true;
     }
 
-    bool HardwareBuffer::read_bytes(std::span<std::byte> output, uint64_t byte_offset) const
-    {
-        if (output.empty())
-            return true;
-
-        if (output.data() == nullptr)
-            return false;
-
-        if (!validate_buffer_host_read(*this, output, byte_offset))
-            return false;
-
-        const auto buffer = read_buffer(*this);
-        if (!buffer)
-            return false;
-
-        const auto* mapped = static_cast<const std::byte*>(buffer->mapped_data());
-        if (mapped == nullptr)
-            return false;
-
-        size_t mapped_offset = 0;
-        if (!offset_to_size_t(byte_offset, mapped_offset))
-            return false;
-
-        if (!fits_range(buffer->logical_size(), byte_offset, output.size_bytes()))
-            return false;
-
-        if (!fits_range(buffer->mapped_size(), byte_offset, output.size_bytes()))
-            return false;
-
-        if (buffer->resource_manager != nullptr)
-            buffer->resource_manager->invalidate_buffer(*buffer, byte_offset, static_cast<uint64_t>(output.size_bytes()));
-
-        std::memcpy(output.data(), mapped + mapped_offset, output.size_bytes());
-        return true;
-    }
-
     uint32_t HardwareBuffer::store_descriptor() const
     {
         const auto buffer = write_buffer(*this);

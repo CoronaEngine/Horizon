@@ -53,7 +53,6 @@ namespace Corona::Horizon
         std::vector<SubmitWait> waits;
         std::vector<SubmitSignal> signals;
         std::vector<PresentDesc> presents;
-        std::vector<std::function<void()>> host_callbacks;
         SubmissionKeepAlive keep_alive;
         std::shared_ptr<TrackedCommandBuffer> command_buffer;
     };
@@ -64,7 +63,6 @@ namespace Corona::Horizon
         std::vector<SubmissionDependency> dependencies;
         std::vector<CrossDeviceDependency> cross_device_dependencies;
 
-        [[nodiscard]] bool empty() const noexcept { return submissions.empty(); }
     };
 
     class ExecutionCompiler
@@ -89,22 +87,6 @@ namespace Corona::Horizon
         VkDevice device_ { VK_NULL_HANDLE };
     };
 
-    class CrossDeviceSync
-    {
-    public:
-        void remember_imported_timeline(DeviceId local_device, VkSemaphore foreign, VkSemaphore imported);
-        [[nodiscard]] VkSemaphore resolve_imported_timeline(DeviceId local_device, VkSemaphore foreign) const noexcept;
-
-    private:
-        struct ImportedTimeline
-        {
-            DeviceId local_device {};
-            VkSemaphore foreign { VK_NULL_HANDLE };
-            VkSemaphore imported { VK_NULL_HANDLE };
-        };
-
-        std::vector<ImportedTimeline> imported_timelines_;
-    };
 }
 
 #include "hardware_wrapper_vulkan/hardware/command.h"

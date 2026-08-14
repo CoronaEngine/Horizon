@@ -12,7 +12,6 @@
 #include "Codegen/VariateProxy.h"
 #include "common.h"
 #include "example_edsl_sky.h"
-#include "hardware_wrapper_vulkan/hardware_context.h"
 #include "horizon.h"
 #include "imgui_horizon.h"
 

@@ -69,11 +69,6 @@ namespace Corona::Horizon
             return valid_subresource(desc, out.layer, out.mip);
         }
 
-        [[nodiscard]] ImageExtent image_mip_extent(const HardwareImageDesc& desc, uint32_t mip) noexcept
-        {
-            return detail::mip_extent(desc.extent, mip);
-        }
-
         [[nodiscard]] bool fits_range(uint64_t total_size, uint64_t byte_offset, uint64_t byte_count) noexcept
         {
             return byte_offset <= total_size && byte_count <= total_size - byte_offset;
@@ -218,48 +213,6 @@ namespace Corona::Horizon
 
             return true;
         }
-
-        [[nodiscard]] bool copy_image_to_host(const std::byte* mapped,
-                                              uint64_t mapped_size,
-                                              const HardwareImageDesc& desc,
-                                              ImageSubresourceLayout layout,
-                                              std::span<std::byte> output,
-                                              uint64_t row_pitch,
-                                              uint64_t slice_pitch)
-        {
-            if (mapped == nullptr || output.data() == nullptr)
-                return false;
-
-            HostImageCopyLayout copy {};
-            if (!resolve_host_image_copy_layout(desc, layout, mapped_size, row_pitch, slice_pitch, output.size_bytes(), copy))
-                return false;
-
-            for (uint32_t slice = 0; slice < copy.slice_count; ++slice)
-            {
-                const uint64_t src_slice_offset = layout.slice_pitch * slice;
-                const uint64_t dst_slice_offset = copy.host_slice_pitch * slice;
-                for (uint32_t row = 0; row < copy.row_count; ++row)
-                {
-                    const uint64_t src_offset = src_slice_offset + layout.row_pitch * row;
-                    const uint64_t dst_offset = dst_slice_offset + copy.host_row_pitch * row;
-                    size_t src_offset_size = 0;
-                    size_t dst_offset_size = 0;
-                    if (!fits_range(layout.byte_size, src_offset, copy.row_bytes) ||
-                        !fits_range(output.size_bytes(), dst_offset, copy.row_bytes) ||
-                        !byte_offset_to_size_t(src_offset, src_offset_size) ||
-                        !byte_offset_to_size_t(dst_offset, dst_offset_size))
-                    {
-                        return false;
-                    }
-
-                    std::memcpy(output.data() + dst_offset_size,
-                                mapped + copy.mapped_base_offset + src_offset_size,
-                                copy.row_size);
-                }
-            }
-
-            return true;
-        }
     }
 
     HardwareImage::HardwareImage(const HardwareImageDesc& desc, std::span<const std::byte> upload_data)
@@ -291,24 +244,6 @@ namespace Corona::Horizon
         HardwareImage view = *this;
         view.range_ = ImageSubresourceRange::single(current.base_layer + layer_index, current.base_mip + mip_index);
         return view;
-    }
-
-    ImageExtent HardwareImage::mip_extent(uint32_t mip_index) const
-    {
-        const auto image = read_image(*this);
-        if (!image)
-            return {};
-
-        const ImageSubresourceRange current = resolve_range(range_, image->desc);
-        if (mip_index >= current.mip_count)
-            return {};
-
-        return image_mip_extent(image->desc, current.base_mip + mip_index);
-    }
-
-    ImageExtent HardwareImage::extent() const
-    {
-        return mip_extent(0);
     }
 
     bool HardwareImage::write_subresource_bytes(uint32_t layer_index,
@@ -354,52 +289,9 @@ namespace Corona::Horizon
         return true;
     }
 
-    bool HardwareImage::read_subresource_bytes(uint32_t layer_index,
-                                               uint32_t mip_index,
-                                               std::span<std::byte> output,
-                                               uint64_t row_pitch,
-                                               uint64_t slice_pitch) const
-    {
-        if (output.empty())
-            return true;
-
-        const auto image = read_image(*this);
-        if (!image)
-            return false;
-
-        if (!validate_image_host_read(image->desc, range_, layer_index, mip_index, output, row_pitch, slice_pitch))
-            return false;
-
-        const ImageSubresourceRange current = resolve_range(range_, image->desc);
-        if (layer_index >= current.layer_count || mip_index >= current.mip_count)
-            return false;
-
-        const uint32_t absolute_layer = current.base_layer + layer_index;
-        const uint32_t absolute_mip = current.base_mip + mip_index;
-        if (!valid_subresource(image->desc, absolute_layer, absolute_mip))
-            return false;
-
-        ImageSubresourceLayout layout = resource_manager().image_subresource_layout(*image, absolute_layer, absolute_mip);
-        if (image->resource_manager != nullptr)
-            image->resource_manager->invalidate_image(*image, layout.byte_offset, layout.byte_size);
-
-        return copy_image_to_host(static_cast<const std::byte*>(image->mapped_data()),
-                                  image->mapped_size(),
-                                  image->desc,
-                                  layout,
-                                  output,
-                                  row_pitch,
-                                  slice_pitch);
-    }
-
     bool HardwareImage::write_bytes(std::span<const std::byte> data, uint64_t row_pitch, uint64_t slice_pitch) const
     {
         return write_subresource_bytes(0, 0, data, row_pitch, slice_pitch);
-    }
-
-    bool HardwareImage::read_bytes(std::span<std::byte> output, uint64_t row_pitch, uint64_t slice_pitch) const
-    {
-        return read_subresource_bytes(0, 0, output, row_pitch, slice_pitch);
     }
 
     void HardwareImage::set_clear_color(float r, float g, float b, float a)
@@ -480,10 +372,5 @@ namespace Corona::Horizon
             throw std::invalid_argument("HardwareImage::export_external requires a valid image.");
 
         return resource_manager().export_image(*image);
-    }
-
-    HardwareImage HardwareImageLayerSelector::operator[](uint32_t mip_index) const
-    {
-        return image_.subresource(layer_, mip_index);
     }
 }

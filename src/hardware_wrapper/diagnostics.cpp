@@ -84,38 +84,6 @@ namespace Corona::Horizon::Diagnostics
         }
     }
 
-    bool enabled() noexcept
-    {
-        return diagnostics_compiled;
-    }
-
-    std::string file_path()
-    {
-        if (!diagnostics_compiled)
-        {
-            return {};
-        }
-
-        DiagnosticState& current = state();
-        std::lock_guard lock(current.mutex);
-        initialize_locked(current);
-        return current.disabled ? std::string {} : current.path;
-    }
-
-    void reset_for_tests() noexcept
-    {
-        if (!diagnostics_compiled)
-        {
-            return;
-        }
-
-        DiagnosticState& current = state();
-        std::lock_guard lock(current.mutex);
-        current.initialized = false;
-        current.disabled = false;
-        current.path.clear();
-    }
-
     void write(Level level, std::string_view channel, std::string_view message) noexcept
     {
         if (!diagnostics_compiled)

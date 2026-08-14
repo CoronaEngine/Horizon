@@ -23,7 +23,6 @@
 #include <vulkan/vulkan_win32.h>
 #endif
 
-#include "corona/kernel/core/i_logger.h"
 #include "device_manager.h"
 #include "hardware_wrapper/diagnostics.h"
 
@@ -780,32 +779,6 @@ namespace Corona::Horizon
         throw_if_failed(vmaCreateAllocator(&create_info, &allocator_), "vmaCreateAllocator");
     }
 
-    std::uint64_t ResourceManager::device_local_memory_size() const
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (allocator_ == VK_NULL_HANDLE)
-        {
-            return 0;
-        }
-
-        const VkPhysicalDeviceMemoryProperties* mem_props = nullptr;
-        vmaGetMemoryProperties(allocator_, &mem_props);
-        if (mem_props == nullptr)
-        {
-            return 0;
-        }
-
-        std::uint64_t total = 0;
-        for (uint32_t heap = 0; heap < mem_props->memoryHeapCount; ++heap)
-        {
-            if ((mem_props->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0)
-            {
-                total += mem_props->memoryHeaps[heap].size;
-            }
-        }
-        return total;
-    }
-
     void ResourceManager::create_default_sampler()
     {
         if (default_sampler_ != VK_NULL_HANDLE)
@@ -1520,28 +1493,6 @@ namespace Corona::Horizon
                         "vmaFlushAllocation");
     }
 
-    void ResourceManager::invalidate_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size)
-    {
-        if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE || byte_size == 0)
-            return;
-
-        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
-            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
-        {
-            throw std::overflow_error("HardwareBuffer invalidate range exceeds VkDeviceSize.");
-        }
-
-        std::lock_guard lock(mutex_);
-        if (allocator_ == VK_NULL_HANDLE)
-            return;
-
-        throw_if_failed(vmaInvalidateAllocation(allocator_,
-                                                buffer.buffer_alloc,
-                                                static_cast<VkDeviceSize>(byte_offset),
-                                                static_cast<VkDeviceSize>(byte_size)),
-                        "vmaInvalidateAllocation");
-    }
-
     void ResourceManager::flush_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size)
     {
         if (!image.valid() || image.image_alloc == VK_NULL_HANDLE || byte_size == 0)
@@ -1562,28 +1513,6 @@ namespace Corona::Horizon
                                            static_cast<VkDeviceSize>(byte_offset),
                                            static_cast<VkDeviceSize>(byte_size)),
                         "vmaFlushAllocation");
-    }
-
-    void ResourceManager::invalidate_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size)
-    {
-        if (!image.valid() || image.image_alloc == VK_NULL_HANDLE || byte_size == 0)
-            return;
-
-        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
-            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
-        {
-            throw std::overflow_error("HardwareImage invalidate range exceeds VkDeviceSize.");
-        }
-
-        std::lock_guard lock(mutex_);
-        if (allocator_ == VK_NULL_HANDLE)
-            return;
-
-        throw_if_failed(vmaInvalidateAllocation(allocator_,
-                                                image.image_alloc,
-                                                static_cast<VkDeviceSize>(byte_offset),
-                                                static_cast<VkDeviceSize>(byte_size)),
-                        "vmaInvalidateAllocation");
     }
 
     ImageWrap ResourceManager::create_image(const HardwareImageDesc& desc)

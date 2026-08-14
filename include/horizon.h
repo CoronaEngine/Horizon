@@ -26,9 +26,6 @@
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include "Compiler/ShaderLanguageConverter.h"
-#include "format.h"
-#include "resource.h"
-#include "horizon_execution.h"
 
 #ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
 #if defined(NDEBUG)
@@ -41,13 +38,659 @@
 namespace Corona::Horizon
 {
     // ================================================================
+    // [merged from resource.h]  Resource handle bridge
+    // ================================================================
+
+    struct ResourceBridge;
+
+    struct IResourceRef
+    {
+        virtual ~IResourceRef() = default;
+
+        [[nodiscard]] virtual std::uintptr_t id() const noexcept = 0;
+        [[nodiscard]] virtual bool valid() const noexcept = 0;
+    };
+
+    class ResourceHandle
+    {
+    public:
+        ResourceHandle() noexcept = default;
+        ResourceHandle(const ResourceHandle&) noexcept = default;
+        ResourceHandle(ResourceHandle&&) noexcept = default;
+        ResourceHandle& operator=(const ResourceHandle&) noexcept = default;
+        ResourceHandle& operator=(ResourceHandle&&) noexcept = default;
+
+        [[nodiscard]] explicit operator bool() const noexcept
+        {
+            // Avoid shared_ptr copy to prevent refcount operation
+            return resource_ != nullptr && resource_->valid();
+        }
+
+    protected:
+        [[nodiscard]] std::uintptr_t resource_id() const noexcept
+        {
+            return resource_ ? resource_->id() : 0;
+        }
+
+    private:
+        friend struct ResourceBridge;
+
+        void set_resource(std::shared_ptr<IResourceRef> resource) noexcept
+        {
+            resource_ = std::move(resource);
+        }
+
+        [[nodiscard]] std::shared_ptr<IResourceRef> resource_ref() const noexcept
+        {
+            return resource_;
+        }
+
+        std::shared_ptr<IResourceRef> resource_{};
+    };
+
+    struct ResourceBridge
+    {
+        static void set(ResourceHandle& owner, std::shared_ptr<IResourceRef> resource) noexcept
+        {
+            owner.set_resource(std::move(resource));
+        }
+
+        [[nodiscard]] static std::shared_ptr<IResourceRef> token(const ResourceHandle& owner) noexcept
+        {
+            return owner.resource_ref();
+        }
+
+        [[nodiscard]] static std::shared_ptr<const IResourceRef> keep_alive(const ResourceHandle& owner) noexcept
+        {
+            return std::static_pointer_cast<const IResourceRef>(owner.resource_ref());
+        }
+    };
+
+
+    // ================================================================
+    // [merged from format.h]  Format / buffer / image / draw / state enums
+    // ================================================================
+
+    enum class Format : uint8_t
+    {
+        UNKNOWN,
+
+        R8_UINT,
+        R8_SINT,
+        R8_UNORM,
+        R8_SNORM,
+        RG8_UINT,
+        RG8_SINT,
+        RG8_UNORM,
+        RG8_SNORM,
+
+        R16_UINT,
+        R16_SINT,
+        R16_UNORM,
+        R16_SNORM,
+        R16_FLOAT,
+
+        BGRA4_UNORM,
+        B5G6R5_UNORM,
+        B5G5R5A1_UNORM,
+
+        RGBA8_UINT,
+        RGBA8_SINT,
+        RGBA8_UNORM,
+        RGBA8_SNORM,
+        BGRA8_UNORM,
+        BGRX8_UNORM,
+        SRGBA8_UNORM,
+        SBGRA8_UNORM,
+        SBGRX8_UNORM,
+
+        R10G10B10A2_UNORM,
+        R11G11B10_FLOAT,
+
+        RG16_UINT,
+        RG16_SINT,
+        RG16_UNORM,
+        RG16_SNORM,
+        RG16_FLOAT,
+
+        R32_UINT,
+        R32_SINT,
+        R32_FLOAT,
+
+        RGBA16_UINT,
+        RGBA16_SINT,
+        RGBA16_FLOAT,
+        RGBA16_UNORM,
+        RGBA16_SNORM,
+
+        RG32_UINT,
+        RG32_SINT,
+        RG32_FLOAT,
+        RGB32_UINT,
+        RGB32_SINT,
+        RGB32_FLOAT,
+        RGBA32_UINT,
+        RGBA32_SINT,
+        RGBA32_FLOAT,
+
+        D16,
+        D24S8,
+        X24G8_UINT,
+        D32,
+        D32S8,
+        X32G8_UINT,
+
+        BC1_UNORM,
+        BC1_UNORM_SRGB,
+        BC2_UNORM,
+        BC2_UNORM_SRGB,
+        BC3_UNORM,
+        BC3_UNORM_SRGB,
+        BC4_UNORM,
+        BC4_SNORM,
+        BC5_UNORM,
+        BC5_SNORM,
+        BC6H_UFLOAT,
+        BC6H_SFLOAT,
+        BC7_UNORM,
+        BC7_UNORM_SRGB,
+
+        COUNT,
+    };
+
+
+
+    // ================================================================
+    // Buffer
+    // ================================================================
+
+    enum class CpuAccessMode
+    {
+        None,
+        Read,
+        Write,
+        ReadWrite,
+    };
+
+    enum class BufferUsageFlags : uint32_t
+    {
+        None = 0,
+        TransferSrc = 1 << 0,
+        TransferDst = 1 << 1,
+        Vertex = 1 << 2,
+        Index = 1 << 3,
+        Uniform = 1 << 4,
+        Storage = 1 << 5,
+        // GPU-readable draw arguments for vkCmdDraw*Indirect / MultiDrawIndirect.
+        Indirect = 1 << 6,
+    };
+
+    constexpr BufferUsageFlags operator|(BufferUsageFlags a, BufferUsageFlags b)
+    {
+        return BufferUsageFlags(uint32_t(a) | uint32_t(b));
+    }
+
+    constexpr BufferUsageFlags operator&(BufferUsageFlags a, BufferUsageFlags b)
+    {
+        return BufferUsageFlags(uint32_t(a) & uint32_t(b));
+    }
+
+    constexpr BufferUsageFlags &operator|=(BufferUsageFlags& a, BufferUsageFlags b) noexcept
+    {
+        a = a | b;
+        return a;
+    }
+
+    constexpr bool has_flag(BufferUsageFlags flags, BufferUsageFlags bit) noexcept
+    {
+        return uint32_t(flags & bit) != 0;
+    }
+
+    struct BufferRange
+    {
+        static constexpr uint64_t whole_size = ~uint64_t{0};
+
+        uint64_t byte_offset = 0;
+        uint64_t byte_size = whole_size;
+
+        static constexpr BufferRange entire() noexcept
+        {
+            return {};
+        }
+
+        [[nodiscard]] constexpr BufferRange resolve(uint64_t total_size) const noexcept
+        {
+            BufferRange result = *this;
+
+            if (result.byte_size == whole_size)
+                result.byte_size = result.byte_offset <= total_size ? total_size - result.byte_offset : 0;
+
+            return result;
+        }
+    };
+
+
+
+    // ================================================================
+    // Native Interop
+    // ================================================================
+
+    enum class ExternalMemoryHandleType : uint8_t
+    {
+        None,
+        OpaqueFd,
+        OpaqueWin32,
+    };
+
+    struct ExternalMemoryHandle
+    {
+#if defined(_WIN32) || defined(_WIN64)
+        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueWin32;
+#else
+        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueFd;
+#endif
+
+        ExternalMemoryHandleType type = ExternalMemoryHandleType::None;
+
+        void* handle = nullptr;
+        int fd = -1;
+
+        uint64_t allocation_size = 0;
+        BufferRange memory_range = BufferRange::entire();
+
+        [[nodiscard]] static constexpr ExternalMemoryHandle win32(void *value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept
+        {
+            return {ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range};
+        }
+
+        [[nodiscard]] static constexpr ExternalMemoryHandle opaque_fd(int value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept
+        {
+            return {ExternalMemoryHandleType::OpaqueFd, nullptr, value, size, range};
+        }
+
+        [[nodiscard]] constexpr bool valid() const noexcept
+        {
+            return type == ExternalMemoryHandleType::OpaqueWin32 ? handle != nullptr : type == ExternalMemoryHandleType::OpaqueFd ? fd >= 0 : false;
+        }
+
+        [[nodiscard]] explicit constexpr operator bool() const noexcept
+        {
+            return valid();
+        }
+    };
+
+
+
+    // ================================================================
+    // Image
+    // ================================================================
+
+    enum class ImageDimension : uint8_t
+    {
+        Image1D,
+        Image2D,
+        Image3D,
+        Cube,
+        Image2DArray,
+        CubeArray,
+    };
+
+    enum class ImageUsageFlags : uint32_t
+    {
+        None = 0,
+        TransferSrc = 1 << 0,
+        TransferDst = 1 << 1,
+        Sampled = 1 << 2,
+        Storage = 1 << 3,
+        ColorAttachment = 1 << 4,
+        DepthStencilAttachment = 1 << 5,
+    };
+
+    constexpr ImageUsageFlags operator|(ImageUsageFlags a, ImageUsageFlags b) noexcept
+    {
+        return ImageUsageFlags(uint32_t(a) | uint32_t(b));
+    }
+
+    constexpr ImageUsageFlags operator&(ImageUsageFlags a, ImageUsageFlags b) noexcept
+    {
+        return ImageUsageFlags(uint32_t(a) & uint32_t(b));
+    }
+
+    constexpr ImageUsageFlags& operator|=(ImageUsageFlags& a, ImageUsageFlags b) noexcept
+    {
+        a = a | b;
+        return a;
+    }
+
+    constexpr bool has_flag(ImageUsageFlags flags, ImageUsageFlags bit) noexcept
+    {
+        return uint32_t(flags & bit) != 0;
+    }
+
+    struct ImageExtent
+    {
+        uint32_t width = 1;
+        uint32_t height = 1;
+        uint32_t depth = 1;
+    };
+
+    struct ImageSubresource
+    {
+        uint32_t layer = 0;
+        uint32_t mip = 0;
+
+        [[nodiscard]] constexpr uint32_t index(uint32_t mip_levels) const noexcept
+        {
+            return layer * mip_levels + mip;
+        }
+    };
+
+    struct ImageSubresourceRange
+    {
+        static constexpr uint32_t remaining = ~0u;
+
+        uint32_t base_layer = 0;
+        uint32_t layer_count = remaining;
+        uint32_t base_mip = 0;
+        uint32_t mip_count = remaining;
+
+        [[nodiscard]] static constexpr ImageSubresourceRange whole() noexcept
+        {
+            return {};
+        }
+
+        [[nodiscard]] static constexpr ImageSubresourceRange single(uint32_t layer, uint32_t mip) noexcept
+        {
+            return
+            {
+                .base_layer = layer,
+                .layer_count = 1,
+                .base_mip = mip,
+                .mip_count = 1,
+            };
+        }
+
+        [[nodiscard]] constexpr bool is_single() const noexcept
+        {
+            return layer_count == 1 && mip_count == 1;
+        }
+    };
+
+    struct ImageSubresourceLayout
+    {
+        uint64_t byte_offset = 0;
+        uint64_t byte_size = 0;
+        uint64_t row_pitch = 0;
+        uint64_t slice_pitch = 0;
+        ImageExtent extent {};
+    };
+
+    // ================================================================
+    // Draw
+    // ================================================================
+
+    enum class IndexType : uint32_t
+    {
+        Auto = 0,
+        UInt16 = 1,
+        UInt32 = 2,
+    };
+
+    struct ScissorRect
+    {
+        int32_t x = 0;
+        int32_t y = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
+
+    struct DrawIndexedParams
+    {
+        uint32_t index_count = 0;
+        uint32_t instance_count = 1;
+        uint32_t first_index = 0;
+        int32_t vertex_offset = 0;
+        uint32_t first_instance = 0;
+        IndexType index_type = IndexType::Auto;
+        bool enable_scissor = false;
+        ScissorRect scissor{};
+        std::string debug_label;
+    };
+
+    // Matches VkDrawIndexedIndirectCommand (20 bytes, tightly packed).
+    struct DrawIndexedIndirectCommand
+    {
+        uint32_t index_count = 0;
+        uint32_t instance_count = 0;
+        uint32_t first_index = 0;
+        int32_t vertex_offset = 0;
+        uint32_t first_instance = 0;
+    };
+    static_assert(sizeof(DrawIndexedIndirectCommand) == 20, "DrawIndexedIndirectCommand must match Vulkan layout");
+
+    struct DrawIndexedIndirectParams
+    {
+        uint32_t draw_count = 0;
+        uint64_t indirect_offset = 0;
+        // 0 means sizeof(DrawIndexedIndirectCommand).
+        uint32_t stride = 0;
+        IndexType index_type = IndexType::Auto;
+        bool enable_scissor = false;
+        ScissorRect scissor{};
+        std::string debug_label;
+    };
+
+    // ================================================================
+    // Pipeline Enums
+    // ================================================================
+
+    enum class PipelineShaderStage : uint16_t
+    {
+        Compute = 0,
+        Vertex = 1,
+        Fragment = 2,
+        RayGeneration = 3,
+        Miss = 4,
+        ClosestHit = 5,
+        AnyHit = 6,
+        Intersection = 7,
+        Callable = 8,
+    };
+
+    enum class PrimitiveTopology : uint16_t
+    {
+        TriangleList = 0,
+        TriangleStrip,
+        LineList,
+        LineStrip,
+        PointList,
+    };
+
+    enum class PolygonFillMode : uint16_t
+    {
+        Fill = 0,
+        Line,
+        Point,
+    };
+
+    enum class CullMode : uint16_t
+    {
+        None = 0,
+        Front,
+        Back,
+        FrontAndBack,
+    };
+
+    enum class CompareOp : uint16_t
+    {
+        Never = 0,
+        Less,
+        Equal,
+        LessOrEqual,
+        Greater,
+        NotEqual,
+        GreaterOrEqual,
+        Always,
+    };
+
+    enum class StencilOp : uint16_t
+    {
+        Keep = 0,
+        Zero,
+        Replace,
+        IncrementAndClamp,
+        DecrementAndClamp,
+        Invert,
+        IncrementAndWrap,
+        DecrementAndWrap,
+    };
+
+    enum class BlendFactor : uint16_t
+    {
+        Zero = 0,
+        One,
+        SrcColor,
+        OneMinusSrcColor,
+        DstColor,
+        OneMinusDstColor,
+        SrcAlpha,
+        OneMinusSrcAlpha,
+        DstAlpha,
+        OneMinusDstAlpha,
+    };
+
+    enum class BlendOp : uint16_t
+    {
+        Add = 0,
+        Subtract,
+        ReverseSubtract,
+        Min,
+        Max,
+    };
+
+    enum class SampleCount : uint16_t
+    {
+        Count1 = 1,
+        Count2 = 2,
+        Count4 = 4,
+        Count8 = 8,
+        Count16 = 16,
+    };
+
+    enum class ColorWriteMask : uint8_t
+    {
+        None = 0,
+        R = 1 << 0,
+        G = 1 << 1,
+        B = 1 << 2,
+        A = 1 << 3,
+        RGB = R | G | B,
+        RGBA = R | G | B | A,
+    };
+
+    constexpr ColorWriteMask operator|(ColorWriteMask a, ColorWriteMask b) noexcept
+    {
+        return ColorWriteMask(uint8_t(a) | uint8_t(b));
+    }
+
+    constexpr ColorWriteMask operator&(ColorWriteMask a, ColorWriteMask b) noexcept
+    {
+        return ColorWriteMask(uint8_t(a) & uint8_t(b));
+    }
+
+    constexpr ColorWriteMask &operator|=(ColorWriteMask& a, ColorWriteMask b) noexcept
+    {
+        a = a | b;
+        return a;
+    }
+
+
+
+    // ================================================================
+    // Pipeline State
+    // ================================================================
+
+    struct RasterizerStateDesc
+    {
+        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+        PolygonFillMode fill_mode = PolygonFillMode::Fill;
+        CullMode cull_mode = CullMode::None;
+
+        bool depth_clamp_enabled = false;
+        bool rasterizer_discard_enabled = false;
+
+        float line_width = 1.0f;
+    };
+
+    struct DepthStencilOpDesc
+    {
+        StencilOp fail_op = StencilOp::Keep;
+        StencilOp pass_op = StencilOp::Keep;
+        StencilOp depth_fail_op = StencilOp::Keep;
+        CompareOp compare_op = CompareOp::Always;
+    };
+
+    struct DepthStencilStateDesc
+    {
+        bool depth_test_enabled = true;
+        bool depth_write_enabled = true;
+        CompareOp depth_compare_op = CompareOp::LessOrEqual;
+
+        bool stencil_test_enabled = false;
+        DepthStencilOpDesc front;
+        DepthStencilOpDesc back;
+        uint32_t stencil_read_mask = 0xff;
+        uint32_t stencil_write_mask = 0xff;
+        uint32_t stencil_reference = 0;
+    };
+
+    struct BlendAttachmentDesc
+    {
+        bool blend_enabled = false;
+
+        BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
+        BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp color_blend_op = BlendOp::Add;
+
+        BlendFactor src_alpha_blend_factor = BlendFactor::One;
+        BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp alpha_blend_op = BlendOp::Add;
+
+        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
+    };
+
+    struct MultisampleStateDesc
+    {
+        SampleCount sample_count = SampleCount::Count1;
+        bool sample_shading_enabled = false;
+        float min_sample_shading = 1.0f;
+    };
+
+
+
+    // ================================================================
+    // Ray Tracing
+    // ================================================================
+
+    // ================================================================
+    // Validation
+    // ================================================================
+
+    enum class HardwareValidationMode : uint8_t
+    {
+        Disabled,
+        Log,
+        Throw,
+    };
+
+
+    // ================================================================
     // Forward Declarations
     // ================================================================
 
     struct HardwareValidationConfig;
     class HardwareBuffer;
     class HardwareImage;
-    class HardwareImageLayerSelector;
 
     struct CopyBufferToImageCommand;
 
@@ -70,10 +713,6 @@ namespace Corona::Horizon
     // Device memory query (VRAM capacity)
     // ================================================================
 
-    /// 查询当前设备 DEVICE_LOCAL 显存总容量（字节，= 各 DEVICE_LOCAL 堆 size 之和）。
-    /// 仅返回容量；实际用量由上层（GeometrySystem）自行统计。设备未就绪时返回 0。
-    [[nodiscard]] std::uint64_t query_device_memory_size();
-
     struct BindingSlot;
 
     // ================================================================
@@ -81,9 +720,459 @@ namespace Corona::Horizon
     // ================================================================
     //
     // 执行 / 命令 IR 层（QueueCapability、DeviceMask、CommandIR、
-    // RecordedTask、SubmissionToken、SubmitReceipt、CommandRecorder 等）
-    // 已抽离到 horizon_execution.h（内部 / 高级 API）。普通用户无需直接
-    // 接触这些类型；下方的资源 / 管线 / 命令门面会在内部使用它们。
+    // RecordedTask、SubmissionToken、SubmitReceipt、CommandRecorder 等）。
+    // 原 horizon_execution.h 已并入本文件（内部 / 高级 API）。普通用户
+    // 无需直接接触这些类型；下方的资源 / 管线 / 命令门面会在内部使用它们。
+    // ================================================================
+
+    class RasterizerPipelineBase;
+    class ComputePipelineBase;
+
+    class Queue;
+    class CommandRecorder;
+    class ExecutionCompiler;
+    struct ExecutionPlan;
+    class SubmissionSync;
+
+    enum class QueueCapability
+    {
+        Graphics,
+        Compute,
+        Transfer,
+        Present
+    };
+
+    enum class AccessKind
+    {
+        Read,
+        Write,
+        ReadWrite
+    };
+
+    enum class CommandOp
+    {
+        CopyBuffer,
+        CopyBufferToImage,
+        Dispatch,
+        BeginRendering,
+        EndRendering,
+        DrawIndexed,
+        DrawIndexedBatch,
+        DrawIndexedIndirect,
+        Present,
+        KeepAlive,
+        CopyImage
+    };
+
+    enum class FeatureRequirement
+    {
+        TimelineSemaphore,
+        Synchronization2,
+        DeferredHostOperations,
+        DeviceGroup
+    };
+
+    struct DeviceId
+    {
+        uint32_t value { 0 };
+
+        [[nodiscard]] friend bool operator==(DeviceId left, DeviceId right) noexcept
+        {
+            return left.value == right.value;
+        }
+    };
+
+    struct DeviceMask
+    {
+        uint32_t bits { 1 };
+    };
+
+    struct QueueId
+    {
+        DeviceId device {};
+        uint32_t family_index { 0 };
+        uint32_t queue_index { 0 };
+        QueueCapability capability { QueueCapability::Transfer };
+    };
+
+    struct BufferRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct ImageRef
+    {
+        ResourceHandle handle {};
+    };
+
+    struct DisplayerRef
+    {
+        std::uintptr_t id { 0 };
+    };
+
+    struct CopyRegion
+    {
+        uint64_t src_offset { 0 };
+        uint64_t dst_offset { 0 };
+        uint64_t size { 0 };
+    };
+
+    struct BufferImageCopyRegion
+    {
+        uint64_t buffer_offset { 0 };
+        uint32_t image_layer { 0 };
+        uint32_t image_mip { 0 };
+    };
+
+    struct ImageCopyRegion
+    {
+        uint32_t src_layer { 0 };
+        uint32_t dst_layer { 0 };
+        uint32_t src_mip { 0 };
+        uint32_t dst_mip { 0 };
+    };
+
+    struct ResourceUse
+    {
+        ResourceHandle handle {};
+        AccessKind access { AccessKind::Read };
+        uint64_t stages { 0 };
+    };
+
+    enum class DispatchBindingKind
+    {
+        StorageBuffer,
+        StorageImage
+    };
+
+    struct DispatchResourceBinding
+    {
+        uint32_t set { 0 };
+        uint32_t binding { 0 };
+        ResourceHandle resource {};
+        DispatchBindingKind kind { DispatchBindingKind::StorageBuffer };
+        AccessKind access { AccessKind::ReadWrite };
+    };
+
+    struct UniformBufferBindingData
+    {
+        uint32_t set { 0 };
+        uint32_t binding { 0 };
+        std::vector<std::byte> data;
+        // 持久化 GPU buffer，在管线初始化时通过反射创建一次，之后只 write_bytes。
+        // 使用 ResourceHandle（基类）存储句柄，避免与 horizon.h 的循环依赖。
+        ResourceHandle gpu_buffer {};
+    };
+
+    struct DispatchDesc
+    {
+        ComputePipelineBase* pipeline;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo comp_condition_info;
+
+        uint32_t groups_x { 1 };
+        uint32_t groups_y { 1 };
+        uint32_t groups_z { 1 };
+        std::vector<DispatchResourceBinding> bindings;
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+        std::string debug_label;
+    };
+
+    struct RenderingDesc
+    {
+        ImageRef color {};
+        std::array<ImageRef, 3> extra_colors {};
+        ImageRef depth {};
+        uint32_t width { 0 };
+        uint32_t height { 0 };
+        bool clear_color { false };
+        bool clear_depth { false };
+    };
+
+    struct DrawIndexedDesc
+    {
+        RasterizerPipelineBase* pipeline {};
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+
+        uint32_t index_count { 0 };
+        uint32_t instance_count { 1 };
+        uint32_t first_index { 0 };
+        int32_t vertex_offset { 0 };
+        uint32_t first_instance { 0 };
+        IndexType index_type { IndexType::Auto };
+        bool enable_scissor { false };
+        ScissorRect scissor {};
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+        std::string debug_label;
+    };
+
+    struct DrawIndexedBatchItem
+    {
+        BufferRef index {};
+        BufferRef vertex {};
+        DrawIndexedDesc draw {};
+    };
+
+    struct DrawIndexedBatchDesc
+    {
+        std::vector<DrawIndexedBatchItem> draws;
+    };
+
+    struct DrawIndexedIndirectDesc
+    {
+        RasterizerPipelineBase* pipeline {};
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+
+        uint64_t indirect_offset { 0 };
+        uint32_t draw_count { 0 };
+        // 0 means sizeof(DrawIndexedIndirectCommand).
+        uint32_t stride { 0 };
+        IndexType index_type { IndexType::Auto };
+        bool enable_scissor { false };
+        ScissorRect scissor {};
+        std::vector<ResourceUse> resource_uses;
+        std::vector<std::byte> push_constant_data;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+        std::string debug_label;
+    };
+
+    struct PresentDesc
+    {
+        DisplayerRef displayer {};
+        ImageRef image {};
+        ImageRef swapchain_image {};
+        DeviceId present_device {};
+        bool allow_cpu_bridge_fallback { true };
+    };
+
+    struct CommandPayload
+    {
+        CopyRegion copy {};
+        ImageCopyRegion image_copy {};
+        BufferImageCopyRegion buffer_image_copy {};
+        DispatchDesc dispatch {};
+        RenderingDesc rendering {};
+        DrawIndexedDesc draw_indexed {};
+        DrawIndexedBatchDesc draw_indexed_batch {};
+        DrawIndexedIndirectDesc draw_indexed_indirect {};
+        PresentDesc present {};
+    };
+
+    struct CommandIR
+    {
+        CommandOp op { CommandOp::CopyBuffer };
+        DeviceMask devices {};
+        QueueCapability queue { QueueCapability::Transfer };
+        std::vector<ResourceUse> resources;
+        CommandPayload payload {};
+        std::shared_ptr<void> keep_alive {};
+        uint64_t sequence { 0 };
+        std::string debug_label;
+    };
+
+    template<typename Visitor>
+    [[nodiscard]] bool visit_indexed_draws(const CommandIR& command, Visitor&& visitor)
+    {
+        if (command.op == CommandOp::DrawIndexed)
+        {
+            const DrawIndexedDesc& draw = command.payload.draw_indexed;
+            const BufferRef index = command.resources.size() > 0
+                ? BufferRef{command.resources[0].handle}
+                : BufferRef{};
+            const BufferRef vertex = command.resources.size() > 1
+                ? BufferRef{command.resources[1].handle}
+                : BufferRef{};
+            std::forward<Visitor>(visitor)(index, vertex, draw);
+            return true;
+        }
+        if (command.op == CommandOp::DrawIndexedBatch)
+        {
+            for (const DrawIndexedBatchItem& item : command.payload.draw_indexed_batch.draws)
+                visitor(item.index, item.vertex, item.draw);
+            return true;
+        }
+        return false;
+    }
+
+    struct RequirementSet
+    {
+        bool graphics { false };
+        bool compute { false };
+        bool transfer { false };
+        bool timeline_semaphore { true };
+        bool synchronization_2 { true };
+        bool deferred_host_operations { false };
+        bool device_group { false };
+    };
+
+    struct RecordedTask
+    {
+        std::vector<CommandIR> commands;
+        RequirementSet requirements {};
+    };
+
+    struct ResourceBarrier
+    {
+        std::uintptr_t resource_id { 0 };
+        AccessKind before { AccessKind::Read };
+        AccessKind after { AccessKind::Read };
+    };
+
+    enum class PresentStatus
+    {
+        None,
+        Presented,
+        Suboptimal,
+        OutOfDate,
+        Skipped
+    };
+
+    struct PresentResult
+    {
+        PresentStatus status { PresentStatus::None };
+        DisplayerRef displayer {};
+        ImageRef image {};
+        std::string message;
+    };
+
+    struct CrossDeviceDependency
+    {
+        std::uintptr_t resource_id { 0 };
+        DeviceId producer {};
+        DeviceId consumer {};
+        bool present_cpu_bridge_fallback { false };
+        bool imported_timeline_required { false };
+    };
+
+    struct SubmissionDependency
+    {
+        size_t producer { 0 };
+        size_t consumer { 0 };
+        std::uintptr_t resource_id { 0 };
+    };
+
+    class SubmissionKeepAlive
+    {
+    public:
+        void add_resource(std::shared_ptr<const IResourceRef> resource);
+        void add_object(std::shared_ptr<void> object);
+        void clear() noexcept;
+
+    private:
+        std::vector<std::shared_ptr<const IResourceRef>> resources_;
+        std::unordered_set<std::uintptr_t> resource_ids_;
+        std::vector<std::shared_ptr<void>> objects_;
+    };
+
+    struct SubmissionToken
+    {
+        DeviceId device {};
+        QueueId queue {};
+        uint64_t value { 0 };
+        std::shared_ptr<const SubmissionSync> sync {};
+
+        [[nodiscard]] bool has_sync() const noexcept { return sync != nullptr; }
+    };
+
+    struct QueueSubmission
+    {
+        std::shared_ptr<class TrackedCommandBuffer> command_buffer;
+        SubmissionKeepAlive keep_alive;
+        std::string debug_summary;
+    };
+
+    struct SubmitReceipt
+    {
+        uint64_t serial { 0 };
+        std::vector<SubmissionToken> tokens;
+        std::vector<PresentResult> presents;
+    };
+
+    struct CommitCommand
+    {
+    };
+
+    [[nodiscard]] CommitCommand commit() noexcept;
+
+    class StreamCommand
+    {
+    public:
+        StreamCommand() = default;
+        explicit StreamCommand(std::function<void(CommandRecorder&)> recorder);
+
+        // 任何提供 record(CommandRecorder&) const 的值命令都可隐式转成 StreamCommand。
+        // 这是唯一的折叠点：此前 horizon.h 里 9 个值命令各自手抄一遍
+        // stream_command() + operator StreamCommand()，做的都是这同一件事。
+        //
+        // 排除 StreamCommand 自身是必须的：它自己也有 record(CommandRecorder&) const，
+        // 不排除则该模板会与拷贝/移动构造函数竞争。
+        template <typename Command>
+            requires(!std::is_same_v<std::remove_cvref_t<Command>, StreamCommand> &&
+                     requires(const std::remove_cvref_t<Command>& command, CommandRecorder& recorder) {
+                         command.record(recorder);
+                     })
+        StreamCommand(Command&& command)
+            : recorder_([command = std::remove_cvref_t<Command>(std::forward<Command>(command))](
+                            CommandRecorder& recorder) { command.record(recorder); })
+        {
+        }
+
+        void record(CommandRecorder& recorder) const;
+        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(recorder_); }
+
+    private:
+        std::function<void(CommandRecorder&)> recorder_ {};
+    };
+
+    class CommandBatch
+    {
+    public:
+        CommandBatch& operator<<(StreamCommand command);
+        [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
+
+    private:
+        std::vector<StreamCommand> commands_;
+    };
+
+    class CommandRecorder
+    {
+    public:
+        CommandRecorder() = default;
+
+        void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
+        void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
+        void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
+        void dispatch(DispatchDesc desc, DeviceMask devices = {});
+        void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
+        void end_rendering(DeviceMask devices = {});
+        void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
+        void draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {});
+        void draw_indexed_indirect(BufferRef index,
+                                   BufferRef vertex,
+                                   BufferRef indirect,
+                                   DrawIndexedIndirectDesc desc,
+                                   DeviceMask devices = {});
+        void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
+        void keep_alive(std::shared_ptr<void> object);
+        [[nodiscard]] RecordedTask close();
+
+    private:
+        void ensure_open() const;
+        void mark_requirement(QueueCapability capability);
+        void mark_requirement(FeatureRequirement feature);
+        [[nodiscard]] uint64_t next_sequence() noexcept;
+        void mark_device_requirements(DeviceMask devices);
+
+        bool closed_ { false };
+        uint64_t next_sequence_ { 0 };
+        std::vector<CommandIR> commands_;
+        RequirementSet requirements_ {};
+    };
 
 
     class HardwareDisplayer
@@ -151,8 +1240,6 @@ namespace Corona::Horizon
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
-        /// Waits for exactly the receipt's timeline values, then retires them.
-        HardwareExecutor& wait_for_completion(const SubmitReceipt& receipt);
 
     private:
         [[nodiscard]] std::vector<SubmissionToken> submit(ExecutionPlan& plan,
@@ -284,19 +1371,11 @@ namespace Corona::Horizon
         [[nodiscard]] void* get_mapped_data() const;
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
-        [[nodiscard]] bool read_bytes(std::span<std::byte> output, uint64_t byte_offset = 0) const;
 
         template <HardwareTransferable T>
         [[nodiscard]] bool write(std::span<const T> data, uint64_t byte_offset = 0) const
         {
             return write_bytes(std::as_bytes(data), byte_offset);
-        }
-
-        template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        [[nodiscard]] bool read(std::span<T> output, uint64_t byte_offset = 0) const
-        {
-            return read_bytes(std::as_writable_bytes(output), byte_offset);
         }
 
         [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
@@ -448,14 +1527,9 @@ namespace Corona::Horizon
         HardwareImage& operator=(HardwareImage&& other) noexcept = default;
 
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
-        [[nodiscard]] HardwareImageLayerSelector operator[](uint32_t layer) const;
         [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const;
-        [[nodiscard]] ImageExtent mip_extent(uint32_t mip_index) const;
-        [[nodiscard]] ImageExtent extent() const;
         bool write_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-        bool read_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-        bool read_bytes(std::span<std::byte> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
 
         template <HardwareTransferable T>
         bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
@@ -464,23 +1538,9 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        bool read_subresource(uint32_t layer_index, uint32_t mip_index, std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return read_subresource_bytes(layer_index, mip_index, std::as_writable_bytes(output), row_pitch, slice_pitch);
-        }
-
-        template <HardwareTransferable T>
         bool write(std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
         {
             return write_bytes(std::as_bytes(data), row_pitch, slice_pitch);
-        }
-
-        template <HardwareTransferable T>
-            requires(!std::is_const_v<T>)
-        bool read(std::span<T> output, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return read_bytes(std::as_writable_bytes(output), row_pitch, slice_pitch);
         }
 
         void set_clear_color(float r, float g, float b, float a);
@@ -494,27 +1554,10 @@ namespace Corona::Horizon
     private:
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
 
-        friend class HardwareImageLayerSelector;
         friend class HardwareBuffer;
     };
 
-    class HardwareImageLayerSelector
-    {
-    public:
-        HardwareImageLayerSelector(const HardwareImage& image, uint32_t layer_index) : image_(image), layer_(layer_index) {}
-        [[nodiscard]] HardwareImage operator[](uint32_t mip_index) const;
 
-    private:
-        HardwareImage image_;
-        uint32_t layer_ = 0;
-    };
-
-    inline HardwareImageLayerSelector HardwareImage::operator[](uint32_t layer_index) const
-    {
-        return HardwareImageLayerSelector(*this, layer_index);
-    }
-
-    
 
     // ================================================================
     // Pipeline Descriptors
@@ -635,6 +1678,21 @@ namespace Corona::Horizon
                 PipelineShaderStage::Fragment, fs_module, compiler_option);
         }
 
+        // 用另一个 desc 的状态字段覆盖当前 desc（不透传 shader）。
+        // 公开：EDSL 路径（RasterizerPipeline<void,void>::make_desc）在编译 shader 后用
+        // 调用方传入的 RasterizerPipelineDesc 状态覆盖 EDSL 派生的默认状态。
+        void apply_state(RasterizerPipelineDesc state)
+        {
+            rasterizer = std::move(state.rasterizer);
+            depth_stencil = std::move(state.depth_stencil);
+            blend = std::move(state.blend);
+            multisample = std::move(state.multisample);
+            multiview_count = state.multiview_count;
+            clear_color_target = state.clear_color_target;
+            clear_depth_target = state.clear_depth_target;
+            debug_name = std::move(state.debug_name);
+        }
+
     private:
         static PipelineShaderDesc compile_slang_to_shader_desc(
             PipelineShaderStage stage,
@@ -680,18 +1738,6 @@ namespace Corona::Horizon
             }
 
             return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
-        }
-
-        void apply_state(RasterizerPipelineDesc state)
-        {
-            rasterizer = std::move(state.rasterizer);
-            depth_stencil = std::move(state.depth_stencil);
-            blend = std::move(state.blend);
-            multisample = std::move(state.multisample);
-            multiview_count = state.multiview_count;
-            clear_color_target = state.clear_color_target;
-            clear_depth_target = state.clear_depth_target;
-            debug_name = std::move(state.debug_name);
         }
     };
 
@@ -930,14 +1976,6 @@ namespace Corona::Horizon
                 location,
             });
             bind_render_target(location, *image);
-            return *this;
-        }
-
-        template <typename... TargetProxies>
-        RasterizerPipelineBase& bind_output_targets(TargetProxies&... targets)
-        {
-            uint32_t location = 0;
-            (bind_render_target(location++, targets), ...);
             return *this;
         }
 
@@ -1335,36 +2373,6 @@ namespace Corona::Horizon
     // Value Command Facades
     // ================================================================
 
-    namespace CommandDetail
-    {
-        template <typename T>
-        struct IsSharedPtr : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct IsSharedPtr<std::shared_ptr<T>> : std::true_type
-        {
-        };
-
-        template <typename T>
-        inline constexpr bool is_shared_ptr_v = IsSharedPtr<std::remove_cvref_t<T>>::value;
-
-        template <typename...>
-        inline constexpr bool single_shared_ptr_v = false;
-
-        template <typename T>
-        inline constexpr bool single_shared_ptr_v<T> = is_shared_ptr_v<T>;
-
-        template <typename Command>
-        [[nodiscard]] StreamCommand make_stream_command(Command command)
-        {
-            return StreamCommand([command = std::move(command)](CommandRecorder& recorder) {
-                command.record(recorder);
-            });
-        }
-    }
-
     struct CopyBufferToImageCommand
     {
         BufferRef src {};
@@ -1375,16 +2383,6 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const
         {
             recorder.copy_to_image(src, dst, region, devices);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
         }
     };
 
@@ -1397,16 +2395,6 @@ namespace Corona::Horizon
         {
             recorder.dispatch(dispatch, devices);
         }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
     };
 
     struct BeginRenderingCommand
@@ -1418,16 +2406,6 @@ namespace Corona::Horizon
         {
             recorder.begin_rendering(rendering, devices);
         }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
     };
 
     struct EndRenderingCommand
@@ -1438,42 +2416,9 @@ namespace Corona::Horizon
         {
             recorder.end_rendering(devices);
         }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
     };
 
-    struct DrawIndexedCommand
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        DrawIndexedDesc draw {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.draw_indexed(index, vertex, draw, devices);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
-    };
-
-    // 批量 indexed draw。payload 由 shared_ptr 持有：make_stream_command 会按值
+    // 批量 indexed draw。payload 由 shared_ptr 持有：StreamCommand 的转换构造会按值
     // 拷贝命令对象，而一个批次可能有数万条 draw，直接内嵌 vector 会让每次
     // StreamCommand 拷贝都变成一次深拷贝。
     struct DrawIndexedBatchCommand
@@ -1485,16 +2430,6 @@ namespace Corona::Horizon
         {
             if (batch)
                 recorder.draw_indexed_batch(*batch, devices);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
         }
     };
 
@@ -1510,16 +2445,6 @@ namespace Corona::Horizon
         {
             recorder.draw_indexed_indirect(index, vertex, indirect, draw, devices);
         }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
     };
 
     struct PresentCommand
@@ -1532,16 +2457,6 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const
         {
             recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
-        }
-
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
         }
     };
 
@@ -1560,16 +2475,6 @@ namespace Corona::Horizon
             recorder.keep_alive(object_);
         }
 
-        [[nodiscard]] StreamCommand stream_command() const
-        {
-            return CommandDetail::make_stream_command(*this);
-        }
-
-        [[nodiscard]] operator StreamCommand() const
-        {
-            return stream_command();
-        }
-
     private:
         std::shared_ptr<void> object_ {};
     };
@@ -1577,40 +2482,6 @@ namespace Corona::Horizon
     [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
     {
         return { src, dst, region, devices };
-    }
-
-    [[nodiscard]] inline ShaderDispatchCommand dispatch(DispatchDesc desc, DeviceMask devices = {})
-    {
-        return { std::move(desc), devices };
-    }
-
-    [[nodiscard]] inline BeginRenderingCommand begin_rendering(RenderingDesc desc, DeviceMask devices = {})
-    {
-        return { desc, devices };
-    }
-
-    [[nodiscard]] inline EndRenderingCommand end_rendering(DeviceMask devices = {})
-    {
-        return { devices };
-    }
-
-    [[nodiscard]] inline DrawIndexedCommand draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {})
-    {
-        return { index, vertex, std::move(desc), devices };
-    }
-
-    [[nodiscard]] inline DrawIndexedBatchCommand draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {})
-    {
-        return { std::make_shared<DrawIndexedBatchDesc>(std::move(batch)), devices };
-    }
-
-    [[nodiscard]] inline DrawIndexedIndirectStreamCommand draw_indexed_indirect(BufferRef index,
-                                                                               BufferRef vertex,
-                                                                               BufferRef indirect,
-                                                                               DrawIndexedIndirectDesc desc,
-                                                                               DeviceMask devices = {})
-    {
-        return { index, vertex, indirect, std::move(desc), devices };
     }
 
     [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
@@ -1626,28 +2497,6 @@ namespace Corona::Horizon
                        allow_cpu_bridge_fallback);
     }
 
-    [[nodiscard]] inline KeepAliveCommand keep_alive(std::shared_ptr<void> object)
-    {
-        return KeepAliveCommand(std::move(object));
-    }
-
-    template <typename T>
-        requires(!std::is_void_v<T>)
-    [[nodiscard]] KeepAliveCommand keep_alive(std::shared_ptr<T> object)
-    {
-        return keep_alive(std::static_pointer_cast<void>(std::move(object)));
-    }
-
-    template <typename... Args>
-        requires(sizeof...(Args) > 0u &&
-                 (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...) &&
-                 !CommandDetail::single_shared_ptr_v<Args...>)
-    [[nodiscard]] KeepAliveCommand keep_alive(Args&&... args)
-    {
-        using Storage = std::tuple<std::remove_cvref_t<Args>...>;
-        return keep_alive(std::static_pointer_cast<void>(
-            std::make_shared<Storage>(std::forward<Args>(args)...)));
-    }
 }
 
 template <typename PipelineType>
@@ -1658,3 +2507,35 @@ EmbeddedShader::BoundField<PipelineType>& EmbeddedShader::BoundField<PipelineTyp
     proxy = value;
     return *this;
 }
+
+// ================================================================
+// Profiling instrumentation (merged from horizon_profiling.h)
+// ----------------------------------------------------------------
+// Tracy wrapper. When HORIZON_TRACY_ENABLED is OFF the macros expand to
+// nothing, so call sites never need #ifdef guards. Enabled via
+// HORIZON_ENABLE_TRACY (see src/CMakeLists.txt).
+// ================================================================
+#if defined(HORIZON_TRACY_ENABLED)
+
+#include <tracy/Tracy.hpp>
+
+// Marks the end of a frame (call once per presented frame).
+#define HORIZON_PROFILE_FRAME() FrameMark
+// Scoped CPU zone named after the enclosing function.
+#define HORIZON_PROFILE_SCOPE() ZoneScoped
+// Scoped CPU zone with an explicit name (string literal).
+#define HORIZON_PROFILE_SCOPE_N(name) ZoneScopedN(name)
+// Plots a numeric value over time (name must be a string literal).
+#define HORIZON_PROFILE_PLOT(name, value) TracyPlot(name, static_cast<double>(value))
+// Names the current thread in the Tracy UI.
+#define HORIZON_PROFILE_THREAD(name) tracy::SetThreadName(name)
+
+#else
+
+#define HORIZON_PROFILE_FRAME()
+#define HORIZON_PROFILE_SCOPE()
+#define HORIZON_PROFILE_SCOPE_N(name)
+#define HORIZON_PROFILE_PLOT(name, value)
+#define HORIZON_PROFILE_THREAD(name)
+
+#endif

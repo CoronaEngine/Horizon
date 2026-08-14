@@ -96,7 +96,6 @@ namespace Corona::Horizon
         [[nodiscard]] size_t pooled_count() const;
 
         void mark_completed_for_tests(uint64_t value) noexcept;
-        void fail_next_submit_for_tests() noexcept;
 
     private:
         [[nodiscard]] uint64_t query_completed_value() const;
@@ -116,7 +115,6 @@ namespace Corona::Horizon
         uint64_t last_submitted_value_ { 0 };
         mutable std::atomic<uint64_t> last_completed_value_ { 0 };
         mutable bool device_lost_ { false };
-        bool fail_next_submit_ { false };
 
         std::deque<std::shared_ptr<TrackedCommandBuffer>> in_flight_;
         std::deque<std::shared_ptr<TrackedCommandBuffer>> pool_;

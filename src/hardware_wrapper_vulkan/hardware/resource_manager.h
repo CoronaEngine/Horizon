@@ -40,7 +40,6 @@ namespace Corona::Horizon
         [[nodiscard]] ExternalMemoryHandle export_buffer(BufferWrap& buffer);
         [[nodiscard]] uint32_t store_descriptor(BufferWrap& buffer);
         void flush_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size);
-        void invalidate_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size);
         void destroy_buffer(BufferWrap& buffer) noexcept;
 
         [[nodiscard]] ImageWrap create_image(const HardwareImageDesc& desc);
@@ -52,7 +51,6 @@ namespace Corona::Horizon
         [[nodiscard]] uint32_t store_storage_descriptor(ImageWrap& image);
         [[nodiscard]] ImageSubresourceLayout image_subresource_layout(const ImageWrap& image, uint32_t layer, uint32_t mip) const;
         void flush_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size);
-        void invalidate_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size);
         void destroy_image(ImageWrap& image) noexcept;
 
         static constexpr uint32_t bindless_texture_set = 0;
@@ -62,10 +60,6 @@ namespace Corona::Horizon
         [[nodiscard]] std::array<VkDescriptorSetLayout, bindless_descriptor_set_count> bindless_descriptor_set_layouts();
         [[nodiscard]] std::array<VkDescriptorSet, bindless_descriptor_set_count> bindless_descriptor_sets();
         [[nodiscard]] VkSampler default_sampler();
-
-        // 返回 DEVICE_LOCAL 显存堆容量之和（字节，VRAM 总量）。
-        // 仅容量，用量由上层自行统计。设备未就绪时返回 0。线程安全。
-        [[nodiscard]] std::uint64_t device_local_memory_size() const;
 
     private:
         struct DescriptorArray

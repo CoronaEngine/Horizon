@@ -55,7 +55,7 @@ target_link_libraries(Horizon PUBLIC
 )
 
 # Tracy 采集客户端；PUBLIC 传递给 examples 等下游目标，
-# 使它们也能直接使用 horizon_profiling.h 中的埋点宏。
+# 使它们也能直接使用 horizon.h 中合并的埋点宏。
 if(HORIZON_ENABLE_TRACY)
     target_link_libraries(Horizon PUBLIC Tracy::TracyClient)
     target_compile_definitions(Horizon PUBLIC HORIZON_TRACY_ENABLED=1)

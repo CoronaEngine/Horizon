@@ -7,7 +7,7 @@
 
 #include "display_manager.h"
 
-#include "horizon_profiling.h"
+#include <horizon.h>  // profiling macros merged from horizon_profiling.h
 
 #include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/frame_ring.h"
