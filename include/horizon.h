@@ -586,13 +586,6 @@ namespace Corona::Horizon
         std::uintptr_t id { 0 };
     };
 
-    struct BufferImageCopyRegion
-    {
-        uint64_t buffer_offset { 0 };
-        uint32_t image_layer { 0 };
-        uint32_t image_mip { 0 };
-    };
-
 
     // SubmitReceipt 的完整载荷（SubmissionToken / PresentResult 序列）由内部
     // SubmitReceiptData 持有，经 shared_ptr<const void> 不透明传递。公共用户只
@@ -959,12 +952,6 @@ namespace Corona::Horizon
     // Pipeline Descriptors
     // ================================================================
 
-    struct EdslPipelineOptions
-    {
-        EmbeddedShader::CompilerOption compiler;
-        bool auto_bind = true;
-    };
-
     // 管线持有的 shader 载荷：编译产物 + EDSL 管线对象 + auto-bind 表。
     // 与 *PipelineDesc 分家的理由：Desc 是调用方写的渲染状态，按值传来传去；
     // shader 侧是 SPIR-V + 反射表，深拷贝很贵。分开后 desc() 只搬状态。
@@ -986,8 +973,9 @@ namespace Corona::Horizon
     struct ComputePipelineDesc
     {
         // 反射缺失时的 workgroup local size 回退值，见 compute_pipeline.cpp 的解析逻辑。
+        // 这里没有 debug_name：和 RasterizerPipelineDesc 不同，计算管线的调试名全仓
+        // 无写入点，恒为 "horizon.compute_pipeline"，字段已删。
         ktm::uvec3 thread_group_size = { 1, 1, 1 };
-        std::string debug_name;
     };
 
     struct RasterizerPipelineDesc
@@ -1047,8 +1035,7 @@ namespace Corona::Horizon
     // ShaderLanguageConverter.h (slang-com-ptr / slang-com-helper) 塞给每个消费者。
     [[nodiscard]] EmbeddedShader::ShaderCodeModule compile_slang_stage(
         EmbeddedShader::ShaderStage stage,
-        EmbeddedShader::SlangModule& module,
-        EmbeddedShader::CompilerOption compiler_option = {});
+        EmbeddedShader::SlangModule& module);
 
     // ================================================================
     // Pipeline Binding
@@ -1337,47 +1324,36 @@ namespace Corona::Horizon
         template <PipelineDetail::EdslComputeShaderCode F>
         explicit ComputePipeline(F&& compute_shader_code,
                                  ktm::uvec3 numthreads = { 1, 1, 1 },
-                                 EdslPipelineOptions options = {},
                                  const std::source_location& source_location = std::source_location::current())
             : ComputePipelineBase(
                   ComputePipelineDesc { numthreads },
-                  compile_edsl(std::forward<F>(compute_shader_code),
-                               numthreads,
-                               std::move(options),
-                               source_location),
+                  compile_edsl(std::forward<F>(compute_shader_code), numthreads, source_location),
                   source_location)
         {
         }
 
     private:
+        // 编译选项曾由 EdslPipelineOptions 形参带入，但全仓没有一个调用方传过它，
+        // 于是连同它撑起的 4 条 CTAD 指引一起删掉。要重新开放 enableBindless /
+        // auto_bind 时，在这里加回一个显式形参即可。
         template <typename F>
         static ComputePipelineShaders compile_edsl(F&& compute_shader_code,
                                                   ktm::uvec3 numthreads,
-                                                  EdslPipelineOptions options,
                                                   std::source_location source_location)
         {
-            options.compiler.enableMatrixColumnMajor = true;
+            EmbeddedShader::CompilerOption compiler;
+            compiler.enableMatrixColumnMajor = true;
 
             ComputePipelineShaders shaders;
             shaders.object = std::make_shared<EmbeddedShader::ComputePipelineObject>(
                 EmbeddedShader::ComputePipelineObject::compile(
                     std::forward<F>(compute_shader_code), numthreads,
-                    options.compiler, source_location));
+                    compiler, source_location));
             shaders.compute = shaders.object->compute->getShaderCode(
-                EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless);
+                EmbeddedShader::ShaderLanguage::SpirV, compiler.enableBindless);
 
-            if (options.auto_bind)
-                shaders.auto_bind_entries = shaders.object->autoBindEntries;
+            shaders.auto_bind_entries = shaders.object->autoBindEntries;
             return shaders;
-        }
-    public:
-
-        template <PipelineDetail::EdslComputeShaderCode F>
-        explicit ComputePipeline(F&& compute_shader_code,
-                                 ktm::uvec3 numthreads,
-                                 const std::source_location& source_location)
-            : ComputePipeline(std::forward<F>(compute_shader_code), numthreads, {}, source_location)
-        {
         }
     };
 
@@ -1447,11 +1423,7 @@ namespace Corona::Horizon
     template <PipelineDetail::EdslComputeShaderCode F>
     ComputePipeline(F, ktm::uvec3) -> ComputePipeline<>;
     template <PipelineDetail::EdslComputeShaderCode F>
-    ComputePipeline(F, ktm::uvec3, EdslPipelineOptions) -> ComputePipeline<>;
-    template <PipelineDetail::EdslComputeShaderCode F>
     ComputePipeline(F, ktm::uvec3, const std::source_location&) -> ComputePipeline<>;
-    template <PipelineDetail::EdslComputeShaderCode F>
-    ComputePipeline(F, ktm::uvec3, EdslPipelineOptions, const std::source_location&) -> ComputePipeline<>;
 
     template <>
     class RasterizerPipeline<void, void> : public RasterizerPipelineBase
@@ -1465,41 +1437,39 @@ namespace Corona::Horizon
         explicit RasterizerPipeline(VS&& vertex_shader_code,
                                     FS&& fragment_shader_code,
                                     RasterizerPipelineDesc desc = {},
-                                    EdslPipelineOptions options = {},
                                     const std::source_location& source_location = std::source_location::current())
             : RasterizerPipelineBase(
                   std::move(desc),
                   compile_edsl(std::forward<VS>(vertex_shader_code),
                                std::forward<FS>(fragment_shader_code),
-                               std::move(options),
                                source_location),
                   source_location)
         {
         }
 
     private:
+        // 同 ComputePipeline<void>::compile_edsl：EdslPipelineOptions 形参零调用方，已删。
         template <typename VS, typename FS>
         static RasterizerPipelineShaders compile_edsl(VS&& vertex_shader_code,
                                                      FS&& fragment_shader_code,
-                                                     EdslPipelineOptions options,
                                                      std::source_location source_location)
         {
-            options.compiler.enableMatrixColumnMajor = true;
+            EmbeddedShader::CompilerOption compiler;
+            compiler.enableMatrixColumnMajor = true;
 
             RasterizerPipelineShaders shaders;
             shaders.object = std::make_shared<EmbeddedShader::RasterizedPipelineObject>(
                 EmbeddedShader::RasterizedPipelineObject::compile(
                     std::forward<VS>(vertex_shader_code),
                     std::forward<FS>(fragment_shader_code),
-                    options.compiler,
+                    compiler,
                     source_location));
             shaders.vertex = shaders.object->vertex->getShaderCode(
-                EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless);
+                EmbeddedShader::ShaderLanguage::SpirV, compiler.enableBindless);
             shaders.fragment = shaders.object->fragment->getShaderCode(
-                EmbeddedShader::ShaderLanguage::SpirV, options.compiler.enableBindless);
+                EmbeddedShader::ShaderLanguage::SpirV, compiler.enableBindless);
 
-            if (options.auto_bind)
-                shaders.auto_bind_entries = shaders.object->autoBindEntries;
+            shaders.auto_bind_entries = shaders.object->autoBindEntries;
             return shaders;
         }
     };
@@ -1587,10 +1557,7 @@ namespace Corona::Horizon
     RasterizerPipeline(VS, FS, RasterizerPipelineDesc) -> RasterizerPipeline<>;
     template <typename VS, typename FS>
         requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
-    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, EdslPipelineOptions) -> RasterizerPipeline<>;
-    template <typename VS, typename FS>
-        requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
-    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, EdslPipelineOptions, const std::source_location&) -> RasterizerPipeline<>;
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<>;
 
     // ================================================================
     // Value Command Facades
@@ -1617,14 +1584,6 @@ namespace Corona::Horizon
 
         void record(CommandRecorder& recorder) const;
     };
-
-    [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(const HardwareBuffer& src,
-                                                                 const HardwareImage& dst,
-                                                                 BufferImageCopyRegion region,
-                                                                 uint32_t device_mask_bits = 1)
-    {
-        return { src, dst, region.buffer_offset, region.image_layer, region.image_mip, device_mask_bits };
-    }
 
     [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer,
                                                 const HardwareImage& image,

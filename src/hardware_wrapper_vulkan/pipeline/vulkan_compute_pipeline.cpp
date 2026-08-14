@@ -799,7 +799,7 @@ namespace Corona::Horizon
                                          std::to_string(static_cast<int>(result)));
             }
 
-            const std::string pipeline_name = desc_.debug_name.empty() ? "horizon.compute_pipeline" : desc_.debug_name;
+            const std::string pipeline_name = "horizon.compute_pipeline";
             name_vulkan_object(device,
                                VK_OBJECT_TYPE_PIPELINE_LAYOUT,
                                reinterpret_cast<uint64_t>(state.layout),
@@ -1294,7 +1294,9 @@ namespace Corona::Horizon
             }
         }
 
-        const std::string debug_name = desc_.debug_name.empty() ? "horizon.compute_pipeline" : desc_.debug_name;
+        // ComputePipelineDesc 曾有 debug_name 字段，但全仓零写入点，恒走这个回退名，
+        // 已删字段。（RasterizerPipelineDesc::debug_name 是活的，imgui 在设。）
+        const std::string debug_name = "horizon.compute_pipeline";
         std::vector<PipelineState::UniformDescriptorSet::Signature> signature;
         for (PipelineState::DescriptorSetLayout& set_layout : state.descriptor_set_layouts)
         {

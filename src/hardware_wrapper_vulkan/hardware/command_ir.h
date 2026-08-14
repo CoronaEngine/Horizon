@@ -16,7 +16,7 @@
 // 内部 Command IR 层。
 //
 // 这些类型曾经内嵌在公共头 include/horizon.h 里。P0/P1 把整个 IR 层移出公共头：
-// horizon.h 只按值持有三个叶子类型（DeviceId / DisplayerRef / BufferImageCopyRegion），
+// horizon.h 只按值持有两个叶子类型（DeviceId / DisplayerRef），
 // 其余引用/IR 类型均在此文件。
 //
 // 本文件仅被硬件层（hardware_wrapper_vulkan/）内部 include：command.h 在 horizon.h
@@ -107,8 +107,18 @@ namespace Corona::Horizon
         CopyImage
     };
 
-    // DeviceId / DisplayerRef / BufferImageCopyRegion 定义在 horizon.h（公共头按值持有）。
+    // DeviceId / DisplayerRef 定义在 horizon.h（公共头按值持有）。
     // 以下是仅内部使用的引用/掩码类型。
+
+    // 缓冲→图像拷贝的目标子资源。曾在 horizon.h，但公共入口是
+    // HardwareImage::copy_from(buffer, offset, layer, mip)——四个标量直传，
+    // 没有任何公共签名提到这个结构，故随 IR 一起收进内部头。
+    struct BufferImageCopyRegion
+    {
+        uint64_t buffer_offset { 0 };
+        uint32_t image_layer { 0 };
+        uint32_t image_mip { 0 };
+    };
 
     struct DeviceMask
     {

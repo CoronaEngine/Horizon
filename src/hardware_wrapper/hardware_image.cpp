@@ -324,7 +324,9 @@ namespace Corona::Horizon
         if (!resolve_absolute_subresource(image->desc, range_, image_layer, image_mip, absolute))
             return {};
 
-        return copy_to_image(src, *this, { buffer_offset, absolute.layer, absolute.mip });
+        // 曾经绕道公共自由函数 copy_to_image()——那个函数全仓只有这一个调用者，
+        // 已删；这里直接建门面值。device_mask_bits 保持默认 1（单设备）。
+        return CopyBufferToImageCommand { src, *this, buffer_offset, absolute.layer, absolute.mip, 1 };
     }
 
     uint32_t HardwareImage::store_descriptor() const

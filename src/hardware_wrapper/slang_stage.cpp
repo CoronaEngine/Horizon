@@ -14,15 +14,15 @@
 namespace Corona::Horizon
 {
     EmbeddedShader::ShaderCodeModule compile_slang_stage(EmbeddedShader::ShaderStage stage,
-                                                         EmbeddedShader::SlangModule& module,
-                                                         EmbeddedShader::CompilerOption compiler_option)
+                                                         EmbeddedShader::SlangModule& module)
     {
+        // 原先还收一个 CompilerOption 形参，只用来喂 args.deps；两个调用点都没传过，
+        // deps 恒为空，故连形参一起删。需要模块依赖时在这里显式加回。
         EmbeddedShader::SlangCompileArgs2 args;
         args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
         args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
         args.stage = stage;
         args.module = &module;
-        args.deps = std::move(compiler_option.slangModules);
         args.enableReflection = true;
 
         EmbeddedShader::SlangCompileResult result =
