@@ -347,8 +347,8 @@ void build_shadow_volume(const VolumeSource& src,
 
 struct GpuMesh
 {
-    Corona::Horizon::HardwareBuffer vb;
-    Corona::Horizon::HardwareBuffer ib;
+    horizon::HardwareBuffer vb;
+    horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
 };
 
@@ -404,8 +404,8 @@ void run_example_edsl_shadowvolumes()
     const VolumeSource bunny_volume = build_volume_source(bunny_mesh);
 
     GpuMesh bunny {
-        Corona::Horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_shadowvolumes.bunny.vb"),
-        Corona::Horizon::HardwareBuffer::index(bunny_mesh.indices, "example_shadowvolumes.bunny.ib"),
+        horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_shadowvolumes.bunny.vb"),
+        horizon::HardwareBuffer::index(bunny_mesh.indices, "example_shadowvolumes.bunny.ib"),
         static_cast<uint32_t>(bunny_mesh.indices.size()),
     };
 
@@ -417,8 +417,8 @@ void run_example_edsl_shadowvolumes()
     };
     const std::vector<uint32_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     GpuMesh floor_plane {
-        Corona::Horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowvolumes.floor.vb"),
-        Corona::Horizon::HardwareBuffer::index(plane_indices, "example_shadowvolumes.floor.ib"),
+        horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowvolumes.floor.vb"),
+        horizon::HardwareBuffer::index(plane_indices, "example_shadowvolumes.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
     };
 
@@ -426,34 +426,34 @@ void run_example_edsl_shadowvolumes()
     constexpr uint32_t max_volume_vertices = 1 << 18;
     std::vector<uint32_t> identity_indices(max_volume_vertices);
     std::iota(identity_indices.begin(), identity_indices.end(), 0u);
-    Corona::Horizon::HardwareBuffer volume_ib = Corona::Horizon::HardwareBuffer::index(identity_indices, "example_shadowvolumes.volume.ib");
+    horizon::HardwareBuffer volume_ib = horizon::HardwareBuffer::index(identity_indices, "example_shadowvolumes.volume.ib");
 
     // 渲染目标
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        sv_width, sv_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        sv_width, sv_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_shadowvolumes.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        sv_width, sv_height, Corona::Horizon::Format::D32, "example_shadowvolumes.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.depth"));
     depth_image.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage depthval_depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        sv_width, sv_height, Corona::Horizon::Format::D32, "example_shadowvolumes.depthval.depth"));
+    horizon::HardwareImage depthval_depth_image(horizon::HardwareImageDesc::depth_attachment(
+        sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.depthval.depth"));
     depthval_depth_image.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage lit_depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        sv_width, sv_height, Corona::Horizon::Format::D32, "example_shadowvolumes.lit.depth"));
+    horizon::HardwareImage lit_depth_image(horizon::HardwareImageDesc::depth_attachment(
+        sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.lit.depth"));
     lit_depth_image.set_clear_depth(1.0f, 0);
 
-    const auto rt_usage = Corona::Horizon::ImageUsageFlags::ColorAttachment | Corona::Horizon::ImageUsageFlags::Sampled;
-    Corona::Horizon::HardwareImage scene_depth_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        sv_width, sv_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.scenedepth"));
+    const auto rt_usage = horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled;
+    horizon::HardwareImage scene_depth_image(horizon::HardwareImageDesc::texture_2d(
+        sv_width, sv_height, horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.scenedepth"));
     scene_depth_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage count_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        sv_width, sv_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.count"));
+    horizon::HardwareImage count_image(horizon::HardwareImageDesc::texture_2d(
+        sv_width, sv_height, horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.count"));
     count_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
 
     SvSceneShared sp;
@@ -537,47 +537,47 @@ void run_example_edsl_shadowvolumes()
     };
 
     // pass 1: ambient
-    Corona::Horizon::RasterizerPipelineDesc ambient_desc;
+    horizon::RasterizerPipelineDesc ambient_desc;
     ambient_desc.blend_enabled = false;
-    Corona::Horizon::RasterizerPipeline ambient_rasterizer(sv_scene_vert, sv_ambient_frag, ambient_desc);
+    horizon::RasterizerPipeline ambient_rasterizer(sv_scene_vert, sv_ambient_frag, ambient_desc);
     ambient_rasterizer.bind_depth_target(depth_image);
 
     // pass 2: depthval
-    Corona::Horizon::RasterizerPipelineDesc depthval_desc;
+    horizon::RasterizerPipelineDesc depthval_desc;
     depthval_desc.blend_enabled = false;
-    Corona::Horizon::RasterizerPipeline depthval_rasterizer(sv_scene_vert, sv_depthval_frag, depthval_desc);
+    horizon::RasterizerPipeline depthval_rasterizer(sv_scene_vert, sv_depthval_frag, depthval_desc);
     depthval_rasterizer.bind_depth_target(depthval_depth_image);
 
     // pass 3: volume（加法混合、无深度附件）
-    Corona::Horizon::RasterizerPipelineDesc volume_desc;
+    horizon::RasterizerPipelineDesc volume_desc;
     volume_desc.depth_test_enabled = false;
     volume_desc.depth_write_enabled = false;
     volume_desc.blend_enabled = true;
-    volume_desc.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    volume_desc.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    volume_desc.color_blend_op = Corona::Horizon::BlendOp::Add;
-    volume_desc.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    volume_desc.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    volume_desc.alpha_blend_op = Corona::Horizon::BlendOp::Add;
-    Corona::Horizon::RasterizerPipeline volume_rasterizer(sv_volume_vert_glsl, sv_volume_frag, volume_desc);
+    volume_desc.src_color_blend_factor = horizon::BlendFactor::One;
+    volume_desc.dst_color_blend_factor = horizon::BlendFactor::One;
+    volume_desc.color_blend_op = horizon::BlendOp::Add;
+    volume_desc.src_alpha_blend_factor = horizon::BlendFactor::One;
+    volume_desc.dst_alpha_blend_factor = horizon::BlendFactor::One;
+    volume_desc.alpha_blend_op = horizon::BlendOp::Add;
+    horizon::RasterizerPipeline volume_rasterizer(sv_volume_vert_glsl, sv_volume_frag, volume_desc);
 
     // pass 4: lit（不清屏、加法混合叠到 ambient 上）
-    Corona::Horizon::RasterizerPipelineDesc lit_desc;
+    horizon::RasterizerPipelineDesc lit_desc;
     lit_desc.clear_color_target = false;
     lit_desc.blend_enabled = true;
-    lit_desc.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    lit_desc.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    lit_desc.color_blend_op = Corona::Horizon::BlendOp::Add;
-    lit_desc.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    lit_desc.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    lit_desc.alpha_blend_op = Corona::Horizon::BlendOp::Add;
-    Corona::Horizon::RasterizerPipeline lit_rasterizer(sv_scene_vert, sv_lit_frag, lit_desc);
+    lit_desc.src_color_blend_factor = horizon::BlendFactor::One;
+    lit_desc.dst_color_blend_factor = horizon::BlendFactor::One;
+    lit_desc.color_blend_op = horizon::BlendOp::Add;
+    lit_desc.src_alpha_blend_factor = horizon::BlendFactor::One;
+    lit_desc.dst_alpha_blend_factor = horizon::BlendFactor::One;
+    lit_desc.alpha_blend_op = horizon::BlendOp::Add;
+    horizon::RasterizerPipeline lit_rasterizer(sv_scene_vert, sv_lit_frag, lit_desc);
     //lit_rasterizer.outColor = final_output_image;
     lit_rasterizer.bind_depth_target(lit_depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(sv_width) / static_cast<float>(sv_height);
     // 原版自由相机初始位姿：pos(3,20,-58)、垂直角 -0.25 rad、yaw 0
@@ -668,8 +668,7 @@ void run_example_edsl_shadowvolumes()
             sp.params = to_edsl_vec4(resolution);
             for (const DrawItem& item : items)
             {
-                Corona::Horizon::DrawIndexedParams params;
-                params.index_type = Corona::Horizon::IndexType::UInt32;
+                horizon::DrawIndexedParams params;
                 params.index_count = item.mesh->index_count;
 
                 model_pc.model = to_edsl_matrix(item.model);
@@ -687,11 +686,10 @@ void run_example_edsl_shadowvolumes()
         volume_rasterizer.clear_records();
         if (!volume_positions.empty())
         {
-            Corona::Horizon::HardwareBuffer volume_vb =
-                Corona::Horizon::HardwareBuffer::vertex(volume_positions, "example_shadowvolumes.volume.vb");
+            horizon::HardwareBuffer volume_vb =
+                horizon::HardwareBuffer::vertex(volume_positions, "example_shadowvolumes.volume.vb");
 
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
+            horizon::DrawIndexedParams params;
             params.index_count = std::min<uint32_t>(static_cast<uint32_t>(volume_positions.size()), max_volume_vertices);
 
             vp.view_proj = to_edsl_matrix(view_proj);
@@ -699,17 +697,17 @@ void run_example_edsl_shadowvolumes()
             volume_rasterizer.record(volume_ib, volume_vb, params);
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << ambient_rasterizer(sv_width, sv_height)
-                            << depthval_rasterizer(sv_width, sv_height)
-                            << volume_rasterizer(sv_width, sv_height)
-                            << lit_rasterizer(sv_width, sv_height)
-                            << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << ambient_rasterizer.extent(sv_width, sv_height)
+                            << depthval_rasterizer.extent(sv_width, sv_height)
+                            << volume_rasterizer.extent(sv_width, sv_height)
+                            << lit_rasterizer.extent(sv_width, sv_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

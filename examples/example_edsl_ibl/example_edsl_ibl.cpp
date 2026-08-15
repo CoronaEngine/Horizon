@@ -93,26 +93,26 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
 {
     constexpr uint32_t bytes_per_pixel = 8; // RGBA16F
 
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::cube(
-        dds.size, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
+        dds.size, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
 
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
+    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
-    Corona::Horizon::HardwareExecutor executor;
-    Corona::Horizon::HardwareStream stream = executor.stream();
+    horizon::HardwareExecutor executor;
+    horizon::HardwareStream stream = executor.stream();
     uint64_t offset = 0;
     for (uint32_t face = 0; face < 6; ++face)
     {
@@ -123,15 +123,15 @@ Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, cons
             offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
         }
     }
-    (void)(stream << Corona::Horizon::commit());
+    (void)(stream << horizon::commit());
 
     return image;
 }
 
 struct LightProbe
 {
-    Corona::Horizon::HardwareImage lod;
-    Corona::Horizon::HardwareImage irr;
+    horizon::HardwareImage lod;
+    horizon::HardwareImage irr;
 };
 
 LightProbe load_light_probe(const std::string& name)
@@ -560,28 +560,28 @@ void run_example_edsl_ibl()
     };
     const std::vector<uint32_t> sky_indices = { 0, 1, 2 };
 
-    Corona::Horizon::HardwareBuffer bunny_vb = Corona::Horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_ibl.bunny.vb");
-    Corona::Horizon::HardwareBuffer bunny_ib = Corona::Horizon::HardwareBuffer::index(bunny_mesh.indices, "example_ibl.bunny.ib");
-    Corona::Horizon::HardwareBuffer orb_vb   = Corona::Horizon::HardwareBuffer::vertex(orb_mesh.vertices, "example_ibl.orb.vb");
-    Corona::Horizon::HardwareBuffer orb_ib   = Corona::Horizon::HardwareBuffer::index(orb_mesh.indices, "example_ibl.orb.ib");
-    Corona::Horizon::HardwareBuffer sky_vb   = Corona::Horizon::HardwareBuffer::vertex(sky_vertices, "example_ibl.sky.vb");
-    Corona::Horizon::HardwareBuffer sky_ib   = Corona::Horizon::HardwareBuffer::index(sky_indices, "example_ibl.sky.ib");
+    horizon::HardwareBuffer bunny_vb = horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_ibl.bunny.vb");
+    horizon::HardwareBuffer bunny_ib = horizon::HardwareBuffer::index(bunny_mesh.indices, "example_ibl.bunny.ib");
+    horizon::HardwareBuffer orb_vb   = horizon::HardwareBuffer::vertex(orb_mesh.vertices, "example_ibl.orb.vb");
+    horizon::HardwareBuffer orb_ib   = horizon::HardwareBuffer::index(orb_mesh.indices, "example_ibl.orb.ib");
+    horizon::HardwareBuffer sky_vb   = horizon::HardwareBuffer::vertex(sky_vertices, "example_ibl.sky.vb");
+    horizon::HardwareBuffer sky_ib   = horizon::HardwareBuffer::index(sky_indices, "example_ibl.sky.ib");
 
     // ---- 渲染目标 ----
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ibl_width, ibl_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        ibl_width, ibl_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_ibl.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ibl_width, ibl_height, Corona::Horizon::Format::D32, "example_ibl.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        ibl_width, ibl_height, horizon::Format::D32, "example_ibl.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
     // ---- Pipeline ----
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
 
     // 共享 UBO（批次内所有 draw 相同，288 bytes → UBO）
@@ -759,24 +759,21 @@ void run_example_edsl_ibl()
         final_output << finalColor;
     };
 
-    Corona::Horizon::RasterizerPipeline rasterizer(
+    horizon::RasterizerPipeline rasterizer(
         edsl_ibl_vertex, edsl_ibl_fragment, desc);
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams bunny_params;
-    bunny_params.index_type = Corona::Horizon::IndexType::UInt32;
+    horizon::DrawIndexedParams bunny_params;
     bunny_params.index_count = static_cast<uint32_t>(bunny_mesh.indices.size());
 
-    Corona::Horizon::DrawIndexedParams orb_params;
-    orb_params.index_type = Corona::Horizon::IndexType::UInt32;
+    horizon::DrawIndexedParams orb_params;
     orb_params.index_count = static_cast<uint32_t>(orb_mesh.indices.size());
 
-    Corona::Horizon::DrawIndexedParams sky_params;
-    sky_params.index_type = Corona::Horizon::IndexType::UInt32;
+    horizon::DrawIndexedParams sky_params;
     sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
 
     constexpr float aspect = static_cast<float>(ibl_width) / static_cast<float>(ibl_height);
@@ -884,13 +881,13 @@ void run_example_edsl_ibl()
         per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
         rasterizer.record(sky_ib, sky_vb, sky_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << rasterizer.extent(ibl_width, ibl_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

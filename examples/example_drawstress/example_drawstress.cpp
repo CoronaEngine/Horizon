@@ -111,35 +111,33 @@ void run_example_drawstress()
               << "  + / - : dim +2 / -2 (draws = dim^3)\n"
               << "  Esc   : quit\n";
 
-    Corona::Horizon::HardwareBuffer cube_vb = Corona::Horizon::HardwareBuffer::vertex(cube_vertices, "example_drawstress.vb");
-    Corona::Horizon::HardwareBuffer cube_ib = Corona::Horizon::HardwareBuffer::index(cube_indices, "example_drawstress.ib");
+    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_drawstress.vb");
+    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_drawstress.ib");
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        stress_width, stress_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        stress_width, stress_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_drawstress.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        stress_width, stress_height, Corona::Horizon::Format::D32, "example_drawstress.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        stress_width, stress_height, horizon::Format::D32, "example_drawstress.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(drawstress_vert_glsl, drawstress_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(drawstress_vert_glsl, drawstress_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams cube_params;
-    cube_params.index_type = Corona::Horizon::IndexType::UInt32;
-    cube_params.index_count = static_cast<uint32_t>(cube_indices.size());
+    horizon::DrawIndexedParams cube_params;
 
     constexpr float aspect = static_cast<float>(stress_width) / static_cast<float>(stress_height);
     // bgfx 左手系：mtxLookAt (0,0,-35)->(0,0,0)、mtxProj fovy 60°
@@ -213,18 +211,18 @@ void run_example_drawstress()
             }
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt;
+        horizon::SubmitReceipt render_receipt;
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
-            render_receipt = render_executor << rasterizer(stress_width, stress_height) << Corona::Horizon::commit();
+            render_receipt = render_executor << rasterizer.extent(stress_width, stress_height) << horizon::commit();
         }
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::wait_present");
             ui.draw_overlay(display_executor, final_output_image, render_receipt);
             display_executor.wait(render_receipt);
-            (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                             << Corona::Horizon::commit());
+            (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                             << horizon::commit());
         }
     }
 

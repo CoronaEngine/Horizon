@@ -17,8 +17,8 @@ struct GLFWwindow;
 //   ...
 //   ui.draw_overlay(display_executor, final_output_image, render_receipt);   // ← 插入的一行
 //   display_executor.wait(render_receipt);
-//   (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-//                                    << Corona::Horizon::commit());
+//   (void)(display_executor.stream() << horizon::present(display, final_output_image)
+//                                    << horizon::commit());
 class HorizonImGuiLayer
 {
 public:
@@ -30,9 +30,9 @@ public:
     void new_frame();
 
 
-    void draw_overlay(Corona::Horizon::HardwareExecutor& display_executor,
-                      Corona::Horizon::HardwareImage& target,
-                      const Corona::Horizon::SubmitReceipt& scene_receipt);
+    void draw_overlay(horizon::HardwareExecutor& display_executor,
+                      horizon::HardwareImage& target,
+                      const horizon::SubmitReceipt& scene_receipt);
 
 private:
     struct Impl;

@@ -34,29 +34,29 @@ void run_example_glsl()
     GLFWwindow* window = glfwCreateWindow(glsl_width, glsl_height, "Horizon Baseline [GLSL]", nullptr, nullptr);
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
-    Corona::Horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
+    horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        glsl_width, glsl_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        glsl_width, glsl_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_glsl.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(
-        Corona::Horizon::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, Corona::Horizon::Format::D32, "example_glsl.depth"));
+    horizon::HardwareImage depth_image(
+        horizon::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, horizon::Format::D32, "example_glsl.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::HardwareBuffer vertex_buffer = Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, "example_glsl.vertex");
-    Corona::Horizon::HardwareBuffer index_buffer = Corona::Horizon::HardwareBuffer::index(mesh.indices, "example_glsl.index");
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareBuffer vertex_buffer = horizon::HardwareBuffer::vertex(mesh.vertices, "example_glsl.vertex");
+    horizon::HardwareBuffer index_buffer = horizon::HardwareBuffer::index(mesh.indices, "example_glsl.index");
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经 push constant 传入 shader。
@@ -74,9 +74,7 @@ void run_example_glsl()
         rasterizer.vp.proj = proj;
     }
 
-    Corona::Horizon::DrawIndexedParams draw_params;
-    draw_params.index_type = Corona::Horizon::IndexType::UInt32;
-    draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
+    horizon::DrawIndexedParams draw_params;
 
     HorizonImGuiLayer ui(window, glsl_width, glsl_height);
 
@@ -85,7 +83,7 @@ void run_example_glsl()
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
 
-    Corona::Horizon::SubmitReceipt render_receipt;
+    horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -121,11 +119,11 @@ void run_example_glsl()
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        render_receipt = render_executor << rasterizer(glsl_width, glsl_height) << Corona::Horizon::commit();
+        render_receipt = render_executor << rasterizer.extent(glsl_width, glsl_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image) << horizon::commit());
     }
     display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);

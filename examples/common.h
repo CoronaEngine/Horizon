@@ -76,7 +76,7 @@ struct Vertex
 
 struct TextureLoadResult
 {
-    Corona::Horizon::HardwareImage texture;
+    horizon::HardwareImage texture;
     uint32_t descriptorID = 0;
     bool success = false;
 };

@@ -189,7 +189,6 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
                 params.index_count = cmd.ElemCount;
                 params.first_index = global_index_offset + cmd.IdxOffset;
                 params.vertex_offset = global_vertex_offset + static_cast<int32_t>(cmd.VtxOffset);
-                params.index_type = IndexType::UInt16;
                 params.enable_scissor = true;
                 params.scissor = ScissorRect {
                     static_cast<int32_t>(clip_min_x),
@@ -207,7 +206,7 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
         // GPU 顺序：场景 → UI。
         display_executor.wait(scene_receipt);
         SubmitReceipt ui_receipt = display_executor.stream()
-            << impl.pipeline(impl.width, impl.height)
+            << impl.pipeline.extent(impl.width, impl.height)
             << commit();
 
         // 挂到 pending waits：同一 executor 上示例随后的 present commit 会等待 UI 完成。

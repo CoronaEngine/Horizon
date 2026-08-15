@@ -217,16 +217,16 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    Corona::Horizon::HardwareBuffer vb;
-    Corona::Horizon::HardwareBuffer ib;
+    horizon::HardwareBuffer vb;
+    horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        Corona::Horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
+        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
     };
 }
@@ -281,36 +281,36 @@ void run_example_edsl_shadowmaps()
     };
     const std::vector<uint32_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     GpuMesh floor_plane {
-        Corona::Horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
-        Corona::Horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
+        horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
+        horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
     };
 
     // Pass 1 目标：1024x1024 RGBA8 打包深度 + 独立 D32
-    Corona::Horizon::HardwareImage shadow_map_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        shadow_map_size, shadow_map_size, Corona::Horizon::Format::RGBA8_UNORM,
-        Corona::Horizon::ImageUsageFlags::ColorAttachment | Corona::Horizon::ImageUsageFlags::Sampled,
+    horizon::HardwareImage shadow_map_image(horizon::HardwareImageDesc::texture_2d(
+        shadow_map_size, shadow_map_size, horizon::Format::RGBA8_UNORM,
+        horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled,
         "example_shadowmaps.shadowmap"));
     shadow_map_image.set_clear_color(1.0f, 1.0f, 1.0f, 1.0f); // 白 = 最远深度
 
-    Corona::Horizon::HardwareImage shadow_depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        shadow_map_size, shadow_map_size, Corona::Horizon::Format::D32, "example_shadowmaps.shadow_depth"));
+    horizon::HardwareImage shadow_depth_image(horizon::HardwareImageDesc::depth_attachment(
+        shadow_map_size, shadow_map_size, horizon::Format::D32, "example_shadowmaps.shadow_depth"));
     shadow_depth_image.set_clear_depth(1.0f, 0);
 
     // Pass 2 目标：主输出
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        smx_width, smx_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        smx_width, smx_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_shadowmaps.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f); // 雾色黑
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        smx_width, smx_height, Corona::Horizon::Format::D32, "example_shadowmaps.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        smx_width, smx_height, horizon::Format::D32, "example_shadowmaps.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc pack_desc;
+    horizon::RasterizerPipelineDesc pack_desc;
     pack_desc.blend_enabled = false;
 
     Texture2D<ktm::fvec4> pack_out_color = shadow_map_image;
@@ -441,20 +441,20 @@ void run_example_edsl_shadowmaps()
         scene_out_color << Float4(mix(fogColor,final,fogFactor),1.f);
     };
 
-    Corona::Horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert, shadowmaps_pack_frag, pack_desc);
+    horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert, shadowmaps_pack_frag, pack_desc);
     //pack_rasterizer.outColor = shadow_map_image;
     pack_rasterizer.bind_depth_target(shadow_depth_image);
 
-    Corona::Horizon::RasterizerPipelineDesc scene_desc;
+    horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert, shadowmaps_scene_frag, scene_desc);
+    horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert, shadowmaps_scene_frag, scene_desc);
     //scene_rasterizer.outColor = final_output_image;
     scene_rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(smx_width) / static_cast<float>(smx_height);
     // 原版 相机 (0,60,-105)、垂直角 -0.45 rad（俯视）
@@ -564,8 +564,7 @@ void run_example_edsl_shadowmaps()
         pack_rasterizer.clear_records();
         for (const DrawItem& item : items)
         {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
+            horizon::DrawIndexedParams params;
             params.index_count = item.mesh->index_count;
 
             mvp = to_edsl_matrix((light_view_proj * item.model));
@@ -593,23 +592,22 @@ void run_example_edsl_shadowmaps()
         params1 = ktm::fvec4(shadow_bias, shadow_normal_offset, 1.0f / shadow_map_size, 0.0f);
         for (const DrawItem& item : items)
         {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
+            horizon::DrawIndexedParams params;
             params.index_count = item.mesh->index_count;
 
             model = to_edsl_matrix(item.model); // per-draw；VS 从中计算 mvp/model_view/light_mtx
             scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << pack_rasterizer(shadow_map_size, shadow_map_size)
-                            << scene_rasterizer(smx_width, smx_height)
-                            << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << pack_rasterizer.extent(shadow_map_size, shadow_map_size)
+                            << scene_rasterizer.extent(smx_width, smx_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

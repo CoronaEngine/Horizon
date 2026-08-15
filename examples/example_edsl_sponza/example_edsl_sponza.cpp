@@ -238,20 +238,20 @@ constexpr std::array<uint8_t, 12> ktx1_identifier = {
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
 };
 
-Corona::Horizon::Format ktx_format_from_gl(uint32_t gl_internal_format)
+horizon::Format ktx_format_from_gl(uint32_t gl_internal_format)
 {
     switch (gl_internal_format)
     {
-    case 0x8E8C: return Corona::Horizon::Format::BC7_UNORM;
-    case 0x8E8D: return Corona::Horizon::Format::BC7_UNORM_SRGB;
-    case 0x8058: return Corona::Horizon::Format::RGBA8_UNORM;
-    case 0x8C43: return Corona::Horizon::Format::SRGBA8_UNORM;
+    case 0x8E8C: return horizon::Format::BC7_UNORM;
+    case 0x8E8D: return horizon::Format::BC7_UNORM_SRGB;
+    case 0x8058: return horizon::Format::RGBA8_UNORM;
+    case 0x8C43: return horizon::Format::SRGBA8_UNORM;
     default:
         throw std::runtime_error("Unsupported KTX internal format: " + std::to_string(gl_internal_format));
     }
 }
 
-Corona::Horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path, const std::string& name)
+horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path, const std::string& name)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open())
@@ -302,46 +302,46 @@ Corona::Horizon::HardwareImage create_ktx_texture(const std::filesystem::path& p
         cursor += (4 - (image_size % 4)) % 4;
     }
 
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::texture_2d(
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, ktx_format_from_gl(gl_internal_format),
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
     desc.mip_levels = mip_count;
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
 
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(payload));
+    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(payload));
 
-    Corona::Horizon::HardwareExecutor executor;
-    Corona::Horizon::HardwareStream stream = executor.stream();
+    horizon::HardwareExecutor executor;
+    horizon::HardwareStream stream = executor.stream();
     for (uint32_t mip = 0; mip < mip_count; ++mip)
         stream << image.copy_from(staging, level_offsets[mip], 0, mip);
-    (void)(stream << Corona::Horizon::commit());
+    (void)(stream << horizon::commit());
 
     return image;
 }
 
-Corona::Horizon::HardwareImage create_solid_texture(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+horizon::HardwareImage create_solid_texture(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
                                                     const std::string& name)
 {
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::texture_2d(
-        1, 1, Corona::Horizon::Format::RGBA8_UNORM,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
+        1, 1, horizon::Format::RGBA8_UNORM,
+        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+    horizon::HardwareImage image(desc);
     const std::array<uint8_t, 4> pixel = { r, g, b, a };
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = pixel.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(
+    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(
         staging_desc, std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
-    Corona::Horizon::HardwareExecutor executor;
-    (void)(executor.stream() << image.copy_from(staging, 0, 0, 0) << Corona::Horizon::commit());
+    horizon::HardwareExecutor executor;
+    (void)(executor.stream() << image.copy_from(staging, 0, 0, 0) << horizon::commit());
     return image;
 }
 
@@ -394,26 +394,26 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
 {
     constexpr uint32_t bytes_per_pixel = 8;
 
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::cube(
-        dds.size, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
+        dds.size, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
 
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
+    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
-    Corona::Horizon::HardwareExecutor executor;
-    Corona::Horizon::HardwareStream stream = executor.stream();
+    horizon::HardwareExecutor executor;
+    horizon::HardwareStream stream = executor.stream();
     uint64_t offset = 0;
     for (uint32_t face = 0; face < 6; ++face)
     {
@@ -424,7 +424,7 @@ Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, cons
             offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
         }
     }
-    (void)(stream << Corona::Horizon::commit());
+    (void)(stream << horizon::commit());
 
     return image;
 }
@@ -654,25 +654,25 @@ void run_example_edsl_sponza()
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_callback);
 
-    Corona::Horizon::HardwareBuffer scene_vb =
-        Corona::Horizon::HardwareBuffer::vertex(asset.vertices, "edsl_sponza.scene.vb");
-    Corona::Horizon::HardwareBuffer scene_ib =
-        Corona::Horizon::HardwareBuffer::index(asset.indices, "edsl_sponza.scene.ib");
-    Corona::Horizon::HardwareBuffer quad_vb =
-        Corona::Horizon::HardwareBuffer::vertex(corner_vertices, "edsl_sponza.quad.vb");
-    Corona::Horizon::HardwareBuffer quad_ib =
-        Corona::Horizon::HardwareBuffer::index(corner_indices, "edsl_sponza.quad.ib");
+    horizon::HardwareBuffer scene_vb =
+        horizon::HardwareBuffer::vertex(asset.vertices, "edsl_sponza.scene.vb");
+    horizon::HardwareBuffer scene_ib =
+        horizon::HardwareBuffer::index(asset.indices, "edsl_sponza.scene.ib");
+    horizon::HardwareBuffer quad_vb =
+        horizon::HardwareBuffer::vertex(corner_vertices, "edsl_sponza.quad.vb");
+    horizon::HardwareBuffer quad_ib =
+        horizon::HardwareBuffer::index(corner_indices, "edsl_sponza.quad.ib");
 
     // 材质贴图 + 缺省贴图(白 / 平法线)
-    std::vector<Corona::Horizon::HardwareImage> textures;
+    std::vector<horizon::HardwareImage> textures;
     textures.reserve(asset.texture_names.size());
     for (const std::string& name : asset.texture_names)
         textures.push_back(create_ktx_texture(spz_asset_root / "textures" / name, "edsl_sponza." + name));
 
-    Corona::Horizon::HardwareImage white_texture = create_solid_texture(255, 255, 255, 255, "edsl_sponza.white");
-    Corona::Horizon::HardwareImage flat_normal_texture = create_solid_texture(128, 128, 255, 255, "edsl_sponza.flatn");
+    horizon::HardwareImage white_texture = create_solid_texture(255, 255, 255, 255, "edsl_sponza.white");
+    horizon::HardwareImage flat_normal_texture = create_solid_texture(128, 128, 255, 255, "edsl_sponza.flatn");
 
-    const auto texture_or = [&](int32_t index, Corona::Horizon::HardwareImage& fallback) -> Corona::Horizon::HardwareImage& {
+    const auto texture_or = [&](int32_t index, horizon::HardwareImage& fallback) -> horizon::HardwareImage& {
         if (index < 0 || static_cast<size_t>(index) >= textures.size())
             return fallback;
         return textures[static_cast<size_t>(index)];
@@ -680,62 +680,62 @@ void run_example_edsl_sponza()
 
     // ---- 渲染目标 ----
     const auto rt_usage =
-        Corona::Horizon::ImageUsageFlags::ColorAttachment | Corona::Horizon::ImageUsageFlags::Sampled;
+        horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled;
 
     // RSM(单目标 ×3 共享深度)
-    Corona::Horizon::HardwareImage rsm_depth_map(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.rsm.depth"));
+    horizon::HardwareImage rsm_depth_map(horizon::HardwareImageDesc::texture_2d(
+        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.rsm.depth"));
     rsm_depth_map.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
-    Corona::Horizon::HardwareImage rsm_normal_map(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.rsm.normal"));
+    horizon::HardwareImage rsm_normal_map(horizon::HardwareImageDesc::texture_2d(
+        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.rsm.normal"));
     rsm_normal_map.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-    Corona::Horizon::HardwareImage rsm_flux_map(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.rsm.flux"));
+    horizon::HardwareImage rsm_flux_map(horizon::HardwareImageDesc::texture_2d(
+        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.rsm.flux"));
     rsm_flux_map.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
-    Corona::Horizon::HardwareImage rsm_zbuffer(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        spz_shadow_map_size, spz_shadow_map_size, Corona::Horizon::Format::D32, "edsl_sponza.rsm.z"));
+    horizon::HardwareImage rsm_zbuffer(horizon::HardwareImageDesc::depth_attachment(
+        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::D32, "edsl_sponza.rsm.z"));
     rsm_zbuffer.set_clear_depth(1.0f, 0);
 
     // G-buffer(单目标 ×3 共享深度)
-    Corona::Horizon::HardwareImage gbuffer_albedo(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.gb.albedo"));
+    horizon::HardwareImage gbuffer_albedo(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.gb.albedo"));
     gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
-    Corona::Horizon::HardwareImage gbuffer_normal(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.gb.normal"));
+    horizon::HardwareImage gbuffer_normal(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.gb.normal"));
     gbuffer_normal.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-    Corona::Horizon::HardwareImage gbuffer_depth_val(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.gb.depthval"));
+    horizon::HardwareImage gbuffer_depth_val(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.gb.depthval"));
     gbuffer_depth_val.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
-    Corona::Horizon::HardwareImage gbuffer_zbuffer(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        spz_width, spz_height, Corona::Horizon::Format::D32, "edsl_sponza.gb.z"));
+    horizon::HardwareImage gbuffer_zbuffer(horizon::HardwareImageDesc::depth_attachment(
+        spz_width, spz_height, horizon::Format::D32, "edsl_sponza.gb.z"));
     gbuffer_zbuffer.set_clear_depth(1.0f, 0);
 
     // SSAO / 光照 / HDR / SSR 中间图
-    Corona::Horizon::HardwareImage ssao_raw(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssao.raw"));
+    horizon::HardwareImage ssao_raw(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssao.raw"));
     ssao_raw.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
-    Corona::Horizon::HardwareImage ssao_blurred(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssao.blur"));
+    horizon::HardwareImage ssao_blurred(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssao.blur"));
     ssao_blurred.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage light_buffer(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.light"));
+    horizon::HardwareImage light_buffer(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.light"));
     light_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage hdr_buffer(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.hdr"));
+    horizon::HardwareImage hdr_buffer(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.hdr"));
     hdr_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage ssr_linear_depth(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssr.lin"));
-    Corona::Horizon::HardwareImage ssr_buffer(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.ssr.buf"));
+    horizon::HardwareImage ssr_linear_depth(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssr.lin"));
+    horizon::HardwareImage ssr_buffer(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.ssr.buf"));
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "edsl_sponza.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -743,8 +743,8 @@ void run_example_edsl_sponza()
     const std::filesystem::path env_root = spz_assets_dir / "env";
     const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_irr.dds");
     const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_lod.dds");
-    Corona::Horizon::HardwareImage env_irradiance = create_cubemap_image(irradiance_dds, "edsl_sponza.env.irr");
-    Corona::Horizon::HardwareImage env_radiance = create_cubemap_image(radiance_dds, "edsl_sponza.env.lod");
+    horizon::HardwareImage env_irradiance = create_cubemap_image(irradiance_dds, "edsl_sponza.env.irr");
+    horizon::HardwareImage env_radiance = create_cubemap_image(radiance_dds, "edsl_sponza.env.lod");
 
     // ========================================================================
     // EDSL:公共辅助
@@ -1699,34 +1699,33 @@ void run_example_edsl_sponza()
     // 管线
     // ========================================================================
 
-    Corona::Horizon::RasterizerPipelineDesc geo_desc; // 混合状态一份即可,运行时复制到全部附件
+    horizon::RasterizerPipelineDesc geo_desc; // 混合状态一份即可,运行时复制到全部附件
     geo_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipelineDesc fullscreen_desc;
+    horizon::RasterizerPipelineDesc fullscreen_desc;
     fullscreen_desc.blend_enabled = false;
     fullscreen_desc.depth_test_enabled = false;
     fullscreen_desc.depth_write_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rsm_pipe(rsm_vert, rsm_frag, geo_desc);
+    horizon::RasterizerPipeline rsm_pipe(rsm_vert, rsm_frag, geo_desc);
     rsm_pipe.bind_depth_target(rsm_zbuffer);
 
-    Corona::Horizon::RasterizerPipeline gb_pipe(gb_vert, gb_frag, geo_desc);
+    horizon::RasterizerPipeline gb_pipe(gb_vert, gb_frag, geo_desc);
     gb_pipe.bind_depth_target(gbuffer_zbuffer);
 
-    Corona::Horizon::RasterizerPipeline ssao_pipe(quad_vert, ssao_frag, fullscreen_desc);
-    Corona::Horizon::RasterizerPipeline ssao_blur_pipe(quad_vert, ssao_blur_frag, fullscreen_desc);
-    Corona::Horizon::RasterizerPipeline light_pipe(quad_vert, light_frag, fullscreen_desc);
-    Corona::Horizon::RasterizerPipeline combine_pipe(quad_vert, combine_frag, fullscreen_desc);
-    Corona::Horizon::RasterizerPipeline ssr_lin_pipe(quad_vert, ssr_lin_frag, fullscreen_desc);
-    Corona::Horizon::RasterizerPipeline ssr_trace_pipe(quad_vert, ssr_trace_frag, fullscreen_desc);
-    Corona::Horizon::RasterizerPipeline ssr_composite_pipe(quad_vert, ssr_composite_frag, fullscreen_desc);
+    horizon::RasterizerPipeline ssao_pipe(quad_vert, ssao_frag, fullscreen_desc);
+    horizon::RasterizerPipeline ssao_blur_pipe(quad_vert, ssao_blur_frag, fullscreen_desc);
+    horizon::RasterizerPipeline light_pipe(quad_vert, light_frag, fullscreen_desc);
+    horizon::RasterizerPipeline combine_pipe(quad_vert, combine_frag, fullscreen_desc);
+    horizon::RasterizerPipeline ssr_lin_pipe(quad_vert, ssr_lin_frag, fullscreen_desc);
+    horizon::RasterizerPipeline ssr_trace_pipe(quad_vert, ssr_trace_frag, fullscreen_desc);
+    horizon::RasterizerPipeline ssr_composite_pipe(quad_vert, ssr_composite_frag, fullscreen_desc);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams quad_params;
-    quad_params.index_type = Corona::Horizon::IndexType::UInt32;
+    horizon::DrawIndexedParams quad_params;
     quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
 
     // ---- 相机 / 太阳 / 场景尺度 ----
@@ -1828,10 +1827,10 @@ void run_example_edsl_sponza()
     const MirrorRange mirror_pool_range { 0, 6 };
     const MirrorRange mirror_frame_range { 6, 6 };
 
-    Corona::Horizon::HardwareBuffer mirror_vb =
-        Corona::Horizon::HardwareBuffer::vertex(mirror_vertices, "edsl_sponza.mirror.vb");
-    Corona::Horizon::HardwareBuffer mirror_ib =
-        Corona::Horizon::HardwareBuffer::index(mirror_indices, "edsl_sponza.mirror.ib");
+    horizon::HardwareBuffer mirror_vb =
+        horizon::HardwareBuffer::vertex(mirror_vertices, "edsl_sponza.mirror.vb");
+    horizon::HardwareBuffer mirror_ib =
+        horizon::HardwareBuffer::index(mirror_indices, "edsl_sponza.mirror.ib");
 
     HorizonImGuiLayer ui(window, spz_width, spz_height);
 
@@ -2031,10 +2030,9 @@ void run_example_edsl_sponza()
         rsm_pipe.clear_records();
         gb_pipe.clear_records();
 
-        const auto record_geometry = [&](Corona::Horizon::HardwareBuffer& ib, Corona::Horizon::HardwareBuffer& vb,
+        const auto record_geometry = [&](horizon::HardwareBuffer& ib, horizon::HardwareBuffer& vb,
                                          uint32_t first_index, uint32_t index_count) {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
+            horizon::DrawIndexedParams params;
             params.index_count = index_count;
             params.first_index = first_index;
             rsm_pipe.record(ib, vb, params);
@@ -2099,22 +2097,22 @@ void run_example_edsl_sponza()
         ssr_composite_pipe.clear_records();
         ssr_composite_pipe.record(quad_ib, quad_vb, quad_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rsm_pipe(spz_shadow_map_size, spz_shadow_map_size)
-                            << gb_pipe(spz_width, spz_height)
-                            << ssao_pipe(spz_width, spz_height)
-                            << ssao_blur_pipe(spz_width, spz_height)
-                            << light_pipe(spz_width, spz_height)
-                            << combine_pipe(spz_width, spz_height)
-                            << ssr_lin_pipe(spz_width, spz_height)
-                            << ssr_trace_pipe(spz_width, spz_height)
-                            << ssr_composite_pipe(spz_width, spz_height)
-                            << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << rsm_pipe.extent(spz_shadow_map_size, spz_shadow_map_size)
+                            << gb_pipe.extent(spz_width, spz_height)
+                            << ssao_pipe.extent(spz_width, spz_height)
+                            << ssao_blur_pipe.extent(spz_width, spz_height)
+                            << light_pipe.extent(spz_width, spz_height)
+                            << combine_pipe.extent(spz_width, spz_height)
+                            << ssr_lin_pipe.extent(spz_width, spz_height)
+                            << ssr_trace_pipe.extent(spz_width, spz_height)
+                            << ssr_composite_pipe.extent(spz_width, spz_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
         ++frame_index;
     }
 

@@ -52,25 +52,25 @@ void run_example_edsl()
     GLFWwindow* window = glfwCreateWindow(edsl_width, edsl_height, "Horizon Baseline [EDSL]", nullptr, nullptr);
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
-    Corona::Horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
+    horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        edsl_width, edsl_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        edsl_width, edsl_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_edsl.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(
-        Corona::Horizon::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, Corona::Horizon::Format::D32, "example_edsl.depth"));
+    horizon::HardwareImage depth_image(
+        horizon::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, horizon::Format::D32, "example_edsl.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::HardwareBuffer vertex_buffer = Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
-    Corona::Horizon::HardwareBuffer index_buffer = Corona::Horizon::HardwareBuffer::index(mesh.indices, "example_edsl.index");
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareBuffer vertex_buffer = horizon::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
+    horizon::HardwareBuffer index_buffer = horizon::HardwareBuffer::index(mesh.indices, "example_edsl.index");
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     using namespace EmbeddedShader;
     using namespace ktm;
@@ -92,14 +92,12 @@ void run_example_edsl()
         final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
     };
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
+    horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::DrawIndexedParams draw_params;
-    draw_params.index_type = Corona::Horizon::IndexType::UInt32;
-    draw_params.index_count = static_cast<uint32_t>(mesh.indices.size());
+    horizon::DrawIndexedParams draw_params;
 
     HorizonImGuiLayer ui(window, edsl_width, edsl_height);
 
@@ -121,7 +119,7 @@ void run_example_edsl()
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
 
-    Corona::Horizon::SubmitReceipt render_receipt;
+    horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -158,11 +156,11 @@ void run_example_edsl()
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::commit();
+        render_receipt = render_executor << rasterizer.extent(edsl_width, edsl_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image) << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image) << horizon::commit());
     }
     display_executor.wait_idle(render_receipt);
     glfwDestroyWindow(window);

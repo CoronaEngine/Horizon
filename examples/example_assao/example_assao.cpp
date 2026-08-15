@@ -200,16 +200,16 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    Corona::Horizon::HardwareBuffer vb;
-    Corona::Horizon::HardwareBuffer ib;
+    horizon::HardwareBuffer vb;
+    horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        Corona::Horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
+        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
     };
 }
@@ -258,70 +258,70 @@ void run_example_assao()
     }
 
     // G-buffer 目标（compute 需 Storage）
-    const auto rt_usage = Corona::Horizon::ImageUsageFlags::ColorAttachment |
-                          Corona::Horizon::ImageUsageFlags::Sampled |
-                          Corona::Horizon::ImageUsageFlags::Storage;
-    Corona::Horizon::HardwareImage scene_color_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::RGBA16_FLOAT, rt_usage, "example_assao.color"));
+    const auto rt_usage = horizon::ImageUsageFlags::ColorAttachment |
+                          horizon::ImageUsageFlags::Sampled |
+                          horizon::ImageUsageFlags::Storage;
+    horizon::HardwareImage scene_color_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_assao.color"));
     scene_color_image.set_clear_color(0.3f, 0.45f, 0.6f, 1.0f); // 天空底色
-    Corona::Horizon::HardwareImage normal_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_assao.normal"));
+    horizon::HardwareImage normal_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_assao.normal"));
     normal_image.set_clear_color(0.5f, 0.5f, 1.0f, 1.0f);
-    Corona::Horizon::HardwareImage depth_val_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_assao.depthval"));
+    horizon::HardwareImage depth_val_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::R32_FLOAT, rt_usage, "example_assao.depthval"));
     depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage ao_image_a(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::R32_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled, "example_assao.ao_a"));
-    Corona::Horizon::HardwareImage ao_image_b(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::R32_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled, "example_assao.ao_b"));
+    horizon::HardwareImage ao_image_a(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::R32_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled, "example_assao.ao_a"));
+    horizon::HardwareImage ao_image_b(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::R32_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled, "example_assao.ao_b"));
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_assao.output"));
 
     // 三个几何 pass 各自的深度附件
-    Corona::Horizon::HardwareImage depth_c(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, Corona::Horizon::Format::D32, "example_assao.depth_c"));
+    horizon::HardwareImage depth_c(horizon::HardwareImageDesc::depth_attachment(
+        ao_width, ao_height, horizon::Format::D32, "example_assao.depth_c"));
     depth_c.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage depth_n(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, Corona::Horizon::Format::D32, "example_assao.depth_n"));
+    horizon::HardwareImage depth_n(horizon::HardwareImageDesc::depth_attachment(
+        ao_width, ao_height, horizon::Format::D32, "example_assao.depth_n"));
     depth_n.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage depth_d(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, Corona::Horizon::Format::D32, "example_assao.depth_d"));
+    horizon::HardwareImage depth_d(horizon::HardwareImageDesc::depth_attachment(
+        ao_width, ao_height, horizon::Format::D32, "example_assao.depth_d"));
     depth_d.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc scene_desc;
+    horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline color_rasterizer(assao_scene_vert_glsl, assao_color_frag_glsl, scene_desc);
+    horizon::RasterizerPipeline color_rasterizer(assao_scene_vert_glsl, assao_color_frag_glsl, scene_desc);
     color_rasterizer.outColor = scene_color_image;
     color_rasterizer.bind_depth_target(depth_c);
 
-    Corona::Horizon::RasterizerPipelineDesc normal_desc = scene_desc;
-    Corona::Horizon::RasterizerPipeline normal_rasterizer(assao_scene_vert_glsl, assao_normal_frag_glsl, normal_desc);
+    horizon::RasterizerPipelineDesc normal_desc = scene_desc;
+    horizon::RasterizerPipeline normal_rasterizer(assao_scene_vert_glsl, assao_normal_frag_glsl, normal_desc);
     normal_rasterizer.outNormal = normal_image;
     normal_rasterizer.bind_depth_target(depth_n);
 
-    Corona::Horizon::RasterizerPipelineDesc depth_desc = scene_desc;
-    Corona::Horizon::RasterizerPipeline depthval_rasterizer(assao_scene_vert_glsl, assao_depth_frag_glsl, depth_desc);
+    horizon::RasterizerPipelineDesc depth_desc = scene_desc;
+    horizon::RasterizerPipeline depthval_rasterizer(assao_scene_vert_glsl, assao_depth_frag_glsl, depth_desc);
     depthval_rasterizer.outDepthVal = depth_val_image;
     depthval_rasterizer.bind_depth_target(depth_d);
 
     // compute 管线：generate → blur ×2（ping-pong 用两个实例）→ apply
-    Corona::Horizon::ComputePipeline generate_compute(assao_generate_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline blur_compute_ab(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline blur_compute_ba(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline apply_compute(assao_apply_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline generate_compute(assao_generate_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline blur_compute_ab(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline blur_compute_ba(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline apply_compute(assao_apply_compute_glsl, ktm::uvec3(8, 8, 1));
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(ao_width) / static_cast<float>(ao_height);
     // 相机 (0,1.5,0) 前视稍向下（垂直角 -0.3 rad）、fovy 60°
@@ -341,8 +341,6 @@ void run_example_assao()
     const float p00 = proj[0][0];
     const float p11 = proj[1][1];
 
-    const uint32_t dispatch_x = (ao_width + 7) / 8;
-    const uint32_t dispatch_y = (ao_height + 7) / 8;
 
     HorizonImGuiLayer ui(window, ao_width, ao_height);
 
@@ -386,8 +384,7 @@ void run_example_assao()
 
             // 地面：压扁的 cube
             {
-                Corona::Horizon::DrawIndexedParams params;
-                params.index_type = Corona::Horizon::IndexType::UInt32;
+                horizon::DrawIndexedParams params;
                 params.index_count = ground.index_count;
 
                 const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
@@ -399,8 +396,7 @@ void run_example_assao()
 
             for (const ModelInstance& m : models)
             {
-                Corona::Horizon::DrawIndexedParams params;
-                params.index_type = Corona::Horizon::IndexType::UInt32;
+                horizon::DrawIndexedParams params;
                 params.index_count = m.mesh->index_count;
 
                 const glm::mat4 model = glm::translate(glm::mat4(1.0f), m.position) *
@@ -440,20 +436,20 @@ void run_example_assao()
         apply_compute.pushConsts.outputID = final_output_image.store_descriptor();
         apply_compute.pushConsts.params0 = glm::vec4(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << color_rasterizer(ao_width, ao_height)
-                            << normal_rasterizer(ao_width, ao_height)
-                            << depthval_rasterizer(ao_width, ao_height)
-                            << generate_compute(dispatch_x, dispatch_y, 1)
-                            << blur_compute_ab(dispatch_x, dispatch_y, 1)
-                            << blur_compute_ba(dispatch_x, dispatch_y, 1)
-                            << apply_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << color_rasterizer.extent(ao_width, ao_height)
+                            << normal_rasterizer.extent(ao_width, ao_height)
+                            << depthval_rasterizer.extent(ao_width, ao_height)
+                            << generate_compute.dispatch_extent(ao_width, ao_height)
+                            << blur_compute_ab.dispatch_extent(ao_width, ao_height)
+                            << blur_compute_ba.dispatch_extent(ao_width, ao_height)
+                            << apply_compute.dispatch_extent(ao_width, ao_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

@@ -2,6 +2,7 @@
 #include "hardware_wrapper_vulkan/resource_pool.h"
 #include "horizon.h"
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -141,22 +142,31 @@ namespace Corona::Horizon
         return true;
     }
 
-    ComputePipelineBase& ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
+    ComputePipelineBase& ComputePipelineBase::groups(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z)
     {
+        // set_dispatch 收 uint16_t；公共签名用 uint32_t（与 dispatch_extent 的像素
+        // 尺寸同类型，避免调用方在两个入口间换整型），这里做一次范围检查再窄化。
+        constexpr uint32_t max_groups = std::numeric_limits<uint16_t>::max();
+        if (groups_x > max_groups || groups_y > max_groups || groups_z > max_groups)
+            throw std::out_of_range("ComputePipeline dispatch group count exceeds 65535 per dimension.");
+
         std::shared_ptr<VulkanComputePipeline> impl = pipeline_impl(ResourceBridge::token(*this));
         bind_auto_resources(impl);
-        impl->set_dispatch(x, y, z);
+        impl->set_dispatch(static_cast<uint16_t>(groups_x),
+                           static_cast<uint16_t>(groups_y),
+                           static_cast<uint16_t>(groups_z));
         return *this;
     }
 
-    ComputePipelineBase::DispatchGroups ComputePipelineBase::dispatch_groups(uint32_t width, uint32_t height) const
+    ComputePipelineBase& ComputePipelineBase::dispatch_extent(uint32_t width, uint32_t height)
     {
         const ktm::uvec3 tgs = pipeline_impl(ResourceBridge::token(*this))->resolved_thread_group_size();
         if (tgs.x == 0 || tgs.y == 0)
             throw std::logic_error("ComputePipeline workgroup local size is zero; reflection failed and no override was provided.");
 
-        return { (width + tgs.x - 1u) / tgs.x,
-                 (height + tgs.y - 1u) / tgs.y };
+        return groups((width + tgs.x - 1u) / tgs.x,
+                      (height + tgs.y - 1u) / tgs.y,
+                      1u);
     }
 
     void ComputePipelineBase::record_into(CommandRecorder& recorder)

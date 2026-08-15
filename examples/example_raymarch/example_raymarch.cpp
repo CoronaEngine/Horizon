@@ -66,35 +66,33 @@ void run_example_raymarch()
     GLFWwindow* window = glfwCreateWindow(rm_width, rm_height, "Horizon Raymarch [Vulkan]", nullptr, nullptr);
     glfwSetKeyCallback(window, key_callback);
 
-    Corona::Horizon::HardwareBuffer quad_vb = Corona::Horizon::HardwareBuffer::vertex(quad_vertices, "example_raymarch.vb");
-    Corona::Horizon::HardwareBuffer quad_ib = Corona::Horizon::HardwareBuffer::index(quad_indices, "example_raymarch.ib");
+    horizon::HardwareBuffer quad_vb = horizon::HardwareBuffer::vertex(quad_vertices, "example_raymarch.vb");
+    horizon::HardwareBuffer quad_ib = horizon::HardwareBuffer::index(quad_indices, "example_raymarch.ib");
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        rm_width, rm_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        rm_width, rm_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
+            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
+            horizon::ImageUsageFlags::TransferDst,
         "example_raymarch.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        rm_width, rm_height, Corona::Horizon::Format::D32, "example_raymarch.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        rm_width, rm_height, horizon::Format::D32, "example_raymarch.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(raymarch_vert_glsl, raymarch_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(raymarch_vert_glsl, raymarch_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams quad_params;
-    quad_params.index_type = Corona::Horizon::IndexType::UInt32;
-    quad_params.index_count = static_cast<uint32_t>(quad_indices.size());
+    horizon::DrawIndexedParams quad_params;
 
     constexpr float aspect = static_cast<float>(rm_width) / static_cast<float>(rm_height);
     // 原版左手系：mtxLookAt (0,0,-15)->(0,0,0)、mtxProj fovy 60°
@@ -152,13 +150,13 @@ void run_example_raymarch()
         rasterizer.rmp.light_dir_time = glm::vec4(light_model, time);
         rasterizer.record(quad_ib, quad_vb, quad_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(rm_width, rm_height) << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << rasterizer.extent(rm_width, rm_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

@@ -402,11 +402,16 @@ namespace Corona::Horizon
 
     struct DrawIndexedParams
     {
+        // 0 = 从 first_index 画到索引 buffer 末尾（后端 normalize_draw_params 按
+        // buffer 的 element_count 解析）。只画一段时才需要显式给值。
         uint32_t index_count = 0;
         uint32_t instance_count = 1;
         uint32_t first_index = 0;
         int32_t vertex_offset = 0;
         uint32_t first_instance = 0;
+        // Auto = 按索引 buffer 的 element_size 推断 u16/u32。HardwareBuffer::index()
+        // 由 HardwareIndexType concept 锁死只能是这两者，所以走该工厂建的 buffer
+        // 无需显式指定。仅 from_bytes() 造出的非常规 element_size 才需要覆盖。
         IndexType index_type = IndexType::Auto;
         bool enable_scissor = false;
         ScissorRect scissor{};
@@ -1165,13 +1170,19 @@ namespace Corona::Horizon
 
         ComputePipelineBase& operator=(const ComputePipelineBase& other);
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
-        ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
 
-        // 根据管线自身的 workgroup local size 将像素尺寸换算为 dispatch group 数。
-        // 消除调用方对 local_size 的硬编码依赖（ceil(w/tgs.x), ceil(h/tgs.y)）。
-        // local size 优先取自反射（编译进 shader 的真实值），构造参数仅作反射缺失时的回退。
-        struct DispatchGroups { uint32_t x; uint32_t y; };
-        [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const;
+        // dispatch 规模的两个入口，单位在名字里写明——曾经这两件事都由
+        // `operator()(x,y,z)` 承担，而光栅侧的 `operator()(w,h)` 收的是像素，
+        // 同一个语法两种单位，调用点无法自证。
+        //
+        // groups(): 直接给 workgroup 组数。1D dispatch（组数由元素个数算出，
+        //   与像素无关）用这个。
+        // dispatch_extent(): 给像素尺寸，按管线自身的 workgroup local size 换算
+        //   成组数。local size 优先取自反射（编译进 shader 的真实值），构造参数
+        //   仅作反射缺失时的回退，因此调用方不必（也不该）硬编码 ceil(w/8)——
+        //   shader 改了 local size，手写的除数会静默算错。
+        ComputePipelineBase& groups(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z = 1);
+        ComputePipelineBase& dispatch_extent(uint32_t width, uint32_t height);
 
         [[nodiscard]] explicit operator bool() const noexcept;
 
@@ -1230,7 +1241,9 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(const RasterizerPipelineBase& other);
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
-        RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
+        // 渲染区域，单位像素。原 `operator()(w,h)`——与计算侧的
+        // `operator()(x,y,z)`（组数）语法相同单位不同，故一并具名化。
+        RasterizerPipelineBase& extent(uint32_t width, uint32_t height);
         RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
@@ -1594,6 +1607,14 @@ namespace Corona::Horizon
     }
 
 }
+
+// 官方短别名。`Corona::Horizon::` 在调用点出现上千次，而 using-directive 会把
+// 一百多个名字（Format / CullMode / present ...）全泼进当前作用域。别名只引入
+// 一个名字，且是库名本身，冲突面最小。
+// 需要完全隔离时在 include 前 #define HORIZON_NO_SHORT_NAMESPACE。
+#ifndef HORIZON_NO_SHORT_NAMESPACE
+namespace horizon = Corona::Horizon;
+#endif
 
 template <typename PipelineType>
 template <typename T>
