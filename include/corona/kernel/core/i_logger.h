@@ -1,14 +1,7 @@
 #pragma once
 #include "quill/Logger.h"
 
-#include <string>
-#include <vector>
-
 namespace Corona::Kernel {
-
-// 前向声明
-struct LogEntry;
-class CallbackSink;
 
 /**
  * @brief 日志级别枚举
@@ -77,31 +70,6 @@ class CoronaLogger {
     static quill::Logger* get_logger();
 
     // ========== 回调 Sink 管理 ==========
-
-    /**
-     * @brief 获取全局 CallbackSink 实例
-     *
-     * 首次调用时自动创建并注入到 Logger 的 sinks 列表中。
-     * @return CallbackSink 原始指针（生命周期由日志系统管理）
-     */
-    static CallbackSink* get_callback_sink();
-
-    /**
-     * @brief 便捷方法：拉取所有待处理的日志条目
-     *
-     * 等价于 get_callback_sink()->drain()。
-     * 用于 Python 侧在 update 循环中主动拉取日志。
-     * @return 自上次 drain 以来的所有 LogEntry
-     */
-    static std::vector<LogEntry> drain_logs();
-
-    /**
-     * @brief 设置 CallbackSink 的独立日志级别过滤
-     *
-     * 例如只让 INFO 及以上的日志进入前端队列，避免 TRACE/DEBUG 的大量推送。
-     * @param min_level 最低日志级别
-     */
-    static void set_callback_sink_level(LogLevel min_level);
 
    private:
     CoronaLogger() = delete;

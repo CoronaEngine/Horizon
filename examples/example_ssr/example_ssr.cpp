@@ -180,7 +180,7 @@ void run_example_ssr()
 
     // ---- 管线 ----
     Corona::Horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    geom_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline geom_rasterizer(ssr_geom_vert_glsl, ssr_geom_mrt_frag_glsl, geom_desc);
     geom_rasterizer.outColor      = color_image;
@@ -423,7 +423,7 @@ void run_example_ssr()
         if (pathtrace_mode)
         {
             render_receipt = render_executor.stream() << pathtrace_compute(dispatch_x, dispatch_y, 1)
-                                                      << Corona::Horizon::submit;
+                                                      << Corona::Horizon::commit();
         }
         else
         {
@@ -431,7 +431,7 @@ void run_example_ssr()
                                              << linear_depth_compute(dispatch_x, dispatch_y, 1)
                                              << trace_compute(dispatch_x, dispatch_y, 1)
                                              << composite_compute(dispatch_x, dispatch_y, 1)
-                                             << Corona::Horizon::submit;
+                                             << Corona::Horizon::commit();
         }
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);

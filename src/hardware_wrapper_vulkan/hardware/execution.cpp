@@ -784,6 +784,22 @@ namespace Corona::Horizon
             recorder_(recorder);
     }
 
+    void CopyBufferToImageCommand::record(CommandRecorder& recorder) const
+    {
+        recorder.copy_to_image(BufferRef{ static_cast<const ResourceHandle&>(src) },
+                               ImageRef{ static_cast<const ResourceHandle&>(dst) },
+                               { buffer_offset, image_layer, image_mip },
+                               DeviceMask{ device_mask_bits });
+    }
+
+    void PresentCommand::record(CommandRecorder& recorder) const
+    {
+        recorder.present(displayer.displayer_ref(),
+                         ImageRef{ static_cast<const ResourceHandle&>(image) },
+                         present_device,
+                         allow_cpu_bridge_fallback);
+    }
+
     CommandBatch& CommandBatch::operator<<(StreamCommand command)
     {
         if (command)
@@ -1513,39 +1529,17 @@ namespace Corona::Horizon
             }
 
             auto rasterizerPipeline = draw.pipeline;
-            // desc() 深拷贝整个 RasterizerPipelineDesc（含两份 SPIR-V + 反射表），
-            // 每 draw 一次在压测下是主要开销。条件信息比较不需要 desc，先比较、
-            // 只有真的要 rebuild 时才付这份拷贝。条件相同（或无 pipelineObject，
-            // 此时两边都是默认值）时原本也不会 rebuild，语义不变。
-            const bool vertex_condition_changed =
-                rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info;
-            const bool fragment_condition_changed =
-                rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info;
-            if (vertex_condition_changed || fragment_condition_changed)
+            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info, draw.frag_condition_info))
             {
-                auto desc = rasterizerPipeline->desc();
-                if (desc.pipelineObject)
-                {
-                    auto& vc = desc.pipelineObject->vertex;
-                    auto& fc = desc.pipelineObject->fragment;
-                    if (vertex_condition_changed)
-                        desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
-                    if (fragment_condition_changed)
-                        desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
-
-                    desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless,  draw.vert_condition_info, draw.frag_condition_info);
-                    desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                    rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
-                    // 重建可能销毁旧 VulkanRasterizerPipeline 连带其 VkPipelineLayout，
-                    // 新建的 layout 有可能复用同一句柄值（ABA）。缓存按句柄相等判定，
-                    // 故此处必须整体作废，两个绑定点都清（句柄池是设备级共享的）。
-                    graphics_descriptors.reset();
-                    compute_descriptors.reset();
-                    // rebuild 换掉了 impl 与 layout，memo 里的 pipeline/prepared 全部失效。
-                    draw_cache.pipeline_key = nullptr;
-                    draw_cache.pipeline_impl.reset();
-                    draw_cache.invalidate_prepared();
-                }
+                // 重建可能销毁旧 VulkanRasterizerPipeline 连带其 VkPipelineLayout，
+                // 新建的 layout 有可能复用同一句柄值（ABA）。缓存按句柄相等判定，
+                // 故此处必须整体作废，两个绑定点都清（句柄池是设备级共享的）。
+                graphics_descriptors.reset();
+                compute_descriptors.reset();
+                // rebuild 换掉了 impl 与 layout，memo 里的 pipeline/prepared 全部失效。
+                draw_cache.pipeline_key = nullptr;
+                draw_cache.pipeline_impl.reset();
+                draw_cache.invalidate_prepared();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1692,31 +1686,14 @@ namespace Corona::Horizon
                 throw std::logic_error("DrawIndexedIndirect requires a valid indirect HardwareBuffer.");
 
             auto rasterizerPipeline = draw.pipeline;
-            const bool vertex_condition_changed =
-                rasterizerPipeline->vertex_condition_info() != draw.vert_condition_info;
-            const bool fragment_condition_changed =
-                rasterizerPipeline->fragment_condition_info() != draw.frag_condition_info;
-            if (vertex_condition_changed || fragment_condition_changed)
+            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info, draw.frag_condition_info))
             {
-                auto desc = rasterizerPipeline->desc();
-                if (desc.pipelineObject)
-                {
-                    auto& vc = desc.pipelineObject->vertex;
-                    auto& fc = desc.pipelineObject->fragment;
-                    if (vertex_condition_changed)
-                        desc.vertex_shader.module = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vc->getCompilerOption().enableBindless);
-                    if (fragment_condition_changed)
-                        desc.fragment_shader.module = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
-
-                    desc.pipelineObject->updateAutoBind(vc->getCompilerOption().enableBindless, draw.vert_condition_info, draw.frag_condition_info);
-                    desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                    rasterizerPipeline->rebuild_pipeline(std::move(desc), draw.vert_condition_info, draw.frag_condition_info);
-                    graphics_descriptors.reset();
-                    compute_descriptors.reset();
-                    draw_cache.pipeline_key = nullptr;
-                    draw_cache.pipeline_impl.reset();
-                    draw_cache.invalidate_prepared();
-                }
+                // 同上：layout 句柄可能 ABA 复用，缓存整体作废。
+                graphics_descriptors.reset();
+                compute_descriptors.reset();
+                draw_cache.pipeline_key = nullptr;
+                draw_cache.pipeline_impl.reset();
+                draw_cache.invalidate_prepared();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1926,23 +1903,12 @@ namespace Corona::Horizon
                 }
 
                 auto computePipeline = command.payload.dispatch.pipeline;
-                // 同光栅路径：desc() 深拷贝整个 ComputePipelineDesc（SPIR-V + 反射），
-                // 先比条件、只有要 rebuild 时才付这份拷贝。
-                if (dispatch.comp_condition_info != computePipeline->compute_condition_info())
+                if (computePipeline->sync_shader_conditions(dispatch.comp_condition_info))
                 {
-                    auto desc = computePipeline->desc();
-                    if (desc.pipelineObject)
-                    {
-                        auto& cc = desc.pipelineObject->compute;
-                        desc.compute_shader.module = cc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, cc->getCompilerOption().enableBindless);
-                        desc.pipelineObject->updateAutoBind(cc->getCompilerOption().enableBindless, dispatch.comp_condition_info);
-                        desc.auto_bind_entries = desc.pipelineObject->autoBindEntries;
-                        computePipeline->rebuild_pipeline(std::move(desc), dispatch.comp_condition_info);
-                        // 同光栅路径：layout 句柄可能被回收复用，缓存整体作废。
-                        graphics_descriptors.reset();
-                        compute_descriptors.reset();
-                        draw_cache.reset();
-                    }
+                    // 同光栅路径：layout 句柄可能被回收复用，缓存整体作废。
+                    graphics_descriptors.reset();
+                    compute_descriptors.reset();
+                    draw_cache.reset();
                 }
 
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);
@@ -2307,36 +2273,26 @@ namespace Corona::Horizon
     }
 
     HardwareStream::HardwareStream(HardwareExecutor& executor)
-        : executor_(&executor)
+        : executor_(&executor),
+          recorder_(std::make_unique<CommandRecorder>())
     {
     }
 
-    HardwareStream& HardwareStream::operator<<(const StreamCommand& command)
-    {
-        ensure_open();
-        command.record(recorder_);
-        return *this;
-    }
-
-    HardwareStream& HardwareStream::operator<<(const CommandBatch& commands)
-    {
-        ensure_open();
-        for (const StreamCommand& command : commands.commands())
-        {
-            command.record(recorder_);
-        }
-        return *this;
-    }
+    // CommandRecorder 仅在 command_ir.h 完整可见，故析构须在此处out-of-line定义，
+    // 否则例子里 unique_ptr<CommandRecorder> 会在不完整类型上实例化 default_delete。
+    HardwareStream::~HardwareStream() = default;
 
     HardwareStream& HardwareStream::operator<<(ComputePipelineBase& pipeline)
     {
-        return *this << pipeline.command_batch();
+        ensure_open();
+        pipeline.record_into(*recorder_);
+        return *this;
     }
 
     HardwareStream& HardwareStream::operator<<(RasterizerPipelineBase& pipeline)
     {
         ensure_open();
-        pipeline.record_into(recorder_);
+        pipeline.record_into(*recorder_);
         return *this;
     }
 
@@ -2344,7 +2300,7 @@ namespace Corona::Horizon
     {
         ensure_open();
         committed_ = true;
-        return executor_->commit(recorder_.close());
+        return executor_->commit(recorder_->close());
     }
 
     void HardwareStream::ensure_open() const
@@ -2372,6 +2328,13 @@ namespace Corona::Horizon
     }
 
     HardwareStream HardwareExecutor::operator<<(RasterizerPipelineBase& pipeline)
+    {
+        HardwareStream s(*this);
+        s << pipeline;
+        return s;
+    }
+
+    HardwareStream HardwareExecutor::operator<<(ComputePipelineBase& pipeline)
     {
         HardwareStream s(*this);
         s << pipeline;
@@ -2659,15 +2622,24 @@ namespace Corona::Horizon
         ExecutionPlan plan = compiler_->compile(std::move(task), &profile);
         profile.compile_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - compile_start).count();
-        std::vector<SubmissionToken> wait_tokens = consume_pending_waits();
+        std::vector<std::shared_ptr<SubmissionToken>> wait_tokens = consume_pending_waits();
 
+        auto receipt_data = std::make_shared<SubmitReceiptData>();
         SubmitReceipt receipt;
         {
             std::lock_guard lock(mutex_);
             receipt.serial = ++next_submit_serial_;
         }
 
-        receipt.tokens = submit(plan, &receipt.presents, wait_tokens, &profile);
+        // submit 需要的是扁平 span<const SubmissionToken>，把待等 token 解引用成一份
+        // 临时拷贝（数量很小，不构成提交路径热点）。
+        std::vector<SubmissionToken> flat_wait_tokens;
+        flat_wait_tokens.reserve(wait_tokens.size());
+        for (const std::shared_ptr<SubmissionToken>& token : wait_tokens)
+            flat_wait_tokens.push_back(*token);
+
+        receipt_data->tokens = submit(plan, &receipt_data->presents, flat_wait_tokens, &profile);
+        receipt.data = receipt_data;
         profile.total_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - total_start).count();
         record_execution_commit_profile(profile);
@@ -2685,14 +2657,17 @@ namespace Corona::Horizon
 
     HardwareExecutor& HardwareExecutor::wait(const SubmitReceipt& receipt)
     {
+        const auto* data = static_cast<const SubmitReceiptData*>(receipt.data.get());
         std::lock_guard lock(mutex_);
-        pending_waits_.insert(pending_waits_.end(), receipt.tokens.begin(), receipt.tokens.end());
+        for (const SubmissionToken& token : data->tokens)
+            pending_waits_.push_back(std::make_shared<SubmissionToken>(token));
         return *this;
     }
 
     HardwareExecutor& HardwareExecutor::wait_idle(const SubmitReceipt& receipt)
     {
-        for (const SubmissionToken& token : receipt.tokens)
+        const auto* data = static_cast<const SubmitReceiptData*>(receipt.data.get());
+        for (const SubmissionToken& token : data->tokens)
         {
             if (token.value == 0)
             {
@@ -2723,11 +2698,9 @@ namespace Corona::Horizon
         return *this;
     }
 
-    std::vector<SubmissionToken> HardwareExecutor::consume_pending_waits()
+    std::vector<std::shared_ptr<SubmissionToken>> HardwareExecutor::consume_pending_waits()
     {
         std::lock_guard lock(mutex_);
-        std::vector<SubmissionToken> waits = std::move(pending_waits_);
-        pending_waits_.clear();
-        return waits;
+        return std::move(pending_waits_);
     }
 }

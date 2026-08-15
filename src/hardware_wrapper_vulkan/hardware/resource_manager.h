@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "hardware_wrapper_vulkan/resource_pool.h"
+#include "hardware_wrapper_vulkan/hardware/command_ir.h"
 
 namespace Corona::Horizon
 {

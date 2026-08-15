@@ -1,7 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -14,8 +12,8 @@
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -25,7 +23,6 @@
 #include "Codegen/RasterizedPipelineObject.h"
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
-#include "Compiler/ShaderLanguageConverter.h"
 
 #ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
 #if defined(NDEBUG)
@@ -75,16 +72,6 @@ namespace Corona::Horizon
     private:
         friend struct ResourceBridge;
 
-        void set_resource(std::shared_ptr<IResourceRef> resource) noexcept
-        {
-            resource_ = std::move(resource);
-        }
-
-        [[nodiscard]] std::shared_ptr<IResourceRef> resource_ref() const noexcept
-        {
-            return resource_;
-        }
-
         std::shared_ptr<IResourceRef> resource_{};
     };
 
@@ -92,17 +79,17 @@ namespace Corona::Horizon
     {
         static void set(ResourceHandle& owner, std::shared_ptr<IResourceRef> resource) noexcept
         {
-            owner.set_resource(std::move(resource));
+            owner.resource_ = std::move(resource);
         }
 
         [[nodiscard]] static std::shared_ptr<IResourceRef> token(const ResourceHandle& owner) noexcept
         {
-            return owner.resource_ref();
+            return owner.resource_;
         }
 
         [[nodiscard]] static std::shared_ptr<const IResourceRef> keep_alive(const ResourceHandle& owner) noexcept
         {
-            return std::static_pointer_cast<const IResourceRef>(owner.resource_ref());
+            return owner.resource_;
         }
     };
 
@@ -284,12 +271,6 @@ namespace Corona::Horizon
 
     struct ExternalMemoryHandle
     {
-#if defined(_WIN32) || defined(_WIN64)
-        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueWin32;
-#else
-        static constexpr ExternalMemoryHandleType platform_type = ExternalMemoryHandleType::OpaqueFd;
-#endif
-
         ExternalMemoryHandleType type = ExternalMemoryHandleType::None;
 
         void* handle = nullptr;
@@ -374,17 +355,6 @@ namespace Corona::Horizon
         uint32_t depth = 1;
     };
 
-    struct ImageSubresource
-    {
-        uint32_t layer = 0;
-        uint32_t mip = 0;
-
-        [[nodiscard]] constexpr uint32_t index(uint32_t mip_levels) const noexcept
-        {
-            return layer * mip_levels + mip;
-        }
-    };
-
     struct ImageSubresourceRange
     {
         static constexpr uint32_t remaining = ~0u;
@@ -409,20 +379,6 @@ namespace Corona::Horizon
                 .mip_count = 1,
             };
         }
-
-        [[nodiscard]] constexpr bool is_single() const noexcept
-        {
-            return layer_count == 1 && mip_count == 1;
-        }
-    };
-
-    struct ImageSubresourceLayout
-    {
-        uint64_t byte_offset = 0;
-        uint64_t byte_size = 0;
-        uint64_t row_pitch = 0;
-        uint64_t slice_pitch = 0;
-        ImageExtent extent {};
     };
 
     // ================================================================
@@ -484,19 +440,6 @@ namespace Corona::Horizon
     // Pipeline Enums
     // ================================================================
 
-    enum class PipelineShaderStage : uint16_t
-    {
-        Compute = 0,
-        Vertex = 1,
-        Fragment = 2,
-        RayGeneration = 3,
-        Miss = 4,
-        ClosestHit = 5,
-        AnyHit = 6,
-        Intersection = 7,
-        Callable = 8,
-    };
-
     enum class PrimitiveTopology : uint16_t
     {
         TriangleList = 0,
@@ -531,18 +474,6 @@ namespace Corona::Horizon
         NotEqual,
         GreaterOrEqual,
         Always,
-    };
-
-    enum class StencilOp : uint16_t
-    {
-        Keep = 0,
-        Zero,
-        Replace,
-        IncrementAndClamp,
-        DecrementAndClamp,
-        Invert,
-        IncrementAndWrap,
-        DecrementAndWrap,
     };
 
     enum class BlendFactor : uint16_t
@@ -607,97 +538,16 @@ namespace Corona::Horizon
 
 
     // ================================================================
-    // Pipeline State
+    // Execution Front End
+    // ----------------------------------------------------------------
+    // 光栅/深度/混合/多重采样状态一律直接摊在 RasterizerPipelineDesc 上，不再分组成
+    // 独立的 *StateDesc。
     // ================================================================
 
-    struct RasterizerStateDesc
-    {
-        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-        PolygonFillMode fill_mode = PolygonFillMode::Fill;
-        CullMode cull_mode = CullMode::None;
-
-        bool depth_clamp_enabled = false;
-        bool rasterizer_discard_enabled = false;
-
-        float line_width = 1.0f;
-    };
-
-    struct DepthStencilOpDesc
-    {
-        StencilOp fail_op = StencilOp::Keep;
-        StencilOp pass_op = StencilOp::Keep;
-        StencilOp depth_fail_op = StencilOp::Keep;
-        CompareOp compare_op = CompareOp::Always;
-    };
-
-    struct DepthStencilStateDesc
-    {
-        bool depth_test_enabled = true;
-        bool depth_write_enabled = true;
-        CompareOp depth_compare_op = CompareOp::LessOrEqual;
-
-        bool stencil_test_enabled = false;
-        DepthStencilOpDesc front;
-        DepthStencilOpDesc back;
-        uint32_t stencil_read_mask = 0xff;
-        uint32_t stencil_write_mask = 0xff;
-        uint32_t stencil_reference = 0;
-    };
-
-    struct BlendAttachmentDesc
-    {
-        bool blend_enabled = false;
-
-        BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
-        BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
-        BlendOp color_blend_op = BlendOp::Add;
-
-        BlendFactor src_alpha_blend_factor = BlendFactor::One;
-        BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
-        BlendOp alpha_blend_op = BlendOp::Add;
-
-        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
-    };
-
-    struct MultisampleStateDesc
-    {
-        SampleCount sample_count = SampleCount::Count1;
-        bool sample_shading_enabled = false;
-        float min_sample_shading = 1.0f;
-    };
-
-
-
-    // ================================================================
-    // Ray Tracing
-    // ================================================================
-
-    // ================================================================
-    // Validation
-    // ================================================================
-
-    enum class HardwareValidationMode : uint8_t
-    {
-        Disabled,
-        Log,
-        Throw,
-    };
-
-
-    // ================================================================
-    // Forward Declarations
-    // ================================================================
-
-    struct HardwareValidationConfig;
     class HardwareBuffer;
     class HardwareImage;
 
     struct CopyBufferToImageCommand;
-
-    class CommandBatch;
-
-    class PipelineBindingScope;
-    class ResourceProxy;
 
     class ComputePipelineBase;
     class RasterizerPipelineBase;
@@ -709,68 +559,17 @@ namespace Corona::Horizon
     class HardwareExecutor;
     class HardwareDisplayer;
 
-    // ================================================================
-    // Device memory query (VRAM capacity)
-    // ================================================================
-
-    struct BindingSlot;
-
-    // ================================================================
-    // Execution / Command Public Types
-    // ================================================================
-    //
-    // 执行 / 命令 IR 层（QueueCapability、DeviceMask、CommandIR、
-    // RecordedTask、SubmissionToken、SubmitReceipt、CommandRecorder 等）。
-    // 原 horizon_execution.h 已并入本文件（内部 / 高级 API）。普通用户
-    // 无需直接接触这些类型；下方的资源 / 管线 / 命令门面会在内部使用它们。
-    // ================================================================
-
-    class RasterizerPipelineBase;
-    class ComputePipelineBase;
-
-    class Queue;
+    // 执行层与资源引用类型由内部 command IR 头定义；这里只保留公共 API 签名里
+    // 按值出现的三个叶子类型，以及 recorder / pipeline / executor 依赖的前置声明。
     class CommandRecorder;
+    class Queue;
     class ExecutionCompiler;
+    class VulkanCommandEncoder;
     struct ExecutionPlan;
-    class SubmissionSync;
-
-    enum class QueueCapability
-    {
-        Graphics,
-        Compute,
-        Transfer,
-        Present
-    };
-
-    enum class AccessKind
-    {
-        Read,
-        Write,
-        ReadWrite
-    };
-
-    enum class CommandOp
-    {
-        CopyBuffer,
-        CopyBufferToImage,
-        Dispatch,
-        BeginRendering,
-        EndRendering,
-        DrawIndexed,
-        DrawIndexedBatch,
-        DrawIndexedIndirect,
-        Present,
-        KeepAlive,
-        CopyImage
-    };
-
-    enum class FeatureRequirement
-    {
-        TimelineSemaphore,
-        Synchronization2,
-        DeferredHostOperations,
-        DeviceGroup
-    };
+    enum class QueueCapability;
+    struct RecordedTask;
+    struct PresentResult;
+    struct SubmissionToken;
 
     struct DeviceId
     {
@@ -782,315 +581,19 @@ namespace Corona::Horizon
         }
     };
 
-    struct DeviceMask
-    {
-        uint32_t bits { 1 };
-    };
-
-    struct QueueId
-    {
-        DeviceId device {};
-        uint32_t family_index { 0 };
-        uint32_t queue_index { 0 };
-        QueueCapability capability { QueueCapability::Transfer };
-    };
-
-    struct BufferRef
-    {
-        ResourceHandle handle {};
-    };
-
-    struct ImageRef
-    {
-        ResourceHandle handle {};
-    };
-
     struct DisplayerRef
     {
         std::uintptr_t id { 0 };
     };
 
-    struct CopyRegion
-    {
-        uint64_t src_offset { 0 };
-        uint64_t dst_offset { 0 };
-        uint64_t size { 0 };
-    };
 
-    struct BufferImageCopyRegion
-    {
-        uint64_t buffer_offset { 0 };
-        uint32_t image_layer { 0 };
-        uint32_t image_mip { 0 };
-    };
-
-    struct ImageCopyRegion
-    {
-        uint32_t src_layer { 0 };
-        uint32_t dst_layer { 0 };
-        uint32_t src_mip { 0 };
-        uint32_t dst_mip { 0 };
-    };
-
-    struct ResourceUse
-    {
-        ResourceHandle handle {};
-        AccessKind access { AccessKind::Read };
-        uint64_t stages { 0 };
-    };
-
-    enum class DispatchBindingKind
-    {
-        StorageBuffer,
-        StorageImage
-    };
-
-    struct DispatchResourceBinding
-    {
-        uint32_t set { 0 };
-        uint32_t binding { 0 };
-        ResourceHandle resource {};
-        DispatchBindingKind kind { DispatchBindingKind::StorageBuffer };
-        AccessKind access { AccessKind::ReadWrite };
-    };
-
-    struct UniformBufferBindingData
-    {
-        uint32_t set { 0 };
-        uint32_t binding { 0 };
-        std::vector<std::byte> data;
-        // 持久化 GPU buffer，在管线初始化时通过反射创建一次，之后只 write_bytes。
-        // 使用 ResourceHandle（基类）存储句柄，避免与 horizon.h 的循环依赖。
-        ResourceHandle gpu_buffer {};
-    };
-
-    struct DispatchDesc
-    {
-        ComputePipelineBase* pipeline;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo comp_condition_info;
-
-        uint32_t groups_x { 1 };
-        uint32_t groups_y { 1 };
-        uint32_t groups_z { 1 };
-        std::vector<DispatchResourceBinding> bindings;
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
-        std::string debug_label;
-    };
-
-    struct RenderingDesc
-    {
-        ImageRef color {};
-        std::array<ImageRef, 3> extra_colors {};
-        ImageRef depth {};
-        uint32_t width { 0 };
-        uint32_t height { 0 };
-        bool clear_color { false };
-        bool clear_depth { false };
-    };
-
-    struct DrawIndexedDesc
-    {
-        RasterizerPipelineBase* pipeline {};
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
-
-        uint32_t index_count { 0 };
-        uint32_t instance_count { 1 };
-        uint32_t first_index { 0 };
-        int32_t vertex_offset { 0 };
-        uint32_t first_instance { 0 };
-        IndexType index_type { IndexType::Auto };
-        bool enable_scissor { false };
-        ScissorRect scissor {};
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
-        std::string debug_label;
-    };
-
-    struct DrawIndexedBatchItem
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        DrawIndexedDesc draw {};
-    };
-
-    struct DrawIndexedBatchDesc
-    {
-        std::vector<DrawIndexedBatchItem> draws;
-    };
-
-    struct DrawIndexedIndirectDesc
-    {
-        RasterizerPipelineBase* pipeline {};
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
-
-        uint64_t indirect_offset { 0 };
-        uint32_t draw_count { 0 };
-        // 0 means sizeof(DrawIndexedIndirectCommand).
-        uint32_t stride { 0 };
-        IndexType index_type { IndexType::Auto };
-        bool enable_scissor { false };
-        ScissorRect scissor {};
-        std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
-        std::string debug_label;
-    };
-
-    struct PresentDesc
-    {
-        DisplayerRef displayer {};
-        ImageRef image {};
-        ImageRef swapchain_image {};
-        DeviceId present_device {};
-        bool allow_cpu_bridge_fallback { true };
-    };
-
-    struct CommandPayload
-    {
-        CopyRegion copy {};
-        ImageCopyRegion image_copy {};
-        BufferImageCopyRegion buffer_image_copy {};
-        DispatchDesc dispatch {};
-        RenderingDesc rendering {};
-        DrawIndexedDesc draw_indexed {};
-        DrawIndexedBatchDesc draw_indexed_batch {};
-        DrawIndexedIndirectDesc draw_indexed_indirect {};
-        PresentDesc present {};
-    };
-
-    struct CommandIR
-    {
-        CommandOp op { CommandOp::CopyBuffer };
-        DeviceMask devices {};
-        QueueCapability queue { QueueCapability::Transfer };
-        std::vector<ResourceUse> resources;
-        CommandPayload payload {};
-        std::shared_ptr<void> keep_alive {};
-        uint64_t sequence { 0 };
-        std::string debug_label;
-    };
-
-    template<typename Visitor>
-    [[nodiscard]] bool visit_indexed_draws(const CommandIR& command, Visitor&& visitor)
-    {
-        if (command.op == CommandOp::DrawIndexed)
-        {
-            const DrawIndexedDesc& draw = command.payload.draw_indexed;
-            const BufferRef index = command.resources.size() > 0
-                ? BufferRef{command.resources[0].handle}
-                : BufferRef{};
-            const BufferRef vertex = command.resources.size() > 1
-                ? BufferRef{command.resources[1].handle}
-                : BufferRef{};
-            std::forward<Visitor>(visitor)(index, vertex, draw);
-            return true;
-        }
-        if (command.op == CommandOp::DrawIndexedBatch)
-        {
-            for (const DrawIndexedBatchItem& item : command.payload.draw_indexed_batch.draws)
-                visitor(item.index, item.vertex, item.draw);
-            return true;
-        }
-        return false;
-    }
-
-    struct RequirementSet
-    {
-        bool graphics { false };
-        bool compute { false };
-        bool transfer { false };
-        bool timeline_semaphore { true };
-        bool synchronization_2 { true };
-        bool deferred_host_operations { false };
-        bool device_group { false };
-    };
-
-    struct RecordedTask
-    {
-        std::vector<CommandIR> commands;
-        RequirementSet requirements {};
-    };
-
-    struct ResourceBarrier
-    {
-        std::uintptr_t resource_id { 0 };
-        AccessKind before { AccessKind::Read };
-        AccessKind after { AccessKind::Read };
-    };
-
-    enum class PresentStatus
-    {
-        None,
-        Presented,
-        Suboptimal,
-        OutOfDate,
-        Skipped
-    };
-
-    struct PresentResult
-    {
-        PresentStatus status { PresentStatus::None };
-        DisplayerRef displayer {};
-        ImageRef image {};
-        std::string message;
-    };
-
-    struct CrossDeviceDependency
-    {
-        std::uintptr_t resource_id { 0 };
-        DeviceId producer {};
-        DeviceId consumer {};
-        bool present_cpu_bridge_fallback { false };
-        bool imported_timeline_required { false };
-    };
-
-    struct SubmissionDependency
-    {
-        size_t producer { 0 };
-        size_t consumer { 0 };
-        std::uintptr_t resource_id { 0 };
-    };
-
-    class SubmissionKeepAlive
-    {
-    public:
-        void add_resource(std::shared_ptr<const IResourceRef> resource);
-        void add_object(std::shared_ptr<void> object);
-        void clear() noexcept;
-
-    private:
-        std::vector<std::shared_ptr<const IResourceRef>> resources_;
-        std::unordered_set<std::uintptr_t> resource_ids_;
-        std::vector<std::shared_ptr<void>> objects_;
-    };
-
-    struct SubmissionToken
-    {
-        DeviceId device {};
-        QueueId queue {};
-        uint64_t value { 0 };
-        std::shared_ptr<const SubmissionSync> sync {};
-
-        [[nodiscard]] bool has_sync() const noexcept { return sync != nullptr; }
-    };
-
-    struct QueueSubmission
-    {
-        std::shared_ptr<class TrackedCommandBuffer> command_buffer;
-        SubmissionKeepAlive keep_alive;
-        std::string debug_summary;
-    };
-
+    // SubmitReceipt 的完整载荷（SubmissionToken / PresentResult 序列）由内部
+    // SubmitReceiptData 持有，经 shared_ptr<const void> 不透明传递。公共用户只
+    // 能读 serial、并把它当作 wait / wait_idle 的参数，不触达内部 token。
     struct SubmitReceipt
     {
         uint64_t serial { 0 };
-        std::vector<SubmissionToken> tokens;
-        std::vector<PresentResult> presents;
+        std::shared_ptr<const void> data {};
     };
 
     struct CommitCommand
@@ -1098,82 +601,6 @@ namespace Corona::Horizon
     };
 
     [[nodiscard]] CommitCommand commit() noexcept;
-
-    class StreamCommand
-    {
-    public:
-        StreamCommand() = default;
-        explicit StreamCommand(std::function<void(CommandRecorder&)> recorder);
-
-        // 任何提供 record(CommandRecorder&) const 的值命令都可隐式转成 StreamCommand。
-        // 这是唯一的折叠点：此前 horizon.h 里 9 个值命令各自手抄一遍
-        // stream_command() + operator StreamCommand()，做的都是这同一件事。
-        //
-        // 排除 StreamCommand 自身是必须的：它自己也有 record(CommandRecorder&) const，
-        // 不排除则该模板会与拷贝/移动构造函数竞争。
-        template <typename Command>
-            requires(!std::is_same_v<std::remove_cvref_t<Command>, StreamCommand> &&
-                     requires(const std::remove_cvref_t<Command>& command, CommandRecorder& recorder) {
-                         command.record(recorder);
-                     })
-        StreamCommand(Command&& command)
-            : recorder_([command = std::remove_cvref_t<Command>(std::forward<Command>(command))](
-                            CommandRecorder& recorder) { command.record(recorder); })
-        {
-        }
-
-        void record(CommandRecorder& recorder) const;
-        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(recorder_); }
-
-    private:
-        std::function<void(CommandRecorder&)> recorder_ {};
-    };
-
-    class CommandBatch
-    {
-    public:
-        CommandBatch& operator<<(StreamCommand command);
-        [[nodiscard]] const std::vector<StreamCommand>& commands() const noexcept { return commands_; }
-
-    private:
-        std::vector<StreamCommand> commands_;
-    };
-
-    class CommandRecorder
-    {
-    public:
-        CommandRecorder() = default;
-
-        void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
-        void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
-        void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
-        void dispatch(DispatchDesc desc, DeviceMask devices = {});
-        void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
-        void end_rendering(DeviceMask devices = {});
-        void draw_indexed(BufferRef index, BufferRef vertex, DrawIndexedDesc desc, DeviceMask devices = {});
-        void draw_indexed_batch(DrawIndexedBatchDesc batch, DeviceMask devices = {});
-        void draw_indexed_indirect(BufferRef index,
-                                   BufferRef vertex,
-                                   BufferRef indirect,
-                                   DrawIndexedIndirectDesc desc,
-                                   DeviceMask devices = {});
-        void present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true);
-        void keep_alive(std::shared_ptr<void> object);
-        [[nodiscard]] RecordedTask close();
-
-    private:
-        void ensure_open() const;
-        void mark_requirement(QueueCapability capability);
-        void mark_requirement(FeatureRequirement feature);
-        [[nodiscard]] uint64_t next_sequence() noexcept;
-        void mark_device_requirements(DeviceMask devices);
-
-        bool closed_ { false };
-        uint64_t next_sequence_ { 0 };
-        std::vector<CommandIR> commands_;
-        RequirementSet requirements_ {};
-    };
-
 
     class HardwareDisplayer
     {
@@ -1205,19 +632,35 @@ namespace Corona::Horizon
         HardwareStream(HardwareStream&&) noexcept = default;
         HardwareStream& operator=(HardwareStream&&) noexcept = default;
 
-        HardwareStream& operator<<(const StreamCommand& command);
-        HardwareStream& operator<<(const CommandBatch& commands);
-        // 便捷门面：pipeline 可直接流入，内部等价于 `<< pipeline.command_batch()`。
-        // 高级/测试路径仍可显式写 `<< pipeline(...).command_batch()`。
+        ~HardwareStream();
+
+        // 便捷门面：pipeline 直接录进当前 recorder。
         HardwareStream& operator<<(ComputePipelineBase& pipeline);
         HardwareStream& operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
+
+        // 值命令门面（CopyBufferToImageCommand、PresentCommand 等）直接录进 recorder。
+        template <typename Command>
+            requires(!std::is_same_v<std::remove_cvref_t<Command>, CommitCommand> &&
+                     !std::is_same_v<std::remove_cvref_t<Command>, ComputePipelineBase> &&
+                     !std::is_same_v<std::remove_cvref_t<Command>, RasterizerPipelineBase> &&
+                     requires(const std::remove_cvref_t<Command>& cmd, CommandRecorder& rec) {
+                         cmd.record(rec);
+                     })
+        HardwareStream& operator<<(Command&& command)
+        {
+            ensure_open();
+            command.record(*recorder_);
+            return *this;
+        }
 
     private:
         void ensure_open() const;
 
         HardwareExecutor* executor_ {};
-        CommandRecorder recorder_ {};
+        // CommandRecorder 定义在内部 command_ir.h；公共头只反声明，故按值成员改为
+        // 独占指针，实例化与 reset 都发生在硬件层。
+        std::unique_ptr<CommandRecorder> recorder_ {};
         bool committed_ { false };
     };
 
@@ -1236,7 +679,9 @@ namespace Corona::Horizon
 
         [[nodiscard]] HardwareStream stream();
         // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
+        // 光栅与计算两条路径对称提供，否则 `executor << compute` 会莫名编译不过。
         [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
+        [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
@@ -1246,34 +691,15 @@ namespace Corona::Horizon
                                                           std::vector<PresentResult>* present_results,
                                                           std::span<const SubmissionToken> wait_tokens,
                                                           struct ExecutionCommitProfileSample* profile = nullptr) const;
-        [[nodiscard]] std::vector<SubmissionToken> consume_pending_waits();
+        [[nodiscard]] std::vector<std::shared_ptr<SubmissionToken>> consume_pending_waits();
 
         std::shared_ptr<ExecutionCompiler> compiler_;
         QueueResolver queue_resolver_ {};
         mutable std::mutex mutex_;
         uint64_t next_submit_serial_ { 0 };
-        std::vector<SubmissionToken> pending_waits_;
+        // SubmissionToken 定义在内部 command_ir.h，公共头不可按值持有，故用 shared_ptr。
+        std::vector<std::shared_ptr<SubmissionToken>> pending_waits_;
     };
-
-    // 隐式提交标记：`stream << pipeline << H::submit` 等价于 `<< H::commit()`。
-    // 复用既有的 `operator<<(CommitCommand)`，不引入新算子。
-    inline constexpr CommitCommand submit {};
-
-
-
-    // ================================================================
-    // Validation
-    // ================================================================
-
-    struct HardwareValidationConfig
-    {
-        HardwareValidationMode mode = HardwareValidationMode::Throw;
-    };
-
-    void set_hardware_validation_config(HardwareValidationConfig config);
-    [[nodiscard]] HardwareValidationConfig get_hardware_validation_config();
-    [[nodiscard]] bool is_hardware_validation_enabled();
-
 
 
     // ================================================================
@@ -1372,47 +798,24 @@ namespace Corona::Horizon
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
 
-        template <HardwareTransferable T>
-        [[nodiscard]] bool write(std::span<const T> data, uint64_t byte_offset = 0) const
-        {
-            return write_bytes(std::as_bytes(data), byte_offset);
-        }
-
         [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
-
-        template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBuffer vertex(std::span<const T> data, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name)), std::as_bytes(data));
-        }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareTransferable<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer vertex(const Range& data, std::string name = {})
         {
-            return vertex<std::ranges::range_value_t<Range>>(
-                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name));
-        }
-
-        template <HardwareIndexType T>
-        [[nodiscard]] static HardwareBuffer index(std::span<const T> data, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name)), std::as_bytes(data));
+            using T = std::ranges::range_value_t<Range>;
+            return HardwareBuffer(HardwareBufferDesc::vertex<T>(data.size(), std::move(name)),
+                                  std::as_bytes(std::span<const T>(std::ranges::data(data), std::ranges::size(data))));
         }
 
         template <std::ranges::contiguous_range Range>
             requires std::ranges::sized_range<Range> && HardwareIndexType<std::ranges::range_value_t<Range>>
         [[nodiscard]] static HardwareBuffer index(const Range& data, std::string name = {})
         {
-            return index<std::ranges::range_value_t<Range>>(
-                std::span<const std::ranges::range_value_t<Range>>(std::ranges::data(data), std::ranges::size(data)),
-                std::move(name));
-        }
-
-        [[nodiscard]] static HardwareBuffer indirect(std::span<const DrawIndexedIndirectCommand> commands, std::string name = {})
-        {
-            return HardwareBuffer(HardwareBufferDesc::indirect(commands.size(), std::move(name)), std::as_bytes(commands));
+            using T = std::ranges::range_value_t<Range>;
+            return HardwareBuffer(HardwareBufferDesc::index<T>(data.size(), std::move(name)),
+                                  std::as_bytes(std::span<const T>(std::ranges::data(data), std::ranges::size(data))));
         }
 
         template <std::ranges::contiguous_range Range>
@@ -1420,9 +823,8 @@ namespace Corona::Horizon
                      std::same_as<std::remove_cvref_t<std::ranges::range_value_t<Range>>, DrawIndexedIndirectCommand>
         [[nodiscard]] static HardwareBuffer indirect(const Range& commands, std::string name = {})
         {
-            return indirect(
-                std::span<const DrawIndexedIndirectCommand>(std::ranges::data(commands), std::ranges::size(commands)),
-                std::move(name));
+            return HardwareBuffer(HardwareBufferDesc::indirect(commands.size(), std::move(name)),
+                                  std::as_bytes(std::span<const DrawIndexedIndirectCommand>(std::ranges::data(commands), std::ranges::size(commands))));
         }
 
         [[nodiscard]] uint32_t store_descriptor() const;
@@ -1528,20 +930,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept { return ResourceHandle::operator bool(); }
         [[nodiscard]] HardwareImage subresource(uint32_t layer_index, uint32_t mip_index) const;
-        bool write_subresource_bytes(uint32_t layer_index, uint32_t mip_index, std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
         bool write_bytes(std::span<const std::byte> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const;
-
-        template <HardwareTransferable T>
-        bool write_subresource(uint32_t layer_index, uint32_t mip_index, std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return write_subresource_bytes(layer_index, mip_index, std::as_bytes(data), row_pitch, slice_pitch);
-        }
-
-        template <HardwareTransferable T>
-        bool write(std::span<const T> data, uint64_t row_pitch = 0, uint64_t slice_pitch = 0) const
-        {
-            return write_bytes(std::as_bytes(data), row_pitch, slice_pitch);
-        }
 
         void set_clear_color(float r, float g, float b, float a);
         void set_clear_depth(float depth, uint32_t stencil = 0);
@@ -1563,81 +952,67 @@ namespace Corona::Horizon
     // Pipeline Descriptors
     // ================================================================
 
-    struct PipelineShaderDesc
+    // 管线持有的 shader 载荷：编译产物 + EDSL 管线对象 + auto-bind 表。
+    // 与 *PipelineDesc 分家的理由：Desc 是调用方写的渲染状态，按值传来传去；
+    // shader 侧是 SPIR-V + 反射表，深拷贝很贵。分开后 desc() 只搬状态。
+    struct ComputePipelineShaders
     {
-        PipelineShaderStage stage;
-        EmbeddedShader::ShaderCodeModule module;
-
-        PipelineShaderDesc(PipelineShaderStage stage, EmbeddedShader::ShaderCodeModule module) : stage(stage), module(std::move(module)) {}
+        EmbeddedShader::ShaderCodeModule compute;
+        std::shared_ptr<EmbeddedShader::ComputePipelineObject> object;
+        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
     };
 
-    struct EdslPipelineOptions
+    struct RasterizerPipelineShaders
     {
-        EmbeddedShader::CompilerOption compiler;
-        bool auto_bind = true;
+        EmbeddedShader::ShaderCodeModule vertex;
+        EmbeddedShader::ShaderCodeModule fragment;
+        std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object;
+        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
     };
 
     struct ComputePipelineDesc
     {
-        PipelineShaderDesc compute_shader;
-        std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipelineObject;
+        // 反射缺失时的 workgroup local size 回退值，见 compute_pipeline.cpp 的解析逻辑。
+        // 这里没有 debug_name：和 RasterizerPipelineDesc 不同，计算管线的调试名全仓
+        // 无写入点，恒为 "horizon.compute_pipeline"，字段已删。
         ktm::uvec3 thread_group_size = { 1, 1, 1 };
-        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
-        std::string debug_name;
-
-        ComputePipelineDesc(PipelineShaderDesc shader, ktm::uvec3 numthreads = { 1, 1, 1 }) : compute_shader(std::move(shader)), thread_group_size(numthreads)
-        {
-            if (compute_shader.stage != PipelineShaderStage::Compute)
-                throw std::invalid_argument("ComputePipelineDesc requires a compute shader.");
-        }
-
-        // 解析真正生效的 workgroup local size。
-        // 优先取反射(entryPointInfoPool 里 compute entry 的 numthreads)——这是编译进 shader 的
-        // 真实值(源码路径下也正确);反射缺失(旧 hardcode 表未序列化该字段)时回退到 thread_group_size
-        // 覆盖值(EDSL 由构造参数喂入,与 codegen 一致)。
-        [[nodiscard]] ktm::uvec3 resolved_thread_group_size() const
-        {
-            for (const auto& entry : compute_shader.module.shaderResources.entryPointInfoPool)
-            {
-                if (entry.stage != EmbeddedShader::ShaderStage::ComputeShader)
-                    continue;
-                if (entry.numthreads.x != 0 && entry.numthreads.y != 0 && entry.numthreads.z != 0)
-                    return entry.numthreads;
-            }
-            return thread_group_size;
-        }
-    };
-
-    struct BlendStateDesc
-    {
-        static constexpr BlendAttachmentDesc opaque_attachment() noexcept
-        {
-            BlendAttachmentDesc desc;
-            desc.blend_enabled = false;
-            return desc;
-        }
-
-        static constexpr BlendAttachmentDesc alpha_blend_attachment() noexcept
-        {
-            BlendAttachmentDesc desc;
-            desc.blend_enabled = true;
-            return desc;
-        }
-
-        bool logic_op_enabled = false;
-        std::vector<BlendAttachmentDesc> attachments = { alpha_blend_attachment() };
     };
 
     struct RasterizerPipelineDesc
     {
-        PipelineShaderDesc vertex_shader { PipelineShaderStage::Vertex, EmbeddedShader::ShaderCodeModule {} };
-        PipelineShaderDesc fragment_shader { PipelineShaderStage::Fragment, EmbeddedShader::ShaderCodeModule {} };
-        std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> pipelineObject;
+        // --- 光栅 ---
+        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+        PolygonFillMode fill_mode = PolygonFillMode::Fill;
+        CullMode cull_mode = CullMode::None;
+        bool depth_clamp_enabled = false;
+        bool rasterizer_discard_enabled = false;
+        float line_width = 1.0f;
 
-        RasterizerStateDesc rasterizer;
-        DepthStencilStateDesc depth_stencil;
-        BlendStateDesc blend;
-        MultisampleStateDesc multisample;
+        // --- 深度 ---
+        // 没有模板状态：动态渲染路径把 stencilAttachmentFormat 恒定写成 UNDEFINED
+        // (vulkan_rasterizer_pipeline.cpp)，从来绑不上模板附件，所以不暴露永远
+        // 无效果的模板旋钮。需要模板效果的例子(shadowvolumes)走 R32F 计数纹理。
+        bool depth_test_enabled = true;
+        bool depth_write_enabled = true;
+        CompareOp depth_compare_op = CompareOp::LessOrEqual;
+
+        // --- 混合 ---
+        // 后端把这一份状态广播给全部颜色附件（从来没有过 per-attachment 独立混合），
+        // 所以这里是单份值而非 vector。默认开 alpha 混合，与摊平前的默认行为一致。
+        bool blend_enabled = true;
+        BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
+        BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp color_blend_op = BlendOp::Add;
+        BlendFactor src_alpha_blend_factor = BlendFactor::One;
+        BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
+        BlendOp alpha_blend_op = BlendOp::Add;
+        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
+        bool logic_op_enabled = false;
+
+        // --- 多重采样 ---
+        SampleCount sample_count = SampleCount::Count1;
+        bool sample_shading_enabled = false;
+        float min_sample_shading = 1.0f;
 
         uint32_t multiview_count = 1;
 
@@ -1646,100 +1021,21 @@ namespace Corona::Horizon
         // (needed for landscape-then-sky with depth Equal on the sky pass).
         bool clear_depth_target = true;
 
-        std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries;
         std::string debug_name;
-
-        RasterizerPipelineDesc() = default;
-
-        RasterizerPipelineDesc(PipelineShaderDesc vertex, PipelineShaderDesc fragment)
-        {
-            set_shaders(std::move(vertex), std::move(fragment));
-        }
-
-        void set_shaders(PipelineShaderDesc vertex, PipelineShaderDesc fragment)
-        {
-            if (vertex.stage != PipelineShaderStage::Vertex)
-                throw std::invalid_argument("RasterizerPipelineDesc requires a vertex shader.");
-
-            if (fragment.stage != PipelineShaderStage::Fragment)
-                throw std::invalid_argument("RasterizerPipelineDesc requires a fragment shader.");
-
-            vertex_shader = std::move(vertex);
-            fragment_shader = std::move(fragment);
-        }
-
-        void set_shaders_from_slang(EmbeddedShader::SlangModule& vs_module,
-                                    EmbeddedShader::SlangModule& fs_module,
-                                    EmbeddedShader::CompilerOption compiler_option = {})
-        {
-            vertex_shader = compile_slang_to_shader_desc(
-                PipelineShaderStage::Vertex, vs_module, compiler_option);
-            fragment_shader = compile_slang_to_shader_desc(
-                PipelineShaderStage::Fragment, fs_module, compiler_option);
-        }
-
-        // 用另一个 desc 的状态字段覆盖当前 desc（不透传 shader）。
-        // 公开：EDSL 路径（RasterizerPipeline<void,void>::make_desc）在编译 shader 后用
-        // 调用方传入的 RasterizerPipelineDesc 状态覆盖 EDSL 派生的默认状态。
-        void apply_state(RasterizerPipelineDesc state)
-        {
-            rasterizer = std::move(state.rasterizer);
-            depth_stencil = std::move(state.depth_stencil);
-            blend = std::move(state.blend);
-            multisample = std::move(state.multisample);
-            multiview_count = state.multiview_count;
-            clear_color_target = state.clear_color_target;
-            clear_depth_target = state.clear_depth_target;
-            debug_name = std::move(state.debug_name);
-        }
-
-    private:
-        static PipelineShaderDesc compile_slang_to_shader_desc(
-            PipelineShaderStage stage,
-            EmbeddedShader::SlangModule& module,
-            EmbeddedShader::CompilerOption compiler_option = {})
-        {
-            EmbeddedShader::SlangCompileArgs2 args;
-            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-            args.stage = [&] {
-                switch (stage)
-                {
-                case PipelineShaderStage::Vertex:
-                    return EmbeddedShader::ShaderStage::VertexShader;
-                case PipelineShaderStage::Fragment:
-                    return EmbeddedShader::ShaderStage::FragmentShader;
-                case PipelineShaderStage::Compute:
-                    return EmbeddedShader::ShaderStage::ComputeShader;
-                default:
-                    throw std::invalid_argument("compile_slang_to_shader_desc only supports vertex, fragment, and compute stages.");
-                }
-            }();
-            args.module = &module;
-            args.deps = std::move(compiler_option.slangModules);
-            args.enableReflection = true;
-
-            EmbeddedShader::SlangCompileResult result = EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
-            if (spirv == result.binaryTargets.end())
-                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
-
-            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
-            if (reflection != result.reflections.end())
-                resources = std::move(reflection->second);
-
-            // Slang 反射产出点分全名（如 global_ubo.field），下游 codegen/runtime 按短名查找，
-            // 这里裁剪成 '.' 后的短段，与离线 codegen (tools/main.cpp) 的约定保持一致。
-            for (auto& info : resources.bindInfoPool)
-            {
-                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
-                    info.variateName = info.variateName.substr(pos + 1);
-            }
-
-            return PipelineShaderDesc(stage, EmbeddedShader::ShaderCodeModule(std::move(spirv->second), std::move(resources)));
-        }
     };
+
+    // ================================================================
+    // Slang 编译
+    // ================================================================
+
+    // 编译单个 Slang shader module 为 ShaderCodeModule。EDSL 路径（栅格 + compute）
+    // 共用：填 SlangCompileArgs2 → slangCompilerWithModules → 取 SPIR-V → 反射短名裁剪。
+    // 集中成一处，避免两份手抄在改约定（短名裁剪）时静默漂移。
+    // 实现在 src/hardware_wrapper/slang_stage.cpp —— 留在头里会把
+    // ShaderLanguageConverter.h (slang-com-ptr / slang-com-helper) 塞给每个消费者。
+    [[nodiscard]] EmbeddedShader::ShaderCodeModule compile_slang_stage(
+        EmbeddedShader::ShaderStage stage,
+        EmbeddedShader::SlangModule& module);
 
     // ================================================================
     // Pipeline Binding
@@ -1809,23 +1105,13 @@ namespace Corona::Horizon
         }
     };
 
-    class PipelineBindingScope
-    {
-    protected:
-        virtual ~PipelineBindingScope() = default;
-
-    private:
-        friend class ResourceProxy;
-
-        virtual void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) = 0;
-        virtual void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) = 0;
-        virtual void bind_image(const BindingSlot& slot, const HardwareImage& image) = 0;
-    };
-
+    // 非虚绑定分派 (旧 friend 两指针设计): ResourceProxy 模板持具体管线引用,
+    // 直接调基类的 public bind_* 成员, 无抽象基、无 virtual、无继承。
+    template <typename Pipeline>
     class ResourceProxy
     {
     public:
-        ResourceProxy(PipelineBindingScope& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
+        ResourceProxy(Pipeline& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
 
         ResourceProxy& operator=(const ResourceProxy&) = delete;
         ResourceProxy& operator=(ResourceProxy&&) = delete;
@@ -1852,31 +1138,26 @@ namespace Corona::Horizon
         }
 
     private:
-        PipelineBindingScope& pipeline_;
+        Pipeline& pipeline_;
         BindingSlot slot_;
-    };
-
-    template <typename Derived>
-    struct ReflectedPipelineBindings
-    {
-        template <ReflectedBindingKey ProxyType>
-        [[nodiscard]]
-        ResourceProxy operator[](const ProxyType& proxy)
-        {
-            return ResourceProxy(static_cast<PipelineBindingScope&>(*static_cast<Derived*>(this)), BindingSlot::from(proxy));
-        }
     };
 
     // ================================================================
     // Pipeline Runtime
     // ================================================================
 
-    class ComputePipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<ComputePipelineBase>
+    class ComputePipelineBase : public ResourceHandle
     {
-        friend class HardwareExecutor;
     public:
+        // record_into / sync_shader_conditions 的签名引用内部 IR 类型，只给执行层看。
+        friend class HardwareExecutor;
+        friend class HardwareStream;
+        friend class VulkanCommandEncoder;
+
         ComputePipelineBase();
-        explicit ComputePipelineBase(ComputePipelineDesc desc, const std::source_location& source_location = std::source_location::current());
+        ComputePipelineBase(ComputePipelineDesc desc,
+                            ComputePipelineShaders shaders,
+                            const std::source_location& source_location = std::source_location::current());
 
         ComputePipelineBase(const ComputePipelineBase& other);
         ComputePipelineBase(ComputePipelineBase&& other) noexcept;
@@ -1885,57 +1166,62 @@ namespace Corona::Horizon
         ComputePipelineBase& operator=(const ComputePipelineBase& other);
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
         ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
-        ComputePipelineBase& set_debug_label(std::string label);
-        [[nodiscard]] ComputePipelineDesc desc() const;
 
         // 根据管线自身的 workgroup local size 将像素尺寸换算为 dispatch group 数。
         // 消除调用方对 local_size 的硬编码依赖（ceil(w/tgs.x), ceil(h/tgs.y)）。
         // local size 优先取自反射（编译进 shader 的真实值），构造参数仅作反射缺失时的回退。
         struct DispatchGroups { uint32_t x; uint32_t y; };
-        [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const
-        {
-            const ktm::uvec3 tgs = desc().resolved_thread_group_size();
-            if (tgs.x == 0 || tgs.y == 0)
-                throw std::logic_error("ComputePipeline workgroup local size is zero; reflection failed and no override was provided.");
-            return { (width  + tgs.x - 1u) / tgs.x,
-                     (height + tgs.y - 1u) / tgs.y };
-        }
+        [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const;
 
-        [[nodiscard]] CommandBatch command_batch();
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        void rebuild_pipeline(ComputePipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
-        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& compute_condition_info();
-    private:
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
-        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
-        std::source_location location_;
-        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
+        // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_image(const BindingSlot& slot, const HardwareImage& image) override
+        void bind_image(const BindingSlot& slot, const HardwareImage& image)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.set, slot.binding);
         }
 
+    private:
+        void record_into(CommandRecorder& recorder);
+
+        // 条件信息(EDSL 条件编译)与上次构建不同时重编译 shader 并重建管线,相同则什么都不做。
+        // 返回是否真的重建过：调用方据此作废自己缓存的 pipeline / layout 句柄(重建销毁旧
+        // layout,新句柄可能复用同一地址值)。
+        bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
+
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
+        void rebuild_pipeline(ComputePipelineDesc desc,
+                              ComputePipelineShaders shaders,
+                              const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
+        std::source_location location_;
     };
 
-    class RasterizerPipelineBase : public ResourceHandle, public PipelineBindingScope, public ReflectedPipelineBindings<RasterizerPipelineBase>
+    class RasterizerPipelineBase : public ResourceHandle
     {
-        friend class HardwareExecutor;
     public:
+        // 同 ComputePipelineBase：内部 IR 入口只对执行层开放。
+        friend class HardwareExecutor;
+        friend class HardwareStream;
+        friend class VulkanCommandEncoder;
+
         RasterizerPipelineBase();
-        explicit RasterizerPipelineBase(RasterizerPipelineDesc desc, const std::source_location& source_location = std::source_location::current());
+        RasterizerPipelineBase(RasterizerPipelineDesc desc,
+                               RasterizerPipelineShaders shaders,
+                               const std::source_location& source_location = std::source_location::current());
 
         RasterizerPipelineBase(const RasterizerPipelineBase& other);
         RasterizerPipelineBase(RasterizerPipelineBase&& other) noexcept;
@@ -1945,68 +1231,49 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
         RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
-        RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer);
         RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
                                                 const HardwareBuffer& indirect_buffer,
                                                 const DrawIndexedIndirectParams& params);
         RasterizerPipelineBase& clear_records();
-        RasterizerPipelineBase& bind_render_target(uint32_t location, HardwareImage& image);
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
-        [[nodiscard]] RasterizerPipelineDesc desc() const;
-        [[nodiscard]] CommandBatch command_batch() const;
-        // 与 command_batch() 等价，但直接录进 recorder，省掉中间容器与一次批次拷贝。
-        void record_into(CommandRecorder& recorder) const;
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        template <typename TargetProxy>
-            requires requires(TargetProxy& proxy) { proxy.boundResource_; }
-        RasterizerPipelineBase& bind_render_target(uint32_t location, TargetProxy& proxy)
-        {
-            auto* image = static_cast<HardwareImage*>(proxy.boundResource_);
-            if (image == nullptr)
-                throw std::logic_error("RasterizerPipeline render target proxy is not bound to a HardwareImage.");
-
-            add_auto_bind_entry({
-                &proxy.boundResource_,
-                0,
-                0,
-                static_cast<int32_t>(EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs),
-                location,
-            });
-            bind_render_target(location, *image);
-            return *this;
-        }
-
-        void rebuild_pipeline(RasterizerPipelineDesc desc, const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const EmbeddedShader::
-                              ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
-        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertex_condition_info() const;
-        const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragment_condition_info() const;
-    private:
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
-        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
-        std::source_location location_;
-        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) override
+        // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) override
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
         }
 
-        void bind_image(const BindingSlot& slot, const HardwareImage& image) override
+        void bind_image(const BindingSlot& slot, const HardwareImage& image)
         {
             set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location, slot.set, slot.binding);
         }
 
+    private:
+        void record_into(CommandRecorder& recorder) const;
+
+        // 同 ComputePipelineBase::sync_shader_conditions，只重编译条件真的变了的那个 stage。
+        bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
+                                    const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
+
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
-        void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
+        void rebuild_pipeline(RasterizerPipelineDesc desc,
+                              RasterizerPipelineShaders shaders,
+                              const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
+                              const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info_;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info_;
+        std::unordered_map<std::string, std::shared_ptr<IResourceRef>> pipeline_pool_;
+        std::source_location location_;
     };
 
     namespace PipelineDetail
@@ -2057,51 +1324,36 @@ namespace Corona::Horizon
         template <PipelineDetail::EdslComputeShaderCode F>
         explicit ComputePipeline(F&& compute_shader_code,
                                  ktm::uvec3 numthreads = { 1, 1, 1 },
-                                 EdslPipelineOptions options = {},
                                  const std::source_location& source_location = std::source_location::current())
             : ComputePipelineBase(
-                  make_desc_from_edsl(std::forward<F>(compute_shader_code),
-                                     numthreads,
-                                     std::move(options),
-                                     source_location),
+                  ComputePipelineDesc { numthreads },
+                  compile_edsl(std::forward<F>(compute_shader_code), numthreads, source_location),
                   source_location)
         {
         }
 
     private:
+        // 编译选项曾由 EdslPipelineOptions 形参带入，但全仓没有一个调用方传过它，
+        // 于是连同它撑起的 4 条 CTAD 指引一起删掉。要重新开放 enableBindless /
+        // auto_bind 时，在这里加回一个显式形参即可。
         template <typename F>
-        static ComputePipelineDesc make_desc_from_edsl(F&& compute_shader_code,
-                                                       ktm::uvec3 numthreads,
-                                                       EdslPipelineOptions options,
-                                                       std::source_location source_location)
+        static ComputePipelineShaders compile_edsl(F&& compute_shader_code,
+                                                  ktm::uvec3 numthreads,
+                                                  std::source_location source_location)
         {
-            options.compiler.enableMatrixColumnMajor = true;
-            std::shared_ptr<EmbeddedShader::ComputePipelineObject> object{
-                new EmbeddedShader::ComputePipelineObject(
-                    EmbeddedShader::ComputePipelineObject::compile(
-                        std::forward<F>(compute_shader_code), numthreads,
-                        options.compiler, source_location))};
+            EmbeddedShader::CompilerOption compiler;
+            compiler.enableMatrixColumnMajor = true;
 
-            ComputePipelineDesc desc(
-                PipelineShaderDesc{
-                    PipelineShaderStage::Compute,
-                    object->compute->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                   options.compiler.enableBindless) },
-                numthreads);
-            desc.pipelineObject = object;
+            ComputePipelineShaders shaders;
+            shaders.object = std::make_shared<EmbeddedShader::ComputePipelineObject>(
+                EmbeddedShader::ComputePipelineObject::compile(
+                    std::forward<F>(compute_shader_code), numthreads,
+                    compiler, source_location));
+            shaders.compute = shaders.object->compute->getShaderCode(
+                EmbeddedShader::ShaderLanguage::SpirV, compiler.enableBindless);
 
-            if (options.auto_bind)
-                desc.auto_bind_entries = object->autoBindEntries;
-            return desc;
-        }
-    public:
-
-        template <PipelineDetail::EdslComputeShaderCode F>
-        explicit ComputePipeline(F&& compute_shader_code,
-                                 ktm::uvec3 numthreads,
-                                 const std::source_location& source_location)
-            : ComputePipeline(std::forward<F>(compute_shader_code), numthreads, {}, source_location)
-        {
+            shaders.auto_bind_entries = shaders.object->autoBindEntries;
+            return shaders;
         }
     };
 
@@ -2111,57 +1363,21 @@ namespace Corona::Horizon
     public:
         using ShaderBindings = typename CS::template Bindings<ComputePipelineBase>;
 
-        static ComputePipelineDesc make_desc(ktm::uvec3 numthreads = { 1, 1, 1 })
+        static ComputePipelineShaders make_shaders()
         {
-            // Compile Slang module inline
-            EmbeddedShader::SlangCompileArgs2 args;
-            args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-            args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-            args.stage = EmbeddedShader::ShaderStage::ComputeShader;
-            args.module = &CS::slangModule;
-            args.enableReflection = true;
-
-            EmbeddedShader::SlangCompileResult result =
-                EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-            auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
-            if (spirv == result.binaryTargets.end())
-                throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
-
-            auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-            EmbeddedShader::ShaderCodeModule::ShaderResources resources;
-            if (reflection != result.reflections.end())
-                resources = std::move(reflection->second);
-
-            for (auto& info : resources.bindInfoPool)
-            {
-                if (auto pos = info.variateName.find_last_of('.'); pos != std::string::npos)
-                    info.variateName = info.variateName.substr(pos + 1);
-            }
-
-            return ComputePipelineDesc(
-                PipelineShaderDesc(PipelineShaderStage::Compute,
-                                  EmbeddedShader::ShaderCodeModule(std::move(spirv->second),
-                                                                  std::move(resources))),
-                numthreads);
+            return { compile_slang_stage(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule) };
         }
 
         explicit ComputePipeline(CS, ktm::uvec3 numthreads = { 1, 1, 1 },
                                  const std::source_location& source_location = std::source_location::current())
-            : ComputePipelineBase(make_desc(numthreads), source_location),
+            : ComputePipelineBase(ComputePipelineDesc { numthreads }, make_shaders(), source_location),
               ShaderBindings(static_cast<ComputePipelineBase*>(this))
         {
         }
 
         explicit ComputePipeline(ktm::uvec3 numthreads = { 1, 1, 1 },
                                  const std::source_location& source_location = std::source_location::current())
-            : ComputePipelineBase(make_desc(numthreads), source_location),
-              ShaderBindings(static_cast<ComputePipelineBase*>(this))
-        {
-        }
-
-        explicit ComputePipeline(ComputePipelineDesc desc,
-                                 const std::source_location& source_location = std::source_location::current())
-            : ComputePipelineBase(std::move(desc), source_location),
+            : ComputePipelineBase(ComputePipelineDesc { numthreads }, make_shaders(), source_location),
               ShaderBindings(static_cast<ComputePipelineBase*>(this))
         {
         }
@@ -2191,9 +1407,11 @@ namespace Corona::Horizon
         }
     };
 
+    // 别想着用 `(CS, Rest...)` 变参尾巴合并成两条：主模板的构造函数会生成隐式推导
+    // 指引，它是定参的，在偏序上比变参 guide 更特化，于是 EDSL lambda 会被推成
+    // RasterizerPipeline<lambda,lambda> / ComputePipeline<lambda> 而不是空参特化。
+    // 显式 guide 只有在与隐式 guide 同样好时才优先，所以必须逐个 arity 写死。
     ComputePipeline() -> ComputePipeline<>;
-    ComputePipeline(ComputePipelineDesc) -> ComputePipeline<>;
-    ComputePipeline(ComputePipelineDesc, const std::source_location&) -> ComputePipeline<>;
     template <PipelineDetail::GeneratedComputeShaderObject CS>
     ComputePipeline(CS) -> ComputePipeline<std::remove_cvref_t<CS>>;
     template <PipelineDetail::GeneratedComputeShaderObject CS>
@@ -2205,11 +1423,7 @@ namespace Corona::Horizon
     template <PipelineDetail::EdslComputeShaderCode F>
     ComputePipeline(F, ktm::uvec3) -> ComputePipeline<>;
     template <PipelineDetail::EdslComputeShaderCode F>
-    ComputePipeline(F, ktm::uvec3, EdslPipelineOptions) -> ComputePipeline<>;
-    template <PipelineDetail::EdslComputeShaderCode F>
     ComputePipeline(F, ktm::uvec3, const std::source_location&) -> ComputePipeline<>;
-    template <PipelineDetail::EdslComputeShaderCode F>
-    ComputePipeline(F, ktm::uvec3, EdslPipelineOptions, const std::source_location&) -> ComputePipeline<>;
 
     template <>
     class RasterizerPipeline<void, void> : public RasterizerPipelineBase
@@ -2220,55 +1434,43 @@ namespace Corona::Horizon
 
         template <typename VS, typename FS>
             requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
-        static RasterizerPipelineDesc make_desc(VS&& vertex_shader_code,
-                                                FS&& fragment_shader_code,
-                                                RasterizerPipelineDesc state = {},
-                                                EdslPipelineOptions options = {},
-                                                std::source_location source_location = std::source_location::current())
-        {
-            // Inline from_edsl logic
-            options.compiler.enableMatrixColumnMajor = true;
-            std::shared_ptr<EmbeddedShader::RasterizedPipelineObject> object{
-                new EmbeddedShader::RasterizedPipelineObject(
-                    EmbeddedShader::RasterizedPipelineObject::compile(
-                        std::forward<VS>(vertex_shader_code),
-                        std::forward<FS>(fragment_shader_code),
-                        options.compiler,
-                        source_location))};
-
-            RasterizerPipelineDesc desc(
-                PipelineShaderDesc {
-                    PipelineShaderStage::Vertex,
-                    object->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                 options.compiler.enableBindless) },
-                PipelineShaderDesc {
-                    PipelineShaderStage::Fragment,
-                    object->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
-                                                   options.compiler.enableBindless) });
-            desc.pipelineObject = object;
-
-            if (options.auto_bind)
-                desc.auto_bind_entries = object->autoBindEntries;
-
-            desc.apply_state(std::move(state));
-            return desc;
-        }
-
-        template <typename VS, typename FS>
-            requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
         explicit RasterizerPipeline(VS&& vertex_shader_code,
                                     FS&& fragment_shader_code,
                                     RasterizerPipelineDesc desc = {},
-                                    EdslPipelineOptions options = {},
                                     const std::source_location& source_location = std::source_location::current())
             : RasterizerPipelineBase(
-                  make_desc(std::forward<VS>(vertex_shader_code),
-                            std::forward<FS>(fragment_shader_code),
-                            std::move(desc),
-                            std::move(options),
-                            source_location),
+                  std::move(desc),
+                  compile_edsl(std::forward<VS>(vertex_shader_code),
+                               std::forward<FS>(fragment_shader_code),
+                               source_location),
                   source_location)
         {
+        }
+
+    private:
+        // 同 ComputePipeline<void>::compile_edsl：EdslPipelineOptions 形参零调用方，已删。
+        template <typename VS, typename FS>
+        static RasterizerPipelineShaders compile_edsl(VS&& vertex_shader_code,
+                                                     FS&& fragment_shader_code,
+                                                     std::source_location source_location)
+        {
+            EmbeddedShader::CompilerOption compiler;
+            compiler.enableMatrixColumnMajor = true;
+
+            RasterizerPipelineShaders shaders;
+            shaders.object = std::make_shared<EmbeddedShader::RasterizedPipelineObject>(
+                EmbeddedShader::RasterizedPipelineObject::compile(
+                    std::forward<VS>(vertex_shader_code),
+                    std::forward<FS>(fragment_shader_code),
+                    compiler,
+                    source_location));
+            shaders.vertex = shaders.object->vertex->getShaderCode(
+                EmbeddedShader::ShaderLanguage::SpirV, compiler.enableBindless);
+            shaders.fragment = shaders.object->fragment->getShaderCode(
+                EmbeddedShader::ShaderLanguage::SpirV, compiler.enableBindless);
+
+            shaders.auto_bind_entries = shaders.object->autoBindEntries;
+            return shaders;
         }
     };
 
@@ -2283,14 +1485,15 @@ namespace Corona::Horizon
         using FragmentResourceBindings = typename FS::template ResourceBindings<RasterizerPipelineBase>;
         using FragmentOutputBindings = typename FS::template OutputBindings<RasterizerPipelineBase>;
 
-        static RasterizerPipelineDesc make_desc(RasterizerPipelineDesc desc = {})
+        static RasterizerPipelineShaders make_shaders()
         {
-            desc.set_shaders_from_slang(VS::slangModule, FS::slangModule);
-            return desc;
+            return { compile_slang_stage(EmbeddedShader::ShaderStage::VertexShader, VS::slangModule),
+                     compile_slang_stage(EmbeddedShader::ShaderStage::FragmentShader, FS::slangModule) };
         }
 
-        explicit RasterizerPipeline(const std::source_location& source_location = std::source_location::current())
-            : RasterizerPipelineBase(make_desc(), source_location),
+        explicit RasterizerPipeline(RasterizerPipelineDesc desc = {},
+                                    const std::source_location& source_location = std::source_location::current())
+            : RasterizerPipelineBase(std::move(desc), make_shaders(), source_location),
               VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
               FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
               FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
@@ -2299,16 +1502,7 @@ namespace Corona::Horizon
 
         explicit RasterizerPipeline(VS, FS, RasterizerPipelineDesc desc = {},
                                     const std::source_location& source_location = std::source_location::current())
-            : RasterizerPipelineBase(make_desc(std::move(desc)), source_location),
-              VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
-              FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
-              FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
-        {
-        }
-
-        explicit RasterizerPipeline(RasterizerPipelineDesc desc,
-                                    const std::source_location& source_location = std::source_location::current())
-            : RasterizerPipelineBase(std::move(desc), source_location),
+            : RasterizerPipelineBase(std::move(desc), make_shaders(), source_location),
               VertexResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
               FragmentResourceBindings(static_cast<RasterizerPipelineBase*>(this)),
               FragmentOutputBindings(static_cast<RasterizerPipelineBase*>(this))
@@ -2344,9 +1538,8 @@ namespace Corona::Horizon
         }
     };
 
+    // 同上，不能用变参尾巴合并——见 ComputePipeline 推导指引处的说明。
     RasterizerPipeline() -> RasterizerPipeline<>;
-    RasterizerPipeline(RasterizerPipelineDesc) -> RasterizerPipeline<>;
-    RasterizerPipeline(RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<>;
     template <typename VS, typename FS>
         requires PipelineDetail::GeneratedRasterizerShaderObjects<VS, FS>
     RasterizerPipeline(VS, FS) -> RasterizerPipeline<std::remove_cvref_t<VS>, std::remove_cvref_t<FS>>;
@@ -2364,10 +1557,7 @@ namespace Corona::Horizon
     RasterizerPipeline(VS, FS, RasterizerPipelineDesc) -> RasterizerPipeline<>;
     template <typename VS, typename FS>
         requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
-    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, EdslPipelineOptions) -> RasterizerPipeline<>;
-    template <typename VS, typename FS>
-        requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
-    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, EdslPipelineOptions, const std::source_location&) -> RasterizerPipeline<>;
+    RasterizerPipeline(VS, FS, RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<>;
 
     // ================================================================
     // Value Command Facades
@@ -2375,126 +1565,32 @@ namespace Corona::Horizon
 
     struct CopyBufferToImageCommand
     {
-        BufferRef src {};
-        ImageRef dst {};
-        BufferImageCopyRegion region {};
-        DeviceMask devices {};
+        HardwareBuffer src {};
+        HardwareImage dst {};
+        uint64_t buffer_offset { 0 };
+        uint32_t image_layer { 0 };
+        uint32_t image_mip { 0 };
+        uint32_t device_mask_bits { 1 };
 
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.copy_to_image(src, dst, region, devices);
-        }
-    };
-
-    struct ShaderDispatchCommand
-    {
-        DispatchDesc dispatch {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.dispatch(dispatch, devices);
-        }
-    };
-
-    struct BeginRenderingCommand
-    {
-        RenderingDesc rendering {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.begin_rendering(rendering, devices);
-        }
-    };
-
-    struct EndRenderingCommand
-    {
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.end_rendering(devices);
-        }
-    };
-
-    // 批量 indexed draw。payload 由 shared_ptr 持有：StreamCommand 的转换构造会按值
-    // 拷贝命令对象，而一个批次可能有数万条 draw，直接内嵌 vector 会让每次
-    // StreamCommand 拷贝都变成一次深拷贝。
-    struct DrawIndexedBatchCommand
-    {
-        std::shared_ptr<DrawIndexedBatchDesc> batch {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            if (batch)
-                recorder.draw_indexed_batch(*batch, devices);
-        }
-    };
-
-    struct DrawIndexedIndirectStreamCommand
-    {
-        BufferRef index {};
-        BufferRef vertex {};
-        BufferRef indirect {};
-        DrawIndexedIndirectDesc draw {};
-        DeviceMask devices {};
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.draw_indexed_indirect(index, vertex, indirect, draw, devices);
-        }
+        void record(CommandRecorder& recorder) const;
     };
 
     struct PresentCommand
     {
-        DisplayerRef displayer {};
-        ImageRef image {};
+        HardwareDisplayer displayer {};
+        HardwareImage image {};
         DeviceId present_device {};
         bool allow_cpu_bridge_fallback { true };
 
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.present(displayer, image, present_device, allow_cpu_bridge_fallback);
-        }
+        void record(CommandRecorder& recorder) const;
     };
 
-    class KeepAliveCommand
-    {
-    public:
-        KeepAliveCommand() = default;
-
-        explicit KeepAliveCommand(std::shared_ptr<void> object)
-            : object_(std::move(object))
-        {
-        }
-
-        void record(CommandRecorder& recorder) const
-        {
-            recorder.keep_alive(object_);
-        }
-
-    private:
-        std::shared_ptr<void> object_ {};
-    };
-
-    [[nodiscard]] inline CopyBufferToImageCommand copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {})
-    {
-        return { src, dst, region, devices };
-    }
-
-    [[nodiscard]] inline PresentCommand present(DisplayerRef displayer, ImageRef image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
+    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer,
+                                                const HardwareImage& image,
+                                                DeviceId present_device = {},
+                                                bool allow_cpu_bridge_fallback = true)
     {
         return { displayer, image, present_device, allow_cpu_bridge_fallback };
-    }
-
-    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer, const HardwareImage& image, DeviceId present_device = {}, bool allow_cpu_bridge_fallback = true)
-    {
-        return present(displayer.displayer_ref(),
-                       { static_cast<const ResourceHandle&>(image) },
-                       present_device,
-                       allow_cpu_bridge_fallback);
     }
 
 }

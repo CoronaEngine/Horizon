@@ -107,14 +107,14 @@ namespace Corona::Horizon
             return {};
         }
 
-        [[nodiscard]] BindingCoordinates reflected_binding_coordinates(const RasterizerPipelineDesc& desc,
+        [[nodiscard]] BindingCoordinates reflected_binding_coordinates(const RasterizerPipelineShaders& shaders,
                                                                        const EmbeddedShader::AutoBindEntry& entry) noexcept
         {
-            BindingCoordinates coordinates = reflected_binding_coordinates(desc.vertex_shader.module, entry);
+            BindingCoordinates coordinates = reflected_binding_coordinates(shaders.vertex, entry);
             if (coordinates.set != 0 || coordinates.binding != 0)
                 return coordinates;
 
-            return reflected_binding_coordinates(desc.fragment_shader.module, entry);
+            return reflected_binding_coordinates(shaders.fragment, entry);
         }
 
         [[nodiscard]] VkPrimitiveTopology to_vk_topology(PrimitiveTopology topology) noexcept
@@ -170,36 +170,6 @@ namespace Corona::Horizon
             return VK_COMPARE_OP_ALWAYS;
         }
 
-        [[nodiscard]] VkStencilOp to_vk_stencil_op(StencilOp op) noexcept
-        {
-            switch (op)
-            {
-            case StencilOp::Keep: return VK_STENCIL_OP_KEEP;
-            case StencilOp::Zero: return VK_STENCIL_OP_ZERO;
-            case StencilOp::Replace: return VK_STENCIL_OP_REPLACE;
-            case StencilOp::IncrementAndClamp: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
-            case StencilOp::DecrementAndClamp: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
-            case StencilOp::Invert: return VK_STENCIL_OP_INVERT;
-            case StencilOp::IncrementAndWrap: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
-            case StencilOp::DecrementAndWrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
-            }
-
-            return VK_STENCIL_OP_KEEP;
-        }
-
-        [[nodiscard]] VkStencilOpState to_vk_stencil_state(const DepthStencilOpDesc& desc, uint32_t read_mask, uint32_t write_mask, uint32_t reference) noexcept
-        {
-            return {
-                .failOp = to_vk_stencil_op(desc.fail_op),
-                .passOp = to_vk_stencil_op(desc.pass_op),
-                .depthFailOp = to_vk_stencil_op(desc.depth_fail_op),
-                .compareOp = to_vk_compare_op(desc.compare_op),
-                .compareMask = read_mask,
-                .writeMask = write_mask,
-                .reference = reference,
-            };
-        }
-
         [[nodiscard]] VkBlendFactor to_vk_blend_factor(BlendFactor factor) noexcept
         {
             switch (factor)
@@ -247,7 +217,7 @@ namespace Corona::Horizon
             return flags;
         }
 
-        [[nodiscard]] VkPipelineColorBlendAttachmentState to_vk_blend_attachment(const BlendAttachmentDesc& desc) noexcept
+        [[nodiscard]] VkPipelineColorBlendAttachmentState to_vk_blend_attachment(const RasterizerPipelineDesc& desc) noexcept
         {
             VkPipelineColorBlendAttachmentState state {};
             state.blendEnable = desc.blend_enabled ? VK_TRUE : VK_FALSE;
@@ -430,10 +400,10 @@ namespace Corona::Horizon
             return false;
         }
 
-        [[nodiscard]] bool uses_bindless_descriptors(const RasterizerPipelineDesc& desc) noexcept
+        [[nodiscard]] bool uses_bindless_descriptors(const RasterizerPipelineShaders& shaders) noexcept
         {
-            return uses_bindless_descriptors(desc.vertex_shader.module) ||
-                   uses_bindless_descriptors(desc.fragment_shader.module);
+            return uses_bindless_descriptors(shaders.vertex) ||
+                   uses_bindless_descriptors(shaders.fragment);
         }
 
         void add_uniform_buffer(std::vector<UniformBufferBindingData>& buffers, uint32_t set, uint32_t binding, uint32_t size)
@@ -476,11 +446,11 @@ namespace Corona::Horizon
                 add_uniform_buffer(buffers, 0, 0, module.shaderResources.uniformBufferSize);
         }
 
-        [[nodiscard]] std::vector<UniformBufferBindingData> reflected_uniform_buffers(const RasterizerPipelineDesc& desc)
+        [[nodiscard]] std::vector<UniformBufferBindingData> reflected_uniform_buffers(const RasterizerPipelineShaders& shaders)
         {
             std::vector<UniformBufferBindingData> buffers;
-            append_reflected_uniform_buffers(buffers, desc.vertex_shader.module);
-            append_reflected_uniform_buffers(buffers, desc.fragment_shader.module);
+            append_reflected_uniform_buffers(buffers, shaders.vertex);
+            append_reflected_uniform_buffers(buffers, shaders.fragment);
             return buffers;
         }
 
@@ -603,16 +573,18 @@ namespace Corona::Horizon
     }
 
     VulkanRasterizerPipeline::VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
+                                                       RasterizerPipelineShaders shaders,
                                                        std::source_location source_location)
         : desc_(std::move(desc)),
+          shaders_(std::move(shaders)),
           source_location_(source_location)
     {
-        (void)validate_rasterizer_pipeline_desc(desc_);
+        (void)validate_rasterizer_pipeline_desc(desc_, shaders_);
 
         const uint32_t constant_size = push_constant_size();
         if (constant_size != 0)
             push_constant_data_.resize(constant_size);
-        uniform_buffers_ = reflected_uniform_buffers(desc_);
+        uniform_buffers_ = reflected_uniform_buffers(shaders_);
         // UBO 环在首次 sync_ubo_slot_unlocked() 时惰性创建：构造这里交换链可能
         // 还没建好，frame_ring_size() 还是 1。
         ubo_rings_.resize(uniform_buffers_.size());
@@ -630,10 +602,16 @@ namespace Corona::Horizon
         return desc_;
     }
 
+    RasterizerPipelineShaders VulkanRasterizerPipeline::shaders() const
+    {
+        std::lock_guard lock(mutex_);
+        return shaders_;
+    }
+
     uint32_t VulkanRasterizerPipeline::push_constant_size() const noexcept
     {
-        return std::max(desc_.vertex_shader.module.shaderResources.pushConstantSize,
-                        desc_.fragment_shader.module.shaderResources.pushConstantSize);
+        return std::max(shaders_.vertex.shaderResources.pushConstantSize,
+                        shaders_.fragment.shaderResources.pushConstantSize);
     }
 
     void VulkanRasterizerPipeline::destroy_pipeline_cache_unlocked() noexcept
@@ -690,12 +668,12 @@ namespace Corona::Horizon
         if (key.color_formats[0] == VK_FORMAT_UNDEFINED && key.depth_format == VK_FORMAT_UNDEFINED)
             throw std::logic_error("RasterizerPipeline graphics pipeline creation requires at least one attachment format.");
 
-        VkShaderModule vertex_shader = create_shader_module(key.device, desc_.vertex_shader.module, "vertex");
+        VkShaderModule vertex_shader = create_shader_module(key.device, shaders_.vertex, "vertex");
         VkShaderModule fragment_shader = VK_NULL_HANDLE;
 
         try
         {
-            fragment_shader = create_shader_module(key.device, desc_.fragment_shader.module, "fragment");
+            fragment_shader = create_shader_module(key.device, shaders_.fragment, "fragment");
 
             VkPipelineShaderStageCreateInfo shader_stages[2] {};
             shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -708,7 +686,7 @@ namespace Corona::Horizon
             shader_stages[1].pName = "main";
 
             std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> inputs;
-            for (const auto& input : desc_.vertex_shader.module.shaderResources.bindInfoPool)
+            for (const auto& input : shaders_.vertex.shaderResources.bindInfoPool)
             {
                 if (input.bindType == EmbeddedShader::ShaderCodeModule::ShaderResources::stageInputs)
                     inputs.push_back(input);
@@ -753,7 +731,7 @@ namespace Corona::Horizon
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly {};
             input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-            input_assembly.topology = to_vk_topology(desc_.rasterizer.topology);
+            input_assembly.topology = to_vk_topology(desc_.topology);
             input_assembly.primitiveRestartEnable = VK_FALSE;
 
             VkPipelineViewportStateCreateInfo viewport_state {};
@@ -763,40 +741,31 @@ namespace Corona::Horizon
 
             VkPipelineRasterizationStateCreateInfo rasterization {};
             rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-            rasterization.depthClampEnable = desc_.rasterizer.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
-            rasterization.rasterizerDiscardEnable = desc_.rasterizer.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
-            rasterization.polygonMode = to_vk_polygon_mode(desc_.rasterizer.fill_mode);
-            rasterization.cullMode = to_vk_cull_mode(desc_.rasterizer.cull_mode);
+            rasterization.depthClampEnable = desc_.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
+            rasterization.rasterizerDiscardEnable = desc_.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
+            rasterization.polygonMode = to_vk_polygon_mode(desc_.fill_mode);
+            rasterization.cullMode = to_vk_cull_mode(desc_.cull_mode);
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
-            rasterization.lineWidth = desc_.rasterizer.line_width;
+            rasterization.lineWidth = desc_.line_width;
 
             VkPipelineMultisampleStateCreateInfo multisample {};
             multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-            multisample.rasterizationSamples = to_vk_sample_count(desc_.multisample.sample_count);
-            multisample.sampleShadingEnable = desc_.multisample.sample_shading_enabled ? VK_TRUE : VK_FALSE;
-            multisample.minSampleShading = desc_.multisample.min_sample_shading;
+            multisample.rasterizationSamples = to_vk_sample_count(desc_.sample_count);
+            multisample.sampleShadingEnable = desc_.sample_shading_enabled ? VK_TRUE : VK_FALSE;
+            multisample.minSampleShading = desc_.min_sample_shading;
 
             VkPipelineDepthStencilStateCreateInfo depth_stencil {};
             depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-            depth_stencil.depthTestEnable = desc_.depth_stencil.depth_test_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
-            depth_stencil.depthWriteEnable = desc_.depth_stencil.depth_write_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
-            depth_stencil.depthCompareOp = to_vk_compare_op(desc_.depth_stencil.depth_compare_op);
+            depth_stencil.depthTestEnable = desc_.depth_test_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
+            depth_stencil.depthWriteEnable = desc_.depth_write_enabled && key.depth_format != VK_FORMAT_UNDEFINED ? VK_TRUE : VK_FALSE;
+            depth_stencil.depthCompareOp = to_vk_compare_op(desc_.depth_compare_op);
             depth_stencil.depthBoundsTestEnable = VK_FALSE;
-            depth_stencil.stencilTestEnable = desc_.depth_stencil.stencil_test_enabled ? VK_TRUE : VK_FALSE;
-            depth_stencil.front = to_vk_stencil_state(desc_.depth_stencil.front,
-                                                      desc_.depth_stencil.stencil_read_mask,
-                                                      desc_.depth_stencil.stencil_write_mask,
-                                                      desc_.depth_stencil.stencil_reference);
-            depth_stencil.back = to_vk_stencil_state(desc_.depth_stencil.back,
-                                                     desc_.depth_stencil.stencil_read_mask,
-                                                     desc_.depth_stencil.stencil_write_mask,
-                                                     desc_.depth_stencil.stencil_reference);
+            // 模板恒关：rendering_info.stencilAttachmentFormat 恒为 UNDEFINED，
+            // 开启模板测试而无模板附件是无意义的（且会触发验证层告警）。
+            depth_stencil.stencilTestEnable = VK_FALSE;
 
-            const BlendAttachmentDesc blend_desc = desc_.blend.attachments.empty()
-                ? BlendStateDesc::alpha_blend_attachment()
-                : desc_.blend.attachments.front();
-            VkPipelineColorBlendAttachmentState blend_attachment = to_vk_blend_attachment(blend_desc);
+            VkPipelineColorBlendAttachmentState blend_attachment = to_vk_blend_attachment(desc_);
 
             // If blending is requested but the color attachment format does not advertise
             // VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT (e.g. integer render targets like
@@ -836,7 +805,7 @@ namespace Corona::Horizon
 
             VkPipelineColorBlendStateCreateInfo color_blend {};
             color_blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-            color_blend.logicOpEnable = desc_.blend.logic_op_enabled ? VK_TRUE : VK_FALSE;
+            color_blend.logicOpEnable = desc_.logic_op_enabled ? VK_TRUE : VK_FALSE;
             color_blend.logicOp = VK_LOGIC_OP_COPY;
             color_blend.attachmentCount = color_attachment_count;
             color_blend.pAttachments = color_attachment_count != 0 ? blend_attachments.data() : nullptr;
@@ -862,7 +831,7 @@ namespace Corona::Horizon
 
             PipelineState state;
             state.key = key;
-            state.uses_bindless = uses_bindless_descriptors(desc_);
+            state.uses_bindless = uses_bindless_descriptors(shaders_);
 
             auto add_descriptor_binding = [&](uint32_t set, uint32_t binding, VkDescriptorType descriptor_type) {
                 if (state.uses_bindless && set < ResourceManager::bindless_descriptor_set_count)
@@ -894,7 +863,7 @@ namespace Corona::Horizon
                 set_found->bindings.push_back({ set, binding, descriptor_type });
             };
 
-            for (const UniformBufferBindingData& uniform_buffer : reflected_uniform_buffers(desc_))
+            for (const UniformBufferBindingData& uniform_buffer : reflected_uniform_buffers(shaders_))
             {
                 add_descriptor_binding(uniform_buffer.set, uniform_buffer.binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
             }
@@ -1298,7 +1267,7 @@ namespace Corona::Horizon
                                                        uint32_t set,
                                                        uint32_t binding_index)
     {
-        if (uses_bindless_descriptors(desc_) && is_storage_buffer_bind(bind_type))
+        if (uses_bindless_descriptors(shaders_) && is_storage_buffer_bind(bind_type))
         {
             const uint32_t descriptor_index = store_storage_buffer_descriptor(buffer);
             std::lock_guard lock(mutex_);
@@ -1366,7 +1335,7 @@ namespace Corona::Horizon
                                                        uint32_t set,
                                                        uint32_t binding_index)
     {
-        if (uses_bindless_descriptors(desc_) && is_direct_resource_bind(bind_type) && !is_stage_output(bind_type))
+        if (uses_bindless_descriptors(shaders_) && is_direct_resource_bind(bind_type) && !is_stage_output(bind_type))
         {
             uint32_t descriptor_index = 0;
             if (is_storage_image_bind(bind_type))
@@ -1449,21 +1418,6 @@ namespace Corona::Horizon
         depth_target_ = image;
     }
 
-    void VulkanRasterizerPipeline::add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry)
-    {
-        std::lock_guard lock(mutex_);
-        auto found = std::ranges::find_if(desc_.auto_bind_entries, [&](const EmbeddedShader::AutoBindEntry& existing) {
-            return existing.boundResourceRef == entry.boundResourceRef &&
-                   existing.bindType == entry.bindType &&
-                   existing.location == entry.location;
-        });
-
-        if (found == desc_.auto_bind_entries.end())
-            desc_.auto_bind_entries.push_back(std::move(entry));
-        else
-            *found = std::move(entry);
-    }
-
     void VulkanRasterizerPipeline::bind_auto_resources()
     {
         struct AutoImage
@@ -1482,9 +1436,9 @@ namespace Corona::Horizon
         std::vector<AutoValue> values;
         {
             std::lock_guard lock(mutex_);
-            images.reserve(desc_.auto_bind_entries.size());
-            values.reserve(desc_.auto_bind_entries.size());
-            for (EmbeddedShader::AutoBindEntry& entry : desc_.auto_bind_entries)
+            images.reserve(shaders_.auto_bind_entries.size());
+            values.reserve(shaders_.auto_bind_entries.size());
+            for (EmbeddedShader::AutoBindEntry& entry : shaders_.auto_bind_entries)
             {
                 if (*entry.dirtyVersion != entry.currentDirtyVersion)
                 {
@@ -1496,7 +1450,7 @@ namespace Corona::Horizon
                     {
                         values.push_back({
                             entry,
-                            reflected_binding_coordinates(desc_, entry),
+                            reflected_binding_coordinates(shaders_, entry),
                         });
                     }
                     entry.currentDirtyVersion = *entry.dirtyVersion;
@@ -1529,7 +1483,7 @@ namespace Corona::Horizon
     std::vector<EmbeddedShader::AutoBindEntry> VulkanRasterizerPipeline::auto_bind_entries() const
     {
         std::lock_guard lock(mutex_);
-        return desc_.auto_bind_entries;
+        return shaders_.auto_bind_entries;
     }
 
     void VulkanRasterizerPipeline::record(RasterizerPipelineBase* pipeline,
@@ -1674,7 +1628,7 @@ namespace Corona::Horizon
             // vector<bool>，原先每 draw 调两次 = 每 draw 两次堆分配），提到循环外。
             EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
             EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
-            if (const auto& object = desc_.pipelineObject; object)
+            if (const auto& object = shaders_.object; object)
             {
                 vert_condition_info = object->vertex->getCurrentConditionInfo();
                 frag_condition_info = object->fragment->getCurrentConditionInfo();
@@ -1746,30 +1700,6 @@ namespace Corona::Horizon
         }
 
         return plan;
-    }
-
-    CommandBatch VulkanRasterizerPipeline::command_batch() const
-    {
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::command_batch");
-
-        DrawPlan plan = build_draw_plan();
-        CommandBatch batch;
-
-        if (plan.has_rendering_scope)
-            batch << BeginRenderingCommand{ plan.rendering };
-
-        // 一条 DrawIndexedBatch 而不是每 draw 一条 DrawIndexed：编译期的资源去重
-        // 让 64k draws 只产生 2 个唯一 resource use，而不是 128k 个，同时省掉
-        // 每 draw 一个 StreamCommand(std::function) + 一个 CommandIR。
-        if (!plan.batch.draws.empty())
-            batch << DrawIndexedBatchCommand{ std::make_shared<DrawIndexedBatchDesc>(std::move(plan.batch)) };
-        for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
-            batch << DrawIndexedIndirectStreamCommand{ index, vertex, indirect, std::move(draw) };
-
-        if (plan.has_rendering_scope)
-            batch << EndRenderingCommand{};
-
-        return batch;
     }
 
     void VulkanRasterizerPipeline::record_into(CommandRecorder& recorder) const

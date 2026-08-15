@@ -454,7 +454,7 @@ void run_example_disney_pbr()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline rasterizer(disney_pbr_vert_glsl, disney_pbr_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
@@ -560,7 +560,7 @@ void run_example_disney_pbr()
         }
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(disney_width, disney_height) << Corona::Horizon::submit;
+            render_executor << rasterizer(disney_width, disney_height) << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

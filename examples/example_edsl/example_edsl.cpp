@@ -158,7 +158,7 @@ void run_example_edsl()
         rasterizer.clear_records();
         rasterizer.record(index_buffer, vertex_buffer, draw_params);
 
-        render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::submit;
+        render_receipt = render_executor << rasterizer(edsl_width, edsl_height) << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

@@ -582,7 +582,7 @@ void run_example_edsl_ibl()
 
     // ---- Pipeline ----
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     // 共享 UBO（批次内所有 draw 相同，288 bytes → UBO）
     IblEdslSharedProxy shared;
@@ -885,7 +885,7 @@ void run_example_edsl_ibl()
         rasterizer.record(sky_ib, sky_vb, sky_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::submit;
+            render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
