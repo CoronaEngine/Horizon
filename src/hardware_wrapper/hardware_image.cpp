@@ -364,4 +364,65 @@ namespace Corona::Horizon
 
         return resource_manager().export_image(*image);
     }
+
+    // 以下四个工厂从 horizon.h 移出（原为类内内联定义）。默认实参只在声明处给，
+    // 这里不能重复。只为压缩公共头，语义未变。
+    HardwareImageDesc HardwareImageDesc::texture_2d(uint32_t width,
+                                                    uint32_t height,
+                                                    Format format,
+                                                    ImageUsageFlags usage,
+                                                    std::string name)
+    {
+        HardwareImageDesc desc;
+        desc.dimension = ImageDimension::Image2D;
+        desc.extent = { width, height, 1 };
+        desc.format = format;
+        desc.usage = usage;
+        desc.debug_name = std::move(name);
+        return desc;
+    }
+
+    HardwareImageDesc HardwareImageDesc::texture_2d_array(uint32_t width,
+                                                          uint32_t height,
+                                                          uint32_t layers,
+                                                          Format format,
+                                                          ImageUsageFlags usage,
+                                                          std::string name)
+    {
+        HardwareImageDesc desc;
+        desc.dimension = ImageDimension::Image2DArray;
+        desc.extent = { width, height, 1 };
+        desc.array_layers = layers;
+        desc.format = format;
+        desc.usage = usage;
+        desc.debug_name = std::move(name);
+        return desc;
+    }
+
+    HardwareImageDesc HardwareImageDesc::cube(uint32_t size,
+                                              Format format,
+                                              ImageUsageFlags usage,
+                                              std::string name)
+    {
+        HardwareImageDesc desc;
+        desc.dimension = ImageDimension::Cube;
+        desc.extent = { size, size, 1 };
+        desc.array_layers = 6;
+        desc.format = format;
+        desc.usage = usage;
+        desc.debug_name = std::move(name);
+        return desc;
+    }
+
+    HardwareImageDesc HardwareImageDesc::depth_attachment(uint32_t width,
+                                                          uint32_t height,
+                                                          Format format,
+                                                          std::string name)
+    {
+        return texture_2d(width,
+                          height,
+                          format,
+                          ImageUsageFlags::DepthStencilAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
+                          std::move(name));
+    }
 }

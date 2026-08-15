@@ -53,11 +53,18 @@ target_link_libraries(Horizon PUBLIC
     horizon::vma
 )
 
-# Tracy 采集客户端；PUBLIC 传递给 examples 等下游目标，
-# 使它们也能直接使用 horizon.h 中合并的埋点宏。
+# Tracy 采集客户端。PRIVATE：profiling 是实现细节，不做 profiling 的消费方不该
+# 被迫链 Tracy、也不该继承 HORIZON_TRACY_ENABLED。
+#
+# Horizon 是 STATIC 库，CMake 会把 PRIVATE 依赖以 $<LINK_ONLY:> 记进
+# INTERFACE_LINK_LIBRARIES，所以最终链接照样解析到 Tracy 符号；下游只是不再继承
+# include 目录和 define。
+#
+# 想埋点的 in-tree 目标须自行 opt-in（见 examples/CMakeLists.txt）——注意宏在缺少
+# define 时展开为空且不报错，埋点会静默消失。
 if(HORIZON_ENABLE_TRACY)
-    target_link_libraries(Horizon PUBLIC Tracy::TracyClient)
-    target_compile_definitions(Horizon PUBLIC HORIZON_TRACY_ENABLED=1)
+    target_link_libraries(Horizon PRIVATE Tracy::TracyClient)
+    target_compile_definitions(Horizon PRIVATE HORIZON_TRACY_ENABLED=1)
 endif()
 
 # 忽略第三方库（VulkanMemoryAllocator）的 nullability 警告

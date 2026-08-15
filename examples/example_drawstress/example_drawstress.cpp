@@ -14,6 +14,7 @@
 #include "Codegen/ControlFlows.h"
 #include "common.h"
 #include "horizon.h"
+#include "horizon_profiling.h"  // 内部头（src/），埋点需在 CMake 里 opt-in
 #include "imgui_horizon.h"
 
 #include <imgui.h>

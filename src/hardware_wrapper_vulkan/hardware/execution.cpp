@@ -1,6 +1,6 @@
 #include "execution.h"
 
-#include <horizon.h>  // profiling macros merged from horizon_profiling.h
+#include "horizon_profiling.h"
 
 #include "device_manager.h"
 #include "hardware_wrapper/diagnostics.h"

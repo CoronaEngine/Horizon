@@ -729,16 +729,9 @@ namespace Corona::Horizon
         bool exportable = false;
         std::string debug_name;
 
-        [[nodiscard]] uint64_t byte_size() const
-        {
-            if (element_count == 0 || element_size == 0)
-                return 0;
-
-            if (element_count > std::numeric_limits<uint64_t>::max() / element_size)
-                throw std::overflow_error("HardwareBufferDesc total byte size overflow.");
-
-            return element_count * uint64_t(element_size);
-        }
+        // 定义在 hardware_buffer.cpp。下面的 typed<T>() 会调用它——模板在消费方
+        // 实例化，但符号由 Horizon 库提供，链接即可解析。
+        [[nodiscard]] uint64_t byte_size() const;
 
         template <HardwareTransferable T>
         [[nodiscard]] static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {})
@@ -790,15 +783,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
-        [[nodiscard]] uint64_t get_byte_size() const
-        {
-            const uint64_t element_count = get_element_count();
-            const uint64_t element_size = get_element_size();
-            if (element_size != 0 && element_count > std::numeric_limits<uint64_t>::max() / element_size)
-                throw std::overflow_error("HardwareBuffer total byte size overflow.");
-
-            return element_count * element_size;
-        }
+        [[nodiscard]] uint64_t get_byte_size() const;
         [[nodiscard]] void* get_mapped_data() const;
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
@@ -860,64 +845,30 @@ namespace Corona::Horizon
         bool exportable = false;
         std::string debug_name;
 
+        // 以下工厂定义在 hardware_image.cpp。默认实参留在声明处（语言要求），
+        // 函数体移出去只为压缩公共头——它们都在资源创建期调用，内联无意义。
         static HardwareImageDesc texture_2d(uint32_t width,
                                             uint32_t height,
                                             Format format,
                                             ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Image2D;
-            desc.extent = { width, height, 1 };
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
+                                            std::string name = {});
 
         static HardwareImageDesc texture_2d_array(uint32_t width,
                                                   uint32_t height,
                                                   uint32_t layers,
                                                   Format format,
                                                   ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                                  std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Image2DArray;
-            desc.extent = { width, height, 1 };
-            desc.array_layers = layers;
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
+                                                  std::string name = {});
 
         static HardwareImageDesc cube(uint32_t size,
                                       Format format,
                                       ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                      std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Cube;
-            desc.extent = { size, size, 1 };
-            desc.array_layers = 6;
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
+                                      std::string name = {});
 
         static HardwareImageDesc depth_attachment(uint32_t width,
                                                   uint32_t height,
                                                   Format format,
-                                                  std::string name = {})
-        {
-            return texture_2d(width,
-                              height,
-                              format,
-                              ImageUsageFlags::DepthStencilAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
-                              std::move(name));
-        }
+                                                  std::string name = {});
     };
 
     class HardwareImage : public ResourceHandle
@@ -1598,13 +1549,11 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const;
     };
 
-    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer,
-                                                const HardwareImage& image,
-                                                DeviceId present_device = {},
-                                                bool allow_cpu_bridge_fallback = true)
-    {
-        return { displayer, image, present_device, allow_cpu_bridge_fallback };
-    }
+    // 定义在 hardware_displayer.cpp。
+    [[nodiscard]] PresentCommand present(const HardwareDisplayer& displayer,
+                                         const HardwareImage& image,
+                                         DeviceId present_device = {},
+                                         bool allow_cpu_bridge_fallback = true);
 
 }
 
@@ -1625,34 +1574,5 @@ EmbeddedShader::BoundField<PipelineType>& EmbeddedShader::BoundField<PipelineTyp
     return *this;
 }
 
-// ================================================================
-// Profiling instrumentation (merged from horizon_profiling.h)
-// ----------------------------------------------------------------
-// Tracy wrapper. When HORIZON_TRACY_ENABLED is OFF the macros expand to
-// nothing, so call sites never need #ifdef guards. Enabled via
-// HORIZON_ENABLE_TRACY (see src/CMakeLists.txt).
-// ================================================================
-#if defined(HORIZON_TRACY_ENABLED)
-
-#include <tracy/Tracy.hpp>
-
-// Marks the end of a frame (call once per presented frame).
-#define HORIZON_PROFILE_FRAME() FrameMark
-// Scoped CPU zone named after the enclosing function.
-#define HORIZON_PROFILE_SCOPE() ZoneScoped
-// Scoped CPU zone with an explicit name (string literal).
-#define HORIZON_PROFILE_SCOPE_N(name) ZoneScopedN(name)
-// Plots a numeric value over time (name must be a string literal).
-#define HORIZON_PROFILE_PLOT(name, value) TracyPlot(name, static_cast<double>(value))
-// Names the current thread in the Tracy UI.
-#define HORIZON_PROFILE_THREAD(name) tracy::SetThreadName(name)
-
-#else
-
-#define HORIZON_PROFILE_FRAME()
-#define HORIZON_PROFILE_SCOPE()
-#define HORIZON_PROFILE_SCOPE_N(name)
-#define HORIZON_PROFILE_PLOT(name, value)
-#define HORIZON_PROFILE_THREAD(name)
-
-#endif
+// Profiling 埋点是实现细节，不属于公共 API：宏在内部头 src/horizon_profiling.h，
+// Tracy 由 Horizon 以 PRIVATE 持有，因此消费方既不会被迫链 Tracy，也拿不到埋点宏。

@@ -1,6 +1,6 @@
 #include "vulkan_rasterizer_pipeline.h"
 
-#include <horizon.h>  // profiling macros merged from horizon_profiling.h
+#include "horizon_profiling.h"
 
 #include "hardware_wrapper/validation/hardware_validation.h"
 #include "hardware_wrapper_vulkan/frame_ring.h"
