@@ -9,17 +9,13 @@
 - 第三方依赖由 Conan 2 管理，推荐通过名为 `horizon-dev` 的 Conda 环境运行开发脚本。
 - 当前主要编译器是 MSVC；使用 VS Code/CMake Tools 时必须启用 Visual Studio Developer Environment。
 - Ocarina、Ocarina 测试和 Vision Hotfix 需要 CUDA；普通 Horizon、Helicon 和工具目标不应无条件依赖 CUDA。
-- 工程包含正在进行的 Helicon/Ocarina 合并与目录迁移。修改代码前必须区分“当前参与构建的实现”和“迁移中的副本”。
+- 工程包含正在进行的 Helicon/Ocarina 合并与目录迁移。Horizon 的源代码修改以 `src/` 为唯一作用域。
 
 ## 2. 目录职责
 
 - `include/`：Horizon 对外公开的头文件。
-- `src/core/`：通用基础设施、类型系统、容器封装及运行时工具。
-- `src/math/`：数学类型、数值工具与几何算法。
-- `src/ast/`：唯一一套 AST 节点模型、遍历接口及相关校验逻辑。
-- `src/dsl/`：面向用户的 DSL 类型、表达式构造和语句构造接口。
-- 上述四个目录来自 Ocarina 迁移，当前并未全部加入 `src/CMakeLists.txt`，不能假设构建 `Horizon` 会编译这些文件。`src/` 下其他目录仍需大幅调整，现阶段不在本文档中定义其职责。
-- `modules/ocarina/`：旧 Ocarina 模块及其 generator、RHI、后端和测试。除非任务明确要求同步修改，否则不要把对 `src/` 新目录的修改扩散到这里，反之亦然。
+- `src/`：Horizon 源代码的唯一修改作用域。`core`、`math`、`ast`、`dsl` 的详细职责、当前依赖和目标架构以 [`docs/architecture/overview.md`](docs/architecture/overview.md) 为权威来源。
+- `modules/ocarina/`：外部的旧 Ocarina 模块及其 generator、RHI、后端和测试。默认完全忽略，不主动搜索、查阅、修改或将 `src/` 的改动同步到该目录；只有用户明确指定 Ocarina 为任务范围时才可进入。
 - `examples/`：示例程序与示例资源。
 - `tools/`：开发工作流、着色器编译工具及辅助脚本。
 - `cmake/`、`CMakePresets.json`、`conanfile.py`：构建、目标族和依赖配置。
@@ -30,26 +26,14 @@
 1. 阅读本文件以及目标目录内更具体的说明文档。
 2. 运行 `git status --short`，确认当前分支和已有未提交修改。
 3. 用户已有的修改必须保留。不要清理、覆盖或顺手格式化与当前任务无关的文件。
-4. 明确任务作用于 `src/` 的迁移代码、`modules/ocarina/` 的旧代码，还是两者都需要修改。
+4. 将代码任务限定在 `src/` 内；除非用户明确要求，不得为了寻找参考实现而查阅 `modules/ocarina/`。
 5. 修改前检查相关 `CMakeLists.txt`，确认目标文件是否真正参与当前构建。
 
 ## 4. 架构与命名空间
 
-新迁移代码使用小写根命名空间 `horizon`，模块命名空间如下：
-
-```cpp
-namespace horizon::core {}
-namespace horizon::math {}
-namespace horizon::ast {}
-namespace horizon::dsl {}
-```
-
-- 类型名保持清晰的模块归属，例如 `horizon::ast::Node`、`horizon::ast::Function`。
-- 不要在新迁移代码中继续引入新的 `ocarina` 命名空间。
-- 旧 `modules/ocarina/` 在完成迁移前仍可能使用 `ocarina`；不要仅为统一文本而进行无边界的大规模替换。
-- AST 只维护一套模型。Helicon 与 Ocarina 合并时，不要再创建平行的第二套 AST 类型。
-- `core` 应承载通用基础设施；`math` 承载数学类型与算法；`ast` 承载语法树模型和遍历接口；`dsl` 承载面向用户的构造接口。
-- 新增依赖时应优先保持清晰的分层。若箭头表示“依赖者指向被依赖者”，目标方向为 `dsl -> ast -> math -> core`。现有循环依赖属于迁移债务，不要在没有说明的情况下继续扩大。
+- `src/` 中的新代码使用小写根命名空间 `horizon`，并使用 `horizon::core`、`horizon::math`、`horizon::ast`、`horizon::dsl` 表达类型的真实模块归属；不得新增 `ocarina` 命名空间。
+- 新增依赖必须遵守架构概览中定义的目标方向，不得扩大已记录的反向依赖或循环依赖。
+- AST 只维护一套模型，不得创建平行的第二套 AST 类型。
 - 避免在公共头文件的全局作用域使用 `using namespace`。迁移兼容代码若必须使用，应限制在命名空间内部，并在后续重构中逐步替换为明确限定名或窄范围 `using` 声明。
 - `detail` 中的符号必须使用真实所有者的命名空间。拆分模块后，不要默认不同模块的 `detail` 仍是同一个命名空间。
 
@@ -69,61 +53,31 @@ namespace horizon::dsl {}
 
 ## 6. 构建方式
 
-### 6.1 推荐工作流
+完整的环境准备、preset、目标族和命令示例统一维护在 [`README.md`](README.md) 的 Windows 构建指南中。代理执行构建时还必须遵守以下约束：
 
-所有命令从仓库根目录执行。完整配置和构建优先使用 `tools/dev.py`：
-
-```powershell
-# 配置 Horizon/Helicon 核心目标族
-conda run -n horizon-dev --no-capture-output python tools/dev.py configure --configuration Debug --target-family core
-
-# 配置并构建 Horizon
-conda run -n horizon-dev --no-capture-output python tools/dev.py build Horizon --configuration Debug
-
-# 已完成配置后快速构建
-conda run -n horizon-dev --no-capture-output python tools/dev.py build-fast Horizon --configuration Debug --target-family core
-```
-
-可用目标族及其构建目录：
-
-| 目标族 | Debug preset | 构建目录 |
-| --- | --- | --- |
-| Horizon / Helicon | `core-debug` | `build/conan/core/debug` |
-| 工具 | `tools-debug` | `build/conan/tools/debug` |
-| 示例 | `examples-debug` | `build/conan/examples/debug` |
-| Ocarina | `ocarina-debug` | `build/conan/ocarina/debug` |
-| Ocarina 测试 | `ocarina-tests-debug` | `build/conan/ocarina-tests/debug` |
-| Vision Hotfix | `vision-hotfix-debug` | `build/conan/vision-hotfix/debug` |
-
+- 所有命令从仓库根目录执行，完整配置和构建优先使用 `tools/dev.py`。
 - 不同目标族必须使用各自独立的构建目录，禁止在同一个构建目录中切换目标族。
 - `Debug`、`Release`、`RelWithDebInfo`、`MinSizeRel` 的大小写必须保持不变。
 - 只有在已经成功配置且依赖未变化时才使用 `build-fast`。
 - 若用户明确要求“按 CLion 配置构建”，应使用当前 CLion 配置对应的 CMake、生成器、profile 和构建目录；不要自行改用另一套 preset 后宣称等价。
 - 不要把本机 CMake、Ninja、Visual Studio 或 CLion 的绝对安装路径写入仓库文件。
 
-### 6.2 判断构建是否覆盖改动
+### 判断构建是否覆盖改动
 
 - 构建成功只证明该 target 实际包含的源文件能够构建。
 - 修改 `src/core/`、`src/math/`、`src/ast/`、`src/dsl/` 后，若它们尚未接入当前 CMake target，必须额外进行头文件聚合检查、单文件语法检查，或先完成目标接入。
 - `ninja: no work to do` 不是新迁移代码通过编译的证据。
-- 若验证被尚未迁移的 generator、RHI 或其他旧模块阻断，应明确报告边界和首个外部错误，不要把它描述为本次修改已完全编译通过。
+- 若验证被任务作用域之外的旧模块阻断，应明确报告边界和首个外部错误，不得转而查阅或修改 `modules/ocarina/`。
 
 ## 7. 测试与验证
 
-- 验证范围应与风险相称：至少执行格式检查、目标构建以及与修改模块相关的测试。
+- 验证范围应与修改风险和实际构建覆盖相称。代码修改原则上执行格式检查、相关目标构建和测试；无法执行或目标未覆盖时，必须采用可行的局部检查并报告原因。
 - 提交前运行：
 
 ```powershell
 git diff --check
 ```
 
-- Ocarina 测试目标位于 `modules/ocarina/tests/`，使用 `ocarina-tests` 目标族。示例：
-
-```powershell
-conda run -n horizon-dev --no-capture-output python tools/dev.py build test-core-half --configuration Debug
-```
-
-- 新增测试时优先放入与功能对应的类别：`core`、`codegen`、`resources`、`math`、`runtime`、`debug` 或 `io`。
 - 修复缺陷时应尽可能增加能够在修复前失败、修复后通过的回归测试。
 - 测试失败时先保留首个有因果价值的错误；不要只报告后续级联错误。
 
