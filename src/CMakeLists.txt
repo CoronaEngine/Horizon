@@ -34,19 +34,6 @@ target_include_directories(Horizon
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HORIZON_VALIDATION_DEFINE
-    "$<IF:$<CONFIG:Debug>,$<BOOL:${HORIZON_ENABLE_DEBUG_VALIDATION}>,$<IF:$<CONFIG:RelWithDebInfo>,$<BOOL:${HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION}>,$<BOOL:${HORIZON_ENABLE_RELEASE_VALIDATION}>>>"
-)
-
-# 两个校验开关都是实现细节：只有 hardware_validation.cpp 与 diagnostics.cpp 读它们，
-# 公共头和 examples 全不引用。PRIVATE 后下游不再继承。
-# ⚠️ #if 遇到未定义标识符会静默当 0——若哪天这两个 define 没到达 TU，校验会无声消失
-# 且不报错。改这里之后请查 compile_commands.json 里对应 TU 的宏值。
-target_compile_definitions(Horizon
-    PRIVATE
-    HORIZON_ENABLE_HARDWARE_VALIDATION=${HORIZON_VALIDATION_DEFINE}
-    HORIZON_ENABLE_VULKAN_VALIDATION=${HORIZON_VALIDATION_DEFINE}
-)
 
 target_link_libraries(Horizon PUBLIC
     Helicon

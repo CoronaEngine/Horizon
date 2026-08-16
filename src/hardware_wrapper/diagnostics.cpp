@@ -5,6 +5,22 @@
 #include <mutex>
 #include <string>
 
+#ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
+#if defined(NDEBUG)
+#define HORIZON_ENABLE_HARDWARE_VALIDATION 0
+#else
+#define HORIZON_ENABLE_HARDWARE_VALIDATION 1
+#endif
+#endif
+
+#ifndef HORIZON_ENABLE_VULKAN_VALIDATION
+#if defined(NDEBUG)
+#define HORIZON_ENABLE_VULKAN_VALIDATION 0
+#else
+#define HORIZON_ENABLE_VULKAN_VALIDATION 1
+#endif
+#endif
+
 namespace Corona::Horizon::Diagnostics
 {
     namespace
