@@ -22,14 +22,6 @@
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
 
-#ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
-#if defined(NDEBUG)
-#define HORIZON_ENABLE_HARDWARE_VALIDATION 0
-#else
-#define HORIZON_ENABLE_HARDWARE_VALIDATION 1
-#endif
-#endif
-
 namespace Corona::Horizon
 {
 
