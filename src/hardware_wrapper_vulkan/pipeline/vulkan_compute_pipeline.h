@@ -58,25 +58,29 @@ namespace Corona::Horizon
             std::vector<UniformSet> uniform_sets;
         };
 
-        explicit VulkanComputePipeline(ComputePipelineDesc desc,
-                                       std::source_location source_location = std::source_location::current());
+        VulkanComputePipeline(ComputePipelineDesc desc,
+                              ComputePipelineShaders shaders,
+                              std::source_location source_location = std::source_location::current());
         ~VulkanComputePipeline();
 
         [[nodiscard]] ComputePipelineDesc desc() const;
-        // 只取 pipelineObject（shared_ptr 浅拷贝），避免 desc() 的整份深拷贝。
+        // shader 侧独立取用：rebuild 时需要原样搬运，不必连状态一起深拷贝。
+        [[nodiscard]] ComputePipelineShaders shaders() const;
+        // 只取 pipelineObject（shared_ptr 浅拷贝），避免整份深拷贝。
         [[nodiscard]] std::shared_ptr<EmbeddedShader::ComputePipelineObject> pipeline_object() const;
+        // 反射里的 workgroup local size，缺失时回落到 desc_.thread_group_size。
+        [[nodiscard]] ktm::uvec3 resolved_thread_group_size() const;
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void bind_auto_resources();
         void bind_auto_image(EmbeddedShader::AutoBindEntry entry, const HardwareImage& image);
         void set_dispatch(uint16_t groups_x, uint16_t groups_y, uint16_t groups_z);
-        void set_debug_label(std::string label);
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
 
         [[nodiscard]] Snapshot snapshot() const;
-        [[nodiscard]] CommandBatch command_batch(ComputePipelineBase& pipeline) const;
+        void record_into(ComputePipelineBase& pipeline, CommandRecorder& recorder) const;
         [[nodiscard]] PreparedDispatch prepare_dispatch(VkDevice device, const DispatchDesc& dispatch);
 
         struct BindingLayout
@@ -148,6 +152,7 @@ namespace Corona::Horizon
         void sync_ubo_slot_unlocked() const;
 
         std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries_;
+        ComputePipelineShaders shaders_;
         ComputePipelineDesc desc_;
         std::source_location source_location_;
 

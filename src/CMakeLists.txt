@@ -17,7 +17,6 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
 
 set(PUBLIC_HEADERS
     "${PROJECT_SOURCE_DIR}/include/horizon.h"
-    "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/callback_sink.h"
     "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/i_logger.h"
     "${PROJECT_SOURCE_DIR}/include/corona/kernel/utils/stack_trace.h"
     "${PROJECT_SOURCE_DIR}/include/corona/kernel/utils/storage.h"

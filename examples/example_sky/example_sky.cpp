@@ -541,7 +541,7 @@ void run_example_sky()
 
     // Landscape first (clears color+depth), then sky into remaining far-plane pixels.
     Corona::Horizon::RasterizerPipelineDesc landscape_desc;
-    landscape_desc.blend.attachments = {Corona::Horizon::BlendStateDesc::opaque_attachment()};
+    landscape_desc.blend_enabled = false;
     landscape_desc.clear_color_target = true;
     landscape_desc.clear_depth_target = true;
 
@@ -552,10 +552,10 @@ void run_example_sky()
     landscape_pipeline.pc.lightmapIndex = lightmap.store_descriptor();
 
     Corona::Horizon::RasterizerPipelineDesc sky_desc;
-    sky_desc.blend.attachments = {Corona::Horizon::BlendStateDesc::opaque_attachment()};
-    sky_desc.depth_stencil.depth_test_enabled = true;
-    sky_desc.depth_stencil.depth_write_enabled = false;
-    sky_desc.depth_stencil.depth_compare_op = Corona::Horizon::CompareOp::Equal;
+    sky_desc.blend_enabled = false;
+    sky_desc.depth_test_enabled = true;
+    sky_desc.depth_write_enabled = false;
+    sky_desc.depth_compare_op = Corona::Horizon::CompareOp::Equal;
     sky_desc.clear_color_target = false;
     sky_desc.clear_depth_target = false;
 
@@ -695,7 +695,7 @@ void run_example_sky()
 
         render_receipt = render_executor << landscape_pipeline(sky_width, sky_height)
                                          << sky_pipeline(sky_width, sky_height)
-                                         << Corona::Horizon::submit;
+                                         << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

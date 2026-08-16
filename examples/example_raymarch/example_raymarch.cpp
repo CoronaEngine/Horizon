@@ -82,7 +82,7 @@ void run_example_raymarch()
     depth_image.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc desc;
-    desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline rasterizer(raymarch_vert_glsl, raymarch_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
@@ -153,7 +153,7 @@ void run_example_raymarch()
         rasterizer.record(quad_ib, quad_vb, quad_params);
 
         Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(rm_width, rm_height) << Corona::Horizon::submit;
+            render_executor << rasterizer(rm_width, rm_height) << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

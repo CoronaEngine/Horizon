@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <limits>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,8 +16,16 @@ namespace Corona::Horizon
 {
     namespace
     {
-        std::mutex validation_config_mutex;
-        HardwareValidationConfig validation_config;
+        // 校验模式固定为 Throw：公开的 set/get 配置接口与配置结构无任何调用者，
+        // 已随 API 简化从 horizon.h 移除，模式枚举也随之内部化。
+        enum class HardwareValidationMode : uint8_t
+        {
+            Disabled,
+            Log,
+            Throw,
+        };
+
+        constexpr HardwareValidationMode validation_mode = HardwareValidationMode::Throw;
 
         [[nodiscard]] bool validation_compiled() noexcept
         {
@@ -67,33 +74,26 @@ namespace Corona::Horizon
             }
         }
 
-        [[nodiscard]] bool shader_has_spirv(const PipelineShaderDesc& shader) noexcept
+        [[nodiscard]] bool shader_has_spirv(const EmbeddedShader::ShaderCodeModule& module) noexcept
         {
-            const auto* spirv = std::get_if<std::vector<uint32_t>>(&shader.module.shaderCode);
+            const auto* spirv = std::get_if<std::vector<uint32_t>>(&module.shaderCode);
             return spirv != nullptr && !spirv->empty();
-        }
-
-        [[nodiscard]] HardwareValidationConfig read_validation_config()
-        {
-            std::lock_guard lock(validation_config_mutex);
-            return validation_config;
         }
 
         [[nodiscard]] bool optional_validation_enabled()
         {
-            return validation_compiled() && read_validation_config().mode != HardwareValidationMode::Disabled;
+            return validation_compiled() && validation_mode != HardwareValidationMode::Disabled;
         }
 
         bool validation_error(std::string_view message, bool hard_error = false)
         {
-            const HardwareValidationConfig config = read_validation_config();
             Diagnostics::write(Diagnostics::Level::Error, "HORIZON VALIDATION", message);
 
-            if (hard_error || (validation_compiled() && config.mode == HardwareValidationMode::Throw))
+            if (hard_error || (validation_compiled() && validation_mode == HardwareValidationMode::Throw))
                 throw std::invalid_argument(std::string(message));
 
 #if HORIZON_ENABLE_HARDWARE_VALIDATION
-            if (config.mode == HardwareValidationMode::Log)
+            if (validation_mode == HardwareValidationMode::Log)
                 CFW_LOG_ERROR("[Horizon validation] {}", message);
 #else
             (void)message;
@@ -107,7 +107,7 @@ namespace Corona::Horizon
             Diagnostics::write(Diagnostics::Level::Warning, "HORIZON VALIDATION", message);
 
 #if HORIZON_ENABLE_HARDWARE_VALIDATION
-            if (read_validation_config().mode != HardwareValidationMode::Disabled)
+            if (validation_mode != HardwareValidationMode::Disabled)
                 CFW_LOG_WARNING("[Horizon validation] {}", message);
 #else
             (void)message;
@@ -269,28 +269,6 @@ namespace Corona::Horizon
             uint64_t unused_size = 0;
             return resolve_tightly_packed_image_bytes(desc, range, layer_index, mip_index, unused_size, operation);
         }
-    }
-
-    void set_hardware_validation_config(HardwareValidationConfig config)
-    {
-        if (!validation_compiled())
-            config.mode = HardwareValidationMode::Disabled;
-
-        std::lock_guard lock(validation_config_mutex);
-        validation_config = config;
-    }
-
-    HardwareValidationConfig get_hardware_validation_config()
-    {
-        HardwareValidationConfig config = read_validation_config();
-        if (!validation_compiled())
-            config.mode = HardwareValidationMode::Disabled;
-        return config;
-    }
-
-    bool is_hardware_validation_enabled()
-    {
-        return optional_validation_enabled();
     }
 
     bool validate_buffer_source_data(std::span<const std::byte> data, uint32_t element_size)
@@ -459,42 +437,31 @@ namespace Corona::Horizon
         return validate_image_host_layout(desc, range, layer_index, mip_index, data.size_bytes(), row_pitch, slice_pitch, "write");
     }
 
-    bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc)
+    bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc, const RasterizerPipelineShaders& shaders)
     {
-        if (desc.vertex_shader.stage != PipelineShaderStage::Vertex)
-            return validation_error("RasterizerPipelineDesc requires a vertex shader.", true);
+        // stage 字段随 PipelineShaderDesc 一并移除；"这一 stage 到位了吗" 现在等价于
+        // "对应槽位里有非空 SPIR-V"。
+        if (!shader_has_spirv(shaders.vertex))
+            return validation_error("RasterizerPipeline requires a vertex shader with SPIR-V code.", true);
 
-        if (desc.fragment_shader.stage != PipelineShaderStage::Fragment)
-            return validation_error("RasterizerPipelineDesc requires a fragment shader.", true);
-
-        if (!shader_has_spirv(desc.vertex_shader))
-            return validation_error("RasterizerPipelineDesc vertex shader must contain SPIR-V code.", true);
-
-        if (!shader_has_spirv(desc.fragment_shader))
-            return validation_error("RasterizerPipelineDesc fragment shader must contain SPIR-V code.", true);
+        if (!shader_has_spirv(shaders.fragment))
+            return validation_error("RasterizerPipeline requires a fragment shader with SPIR-V code.", true);
 
         if (desc.multiview_count == 0)
             return validation_error("RasterizerPipelineDesc multiview_count must be greater than zero.", true);
 
-        const uint32_t sample_count = static_cast<uint32_t>(desc.multisample.sample_count);
-        if (!is_supported_sample_count(sample_count))
-            return validation_error("RasterizerPipelineDesc multisample sample_count is not supported.", true);
+        if (!is_supported_sample_count(static_cast<uint32_t>(desc.sample_count)))
+            return validation_error("RasterizerPipelineDesc sample_count is not supported.", true);
 
-        if (!std::isfinite(desc.rasterizer.line_width) || desc.rasterizer.line_width <= 0.0f)
-            return validation_error("RasterizerPipelineDesc rasterizer line_width must be finite and greater than zero.", true);
+        if (!std::isfinite(desc.line_width) || desc.line_width <= 0.0f)
+            return validation_error("RasterizerPipelineDesc line_width must be finite and greater than zero.", true);
 
-        if (!std::isfinite(desc.multisample.min_sample_shading) ||
-            desc.multisample.min_sample_shading < 0.0f ||
-            desc.multisample.min_sample_shading > 1.0f)
+        if (!std::isfinite(desc.min_sample_shading) ||
+            desc.min_sample_shading < 0.0f ||
+            desc.min_sample_shading > 1.0f)
         {
             return validation_error("RasterizerPipelineDesc min_sample_shading must be in [0, 1].", true);
         }
-
-        if (!optional_validation_enabled())
-            return true;
-
-        if (desc.blend.attachments.empty())
-            validation_warning("RasterizerPipelineDesc has no color blend attachments; bind render targets before recording draw work.");
 
         return true;
     }

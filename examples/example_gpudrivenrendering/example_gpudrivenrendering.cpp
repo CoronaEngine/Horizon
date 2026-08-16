@@ -561,10 +561,10 @@ void run_example_gpudrivenrendering()
     main_depth.set_clear_depth(1.0f, 0);
 
     Corona::Horizon::RasterizerPipelineDesc opaque_desc;
-    opaque_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    opaque_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipelineDesc main_desc = opaque_desc;
-    main_desc.rasterizer.cull_mode = Corona::Horizon::CullMode::Front;
+    main_desc.cull_mode = Corona::Horizon::CullMode::Front;
 
     Corona::Horizon::RasterizerPipeline occlusion_rasterizer(
         gdr_occlusion_vert_glsl, gdr_occlusion_frag_glsl, opaque_desc);
@@ -807,7 +807,7 @@ void run_example_gpudrivenrendering()
             stream << occlude(occlude_groups_x, 1, 1) << compact(1, 1, 1);
         }
 
-        render_receipt = (stream << main_rasterizer(gdr_width, gdr_height) << Corona::Horizon::submit);
+        render_receipt = (stream << main_rasterizer(gdr_width, gdr_height) << Corona::Horizon::commit());
 
         first_frame = false;
 

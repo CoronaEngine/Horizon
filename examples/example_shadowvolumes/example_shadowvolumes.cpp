@@ -408,31 +408,29 @@ void run_example_shadowvolumes()
 
     // pass 1: ambient
     Corona::Horizon::RasterizerPipelineDesc ambient_desc;
-    ambient_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    ambient_desc.blend_enabled = false;
     Corona::Horizon::RasterizerPipeline ambient_rasterizer(sv_scene_vert_glsl, sv_ambient_frag_glsl, ambient_desc);
     ambient_rasterizer.outColor = final_output_image;
     ambient_rasterizer.bind_depth_target(depth_image);
 
     // pass 2: depthval
     Corona::Horizon::RasterizerPipelineDesc depthval_desc;
-    depthval_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    depthval_desc.blend_enabled = false;
     Corona::Horizon::RasterizerPipeline depthval_rasterizer(sv_scene_vert_glsl, sv_depthval_frag_glsl, depthval_desc);
     depthval_rasterizer.outColor = scene_depth_image;
     depthval_rasterizer.bind_depth_target(depthval_depth_image);
 
     // pass 3: volume（加法混合、无深度附件）
     Corona::Horizon::RasterizerPipelineDesc volume_desc;
-    volume_desc.depth_stencil.depth_test_enabled = false;
-    volume_desc.depth_stencil.depth_write_enabled = false;
-    Corona::Horizon::BlendAttachmentDesc additive;
-    additive.blend_enabled = true;
-    additive.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.color_blend_op = Corona::Horizon::BlendOp::Add;
-    additive.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.alpha_blend_op = Corona::Horizon::BlendOp::Add;
-    volume_desc.blend.attachments = { additive };
+    volume_desc.depth_test_enabled = false;
+    volume_desc.depth_write_enabled = false;
+    volume_desc.blend_enabled = true;
+    volume_desc.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    volume_desc.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    volume_desc.color_blend_op = Corona::Horizon::BlendOp::Add;
+    volume_desc.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    volume_desc.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    volume_desc.alpha_blend_op = Corona::Horizon::BlendOp::Add;
     Corona::Horizon::RasterizerPipeline volume_rasterizer(sv_volume_vert_glsl, sv_volume_frag_glsl, volume_desc);
     volume_rasterizer.outColor = count_image;
     // scene depth 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
@@ -441,7 +439,13 @@ void run_example_shadowvolumes()
     // pass 4: lit（不清屏、加法混合叠到 ambient 上）
     Corona::Horizon::RasterizerPipelineDesc lit_desc;
     lit_desc.clear_color_target = false;
-    lit_desc.blend.attachments = { additive };
+    lit_desc.blend_enabled = true;
+    lit_desc.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    lit_desc.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    lit_desc.color_blend_op = Corona::Horizon::BlendOp::Add;
+    lit_desc.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    lit_desc.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    lit_desc.alpha_blend_op = Corona::Horizon::BlendOp::Add;
     Corona::Horizon::RasterizerPipeline lit_rasterizer(sv_scene_vert_glsl, sv_lit_frag_glsl, lit_desc);
     lit_rasterizer.outColor = final_output_image;
     lit_rasterizer.bind_depth_target(lit_depth_image);
@@ -577,7 +581,7 @@ void run_example_shadowvolumes()
                             << depthval_rasterizer(sv_width, sv_height)
                             << volume_rasterizer(sv_width, sv_height)
                             << lit_rasterizer(sv_width, sv_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

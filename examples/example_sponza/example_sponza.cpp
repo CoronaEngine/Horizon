@@ -800,7 +800,7 @@ void run_example_sponza()
 
     // Pass 0: sun RSM (depth / normal / flux)
     Corona::Horizon::RasterizerPipelineDesc shadow_desc;
-    shadow_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    shadow_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline shadow_rasterizer(sponza_shadow_vert_glsl,
                                                           sponza_shadow_frag_glsl, shadow_desc);
@@ -811,7 +811,7 @@ void run_example_sponza()
 
     // Pass 1: geometry -> G-buffer (single MRT pass, three colour attachments)
     Corona::Horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    geom_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline geom_rasterizer(sponza_geom_vert_glsl, sponza_geom_frag_glsl, geom_desc);
     geom_rasterizer.outAlbedo = gbuffer_albedo;
@@ -821,17 +821,15 @@ void run_example_sponza()
 
     // Pass 2: light accumulation (additive blend, no depth)
     Corona::Horizon::RasterizerPipelineDesc light_desc;
-    light_desc.depth_stencil.depth_test_enabled = false;
-    light_desc.depth_stencil.depth_write_enabled = false;
-    Corona::Horizon::BlendAttachmentDesc additive;
-    additive.blend_enabled = true;
-    additive.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.color_blend_op = Corona::Horizon::BlendOp::Add;
-    additive.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.alpha_blend_op = Corona::Horizon::BlendOp::Add;
-    light_desc.blend.attachments = { additive };
+    light_desc.depth_test_enabled = false;
+    light_desc.depth_write_enabled = false;
+    light_desc.blend_enabled = true;
+    light_desc.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.color_blend_op = Corona::Horizon::BlendOp::Add;
+    light_desc.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.alpha_blend_op = Corona::Horizon::BlendOp::Add;
 
     Corona::Horizon::RasterizerPipeline light_rasterizer(sponza_light_vert_glsl, sponza_light_frag_glsl, light_desc);
     light_rasterizer.outColor = light_buffer;
@@ -854,9 +852,9 @@ void run_example_sponza()
     ssao_blurred.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
 
     Corona::Horizon::RasterizerPipelineDesc fullscreen_desc;
-    fullscreen_desc.depth_stencil.depth_test_enabled = false;
-    fullscreen_desc.depth_stencil.depth_write_enabled = false;
-    fullscreen_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    fullscreen_desc.depth_test_enabled = false;
+    fullscreen_desc.depth_write_enabled = false;
+    fullscreen_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline ssao_rasterizer(sponza_combine_vert_glsl,
                                                         sponza_ssao_frag_glsl, fullscreen_desc);
@@ -874,9 +872,9 @@ void run_example_sponza()
 
     // Pass 3: combine
     Corona::Horizon::RasterizerPipelineDesc combine_desc;
-    combine_desc.depth_stencil.depth_test_enabled = false;
-    combine_desc.depth_stencil.depth_write_enabled = false;
-    combine_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    combine_desc.depth_test_enabled = false;
+    combine_desc.depth_write_enabled = false;
+    combine_desc.blend_enabled = false;
 
     // combine 渲染进线性 HDR(不再直接进 final output;SSR composite 收尾)
     Corona::Horizon::RasterizerPipeline combine_rasterizer(sponza_combine_vert_glsl, sponza_combine_frag_glsl, combine_desc);
@@ -1511,7 +1509,7 @@ void run_example_sponza()
                             << ssr_linear_depth_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
                             << ssr_trace_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
                             << ssr_composite_compute(ssr_dispatch_x, ssr_dispatch_y, 1)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

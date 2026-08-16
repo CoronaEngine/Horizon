@@ -61,10 +61,12 @@ namespace Corona::Horizon
         };
 
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
+                                          RasterizerPipelineShaders shaders,
                                           std::source_location source_location = std::source_location::current());
         ~VulkanRasterizerPipeline();
 
         [[nodiscard]] RasterizerPipelineDesc desc() const;
+        [[nodiscard]] RasterizerPipelineShaders shaders() const;
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void set_extent(uint16_t width, uint16_t height);
@@ -72,7 +74,6 @@ namespace Corona::Horizon
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareBuffer& buffer, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
         void set_resource_direct(uint64_t byte_offset, uint32_t type_size, const HardwareImage& image, int32_t bind_type, uint32_t location = 0, uint32_t set = 0, uint32_t binding = 0);
         void set_depth_target(const HardwareImage& image);
-        void add_auto_bind_entry(EmbeddedShader::AutoBindEntry entry);
         void bind_auto_resources();
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
         void record(RasterizerPipelineBase* pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
@@ -107,9 +108,6 @@ namespace Corona::Horizon
                                                 uint32_t vertex_stride,
                                                 const DrawIndexedDesc& draw);
 
-        [[nodiscard]] CommandBatch command_batch() const;
-        // 直接录进 recorder：与 command_batch() 等价，但省掉中间的 CommandBatch /
-        // StreamCommand(std::function) 以及批次 payload 的一次拷贝。
         void record_into(CommandRecorder& recorder) const;
 
     private:
@@ -191,6 +189,7 @@ namespace Corona::Horizon
         void sync_ubo_slot_unlocked() const;
 
         RasterizerPipelineDesc desc_;
+        RasterizerPipelineShaders shaders_;
         std::source_location source_location_;
 
         mutable std::mutex mutex_;

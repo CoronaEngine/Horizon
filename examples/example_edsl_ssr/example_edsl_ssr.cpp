@@ -689,10 +689,7 @@ void run_example_edsl_ssr()
     // 管线构造
     // ================================================================
     Corona::Horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment(),
-                                    Corona::Horizon::BlendStateDesc::opaque_attachment(),
-                                    Corona::Horizon::BlendStateDesc::opaque_attachment(),
-                                    Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    geom_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline geom_rasterizer(geom_vert, geom_frag, geom_desc);
     geom_rasterizer.bind_depth_target(scene_depth);
@@ -876,7 +873,7 @@ void run_example_edsl_ssr()
                             << linear_depth_compute(dispatch_x, dispatch_y, 1)
                             << trace_compute(dispatch_x, dispatch_y, 1)
                             << composite_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

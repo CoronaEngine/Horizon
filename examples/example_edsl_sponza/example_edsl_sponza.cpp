@@ -1700,12 +1700,12 @@ void run_example_edsl_sponza()
     // ========================================================================
 
     Corona::Horizon::RasterizerPipelineDesc geo_desc; // 混合状态一份即可,运行时复制到全部附件
-    geo_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    geo_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipelineDesc fullscreen_desc;
-    fullscreen_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
-    fullscreen_desc.depth_stencil.depth_test_enabled = false;
-    fullscreen_desc.depth_stencil.depth_write_enabled = false;
+    fullscreen_desc.blend_enabled = false;
+    fullscreen_desc.depth_test_enabled = false;
+    fullscreen_desc.depth_write_enabled = false;
 
     Corona::Horizon::RasterizerPipeline rsm_pipe(rsm_vert, rsm_frag, geo_desc);
     rsm_pipe.bind_depth_target(rsm_zbuffer);
@@ -2109,7 +2109,7 @@ void run_example_edsl_sponza()
                             << ssr_lin_pipe(spz_width, spz_height)
                             << ssr_trace_pipe(spz_width, spz_height)
                             << ssr_composite_pipe(spz_width, spz_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

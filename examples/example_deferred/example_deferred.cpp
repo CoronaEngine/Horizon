@@ -317,7 +317,7 @@ void run_example_deferred()
 
     // Pass 1：几何 → G-buffer（MRT 单 pass：albedo/normal/depthval 三附件同时输出）
     Corona::Horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    geom_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline geom_rasterizer(deferred_geom_vert_glsl, deferred_geom_mrt_frag_glsl, geom_desc);
     geom_rasterizer.outAlbedo = gbuffer_albedo;
@@ -330,17 +330,15 @@ void run_example_deferred()
 
     // Pass 2：光照累加（加法混合、无深度）
     Corona::Horizon::RasterizerPipelineDesc light_desc;
-    light_desc.depth_stencil.depth_test_enabled = false;
-    light_desc.depth_stencil.depth_write_enabled = false;
-    Corona::Horizon::BlendAttachmentDesc additive;
-    additive.blend_enabled = true;
-    additive.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.color_blend_op = Corona::Horizon::BlendOp::Add;
-    additive.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
-    additive.alpha_blend_op = Corona::Horizon::BlendOp::Add;
-    light_desc.blend.attachments = { additive };
+    light_desc.depth_test_enabled = false;
+    light_desc.depth_write_enabled = false;
+    light_desc.blend_enabled = true;
+    light_desc.src_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.dst_color_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.color_blend_op = Corona::Horizon::BlendOp::Add;
+    light_desc.src_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.dst_alpha_blend_factor = Corona::Horizon::BlendFactor::One;
+    light_desc.alpha_blend_op = Corona::Horizon::BlendOp::Add;
 
     Corona::Horizon::RasterizerPipeline light_rasterizer(deferred_light_vert_glsl, deferred_light_frag_glsl, light_desc);
     light_rasterizer.outColor = light_buffer;
@@ -349,9 +347,9 @@ void run_example_deferred()
 
     // Pass 3：合成
     Corona::Horizon::RasterizerPipelineDesc combine_desc;
-    combine_desc.depth_stencil.depth_test_enabled = false;
-    combine_desc.depth_stencil.depth_write_enabled = false;
-    combine_desc.blend.attachments = { Corona::Horizon::BlendStateDesc::opaque_attachment() };
+    combine_desc.depth_test_enabled = false;
+    combine_desc.depth_write_enabled = false;
+    combine_desc.blend_enabled = false;
 
     Corona::Horizon::RasterizerPipeline combine_rasterizer(deferred_combine_vert_glsl, deferred_combine_frag_glsl, combine_desc);
     combine_rasterizer.outColor = final_output_image;
@@ -500,7 +498,7 @@ void run_example_deferred()
             render_executor << geom_rasterizer(dfr_width, dfr_height)
                             << light_rasterizer(dfr_width, dfr_height)
                             << combine_rasterizer(dfr_width, dfr_height)
-                            << Corona::Horizon::submit;
+                            << Corona::Horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);

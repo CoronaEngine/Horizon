@@ -13,7 +13,6 @@
 #include <Windows.h>
 #endif
 
-#include "corona/kernel/core/callback_sink.h"
 #include "corona/kernel/core/i_logger.h"
 #include "quill/Backend.h"
 #include "quill/Frontend.h"
@@ -29,7 +28,6 @@ namespace {
 // 单例控制
 static std::once_flag init_flag;
 static quill::Logger* g_logger = nullptr;
-static std::shared_ptr<CallbackSink> g_callback_sink = nullptr;
 
 // Corona LogLevel 映射到 Quill LogLevel
 quill::LogLevel to_quill_level(LogLevel level) {
@@ -128,14 +126,10 @@ void initialize_impl() {
         }(),
         quill::FileEventNotifier{});
 
-    // 创建 CallbackSink（用于前端日志转发）
-    g_callback_sink = std::make_shared<CallbackSink>();
-
-    // 创建 Logger，同时添加控制台、文件和回调三个 sinks
+    // 创建 Logger，同时添加控制台和文件两个 sinks
     std::vector<std::shared_ptr<quill::Sink>> sinks;
     sinks.push_back(console_sink);
     sinks.push_back(file_sink);
-    sinks.push_back(g_callback_sink);
 
     g_logger = quill::Frontend::create_or_get_logger(
         "corona_default",
@@ -180,23 +174,6 @@ void CoronaLogger::flush() {
 quill::Logger* CoronaLogger::get_logger() {
     initialize();
     return g_logger;
-}
-
-CallbackSink* CoronaLogger::get_callback_sink() {
-    initialize();
-    return g_callback_sink.get();
-}
-
-std::vector<LogEntry> CoronaLogger::drain_logs() {
-    if (!g_callback_sink) return {};
-    return g_callback_sink->drain();
-}
-
-void CoronaLogger::set_callback_sink_level(LogLevel min_level) {
-    initialize();
-    if (g_callback_sink) {
-        g_callback_sink->set_log_level_filter(to_quill_level(min_level));
-    }
 }
 
 }  // namespace Corona::Kernel
