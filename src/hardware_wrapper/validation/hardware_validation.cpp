@@ -268,7 +268,7 @@ namespace Corona::Horizon
                                                  ImageUsageFlags required_usage,
                                                  std::string_view operation)
         {
-            if (!has_flag(desc.usage, required_usage))
+            if (!(desc.usage & required_usage))
                 return validation_error(std::string("HardwareImage ") + std::string(operation) + " requires the matching transfer usage flag.");
 
             if (desc.sample_count != 1)
@@ -315,10 +315,10 @@ namespace Corona::Horizon
         if (desc.element_count == 0)
             return validation_error("HardwareBufferDesc element_count must not be zero.");
 
-        if (desc.usage == BufferUsageFlags::None)
+        if (desc.usage == BufferUsage_None)
             return validation_error("HardwareBufferDesc usage must not be None.");
 
-        if (has_flag(desc.usage, BufferUsageFlags::Index) && !is_index_element_size(desc.element_size))
+        if ((desc.usage & BufferUsage_Index) && !is_index_element_size(desc.element_size))
             return validation_error("HardwareBufferDesc index element_size must be 2 or 4 bytes.");
 
         if (desc.exportable && !desc.dedicated)
@@ -387,7 +387,7 @@ namespace Corona::Horizon
         if (!optional_validation_enabled())
             return true;
 
-        if (desc.usage == ImageUsageFlags::None)
+        if (desc.usage == ImageUsage_None)
             return validation_error("HardwareImageDesc usage must not be None.");
 
         if (desc.cpu_access != CpuAccessMode::None && desc.sample_count > 1)
@@ -413,7 +413,7 @@ namespace Corona::Horizon
             return validation_error("Buffer-to-image copy requires a valid source HardwareBuffer.");
 
         uint64_t required_size = 0;
-        if (!validate_copyable_image_subresource(dst_desc, dst_range, dst_layer, dst_mip, ImageUsageFlags::TransferDst, "copy destination") ||
+        if (!validate_copyable_image_subresource(dst_desc, dst_range, dst_layer, dst_mip, ImageUsage_TransferDst, "copy destination") ||
             !resolve_tightly_packed_image_bytes(dst_desc, dst_range, dst_layer, dst_mip, required_size, "copy destination"))
         {
             return false;

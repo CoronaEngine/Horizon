@@ -41,14 +41,14 @@ HardwareImage upload_font_atlas()
 
     HardwareImageDesc desc = HardwareImageDesc::texture_2d(
         static_cast<uint32_t>(width), static_cast<uint32_t>(height), Format::RGBA8_UNORM,
-        ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst, "imgui.font_atlas");
+        ImageUsage_Sampled | ImageUsage_TransferDst, "imgui.font_atlas");
     HardwareImage image(desc);
 
     const size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
     HardwareBufferDesc staging_desc;
     staging_desc.element_count = byte_count;
     staging_desc.element_size = 1;
-    staging_desc.usage = BufferUsageFlags::TransferSrc;
+    staging_desc.usage = BufferUsage_TransferSrc;
     staging_desc.cpu_access = CpuAccessMode::Write;
     HardwareBuffer staging(staging_desc, std::as_bytes(std::span<const unsigned char>(pixels, byte_count)));
 

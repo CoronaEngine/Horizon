@@ -104,7 +104,7 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, format,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = mip_count;
 
     horizon::HardwareImage image(desc);
@@ -113,7 +113,7 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, payload);
 
@@ -286,7 +286,7 @@ void run_example_deferred()
     horizon::HardwareImage normal_image = create_bc_texture(dfr_asset_root / "textures" / "fieldstone-n.dds", "example_deferred.texNormal");
 
     // G-buffer：albedo + 世界法线 + 器件深度（R32F 颜色目标）
-    const auto gbuffer_usage = horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled;
+    const auto gbuffer_usage = horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
     horizon::HardwareImage gbuffer_albedo(horizon::HardwareImageDesc::texture_2d(
         dfr_width, dfr_height, horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_deferred.gbuffer.albedo"));
     gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -309,9 +309,9 @@ void run_example_deferred()
     // 最终输出
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         dfr_width, dfr_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_deferred.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 

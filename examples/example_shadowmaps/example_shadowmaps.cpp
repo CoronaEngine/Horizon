@@ -256,7 +256,7 @@ void run_example_shadowmaps()
     // Pass 1 目标：1024x1024 RGBA8 打包深度 + 独立 D32
     horizon::HardwareImage shadow_map_image(horizon::HardwareImageDesc::texture_2d(
         shadow_map_size, shadow_map_size, horizon::Format::RGBA8_UNORM,
-        horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled,
+        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled,
         "example_shadowmaps.shadowmap"));
     shadow_map_image.set_clear_color(1.0f, 1.0f, 1.0f, 1.0f); // 白 = 最远深度
 
@@ -267,9 +267,9 @@ void run_example_shadowmaps()
     // Pass 2 目标：主输出
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         smx_width, smx_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_shadowmaps.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f); // 雾色黑
 

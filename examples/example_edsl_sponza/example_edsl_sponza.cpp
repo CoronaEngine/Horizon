@@ -304,7 +304,7 @@ horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path, con
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, ktx_format_from_gl(gl_internal_format),
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = mip_count;
 
     horizon::HardwareImage image(desc);
@@ -312,7 +312,7 @@ horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path, con
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(payload));
 
@@ -330,13 +330,13 @@ horizon::HardwareImage create_solid_texture(uint8_t r, uint8_t g, uint8_t b, uin
 {
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         1, 1, horizon::Format::RGBA8_UNORM,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     horizon::HardwareImage image(desc);
     const std::array<uint8_t, 4> pixel = { r, g, b, a };
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = pixel.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(
         staging_desc, std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
@@ -400,7 +400,7 @@ horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::s
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
         dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
     horizon::HardwareImage image(desc);
@@ -408,7 +408,7 @@ horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::s
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
@@ -680,7 +680,7 @@ void run_example_edsl_sponza()
 
     // ---- 渲染目标 ----
     const auto rt_usage =
-        horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled;
+        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
 
     // RSM(单目标 ×3 共享深度)
     horizon::HardwareImage rsm_depth_map(horizon::HardwareImageDesc::texture_2d(
@@ -733,9 +733,9 @@ void run_example_edsl_sponza()
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "edsl_sponza.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 

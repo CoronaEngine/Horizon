@@ -24,7 +24,7 @@ HardwareImageDesc make_texture_desc(uint32_t width, uint32_t height, Format form
     return HardwareImageDesc::texture_2d(width,
                                          height,
                                          format,
-                                         ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst);
+                                         ImageUsage_Sampled | ImageUsage_TransferDst);
 }
 
 std::span<const std::byte> byte_span(const unsigned char *data, size_t byte_count)
@@ -42,7 +42,7 @@ HardwareBuffer make_staging_buffer(std::span<const std::byte> data)
     HardwareBufferDesc desc;
     desc.element_count = data.size_bytes();
     desc.element_size = 1;
-    desc.usage = BufferUsageFlags::TransferSrc;
+    desc.usage = BufferUsage_TransferSrc;
     desc.cpu_access = CpuAccessMode::Write;
     return HardwareBuffer(desc, data);
 }
@@ -251,7 +251,7 @@ TextureLoadResult loadTextureWithMipmapAndLayers(const std::string &texturePath,
                                             static_cast<uint32_t>(height),
                                             static_cast<uint32_t>(arrayLayers),
                                             Format::SRGBA8_UNORM,
-                                            ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst);
+                                            ImageUsage_Sampled | ImageUsage_TransferDst);
     createInfo.mip_levels = static_cast<uint32_t>(mipLevels);
 
     result.texture = create_uploaded_image(createInfo, byte_span(layerData));

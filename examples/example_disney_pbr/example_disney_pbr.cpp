@@ -95,7 +95,7 @@ horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::s
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
         dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
     horizon::HardwareImage image(desc);
@@ -103,7 +103,7 @@ horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::s
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
@@ -443,9 +443,9 @@ void run_example_disney_pbr()
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         disney_width, disney_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_disney_pbr.output"));
     final_output_image.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
 

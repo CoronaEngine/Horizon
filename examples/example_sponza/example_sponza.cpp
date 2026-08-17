@@ -406,7 +406,7 @@ horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path,
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, ktx_format_from_gl(gl_internal_format),
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
         name);
     desc.mip_levels = mip_count;
 
@@ -415,7 +415,7 @@ horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path,
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(payload));
 
@@ -488,7 +488,7 @@ horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::s
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
         dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
     horizon::HardwareImage image(desc);
@@ -496,7 +496,7 @@ horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::s
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
@@ -714,8 +714,8 @@ void run_example_sponza()
     // G-buffer: albedo+metallic / world normal+roughness / device depth。
     // normal 与 depthval 额外带 Storage:SSR compute 用 imageLoad 直接读。
     const auto gbuffer_usage =
-        horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled;
-    const auto gbuffer_storage_usage = gbuffer_usage | horizon::ImageUsageFlags::Storage;
+        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
+    const auto gbuffer_storage_usage = gbuffer_usage | horizon::ImageUsage_Storage;
     horizon::HardwareImage gbuffer_albedo(horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_sponza.gbuffer.albedo"));
     gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // a=metallic,清 0
@@ -750,18 +750,18 @@ void run_example_sponza()
     // SSR 中间图:view 空间线性深度 + 反射色/权重
     horizon::HardwareImage ssr_linear_depth(horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
         "example_sponza.ssr.lineardepth"));
     horizon::HardwareImage ssr_buffer(horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
         "example_sponza.ssr.buffer"));
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_sponza.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -999,14 +999,14 @@ void run_example_sponza()
     horizon::HardwareImage white_texture = [] {
         horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
             1, 1, horizon::Format::RGBA8_UNORM,
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst,
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
             "example_sponza.white");
         horizon::HardwareImage image(desc);
         const std::array<uint8_t, 4> pixel = { 255, 255, 255, 255 };
         horizon::HardwareBufferDesc staging_desc;
         staging_desc.element_count = pixel.size();
         staging_desc.element_size = 1;
-        staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+        staging_desc.usage = horizon::BufferUsage_TransferSrc;
         staging_desc.cpu_access = horizon::CpuAccessMode::Write;
         horizon::HardwareBuffer staging(staging_desc,
                                                 std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));

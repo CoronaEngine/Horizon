@@ -289,9 +289,9 @@ horizon::HardwareImage make_hi_z_image(uint32_t width, uint32_t height, const st
         width,
         height,
         horizon::Format::R32_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         name));
 }
 
@@ -472,21 +472,21 @@ void run_example_gpudrivenrendering()
     horizon::HardwareBuffer instance_in_buffer(
         horizon::HardwareBufferDesc::typed<glm::vec4>(
             scene.instance_data.size(),
-            horizon::BufferUsageFlags::Storage | horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.instances_in"),
         std::as_bytes(std::span(scene.instance_data)));
 
     horizon::HardwareBuffer instance_out_buffer(
         horizon::HardwareBufferDesc::typed<glm::vec4>(
             scene.instance_data.size(),
-            horizon::BufferUsageFlags::Storage | horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.instances_out"),
         {});
 
     horizon::HardwareBuffer bbox_buffer(
         horizon::HardwareBufferDesc::typed<glm::vec4>(
             scene.bbox_data.size(),
-            horizon::BufferUsageFlags::Storage | horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.bboxes"),
         std::as_bytes(std::span(scene.bbox_data)));
 
@@ -494,7 +494,7 @@ void run_example_gpudrivenrendering()
     horizon::HardwareBuffer count_buffer(
         horizon::HardwareBufferDesc::typed<uint32_t>(
             s_max_noof_props,
-            horizon::BufferUsageFlags::Storage | horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.counts"),
         std::as_bytes(std::span(zero_counts)));
 
@@ -504,14 +504,14 @@ void run_example_gpudrivenrendering()
     horizon::HardwareBuffer predicate_buffer(
         horizon::HardwareBufferDesc::typed<uint32_t>(
             k_max_instances,
-            horizon::BufferUsageFlags::Storage | horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.predicates"),
         std::as_bytes(std::span(zero_predicates)));
 
     horizon::HardwareBuffer indirect_const_buffer(
         horizon::HardwareBufferDesc::typed<uint32_t>(
             scene.indirect_const.size(),
-            horizon::BufferUsageFlags::Storage | horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.indirect_const"),
         std::as_bytes(std::span(scene.indirect_const)));
 
@@ -550,9 +550,9 @@ void run_example_gpudrivenrendering()
         gdr_width,
         gdr_height,
         horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_gpudrivenrendering.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 

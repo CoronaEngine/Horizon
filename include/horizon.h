@@ -175,39 +175,19 @@ namespace Corona::Horizon
         ReadWrite,
     };
 
-    enum class BufferUsageFlags : uint32_t
-    {
-        None = 0,
-        TransferSrc = 1 << 0,
-        TransferDst = 1 << 1,
-        Vertex = 1 << 2,
-        Index = 1 << 3,
-        Uniform = 1 << 4,
-        Storage = 1 << 5,
+    using BufferUsageFlags = uint32_t;
 
-        Indirect = 1 << 6,
+    enum : BufferUsageFlags
+    {
+        BufferUsage_None = 0,
+        BufferUsage_TransferSrc = 1 << 0,
+        BufferUsage_TransferDst = 1 << 1,
+        BufferUsage_Vertex = 1 << 2,
+        BufferUsage_Index = 1 << 3,
+        BufferUsage_Uniform = 1 << 4,
+        BufferUsage_Storage = 1 << 5,
+        BufferUsage_Indirect = 1 << 6,
     };
-
-    constexpr BufferUsageFlags operator|(BufferUsageFlags a, BufferUsageFlags b)
-    {
-        return BufferUsageFlags(uint32_t(a) | uint32_t(b));
-    }
-
-    constexpr BufferUsageFlags operator&(BufferUsageFlags a, BufferUsageFlags b)
-    {
-        return BufferUsageFlags(uint32_t(a) & uint32_t(b));
-    }
-
-    constexpr BufferUsageFlags &operator|=(BufferUsageFlags& a, BufferUsageFlags b) noexcept
-    {
-        a = a | b;
-        return a;
-    }
-
-    constexpr bool has_flag(BufferUsageFlags flags, BufferUsageFlags bit) noexcept
-    {
-        return uint32_t(flags & bit) != 0;
-    }
 
     struct BufferRange
     {
@@ -280,37 +260,18 @@ namespace Corona::Horizon
         CubeArray,
     };
 
-    enum class ImageUsageFlags : uint32_t
+    using ImageUsageFlags = uint32_t;
+
+    enum : ImageUsageFlags
     {
-        None = 0,
-        TransferSrc = 1 << 0,
-        TransferDst = 1 << 1,
-        Sampled = 1 << 2,
-        Storage = 1 << 3,
-        ColorAttachment = 1 << 4,
-        DepthStencilAttachment = 1 << 5,
+        ImageUsage_None = 0,
+        ImageUsage_TransferSrc = 1 << 0,
+        ImageUsage_TransferDst = 1 << 1,
+        ImageUsage_Sampled = 1 << 2,
+        ImageUsage_Storage = 1 << 3,
+        ImageUsage_ColorAttachment = 1 << 4,
+        ImageUsage_DepthStencilAttachment = 1 << 5,
     };
-
-    constexpr ImageUsageFlags operator|(ImageUsageFlags a, ImageUsageFlags b) noexcept
-    {
-        return ImageUsageFlags(uint32_t(a) | uint32_t(b));
-    }
-
-    constexpr ImageUsageFlags operator&(ImageUsageFlags a, ImageUsageFlags b) noexcept
-    {
-        return ImageUsageFlags(uint32_t(a) & uint32_t(b));
-    }
-
-    constexpr ImageUsageFlags& operator|=(ImageUsageFlags& a, ImageUsageFlags b) noexcept
-    {
-        a = a | b;
-        return a;
-    }
-
-    constexpr bool has_flag(ImageUsageFlags flags, ImageUsageFlags bit) noexcept
-    {
-        return uint32_t(flags & bit) != 0;
-    }
 
     struct ImageExtent
     {
@@ -465,32 +426,18 @@ namespace Corona::Horizon
         Count16 = 16,
     };
 
-    enum class ColorWriteMask : uint8_t
+    using ColorWriteMask = uint32_t;
+
+    enum : ColorWriteMask
     {
-        None = 0,
-        R = 1 << 0,
-        G = 1 << 1,
-        B = 1 << 2,
-        A = 1 << 3,
-        RGB = R | G | B,
-        RGBA = R | G | B | A,
+        ColorWrite_None = 0,
+        ColorWrite_R = 1 << 0,
+        ColorWrite_G = 1 << 1,
+        ColorWrite_B = 1 << 2,
+        ColorWrite_A = 1 << 3,
+        ColorWrite_RGB = ColorWrite_R | ColorWrite_G | ColorWrite_B,
+        ColorWrite_RGBA = ColorWrite_R | ColorWrite_G | ColorWrite_B | ColorWrite_A,
     };
-
-    constexpr ColorWriteMask operator|(ColorWriteMask a, ColorWriteMask b) noexcept
-    {
-        return ColorWriteMask(uint8_t(a) | uint8_t(b));
-    }
-
-    constexpr ColorWriteMask operator&(ColorWriteMask a, ColorWriteMask b) noexcept
-    {
-        return ColorWriteMask(uint8_t(a) & uint8_t(b));
-    }
-
-    constexpr ColorWriteMask &operator|=(ColorWriteMask& a, ColorWriteMask b) noexcept
-    {
-        a = a | b;
-        return a;
-    }
 
     class HardwareBuffer;
     class HardwareImage;
@@ -649,7 +596,7 @@ namespace Corona::Horizon
     {
         uint64_t element_count = 0;
         uint32_t element_size = 0;
-        BufferUsageFlags usage = BufferUsageFlags::None;
+        BufferUsageFlags usage = BufferUsage_None;
         CpuAccessMode cpu_access = CpuAccessMode::Write;
         bool dedicated = false;
         bool exportable = false;
@@ -672,20 +619,20 @@ namespace Corona::Horizon
         template <HardwareTransferable T>
         [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Vertex, std::move(name));
+            return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Vertex, std::move(name));
         }
 
         template <HardwareIndexType T>
         [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name));
+            return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Index, std::move(name));
         }
 
         [[nodiscard]] static HardwareBufferDesc indirect(uint64_t command_count, std::string name = {})
         {
             return typed<DrawIndexedIndirectCommand>(
                 command_count,
-                BufferUsageFlags::TransferDst | BufferUsageFlags::Indirect | BufferUsageFlags::Storage,
+                BufferUsage_TransferDst | BufferUsage_Indirect | BufferUsage_Storage,
                 std::move(name));
         }
     };
@@ -753,7 +700,7 @@ namespace Corona::Horizon
         ImageDimension dimension = ImageDimension::Image2D;
         ImageExtent extent {};
         Format format = Format::UNKNOWN;
-        ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst;
+        ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst;
         CpuAccessMode cpu_access = CpuAccessMode::None;
         uint32_t array_layers = 1;
         uint32_t mip_levels = 1;
@@ -765,19 +712,19 @@ namespace Corona::Horizon
         static HardwareImageDesc texture_2d(uint32_t width,
                                             uint32_t height,
                                             Format format,
-                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                            ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst,
                                             std::string name = {});
 
         static HardwareImageDesc texture_2d_array(uint32_t width,
                                                   uint32_t height,
                                                   uint32_t layers,
                                                   Format format,
-                                                  ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                                  ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst,
                                                   std::string name = {});
 
         static HardwareImageDesc cube(uint32_t size,
                                       Format format,
-                                      ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
+                                      ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst,
                                       std::string name = {});
 
         static HardwareImageDesc depth_attachment(uint32_t width,
@@ -859,7 +806,7 @@ namespace Corona::Horizon
         BlendFactor src_alpha_blend_factor = BlendFactor::One;
         BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
         BlendOp alpha_blend_op = BlendOp::Add;
-        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
+        ColorWriteMask color_write_mask = ColorWrite_RGBA;
         bool logic_op_enabled = false;
 
         SampleCount sample_count = SampleCount::Count1;

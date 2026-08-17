@@ -206,13 +206,13 @@ namespace Corona::Horizon
         [[nodiscard]] VkColorComponentFlags to_vk_color_mask(ColorWriteMask mask) noexcept
         {
             VkColorComponentFlags flags = 0;
-            if ((mask & ColorWriteMask::R) == ColorWriteMask::R)
+            if ((mask & ColorWrite_R) == ColorWrite_R)
                 flags |= VK_COLOR_COMPONENT_R_BIT;
-            if ((mask & ColorWriteMask::G) == ColorWriteMask::G)
+            if ((mask & ColorWrite_G) == ColorWrite_G)
                 flags |= VK_COLOR_COMPONENT_G_BIT;
-            if ((mask & ColorWriteMask::B) == ColorWriteMask::B)
+            if ((mask & ColorWrite_B) == ColorWrite_B)
                 flags |= VK_COLOR_COMPONENT_B_BIT;
-            if ((mask & ColorWriteMask::A) == ColorWriteMask::A)
+            if ((mask & ColorWrite_A) == ColorWrite_A)
                 flags |= VK_COLOR_COMPONENT_A_BIT;
             return flags;
         }
@@ -1580,7 +1580,7 @@ namespace Corona::Horizon
             while (ring.size() < ring_size)
                 ring.push_back(HardwareBuffer::from_bytes(
                     std::span<const std::byte>(ubo.data),
-                    1, BufferUsageFlags::Uniform, "RasterizerPipeline.ubo_persistent"));
+                    1, BufferUsage_Uniform, "RasterizerPipeline.ubo_persistent"));
 
             HardwareBuffer& target = ring[static_cast<size_t>(slot)];
             // 换槽时必须整份写：该槽上一次被写的是第 i-N 帧的数据。

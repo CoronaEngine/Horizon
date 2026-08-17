@@ -117,9 +117,9 @@ void run_example_drawstress()
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         stress_width, stress_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_drawstress.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 

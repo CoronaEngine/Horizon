@@ -134,9 +134,9 @@ void run_example_edsl_ssr()
     horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_edsl_ssr.cube.vb");
     horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(essr_cube_indices, "example_edsl_ssr.cube.ib");
 
-    const auto rt_usage = horizon::ImageUsageFlags::ColorAttachment |
-                          horizon::ImageUsageFlags::Sampled |
-                          horizon::ImageUsageFlags::Storage;
+    const auto rt_usage = horizon::ImageUsage_ColorAttachment |
+                          horizon::ImageUsage_Sampled |
+                          horizon::ImageUsage_Storage;
 
     horizon::HardwareImage color_image(horizon::HardwareImageDesc::texture_2d(
         essr_width, essr_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_edsl_ssr.color"));
@@ -156,19 +156,19 @@ void run_example_edsl_ssr()
 
     horizon::HardwareImage linear_depth_image(horizon::HardwareImageDesc::texture_2d(
         essr_width, essr_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
         "example_edsl_ssr.lineardepth"));
 
     horizon::HardwareImage ssr_image(horizon::HardwareImageDesc::texture_2d(
         essr_width, essr_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
         "example_edsl_ssr.ssr"));
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         essr_width, essr_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_edsl_ssr.output"));
 
     horizon::HardwareImage scene_depth(horizon::HardwareImageDesc::depth_attachment(

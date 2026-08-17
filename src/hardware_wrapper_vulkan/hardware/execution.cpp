@@ -2144,8 +2144,8 @@ namespace Corona::Horizon
 
                         const bool hi_z_style =
                             color->desc.format == Format::R32_FLOAT &&
-                            has_flag(color->desc.usage, ImageUsageFlags::Storage) &&
-                            has_flag(color->desc.usage, ImageUsageFlags::Sampled);
+                            (color->desc.usage & ImageUsage_Storage) &&
+                            (color->desc.usage & ImageUsage_Sampled);
                         if (!hi_z_style)
                             continue;
 

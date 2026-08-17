@@ -275,8 +275,8 @@ void run_example_rsm()
         glm::vec3(0.0f, 0.0f, -1.0f), "example_rsm.wall_blue");
 
     // Pass 1 目标：1024x1024 RSM 三附件 + D32
-    const auto rsm_rt_usage = horizon::ImageUsageFlags::ColorAttachment |
-                              horizon::ImageUsageFlags::Sampled;
+    const auto rsm_rt_usage = horizon::ImageUsage_ColorAttachment |
+                              horizon::ImageUsage_Sampled;
 
     // xyz: 世界坐标, w: 光空间深度（清屏 w=1 → 最远，阴影比较视为无遮挡）
     horizon::HardwareImage rsm_position_image(horizon::HardwareImageDesc::texture_2d(
@@ -298,9 +298,9 @@ void run_example_rsm()
     // Pass 2 目标：主输出
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         rsm_width, rsm_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_rsm.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 

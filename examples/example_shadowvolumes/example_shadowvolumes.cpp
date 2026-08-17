@@ -381,9 +381,9 @@ void run_example_shadowvolumes()
     // 渲染目标
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         sv_width, sv_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_shadowvolumes.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -397,7 +397,7 @@ void run_example_shadowvolumes()
         sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.lit.depth"));
     lit_depth_image.set_clear_depth(1.0f, 0);
 
-    const auto rt_usage = horizon::ImageUsageFlags::ColorAttachment | horizon::ImageUsageFlags::Sampled;
+    const auto rt_usage = horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
     horizon::HardwareImage scene_depth_image(horizon::HardwareImageDesc::texture_2d(
         sv_width, sv_height, horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.scenedepth"));
     scene_depth_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);

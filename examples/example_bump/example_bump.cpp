@@ -88,7 +88,7 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
 
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, format,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = mip_count;
 
     horizon::HardwareImage image(desc);
@@ -97,7 +97,7 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
     horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
     staging_desc.cpu_access = horizon::CpuAccessMode::Write;
     horizon::HardwareBuffer staging(staging_desc, payload);
 
@@ -250,9 +250,9 @@ void run_example_bump()
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         bump_width, bump_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_bump.output"));
     final_output_image.set_clear_color(0x30 / 255.0f, 0x30 / 255.0f, 0x30 / 255.0f, 1.0f); // 原版 0x303030ff
 

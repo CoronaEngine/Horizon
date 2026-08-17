@@ -422,7 +422,7 @@ namespace Corona::Horizon
         return texture_2d(width,
                           height,
                           format,
-                          ImageUsageFlags::DepthStencilAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
+                          ImageUsage_DepthStencilAttachment | ImageUsage_Sampled | ImageUsage_TransferSrc | ImageUsage_TransferDst,
                           std::move(name));
     }
 }

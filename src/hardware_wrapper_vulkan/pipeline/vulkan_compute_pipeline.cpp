@@ -1076,7 +1076,7 @@ namespace Corona::Horizon
             while (ring.size() < ring_size)
                 ring.push_back(HardwareBuffer::from_bytes(
                     std::span<const std::byte>(ubo.data),
-                    1, BufferUsageFlags::Uniform, "ComputePipeline.ubo_persistent"));
+                    1, BufferUsage_Uniform, "ComputePipeline.ubo_persistent"));
 
             HardwareBuffer& target = ring[static_cast<size_t>(slot)];
             // 换槽时整份写：该槽上一次装的是第 i-N 帧的数据。

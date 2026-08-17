@@ -258,9 +258,9 @@ void run_example_assao()
     }
 
     // G-buffer 目标（compute 需 Storage）
-    const auto rt_usage = horizon::ImageUsageFlags::ColorAttachment |
-                          horizon::ImageUsageFlags::Sampled |
-                          horizon::ImageUsageFlags::Storage;
+    const auto rt_usage = horizon::ImageUsage_ColorAttachment |
+                          horizon::ImageUsage_Sampled |
+                          horizon::ImageUsage_Storage;
     horizon::HardwareImage scene_color_image(horizon::HardwareImageDesc::texture_2d(
         ao_width, ao_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_assao.color"));
     scene_color_image.set_clear_color(0.3f, 0.45f, 0.6f, 1.0f); // 天空底色
@@ -273,16 +273,16 @@ void run_example_assao()
 
     horizon::HardwareImage ao_image_a(horizon::HardwareImageDesc::texture_2d(
         ao_width, ao_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled, "example_assao.ao_a"));
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled, "example_assao.ao_a"));
     horizon::HardwareImage ao_image_b(horizon::HardwareImageDesc::texture_2d(
         ao_width, ao_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::Sampled, "example_assao.ao_b"));
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled, "example_assao.ao_b"));
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         ao_width, ao_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_assao.output"));
 
     // 三个几何 pass 各自的深度附件

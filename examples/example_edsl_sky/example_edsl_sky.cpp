@@ -386,7 +386,7 @@ horizon::HardwareImage upload_rgba8_texture(uint32_t width,
 {
     horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, horizon::Format::RGBA8_UNORM,
-        horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
         debug_name);
 
     horizon::HardwareImage image(desc);
@@ -395,7 +395,7 @@ horizon::HardwareImage upload_rgba8_texture(uint32_t width,
         horizon::HardwareBufferDesc staging_desc;
         staging_desc.element_count = rgba.size_bytes();
         staging_desc.element_size = 1;
-        staging_desc.usage = horizon::BufferUsageFlags::TransferSrc;
+        staging_desc.usage = horizon::BufferUsage_TransferSrc;
         staging_desc.cpu_access = horizon::CpuAccessMode::Write;
 
         horizon::HardwareBuffer staging(staging_desc, rgba);
@@ -619,9 +619,9 @@ void run_example_edsl_sky()
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         sky_width, sky_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsageFlags::Storage | horizon::ImageUsageFlags::ColorAttachment |
-            horizon::ImageUsageFlags::Sampled | horizon::ImageUsageFlags::TransferSrc |
-            horizon::ImageUsageFlags::TransferDst,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_edsl_sky.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
