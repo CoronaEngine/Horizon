@@ -9,6 +9,7 @@ CMakeUserPresets.json
 
 # 本地代码索引/工具运行态
 .codegraph/
+.codegraph-*/
 .understand-anything/
 
 # 构建目录
