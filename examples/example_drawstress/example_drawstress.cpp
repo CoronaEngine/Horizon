@@ -134,6 +134,21 @@ void run_example_drawstress()
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
 
+    // P2: per-draw MVP SSBO. Initial capacity 64000 mat4 = 4MB.
+    // Always allocate max capacity to avoid recreating the buffer (which invalidates descriptors).
+    struct PerDrawData
+    {
+        glm::mat4 mvp;
+    };
+    constexpr size_t max_draws = dim_max * dim_max * dim_max;
+    horizon::HardwareBuffer per_draw_ssbo = horizon::HardwareBuffer(
+        horizon::HardwareBufferDesc::typed<PerDrawData>(max_draws,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
+            "drawstress.per_draw_ssbo"));
+    // Get bindless descriptor index once at initialization
+    const uint32_t ssbo_descriptor_index = per_draw_ssbo.store_descriptor();
+    std::cout << "[DEBUG] SSBO descriptor_index=" << ssbo_descriptor_index << ", capacity=" << max_draws << std::endl;
+
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
@@ -206,6 +221,10 @@ void run_example_drawstress()
 
         HORIZON_PROFILE_PLOT("draw calls", dim * dim * dim);
 
+        // P2: build per-draw MVP array and upload to SSBO.
+        std::vector<PerDrawData> per_draw_array;
+        per_draw_array.reserve(dim * dim * dim);
+
         rasterizer.clear_records();
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::build_records");
@@ -215,15 +234,35 @@ void run_example_drawstress()
                 {
                     for (int xx = 0; xx < dim; ++xx)
                     {
-                        // 等价于 bgfx 的 mtxScale(0.25) × mtxRotateXYZ(...)（行向量约定），
-                        // 换到 glm 列向量为 Rz·Ry·Rx·S，再直接写入平移列。
                         glm::mat4 model = glm::eulerAngleZYX(time + zz * 0.13f, time + yy * 0.37f, time + xx * 0.21f) * scale_mtx;
                         model[3] = glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f);
 
-                        rasterizer.model_pc.mvp = view_proj * model;
-                        rasterizer.record(cube_ib, cube_vb, cube_params);
+                        per_draw_array.push_back({ view_proj * model });
                     }
                 }
+            }
+
+            // Upload per-draw data to SSBO (buffer was pre-allocated at max capacity).
+            const size_t upload_size = per_draw_array.size();
+
+            if (!per_draw_ssbo.write_bytes(std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(per_draw_array.data()),
+                upload_size * sizeof(PerDrawData)), 0))
+            {
+                std::cerr << "[ERROR] Failed to write SSBO data!" << std::endl;
+            }
+
+            if (frame_index < 3)
+            {
+                std::cout << "[DEBUG] Frame " << frame_index
+                          << ": draws=" << upload_size << std::endl;
+            }
+
+            // Record all draws with the same push constant (descriptor index is constant).
+            rasterizer.model_pc.per_draw_ssbo_index = ssbo_descriptor_index;
+            for (size_t i = 0; i < per_draw_array.size(); ++i)
+            {
+                rasterizer.record(cube_ib, cube_vb, cube_params);
             }
         }
 

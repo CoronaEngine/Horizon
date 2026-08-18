@@ -64,6 +64,7 @@ namespace EmbeddedShader::Ast
 	    std::shared_ptr<Variate> fsPositionOutput;
 		std::shared_ptr<Variate> isFrontFaceOutput;
 		std::shared_ptr<Variate> dispatchThreadIDInput;
+		std::shared_ptr<Variate> drawIndexInput;
 
 		std::shared_ptr<Variate> globalUBO;
 		std::shared_ptr<Variate> globalParameterBlock;

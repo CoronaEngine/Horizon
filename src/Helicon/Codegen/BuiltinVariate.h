@@ -18,6 +18,11 @@ namespace EmbeddedShader::BuiltinVariate
     {
         return VariateProxy<ktm::uvec3>{Ast::AST::getDispatchThreadIDInput()};
     }
+
+    inline VariateProxy<uint32_t> drawIndex()
+    {
+        return VariateProxy<uint32_t>{Ast::AST::getDrawIndexInput()};
+    }
 }
 
 namespace EmbeddedShader

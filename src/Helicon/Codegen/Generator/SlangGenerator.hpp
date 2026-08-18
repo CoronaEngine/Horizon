@@ -117,6 +117,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::shared_ptr<Ast::Variate> getPositionOutput();
 		static std::shared_ptr<Ast::Variate> getIsFrontFaceOutput();
 		static std::shared_ptr<Ast::Variate> getDispatchThreadIDInput();
+		static std::shared_ptr<Ast::Variate> getDrawIndexInput();
 	private:
 		static bool bindless();
 		static thread_local inline std::string uboMembers;

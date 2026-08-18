@@ -211,6 +211,17 @@ namespace Corona::Horizon
         // 上次 sync 使用的槽；-1 表示还没 sync 过。
         mutable int64_t ubo_slot_ { -1 };
         mutable bool ubo_dirty_ { true };
+        // indirect args 环形缓冲（与 ubo_rings_ 同样机制）。每帧槽一个 buffer，
+        // 按需增长；build_draw_plan() 里把 RecordedDraw 转 DrawIndexedIndirectCommand
+        // 写入本槽，供同批次 indirect draw 消费。
+        mutable std::vector<HardwareBuffer> indirect_args_ring_;
+        mutable int64_t indirect_args_slot_ { -1 };
+        // 暂存本帧构建的 indirect command 数据，build_draw_plan 完成后一次性写入环。
+        mutable std::vector<DrawIndexedIndirectCommand> indirect_args_staging_;
+        // per-draw data SSBO 环形缓冲（P2）。每帧槽一个 buffer，存 mat4[] 等
+        // per-draw payload，shader 用 drawIndex 索引。初始 1024 mat4 = 64KB。
+        mutable std::vector<HardwareBuffer> per_draw_data_ring_;
+        mutable int64_t per_draw_data_slot_ { -1 };
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;

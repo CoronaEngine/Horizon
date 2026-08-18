@@ -689,6 +689,19 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 	return id;
 }
 
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getDrawIndexInput()
+{
+	auto drawIdx = std::make_shared<Ast::InputVariate>();
+	drawIdx->type = Ast::AST::createType<uint32_t>();
+	drawIdx->name = "draw_index_input";
+	drawIdx->location = 0;
+	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
+	defineNode->variate = drawIdx;
+	defineNode->semanticName = "SV_DrawIndex";
+	Ast::AST::addInputStatement(defineNode);
+	return drawIdx;
+}
+
 bool EmbeddedShader::Generator::SlangGenerator::bindless()
 {
 	return Ast::Parser::getBindless();
