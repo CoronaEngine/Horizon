@@ -1482,6 +1482,30 @@ namespace Corona::Horizon
             }
         } draw_cache;
 
+        // Compute dispatch 的类似缓存：避免相同 pipeline 重复 prepare_dispatch。
+        // 同样只在 uniform_buffers 为空时复用（bindless + push constant 常见路径）。
+        struct DispatchEncodeCache
+        {
+            const ComputePipelineBase* pipeline_key { nullptr };
+            std::shared_ptr<VulkanComputePipeline> pipeline_impl;
+            bool prepared_valid { false };
+            VulkanComputePipeline::PreparedDispatch prepared {};
+
+            void reset() noexcept
+            {
+                pipeline_key = nullptr;
+                pipeline_impl.reset();
+                prepared_valid = false;
+                prepared = {};
+            }
+
+            void invalidate_prepared() noexcept
+            {
+                prepared_valid = false;
+                prepared = {};
+            }
+        } dispatch_cache;
+
         // 三个 bindless set 全submission只取一次：省掉每 draw/dispatch 一次
         // ResourceManager 全局锁 + 数组拷贝。
         std::optional<std::array<VkDescriptorSet, ResourceManager::bindless_descriptor_set_count>> bindless_sets_cache;
@@ -1927,9 +1951,26 @@ namespace Corona::Horizon
                     graphics_descriptors.reset();
                     compute_descriptors.reset();
                     draw_cache.reset();
+                    dispatch_cache.reset();
                 }
 
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);
+
+                // 缓存 prepare_dispatch 结果，避免每 dispatch 重复调用。
+                // 只在 uniform_buffers 为空时复用（类似 draw_cache 的策略）。
+                if (dispatch_cache.pipeline_key != computePipeline || !dispatch_cache.pipeline_impl)
+                {
+                    dispatch_cache.pipeline_impl = pipeline;
+                    dispatch_cache.pipeline_key = computePipeline;
+                    dispatch_cache.invalidate_prepared();
+                }
+
+                if (!dispatch_cache.prepared_valid || !dispatch.uniform_buffers().empty())
+                {
+                    dispatch_cache.prepared = pipeline->prepare_dispatch(device_, dispatch);
+                    dispatch_cache.prepared_valid = dispatch.uniform_buffers().empty();
+                }
+                const VulkanComputePipeline::PreparedDispatch& prepared = dispatch_cache.prepared;
 
                 for (const DispatchResourceBinding& binding : dispatch.bindings)
                 {
@@ -1951,7 +1992,6 @@ namespace Corona::Horizon
                                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
                 }
 
-                VulkanComputePipeline::PreparedDispatch prepared = pipeline->prepare_dispatch(device_, dispatch);
                 if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                     throw std::logic_error("Dispatch resolved an invalid compute pipeline.");
 
