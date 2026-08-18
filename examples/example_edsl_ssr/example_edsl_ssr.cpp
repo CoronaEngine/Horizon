@@ -82,7 +82,7 @@ std::vector<EssrVertex> build_cube_vertices()
     return vertices;
 }
 
-const std::vector<uint32_t> essr_cube_indices = {
+const std::vector<uint16_t> essr_cube_indices = {
     0, 2, 1, 1, 2, 3,   4, 5, 6, 5, 7, 6,   8, 10, 9, 9, 10, 11,
     12, 13, 14, 13, 15, 14,  16, 18, 17, 17, 18, 19,  20, 21, 22, 21, 23, 22,
 };

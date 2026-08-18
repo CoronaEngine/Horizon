@@ -180,7 +180,7 @@ std::vector<GeomVertex> build_cube_vertices()
     return vertices;
 }
 
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 2, 1, 1, 2, 3,
     4, 5, 6, 5, 7, 6,
     8, 10, 9, 9, 10, 11,
@@ -189,7 +189,7 @@ const std::vector<uint32_t> cube_indices = {
     20, 21, 22, 21, 23, 22,
 };
 
-void calc_tangents(std::vector<GeomVertex>& vertices, const std::vector<uint32_t>& indices)
+void calc_tangents(std::vector<GeomVertex>& vertices, const std::vector<uint16_t>& indices)
 {
     std::vector<glm::vec3> tan_accum(vertices.size(), glm::vec3(0.0f));
     std::vector<glm::vec3> bitan_accum(vertices.size(), glm::vec3(0.0f));
@@ -249,7 +249,7 @@ const std::vector<CornerVertex> corner_vertices = {
     { { 1.0f, 1.0f, 0.0f } },
     { { 0.0f, 1.0f, 0.0f } },
 };
-const std::vector<uint32_t> corner_indices = { 0, 2, 1, 0, 3, 2 };
+const std::vector<uint16_t> corner_indices = { 0, 2, 1, 0, 3, 2 };
 
 // bx::mulH：列向量变换 + 透视除法
 glm::vec3 mul_h(const glm::vec3& v, const glm::mat4& m)

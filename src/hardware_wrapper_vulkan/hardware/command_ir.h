@@ -267,9 +267,6 @@ namespace Corona::Horizon
         uint32_t first_index { 0 };
         int32_t vertex_offset { 0 };
         uint32_t first_instance { 0 };
-        IndexType index_type { IndexType::Auto };
-        bool enable_scissor { false };
-        ScissorRect scissor {};
         std::vector<ResourceUse> resource_uses;
         std::string debug_label;
 
@@ -313,9 +310,6 @@ namespace Corona::Horizon
         uint32_t draw_count { 0 };
         // 0 means sizeof(DrawIndexedIndirectCommand).
         uint32_t stride { 0 };
-        IndexType index_type { IndexType::Auto };
-        bool enable_scissor { false };
-        ScissorRect scissor {};
         std::vector<ResourceUse> resource_uses;
         std::string debug_label;
 

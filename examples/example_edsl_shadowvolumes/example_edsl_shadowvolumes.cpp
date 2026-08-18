@@ -82,10 +82,20 @@ struct SvVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LoadedMesh
 {
     std::vector<SvVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -196,11 +206,18 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -256,11 +273,15 @@ VolumeSource build_volume_source(const LoadedMesh& mesh)
     }
 
     std::map<std::pair<uint32_t, uint32_t>, size_t> edge_map;
-    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3)
+    // 索引是 group 相对的，取顶点前必须补回 group 的 base_vertex。
+    for (const MeshGroup& group : mesh.groups)
+    for (uint32_t t = 0; t + 2 < group.index_count; t += 3)
     {
-        const uint32_t a = vertex_to_welded[mesh.indices[t]];
-        const uint32_t b = vertex_to_welded[mesh.indices[t + 1]];
-        const uint32_t c = vertex_to_welded[mesh.indices[t + 2]];
+        const uint32_t base = static_cast<uint32_t>(group.base_vertex);
+        const uint32_t i0 = group.first_index + t;
+        const uint32_t a = vertex_to_welded[base + mesh.indices[i0]];
+        const uint32_t b = vertex_to_welded[base + mesh.indices[i0 + 1]];
+        const uint32_t c = vertex_to_welded[base + mesh.indices[i0 + 2]];
         if (a == b || b == c || a == c)
             continue;
 
@@ -350,6 +371,8 @@ struct GpuMesh
     horizon::HardwareBuffer vb;
     horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
+    // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
+    std::vector<MeshGroup> groups;
 };
 
 void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
@@ -407,6 +430,7 @@ void run_example_edsl_shadowvolumes()
         horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_shadowvolumes.bunny.vb"),
         horizon::HardwareBuffer::index(bunny_mesh.indices, "example_shadowvolumes.bunny.ib"),
         static_cast<uint32_t>(bunny_mesh.indices.size()),
+        bunny_mesh.groups,
     };
 
     const std::vector<SvVertex> plane_vertices = {
@@ -415,17 +439,21 @@ void run_example_edsl_shadowvolumes()
         { { -1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
         { { 1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
     };
-    const std::vector<uint32_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
+    const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     GpuMesh floor_plane {
         horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowvolumes.floor.vb"),
         horizon::HardwareBuffer::index(plane_indices, "example_shadowvolumes.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
+        { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } },
     };
 
-    // 阴影体索引：恒等（CPU 生成纯三角形序列，上限按轮廓边数量放宽）
+    // 阴影体索引：恒等（CPU 生成纯三角形序列）。16-bit 索引下只需一段
+    // 65535 长的恒等表，超出的顶点靠 draw 的 vertex_offset 分段复用同一个 IB。
+    // 65535 = 3 * 21845，段边界必然落在三角形边界上。
+    constexpr uint32_t volume_chunk_vertices = 65535;
     constexpr uint32_t max_volume_vertices = 1 << 18;
-    std::vector<uint32_t> identity_indices(max_volume_vertices);
-    std::iota(identity_indices.begin(), identity_indices.end(), 0u);
+    std::vector<uint16_t> identity_indices(volume_chunk_vertices);
+    std::iota(identity_indices.begin(), identity_indices.end(), uint16_t { 0 });
     horizon::HardwareBuffer volume_ib = horizon::HardwareBuffer::index(identity_indices, "example_shadowvolumes.volume.ib");
 
     // 渲染目标
@@ -668,11 +696,15 @@ void run_example_edsl_shadowvolumes()
             sp.params = to_edsl_vec4(resolution);
             for (const DrawItem& item : items)
             {
-                horizon::DrawIndexedParams params;
-                params.index_count = item.mesh->index_count;
-
                 model_pc.model = to_edsl_matrix(item.model);
-                pipeline.record(item.mesh->ib, item.mesh->vb, params);
+                for (const MeshGroup& group : item.mesh->groups)
+                {
+                    horizon::DrawIndexedParams params;
+                    params.index_count = group.index_count;
+                    params.first_index = group.first_index;
+                    params.vertex_offset = group.base_vertex;
+                    pipeline.record(item.mesh->ib, item.mesh->vb, params);
+                }
             }
         };
 
@@ -689,12 +721,18 @@ void run_example_edsl_shadowvolumes()
             horizon::HardwareBuffer volume_vb =
                 horizon::HardwareBuffer::vertex(volume_positions, "example_shadowvolumes.volume.vb");
 
-            horizon::DrawIndexedParams params;
-            params.index_count = std::min<uint32_t>(static_cast<uint32_t>(volume_positions.size()), max_volume_vertices);
-
             vp.view_proj = to_edsl_matrix(view_proj);
             vp.params = to_edsl_vec4(resolution);
-            volume_rasterizer.record(volume_ib, volume_vb, params);
+
+            const uint32_t volume_vertices =
+                std::min<uint32_t>(static_cast<uint32_t>(volume_positions.size()), max_volume_vertices);
+            for (uint32_t drawn = 0; drawn < volume_vertices; drawn += volume_chunk_vertices)
+            {
+                horizon::DrawIndexedParams params;
+                params.index_count = std::min(volume_chunk_vertices, volume_vertices - drawn);
+                params.vertex_offset = static_cast<int32_t>(drawn);
+                volume_rasterizer.record(volume_ib, volume_vb, params);
+            }
         }
 
         horizon::SubmitReceipt render_receipt =

@@ -84,7 +84,7 @@ std::vector<SsrVertex> build_cube_vertices()
 }
 
 // 与 example_deferred 的立方体索引一致（左手系正面朝外）
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 2, 1, 1, 2, 3,
     4, 5, 6, 5, 7, 6,
     8, 10, 9, 9, 10, 11,

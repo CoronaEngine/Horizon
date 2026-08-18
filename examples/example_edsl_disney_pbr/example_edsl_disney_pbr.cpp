@@ -151,7 +151,7 @@ struct MeshVertex
 struct MeshData
 {
     std::vector<MeshVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
 };
 
 MeshData make_uv_sphere(int slices, int stacks)
@@ -185,10 +185,10 @@ MeshData make_uv_sphere(int slices, int stacks)
     {
         for (int x = 0; x < slices; ++x)
         {
-            const uint32_t i0 = static_cast<uint32_t>(y * (slices + 1) + x);
-            const uint32_t i1 = i0 + 1;
-            const uint32_t i2 = i0 + static_cast<uint32_t>(slices + 1);
-            const uint32_t i3 = i2 + 1;
+            const uint16_t i0 = static_cast<uint16_t>(y * (slices + 1) + x);
+            const uint16_t i1 = static_cast<uint16_t>(i0 + 1);
+            const uint16_t i2 = static_cast<uint16_t>(i0 + slices + 1);
+            const uint16_t i3 = static_cast<uint16_t>(i2 + 1);
 
             mesh.indices.push_back(i0);
             mesh.indices.push_back(i2);

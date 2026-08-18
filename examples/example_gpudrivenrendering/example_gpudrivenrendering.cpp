@@ -191,7 +191,7 @@ const std::vector<PosVertex> cube_vertices = {
     { { 0.5f, -0.5f, -0.5f } },
 };
 
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 1, 2, 1, 3, 2,
     4, 6, 5, 5, 6, 7,
     0, 2, 4, 4, 2, 6,
@@ -302,7 +302,7 @@ struct SceneData
     std::vector<glm::vec4> bbox_data;
     std::vector<uint32_t> indirect_const;
     std::vector<PosVertex> merged_vertices;
-    std::vector<uint32_t> merged_indices;
+    std::vector<uint16_t> merged_indices;
 };
 
 SceneData build_scene(std::mt19937& rng)

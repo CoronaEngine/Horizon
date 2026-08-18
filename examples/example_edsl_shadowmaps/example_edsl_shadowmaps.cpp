@@ -75,10 +75,20 @@ struct SmxVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LoadedMesh
 {
     std::vector<SmxVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -188,11 +198,18 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -220,6 +237,8 @@ struct GpuMesh
     horizon::HardwareBuffer vb;
     horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
+    // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
+    std::vector<MeshGroup> groups;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
@@ -228,6 +247,7 @@ GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
         horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
         horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
+        mesh.groups,
     };
 }
 
@@ -279,11 +299,12 @@ void run_example_edsl_shadowmaps()
         { { -1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
         { { 1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
     };
-    const std::vector<uint32_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
+    const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     GpuMesh floor_plane {
         horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
         horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
+        { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } },
     };
 
     // Pass 1 目标：1024x1024 RGBA8 打包深度 + 独立 D32
@@ -564,11 +585,15 @@ void run_example_edsl_shadowmaps()
         pack_rasterizer.clear_records();
         for (const DrawItem& item : items)
         {
-            horizon::DrawIndexedParams params;
-            params.index_count = item.mesh->index_count;
-
             mvp = to_edsl_matrix((light_view_proj * item.model));
-            pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            for (const MeshGroup& group : item.mesh->groups)
+            {
+                horizon::DrawIndexedParams params;
+                params.index_count = group.index_count;
+                params.first_index = group.first_index;
+                params.vertex_offset = group.base_vertex;
+                pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            }
         }
 
         // Pass 2：场景光照 + 硬阴影
@@ -592,11 +617,15 @@ void run_example_edsl_shadowmaps()
         params1 = ktm::fvec4(shadow_bias, shadow_normal_offset, 1.0f / shadow_map_size, 0.0f);
         for (const DrawItem& item : items)
         {
-            horizon::DrawIndexedParams params;
-            params.index_count = item.mesh->index_count;
-
             model = to_edsl_matrix(item.model); // per-draw；VS 从中计算 mvp/model_view/light_mtx
-            scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            for (const MeshGroup& group : item.mesh->groups)
+            {
+                horizon::DrawIndexedParams params;
+                params.index_count = group.index_count;
+                params.first_index = group.first_index;
+                params.vertex_offset = group.base_vertex;
+                scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            }
         }
 
         horizon::SubmitReceipt render_receipt =

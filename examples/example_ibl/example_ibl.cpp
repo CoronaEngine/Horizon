@@ -156,10 +156,20 @@ struct IblVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct IblMesh
 {
     std::vector<IblVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -270,11 +280,18 @@ IblMesh load_bgfx_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -503,7 +520,7 @@ void run_example_ibl()
         { { 3.0f, -1.0f, 1.0f }, {} },
         { { -1.0f, 3.0f, 1.0f }, {} },
     };
-    const std::vector<uint32_t> sky_indices = { 0, 1, 2 };
+    const std::vector<uint16_t> sky_indices = { 0, 1, 2 };
 
     horizon::HardwareBuffer bunny_vb = horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_ibl.bunny.vb");
     horizon::HardwareBuffer bunny_ib = horizon::HardwareBuffer::index(bunny_mesh.indices, "example_ibl.bunny.ib");
@@ -537,11 +554,22 @@ void run_example_ibl()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams bunny_params;
-    bunny_params.index_count = static_cast<uint32_t>(bunny_mesh.indices.size());
-
-    horizon::DrawIndexedParams orb_params;
-    orb_params.index_count = static_cast<uint32_t>(orb_mesh.indices.size());
+    // 每个 bgfx group 一组 params：索引是 group 相对的，base_vertex 走 vertex_offset。
+    const auto group_params = [](const IblMesh& mesh) {
+        std::vector<horizon::DrawIndexedParams> out;
+        out.reserve(mesh.groups.size());
+        for (const MeshGroup& group : mesh.groups)
+        {
+            horizon::DrawIndexedParams params;
+            params.index_count = group.index_count;
+            params.first_index = group.first_index;
+            params.vertex_offset = group.base_vertex;
+            out.push_back(params);
+        }
+        return out;
+    };
+    const std::vector<horizon::DrawIndexedParams> bunny_params = group_params(bunny_mesh);
+    const std::vector<horizon::DrawIndexedParams> orb_params = group_params(orb_mesh);
 
     horizon::DrawIndexedParams sky_params;
     sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
@@ -623,7 +651,8 @@ void run_example_ibl()
             rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
             rasterizer.vpc.model   = model;
             rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-            rasterizer.record(bunny_ib, bunny_vb, bunny_params);
+            for (const horizon::DrawIndexedParams& params : bunny_params)
+                rasterizer.record(bunny_ib, bunny_vb, params);
         }
         else
         {
@@ -646,7 +675,8 @@ void run_example_ibl()
                     rasterizer.vpc.model   = model;
                     rasterizer.vpc.params0 =
                         glm::vec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
-                    rasterizer.record(orb_ib, orb_vb, orb_params);
+                    for (const horizon::DrawIndexedParams& params : orb_params)
+                        rasterizer.record(orb_ib, orb_vb, params);
                 }
             }
         }

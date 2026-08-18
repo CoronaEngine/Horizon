@@ -185,17 +185,12 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
                 if (clip_max_x <= clip_min_x || clip_max_y <= clip_min_y || cmd.ElemCount == 0)
                     continue;
 
+                // per-draw scissor 已从 Horizon 移除：clip rect 只用于跳过零面积 cmd，
+                // 不再做实际裁剪。超出窗口的 UI 内容不会被裁掉。
                 DrawIndexedParams params;
                 params.index_count = cmd.ElemCount;
                 params.first_index = global_index_offset + cmd.IdxOffset;
                 params.vertex_offset = global_vertex_offset + static_cast<int32_t>(cmd.VtxOffset);
-                params.enable_scissor = true;
-                params.scissor = ScissorRect {
-                    static_cast<int32_t>(clip_min_x),
-                    static_cast<int32_t>(clip_min_y),
-                    static_cast<uint32_t>(clip_max_x - clip_min_x),
-                    static_cast<uint32_t>(clip_max_y - clip_min_y),
-                };
                 params.debug_label = "imgui.draw";
                 impl.pipeline.record(index_buffer, vertex_buffer, params);
             }

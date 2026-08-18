@@ -500,9 +500,6 @@ namespace Corona::Horizon
             desc.first_index = params.first_index;
             desc.vertex_offset = params.vertex_offset;
             desc.first_instance = params.first_instance;
-            desc.index_type = params.index_type;
-            desc.enable_scissor = params.enable_scissor;
-            desc.scissor = params.scissor;
             desc.debug_label = params.debug_label;
             return desc;
         }
@@ -1644,9 +1641,6 @@ namespace Corona::Horizon
                 indirect_desc.indirect_offset = draw.params.indirect_offset;
                 indirect_desc.draw_count = draw.params.draw_count;
                 indirect_desc.stride = draw.params.stride;
-                indirect_desc.index_type = draw.params.index_type;
-                indirect_desc.enable_scissor = draw.params.enable_scissor;
-                indirect_desc.scissor = draw.params.scissor;
                 indirect_desc.push_constants = draw.push_constant_data;
                 indirect_desc.debug_label = draw.params.debug_label;
 

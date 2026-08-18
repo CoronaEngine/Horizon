@@ -105,7 +105,7 @@ namespace Corona::Horizon
     RasterizerPipelineBase& RasterizerPipelineBase::extent(uint32_t width, uint32_t height)
     {
         // set_extent 收 uint16_t；公共签名统一 uint32_t（与 HardwareImageDesc 的
-        // extent、ScissorRect 同类型），这里检查后窄化。
+        // extent 同类型），这里检查后窄化。
         constexpr uint32_t max_extent = std::numeric_limits<uint16_t>::max();
         if (width > max_extent || height > max_extent)
             throw std::out_of_range("RasterizerPipeline render extent exceeds 65535 per dimension.");

@@ -48,7 +48,7 @@ const std::vector<QuadVertex> quad_vertices = {
     { { -1.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { -1.0f, 1.0f } },   // 左下
 };
 
-const std::vector<uint32_t> quad_indices = { 0, 2, 1, 0, 3, 2 };
+const std::vector<uint16_t> quad_indices = { 0, 2, 1, 0, 3, 2 };
 
 void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
 {

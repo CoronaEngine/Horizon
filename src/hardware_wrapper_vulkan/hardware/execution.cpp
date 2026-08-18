@@ -483,55 +483,12 @@ namespace Corona::Horizon
             image.image_layout = new_layout;
         }
 
-        [[nodiscard]] VkIndexType resolve_index_type(const DrawIndexedDesc& draw, const BufferWrap& index_buffer) noexcept
-        {
-            switch (draw.index_type)
-            {
-            case IndexType::UInt32:
-                return VK_INDEX_TYPE_UINT32;
-            case IndexType::UInt16:
-                return VK_INDEX_TYPE_UINT16;
-            case IndexType::Auto:
-            default:
-                return index_buffer.desc.element_size == sizeof(uint32_t) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
-            }
-        }
-
         [[nodiscard]] VkRect2D full_scissor(uint32_t width, uint32_t height) noexcept
         {
             return {
                 .offset = { 0, 0 },
                 .extent = { width, height },
             };
-        }
-
-        [[nodiscard]] VkRect2D draw_scissor(const DrawIndexedDesc& draw, uint32_t width, uint32_t height) noexcept
-        {
-            if (!draw.enable_scissor)
-                return full_scissor(width, height);
-
-            const int32_t x = std::max<int32_t>(0, draw.scissor.x);
-            const int32_t y = std::max<int32_t>(0, draw.scissor.y);
-            const int32_t right = std::min<int32_t>(static_cast<int32_t>(width),
-                                                    draw.scissor.x + static_cast<int32_t>(draw.scissor.width));
-            const int32_t bottom = std::min<int32_t>(static_cast<int32_t>(height),
-                                                     draw.scissor.y + static_cast<int32_t>(draw.scissor.height));
-
-            if (right <= x || bottom <= y)
-                return { .offset = { 0, 0 }, .extent = { 0, 0 } };
-
-            return {
-                .offset = { x, y },
-                .extent = { static_cast<uint32_t>(right - x), static_cast<uint32_t>(bottom - y) },
-            };
-        }
-
-        [[nodiscard]] VkRect2D draw_scissor(bool enable_scissor, const ScissorRect& scissor, uint32_t width, uint32_t height) noexcept
-        {
-            DrawIndexedDesc draw;
-            draw.enable_scissor = enable_scissor;
-            draw.scissor = scissor;
-            return draw_scissor(draw, width, height);
         }
 
         [[nodiscard]] std::shared_ptr<VulkanRasterizerPipeline> rasterizer_impl(const ResourceHandle& handle)
@@ -1453,8 +1410,6 @@ namespace Corona::Horizon
         {
             const IResourceRef* index_token { nullptr };
             VkBuffer index_buffer { VK_NULL_HANDLE };
-            IndexType index_type_request { IndexType::Auto };
-            VkIndexType index_type { VK_INDEX_TYPE_UINT32 };
 
             const IResourceRef* vertex_token { nullptr };
             VkBuffer vertex_buffer { VK_NULL_HANDLE };
@@ -1528,7 +1483,7 @@ namespace Corona::Horizon
 
             // IB / VB：句柄与上一 draw 相同则复用已取出的值，不再进 resource store。
             const IResourceRef* index_token = ResourceBridge::token(index_ref.handle).get();
-            if (draw_cache.index_token != index_token || draw_cache.index_type_request != draw.index_type)
+            if (draw_cache.index_token != index_token)
             {
                 BufferStore::Read index = read_buffer(index_ref.handle);
                 if (!index || index->buffer_handle == VK_NULL_HANDLE)
@@ -1536,8 +1491,6 @@ namespace Corona::Horizon
 
                 draw_cache.index_token = index_token;
                 draw_cache.index_buffer = index->buffer_handle;
-                draw_cache.index_type_request = draw.index_type;
-                draw_cache.index_type = resolve_index_type(draw, *index);
             }
 
             const IResourceRef* vertex_token = ResourceBridge::token(vertex_ref.handle).get();
@@ -1632,7 +1585,7 @@ namespace Corona::Horizon
             VkBuffer vertex_buffer = draw_cache.vertex_buffer;
             VkDeviceSize vertex_offset = 0;
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, draw_cache.index_type);
+            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
 
             const std::vector<std::byte>& push_constants = draw.push_constant_data();
             if (!push_constants.empty())
@@ -1644,10 +1597,10 @@ namespace Corona::Horizon
                                    static_cast<uint32_t>(push_constants.size()),
                                    push_constants.data());
             }
-            VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
-            if (scissor.extent.width == 0 || scissor.extent.height == 0)
+            // scissor 不再逐 draw 设置：BeginRendering 已把它设为全幅，且是 pass 内不变量。
+            // 退化尺寸的 pass 在这里直接跳过，省掉整批 draw。
+            if (active_rendering.width == 0 || active_rendering.height == 0)
                 return;
-            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
             // 逐 draw 计时（仅 HORIZON_GPU_TIMES_DRAWS=1）：pass 级别的数字无法区分
             // 同一 pass 内哪个 draw 贵。draws 很多时会打爆 512 查询预算，故单独开关。
             const bool time_this_draw = GpuTimes::draws_enabled();
@@ -1688,13 +1641,10 @@ namespace Corona::Horizon
             prepare_desc.shared = draw.shared;
             prepare_desc.index_count = 1;
             prepare_desc.instance_count = 1;
-            prepare_desc.index_type = draw.index_type;
-            prepare_desc.enable_scissor = draw.enable_scissor;
-            prepare_desc.scissor = draw.scissor;
             prepare_desc.resource_uses = draw.resource_uses;
             prepare_desc.push_constants = draw.push_constants;
             prepare_desc.debug_label = draw.debug_label;
-            if (draw_cache.index_token != index_token || draw_cache.index_type_request != draw.index_type)
+            if (draw_cache.index_token != index_token)
             {
                 BufferStore::Read index = read_buffer(index_ref.handle);
                 if (!index || index->buffer_handle == VK_NULL_HANDLE)
@@ -1702,8 +1652,6 @@ namespace Corona::Horizon
 
                 draw_cache.index_token = index_token;
                 draw_cache.index_buffer = index->buffer_handle;
-                draw_cache.index_type_request = draw.index_type;
-                draw_cache.index_type = resolve_index_type(prepare_desc, *index);
             }
 
             const IResourceRef* vertex_token = ResourceBridge::token(vertex_ref.handle).get();
@@ -1792,7 +1740,7 @@ namespace Corona::Horizon
             VkBuffer vertex_buffer = draw_cache.vertex_buffer;
             VkDeviceSize vertex_offset = 0;
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, draw_cache.index_type);
+            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
 
             const std::vector<std::byte>& push_constants = draw.push_constant_data();
             if (!push_constants.empty())
@@ -1805,10 +1753,9 @@ namespace Corona::Horizon
                                    push_constants.data());
             }
 
-            VkRect2D scissor = draw_scissor(draw.enable_scissor, draw.scissor, active_rendering.width, active_rendering.height);
-            if (scissor.extent.width == 0 || scissor.extent.height == 0)
+            // 同 direct 路径：scissor 由 BeginRendering 一次设定。
+            if (active_rendering.width == 0 || active_rendering.height == 0)
                 return;
-            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
             const uint32_t stride = draw.stride != 0
                 ? draw.stride

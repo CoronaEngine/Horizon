@@ -20,6 +20,7 @@
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
+#include <limits>
 #include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
@@ -257,6 +258,86 @@ void read_array(const std::vector<std::byte>& bytes, size_t& cursor, std::vector
     if (byte_count != 0)
         std::memcpy(out.data(), bytes.data() + cursor, byte_count);
     cursor += byte_count;
+}
+
+// 16-bit 索引化：HZMS 的索引是全局的（sponza 共 190448 顶点，远超 65535），
+// 但每个 submesh 实际触及的顶点区间很窄。按 submesh 把索引重基到区间起点，
+// 用 draw 的 vertex_offset 补回，索引本身就能压进 16-bit。
+// 万一某个 submesh 的顶点跨度仍 >= 65536，就按三角形粒度继续切成多次 draw。
+struct SponzaDrawRange
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t vertex_offset = 0;
+};
+
+// 返回：每个 submesh 对应的 draw 区间列表（与 asset.submeshes 同序、一一对应）。
+// 同时把 asset.indices 就地重基后写入 out_indices（长度不变，只是宽度变 16-bit）。
+std::vector<std::vector<SponzaDrawRange>> rebase_indices_to_16bit(
+    const std::vector<uint32_t>& indices,
+    const std::vector<SponzaSubmesh>& submeshes,
+    std::vector<uint16_t>& out_indices)
+{
+    constexpr uint32_t max_span = 0x10000u; // 16-bit 索引能覆盖的顶点跨度
+
+    out_indices.assign(indices.size(), 0);
+    std::vector<std::vector<SponzaDrawRange>> ranges;
+    ranges.reserve(submeshes.size());
+
+    for (const SponzaSubmesh& submesh : submeshes)
+    {
+        std::vector<SponzaDrawRange> submesh_ranges;
+
+        const uint32_t begin = submesh.first_index;
+        const uint32_t end = submesh.first_index + submesh.index_count;
+        uint32_t chunk_begin = begin;
+        uint32_t chunk_min = std::numeric_limits<uint32_t>::max();
+        uint32_t chunk_max = 0;
+
+        // chunk 收尾：把 [chunk_begin, chunk_end) 的索引减去 chunk_min 后落盘。
+        const auto flush = [&](uint32_t chunk_end) {
+            if (chunk_end == chunk_begin)
+                return;
+            for (uint32_t i = chunk_begin; i < chunk_end; ++i)
+                out_indices[i] = static_cast<uint16_t>(indices[i] - chunk_min);
+            submesh_ranges.push_back({ chunk_begin, chunk_end - chunk_begin,
+                                       static_cast<int32_t>(chunk_min) });
+        };
+
+        // 按三角形推进：切点只落在三角形边界，否则会把三角形撕开。
+        for (uint32_t t = begin; t + 2 < end; t += 3)
+        {
+            const uint32_t a = indices[t];
+            const uint32_t b = indices[t + 1];
+            const uint32_t c = indices[t + 2];
+            const uint32_t tri_min = std::min({ a, b, c });
+            const uint32_t tri_max = std::max({ a, b, c });
+
+            if (tri_max - tri_min >= max_span)
+                throw std::runtime_error("HZMS: a single triangle spans more than 65535 vertices; "
+                                         "cannot express it with 16-bit indices");
+
+            const uint32_t new_min = std::min(chunk_min, tri_min);
+            const uint32_t new_max = std::max(chunk_max, tri_max);
+            if (new_max - new_min >= max_span)
+            {
+                flush(t);
+                chunk_begin = t;
+                chunk_min = tri_min;
+                chunk_max = tri_max;
+            }
+            else
+            {
+                chunk_min = new_min;
+                chunk_max = new_max;
+            }
+        }
+        flush(end);
+
+        ranges.push_back(std::move(submesh_ranges));
+    }
+
+    return ranges;
 }
 
 SponzaAsset load_hzms(const std::filesystem::path& path)
@@ -532,7 +613,7 @@ const std::vector<CornerVertex> corner_vertices = {
     { { 1.0f, 1.0f, 0.0f } },
     { { 0.0f, 1.0f, 0.0f } },
 };
-const std::vector<uint32_t> corner_indices = { 0, 2, 1, 0, 3, 2 };
+const std::vector<uint16_t> corner_indices = { 0, 2, 1, 0, 3, 2 };
 
 glm::vec3 mul_h(const glm::vec3& v, const glm::mat4& m)
 {
@@ -684,8 +765,12 @@ void run_example_sponza()
 
     horizon::HardwareBuffer scene_vb =
         horizon::HardwareBuffer::vertex(asset.vertices, "example_sponza.scene.vb");
+    // 16-bit 重基：索引写成 submesh 区间相对，vertex_offset 在 draw 时补回。
+    std::vector<uint16_t> scene_indices_16;
+    const std::vector<std::vector<SponzaDrawRange>> submesh_ranges =
+        rebase_indices_to_16bit(asset.indices, asset.submeshes, scene_indices_16);
     horizon::HardwareBuffer scene_ib =
-        horizon::HardwareBuffer::index(asset.indices, "example_sponza.scene.ib");
+        horizon::HardwareBuffer::index(scene_indices_16, "example_sponza.scene.ib");
     horizon::HardwareBuffer quad_vb =
         horizon::HardwareBuffer::vertex(corner_vertices, "example_sponza.quad.vb");
     horizon::HardwareBuffer quad_ib =
@@ -948,7 +1033,7 @@ void run_example_sponza()
     const glm::vec3 pool_center(scene_min.x + scene_extent.x * 0.58f,
                                 mirror_y, hall_center_z);
 
-    const auto make_panel = [](std::vector<SponzaVertex>& out_v, std::vector<uint32_t>& out_i,
+    const auto make_panel = [](std::vector<SponzaVertex>& out_v, std::vector<uint16_t>& out_i,
                                const glm::vec3& center, const glm::vec3& normal_dir,
                                float width, float height) {
         const glm::vec3 n = glm::normalize(normal_dir);
@@ -956,7 +1041,7 @@ void run_example_sponza()
                                                          : glm::vec3(0.0f, 1.0f, 0.0f);
         const glm::vec3 right = glm::normalize(glm::cross(helper_up, n));
         const glm::vec3 v_up = glm::normalize(glm::cross(n, right));
-        const uint32_t base = static_cast<uint32_t>(out_v.size());
+        const uint16_t base = static_cast<uint16_t>(out_v.size());
         const glm::vec3 corners[4] = {
             center - right * (width * 0.5f) - v_up * (height * 0.5f),
             center + right * (width * 0.5f) - v_up * (height * 0.5f),
@@ -974,11 +1059,11 @@ void run_example_sponza()
             out_v.push_back(v);
         }
         for (uint32_t idx : { 0u, 1u, 2u, 1u, 3u, 2u })
-            out_i.push_back(base + idx);
+            out_i.push_back(static_cast<uint16_t>(base + idx));
     };
 
     std::vector<SponzaVertex> mirror_vertices;
-    std::vector<uint32_t> mirror_indices;
+    std::vector<uint16_t> mirror_indices;
     // 0: 镜面;1:略低且略大的深石围边。
     make_panel(mirror_vertices, mirror_indices, pool_center, glm::vec3(0.0f, 1.0f, 0.0f),
                scene_extent.x * 0.19f, scene_extent.z * 0.105f);
@@ -1239,8 +1324,9 @@ void run_example_sponza()
         shadow_rasterizer.clear_records();
         shadow_rasterizer.vsp.light_view_proj = sun_view_proj;
         shadow_rasterizer.vsp.sun_color = glm::vec4(tuning.sun_color, 0.0f);
-        for (const SponzaSubmesh& submesh : asset.submeshes)
+        for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
+            const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
                 continue;
             const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
@@ -1258,10 +1344,14 @@ void run_example_sponza()
             shadow_rasterizer.model_pc.tex_mask_index = descriptor_of(material.mask_texture);
             shadow_rasterizer.model_pc.material_flags = flags;
 
-            horizon::DrawIndexedParams params;
-            params.index_count = submesh.index_count;
-            params.first_index = submesh.first_index;
-            shadow_rasterizer.record(scene_ib, scene_vb, params);
+            for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
+            {
+                horizon::DrawIndexedParams params;
+                params.index_count = range.index_count;
+                params.first_index = range.first_index;
+                params.vertex_offset = range.vertex_offset;
+                shadow_rasterizer.record(scene_ib, scene_vb, params);
+            }
         }
         if (tuning.mirror_enable)
         {
@@ -1283,8 +1373,9 @@ void run_example_sponza()
         // Pass 1: one draw per submesh, material switched through the push constant.
         geom_rasterizer.clear_records();
         geom_rasterizer.vsp.view_proj = view_proj;
-        for (const SponzaSubmesh& submesh : asset.submeshes)
+        for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
+            const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
                 continue;
             const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
@@ -1311,10 +1402,14 @@ void run_example_sponza()
             geom_rasterizer.model_pc.tex_mask_index = descriptor_of(material.mask_texture);
             geom_rasterizer.model_pc.material_flags = flags;
 
-            horizon::DrawIndexedParams params;
-            params.index_count = submesh.index_count;
-            params.first_index = submesh.first_index;
-            geom_rasterizer.record(scene_ib, scene_vb, params);
+            for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
+            {
+                horizon::DrawIndexedParams params;
+                params.index_count = range.index_count;
+                params.first_index = range.first_index;
+                params.vertex_offset = range.vertex_offset;
+                geom_rasterizer.record(scene_ib, scene_vb, params);
+            }
         }
         if (tuning.mirror_enable)
         {

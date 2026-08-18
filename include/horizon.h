@@ -306,21 +306,6 @@ namespace Corona::Horizon
         }
     };
 
-    enum class IndexType : uint32_t
-    {
-        Auto = 0,
-        UInt16 = 1,
-        UInt32 = 2,
-    };
-
-    struct ScissorRect
-    {
-        int32_t x = 0;
-        int32_t y = 0;
-        uint32_t width = 0;
-        uint32_t height = 0;
-    };
-
     struct DrawIndexedParams
     {
 
@@ -330,9 +315,6 @@ namespace Corona::Horizon
         int32_t vertex_offset = 0;
         uint32_t first_instance = 0;
 
-        IndexType index_type = IndexType::Auto;
-        bool enable_scissor = false;
-        ScissorRect scissor{};
         std::string debug_label;
     };
 
@@ -352,9 +334,6 @@ namespace Corona::Horizon
         uint64_t indirect_offset = 0;
 
         uint32_t stride = 0;
-        IndexType index_type = IndexType::Auto;
-        bool enable_scissor = false;
-        ScissorRect scissor{};
         std::string debug_label;
     };
 
@@ -566,7 +545,7 @@ namespace Corona::Horizon
     concept HardwareTransferable = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
     template <typename T>
-    concept HardwareIndexType = std::same_as<std::remove_cvref_t<T>, uint16_t> || std::same_as<std::remove_cvref_t<T>, uint32_t>;
+    concept HardwareIndexType = std::same_as<std::remove_cvref_t<T>, uint16_t>;
 
     struct HardwareBufferDesc
     {

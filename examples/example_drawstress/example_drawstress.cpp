@@ -58,7 +58,7 @@ const std::vector<StressVertex> cube_vertices = {
     { { 1.0f, -1.0f, -1.0f }, { 1.0f, 1.0f, 1.0f } },  // 0xffffffff
 };
 
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 1, 2, 1, 3, 2,
     4, 6, 5, 5, 6, 7,
     0, 2, 4, 4, 2, 6,

@@ -225,10 +225,20 @@ struct LandscapeVertex
     std::array<float, 2> texcoord {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LandscapeMesh
 {
     std::vector<LandscapeVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -351,11 +361,15 @@ LandscapeMesh load_landscape_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -461,7 +475,7 @@ horizon::HardwareImage load_ktx_rgba8_or_white(const std::filesystem::path& path
 }
 
 void build_sky_grid(int vertical_count, int horizontal_count,
-                    std::vector<ScreenPosVertex>& vertices, std::vector<uint32_t>& indices)
+                    std::vector<ScreenPosVertex>& vertices, std::vector<uint16_t>& indices)
 {
     vertices.clear();
     indices.clear();
@@ -482,10 +496,10 @@ void build_sky_grid(int vertical_count, int horizontal_count,
     {
         for (int j = 0; j < horizontal_count - 1; ++j)
         {
-            const uint32_t i0 = static_cast<uint32_t>(j + 0 + horizontal_count * (i + 0));
-            const uint32_t i1 = static_cast<uint32_t>(j + 1 + horizontal_count * (i + 0));
-            const uint32_t i2 = static_cast<uint32_t>(j + 0 + horizontal_count * (i + 1));
-            const uint32_t i3 = static_cast<uint32_t>(j + 1 + horizontal_count * (i + 1));
+            const uint16_t i0 = static_cast<uint16_t>(j + 0 + horizontal_count * (i + 0));
+            const uint16_t i1 = static_cast<uint16_t>(j + 1 + horizontal_count * (i + 0));
+            const uint16_t i2 = static_cast<uint16_t>(j + 0 + horizontal_count * (i + 1));
+            const uint16_t i3 = static_cast<uint16_t>(j + 1 + horizontal_count * (i + 1));
             indices.push_back(i0);
             indices.push_back(i1);
             indices.push_back(i2);
@@ -512,7 +526,7 @@ void run_example_sky()
     glfwSetKeyCallback(window, key_callback);
 
     std::vector<ScreenPosVertex> sky_vertices;
-    std::vector<uint32_t> sky_indices;
+    std::vector<uint16_t> sky_indices;
     build_sky_grid(sky_grid, sky_grid, sky_vertices, sky_indices);
 
     LandscapeMesh landscape = load_landscape_mesh(sky_asset_root / "meshes" / "test_scene.bin");
@@ -570,8 +584,16 @@ void run_example_sky()
     horizon::DrawIndexedParams sky_params;
     sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
 
-    horizon::DrawIndexedParams landscape_params;
-    landscape_params.index_count = static_cast<uint32_t>(landscape.indices.size());
+    std::vector<horizon::DrawIndexedParams> landscape_params;
+    landscape_params.reserve(landscape.groups.size());
+    for (const MeshGroup& group : landscape.groups)
+    {
+        horizon::DrawIndexedParams params;
+        params.index_count = group.index_count;
+        params.first_index = group.first_index;
+        params.vertex_offset = group.base_vertex;
+        landscape_params.push_back(params);
+    }
 
     DynamicValueController sun_lum_xyz;
     DynamicValueController sky_lum_xyz;
@@ -689,7 +711,8 @@ void run_example_sky()
         landscape_pipeline.ls_fs.parameters = parameters;
         landscape_pipeline.pc.model = glm::mat4(1.0f);
         landscape_pipeline.pc.lightmapIndex = lightmap.store_descriptor();
-        landscape_pipeline.record(landscape_ib, landscape_vb, landscape_params);
+        for (const horizon::DrawIndexedParams& params : landscape_params)
+            landscape_pipeline.record(landscape_ib, landscape_vb, params);
 
         render_receipt = render_executor << landscape_pipeline.extent(sky_width, sky_height)
                                          << sky_pipeline.extent(sky_width, sky_height)
