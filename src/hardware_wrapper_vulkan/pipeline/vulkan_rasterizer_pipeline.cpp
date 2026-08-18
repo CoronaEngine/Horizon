@@ -118,42 +118,6 @@ namespace Corona::Horizon
             return reflected_binding_coordinates(shaders.fragment, entry);
         }
 
-        [[nodiscard]] VkPrimitiveTopology to_vk_topology(PrimitiveTopology topology) noexcept
-        {
-            switch (topology)
-            {
-            case PrimitiveTopology::TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-            case PrimitiveTopology::LineList: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-            case PrimitiveTopology::LineStrip: return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-            case PrimitiveTopology::PointList: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-            case PrimitiveTopology::TriangleList:
-            default: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            }
-        }
-
-        [[nodiscard]] VkPolygonMode to_vk_polygon_mode(PolygonFillMode mode) noexcept
-        {
-            switch (mode)
-            {
-            case PolygonFillMode::Line: return VK_POLYGON_MODE_LINE;
-            case PolygonFillMode::Point: return VK_POLYGON_MODE_POINT;
-            case PolygonFillMode::Fill:
-            default: return VK_POLYGON_MODE_FILL;
-            }
-        }
-
-        [[nodiscard]] VkCullModeFlags to_vk_cull_mode(CullMode mode) noexcept
-        {
-            switch (mode)
-            {
-            case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
-            case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
-            case CullMode::None:
-            default: return VK_CULL_MODE_NONE;
-            }
-        }
-
-
         [[nodiscard]] VkCompareOp to_vk_compare_op(CompareOp op) noexcept
         {
             switch (op)
@@ -732,7 +696,7 @@ namespace Corona::Horizon
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly {};
             input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-            input_assembly.topology = to_vk_topology(desc_.topology);
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             input_assembly.primitiveRestartEnable = VK_FALSE;
 
             VkPipelineViewportStateCreateInfo viewport_state {};
@@ -744,8 +708,8 @@ namespace Corona::Horizon
             rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
             rasterization.depthClampEnable = desc_.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
             rasterization.rasterizerDiscardEnable = desc_.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
-            rasterization.polygonMode = to_vk_polygon_mode(desc_.fill_mode);
-            rasterization.cullMode = to_vk_cull_mode(desc_.cull_mode);
+            rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+            rasterization.cullMode = VK_CULL_MODE_NONE;
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
             rasterization.lineWidth = desc_.line_width;

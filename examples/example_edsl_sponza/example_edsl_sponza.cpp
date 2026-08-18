@@ -63,7 +63,7 @@ ktm::fvec4 to_edsl_vec4(const glm::vec4& v) { return ktm::fvec4(v.x, v.y, v.z, v
 
 constexpr uint32_t spz_width = 1280;
 constexpr uint32_t spz_height = 720;
-constexpr uint32_t spz_shadow_map_size = 2048;
+constexpr uint32_t spz_shadow_map_size = 1024;  // 从2048降低，减少4倍shadow pass开销
 
 constexpr uint32_t hzms_magic = 0x534D5A48; // 'HZMS'
 constexpr uint32_t hzms_version_legacy = 2;

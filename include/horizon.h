@@ -358,30 +358,6 @@ namespace Corona::Horizon
         std::string debug_label;
     };
 
-    enum class PrimitiveTopology : uint16_t
-    {
-        TriangleList = 0,
-        TriangleStrip,
-        LineList,
-        LineStrip,
-        PointList,
-    };
-
-    enum class PolygonFillMode : uint16_t
-    {
-        Fill = 0,
-        Line,
-        Point,
-    };
-
-    enum class CullMode : uint16_t
-    {
-        None = 0,
-        Front,
-        Back,
-        FrontAndBack,
-    };
-
     enum class CompareOp : uint16_t
     {
         Never = 0,
@@ -787,10 +763,6 @@ namespace Corona::Horizon
 
     struct RasterizerPipelineDesc
     {
-
-        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-        PolygonFillMode fill_mode = PolygonFillMode::Fill;
-        CullMode cull_mode = CullMode::None;
         bool depth_clamp_enabled = false;
         bool rasterizer_discard_enabled = false;
         float line_width = 1.0f;

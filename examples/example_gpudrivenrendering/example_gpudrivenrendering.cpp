@@ -564,7 +564,6 @@ void run_example_gpudrivenrendering()
     opaque_desc.blend_enabled = false;
 
     horizon::RasterizerPipelineDesc main_desc = opaque_desc;
-    main_desc.cull_mode = horizon::CullMode::Front;
 
     horizon::RasterizerPipeline occlusion_rasterizer(
         gdr_occlusion_vert_glsl, gdr_occlusion_frag_glsl, opaque_desc);

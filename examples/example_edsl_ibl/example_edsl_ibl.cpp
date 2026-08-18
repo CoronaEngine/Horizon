@@ -583,8 +583,6 @@ void run_example_edsl_ibl()
     // ---- Pipeline ----
     horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
-    // 同 example_ibl：闭合网格 + Y 翻转，剔除 Front。逐像素验证仅 2 像素不同。
-    desc.cull_mode = horizon::CullMode::Front;
 
     // 共享 UBO（批次内所有 draw 相同，288 bytes → UBO）
     IblEdslSharedProxy shared;

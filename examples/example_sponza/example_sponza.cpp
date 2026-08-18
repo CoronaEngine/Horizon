@@ -61,7 +61,7 @@ namespace
 constexpr uint32_t spz_width = 1280;
 constexpr uint32_t spz_height = 720;
 constexpr int spz_max_lights = 128;
-constexpr uint32_t spz_shadow_map_size = 2048;
+constexpr uint32_t spz_shadow_map_size = 1024;  // 从2048降低，减少4倍shadow pass开销
 
 // Everything the ImGui panel can drive. 默认值按"白天、斜射太阳"标定:
 // Disney 直接光是能量守恒的(diffuse 带 1/π),太阳强度要比旧 Blinn 版大一个

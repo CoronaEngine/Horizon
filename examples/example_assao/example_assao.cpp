@@ -22,9 +22,7 @@
 #include <imgui.h>
 
 #include GLSL(shaders/assao_scene_vert.glsl)
-#include GLSL(shaders/assao_color_frag.glsl)
-#include GLSL(shaders/assao_normal_frag.glsl)
-#include GLSL(shaders/assao_depth_frag.glsl)
+#include GLSL(shaders/assao_gbuffer_mrt_frag.glsl)
 #include GLSL(shaders/assao_generate_compute.glsl)
 #include GLSL(shaders/assao_blur_compute.glsl)
 #include GLSL(shaders/assao_apply_compute.glsl)
@@ -242,6 +240,16 @@ void run_example_assao()
         float scale;
         glm::vec3 position;
     };
+
+    // 预计算的静态transform，避免每帧重复计算
+    struct StaticTransform
+    {
+        glm::mat4 model;
+        glm::vec4 color;
+        const GpuMesh* mesh;
+        uint32_t index_count;
+    };
+
     const std::array<std::pair<const GpuMesh*, float>, 3> model_pool = { {
         { &orb, 0.5f },
         { &column, 0.05f },
@@ -255,6 +263,31 @@ void run_example_assao()
         const float px = ((int(rng() % 256)) - 128.0f) / 20.0f;
         const float pz = ((int(rng() % 256)) - 128.0f) / 20.0f;
         models.push_back({ mesh, scale, glm::vec3(px, 0.0f, pz) });
+    }
+
+    // 预计算所有静态transform（1个地面 + 120个模型）
+    std::vector<StaticTransform> static_transforms;
+    static_transforms.reserve(121);
+
+    // 地面
+    static_transforms.push_back({
+        glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
+        glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)),
+        glm::vec4(0.6f, 0.6f, 0.6f, 1.0f),
+        &ground,
+        ground.index_count
+    });
+
+    // 模型
+    for (const ModelInstance& m : models)
+    {
+        static_transforms.push_back({
+            glm::translate(glm::mat4(1.0f), m.position) *
+            glm::scale(glm::mat4(1.0f), glm::vec3(m.scale)),
+            glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f),
+            m.mesh,
+            m.mesh->index_count
+        });
     }
 
     // G-buffer 目标（compute 需 Storage）
@@ -285,37 +318,20 @@ void run_example_assao()
             horizon::ImageUsage_TransferDst,
         "example_assao.output"));
 
-    // 三个几何 pass 各自的深度附件
-    horizon::HardwareImage depth_c(horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, horizon::Format::D32, "example_assao.depth_c"));
-    depth_c.set_clear_depth(1.0f, 0);
-    horizon::HardwareImage depth_n(horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, horizon::Format::D32, "example_assao.depth_n"));
-    depth_n.set_clear_depth(1.0f, 0);
-    horizon::HardwareImage depth_d(horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, horizon::Format::D32, "example_assao.depth_d"));
-    depth_d.set_clear_depth(1.0f, 0);
+    // MRT: 单个深度附件，一次 pass 输出三个 G-buffer RT
+    horizon::HardwareImage depth_attachment(horizon::HardwareImageDesc::depth_attachment(
+        ao_width, ao_height, horizon::Format::D32, "example_assao.depth"));
+    depth_attachment.set_clear_depth(1.0f, 0);
 
     horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend_enabled = false;
-    // 场景几何被 color/normal/depth 三个 pass 各画一遍，剔除背面等于省下三份三角形装配。
-    // 投影含 Y 翻转，故 Front 即背面。逐像素验证：921600 像素中 48 像素不同（轮廓边法线定序
-    // 变化经 AO 放大），占 0.005%。
-    scene_desc.cull_mode = horizon::CullMode::Front;
 
-    horizon::RasterizerPipeline color_rasterizer(assao_scene_vert_glsl, assao_color_frag_glsl, scene_desc);
-    color_rasterizer.outColor = scene_color_image;
-    color_rasterizer.bind_depth_target(depth_c);
-
-    horizon::RasterizerPipelineDesc normal_desc = scene_desc;
-    horizon::RasterizerPipeline normal_rasterizer(assao_scene_vert_glsl, assao_normal_frag_glsl, normal_desc);
-    normal_rasterizer.outNormal = normal_image;
-    normal_rasterizer.bind_depth_target(depth_n);
-
-    horizon::RasterizerPipelineDesc depth_desc = scene_desc;
-    horizon::RasterizerPipeline depthval_rasterizer(assao_scene_vert_glsl, assao_depth_frag_glsl, depth_desc);
-    depthval_rasterizer.outDepthVal = depth_val_image;
-    depthval_rasterizer.bind_depth_target(depth_d);
+    // MRT pipeline: 一个 fragment shader 输出 3 个 RT (color/normal/depthval)
+    horizon::RasterizerPipeline gbuffer_rasterizer(assao_scene_vert_glsl, assao_gbuffer_mrt_frag_glsl, scene_desc);
+    gbuffer_rasterizer.outColor = scene_color_image;
+    gbuffer_rasterizer.outNormal = normal_image;
+    gbuffer_rasterizer.outDepthVal = depth_val_image;
+    gbuffer_rasterizer.bind_depth_target(depth_attachment);
 
     // compute 管线：generate → blur ×2（ping-pong 用两个实例）→ apply
     horizon::ComputePipeline generate_compute(assao_generate_compute_glsl, ktm::uvec3(8, 8, 1));
@@ -379,40 +395,23 @@ void run_example_assao()
             fps_frame_count = 0;
         }
 
-        // 三个几何 pass
+        // MRT: 单次 G-buffer pass，使用预计算的transform避免每帧重复计算
         auto record_scene = [&](auto& pipeline) {
             pipeline.clear_records();
             // 共享矩阵（UBO，batch 内不变）；per-draw 数据（model、color）走 push constant
             pipeline.vsp.proj_view   = view_proj;
             pipeline.vsp.view_matrix = view;
 
-            // 地面：压扁的 cube
+            for (const StaticTransform& t : static_transforms)
             {
                 horizon::DrawIndexedParams params;
-                params.index_count = ground.index_count;
-
-                const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
-                                        glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)); // 原版：cube x10，顶面 y=0
-                pipeline.vpc.model = model;
-                pipeline.vpc.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
-                pipeline.record(ground.ib, ground.vb, params);
-            }
-
-            for (const ModelInstance& m : models)
-            {
-                horizon::DrawIndexedParams params;
-                params.index_count = m.mesh->index_count;
-
-                const glm::mat4 model = glm::translate(glm::mat4(1.0f), m.position) *
-                                        glm::scale(glm::mat4(1.0f), glm::vec3(m.scale));
-                pipeline.vpc.model = model;
-                pipeline.vpc.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
-                pipeline.record(m.mesh->ib, m.mesh->vb, params);
+                params.index_count = t.index_count;
+                pipeline.vpc.model = t.model;
+                pipeline.vpc.color = t.color;
+                pipeline.record(t.mesh->ib, t.mesh->vb, params);
             }
         };
-        record_scene(color_rasterizer);
-        record_scene(normal_rasterizer);
-        record_scene(depthval_rasterizer);
+        record_scene(gbuffer_rasterizer);
 
         // compute 参数
         const glm::vec4 resolution(float(ao_width), float(ao_height), 0.0f, 0.0f);
@@ -441,9 +440,7 @@ void run_example_assao()
         apply_compute.pushConsts.params0 = glm::vec4(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
         horizon::SubmitReceipt render_receipt =
-            render_executor << color_rasterizer.extent(ao_width, ao_height)
-                            << normal_rasterizer.extent(ao_width, ao_height)
-                            << depthval_rasterizer.extent(ao_width, ao_height)
+            render_executor << gbuffer_rasterizer.extent(ao_width, ao_height)
                             << generate_compute.dispatch_extent(ao_width, ao_height)
                             << blur_compute_ab.dispatch_extent(ao_width, ao_height)
                             << blur_compute_ba.dispatch_extent(ao_width, ao_height)

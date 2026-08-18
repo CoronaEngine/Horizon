@@ -45,7 +45,7 @@ namespace
 {
 constexpr uint32_t rsm_width = 1280;
 constexpr uint32_t rsm_height = 720;
-constexpr uint32_t rsm_map_size = 1024; // RSM 分辨率（阴影比较共用）
+constexpr uint32_t rsm_map_size = 512; // RSM 分辨率（间接光照低频，从1024降低减少4倍开销）
 constexpr float rsm_near = 1.0f;
 constexpr float rsm_far = 250.0f;
 constexpr float rsm_shadow_bias = 0.0035f;
@@ -222,7 +222,7 @@ GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
     };
 }
 
-// 预缩放的单面四边形（默认 CullMode::None，绕向不敏感）
+// 预缩放的单面四边形（不剔除背面，绕向不敏感）
 GpuMesh make_quad(const std::array<glm::vec3, 4>& corners, const glm::vec3& normal, const std::string& name)
 {
     std::vector<RsmVertex> vertices;
