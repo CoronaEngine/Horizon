@@ -1420,6 +1420,19 @@ namespace Corona::Horizon
             bool prepared_valid { false };
             VulkanRasterizerPipeline::PreparedDraw prepared {};
 
+            // 已经下发到命令缓冲的绑定状态。上面那些字段缓存的是"取值"，这三个记的是
+            // "已 bind 过什么"——同一批次里连续 draw 绝大多数共用同一 pipeline/IB/VB，
+            // 相邻 descriptor set 绑定早有判等跳过，这三个 vkCmd* 却一直无条件重发。
+            //
+            // 只比句柄是安全的：IB 的 offset/indexType 与 VB 的 offset/binding 在本
+            // 路径里都是常量（0 / UINT16 / slot 0），不参与判等。句柄的 ABA 风险由
+            // submission.keep_alive 覆盖（encode 期间资源不可能被销毁）；pipeline 句柄
+            // 在 rebuild 时会被销毁并可能复用同值，故 rebuild 处必须调
+            // invalidate_bindings()，否则会绑到已销毁的 VkPipeline。
+            VkPipeline bound_pipeline { VK_NULL_HANDLE };
+            VkBuffer bound_index_buffer { VK_NULL_HANDLE };
+            VkBuffer bound_vertex_buffer { VK_NULL_HANDLE };
+
             void reset() noexcept
             {
                 index_token = nullptr;
@@ -1428,12 +1441,20 @@ namespace Corona::Horizon
                 pipeline_impl.reset();
                 prepared_valid = false;
                 prepared = {};
+                invalidate_bindings();
             }
 
             void invalidate_prepared() noexcept
             {
                 prepared_valid = false;
                 prepared = {};
+            }
+
+            void invalidate_bindings() noexcept
+            {
+                bound_pipeline = VK_NULL_HANDLE;
+                bound_index_buffer = VK_NULL_HANDLE;
+                bound_vertex_buffer = VK_NULL_HANDLE;
             }
         } draw_cache;
 
@@ -1521,6 +1542,8 @@ namespace Corona::Horizon
                 draw_cache.pipeline_key = nullptr;
                 draw_cache.pipeline_impl.reset();
                 draw_cache.invalidate_prepared();
+                // 旧 VkPipeline 已销毁，新句柄可能复用同值；不清则会跳过重绑。
+                draw_cache.invalidate_bindings();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1555,7 +1578,13 @@ namespace Corona::Horizon
             if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                 throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
 
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+            if (draw_cache.bound_pipeline != prepared.pipeline)
+            {
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+                draw_cache.bound_pipeline = prepared.pipeline;
+            }
+            // use_layout 是纯 CPU 侧缓存判定，必须无条件调：layout 变了要丢弃 descriptor
+            // 缓存，与上面是否真的重绑 pipeline 无关。
             graphics_descriptors.use_layout(prepared.layout);
             if (prepared.uses_bindless && !graphics_descriptors.bindless_bound)
             {
@@ -1582,10 +1611,18 @@ namespace Corona::Horizon
                 graphics_descriptors.remember_uniform_sets(prepared.uniform_sets);
             }
 
-            VkBuffer vertex_buffer = draw_cache.vertex_buffer;
-            VkDeviceSize vertex_offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+            if (draw_cache.bound_vertex_buffer != draw_cache.vertex_buffer)
+            {
+                VkBuffer vertex_buffer = draw_cache.vertex_buffer;
+                VkDeviceSize vertex_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+                draw_cache.bound_vertex_buffer = draw_cache.vertex_buffer;
+            }
+            if (draw_cache.bound_index_buffer != draw_cache.index_buffer)
+            {
+                vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+                draw_cache.bound_index_buffer = draw_cache.index_buffer;
+            }
 
             const std::vector<std::byte>& push_constants = draw.push_constant_data();
             if (!push_constants.empty())
@@ -1683,6 +1720,7 @@ namespace Corona::Horizon
                 draw_cache.pipeline_key = nullptr;
                 draw_cache.pipeline_impl.reset();
                 draw_cache.invalidate_prepared();
+                draw_cache.invalidate_bindings();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1712,7 +1750,11 @@ namespace Corona::Horizon
             if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                 throw std::logic_error("DrawIndexedIndirect resolved an invalid graphics pipeline.");
 
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+            if (draw_cache.bound_pipeline != prepared.pipeline)
+            {
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+                draw_cache.bound_pipeline = prepared.pipeline;
+            }
             graphics_descriptors.use_layout(prepared.layout);
             if (prepared.uses_bindless && !graphics_descriptors.bindless_bound)
             {
@@ -1737,10 +1779,18 @@ namespace Corona::Horizon
                 graphics_descriptors.remember_uniform_sets(prepared.uniform_sets);
             }
 
-            VkBuffer vertex_buffer = draw_cache.vertex_buffer;
-            VkDeviceSize vertex_offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+            if (draw_cache.bound_vertex_buffer != draw_cache.vertex_buffer)
+            {
+                VkBuffer vertex_buffer = draw_cache.vertex_buffer;
+                VkDeviceSize vertex_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+                draw_cache.bound_vertex_buffer = draw_cache.vertex_buffer;
+            }
+            if (draw_cache.bound_index_buffer != draw_cache.index_buffer)
+            {
+                vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+                draw_cache.bound_index_buffer = draw_cache.index_buffer;
+            }
 
             const std::vector<std::byte>& push_constants = draw.push_constant_data();
             if (!push_constants.empty())
