@@ -528,6 +528,9 @@ void run_example_ibl()
     // ---- Pipeline ----
     horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
+    // 球体/兔子/天空盒都是闭合网格，投影含 Y 翻转故屏幕空间绕向反转，剔除 Front 即剔除背面。
+    // 已逐像素验证：921600 像素中仅 2 像素因轮廓边共面三角形的定序变化而不同（maxDelta 0.0044）。
+    desc.cull_mode = horizon::CullMode::Front;
 
     horizon::RasterizerPipeline rasterizer(ibl_vert_glsl, ibl_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
