@@ -233,11 +233,34 @@ namespace Corona::Horizon
         bool clear_depth { false };
     };
 
+    // 一个批次内所有 draw 共享的数据。逐 draw 拷贝这三个 vector 曾是提交路径上
+    // 最大的堆分配来源（每 draw 三次），现在整批只建一份、各 draw 持指针。
+    struct DrawSharedPayload
+    {
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
+        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+        std::vector<UniformBufferBindingData> uniform_buffers;
+    };
+
+    // shared 为空时返回的静态空值，让访问器始终能给出 const 引用。
+    [[nodiscard]] inline const DrawSharedPayload& empty_draw_shared_payload() noexcept
+    {
+        static const DrawSharedPayload empty {};
+        return empty;
+    }
+
+    [[nodiscard]] inline const std::vector<std::byte>& empty_push_constant_data() noexcept
+    {
+        static const std::vector<std::byte> empty {};
+        return empty;
+    }
+
     struct DrawIndexedDesc
     {
         RasterizerPipelineBase* pipeline {};
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+        std::shared_ptr<const DrawSharedPayload> shared;
+        // 逐 draw 不同，但 record() 与批次构建各拷一次曾是纯浪费；改为共享同一份。
+        std::shared_ptr<const std::vector<std::byte>> push_constants;
 
         uint32_t index_count { 0 };
         uint32_t instance_count { 1 };
@@ -248,9 +271,24 @@ namespace Corona::Horizon
         bool enable_scissor { false };
         ScissorRect scissor {};
         std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
         std::string debug_label;
+
+        [[nodiscard]] const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vert_condition_info() const noexcept
+        {
+            return (shared ? *shared : empty_draw_shared_payload()).vert_condition_info;
+        }
+        [[nodiscard]] const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& frag_condition_info() const noexcept
+        {
+            return (shared ? *shared : empty_draw_shared_payload()).frag_condition_info;
+        }
+        [[nodiscard]] const std::vector<UniformBufferBindingData>& uniform_buffers() const noexcept
+        {
+            return (shared ? *shared : empty_draw_shared_payload()).uniform_buffers;
+        }
+        [[nodiscard]] const std::vector<std::byte>& push_constant_data() const noexcept
+        {
+            return push_constants ? *push_constants : empty_push_constant_data();
+        }
     };
 
     struct DrawIndexedBatchItem
@@ -268,8 +306,8 @@ namespace Corona::Horizon
     struct DrawIndexedIndirectDesc
     {
         RasterizerPipelineBase* pipeline {};
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-        EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
+        std::shared_ptr<const DrawSharedPayload> shared;
+        std::shared_ptr<const std::vector<std::byte>> push_constants;
 
         uint64_t indirect_offset { 0 };
         uint32_t draw_count { 0 };
@@ -279,9 +317,24 @@ namespace Corona::Horizon
         bool enable_scissor { false };
         ScissorRect scissor {};
         std::vector<ResourceUse> resource_uses;
-        std::vector<std::byte> push_constant_data;
-        std::vector<UniformBufferBindingData> uniform_buffers;
         std::string debug_label;
+
+        [[nodiscard]] const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vert_condition_info() const noexcept
+        {
+            return (shared ? *shared : empty_draw_shared_payload()).vert_condition_info;
+        }
+        [[nodiscard]] const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& frag_condition_info() const noexcept
+        {
+            return (shared ? *shared : empty_draw_shared_payload()).frag_condition_info;
+        }
+        [[nodiscard]] const std::vector<UniformBufferBindingData>& uniform_buffers() const noexcept
+        {
+            return (shared ? *shared : empty_draw_shared_payload()).uniform_buffers;
+        }
+        [[nodiscard]] const std::vector<std::byte>& push_constant_data() const noexcept
+        {
+            return push_constants ? *push_constants : empty_push_constant_data();
+        }
     };
 
     struct PresentDesc
