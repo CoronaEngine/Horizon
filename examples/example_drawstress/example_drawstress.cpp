@@ -157,6 +157,15 @@ void run_example_drawstress()
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
+    // HORIZON_FIXED_DT=<秒>：用固定步长取代墙钟，使逐帧画面可复现（仅供像素比对）。
+    const float fixed_dt = [] {
+        if (const char* value = std::getenv("HORIZON_FIXED_DT"))
+        {
+            return static_cast<float>(std::atof(value));
+        }
+        return 0.0f;
+    }();
+    uint64_t frame_index = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -167,9 +176,15 @@ void run_example_drawstress()
         ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
-        const float dt = std::chrono::duration<float>(now - prev_time).count();
-        const float time = std::chrono::duration<float>(now - start_time).count();
+        float dt = std::chrono::duration<float>(now - prev_time).count();
+        float time = std::chrono::duration<float>(now - start_time).count();
         prev_time = now;
+        if (fixed_dt > 0.0f)
+        {
+            dt = fixed_dt;
+            time = fixed_dt * static_cast<float>(frame_index);
+        }
+        ++frame_index;
 
         fps_accum_seconds += dt;
         ++fps_frame_count;
