@@ -1965,10 +1965,10 @@ namespace Corona::Horizon
                     dispatch_cache.invalidate_prepared();
                 }
 
-                if (!dispatch_cache.prepared_valid || !dispatch.uniform_buffers().empty())
+                if (!dispatch_cache.prepared_valid || !dispatch.uniform_buffers.empty())
                 {
                     dispatch_cache.prepared = pipeline->prepare_dispatch(device_, dispatch);
-                    dispatch_cache.prepared_valid = dispatch.uniform_buffers().empty();
+                    dispatch_cache.prepared_valid = dispatch.uniform_buffers.empty();
                 }
                 const VulkanComputePipeline::PreparedDispatch& prepared = dispatch_cache.prepared;
 
