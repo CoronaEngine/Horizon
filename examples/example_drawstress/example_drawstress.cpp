@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <span>
 #include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -112,7 +113,16 @@ void run_example_drawstress()
               << "  + / - : dim +2 / -2 (draws = dim^3)\n"
               << "  Esc   : quit\n";
 
-    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_drawstress.vb");
+    // VB 额外带 Storage 用法:顶点由 shader 从 bindless SSBO 拉取,不再走顶点属性。
+    // 仍保留 Vertex 用法与 record() 时的 VB 绑定——pipeline 顶点属性表为空使绑定成为
+    // 空操作,但保住了自动 MDI 合批 key 里的 VB 项。
+    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(cube_vertices.data()),
+                                   cube_vertices.size() * sizeof(StressVertex)),
+        static_cast<uint32_t>(sizeof(StressVertex)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Vertex
+            | horizon::BufferUsage_Storage,
+        "example_drawstress.vb");
     horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_drawstress.ib");
 
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
@@ -147,7 +157,11 @@ void run_example_drawstress()
             "drawstress.per_draw_ssbo"));
     // Get bindless descriptor index once at initialization
     const uint32_t ssbo_descriptor_index = per_draw_ssbo.store_descriptor();
-    std::cout << "[DEBUG] SSBO descriptor_index=" << ssbo_descriptor_index << ", capacity=" << max_draws << std::endl;
+    // 顶点表也注册进 bindless,顶点阶段靠 push constant 里的 vertex_ssbo_index 选表。
+    const uint32_t vertex_descriptor_index = cube_vb.store_descriptor();
+    std::cout << "[DEBUG] SSBO descriptor_index=" << ssbo_descriptor_index
+              << ", vertex descriptor_index=" << vertex_descriptor_index
+              << ", capacity=" << max_draws << std::endl;
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
@@ -259,9 +273,12 @@ void run_example_drawstress()
             }
 
             // Record all draws with the same push constant (descriptor index is constant).
+            // 每个 draw 通过 first_instance 携带自己的索引，shader 用 gl_InstanceIndex 读取。
             rasterizer.model_pc.per_draw_ssbo_index = ssbo_descriptor_index;
+            rasterizer.model_pc.vertex_ssbo_index = vertex_descriptor_index;
             for (size_t i = 0; i < per_draw_array.size(); ++i)
             {
+                cube_params.first_instance = static_cast<uint32_t>(i);
                 rasterizer.record(cube_ib, cube_vb, cube_params);
             }
         }
