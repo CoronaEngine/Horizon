@@ -163,6 +163,35 @@ void run_example_drawstress()
               << ", vertex descriptor_index=" << vertex_descriptor_index
               << ", capacity=" << max_draws << std::endl;
 
+    // 方案 A：静态 indirect args buffer，一次性构建 64000 个 draw command。
+    // 每个 command 使用相同的几何参数（36 indices, same IB/VB），
+    // 通过 first_instance 携带 draw index → shader 的 gl_InstanceIndex。
+    std::vector<horizon::DrawIndexedIndirectCommand> static_indirect_args;
+    static_indirect_args.reserve(max_draws);
+    for (size_t i = 0; i < max_draws; ++i)
+    {
+        horizon::DrawIndexedIndirectCommand cmd;
+        cmd.index_count = 36;          // cube 的索引数
+        cmd.instance_count = 1;        // 每个 draw 1 instance
+        cmd.first_index = 0;           // 所有 cube 共享同一个 IB
+        cmd.vertex_offset = 0;         // 所有 cube 共享同一个 VB
+        cmd.first_instance = static_cast<uint32_t>(i);  // 携带 draw index
+        static_indirect_args.push_back(cmd);
+    }
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(static_indirect_args.data()),
+            static_indirect_args.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "drawstress.indirect_args");
+
+    std::cout << "[DEBUG] Static indirect args buffer created: "
+              << static_indirect_args.size() << " commands, "
+              << (static_indirect_args.size() * sizeof(horizon::DrawIndexedIndirectCommand)) << " bytes"
+              << std::endl;
+
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
@@ -272,15 +301,17 @@ void run_example_drawstress()
                           << ": draws=" << upload_size << std::endl;
             }
 
-            // Record all draws with the same push constant (descriptor index is constant).
-            // 每个 draw 通过 first_instance 携带自己的索引，shader 用 gl_InstanceIndex 读取。
+            // 方案 A：单次 indirect draw，替代 64000 次 record() 循环。
+            // Push constant 对整个 pass 恒定，indirect args buffer 携带所有 draw 参数。
             rasterizer.model_pc.per_draw_ssbo_index = ssbo_descriptor_index;
             rasterizer.model_pc.vertex_ssbo_index = vertex_descriptor_index;
-            for (size_t i = 0; i < per_draw_array.size(); ++i)
-            {
-                cube_params.first_instance = static_cast<uint32_t>(i);
-                rasterizer.record(cube_ib, cube_vb, cube_params);
-            }
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = static_cast<uint32_t>(upload_size);
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = 0;  // 紧凑排列，使用结构体自然大小
+
+            rasterizer.record_indirect(cube_ib, cube_vb, indirect_args_buffer, indirect_params);
         }
 
         horizon::SubmitReceipt render_receipt;
