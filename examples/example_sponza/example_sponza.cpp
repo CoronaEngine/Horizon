@@ -763,8 +763,19 @@ void run_example_sponza()
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_callback);
 
-    horizon::HardwareBuffer scene_vb =
-        horizon::HardwareBuffer::vertex(asset.vertices, "example_sponza.scene.vb");
+    // vertex pulling：顶点数据同时要能当 storage buffer 被 SSBO 读，所以在
+    // Vertex 之外补 Storage。仍保留 Vertex 用法与 record 时的 VB 绑定 ——
+    // pipeline 无顶点属性，绑定是空操作，但保住了自动 MDI 合批 key 里的 VB 项。
+    const auto make_pullable_vb = [](const std::vector<SponzaVertex>& verts, std::string name) {
+        return horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(verts.data()),
+                                       verts.size() * sizeof(SponzaVertex)),
+            static_cast<uint32_t>(sizeof(SponzaVertex)),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Vertex
+                | horizon::BufferUsage_Storage,
+            std::move(name));
+    };
+    horizon::HardwareBuffer scene_vb = make_pullable_vb(asset.vertices, "example_sponza.scene.vb");
     // 16-bit 重基：索引写成 submesh 区间相对，vertex_offset 在 draw 时补回。
     std::vector<uint16_t> scene_indices_16;
     const std::vector<std::vector<SponzaDrawRange>> submesh_ranges =
@@ -1075,8 +1086,7 @@ void run_example_sponza()
     const MirrorRange mirror_pool_range { 0, 6 };
     const MirrorRange mirror_frame_range { 6, 6 };
 
-    horizon::HardwareBuffer mirror_vb =
-        horizon::HardwareBuffer::vertex(mirror_vertices, "example_sponza.mirror.vb");
+    horizon::HardwareBuffer mirror_vb = make_pullable_vb(mirror_vertices, "example_sponza.mirror.vb");
     horizon::HardwareBuffer mirror_ib =
         horizon::HardwareBuffer::index(mirror_indices, "example_sponza.mirror.ib");
 
@@ -1100,6 +1110,152 @@ void run_example_sponza()
         return image;
     }();
     const uint32_t white_descriptor = white_texture.store_descriptor();
+
+    // ---- 逐-draw 材质 SSBO ----------------------------------------------
+    // 材质原本逐 submesh 写 push constant，使自动 MDI 的合批 key
+    // {pipeline, IB, VB, push constant} 每 draw 都变，数百次 draw 一条都合不了。
+    // 改为把材质放进 bindless SSBO、用 draw 序号索引，push constant 全 pass 恒定。
+    //
+    // draw 序号靠 first_instance 携带（instance_count 恒为 1，故 shader 侧
+    // gl_InstanceIndex == first_instance）。不用 gl_DrawID：它只在 indirect
+    // 路径下有效，直接 draw 下恒为 0，会让默认模式渲染错误。
+    //
+    // 槽位布局在启动时定死：场景 draw 占 [0, scene_draw_count)，镜面池/边框占
+    // 末尾两槽。缓冲一次性按最大容量分配并只 store_descriptor() 一次——
+    // 每帧重建缓冲会让 bindless descriptor 失效（见 test_drawstress_fix.md）。
+    struct PerDrawMaterial // 与 sponza_geom_frag.glsl 的 PerDrawMaterial 逐字段一致
+    {
+        glm::vec4 base_color_factor { 1.0f };
+        glm::vec4 mr_factor { 0.0f };
+        uint32_t tex_base_color_index = 0;
+        uint32_t tex_normal_index = 0;
+        uint32_t tex_metal_rough_index = 0;
+        uint32_t tex_mask_index = 0;
+        uint32_t material_flags = 0;
+        uint32_t pad0 = 0;
+        uint32_t pad1 = 0;
+        uint32_t pad2 = 0;
+    };
+    static_assert(sizeof(PerDrawMaterial) == 64, "must match std430 stride in sponza_geom_frag.glsl");
+
+    struct PerDrawShadowMaterial // 与 sponza_shadow_frag.glsl 一致
+    {
+        glm::vec4 base_color_factor { 1.0f };
+        uint32_t tex_base_color_index = 0;
+        uint32_t tex_mask_index = 0;
+        uint32_t material_flags = 0;
+        uint32_t pad0 = 0;
+    };
+    static_assert(sizeof(PerDrawShadowMaterial) == 32, "must match std430 stride in sponza_shadow_frag.glsl");
+
+    // 每个 submesh 的首个 draw 槽位；16-bit 重基可能把一个 submesh 切成多段，
+    // 所以槽位数是所有 range 之和，不等于 submesh 数。
+    std::vector<uint32_t> submesh_draw_slot(asset.submeshes.size(), 0);
+    uint32_t scene_draw_count = 0;
+    for (size_t i = 0; i < asset.submeshes.size(); ++i)
+    {
+        submesh_draw_slot[i] = scene_draw_count;
+        scene_draw_count += static_cast<uint32_t>(submesh_ranges[i].size());
+    }
+    const uint32_t mirror_pool_slot = scene_draw_count;
+    const uint32_t mirror_frame_slot = scene_draw_count + 1;
+    const uint32_t total_draw_slots = scene_draw_count + 2;
+
+    // 场景材质来自资产，是静态的；只有镜面两槽随 imgui 变，每帧改那两条即可。
+    std::vector<PerDrawMaterial> geom_materials(total_draw_slots);
+    std::vector<PerDrawShadowMaterial> shadow_materials(total_draw_slots);
+    for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
+    {
+        const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
+        if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
+            continue;
+        const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
+
+        uint32_t geom_flags = 0;
+        if (material.normal_texture >= 0)
+            geom_flags |= shader_material_has_normal;
+        if ((material.flags & hzms_material_alpha_mask) != 0 && material.mask_texture >= 0)
+            geom_flags |= shader_material_alpha_mask;
+        if (material.metal_rough_texture >= 0)
+            geom_flags |= shader_material_has_metalrough;
+        if ((material.flags & hzms_material_mask_uses_alpha) != 0)
+            geom_flags |= shader_material_mask_uses_alpha;
+
+        // RSM pass 只关心镂空，法线/MR 贴图与它无关。
+        uint32_t shadow_flags = 0;
+        if ((material.flags & hzms_material_alpha_mask) != 0 && material.mask_texture >= 0)
+            shadow_flags |= shader_material_alpha_mask;
+        if ((material.flags & hzms_material_mask_uses_alpha) != 0)
+            shadow_flags |= shader_material_mask_uses_alpha;
+
+        const glm::vec4 base_color(material.base_color_factor[0], material.base_color_factor[1],
+                                   material.base_color_factor[2], material.base_color_factor[3]);
+
+        PerDrawMaterial geom_entry;
+        geom_entry.base_color_factor = base_color;
+        // Sponza 的石、砖、木、灰泥统一按非金属 diffuse 材质展示；
+        // MR 贴图仍提供每像素 roughness，镜面池在下面单独写 metallic=1。
+        geom_entry.mr_factor = glm::vec4(0.0f, material.roughness, 0.0f, 0.0f);
+        geom_entry.tex_base_color_index = descriptor_of(material.base_color_texture);
+        geom_entry.tex_normal_index = descriptor_of(material.normal_texture);
+        geom_entry.tex_metal_rough_index = descriptor_of(material.metal_rough_texture);
+        geom_entry.tex_mask_index = descriptor_of(material.mask_texture);
+        geom_entry.material_flags = geom_flags;
+
+        PerDrawShadowMaterial shadow_entry;
+        shadow_entry.base_color_factor = base_color;
+        shadow_entry.tex_base_color_index = descriptor_of(material.base_color_texture);
+        shadow_entry.tex_mask_index = descriptor_of(material.mask_texture);
+        shadow_entry.material_flags = shadow_flags;
+
+        // 同一 submesh 被切成的每一段都用同一份材质。
+        const uint32_t slot = submesh_draw_slot[submesh_index];
+        for (size_t r = 0; r < submesh_ranges[submesh_index].size(); ++r)
+        {
+            geom_materials[slot + r] = geom_entry;
+            shadow_materials[slot + r] = shadow_entry;
+        }
+    }
+
+    // 镜面进 RSM 时 albedo 压暗（镜面几乎不产生漫反射弹射），且不需要镂空。
+    for (uint32_t slot : { mirror_pool_slot, mirror_frame_slot })
+    {
+        shadow_materials[slot].base_color_factor = glm::vec4(0.12f, 0.12f, 0.12f, 1.0f);
+        shadow_materials[slot].tex_base_color_index = white_descriptor;
+        shadow_materials[slot].tex_mask_index = white_descriptor;
+        shadow_materials[slot].material_flags = 0;
+
+        geom_materials[slot].tex_base_color_index = white_descriptor;
+        geom_materials[slot].tex_normal_index = white_descriptor;
+        geom_materials[slot].tex_metal_rough_index = white_descriptor;
+        geom_materials[slot].tex_mask_index = white_descriptor;
+        geom_materials[slot].material_flags = 0;
+    }
+
+    horizon::HardwareBuffer geom_material_ssbo(horizon::HardwareBufferDesc::typed<PerDrawMaterial>(
+        total_draw_slots, horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
+        "example_sponza.geom.per_draw_ssbo"));
+    horizon::HardwareBuffer shadow_material_ssbo(horizon::HardwareBufferDesc::typed<PerDrawShadowMaterial>(
+        total_draw_slots, horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
+        "example_sponza.shadow.per_draw_ssbo"));
+    const uint32_t geom_ssbo_descriptor = geom_material_ssbo.store_descriptor();
+    const uint32_t shadow_ssbo_descriptor = shadow_material_ssbo.store_descriptor();
+
+    // vertex pulling 用的顶点 SSBO descriptor。scene 与 mirror 是两份独立 VB，
+    // 顶点阶段靠 push constant 里的 vertex_ssbo_index 选表。
+    const uint32_t scene_vertex_descriptor = scene_vb.store_descriptor();
+    const uint32_t mirror_vertex_descriptor = mirror_vb.store_descriptor();
+
+    // 静态部分先上传一次；镜面 roughness 变化时每帧重传（见渲染循环）。
+    const auto upload_geom_materials = [&] {
+        return geom_material_ssbo.write_bytes(std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(geom_materials.data()),
+            geom_materials.size() * sizeof(PerDrawMaterial)), 0);
+    };
+    (void)shadow_material_ssbo.write_bytes(std::span<const std::byte>(
+        reinterpret_cast<const std::byte*>(shadow_materials.data()),
+        shadow_materials.size() * sizeof(PerDrawShadowMaterial)), 0);
+    (void)upload_geom_materials();
 
     constexpr float aspect = static_cast<float>(spz_width) / static_cast<float>(spz_height);
     const float z_far = glm::length(scene_extent) * 2.0f;
@@ -1324,114 +1480,91 @@ void run_example_sponza()
         shadow_rasterizer.clear_records();
         shadow_rasterizer.vsp.light_view_proj = sun_view_proj;
         shadow_rasterizer.vsp.sun_color = glm::vec4(tuning.sun_color, 0.0f);
+        // push constant 在 scene 段内恒定：材质由 first_instance 索引 SSBO，
+        // 顶点由 gl_VertexIndex 从 vertex_ssbo_index 指向的 SSBO 拉取。
+        shadow_rasterizer.model_pc.per_draw_ssbo_index = shadow_ssbo_descriptor;
+        shadow_rasterizer.model_pc.vertex_ssbo_index = scene_vertex_descriptor;
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
             const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
                 continue;
-            const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
 
-            uint32_t flags = 0;
-            if ((material.flags & hzms_material_alpha_mask) != 0 && material.mask_texture >= 0)
-                flags |= shader_material_alpha_mask;
-            if ((material.flags & hzms_material_mask_uses_alpha) != 0)
-                flags |= shader_material_mask_uses_alpha;
-
-            shadow_rasterizer.model_pc.base_color_factor = glm::vec4(
-                material.base_color_factor[0], material.base_color_factor[1],
-                material.base_color_factor[2], material.base_color_factor[3]);
-            shadow_rasterizer.model_pc.tex_base_color_index = descriptor_of(material.base_color_texture);
-            shadow_rasterizer.model_pc.tex_mask_index = descriptor_of(material.mask_texture);
-            shadow_rasterizer.model_pc.material_flags = flags;
-
+            uint32_t slot = submesh_draw_slot[submesh_index];
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
             {
                 horizon::DrawIndexedParams params;
                 params.index_count = range.index_count;
                 params.first_index = range.first_index;
                 params.vertex_offset = range.vertex_offset;
+                params.first_instance = slot++;
                 shadow_rasterizer.record(scene_ib, scene_vb, params);
             }
         }
         if (tuning.mirror_enable)
         {
-            // 镜面池也进 RSM/阴影:albedo 压暗(镜面几乎不产生漫反射弹射)
+            // 镜面池也进 RSM/阴影（albedo 已在 shadow_materials 里压暗）。
+            // mirror_ib/vb 与场景不同，这两条自成一个 MDI 批次。
+            shadow_rasterizer.model_pc.vertex_ssbo_index = mirror_vertex_descriptor;
             const MirrorRange mirror_ranges[2] = { mirror_pool_range, mirror_frame_range };
-            shadow_rasterizer.model_pc.base_color_factor = glm::vec4(0.12f, 0.12f, 0.12f, 1.0f);
-            shadow_rasterizer.model_pc.tex_base_color_index = white_descriptor;
-            shadow_rasterizer.model_pc.tex_mask_index = white_descriptor;
-            shadow_rasterizer.model_pc.material_flags = 0;
-            for (const MirrorRange& range : mirror_ranges)
+            const uint32_t mirror_slots[2] = { mirror_pool_slot, mirror_frame_slot };
+            for (size_t i = 0; i < 2; ++i)
             {
                 horizon::DrawIndexedParams params;
-                params.index_count = range.count;
-                params.first_index = range.first;
+                params.index_count = mirror_ranges[i].count;
+                params.first_index = mirror_ranges[i].first;
+                params.first_instance = mirror_slots[i];
                 shadow_rasterizer.record(mirror_ib, mirror_vb, params);
             }
         }
 
-        // Pass 1: one draw per submesh, material switched through the push constant.
+        // Pass 1: one draw per submesh；材质走 SSBO，push constant 全 pass 恒定，
+        // 所有场景 draw 合成一条 MDI（镜面另算一条，IB/VB 不同）。
         geom_rasterizer.clear_records();
         geom_rasterizer.vsp.view_proj = view_proj;
+        geom_rasterizer.model_pc.per_draw_ssbo_index = geom_ssbo_descriptor;
+        geom_rasterizer.model_pc.vertex_ssbo_index = scene_vertex_descriptor;
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
             const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
                 continue;
-            const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
 
-            uint32_t flags = 0;
-            if (material.normal_texture >= 0)
-                flags |= shader_material_has_normal;
-            if ((material.flags & hzms_material_alpha_mask) != 0 && material.mask_texture >= 0)
-                flags |= shader_material_alpha_mask;
-            if (material.metal_rough_texture >= 0)
-                flags |= shader_material_has_metalrough;
-            if ((material.flags & hzms_material_mask_uses_alpha) != 0)
-                flags |= shader_material_mask_uses_alpha;
-
-            geom_rasterizer.model_pc.base_color_factor = glm::vec4(
-                material.base_color_factor[0], material.base_color_factor[1],
-                material.base_color_factor[2], material.base_color_factor[3]);
-            // Sponza 的石、砖、木、灰泥统一按非金属 diffuse 材质展示;
-            // MR 贴图仍提供每像素 roughness,镜面池在下面单独写 metallic=1。
-            geom_rasterizer.model_pc.mr_factor = glm::vec4(0.0f, material.roughness, 0.0f, 0.0f);
-            geom_rasterizer.model_pc.tex_base_color_index = descriptor_of(material.base_color_texture);
-            geom_rasterizer.model_pc.tex_normal_index = descriptor_of(material.normal_texture);
-            geom_rasterizer.model_pc.tex_metal_rough_index = descriptor_of(material.metal_rough_texture);
-            geom_rasterizer.model_pc.tex_mask_index = descriptor_of(material.mask_texture);
-            geom_rasterizer.model_pc.material_flags = flags;
-
+            uint32_t slot = submesh_draw_slot[submesh_index];
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
             {
                 horizon::DrawIndexedParams params;
                 params.index_count = range.index_count;
                 params.first_index = range.first_index;
                 params.vertex_offset = range.vertex_offset;
+                params.first_instance = slot++;
                 geom_rasterizer.record(scene_ib, scene_vb, params);
             }
         }
         if (tuning.mirror_enable)
         {
-            const auto record_panel = [&](const MirrorRange& range, const glm::vec4& color,
-                                          float metallic, float roughness) {
-                geom_rasterizer.model_pc.base_color_factor = color;
-                geom_rasterizer.model_pc.mr_factor = glm::vec4(metallic, roughness, 0.0f, 0.0f);
-                geom_rasterizer.model_pc.tex_base_color_index = white_descriptor;
-                geom_rasterizer.model_pc.tex_normal_index = white_descriptor;
-                geom_rasterizer.model_pc.tex_metal_rough_index = white_descriptor;
-                geom_rasterizer.model_pc.tex_mask_index = white_descriptor;
-                geom_rasterizer.model_pc.material_flags = 0;
+            // 镜面:全金属、极低粗糙,银白底色;边框:深色粗糙。
+            // roughness 来自 imgui 滑条，所以这两槽每帧重写并重传 SSBO。
+            geom_materials[mirror_pool_slot].base_color_factor =
+                glm::vec4(0.93f, 0.95f, 0.97f, 1.0f);
+            geom_materials[mirror_pool_slot].mr_factor =
+                glm::vec4(1.0f, tuning.mirror_roughness, 0.0f, 0.0f);
+            geom_materials[mirror_frame_slot].base_color_factor =
+                glm::vec4(0.055f, 0.045f, 0.038f, 1.0f);
+            geom_materials[mirror_frame_slot].mr_factor = glm::vec4(0.0f, 0.72f, 0.0f, 0.0f);
+            (void)upload_geom_materials();
+
+            geom_rasterizer.model_pc.vertex_ssbo_index = mirror_vertex_descriptor;
+            const MirrorRange mirror_ranges[2] = { mirror_pool_range, mirror_frame_range };
+            const uint32_t mirror_slots[2] = { mirror_pool_slot, mirror_frame_slot };
+            for (size_t i = 0; i < 2; ++i)
+            {
                 horizon::DrawIndexedParams params;
-                params.index_count = range.count;
-                params.first_index = range.first;
+                params.index_count = mirror_ranges[i].count;
+                params.first_index = mirror_ranges[i].first;
+                params.first_instance = mirror_slots[i];
                 geom_rasterizer.record(mirror_ib, mirror_vb, params);
-            };
-            // 镜面:全金属、极低粗糙,银白底色;边框:深色粗糙
-            record_panel(mirror_pool_range, glm::vec4(0.93f, 0.95f, 0.97f, 1.0f),
-                         1.0f, tuning.mirror_roughness);
-            record_panel(mirror_frame_range, glm::vec4(0.055f, 0.045f, 0.038f, 1.0f),
-                         0.0f, 0.72f);
+            }
         }
 
         // Pass 1.5: SSAO over the G-buffer, then a cross-bilateral blur.

@@ -8,6 +8,9 @@
 //
 // 顶点布局必须与共享的 HZMS 缓冲一致(位置/法线/切线/uv 都在),因为同一份
 // 顶点缓冲也喂 G-buffer pass。
+//
+// 每-draw 材质走 bindless SSBO(由 gl_InstanceIndex 索引),push constant 因此
+// 对整个 pass 恒定,数百次 submesh draw 收敛成一条 MDI。详见 sponza_geom_vert.glsl。
 
 layout(set = 3, binding = 0) uniform SponzaShadowShared {
     mat4 light_view_proj;
@@ -16,24 +19,35 @@ layout(set = 3, binding = 0) uniform SponzaShadowShared {
 
 // 与 sponza_shadow_frag.glsl 共享同一 push constant 块,布局必须一致。
 layout(push_constant) uniform SponzaShadowPC {
-    vec4 base_color_factor;
-    uint tex_base_color_index;
-    uint tex_mask_index;
-    uint material_flags; // bit1: alpha mask, bit3: mask 采 alpha 通道(与 G-buffer pass 相同)
+    uint per_draw_ssbo_index;
+    uint vertex_ssbo_index;
 } model_pc;
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inTangent;
-layout(location = 3) in vec2 inTexCoord;
+// vertex pulling:与 sponza_geom_vert.glsl 同一份顶点 SSBO 与同一套下标语义
+// (gl_VertexIndex == IB[i] + vertexOffset)。结构须与 C++ SponzaVertex 逐字节一致,
+// std430 下 vec3 会对齐到 16 撑坏步长,故逐标量声明。
+struct PulledVertex {
+    float px, py, pz;
+    float nx, ny, nz;
+    float tx, ty, tz, tw;
+    float u, v;
+};
+
+layout(set = 1, binding = 0) readonly buffer VertexSSBO {
+    PulledVertex verts[];
+} vertex_data[];
 
 layout(location = 0) out vec2 v_texcoord;
 layout(location = 1) out vec3 v_normal;
+layout(location = 2) flat out int v_draw_index;
 
 void main()
 {
+    PulledVertex vtx = vertex_data[model_pc.vertex_ssbo_index].verts[uint(gl_VertexIndex)];
+
     // 节点变换已烘焙进顶点,object space 即 world space。
-    gl_Position = vsp.light_view_proj * vec4(inPosition, 1.0);
-    v_texcoord = inTexCoord;
-    v_normal = inNormal;
+    gl_Position = vsp.light_view_proj * vec4(vtx.px, vtx.py, vtx.pz, 1.0);
+    v_texcoord = vec2(vtx.u, vtx.v);
+    v_normal = vec3(vtx.nx, vtx.ny, vtx.nz);
+    v_draw_index = gl_InstanceIndex;
 }

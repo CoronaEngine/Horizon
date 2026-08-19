@@ -680,7 +680,7 @@ struct Tuning
 
 using namespace EmbeddedShader;
 
-// 顶点输入(48B HZMS 布局;用 Aggregate 保证 location 与成员顺序一致)
+// G-buffer pass / RSM pass 共用顶点输入(EDSL 内部自动生成 ParameterBlock vertex pulling)
 struct EdslSponzaVertexIn
 {
     Float3 pos;
@@ -735,8 +735,19 @@ void run_example_edsl_sponza()
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_callback);
 
-    horizon::HardwareBuffer scene_vb =
-        horizon::HardwareBuffer::vertex(asset.vertices, "edsl_sponza.scene.vb");
+    // vertex pulling：顶点数据要能当 storage buffer 被 StructuredBuffer 读，所以在
+    // Vertex 之外补 Storage。仍保留 Vertex 用法与 record 时的 VB 绑定 —— pipeline 无
+    // 顶点属性，绑定是空操作，但保住了自动 MDI 合批 key 里的 VB 项。
+    const auto make_pullable_vb = [](const std::vector<SponzaVertex>& verts, std::string name) {
+        return horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(verts.data()),
+                                       verts.size() * sizeof(SponzaVertex)),
+            static_cast<uint32_t>(sizeof(SponzaVertex)),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Vertex
+                | horizon::BufferUsage_Storage,
+            std::move(name));
+    };
+    horizon::HardwareBuffer scene_vb = make_pullable_vb(asset.vertices, "edsl_sponza.scene.vb");
     // 16-bit 重基：索引写成 submesh 区间相对，vertex_offset 在 draw 时补回。
     std::vector<uint16_t> scene_indices_16;
     const std::vector<std::vector<SponzaDrawRange>> submesh_ranges =
@@ -891,6 +902,8 @@ void run_example_edsl_sponza()
     Texture2D<ktm::fvec4> rsm_normal_out = rsm_normal_map;
     Texture2D<ktm::fvec4> rsm_flux_out = rsm_flux_map;
 
+    // EDSL 为 Aggregate<EdslSponzaVertexIn> 自动生成 ParameterBlock vertex pulling，
+    // 与 GB pass 共用同一套 VB 绑定机制，scene / mirror 通过 record() 传入的 vb 参数切换。
     auto rsm_vert = [&](Aggregate<EdslSponzaVertexIn> vin) {
         Aggregate<EdslRsmVertOut> out;
         auto clip = mul(rsm_light_view_proj, Float4(vin->pos, 1.f));
@@ -1912,8 +1925,7 @@ void run_example_edsl_sponza()
     const MirrorRange mirror_pool_range { 0, 6 };
     const MirrorRange mirror_frame_range { 6, 6 };
 
-    horizon::HardwareBuffer mirror_vb =
-        horizon::HardwareBuffer::vertex(mirror_vertices, "edsl_sponza.mirror.vb");
+    horizon::HardwareBuffer mirror_vb = make_pullable_vb(mirror_vertices, "edsl_sponza.mirror.vb");
     horizon::HardwareBuffer mirror_ib =
         horizon::HardwareBuffer::index(mirror_indices, "edsl_sponza.mirror.ib");
 
