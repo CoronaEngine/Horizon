@@ -441,6 +441,22 @@ void run_example_disney_pbr()
     horizon::HardwareBuffer sphere_ib =
         horizon::HardwareBuffer::index(sphere_mesh.indices, "example_disney_pbr.sphere.ib");
 
+    // Indirect args buffer for single draw
+    horizon::DrawIndexedIndirectCommand indirect_cmd;
+    indirect_cmd.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
+    indirect_cmd.instance_count = 1;
+    indirect_cmd.first_index = 0;
+    indirect_cmd.vertex_offset = 0;
+    indirect_cmd.first_instance = 0;
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(&indirect_cmd),
+            sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_disney_pbr.indirect_args");
+
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         disney_width, disney_height, horizon::Format::RGBA16_FLOAT,
         horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
@@ -543,6 +559,10 @@ void run_example_disney_pbr()
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
         rasterizer.vsp.exposurePad = glm::vec4(s.exposure, 0.0f, 0.0f, 0.0f);
 
+        // Build indirect commands for all spheres in the material chart
+        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+        indirect_cmds.reserve(chart_row_count * chart_col_count);
+
         for (int row = 0; row < chart_row_count; ++row)
         {
             for (int col = 0; col < chart_col_count; ++col)
@@ -554,9 +574,30 @@ void run_example_disney_pbr()
 
                 rasterizer.vpc.model = model;
                 apply_material_to_pipeline(rasterizer, chart_materials[index], aspect);
-                rasterizer.record(sphere_ib, sphere_vb, sphere_params);
+
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
+                cmd.instance_count = 1;
+                cmd.first_index = 0;
+                cmd.vertex_offset = 0;
+                cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_cmds.push_back(cmd);
             }
         }
+
+        horizon::HardwareBuffer frame_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_disney_pbr.frame_indirect");
+
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+        indirect_params.indirect_offset = 0;
+        indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+        rasterizer.record_indirect(sphere_ib, sphere_vb, frame_indirect_buffer, indirect_params);
 
         horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer.extent(disney_width, disney_height) << horizon::commit();

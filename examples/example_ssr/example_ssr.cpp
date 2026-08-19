@@ -368,11 +368,39 @@ void run_example_ssr()
                                                   mat.sheen, mat.sheen_tint);
         geom_rasterizer.vsp.disney_c = glm::vec4(mat.clearcoat, mat.clearcoat_gloss, 0.0f, 0.0f);
 
+        // Convert instance loop to multi-draw indirect
+        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+        indirect_cmds.reserve(instances.size());
+
         for (const Instance& inst : instances)
         {
             geom_rasterizer.vpc.model    = inst.model;
             geom_rasterizer.vpc.material = glm::vec4(inst.albedo, 0.0f);
-            geom_rasterizer.record(cube_ib, cube_vb, cube_params);
+
+            horizon::DrawIndexedIndirectCommand cmd;
+            cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+            cmd.instance_count = 1;
+            cmd.first_index = 0;
+            cmd.vertex_offset = 0;
+            cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+            indirect_cmds.push_back(cmd);
+        }
+
+        if (!indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                    indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_ssr.geom_indirect");
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            geom_rasterizer.record_indirect(cube_ib, cube_vb, indirect_buffer, indirect_params);
         }
 
         // Pass 2：器件深度 → view 空间线性深度

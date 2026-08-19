@@ -419,18 +419,44 @@ void run_example_assao()
             pipeline.vsp.proj_view   = view_proj;
             pipeline.vsp.view_matrix = view;
 
+            // Convert nested loop to multi-draw indirect
+            std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+
             for (const StaticTransform& t : static_transforms)
             {
                 pipeline.vpc.model = t.model;
                 pipeline.vpc.color = t.color;
+
                 for (const MeshGroup& group : t.mesh->groups)
                 {
-                    horizon::DrawIndexedParams params;
-                    params.index_count = group.index_count;
-                    params.first_index = group.first_index;
-                    params.vertex_offset = group.base_vertex;
-                    pipeline.record(t.mesh->ib, t.mesh->vb, params);
+                    horizon::DrawIndexedIndirectCommand cmd;
+                    cmd.index_count = group.index_count;
+                    cmd.first_index = group.first_index;
+                    cmd.vertex_offset = group.base_vertex;
+                    cmd.instance_count = 1;
+                    cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                    indirect_cmds.push_back(cmd);
                 }
+            }
+
+            if (!indirect_cmds.empty())
+            {
+                horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                        indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_assao.scene_indirect");
+
+                // Assume all meshes share the same VB/IB (sponza model)
+                // If not, this needs more complex handling
+                const StaticTransform& first_transform = static_transforms[0];
+                horizon::DrawIndexedIndirectParams indirect_params;
+                indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_params.indirect_offset = 0;
+                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                pipeline.record_indirect(first_transform.mesh->ib, first_transform.mesh->vb, indirect_buffer, indirect_params);
             }
         };
         record_scene(gbuffer_rasterizer);

@@ -464,6 +464,23 @@ void run_example_gpudrivenrendering()
         horizon::HardwareBuffer::vertex(cube_vertices, "example_gpudrivenrendering.cube_vb");
     horizon::HardwareBuffer cube_ib =
         horizon::HardwareBuffer::index(cube_indices, "example_gpudrivenrendering.cube_ib");
+
+    // Indirect args buffer for occlusion pass (wall cubes)
+    horizon::DrawIndexedIndirectCommand occlusion_indirect_cmd;
+    occlusion_indirect_cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+    occlusion_indirect_cmd.instance_count = 0;  // Will be updated per-frame
+    occlusion_indirect_cmd.first_index = 0;
+    occlusion_indirect_cmd.vertex_offset = 0;
+    occlusion_indirect_cmd.first_instance = 0;
+
+    horizon::HardwareBuffer occlusion_indirect_args = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(&occlusion_indirect_cmd),
+            sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_gpudrivenrendering.occlusion_indirect");
+
     horizon::HardwareBuffer merged_vb =
         horizon::HardwareBuffer::vertex(scene.merged_vertices, "example_gpudrivenrendering.merged_vb");
     horizon::HardwareBuffer merged_ib =
@@ -720,11 +737,28 @@ void run_example_gpudrivenrendering()
         occlusion_rasterizer.clear_records();
         if (hiz_enable)
         {
-            horizon::DrawIndexedParams wall_params;
-            wall_params.index_count = static_cast<uint32_t>(cube_indices.size());
-            wall_params.instance_count = scene.props[1].instance_count;
-            wall_params.first_instance = k_wall_start_instance;
-            occlusion_rasterizer.record(cube_ib, cube_vb, wall_params);
+            // Update indirect command with current instance count
+            horizon::DrawIndexedIndirectCommand occlusion_cmd;
+            occlusion_cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+            occlusion_cmd.instance_count = scene.props[1].instance_count;
+            occlusion_cmd.first_index = 0;
+            occlusion_cmd.vertex_offset = 0;
+            occlusion_cmd.first_instance = k_wall_start_instance;
+
+            // Upload updated command
+            horizon::HardwareBuffer occlusion_indirect_frame = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(&occlusion_cmd),
+                    sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_gpudrivenrendering.occlusion_indirect_frame");
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = 1;
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = 0;
+            occlusion_rasterizer.record_indirect(cube_ib, cube_vb, occlusion_indirect_frame, indirect_params);
         }
 
         main_rasterizer.clear_records();
@@ -746,19 +780,39 @@ void run_example_gpudrivenrendering()
         }
         else
         {
+            // Fallback path: convert loop to multi-draw indirect
+            std::vector<horizon::DrawIndexedIndirectCommand> fallback_commands;
             main_rasterizer.pc.instanceBufferID = instance_in_id;
+
             for (const PropDesc& prop : scene.props)
             {
                 if (!prop.main_pass)
                     continue;
 
-                horizon::DrawIndexedParams params;
-                params.index_count = prop.index_count;
-                params.first_index = prop.first_index;
-                params.vertex_offset = prop.base_vertex;
-                params.instance_count = prop.instance_count;
-                params.first_instance = prop.first_instance;
-                main_rasterizer.record(merged_ib, merged_vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = prop.index_count;
+                cmd.first_index = prop.first_index;
+                cmd.vertex_offset = prop.base_vertex;
+                cmd.instance_count = prop.instance_count;
+                cmd.first_instance = prop.first_instance;
+                fallback_commands.push_back(cmd);
+            }
+
+            if (!fallback_commands.empty())
+            {
+                horizon::HardwareBuffer fallback_indirect = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(fallback_commands.data()),
+                        fallback_commands.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(fallback_commands.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_gpudrivenrendering.fallback_indirect");
+
+                horizon::DrawIndexedIndirectParams indirect_params;
+                indirect_params.draw_count = static_cast<uint32_t>(fallback_commands.size());
+                indirect_params.indirect_offset = 0;
+                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                main_rasterizer.record_indirect(merged_ib, merged_vb, fallback_indirect, indirect_params);
             }
         }
 

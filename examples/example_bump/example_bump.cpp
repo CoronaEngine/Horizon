@@ -245,6 +245,26 @@ void run_example_bump()
     horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_bump.vb");
     horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_bump.ib");
 
+    // Indirect args buffer for 3×3=9 cubes (static)
+    constexpr uint32_t cube_count = 9;
+    std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds(cube_count);
+    for (uint32_t i = 0; i < cube_count; ++i)
+    {
+        indirect_cmds[i].index_count = static_cast<uint32_t>(cube_indices.size());
+        indirect_cmds[i].instance_count = 1;
+        indirect_cmds[i].first_index = 0;
+        indirect_cmds[i].vertex_offset = 0;
+        indirect_cmds[i].first_instance = i;  // Use first_instance as draw index
+    }
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+            indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_bump.indirect_args");
+
     horizon::HardwareImage color_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-rgba.dds", "example_bump.texColor");
     horizon::HardwareImage normal_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-n.dds", "example_bump.texNormal");
 
@@ -349,6 +369,14 @@ void run_example_bump()
         rasterizer.vsp.light2_rgb_inner_r = light_rgb_inner_r[2];
         rasterizer.vsp.light3_rgb_inner_r = light_rgb_inner_r[3];
 
+        // Convert 3×3 loop to single multi-draw indirect
+        // Note: Per-draw data (model matrix) still set via push constant per-draw
+        // TODO: Move to SSBO for true GPU-driven rendering
+        rasterizer.clear_records();
+
+        std::vector<horizon::DrawIndexedIndirectCommand> frame_indirect_cmds;
+        frame_indirect_cmds.reserve(9);
+
         for (uint32_t yy = 0; yy < 3; ++yy)
         {
             for (uint32_t xx = 0; xx < 3; ++xx)
@@ -358,9 +386,30 @@ void run_example_bump()
                 model[3] = glm::vec4(-3.0f + xx * 3.0f, -3.0f + yy * 3.0f, 0.0f, 1.0f);
 
                 rasterizer.model_pc.model = model;
-                rasterizer.record(cube_ib, cube_vb, draw_params);
+
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+                cmd.instance_count = 1;
+                cmd.first_index = 0;
+                cmd.vertex_offset = 0;
+                cmd.first_instance = static_cast<uint32_t>(frame_indirect_cmds.size());
+                frame_indirect_cmds.push_back(cmd);
             }
         }
+
+        horizon::HardwareBuffer frame_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(frame_indirect_cmds.data()),
+                frame_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            static_cast<uint32_t>(frame_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_bump.frame_indirect");
+
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = static_cast<uint32_t>(frame_indirect_cmds.size());
+        indirect_params.indirect_offset = 0;
+        indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+        rasterizer.record_indirect(cube_ib, cube_vb, frame_indirect_buffer, indirect_params);
 
         horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer.extent(bump_width, bump_height) << horizon::commit();
