@@ -197,6 +197,12 @@ namespace EmbeddedShader::Ast
 		void access(AccessPermissions permissions) override;
 		std::string parse() override;
 	    const Variate* getRootVariate() const override;
+
+		// 指回 C++ 侧 ArrayProxy 的 boundResource_(HardwareBuffer*),
+		// 供 auto-bind 在 record 时读当前绑定的 buffer。与 UniversalTexture 同构。
+		void** boundResourceRef = nullptr;
+
+		size_t dirtyVersion = 1;
 	};
 
 	struct ElementValue : Value

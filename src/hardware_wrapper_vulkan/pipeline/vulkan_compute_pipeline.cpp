@@ -518,6 +518,7 @@ namespace Corona::Horizon
         };
 
         std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareImage>> images;
+        std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareBuffer>> buffers;
         std::vector<AutoValue> values;
         {
             std::lock_guard lock(mutex_);
@@ -527,7 +528,11 @@ namespace Corona::Horizon
             {
                 if (entry.boundResourceRef != nullptr && *entry.boundResourceRef != nullptr)
                 {
-                    images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
+                    // EDSL 的 Array<T> 绑 HardwareBuffer；纹理绑 HardwareImage。
+                    if (entry.boundResourceIsBuffer)
+                        buffers.push_back({ entry, *static_cast<HardwareBuffer*>(*entry.boundResourceRef) });
+                    else
+                        images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
                     continue;
                 }
 
@@ -546,6 +551,16 @@ namespace Corona::Horizon
             set_resource_direct(entry.byteOffset,
                                 entry.typeSize,
                                 image,
+                                entry.bindType,
+                                0,
+                                entry.location);
+        }
+
+        for (const auto& [entry, buffer] : buffers)
+        {
+            set_resource_direct(entry.byteOffset,
+                                entry.typeSize,
+                                buffer,
                                 entry.bindType,
                                 0,
                                 entry.location);

@@ -739,6 +739,29 @@ namespace EmbeddedShader
 				node = Ast::AST::defineUniversalArray(std::move(textureType));
 			}
 			else node = Ast::AST::defineUniversalArray<Type>();
+
+			// 回指针:让 auto-bind 能在 record 时取到当前绑定的 HardwareBuffer。
+			if (auto arr = std::dynamic_pointer_cast<Ast::UniversalArray>(node))
+			{
+				arr->boundResourceRef = &boundResource_;
+				dirtyVersion = &arr->dirtyVersion;
+			}
+		}
+
+		// 绑定既有 HardwareBuffer：Array<T> arr = existingBuffer;
+		ArrayProxy(Corona::Horizon::HardwareBuffer& buffer) : ArrayProxy()
+		{
+			boundResource_ = &buffer;
+		}
+
+		// 重新绑定(逐 draw 换 buffer 时用)。dirtyVersion 自增，
+		// 否则 bind_auto_resources 的脏检查会整批跳过。
+		ArrayProxy& operator=(Corona::Horizon::HardwareBuffer& buffer)
+		{
+			boundResource_ = &buffer;
+			if (dirtyVersion)
+				++*dirtyVersion;
+			return *this;
 		}
 
 		template<std::integral IndexType>
@@ -790,6 +813,8 @@ namespace EmbeddedShader
 		}
 	private:
 		std::shared_ptr<Ast::Value> node;
+		void* boundResource_ = nullptr;
+		size_t* dirtyVersion = nullptr;
 	};
 
 	// Codegen emits ::EmbeddedShader::Array<T>; qualified lookup ignores TypeAlias using-directives.

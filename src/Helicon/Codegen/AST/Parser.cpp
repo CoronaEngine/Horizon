@@ -81,6 +81,12 @@ void EmbeddedShader::Ast::Parser::reset()
 	fsPositionOutput.reset();
     isFrontFaceOutput.reset();
 	dispatchThreadIDInput.reset();
+	// 三个下标 builtin 的记忆化必须随 stage 作废：input statement 是逐 stage 收集的，
+	// 留着旧 variate 会让后续 stage 拿到记忆化结果而不再登记 input statement，
+	// 于是 entrypoint 不带 input 形参、函数体里却仍引用 input.xxx。
+	drawIndexInput.reset();
+	instanceIndexInput.reset();
+	vertexIndexInput.reset();
     structure.slangModuleSource.clear();
     resetBranchOutputs();
     typeHeader.clear();

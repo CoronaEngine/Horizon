@@ -88,6 +88,36 @@ namespace EmbeddedShader
 						}
 					}
 				}
+
+				// StructuredBuffer(EDSL 的 Array<T>)。bindless 下 handle 在 push
+				// constant 里,反射报 pushConstantMembers,重映射为 storageBuffer。
+				if (auto* def = dynamic_cast<Ast::DefineUniversalArray*>(stmt.get()))
+				{
+					if (def->array && def->array->boundResourceRef)
+					{
+						auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->array->name);
+						auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->array->name);
+						if (vsInfo || fsInfo)
+						{
+							auto* bindInfo = vsInfo ? vsInfo : fsInfo;
+							int32_t arrayBindType = static_cast<int32_t>(bindInfo->bindType);
+							if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
+								arrayBindType = static_cast<int32_t>(ShaderCodeModule::ShaderResources::storageBuffer);
+							autoBindEntries.push_back({
+								def->array->boundResourceRef,
+								bindInfo->byteOffset,
+								bindInfo->typeSize,
+								arrayBindType,
+								bindInfo->location,
+								nullptr,
+								0,
+								&def->array->dirtyVersion,
+								0,
+								true
+							});
+						}
+					}
+				}
 			}
 
 			// Collect render target auto-bind entries from operator() calls in FS.

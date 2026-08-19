@@ -24,6 +24,11 @@ namespace EmbeddedShader
 		uint32_t boundValueSize = 0;
 	    size_t* dirtyVersion;
 	    size_t currentDirtyVersion = 0;
+
+	    // boundResourceRef 指向的是 HardwareBuffer* 而非 HardwareImage*。
+	    // 消费端(bind_auto_resources)靠它选 set_resource_direct 的重载 ——
+	    // 不靠 bindType 隐式判别,免得以后 bindType 的映射一改就静默转错类型。
+	    bool boundResourceIsBuffer = false;
 	};
 
 	class ComputePipelineObject
@@ -96,6 +101,34 @@ namespace EmbeddedShader
                                 nullptr,
                                 0,
                                 &def->texture->dirtyVersion
+                            });
+                        }
+                    }
+                }
+
+                // StructuredBuffer(EDSL 的 Array<T>)。bindless 下 handle 落在
+                // push constant 里,反射报的是 pushConstantMembers,需重映射成
+                // storageBuffer,引擎才会走 store_storage_buffer_descriptor。
+                if (auto* def = dynamic_cast<Ast::DefineUniversalArray*>(stmt.get()))
+                {
+                    if (def->array && def->array->boundResourceRef)
+                    {
+                        if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->array->name))
+                        {
+                            int32_t effectiveBindType = static_cast<int32_t>(bindInfo->bindType);
+                            if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
+                                effectiveBindType = static_cast<int32_t>(ShaderCodeModule::ShaderResources::storageBuffer);
+                            autoBindEntries.push_back({
+                                def->array->boundResourceRef,
+                                bindInfo->byteOffset,
+                                bindInfo->typeSize,
+                                effectiveBindType,
+                                bindInfo->location,
+                                nullptr,
+                                0,
+                                &def->array->dirtyVersion,
+                                0,
+                                true
                             });
                         }
                     }

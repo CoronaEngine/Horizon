@@ -702,6 +702,36 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 	return drawIdx;
 }
 
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getInstanceIndexInput()
+{
+	auto instanceIdx = std::make_shared<Ast::InputVariate>();
+	instanceIdx->type = Ast::AST::createType<uint32_t>();
+	instanceIdx->name = "instance_index_input";
+	instanceIdx->location = 0;
+	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
+	defineNode->variate = instanceIdx;
+	// Slang 把 SV_InstanceID 映射到 SPIR-V 的 gl_InstanceIndex,含 firstInstance
+	// 基址,所以能当逐-draw 数据下标用(instance_count 恒为 1 时等于 first_instance)。
+	defineNode->semanticName = "SV_InstanceID";
+	Ast::AST::addInputStatement(defineNode);
+	return instanceIdx;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getVertexIndexInput()
+{
+	auto vertexIdx = std::make_shared<Ast::InputVariate>();
+	vertexIdx->type = Ast::AST::createType<uint32_t>();
+	vertexIdx->name = "vertex_index_input";
+	vertexIdx->location = 0;
+	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
+	defineNode->variate = vertexIdx;
+	// gl_VertexIndex:indexed draw 下等于 IB[i] + vertexOffset,即全局顶点下标,
+	// vertex pulling 用它索引顶点 SSBO。
+	defineNode->semanticName = "SV_VertexID";
+	Ast::AST::addInputStatement(defineNode);
+	return vertexIdx;
+}
+
 bool EmbeddedShader::Generator::SlangGenerator::bindless()
 {
 	return Ast::Parser::getBindless();
