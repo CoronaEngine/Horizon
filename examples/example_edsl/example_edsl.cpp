@@ -68,6 +68,23 @@ void run_example_edsl()
 
     horizon::HardwareBuffer vertex_buffer = horizon::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
     horizon::HardwareBuffer index_buffer = horizon::HardwareBuffer::index(mesh.indices, "example_edsl.index");
+
+    // 方案 A：构建静态 indirect args buffer（单个 draw command）
+    horizon::DrawIndexedIndirectCommand indirect_cmd;
+    indirect_cmd.index_count = static_cast<uint32_t>(mesh.indices.size());
+    indirect_cmd.instance_count = 1;
+    indirect_cmd.first_index = 0;
+    indirect_cmd.vertex_offset = 0;
+    indirect_cmd.first_instance = 0;
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(&indirect_cmd),
+            sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_edsl.indirect_args");
+
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
@@ -154,7 +171,13 @@ void run_example_edsl()
                         glm::vec3(0.0f, 0.0f, 1.0f)));
 
         rasterizer.clear_records();
-        rasterizer.record(index_buffer, vertex_buffer, draw_params);
+
+        // 单次 indirect draw 替代 record()
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = 1;
+        indirect_params.indirect_offset = 0;
+        indirect_params.stride = 0;
+        rasterizer.record_indirect(index_buffer, vertex_buffer, indirect_args_buffer, indirect_params);
 
         render_receipt = render_executor << rasterizer.extent(edsl_width, edsl_height) << horizon::commit();
 

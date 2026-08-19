@@ -69,6 +69,23 @@ void run_example_raymarch()
     horizon::HardwareBuffer quad_vb = horizon::HardwareBuffer::vertex(quad_vertices, "example_raymarch.vb");
     horizon::HardwareBuffer quad_ib = horizon::HardwareBuffer::index(quad_indices, "example_raymarch.ib");
 
+    // 方案 A：构建静态 indirect args buffer（单个 draw command）
+    horizon::DrawIndexedIndirectCommand indirect_cmd;
+    indirect_cmd.index_count = static_cast<uint32_t>(quad_indices.size());
+    indirect_cmd.instance_count = 1;
+    indirect_cmd.first_index = 0;
+    indirect_cmd.vertex_offset = 0;
+    indirect_cmd.first_instance = 0;
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(&indirect_cmd),
+            sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_raymarch.indirect_args");
+
+
     horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         rm_width, rm_height, horizon::Format::RGBA16_FLOAT,
         horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
@@ -148,7 +165,13 @@ void run_example_raymarch()
         rasterizer.clear_records();
         rasterizer.rmp.inv_mvp = inv_mvp;
         rasterizer.rmp.light_dir_time = glm::vec4(light_model, time);
-        rasterizer.record(quad_ib, quad_vb, quad_params);
+
+        // 单次 indirect draw 替代 record()
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = 1;
+        indirect_params.indirect_offset = 0;
+        indirect_params.stride = 0;
+        rasterizer.record_indirect(quad_ib, quad_vb, indirect_args_buffer, indirect_params);
 
         horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer.extent(rm_width, rm_height) << horizon::commit();
