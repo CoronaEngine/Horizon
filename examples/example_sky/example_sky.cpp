@@ -695,7 +695,27 @@ void run_example_sky()
         sky_pipeline.sky_fs.perez2 = perez[2];
         sky_pipeline.sky_fs.perez3 = perez[3];
         sky_pipeline.sky_fs.perez4 = perez[4];
-        sky_pipeline.record(sky_ib, sky_vb, sky_params);
+
+        horizon::DrawIndexedIndirectCommand sky_cmd;
+        sky_cmd.index_count = sky_params.index_count;
+        sky_cmd.first_index = sky_params.first_index;
+        sky_cmd.vertex_offset = sky_params.vertex_offset;
+        sky_cmd.instance_count = 1;
+        sky_cmd.first_instance = 0;
+
+        horizon::HardwareBuffer sky_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(&sky_cmd),
+                sizeof(horizon::DrawIndexedIndirectCommand)),
+            sizeof(horizon::DrawIndexedIndirectCommand),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_sky.sky_indirect");
+
+        horizon::DrawIndexedIndirectParams sky_indirect_params;
+        sky_indirect_params.draw_count = 1;
+        sky_indirect_params.indirect_offset = 0;
+        sky_indirect_params.stride = 0;
+        sky_pipeline.record_indirect(sky_ib, sky_vb, sky_indirect_buffer, sky_indirect_params);
 
         landscape_pipeline.clear_records();
         landscape_pipeline.ls.viewProj = view_proj;
@@ -711,8 +731,36 @@ void run_example_sky()
         landscape_pipeline.ls_fs.parameters = parameters;
         landscape_pipeline.pc.model = glm::mat4(1.0f);
         landscape_pipeline.pc.lightmapIndex = lightmap.store_descriptor();
+
+        std::vector<horizon::DrawIndexedIndirectCommand> landscape_indirect_cmds;
+        landscape_indirect_cmds.reserve(landscape_params.size());
         for (const horizon::DrawIndexedParams& params : landscape_params)
-            landscape_pipeline.record(landscape_ib, landscape_vb, params);
+        {
+            horizon::DrawIndexedIndirectCommand cmd;
+            cmd.index_count = params.index_count;
+            cmd.first_index = params.first_index;
+            cmd.vertex_offset = params.vertex_offset;
+            cmd.instance_count = 1;
+            cmd.first_instance = static_cast<uint32_t>(landscape_indirect_cmds.size());
+            landscape_indirect_cmds.push_back(cmd);
+        }
+
+        if (!landscape_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer landscape_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(landscape_indirect_cmds.data()),
+                    landscape_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(landscape_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_sky.landscape_indirect");
+
+            horizon::DrawIndexedIndirectParams landscape_indirect_params;
+            landscape_indirect_params.draw_count = static_cast<uint32_t>(landscape_indirect_cmds.size());
+            landscape_indirect_params.indirect_offset = 0;
+            landscape_indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            landscape_pipeline.record_indirect(landscape_ib, landscape_vb, landscape_indirect_buffer, landscape_indirect_params);
+        }
 
         render_receipt = render_executor << landscape_pipeline.extent(sky_width, sky_height)
                                          << sky_pipeline.extent(sky_width, sky_height)

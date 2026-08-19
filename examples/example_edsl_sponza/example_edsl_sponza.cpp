@@ -2123,20 +2123,11 @@ void run_example_edsl_sponza()
                                          tuning.output_saturation, tuning.output_temperature));
         u_texel = to_edsl_vec4(glm::vec4(1.0f / spz_width, 1.0f / spz_height, 0.0f, 0.0f));
 
-        // ---- 几何 pass 录制(RSM ×3 + G-buffer ×3;逐 draw 重绑材质贴图)----
+        // ---- 几何 pass 录制(RSM ×3 + G-buffer ×3) - Convert to indirect ----
         rsm_pipe.clear_records();
         gb_pipe.clear_records();
 
-        const auto record_geometry = [&](horizon::HardwareBuffer& ib, horizon::HardwareBuffer& vb,
-                                         uint32_t first_index, uint32_t index_count,
-                                         int32_t vertex_offset = 0) {
-            horizon::DrawIndexedParams params;
-            params.index_count = index_count;
-            params.first_index = first_index;
-            params.vertex_offset = vertex_offset;
-            rsm_pipe.record(ib, vb, params);
-            gb_pipe.record(ib, vb, params);
-        };
+        std::vector<horizon::DrawIndexedIndirectCommand> scene_cmds;
 
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
@@ -2161,12 +2152,39 @@ void run_example_edsl_sponza()
             gb_mr_factor = to_edsl_vec4(glm::vec4(material.metallic, material.roughness, 0.0f, 0.0f));
 
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
-                record_geometry(scene_ib, scene_vb, range.first_index, range.index_count,
-                                range.vertex_offset);
+            {
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = range.index_count;
+                cmd.first_index = range.first_index;
+                cmd.vertex_offset = range.vertex_offset;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(scene_cmds.size());
+                scene_cmds.push_back(cmd);
+            }
+        }
+
+        if (!scene_cmds.empty())
+        {
+            horizon::HardwareBuffer scene_indirect = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(scene_cmds.data()),
+                    scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_sponza.scene_indirect");
+
+            horizon::DrawIndexedIndirectParams scene_params;
+            scene_params.draw_count = static_cast<uint32_t>(scene_cmds.size());
+            scene_params.indirect_offset = 0;
+            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            rsm_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, scene_params);
+            gb_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, scene_params);
         }
 
         if (tuning.mirror_enable)
         {
+            std::vector<horizon::DrawIndexedIndirectCommand> mirror_cmds;
+
             const auto record_mirror = [&](const MirrorRange& range, const glm::vec4& color,
                                            float metallic, float roughness, const glm::vec4& rsm_color) {
                 rsm_base_color_tex = white_texture;
@@ -2176,28 +2194,74 @@ void run_example_edsl_sponza()
                 rsm_albedo_factor = to_edsl_vec4(rsm_color);
                 gb_base_factor = to_edsl_vec4(color);
                 gb_mr_factor = to_edsl_vec4(glm::vec4(metallic, roughness, 0.0f, 0.0f));
-                record_geometry(mirror_ib, mirror_vb, range.first, range.count);
+
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = range.count;
+                cmd.first_index = range.first;
+                cmd.vertex_offset = 0;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(mirror_cmds.size());
+                mirror_cmds.push_back(cmd);
             };
+
             const glm::vec4 mirror_rsm_dark(0.12f, 0.12f, 0.12f, 1.0f);
             record_mirror(mirror_pool_range, glm::vec4(0.93f, 0.95f, 0.97f, 1.0f), 1.0f, tuning.mirror_roughness, mirror_rsm_dark);
             record_mirror(mirror_frame_range, glm::vec4(0.055f, 0.045f, 0.038f, 1.0f), 0.0f, 0.72f, mirror_rsm_dark);
+
+            if (!mirror_cmds.empty())
+            {
+                horizon::HardwareBuffer mirror_indirect = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(mirror_cmds.data()),
+                        mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_edsl_sponza.mirror_indirect");
+
+                horizon::DrawIndexedIndirectParams mirror_params;
+                mirror_params.draw_count = static_cast<uint32_t>(mirror_cmds.size());
+                mirror_params.indirect_offset = 0;
+                mirror_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                rsm_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, mirror_params);
+                gb_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, mirror_params);
+            }
         }
 
-        // ---- 全屏 pass 录制 ----
+        // ---- 全屏 pass 录制 - Convert to indirect ----
+        horizon::DrawIndexedIndirectCommand quad_cmd;
+        quad_cmd.index_count = quad_params.index_count;
+        quad_cmd.first_index = quad_params.first_index;
+        quad_cmd.vertex_offset = quad_params.vertex_offset;
+        quad_cmd.instance_count = 1;
+        quad_cmd.first_instance = 0;
+
+        horizon::HardwareBuffer quad_indirect = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(&quad_cmd),
+                sizeof(horizon::DrawIndexedIndirectCommand)),
+            sizeof(horizon::DrawIndexedIndirectCommand),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_edsl_sponza.quad_indirect");
+
+        horizon::DrawIndexedIndirectParams quad_indirect_params;
+        quad_indirect_params.draw_count = 1;
+        quad_indirect_params.indirect_offset = 0;
+        quad_indirect_params.stride = 0;
+
         ssao_pipe.clear_records();
-        ssao_pipe.record(quad_ib, quad_vb, quad_params);
+        ssao_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
         ssao_blur_pipe.clear_records();
-        ssao_blur_pipe.record(quad_ib, quad_vb, quad_params);
+        ssao_blur_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
         light_pipe.clear_records();
-        light_pipe.record(quad_ib, quad_vb, quad_params);
+        light_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
         combine_pipe.clear_records();
-        combine_pipe.record(quad_ib, quad_vb, quad_params);
+        combine_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
         ssr_lin_pipe.clear_records();
-        ssr_lin_pipe.record(quad_ib, quad_vb, quad_params);
+        ssr_lin_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
         ssr_trace_pipe.clear_records();
-        ssr_trace_pipe.record(quad_ib, quad_vb, quad_params);
+        ssr_trace_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
         ssr_composite_pipe.clear_records();
-        ssr_composite_pipe.record(quad_ib, quad_vb, quad_params);
+        ssr_composite_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
 
         horizon::SubmitReceipt render_receipt =
             render_executor << rsm_pipe.extent(spz_shadow_map_size, spz_shadow_map_size)

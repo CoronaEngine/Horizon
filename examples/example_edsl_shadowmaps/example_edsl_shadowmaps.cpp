@@ -581,23 +581,47 @@ void run_example_edsl_shadowmaps()
                                   glm::eulerAngleY(-float(i)) * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f)) });
         }
 
-        // Pass 1：光源视角打包深度
+        // Pass 1：光源视角打包深度 - Convert to indirect
         pack_rasterizer.clear_records();
+        std::vector<horizon::DrawIndexedIndirectCommand> pack_indirect_cmds;
+
         for (const DrawItem& item : items)
         {
             mvp = to_edsl_matrix((light_view_proj * item.model));
             for (const MeshGroup& group : item.mesh->groups)
             {
-                horizon::DrawIndexedParams params;
-                params.index_count = group.index_count;
-                params.first_index = group.first_index;
-                params.vertex_offset = group.base_vertex;
-                pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(pack_indirect_cmds.size());
+                pack_indirect_cmds.push_back(cmd);
             }
         }
 
-        // Pass 2：场景光照 + 硬阴影
+        if (!pack_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer pack_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(pack_indirect_cmds.data()),
+                    pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_shadowmaps.pack_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams pack_params;
+            pack_params.draw_count = static_cast<uint32_t>(pack_indirect_cmds.size());
+            pack_params.indirect_offset = 0;
+            pack_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            pack_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, pack_indirect_buffer, pack_params);
+        }
+
+        // Pass 2：场景光照 + 硬阴影 - Convert to indirect
         scene_rasterizer.clear_records();
+        std::vector<horizon::DrawIndexedIndirectCommand> scene_indirect_cmds;
+
         // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
         proj_view       = to_edsl_matrix(view_proj);
         view_matrix     = to_edsl_matrix(view);
@@ -615,17 +639,38 @@ void run_example_edsl_shadowmaps()
         material_ks = ktm::fvec4(c_material_ks.x,c_material_ks.y,c_material_ks.z,c_material_ks.w);
         color = ktm::fvec4(1.0f);
         params1 = ktm::fvec4(shadow_bias, shadow_normal_offset, 1.0f / shadow_map_size, 0.0f);
+
         for (const DrawItem& item : items)
         {
             model = to_edsl_matrix(item.model); // per-draw；VS 从中计算 mvp/model_view/light_mtx
             for (const MeshGroup& group : item.mesh->groups)
             {
-                horizon::DrawIndexedParams params;
-                params.index_count = group.index_count;
-                params.first_index = group.first_index;
-                params.vertex_offset = group.base_vertex;
-                scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(scene_indirect_cmds.size());
+                scene_indirect_cmds.push_back(cmd);
             }
+        }
+
+        if (!scene_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer scene_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(scene_indirect_cmds.data()),
+                    scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_shadowmaps.scene_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams scene_params;
+            scene_params.draw_count = static_cast<uint32_t>(scene_indirect_cmds.size());
+            scene_params.indirect_offset = 0;
+            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            scene_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, scene_indirect_buffer, scene_params);
         }
 
         horizon::SubmitReceipt render_receipt =

@@ -413,10 +413,13 @@ void run_example_deferred()
         constexpr uint32_t dim = 11;
         constexpr float offset = (float(dim - 1) * 3.0f) * 0.5f; // 15
 
-        // Pass 1a/1b/1c：11x11 立方体分别写入三张 G-buffer
+        // Pass 1a/1b/1c：11x11 立方体分别写入三张 G-buffer - Convert to indirect
         auto record_geometry = [&](auto& pipeline) {
             pipeline.clear_records();
             pipeline.vsp.view_proj = view_proj;
+
+            std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+            indirect_cmds.reserve(dim * dim);
             for (uint32_t yy = 0; yy < dim; ++yy)
             {
                 for (uint32_t xx = 0; xx < dim; ++xx)
@@ -426,16 +429,42 @@ void run_example_deferred()
                     model[3] = glm::vec4(-offset + xx * 3.0f, -offset + yy * 3.0f, 0.0f, 1.0f);
 
                     pipeline.model_pc.model = model;
-                    pipeline.record(cube_ib, cube_vb, cube_params);
+
+                    horizon::DrawIndexedIndirectCommand cmd;
+                    cmd.index_count = cube_params.index_count;
+                    cmd.first_index = cube_params.first_index;
+                    cmd.vertex_offset = cube_params.vertex_offset;
+                    cmd.instance_count = 1;
+                    cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                    indirect_cmds.push_back(cmd);
                 }
+            }
+
+            if (!indirect_cmds.empty())
+            {
+                horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                        indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_deferred.geom_indirect");
+
+                horizon::DrawIndexedIndirectParams indirect_params;
+                indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_params.indirect_offset = 0;
+                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                pipeline.record_indirect(cube_ib, cube_vb, indirect_buffer, indirect_params);
             }
         };
         record_geometry(geom_rasterizer);
 
-        // Pass 2：512 光源逐个累加（quad 按光源包围盒 NDC rect 定位）
+        // Pass 2：512 光源逐个累加（quad 按光源包围盒 NDC rect 定位）- Convert to indirect
         light_rasterizer.clear_records();
         light_rasterizer.vsp.inv_mvp = inv_view_proj;
         light_rasterizer.vsp.view = view;
+
+        std::vector<horizon::DrawIndexedIndirectCommand> light_indirect_cmds;
         for (int light = 0; light < num_lights; ++light)
         {
             const float light_time = time * light_animation_speed *
@@ -485,12 +514,55 @@ void run_example_deferred()
                 (val & 0x4) ? 1.0f : 0.25f,
                 0.8f);
             light_rasterizer.vpc.rect = glm::vec4(rect_min, rect_max);
-            light_rasterizer.record(quad_ib, quad_vb, quad_params);
+
+            horizon::DrawIndexedIndirectCommand cmd;
+            cmd.index_count = quad_params.index_count;
+            cmd.first_index = quad_params.first_index;
+            cmd.vertex_offset = quad_params.vertex_offset;
+            cmd.instance_count = 1;
+            cmd.first_instance = static_cast<uint32_t>(light_indirect_cmds.size());
+            light_indirect_cmds.push_back(cmd);
         }
 
-        // Pass 3：albedo × light 合成
+        if (!light_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer light_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(light_indirect_cmds.data()),
+                    light_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(light_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_deferred.light_indirect");
+
+            horizon::DrawIndexedIndirectParams light_params;
+            light_params.draw_count = static_cast<uint32_t>(light_indirect_cmds.size());
+            light_params.indirect_offset = 0;
+            light_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            light_rasterizer.record_indirect(quad_ib, quad_vb, light_indirect_buffer, light_params);
+        }
+
+        // Pass 3：albedo × light 合成 - Convert to indirect
         combine_rasterizer.clear_records();
-        combine_rasterizer.record(quad_ib, quad_vb, quad_params);
+        horizon::DrawIndexedIndirectCommand combine_cmd;
+        combine_cmd.index_count = quad_params.index_count;
+        combine_cmd.first_index = quad_params.first_index;
+        combine_cmd.vertex_offset = quad_params.vertex_offset;
+        combine_cmd.instance_count = 1;
+        combine_cmd.first_instance = 0;
+
+        horizon::HardwareBuffer combine_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(&combine_cmd),
+                sizeof(horizon::DrawIndexedIndirectCommand)),
+            sizeof(horizon::DrawIndexedIndirectCommand),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_deferred.combine_indirect");
+
+        horizon::DrawIndexedIndirectParams combine_params;
+        combine_params.draw_count = 1;
+        combine_params.indirect_offset = 0;
+        combine_params.stride = 0;
+        combine_rasterizer.record_indirect(quad_ib, quad_vb, combine_indirect_buffer, combine_params);
 
         horizon::SubmitReceipt render_receipt =
             render_executor << geom_rasterizer.extent(dfr_width, dfr_height)

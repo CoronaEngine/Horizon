@@ -869,6 +869,8 @@ void run_example_edsl_ibl()
 
         rasterizer.clear_records();
 
+        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+
         // ---- 网格 draw ----
         if (s.mesh_selection == 0)
         {
@@ -878,7 +880,15 @@ void run_example_edsl_ibl()
             per_model   = to_edsl_matrix(model);
             per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
             for (const horizon::DrawIndexedParams& params : bunny_params)
-                rasterizer.record(bunny_ib, bunny_vb, params);
+            {
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = params.index_count;
+                cmd.first_index = params.first_index;
+                cmd.vertex_offset = params.vertex_offset;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_cmds.push_back(cmd);
+            }
         }
         else
         {
@@ -900,7 +910,15 @@ void run_example_edsl_ibl()
                     per_model   = to_edsl_matrix(model);
                     per_params0 = fvec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
                     for (const horizon::DrawIndexedParams& params : orb_params)
-                        rasterizer.record(orb_ib, orb_vb, params);
+                    {
+                        horizon::DrawIndexedIndirectCommand cmd;
+                        cmd.index_count = params.index_count;
+                        cmd.first_index = params.first_index;
+                        cmd.vertex_offset = params.vertex_offset;
+                        cmd.instance_count = 1;
+                        cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                        indirect_cmds.push_back(cmd);
+                    }
                 }
             }
         }
@@ -909,7 +927,34 @@ void run_example_edsl_ibl()
         per_misc    = fvec4(1.0f, aspect, 0.0f, 0.0f);
         per_model   = to_edsl_matrix(glm::mat4(1.0f));  // identity，skybox 路径不使用 model
         per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-        rasterizer.record(sky_ib, sky_vb, sky_params);
+
+        horizon::DrawIndexedIndirectCommand sky_cmd;
+        sky_cmd.index_count = sky_params.index_count;
+        sky_cmd.first_index = sky_params.first_index;
+        sky_cmd.vertex_offset = sky_params.vertex_offset;
+        sky_cmd.instance_count = 1;
+        sky_cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+        indirect_cmds.push_back(sky_cmd);
+
+        if (!indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                    indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_ibl.indirect");
+
+            const horizon::HardwareBuffer& ib = (s.mesh_selection == 0) ? bunny_ib : orb_ib;
+            const horizon::HardwareBuffer& vb = (s.mesh_selection == 0) ? bunny_vb : orb_vb;
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            rasterizer.record_indirect(ib, vb, indirect_buffer, indirect_params);
+        }
 
         horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer.extent(ibl_width, ibl_height) << horizon::commit();

@@ -571,17 +571,39 @@ void run_example_shadowvolumes()
             pipeline.vsp.fog = fog_params;
             pipeline.vsp.color = glm::vec4(1.0f);
             pipeline.vsp.params = resolution;
+
+            std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
             for (const DrawItem& item : items)
             {
                 pipeline.model_pc.model = item.model;
                 for (const MeshGroup& group : item.mesh->groups)
                 {
-                    horizon::DrawIndexedParams params;
-                    params.index_count = group.index_count;
-                    params.first_index = group.first_index;
-                    params.vertex_offset = group.base_vertex;
-                    pipeline.record(item.mesh->ib, item.mesh->vb, params);
+                    horizon::DrawIndexedIndirectCommand cmd;
+                    cmd.index_count = group.index_count;
+                    cmd.first_index = group.first_index;
+                    cmd.vertex_offset = group.base_vertex;
+                    cmd.instance_count = 1;
+                    cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                    indirect_cmds.push_back(cmd);
                 }
+            }
+
+            if (!indirect_cmds.empty())
+            {
+                horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                        indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_shadowvolumes.scene_indirect");
+
+                const DrawItem& first_item = items[0];
+                horizon::DrawIndexedIndirectParams indirect_params;
+                indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_params.indirect_offset = 0;
+                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                pipeline.record_indirect(first_item.mesh->ib, first_item.mesh->vb, indirect_buffer, indirect_params);
             }
         };
 
@@ -603,12 +625,34 @@ void run_example_shadowvolumes()
 
             const uint32_t volume_vertices =
                 std::min<uint32_t>(static_cast<uint32_t>(volume_positions.size()), max_volume_vertices);
+
+            std::vector<horizon::DrawIndexedIndirectCommand> volume_indirect_cmds;
             for (uint32_t drawn = 0; drawn < volume_vertices; drawn += volume_chunk_vertices)
             {
-                horizon::DrawIndexedParams params;
-                params.index_count = std::min(volume_chunk_vertices, volume_vertices - drawn);
-                params.vertex_offset = static_cast<int32_t>(drawn);
-                volume_rasterizer.record(volume_ib, volume_vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = std::min(volume_chunk_vertices, volume_vertices - drawn);
+                cmd.first_index = 0;
+                cmd.vertex_offset = static_cast<int32_t>(drawn);
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(volume_indirect_cmds.size());
+                volume_indirect_cmds.push_back(cmd);
+            }
+
+            if (!volume_indirect_cmds.empty())
+            {
+                horizon::HardwareBuffer volume_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(volume_indirect_cmds.data()),
+                        volume_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(volume_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_shadowvolumes.volume_indirect");
+
+                horizon::DrawIndexedIndirectParams volume_params;
+                volume_params.draw_count = static_cast<uint32_t>(volume_indirect_cmds.size());
+                volume_params.indirect_offset = 0;
+                volume_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                volume_rasterizer.record_indirect(volume_ib, volume_vb, volume_indirect_buffer, volume_params);
             }
         }
 

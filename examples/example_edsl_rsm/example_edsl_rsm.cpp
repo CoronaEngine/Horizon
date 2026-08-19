@@ -669,28 +669,50 @@ void run_example_edsl_rsm()
         const float cos_inner = std::cos(glm::radians(spot_inner_angle));
         const float cos_outer = std::cos(glm::radians(spot_outer_angle));
 
-        // Pass 1：光源视角生成 RSM（position+depth / normal / flux 三个单目标 pass）
+        // Pass 1：光源视角生成 RSM（position+depth / normal / flux 三个单目标 pass）- Convert to indirect
         pack_rasterizer.clear_records();
         pk_light_view_proj = to_edsl_matrix(light_view_proj);
         pk_light_pos_ws = ktm::fvec4(c_light_pos.x, c_light_pos.y, c_light_pos.z, 0.0f);
         pk_light_dir_ws = ktm::fvec4(c_spot_dir.x, c_spot_dir.y, c_spot_dir.z, 0.0f);
         pk_light_color = ktm::fvec4(c_light_color.x, c_light_color.y, c_light_color.z, 0.0f);
         pk_spot_params = ktm::fvec4(cos_inner, cos_outer, 0.0f, 0.0f);
+
+        std::vector<horizon::DrawIndexedIndirectCommand> pack_indirect_cmds;
         for (const DrawItem& item : items)
         {
             pk_model = to_edsl_matrix(item.model);
             pk_albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
             for (const MeshGroup& group : item.mesh->groups)
             {
-                horizon::DrawIndexedParams params;
-                params.index_count = group.index_count;
-                params.first_index = group.first_index;
-                params.vertex_offset = group.base_vertex;
-                pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(pack_indirect_cmds.size());
+                pack_indirect_cmds.push_back(cmd);
             }
         }
 
-        // Pass 2：场景直接光 + 硬阴影 + RSM 间接光
+        if (!pack_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer pack_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(pack_indirect_cmds.data()),
+                    pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_rsm.pack_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams pack_params;
+            pack_params.draw_count = static_cast<uint32_t>(pack_indirect_cmds.size());
+            pack_params.indirect_offset = 0;
+            pack_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            pack_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, pack_indirect_buffer, pack_params);
+        }
+
+        // Pass 2：场景直接光 + 硬阴影 + RSM 间接光 - Convert to indirect
         scene_rasterizer.clear_records();
         proj_view = to_edsl_matrix(view_proj);
         light_proj_view = to_edsl_matrix(shadow_mtx); // bias * light_proj * light_view
@@ -700,18 +722,40 @@ void run_example_edsl_rsm()
         spot_params = ktm::fvec4(cos_inner, cos_outer, rsm_shadow_bias, rsm_normal_offset);
         rsm_params = ktm::fvec4(sample_radius, indirect_intensity, static_cast<float>(debug_mode), 0.0f);
         camera_pos_ws = ktm::fvec4(eye.x, eye.y, eye.z, 0.0f);
+
+        std::vector<horizon::DrawIndexedIndirectCommand> scene_indirect_cmds;
         for (const DrawItem& item : items)
         {
             model = to_edsl_matrix(item.model);
             albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
             for (const MeshGroup& group : item.mesh->groups)
             {
-                horizon::DrawIndexedParams params;
-                params.index_count = group.index_count;
-                params.first_index = group.first_index;
-                params.vertex_offset = group.base_vertex;
-                scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(scene_indirect_cmds.size());
+                scene_indirect_cmds.push_back(cmd);
             }
+        }
+
+        if (!scene_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer scene_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(scene_indirect_cmds.data()),
+                    scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_rsm.scene_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams scene_params;
+            scene_params.draw_count = static_cast<uint32_t>(scene_indirect_cmds.size());
+            scene_params.indirect_offset = 0;
+            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            scene_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, scene_indirect_buffer, scene_params);
         }
 
         horizon::SubmitReceipt render_receipt =
