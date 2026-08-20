@@ -817,15 +817,24 @@ void run_example_edsl_sky()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
+    horizon::DrawIndexedIndirectCommand sky_cmd;
+    sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());
+    sky_cmd.instance_count = 1;
+    sky_cmd.first_index = 0;
+    sky_cmd.vertex_offset = 0;
+    sky_cmd.first_instance = 0;
 
-    landscape_params.reserve(landscape.groups.size());
+    std::vector<horizon::DrawIndexedIndirectCommand> landscape_commands;
+    landscape_commands.reserve(landscape.groups.size());
     for (const MeshGroup& group : landscape.groups)
     {
-        params.index_count = group.index_count;
-        params.first_index = group.first_index;
-        params.vertex_offset = group.base_vertex;
-        landscape_params.push_back(params);
+        horizon::DrawIndexedIndirectCommand cmd;
+        cmd.index_count = group.index_count;
+        cmd.instance_count = 1;
+        cmd.first_index = group.first_index;
+        cmd.vertex_offset = group.base_vertex;
+        cmd.first_instance = 0;
+        landscape_commands.push_back(cmd);
     }
 
     DynamicValueController sun_lum_xyz;
@@ -925,14 +934,10 @@ void run_example_edsl_sky()
 
         landscape_pipeline.clear_records();
         std::vector<horizon::DrawIndexedIndirectCommand> landscape_indirect_cmds;
-        landscape_indirect_cmds.reserve(landscape_params.size());
-        for (const horizon::DrawIndexedParams& params : landscape_params)
+        landscape_indirect_cmds.reserve(landscape_commands.size());
+        for (const horizon::DrawIndexedIndirectCommand& base_cmd : landscape_commands)
         {
-            horizon::DrawIndexedIndirectCommand cmd;
-            cmd.index_count = params.index_count;
-            cmd.first_index = params.first_index;
-            cmd.vertex_offset = params.vertex_offset;
-            cmd.instance_count = 1;
+            horizon::DrawIndexedIndirectCommand cmd = base_cmd;
             cmd.first_instance = static_cast<uint32_t>(landscape_indirect_cmds.size());
             landscape_indirect_cmds.push_back(cmd);
         }
@@ -955,13 +960,6 @@ void run_example_edsl_sky()
         }
 
         sky_pipeline.clear_records();
-        horizon::DrawIndexedIndirectCommand sky_cmd;
-        sky_cmd.index_count = sky_params.index_count;
-        sky_cmd.first_index = sky_params.first_index;
-        sky_cmd.vertex_offset = sky_params.vertex_offset;
-        sky_cmd.instance_count = 1;
-        sky_cmd.first_instance = 0;
-
         horizon::HardwareBuffer sky_indirect_buffer = horizon::HardwareBuffer::from_bytes(
             std::span<const std::byte>(
                 reinterpret_cast<const std::byte*>(&sky_cmd),
