@@ -475,35 +475,6 @@ namespace Corona::Horizon
             return manager->store_storage_descriptor(*native);
         }
 
-        [[nodiscard]] DrawIndexedParams normalize_draw_params(const HardwareBuffer& index_buffer, DrawIndexedParams params)
-        {
-            if (params.index_count != 0)
-                return params;
-
-            const uint64_t element_count = index_buffer.get_element_count();
-            if (params.first_index >= element_count)
-                return params;
-
-            const uint64_t resolved_count = element_count - params.first_index;
-            if (resolved_count > std::numeric_limits<uint32_t>::max())
-                throw std::overflow_error("RasterizerPipeline draw index_count exceeds uint32_t.");
-
-            params.index_count = static_cast<uint32_t>(resolved_count);
-            return params;
-        }
-
-        [[nodiscard]] DrawIndexedDesc to_draw_desc(const DrawIndexedParams& params)
-        {
-            DrawIndexedDesc desc;
-            desc.index_count = params.index_count;
-            desc.instance_count = params.instance_count;
-            desc.first_index = params.first_index;
-            desc.vertex_offset = params.vertex_offset;
-            desc.first_instance = params.first_instance;
-            desc.debug_label = params.debug_label;
-            return desc;
-        }
-
         [[nodiscard]] VkShaderModule create_shader_module(VkDevice device, const EmbeddedShader::ShaderCodeModule& module, const char* label)
         {
             if (!std::holds_alternative<std::vector<uint32_t>>(module.shaderCode))
@@ -1484,36 +1455,6 @@ namespace Corona::Horizon
         return push_constant_snapshot_;
     }
 
-    void VulkanRasterizerPipeline::record(RasterizerPipelineBase* pipeline,
-                                          const HardwareBuffer& index_buffer,
-                                          const HardwareBuffer& vertex_buffer,
-                                          const DrawIndexedParams& params)
-    {
-        if (!validate_rasterizer_pipeline_record(index_buffer, vertex_buffer, params))
-            return;
-
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record");
-
-        RecordedDraw draw;
-        draw.pipeline = pipeline;
-        draw.index_buffer = index_buffer;
-        draw.vertex_buffer = vertex_buffer;
-        draw.params = normalize_draw_params(index_buffer, params);
-
-        std::lock_guard lock(mutex_);
-        // 自上次 record 后没写过 push constant 时，这里连拷贝都不做。
-        draw.push_constant_data = push_constant_snapshot_unlocked();
-        // UBO 不再逐 draw 拷贝：它是批次公共数据，批次构建时统一取本帧槽的句柄。
-        draws_.push_back(std::move(draw));
-    }
-
-    void VulkanRasterizerPipeline::record(const HardwareBuffer& index_buffer,
-                                          const HardwareBuffer& vertex_buffer,
-                                          const DrawIndexedParams& params)
-    {
-        record({}, index_buffer, vertex_buffer, params);
-    }
-
     void VulkanRasterizerPipeline::record_indirect(RasterizerPipelineBase* pipeline,
                                                    const HardwareBuffer& index_buffer,
                                                    const HardwareBuffer& vertex_buffer,
@@ -1537,7 +1478,6 @@ namespace Corona::Horizon
     void VulkanRasterizerPipeline::clear_records()
     {
         std::lock_guard lock(mutex_);
-        draws_.clear();
         indirect_draws_.clear();
     }
 
@@ -1633,141 +1573,7 @@ namespace Corona::Horizon
 
             std::shared_ptr<const DrawSharedPayload> shared = std::move(shared_payload);
 
-            const char* indirect_env = std::getenv("HORIZON_INDIRECT_DRAWS");
-            const bool convert_to_indirect = indirect_env && *indirect_env == '1';
-
-            if (convert_to_indirect && !draws_.empty())
-            {
-                // P1: convert direct draws to indirect, batching adjacent runs that share
-                // pipeline/IB/VB/push_constants. Commands written to this frame's ring slot.
-                indirect_args_staging_.clear();
-                const uint32_t ring_size = std::max(1u, frame_ring_size());
-                const int64_t slot = static_cast<int64_t>(frame_ring_slot() % ring_size);
-
-                while (indirect_args_ring_.size() < ring_size)
-                {
-                    indirect_args_ring_.push_back(HardwareBuffer(
-                        HardwareBufferDesc::indirect(256, "RasterizerPipeline.indirect_args_ring")));
-                }
-
-                indirect_args_slot_ = slot;
-                HardwareBuffer& args_buffer = indirect_args_ring_[static_cast<size_t>(slot)];
-
-                // Group adjacent draws, stage commands, then write once and emit DrawIndexedIndirectDesc.
-                struct BatchInfo
-                {
-                    size_t first_draw_idx;
-                    HardwareBuffer index_buffer;
-                    HardwareBuffer vertex_buffer;
-                    RasterizerPipelineBase* pipeline;
-                    std::shared_ptr<const DrawSharedPayload> shared_payload;
-                    std::shared_ptr<const std::vector<std::byte>> push_constants;
-                    uint64_t indirect_offset;
-                    uint32_t draw_count;
-                };
-                std::vector<BatchInfo> batches;
-
-                size_t i = 0;
-                while (i < draws_.size())
-                {
-                    size_t batch_start = i;
-                    const RecordedDraw& first = draws_[i];
-                    const BufferRef first_index = buffer_ref(first.index_buffer);
-                    const BufferRef first_vertex = buffer_ref(first.vertex_buffer);
-                    ++i;
-
-                    while (i < draws_.size())
-                    {
-                        const RecordedDraw& cur = draws_[i];
-                        const BufferRef cur_index = buffer_ref(cur.index_buffer);
-                        const BufferRef cur_vertex = buffer_ref(cur.vertex_buffer);
-                        if (cur.pipeline != first.pipeline ||
-                            std::memcmp(&cur_index.handle, &first_index.handle, sizeof(ResourceHandle)) != 0 ||
-                            std::memcmp(&cur_vertex.handle, &first_vertex.handle, sizeof(ResourceHandle)) != 0 ||
-                            cur.push_constant_data != first.push_constant_data)
-                            break;
-                        ++i;
-                    }
-
-                    const size_t batch_count = i - batch_start;
-                    const uint64_t batch_offset = indirect_args_staging_.size();
-
-                    for (size_t j = batch_start; j < i; ++j)
-                    {
-                        const DrawIndexedParams normalized = normalize_draw_params(
-                            draws_[j].index_buffer, draws_[j].params);
-                        DrawIndexedIndirectCommand cmd;
-                        cmd.index_count = normalized.index_count;
-                        cmd.instance_count = normalized.instance_count;
-                        cmd.first_index = normalized.first_index;
-                        cmd.vertex_offset = normalized.vertex_offset;
-                        cmd.first_instance = normalized.first_instance;
-                        indirect_args_staging_.push_back(cmd);
-                    }
-
-                    batches.push_back({
-                        .first_draw_idx = batch_start,
-                        .index_buffer = first.index_buffer,
-                        .vertex_buffer = first.vertex_buffer,
-                        .pipeline = first.pipeline,
-                        .shared_payload = shared,
-                        .push_constants = first.push_constant_data,
-                        .indirect_offset = batch_offset * sizeof(DrawIndexedIndirectCommand),
-                        .draw_count = static_cast<uint32_t>(batch_count),
-                    });
-                }
-
-                if (!indirect_args_staging_.empty())
-                {
-                    const uint64_t total_size = indirect_args_staging_.size();
-                    if (total_size > args_buffer.get_element_count())
-                    {
-                        args_buffer = HardwareBuffer(HardwareBufferDesc::indirect(
-                            total_size, "RasterizerPipeline.indirect_args_ring"));
-                    }
-
-                    const auto data_span = std::span<const std::byte>(
-                        reinterpret_cast<const std::byte*>(indirect_args_staging_.data()),
-                        indirect_args_staging_.size() * sizeof(DrawIndexedIndirectCommand));
-                    if (!args_buffer.write_bytes(data_span, 0))
-                        throw std::runtime_error("Failed to write indirect args to ring buffer.");
-                }
-
-                for (const BatchInfo& batch : batches)
-                {
-                    DrawIndexedIndirectDesc indirect_desc;
-                    indirect_desc.pipeline = batch.pipeline;
-                    indirect_desc.shared = batch.shared_payload;
-                    indirect_desc.push_constants = batch.push_constants;
-                    indirect_desc.indirect_offset = batch.indirect_offset;
-                    indirect_desc.draw_count = batch.draw_count;
-                    indirect_desc.stride = 0;
-
-                    plan.indirect_draws.emplace_back(
-                        buffer_ref(batch.index_buffer),
-                        buffer_ref(batch.vertex_buffer),
-                        buffer_ref(args_buffer),
-                        std::move(indirect_desc));
-                }
-            }
-            else
-            {
-                plan.batch.draws.reserve(draws_.size());
-                for (const RecordedDraw& draw : draws_)
-                {
-                    DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-                    draw_desc.pipeline = draw.pipeline;
-                    draw_desc.shared = shared;
-                    draw_desc.push_constants = draw.push_constant_data;
-
-                    plan.batch.draws.push_back({
-                        .index = buffer_ref(draw.index_buffer),
-                        .vertex = buffer_ref(draw.vertex_buffer),
-                        .draw = std::move(draw_desc),
-                    });
-                }
-            }
-
+            // 处理所有 indirect draws
             plan.indirect_draws.reserve(indirect_draws_.size());
             for (const RecordedIndirectDraw& draw : indirect_draws_)
             {
@@ -1823,8 +1629,6 @@ namespace Corona::Horizon
         if (plan.has_rendering_scope)
             recorder.begin_rendering(plan.rendering);
 
-        if (!plan.batch.draws.empty())
-            recorder.draw_indexed_batch(std::move(plan.batch));
         for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
             recorder.draw_indexed_indirect(index, vertex, indirect, std::move(draw));
 

@@ -118,22 +118,6 @@ namespace Corona::Horizon
         return *this;
     }
 
-    RasterizerPipelineBase& RasterizerPipelineBase::record(const HardwareBuffer& index_buffer,
-                                                           const HardwareBuffer& vertex_buffer,
-                                                           const DrawIndexedParams& params)
-    {
-        if (!validate_rasterizer_pipeline_record(index_buffer, vertex_buffer, params))
-            return *this;
-
-        std::shared_ptr<IResourceRef> token;
-        token = ResourceBridge::token(*this);
-
-        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
-        bind_auto_resources(impl);
-        impl->record(this, index_buffer, vertex_buffer, params);
-        return *this;
-    }
-
     RasterizerPipelineBase& RasterizerPipelineBase::record_indirect(const HardwareBuffer& index_buffer,
                                                                    const HardwareBuffer& vertex_buffer,
                                                                    const HardwareBuffer& indirect_buffer,

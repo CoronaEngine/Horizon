@@ -306,17 +306,6 @@ namespace Corona::Horizon
         }
     };
 
-    struct DrawIndexedParams
-    {
-
-        uint32_t index_count = 0;
-        uint32_t instance_count = 1;
-        uint32_t first_index = 0;
-        int32_t vertex_offset = 0;
-        uint32_t first_instance = 0;
-
-        std::string debug_label;
-    };
 
     struct DrawIndexedIndirectCommand
     {
@@ -951,7 +940,6 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
         RasterizerPipelineBase& extent(uint32_t width, uint32_t height);
-        RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
                                                 const HardwareBuffer& indirect_buffer,
