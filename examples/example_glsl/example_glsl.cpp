@@ -91,7 +91,6 @@ void run_example_glsl()
         rasterizer.vp.proj = proj;
     }
 
-    horizon::DrawIndexedParams draw_params;
 
     HorizonImGuiLayer ui(window, glsl_width, glsl_height);
 

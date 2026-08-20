@@ -817,14 +817,11 @@ void run_example_edsl_sky()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams sky_params;
     sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
 
-    std::vector<horizon::DrawIndexedParams> landscape_params;
     landscape_params.reserve(landscape.groups.size());
     for (const MeshGroup& group : landscape.groups)
     {
-        horizon::DrawIndexedParams params;
         params.index_count = group.index_count;
         params.first_index = group.first_index;
         params.vertex_offset = group.base_vertex;

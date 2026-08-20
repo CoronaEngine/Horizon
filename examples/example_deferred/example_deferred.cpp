@@ -360,10 +360,8 @@ void run_example_deferred()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams cube_params;
     cube_params.index_count = static_cast<uint32_t>(cube_indices.size());
 
-    horizon::DrawIndexedParams quad_params;
     quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
 
     constexpr float aspect = static_cast<float>(dfr_width) / static_cast<float>(dfr_height);

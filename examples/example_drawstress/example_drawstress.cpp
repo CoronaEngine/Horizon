@@ -196,7 +196,6 @@ void run_example_drawstress()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams cube_params;
 
     constexpr float aspect = static_cast<float>(stress_width) / static_cast<float>(stress_height);
     // bgfx 左手系：mtxLookAt (0,0,-35)->(0,0,0)、mtxProj fovy 60°

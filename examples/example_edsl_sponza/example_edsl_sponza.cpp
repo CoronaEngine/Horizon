@@ -1823,7 +1823,6 @@ void run_example_edsl_sponza()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams quad_params;
     quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
 
     // ---- 相机 / 太阳 / 场景尺度 ----

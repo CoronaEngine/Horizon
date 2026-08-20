@@ -109,7 +109,6 @@ void run_example_raymarch()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams quad_params;
 
     constexpr float aspect = static_cast<float>(rm_width) / static_cast<float>(rm_height);
     // 原版左手系：mtxLookAt (0,0,-15)->(0,0,0)、mtxProj fovy 60°

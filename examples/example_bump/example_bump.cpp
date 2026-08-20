@@ -295,7 +295,6 @@ void run_example_bump()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams draw_params;
 
     constexpr float aspect = static_cast<float>(bump_width) / static_cast<float>(bump_height);
     // 原版左手系：mtxLookAt (0,0,-7)->(0,0,0)、mtxProj fovy 60°

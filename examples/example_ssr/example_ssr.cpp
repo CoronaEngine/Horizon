@@ -206,7 +206,6 @@ void run_example_ssr()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams cube_params;
 
     // ---- 相机 ----
     constexpr float aspect = static_cast<float>(ssr_width) / static_cast<float>(ssr_height);

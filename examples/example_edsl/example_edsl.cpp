@@ -114,7 +114,6 @@ void run_example_edsl()
     horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
     rasterizer.bind_depth_target(depth_image);
 
-    horizon::DrawIndexedParams draw_params;
 
     HorizonImGuiLayer ui(window, edsl_width, edsl_height);
 

@@ -784,25 +784,31 @@ void run_example_edsl_ibl()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    // 每个 bgfx group 一组 params：索引是 group 相对的，base_vertex 走 vertex_offset。
-    const auto group_params = [](const IblMesh& mesh) {
-        std::vector<horizon::DrawIndexedParams> out;
+    // 每个 bgfx group 一组 indirect command：索引是 group 相对的，base_vertex 走 vertex_offset。
+    const auto group_commands = [](const IblMesh& mesh) {
+        std::vector<horizon::DrawIndexedIndirectCommand> out;
         out.reserve(mesh.groups.size());
         for (const MeshGroup& group : mesh.groups)
         {
-            horizon::DrawIndexedParams params;
-            params.index_count = group.index_count;
-            params.first_index = group.first_index;
-            params.vertex_offset = group.base_vertex;
-            out.push_back(params);
+            horizon::DrawIndexedIndirectCommand cmd;
+            cmd.index_count = group.index_count;
+            cmd.instance_count = 1;
+            cmd.first_index = group.first_index;
+            cmd.vertex_offset = group.base_vertex;
+            cmd.first_instance = 0;
+            out.push_back(cmd);
         }
         return out;
     };
-    const std::vector<horizon::DrawIndexedParams> bunny_params = group_params(bunny_mesh);
-    const std::vector<horizon::DrawIndexedParams> orb_params = group_params(orb_mesh);
+    const std::vector<horizon::DrawIndexedIndirectCommand> bunny_commands = group_commands(bunny_mesh);
+    const std::vector<horizon::DrawIndexedIndirectCommand> orb_commands = group_commands(orb_mesh);
 
-    horizon::DrawIndexedParams sky_params;
-    sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
+    horizon::DrawIndexedIndirectCommand sky_cmd;
+    sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());
+    sky_cmd.instance_count = 1;
+    sky_cmd.first_index = 0;
+    sky_cmd.vertex_offset = 0;
+    sky_cmd.first_instance = 0;
 
     constexpr float aspect = static_cast<float>(ibl_width) / static_cast<float>(ibl_height);
     const glm::mat4 proj = [] {
@@ -879,13 +885,9 @@ void run_example_edsl_ibl()
             per_misc    = fvec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
             per_model   = to_edsl_matrix(model);
             per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-            for (const horizon::DrawIndexedParams& params : bunny_params)
+            for (const horizon::DrawIndexedIndirectCommand& base_cmd : bunny_commands)
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = params.index_count;
-                cmd.first_index = params.first_index;
-                cmd.vertex_offset = params.vertex_offset;
-                cmd.instance_count = 1;
+                horizon::DrawIndexedIndirectCommand cmd = base_cmd;
                 cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
                 indirect_cmds.push_back(cmd);
             }
@@ -909,13 +911,9 @@ void run_example_edsl_ibl()
                     per_misc    = fvec4(0.0f, aspect, 0.0f, 0.0f);
                     per_model   = to_edsl_matrix(model);
                     per_params0 = fvec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
-                    for (const horizon::DrawIndexedParams& params : orb_params)
+                    for (const horizon::DrawIndexedIndirectCommand& base_cmd : orb_commands)
                     {
-                        horizon::DrawIndexedIndirectCommand cmd;
-                        cmd.index_count = params.index_count;
-                        cmd.first_index = params.first_index;
-                        cmd.vertex_offset = params.vertex_offset;
-                        cmd.instance_count = 1;
+                        horizon::DrawIndexedIndirectCommand cmd = base_cmd;
                         cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
                         indirect_cmds.push_back(cmd);
                     }
@@ -928,13 +926,9 @@ void run_example_edsl_ibl()
         per_model   = to_edsl_matrix(glm::mat4(1.0f));  // identity，skybox 路径不使用 model
         per_params0 = fvec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
 
-        horizon::DrawIndexedIndirectCommand sky_cmd;
-        sky_cmd.index_count = sky_params.index_count;
-        sky_cmd.first_index = sky_params.first_index;
-        sky_cmd.vertex_offset = sky_params.vertex_offset;
-        sky_cmd.instance_count = 1;
-        sky_cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-        indirect_cmds.push_back(sky_cmd);
+        horizon::DrawIndexedIndirectCommand sky_draw = sky_cmd;
+        sky_draw.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+        indirect_cmds.push_back(sky_draw);
 
         if (!indirect_cmds.empty())
         {

@@ -704,7 +704,6 @@ void run_example_edsl_ssr()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams cube_params;
     cube_params.index_count = static_cast<uint32_t>(essr_cube_indices.size());
 
     // ---- 相机（与 GLSL 版一致）----

@@ -1001,7 +1001,6 @@ void run_example_sponza()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    horizon::DrawIndexedParams quad_params;
     quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
 
     // Camera starts from the asset view, with a corrected hero shot for Intel
