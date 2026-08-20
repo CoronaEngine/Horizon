@@ -167,7 +167,8 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
             std::array<float, 2> { -1.0f - display_pos.x * scale[0], -1.0f - display_pos.y * scale[1] };
         impl.pipeline.outColor = target;
 
-        impl.pipeline.clear_records();
+        // 收集所有 ImGui draw commands 到 indirect buffer（CPU 端构造）
+        std::vector<DrawIndexedIndirectCommand> indirect_commands;
         uint32_t global_index_offset = 0;
         int32_t global_vertex_offset = 0;
         for (int list_index = 0; list_index < draw_data->CmdListsCount; ++list_index)
@@ -187,15 +188,31 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
 
                 // per-draw scissor 已从 Horizon 移除：clip rect 只用于跳过零面积 cmd，
                 // 不再做实际裁剪。超出窗口的 UI 内容不会被裁掉。
-                DrawIndexedParams params;
-                params.index_count = cmd.ElemCount;
-                params.first_index = global_index_offset + cmd.IdxOffset;
-                params.vertex_offset = global_vertex_offset + static_cast<int32_t>(cmd.VtxOffset);
-                params.debug_label = "imgui.draw";
-                impl.pipeline.record(index_buffer, vertex_buffer, params);
+                DrawIndexedIndirectCommand indirect_cmd;
+                indirect_cmd.index_count = cmd.ElemCount;
+                indirect_cmd.instance_count = 1;
+                indirect_cmd.first_index = global_index_offset + cmd.IdxOffset;
+                indirect_cmd.vertex_offset = global_vertex_offset + static_cast<int32_t>(cmd.VtxOffset);
+                indirect_cmd.first_instance = 0;
+                indirect_commands.push_back(indirect_cmd);
             }
             global_index_offset += static_cast<uint32_t>(list->IdxBuffer.Size);
             global_vertex_offset += list->VtxBuffer.Size;
+        }
+
+        // 转为 indirect draw：单次批量提交所有 UI draw calls
+        impl.pipeline.clear_records();
+        if (!indirect_commands.empty())
+        {
+            HardwareBuffer indirect_buffer =
+                HardwareBuffer::indirect(std::span<const DrawIndexedIndirectCommand>(indirect_commands), "imgui.indirect");
+
+            DrawIndexedIndirectParams params;
+            params.draw_count = static_cast<uint32_t>(indirect_commands.size());
+            params.indirect_offset = 0;
+            params.stride = 0;
+            params.debug_label = "imgui.batch";
+            impl.pipeline.record_indirect(index_buffer, vertex_buffer, indirect_buffer, params);
         }
 
         // GPU 顺序：场景 → UI。
