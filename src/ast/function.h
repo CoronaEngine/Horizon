@@ -7,7 +7,7 @@
 #include "math/basic_types.h"
 #include "core/stl.h"
 #include "core/header.h"
-#include "core/type.h"
+#include "math/storage_traits.h"
 #include "core/type_system/precision_policy.h"
 #include "expression.h"
 #include "statement.h"

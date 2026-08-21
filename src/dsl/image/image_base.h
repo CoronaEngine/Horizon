@@ -6,7 +6,7 @@
 
 #include "core/stl.h"
 #include "core/image/image_format.h"
-#include "core/numeric/basic_types.h"
+#include "math/basic_types.h"
 #include "core/concepts.h"
 
 namespace horizon::core {

@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "core/type_system/type_desc.h"
+#include "ast/type_desc.h"
 #include "../core/var.h"
 #include "soa.h"
 

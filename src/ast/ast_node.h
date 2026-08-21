@@ -6,7 +6,7 @@
 
 #include "core/stl.h"
 #include "core/util/logging.h"
-#include "core/type.h"
+#include "math/storage_traits.h"
 #include "core/concepts.h"
 #include "variable.h"
 #include "op.h"

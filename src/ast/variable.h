@@ -8,7 +8,7 @@
 #include <utility>
 #include "core/stl.h"
 #include "core/util/hash.h"
-#include "core/type.h"
+#include "math/storage_traits.h"
 
 namespace horizon::ast {
 using namespace horizon::core;

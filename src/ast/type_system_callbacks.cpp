@@ -2,7 +2,7 @@
 // Created by Zero on 30/04/2022.
 //
 
-#include "core/type.h"
+#include "math/storage_traits.h"
 #include "function.h"
 
 namespace horizon::ast {

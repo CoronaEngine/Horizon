@@ -63,9 +63,9 @@ Core 是四个模块的基础层，主要内容包括：
 - 动态 Buffer 的布局描述、编码和主机端存储。
 - 基础并发、平台、动态库和图像设施。
 
-Core 对上层提供稳定的基础类型和公共服务。目标架构中，Core 不应知道 AST 节点、DSL 包装类型或 DSL 的构造过程。
+Core 对上层提供稳定的基础类型和公共服务。Core 不应知道 Math 的具体类型，也不应知道 AST 节点、DSL 包装类型或 DSL 的构造过程。
 
-当前 Core 中仍存在对 Math 类型的直接引用。要实现严格的目标分层，需要将数学类型适配逻辑移到 Math 或独立扩展点，避免 Core 与 Math 相互包含。
+Core 直接拥有类型系统和动态 Buffer；Math 只通过 Core 提供的布局 traits 和标量存储扩展点接入自己的向量、矩阵、real 与 half。Core 的公共头文件不能包含 Math。
 
 关键入口包括：
 
@@ -74,6 +74,9 @@ Core 对上层提供稳定的基础类型和公共服务。目标架构中，Cor
 - [`src/core/type.h`](../../src/core/type.h)
 - [`src/core/type_system/`](../../src/core/type_system/)
 - [`src/core/dynamic_buffer/`](../../src/core/dynamic_buffer/)
+- [`src/core/type_system/precision_policy.h`](../../src/core/type_system/precision_policy.h)
+- [`src/math/storage_traits.h`](../../src/math/storage_traits.h)
+- [`src/math/type_system/`](../../src/math/type_system/)
 
 ## 5. Math
 
@@ -86,7 +89,7 @@ Math 提供语言层共享的数值类型和算法，主要包括：
 
 Math 应建立在 Core 的容器、traits 和基础工具之上，不应依赖 AST 或 DSL。
 
-当前部分 Math 头文件仍直接包含 DSL，并为 DSL `Var` 等类型提供特化。这是从 Ocarina 单一命名空间拆分后保留下来的迁移债务。目标方案应由 DSL 在自己的命名空间中扩展 Math traits，或者由 Math 提供不感知 DSL 具体类型的扩展点。
+Math 当前不直接包含 AST 或 DSL。DSL 对 Math traits 的扩展仍是后续需要继续收敛的兼容代码，不能反向加入 Math 的公共头文件。
 
 关键入口包括：
 
@@ -94,7 +97,7 @@ Math 应建立在 Core 的容器、traits 和基础工具之上，不应依赖 A
 - [`src/math/basic_traits.h`](../../src/math/basic_traits.h)
 - [`src/math/vector_types.h`](../../src/math/vector_types.h)
 - [`src/math/matrix_types.h`](../../src/math/matrix_types.h)
-- [`src/math/base.h`](../../src/math/base.h)
+- [`src/math/storage_traits.h`](../../src/math/storage_traits.h)
 
 ## 6. AST
 
@@ -182,7 +185,7 @@ DSL 不应直接 `new` AST 节点，也不应复制 AST 节点或 Function 状�
 
 ## 8. 当前依赖状态
 
-当前代码已经拆分为四个 `horizon` 子命名空间，但文件依赖尚未完全达到目标分层：
+当前代码已经拆分为四个 `horizon` 子命名空间，Core 与 Math 的依赖边界已经收敛为单向：
 
 ```mermaid
 flowchart LR
@@ -191,9 +194,7 @@ flowchart LR
     AST[ast]
     DSL[dsl]
 
-    Core --> Math
     Math --> Core
-    Math --> DSL
     AST --> Core
     AST --> Math
     DSL --> Core
@@ -201,10 +202,10 @@ flowchart LR
     DSL --> AST
 ```
 
-主要迁移债务：
+仍需继续处理的迁移债务：
 
-- Core 与 Math 仍存在双向包含。
-- Math 中仍有针对 DSL 类型的前置声明、特化或直接包含。
+- Math target 中仍保留面向 Core 扩展点的数值布局适配代码；这些适配不得回流为 Core 对 Math 的直接依赖。
+- DSL 中仍有针对 Math 类型的兼容特化，应继续保持在 DSL 侧。
 - 模块内部使用了部分兼容性 `using namespace`，会弱化类型真实所有者的可见性。
 - 不同模块过去共享的 `detail` 已经拆分，仍需继续核对特化和辅助函数的真实归属。
 - DSL 的部分实现会进入尚未迁移的旧 generator、RHI 或其他 Ocarina 模块。
@@ -213,9 +214,9 @@ flowchart LR
 
 ## 9. 构建接入状态
 
-这四个目录目前尚未全部接入根工程的 `src/CMakeLists.txt`。当前 `Horizon` target 的成功构建不能证明这些目录已经通过完整编译。
+这四个目录已经接入根工程的 `src/CMakeLists.txt`，并分别生成 `horizon-core`、`horizon-math`、`horizon-ast` 和 `horizon-dsl` target。测试 target 默认启用，用于验证 Math 运算和 Core/Math 依赖边界。
 
-各目录中的局部 `CMakeLists.txt` 仍保留部分 Ocarina 时代的 target 名称和依赖关系，应视为迁移输入，而不是 Horizon 最终构建结构的权威定义。
+各目录中的局部 `CMakeLists.txt` 已按 Horizon target 命名；旧 Ocarina 目录不属于本架构的验证范围。
 
 修改这四个模块时至少需要：
 
@@ -230,11 +231,11 @@ flowchart LR
 建议按照基础依赖从下到上的顺序收敛：
 
 1. 稳定 Core 的公共类型、类型系统和扩展机制。
-2. 解除 Core 与 Math 的双向依赖，使 Math 单向依赖 Core。
+2. [已完成] 解除 Core 与 Math 的双向依赖，使 Math 单向依赖 Core。
 3. 将 Math 中的 DSL 感知逻辑迁回 DSL，使 Math 不再依赖 DSL。
 4. 稳定 AST 的节点所有权、Context、Validator 和 Visitor 接口。
 5. 让 DSL 只通过 AST 公共构建接口生成节点。
-6. 最后再把四个模块正式接入 Horizon 的 CMake target 和验证体系。
+6. 持续收敛兼容层，并通过依赖边界检查和测试保持四个模块的构建与验证。
 
 任何阶段都必须保持代码处于可解释状态：临时兼容层要标明用途，当前状态和最终目标要分别记录，不能以目标文档替代实际验证。
 

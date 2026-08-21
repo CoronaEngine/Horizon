@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "math/basic_types.h"
+#include "math/storage_traits.h"
 #include "core/dynamic_buffer/dynamic_buffer_layout_common.h"
 #include "core/dynamic_buffer/dynamic_buffer_layout_codec.h"
 #include "core/type_system/precision_policy.h"

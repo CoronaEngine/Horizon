@@ -105,7 +105,6 @@
 
 #define OC_ASSERT(...) assert(__VA_ARGS__)
 
-namespace horizon::math {}
 namespace horizon::ast {}
 namespace horizon::dsl {}
 

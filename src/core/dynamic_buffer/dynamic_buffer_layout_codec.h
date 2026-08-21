@@ -8,8 +8,6 @@
 #include "core/dynamic_buffer/host_byte_buffer.h"
 #include "core/type_system/precision_policy.h"
 #include "core/type.h"
-#include "core/numeric/half.h"
-#include "core/numeric/real.h"
 
 namespace horizon::core {
 
@@ -49,7 +47,7 @@ void for_each_array_element_impl(Func &&func,
 template<typename T, typename Func>
 void for_each_array_element(Func &&func) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    constexpr size_t element_count = array_dimension_v<raw_t>;
+    constexpr size_t element_count = static_type_layout_traits<raw_t>::dimension;
     for_each_array_element_impl<raw_t>(std::forward<Func>(func),
                                        std::make_index_sequence<element_count>{});
 }
@@ -81,7 +79,9 @@ template<typename T>
 template<size_t I, typename T>
 [[nodiscard]] decltype(auto) member_ref(T &value) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_array_v<raw_t> || is_vector_v<raw_t> || is_matrix_v<raw_t>) {
+    if constexpr (static_type_layout_traits<raw_t>::is_array ||
+                  static_type_layout_traits<raw_t>::is_vector ||
+                  static_type_layout_traits<raw_t>::is_matrix) {
         return (value[I]);
     } else {
         using member_t = tuple_element_t<I, struct_member_tuple_t<raw_t>>;
@@ -94,7 +94,9 @@ template<size_t I, typename T>
 template<size_t I, typename T>
 [[nodiscard]] decltype(auto) member_ref(const T &value) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_array_v<raw_t> || is_vector_v<raw_t> || is_matrix_v<raw_t>) {
+    if constexpr (static_type_layout_traits<raw_t>::is_array ||
+                  static_type_layout_traits<raw_t>::is_vector ||
+                  static_type_layout_traits<raw_t>::is_matrix) {
         return (value[I]);
     } else {
         using member_t = tuple_element_t<I, struct_member_tuple_t<raw_t>>;
@@ -105,12 +107,15 @@ template<size_t I, typename T>
 }
 
 template<typename T>
-constexpr bool is_soa_atomic_v = is_scalar_v<T> || is_vector_v<T>;
+constexpr bool is_soa_atomic_v = static_type_layout_traits<std::remove_cvref_t<T>>::is_scalar ||
+                                 static_type_layout_traits<std::remove_cvref_t<T>>::is_vector;
 
 template<typename Member, typename T>
 [[nodiscard]] decltype(auto) runtime_member_ref(T &value, size_t index) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_array_v<raw_t> || is_vector_v<raw_t> || is_matrix_v<raw_t>) {
+    if constexpr (static_type_layout_traits<raw_t>::is_array ||
+                  static_type_layout_traits<raw_t>::is_vector ||
+                  static_type_layout_traits<raw_t>::is_matrix) {
         return value[index];
     } else {
         return struct_member_at<Member>(value, index);
@@ -223,17 +228,7 @@ void encode_scalar(HostByteBuffer &dst,
                    StoragePrecisionPolicy policy,
                    bool direct_array_element) noexcept {
     (void)direct_array_element;
-    if constexpr (is_real_v<T>) {
-        if (policy.policy == PrecisionPolicy::force_f32) {
-            dst.store<float>(offset, static_cast<float>(value));
-        } else {
-            dst.store<uint16_t>(offset, float_to_half(static_cast<float>(value)));
-        }
-    } else if constexpr (is_half_v<T>) {
-        dst.store<uint16_t>(offset, value.bits());
-    } else {
-        dst.store<T>(offset, value);
-    }
+    scalar_storage_traits<std::remove_cvref_t<T>>::store(dst, offset, value, policy);
 }
 
 template<typename T>
@@ -242,16 +237,7 @@ template<typename T>
                               StoragePrecisionPolicy policy,
                               bool direct_array_element) noexcept {
     (void)direct_array_element;
-    if constexpr (is_real_v<T>) {
-        if (policy.policy == PrecisionPolicy::force_f32) {
-            return real{src.load<float>(offset)};
-        }
-        return real{half_to_float(src.load<uint16_t>(offset))};
-    } else if constexpr (is_half_v<T>) {
-        return half{half_to_float(src.load<uint16_t>(offset))};
-    } else {
-        return src.load<T>(offset);
-    }
+    return scalar_storage_traits<std::remove_cvref_t<T>>::load(src, offset, policy);
 }
 
 template<typename T>
@@ -261,32 +247,32 @@ void encode_aos_value(HostByteBuffer &dst,
                       StoragePrecisionPolicy policy,
                       bool direct_array_element) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_scalar_v<raw_t>) {
+    if constexpr (static_type_layout_traits<raw_t>::is_scalar) {
         encode_scalar(dst, offset, value, policy, direct_array_element);
-    } else if constexpr (is_vector_v<raw_t>) {
-        using element_t = type_element_t<raw_t>;
-        constexpr size_t dim = vector_dimension_v<raw_t>;
+    } else if constexpr (static_type_layout_traits<raw_t>::is_vector) {
+        using element_t = static_type_element_t<raw_t>;
+        constexpr size_t dim = static_type_layout_traits<raw_t>::dimension;
         size_t total_size = resolved_size<raw_t>(policy);
         size_t element_size = resolved_size<element_t>(policy);
         zero_bytes<raw_t>(dst, offset, total_size);
         for (size_t index = 0; index < dim; ++index) {
             encode_scalar<element_t>(dst, offset + index * element_size, value[index], policy, false);
         }
-    } else if constexpr (is_matrix_v<raw_t>) {
-        constexpr size_t dim = matrix_dimension_v<raw_t>;
-        using column_t = tuple_element_t<0, struct_member_tuple_t<raw_t>>;
+    } else if constexpr (static_type_layout_traits<raw_t>::is_matrix) {
+        constexpr size_t dim = static_type_layout_traits<raw_t>::dimension;
+        using column_t = static_type_element_t<raw_t>;
         size_t column_size = resolved_size<column_t>(policy);
         for (size_t index = 0; index < dim; ++index) {
             encode_aos_value<column_t>(dst, offset + index * column_size, value[index], policy, false);
         }
-    } else if constexpr (is_array_v<raw_t>) {
-        using element_t = array_element_t<raw_t>;
-        constexpr size_t dim = array_dimension_v<raw_t>;
+    } else if constexpr (static_type_layout_traits<raw_t>::is_array) {
+        using element_t = static_type_element_t<raw_t>;
+        constexpr size_t dim = static_type_layout_traits<raw_t>::dimension;
         size_t element_size = resolved_size_in_context<element_t>(policy, true);
         for (size_t index = 0; index < dim; ++index) {
             encode_aos_value<element_t>(dst, offset + index * element_size, value[index], policy, true);
         }
-    } else if constexpr (is_struct_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_structure) {
         zero_bytes<raw_t>(dst, offset, resolved_size<raw_t>(policy));
         encode_aos_struct_members(dst, offset, value, policy);
     } else {
@@ -300,36 +286,36 @@ template<typename T>
                                  StoragePrecisionPolicy policy,
                                  bool direct_array_element) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_scalar_v<raw_t>) {
+    if constexpr (static_type_layout_traits<raw_t>::is_scalar) {
         return decode_scalar<raw_t>(src, offset, policy, direct_array_element);
-    } else if constexpr (is_vector_v<raw_t>) {
-        using element_t = type_element_t<raw_t>;
-        constexpr size_t dim = vector_dimension_v<raw_t>;
+    } else if constexpr (static_type_layout_traits<raw_t>::is_vector) {
+        using element_t = static_type_element_t<raw_t>;
+        constexpr size_t dim = static_type_layout_traits<raw_t>::dimension;
         size_t element_size = resolved_size<element_t>(policy);
         raw_t value{};
         for (size_t index = 0; index < dim; ++index) {
             value[index] = decode_scalar<element_t>(src, offset + index * element_size, policy, false);
         }
         return value;
-    } else if constexpr (is_matrix_v<raw_t>) {
-        constexpr size_t dim = matrix_dimension_v<raw_t>;
-        using column_t = tuple_element_t<0, struct_member_tuple_t<raw_t>>;
+    } else if constexpr (static_type_layout_traits<raw_t>::is_matrix) {
+        constexpr size_t dim = static_type_layout_traits<raw_t>::dimension;
+        using column_t = static_type_element_t<raw_t>;
         size_t column_size = resolved_size<column_t>(policy);
         raw_t value{};
         for (size_t index = 0; index < dim; ++index) {
             value[index] = decode_aos_value<column_t>(src, offset + index * column_size, policy, false);
         }
         return value;
-    } else if constexpr (is_array_v<raw_t>) {
-        using element_t = array_element_t<raw_t>;
-        constexpr size_t dim = array_dimension_v<raw_t>;
+    } else if constexpr (static_type_layout_traits<raw_t>::is_array) {
+        using element_t = static_type_element_t<raw_t>;
+        constexpr size_t dim = static_type_layout_traits<raw_t>::dimension;
         size_t element_size = resolved_size_in_context<element_t>(policy, true);
         raw_t value{};
         for (size_t index = 0; index < dim; ++index) {
             value[index] = decode_aos_value<element_t>(src, offset + index * element_size, policy, true);
         }
         return value;
-    } else if constexpr (is_struct_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_structure) {
         return decode_aos_struct_members<raw_t>(src, offset, policy);
     } else {
         static_assert(always_false_v<raw_t>, "Unsupported type for DynamicBufferLayoutCodec::decode_aos_value");
@@ -363,9 +349,9 @@ template<typename T, typename Getter>
     auto &getter_ref = getter;
     size_t current = offset;
     for_each_array_element<raw_t>([&]<size_t Index>(std::integral_constant<size_t, Index>) {
-        current += encode_soa_from_getter<array_element_t<raw_t>>(
+        current += encode_soa_from_getter<static_type_element_t<raw_t>>(
             count, dst, current, policy,
-            make_const_struct_member_getter<array_element_t<raw_t>>(getter_ref, Index),
+            make_const_struct_member_getter<static_type_element_t<raw_t>>(getter_ref, Index),
             true);
     });
     return current - offset;
@@ -398,9 +384,9 @@ template<typename T, typename Getter>
     auto &getter_ref = getter;
     size_t current = offset;
     for_each_array_element<raw_t>([&]<size_t Index>(std::integral_constant<size_t, Index>) {
-        current += decode_soa_to_getter<array_element_t<raw_t>>(
+        current += decode_soa_to_getter<static_type_element_t<raw_t>>(
             count, src, current, policy,
-            make_struct_member_getter<array_element_t<raw_t>>(getter_ref, Index),
+            make_struct_member_getter<static_type_element_t<raw_t>>(getter_ref, Index),
             true);
     });
     return current - offset;
@@ -426,11 +412,11 @@ template<typename T, typename Getter>
             encode_aos_value<raw_t>(dst, offset + index * stride, getter(index), policy, direct_array_element);
         }
         return count * stride;
-    } else if constexpr (is_matrix_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_matrix) {
         return encode_soa_struct_like<raw_t>(count, dst, offset, policy, std::forward<Getter>(getter));
-    } else if constexpr (is_array_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_array) {
         return encode_soa_array_like<raw_t>(count, dst, offset, policy, std::forward<Getter>(getter));
-    } else if constexpr (is_struct_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_structure) {
         return encode_soa_struct_like<raw_t>(count, dst, offset, policy, std::forward<Getter>(getter));
     } else {
         static_assert(always_false_v<raw_t>, "Unsupported type for DynamicBufferLayoutCodec::encode_soa_from_getter");
@@ -451,11 +437,11 @@ template<typename T, typename Getter>
             getter(index) = decode_aos_value<raw_t>(src, offset + index * stride, policy, direct_array_element);
         }
         return count * stride;
-    } else if constexpr (is_matrix_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_matrix) {
         return decode_soa_struct_like<raw_t>(count, src, offset, policy, std::forward<Getter>(getter));
-    } else if constexpr (is_array_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_array) {
         return decode_soa_array_like<raw_t>(count, src, offset, policy, std::forward<Getter>(getter));
-    } else if constexpr (is_struct_v<raw_t>) {
+    } else if constexpr (static_type_layout_traits<raw_t>::is_structure) {
         return decode_soa_struct_like<raw_t>(count, src, offset, policy, std::forward<Getter>(getter));
     } else {
         static_assert(always_false_v<raw_t>, "Unsupported type for DynamicBufferLayoutCodec::decode_soa_to_getter");

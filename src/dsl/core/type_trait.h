@@ -7,7 +7,7 @@
 #include "core/stl.h"
 #include <type_traits>
 #include "core/concepts.h"
-#include "core/type.h"
+#include "math/storage_traits.h"
 #include "math/basic_traits.h"
 
 namespace horizon::dsl {

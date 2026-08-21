@@ -6,8 +6,6 @@
 
 #include "core/type_system/precision_policy.h"
 #include "core/type.h"
-#include "core/numeric/half.h"
-#include "core/numeric/real.h"
 
 namespace horizon::core::detail {
 
@@ -89,25 +87,13 @@ template<typename T>
 template<typename T>
 [[nodiscard]] inline size_t resolved_scalar_size(StoragePrecisionPolicy policy) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_real_v<raw_t>) {
-        return policy.policy == PrecisionPolicy::force_f32 ? sizeof(float) : sizeof(uint16_t);
-    } else if constexpr (is_half_v<raw_t>) {
-        return sizeof(uint16_t);
-    } else {
-        return sizeof(raw_t);
-    }
+    return scalar_storage_traits<raw_t>::size(policy);
 }
 
 template<typename T>
 [[nodiscard]] inline size_t resolved_scalar_alignment(StoragePrecisionPolicy policy) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    if constexpr (is_real_v<raw_t>) {
-        return policy.policy == PrecisionPolicy::force_f32 ? alignof(float) : alignof(uint16_t);
-    } else if constexpr (is_half_v<raw_t>) {
-        return alignof(uint16_t);
-    } else {
-        return alignof(raw_t);
-    }
+    return scalar_storage_traits<raw_t>::alignment(policy);
 }
 
 template<typename Adapter, typename T>
@@ -279,62 +265,55 @@ struct CompileTimeTypeLayoutAdapter {
     template<typename Node>
     [[nodiscard]] static constexpr bool is_scalar(Node) noexcept {
         using raw_t = typename Node::type;
-        return is_scalar_v<raw_t>;
+        return static_type_layout_traits<raw_t>::is_scalar;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_vector(Node) noexcept {
         using raw_t = typename Node::type;
-        return is_vector_v<raw_t>;
+        return static_type_layout_traits<raw_t>::is_vector;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_matrix(Node) noexcept {
         using raw_t = typename Node::type;
-        return is_matrix_v<raw_t>;
+        return static_type_layout_traits<raw_t>::is_matrix;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_array(Node) noexcept {
         using raw_t = typename Node::type;
-        return is_array_v<raw_t>;
+        return static_type_layout_traits<raw_t>::is_array;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_structure(Node) noexcept {
         using raw_t = typename Node::type;
-        return is_struct_v<raw_t>;
+        return static_type_layout_traits<raw_t>::is_structure;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr auto element(Node) noexcept {
         using raw_t = typename Node::type;
-        if constexpr (is_vector_v<raw_t>) {
-            return StaticTypeKey<type_element_t<raw_t>>{};
-        } else if constexpr (is_matrix_v<raw_t>) {
-            return StaticTypeKey<tuple_element_t<0, struct_member_tuple_t<raw_t>>>{};
+        if constexpr (static_type_layout_traits<raw_t>::is_vector ||
+                      static_type_layout_traits<raw_t>::is_matrix ||
+                      static_type_layout_traits<raw_t>::is_array) {
+            return StaticTypeKey<static_type_element_t<raw_t>>{};
         } else {
-            return StaticTypeKey<array_element_t<raw_t>>{};
+            return StaticTypeKey<static_type_element_t<raw_t>>{};
         }
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr size_t dimension(Node) noexcept {
         using raw_t = typename Node::type;
-        if constexpr (is_vector_v<raw_t>) {
-            return vector_dimension_v<raw_t>;
-        } else if constexpr (is_matrix_v<raw_t>) {
-            return matrix_dimension_v<raw_t>;
-        } else {
-            return array_dimension_v<raw_t>;
-        }
+        return static_type_layout_traits<raw_t>::dimension;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr size_t vector_storage_width(Node) noexcept {
         using raw_t = typename Node::type;
-        constexpr size_t dim = vector_dimension_v<raw_t>;
-        return dim == 3 ? 4u : dim;
+        return static_type_layout_traits<raw_t>::vector_storage_width;
     }
 
     template<typename Node>

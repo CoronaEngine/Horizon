@@ -6,7 +6,7 @@
 
 #include "core/dynamic_buffer/dynamic_buffer_field_access.h"
 #include "core/dynamic_buffer/dynamic_buffer_layout_common.h"
-#include "core/type_system/type_desc.h"
+#include "core/util/string_util.h"
 
 namespace horizon::core {
 
@@ -19,10 +19,10 @@ namespace {
     }
     switch (policy.policy) {
         case PrecisionPolicy::force_f16:
-            return string(TypeDesc<half>::description());
+            return "half";
         case PrecisionPolicy::force_f32:
         default:
-            return string(TypeDesc<float>::description());
+            return "float";
     }
 }
 

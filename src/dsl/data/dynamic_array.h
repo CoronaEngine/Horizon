@@ -7,7 +7,7 @@
 #include "core/stl.h"
 #include "../core/ref.h"
 #include "core/util/string_util.h"
-#include "core/type_system/type_desc.h"
+#include "ast/type_desc.h"
 #include "../api/syntax.h"
 
 namespace horizon::dsl {

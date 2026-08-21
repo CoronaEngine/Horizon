@@ -2,7 +2,7 @@
 // Created by Zero on 30/04/2022.
 //
 
-#include "core/type.h"
+#include "core/type_system/type_desc.h"
 #include "core/type_system/type_registry.h"
 
 #include <cctype>
@@ -177,31 +177,9 @@ void TypeParser::parse_matrix_locked(Type *type, horizon::core::string_view desc
     auto tmp_desc = horizon::core::format("vector<{},{}>", type_str, N);
     type->members_.push_back(parse_type_locked(tmp_desc));
 
-#define OC_SIZE_ALIGN(TypeName, NN, MM)                       \
-    if (#TypeName == type_str && N == (NN) && M == (MM)) {    \
-        type->size_ = sizeof(Matrix<TypeName, NN, MM>);       \
-        type->alignment_ = alignof(Matrix<TypeName, NN, MM>); \
-    } else
-
-#define OC_SIZE_ALIGN_FOR_TYPE(type_name) \
-    OC_SIZE_ALIGN(type_name, 2, 2)        \
-    OC_SIZE_ALIGN(type_name, 2, 3)        \
-    OC_SIZE_ALIGN(type_name, 2, 4)        \
-    OC_SIZE_ALIGN(type_name, 3, 2)        \
-    OC_SIZE_ALIGN(type_name, 3, 3)        \
-    OC_SIZE_ALIGN(type_name, 3, 4)        \
-    OC_SIZE_ALIGN(type_name, 4, 2)        \
-    OC_SIZE_ALIGN(type_name, 4, 3)        \
-    OC_SIZE_ALIGN(type_name, 4, 4)
-
-    OC_SIZE_ALIGN_FOR_TYPE(float)
-    OC_SIZE_ALIGN_FOR_TYPE(real)
-    OC_SIZE_ALIGN_FOR_TYPE(half) {
-        OC_ERROR("invalid matrix dimension <{}, {}>!", N, M);
-    }
-
-#undef OC_SIZE_ALIGN_FOR_TYPE
-#undef OC_SIZE_ALIGN
+    const auto *member = type->members_.front();
+    type->size_ = member->size() * M;
+    type->alignment_ = member->alignment();
 }
 
 void TypeParser::parse_struct_locked(Type *type, horizon::core::string_view desc) noexcept {
@@ -300,27 +278,62 @@ const Type *TypeParser::parse_type_locked(horizon::core::string_view desc) noexc
     OC_USING_SV
     auto type = horizon::core::make_unique<Type>();
 
-#define OC_PARSE_BASIC_TYPE(T, TAG)    \
-    if (desc == #T##sv) {              \
-        type->size_ = sizeof(T);       \
-        type->tag_ = Type::Tag::TAG;   \
-        type->alignment_ = alignof(T); \
-        type->dimension_ = 1;          \
-    } else
-
-    OC_PARSE_BASIC_TYPE(int, INT)
-    OC_PARSE_BASIC_TYPE(uint, UINT)
-    OC_PARSE_BASIC_TYPE(bool, BOOL)
-    OC_PARSE_BASIC_TYPE(float, FLOAT)
-    OC_PARSE_BASIC_TYPE(real, REAL)
-    OC_PARSE_BASIC_TYPE(half, HALF)
-    OC_PARSE_BASIC_TYPE(uchar, UCHAR)
-    OC_PARSE_BASIC_TYPE(char, CHAR)
-    OC_PARSE_BASIC_TYPE(ushort, USHORT)
-    OC_PARSE_BASIC_TYPE(ulong, ULONG)
-    OC_PARSE_BASIC_TYPE(short, SHORT)
-
-#undef OC_PARSE_BASIC_TYPE
+    if (desc == "int"sv) {
+        type->size_ = sizeof(int);
+        type->tag_ = Type::Tag::INT;
+        type->alignment_ = alignof(int);
+        type->dimension_ = 1;
+    } else if (desc == "uint"sv) {
+        type->size_ = sizeof(uint);
+        type->tag_ = Type::Tag::UINT;
+        type->alignment_ = alignof(uint);
+        type->dimension_ = 1;
+    } else if (desc == "bool"sv) {
+        type->size_ = sizeof(bool);
+        type->tag_ = Type::Tag::BOOL;
+        type->alignment_ = alignof(bool);
+        type->dimension_ = 1;
+    } else if (desc == "float"sv) {
+        type->size_ = sizeof(float);
+        type->tag_ = Type::Tag::FLOAT;
+        type->alignment_ = alignof(float);
+        type->dimension_ = 1;
+    } else if (desc == "real"sv) {
+        type->size_ = sizeof(float);
+        type->tag_ = Type::Tag::REAL;
+        type->alignment_ = alignof(float);
+        type->dimension_ = 1;
+    } else if (desc == "half"sv) {
+        type->size_ = sizeof(uint16_t);
+        type->tag_ = Type::Tag::HALF;
+        type->alignment_ = alignof(uint16_t);
+        type->dimension_ = 1;
+    } else if (desc == "uchar"sv) {
+        type->size_ = sizeof(uchar);
+        type->tag_ = Type::Tag::UCHAR;
+        type->alignment_ = alignof(uchar);
+        type->dimension_ = 1;
+    } else if (desc == "char"sv) {
+        type->size_ = sizeof(char);
+        type->tag_ = Type::Tag::CHAR;
+        type->alignment_ = alignof(char);
+        type->dimension_ = 1;
+    } else if (desc == "ushort"sv) {
+        type->size_ = sizeof(ushort);
+        type->tag_ = Type::Tag::USHORT;
+        type->alignment_ = alignof(ushort);
+        type->dimension_ = 1;
+    } else if (desc == "ulong"sv) {
+        type->size_ = sizeof(ulong);
+        type->tag_ = Type::Tag::ULONG;
+        type->alignment_ = alignof(ulong);
+        type->dimension_ = 1;
+    } else if (desc == "short"sv) {
+        type->size_ = sizeof(short);
+        type->tag_ = Type::Tag::SHORT;
+        type->alignment_ = alignof(short);
+        type->dimension_ = 1;
+    }
 
     if (desc.starts_with("vector")) {
         parse_vector_locked(type.get(), desc);
