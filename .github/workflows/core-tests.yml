@@ -1,0 +1,47 @@
+name: Core Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Windows Core Tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install build tools
+        run: python -m pip install --upgrade conan cmake ninja
+
+      - name: Prefer pip build tools
+        shell: pwsh
+        run: |
+          $scriptsPath = python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+          $scriptsPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify CMake version
+        run: cmake --version
+
+      - name: Build all registered test targets
+        run: python tools/dev.py build horizon-tests --configuration Debug --target-family core
+
+      - name: Verify generated tuple header
+        run: python src/core/generate_tuple.py --max-arity 32 --check
+
+      - name: Run all registered tests
+        run: ctest --test-dir build/conan/core/debug -C Debug --output-on-failure

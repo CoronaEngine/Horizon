@@ -56,7 +56,7 @@ class WorkflowTests(unittest.TestCase):
             target_family_for_targets(["HorizonExamples", "ocarina-native"])
 
     def test_target_families_select_conan_options(self) -> None:
-        self.assertEqual(conan_options("core"), [])
+        self.assertEqual(conan_options("core"), ["&:with_tests=True"])
         self.assertEqual(conan_options("examples"), ["&:with_examples=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),

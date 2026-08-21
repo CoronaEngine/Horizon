@@ -33,7 +33,7 @@ RECIPE_TOGGLE_ENV = "HORIZON_CONAN_EXPORT_LOCAL_RECIPES"
 
 
 TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
-    "core": (),
+    "core": ("&:with_tests=True",),
     "tools": ("&:with_tools=True",),
     "examples": ("&:with_examples=True",),
     "ocarina": ("&:with_ocarina=True", "&:with_cuda=True"),

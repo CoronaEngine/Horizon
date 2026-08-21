@@ -5,6 +5,9 @@ CMakeUserPresets.json
 .cache/
 .idea/
 .github/
+!.github/
+!.github/workflows/
+!.github/workflows/core-tests.yml
 .venv/
 
 # 本地代码索引/工具运行态
