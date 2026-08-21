@@ -5,6 +5,7 @@
 #pragma once
 
 #include "header.h"
+#include "tuple.h"
 #include <functional>
 #include <deque>
 #include <stack>
@@ -280,42 +281,6 @@ using std::stack;
 using std::unordered_map;
 using std::unordered_set;
 using std::vector;
-
-// tuple
-using std::get;
-using std::tuple;
-
-namespace detail {
-template<typename T>
-struct tuple_size_impl {
-    static_assert(horizon::core::always_false_v<T>);
-};
-
-template<typename... Ts>
-struct tuple_size_impl<std::tuple<Ts...>> : public std::tuple_size<std::tuple<Ts...>> {};
-
-}// namespace detail
-template<typename T>
-using tuple_size = typename detail::tuple_size_impl<std::remove_cvref_t<T>>;
-
-template<typename T>
-constexpr auto tuple_size_v = tuple_size<T>::value;
-
-template<size_t i, typename T>
-struct tuple_element {
-    static_assert(horizon::core::always_false_v<T>);
-};
-
-template<size_t i, typename... Ts>
-struct tuple_element<i, std::tuple<Ts...>> : public std::tuple_element<i, std::tuple<Ts...>> {};
-
-template<size_t i, typename T>
-using tuple_element_t = typename tuple_element<i, T>::type;
-
-template<size_t i, typename... Ts>
-auto tuple_get(const std::tuple<Ts...> &tp) noexcept {
-    return std::get<i>(tp);
-}
 
 template<size_t i = 0, typename Tuple, typename Func>
 void traverse_tuple(Tuple &&tuple, Func &&func) noexcept {
