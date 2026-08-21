@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include "basic_types.h"
-#include "interval.h"
-#include "math/base.h"
+#include "math/basic_types.h"
+#include "math/interval.h"
+#include "base.h"
 #include "dsl/core/var.h"
 #include "core/type_system/type_desc.h"
 #include "dsl/types/struct.h"

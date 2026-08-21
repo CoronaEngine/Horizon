@@ -9,7 +9,7 @@
 #include "../core/var.h"
 #include "../api/builtin.h"
 #include "rhi/resources/managed.h"
-#include "math/box.h"
+#include "dsl/math/box.h"
 #include "../api/stmt_builder.h"
 
 namespace horizon::dsl {

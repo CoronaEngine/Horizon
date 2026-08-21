@@ -4,15 +4,13 @@
 
 #pragma once
 
-#include "math/basic_traits.h"
 #include "core/concepts.h"
-#include "math/base.h"
 #include "core/util/logging.h"
 
 namespace horizon::core {
 
 template<typename T, typename U>
-requires is_integral_v<T> && is_integral_v<U>
+requires concepts::integral<T> && concepts::integral<U>
 OC_NODISCARD static constexpr auto
 mem_offset(T offset, U alignment) noexcept {
     return (offset + alignment - 1u) / alignment * alignment;
@@ -36,7 +34,7 @@ inline size_t structure_size(horizon::core::span<const MemoryBlock> members) noe
 inline size_t structure_alignment(span<const MemoryBlock> members) noexcept {
     size_t ret = 0;
     for (const MemoryBlock block : members) {
-        ret = max(block.alignment, ret);
+        ret = std::max(block.alignment, ret);
     }
     return ret;
 }
@@ -55,7 +53,7 @@ requires concepts::subscriptable<T>
             return i;
         }
     }
-    return InvalidUI32;
+    return std::numeric_limits<uint>::max();
 }
 
 inline namespace size_literals {
@@ -64,11 +62,11 @@ inline namespace size_literals {
 }
 
 [[nodiscard]] constexpr auto operator""_mb(size_t bytes) noexcept {
-    return static_cast<size_t>(bytes * sqr(1024u));
+    return static_cast<size_t>(bytes * 1024u * 1024u);
 }
 
 [[nodiscard]] constexpr auto operator""_gb(size_t bytes) noexcept {
-    return static_cast<size_t>(bytes * Pow<3>(1024u));
+    return static_cast<size_t>(bytes * 1024u * 1024u * 1024u);
 }
 }// namespace size_literals
 
@@ -77,11 +75,11 @@ inline namespace size_literals {
 }
 
 [[nodiscard]] constexpr float to_mb(size_t bytes) noexcept {
-    return static_cast<float>(bytes) / sqr(1024);
+    return static_cast<float>(bytes) / (1024.0f * 1024.0f);
 }
 
 [[nodiscard]] constexpr float to_gb(size_t bytes) noexcept {
-    return static_cast<double>(bytes) / Pow<3>(1024u);
+    return static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
 }
 
 [[nodiscard]] inline string bytes_string(size_t bytes) noexcept {

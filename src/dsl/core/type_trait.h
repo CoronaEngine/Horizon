@@ -132,15 +132,30 @@ constexpr bool is_valid_dsl_type_v = is_valid_dsl_type<T>::value;
 
 }// namespace horizon::dsl
 
+namespace horizon::math {
+template<typename T, size_t N>
+struct swizzle_vec<horizon::dsl::Var<T>, N> {
+    using type = horizon::dsl::Var<Vector<T, N>>;
+};
+}// namespace horizon::math
+
 namespace horizon::math::detail {
 template<typename T>
-struct remove_device_impl {
-    using type = horizon::dsl::expr_value_t<T>;
+struct remove_device_impl<horizon::dsl::Var<T>> {
+    using type = horizon::dsl::expr_value_t<horizon::dsl::Var<T>>;
 };
 
 template<typename T, size_t N, size_t... Indices>
 struct remove_device_impl<Swizzle<horizon::dsl::Var<T>, N, Indices...>> {
     using type = Swizzle<T, N, Indices...>;
+};
+
+template<typename T, size_t N, size_t... Indices>
+struct is_device_swizzle_impl<Swizzle<horizon::dsl::Var<T>, N, Indices...>> : std::true_type {};
+
+template<typename T, size_t N, size_t... Indices>
+struct swizzle_decay_impl<Swizzle<horizon::dsl::Var<T>, N, Indices...>> {
+    using type = typename Swizzle<horizon::dsl::Var<T>, N, Indices...>::vec_type;
 };
 }// namespace horizon::math::detail
 

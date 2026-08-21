@@ -8,8 +8,8 @@
 #include "core/dynamic_buffer/host_byte_buffer.h"
 #include "core/type_system/precision_policy.h"
 #include "core/type.h"
-#include "math/half.h"
-#include "math/real.h"
+#include "core/numeric/half.h"
+#include "core/numeric/real.h"
 
 namespace horizon::core {
 

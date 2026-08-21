@@ -6,13 +6,17 @@
 
 #include "core/header.h"
 #include "core/util/hash.h"
-#include "core/image/image_base.h"
+#include "core/image/image_format.h"
 #include "core/util/macro_map.h"
 #include "core/type_system/precision_policy.h"
 #include "core/stl.h"
-#include "math/basic_types.h"
+#include "core/numeric/basic_types.h"
 
 namespace horizon::core {
+
+// The numeric primitives are implemented as part of Core's foundation layer;
+// keep the historical Math names available to the type-system code.
+using namespace horizon::math;
 
 template<typename T>
 struct array_dimension {

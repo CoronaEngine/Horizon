@@ -7,7 +7,6 @@
 //#define XXH_INLINE_ALL   /* access definitions */
 #include "xxhash.h"
 #include "core/stl.h"
-#include "math/basic_types.h"
 #include "core/concepts.h"
 
 namespace horizon::core {
@@ -34,21 +33,6 @@ concept hashable_with_hash_code_method = requires(T x) {
     return XXH3_64bits_withSeed(data, size, seed);
 }
 
-namespace {
-template<typename T>
-struct is_3row_matrix {
-    static constexpr bool value = false;
-};
-
-template<typename T, size_t N>
-struct is_3row_matrix<Matrix<T, 3, N>> {
-    static constexpr bool value = true;
-};
-
-template<typename T>
-static constexpr bool is_3row_matrix_v = is_3row_matrix<std::remove_cvref_t<T>>::value;
-}// namespace
-
 [[nodiscard]] OC_CORE_API std::string_view hash_to_string(uint64_t hash) noexcept;
 
 class Hash64 {
@@ -72,20 +56,10 @@ public:
         } else if constexpr (concepts::string_viewable<T>) {
             std::string_view sv{std::forward<T>(s)};
             return xxh3_hash64(sv.data(), sv.size(), seed_);
-        } else if constexpr (is_vector3_v<T>) {
-            auto x = s;
-            return xxh3_hash64(&x, sizeof(vector_element_t<T>) * 3u, seed_);
-        } else if constexpr (is_3row_matrix_v<T>) {
-            ulong ret = seed_;
-            for (int i = 0; i < std::remove_cvref_t<T>::col_num; ++i) {
-                ret = Hash64{ret}((*this)(s[i]));
-            }
-            return ret;
         } else if constexpr (
             std::is_standard_layout_v<std::remove_cvref_t<T>> ||
             std::is_arithmetic_v<std::remove_cvref_t<T>> ||
-            std::is_enum_v<std::remove_cvref_t<T>> ||
-            is_basic_v<std::remove_cvref_t<T>>) {
+            std::is_enum_v<std::remove_cvref_t<T>>) {
             auto x = s;
             return xxh3_hash64(&x, sizeof(x), seed_);
         } else {

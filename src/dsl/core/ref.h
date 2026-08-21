@@ -67,7 +67,7 @@ public:
 public:
     Var<T> x{Function::current()->swizzle(Type::of<T>(), expression(), 0, 1)};
     Var<T> y{Function::current()->swizzle(Type::of<T>(), expression(), 1, 1)};
-#include "math/swizzle_inl/swizzle2.inl.h"
+#include "core/numeric/swizzle_inl/swizzle2.inl.h"
 };
 
 template<typename T>
@@ -95,7 +95,7 @@ public:
     Var<T> x{Function::current()->swizzle(Type::of<T>(), expression(), 0, 1)};
     Var<T> y{Function::current()->swizzle(Type::of<T>(), expression(), 1, 1)};
     Var<T> z{Function::current()->swizzle(Type::of<T>(), expression(), 2, 1)};
-#include "math/swizzle_inl/swizzle3.inl.h"
+#include "core/numeric/swizzle_inl/swizzle3.inl.h"
 };
 
 template<typename T>
@@ -125,7 +125,7 @@ public:
     Var<T> y{Function::current()->swizzle(Type::of<T>(), expression(), 1, 1)};
     Var<T> z{Function::current()->swizzle(Type::of<T>(), expression(), 2, 1)};
     Var<T> w{Function::current()->swizzle(Type::of<T>(), expression(), 3, 1)};
-#include "math/swizzle_inl/swizzle4.inl.h"
+#include "core/numeric/swizzle_inl/swizzle4.inl.h"
 };
 
 template<typename T, size_t N, size_t M>

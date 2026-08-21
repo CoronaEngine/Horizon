@@ -3,7 +3,6 @@
 //
 
 #include "stl.h"
-#include "EASTL/allocator.h"
 
 namespace horizon::core {
 
@@ -53,17 +52,16 @@ std::string get_file_name(const std::string &file_path) {
 
 namespace detail {
 void *allocator_allocate(size_t size, size_t alignment) noexcept {
-    return eastl::GetDefaultAllocator()->allocate(size, alignment, 0u);
+    return ::operator new(size, std::align_val_t(alignment));
 }
 
-void allocator_deallocate(void *p, size_t) noexcept {
-    eastl::GetDefaultAllocator()->deallocate(p, 0u);
+void allocator_deallocate(void *p, size_t alignment) noexcept {
+    ::operator delete(p, std::align_val_t(alignment));
 }
 
 void *allocator_reallocate(void *p, size_t size, size_t alignment) noexcept {
-    auto &&allocator = eastl::GetDefaultAllocator();
-    allocator->deallocate(p, 0u);
-    return allocator->allocate(size, alignment, 0u);
+    allocator_deallocate(p, alignment);
+    return allocator_allocate(size, alignment);
 }
 }// namespace detail
 }// namespace horizon::core

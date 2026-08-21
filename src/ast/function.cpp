@@ -5,8 +5,8 @@
 #include "function.h"
 #include "core/type_system/type_desc.h"
 #include "core/util/util.h"
-#include "generator/source_emitter.h"
 #include "function_corrector.h"
+#include "symbol_name.h"
 
 namespace horizon::ast {
 using namespace horizon::core;

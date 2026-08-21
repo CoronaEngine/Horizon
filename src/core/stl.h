@@ -25,8 +25,6 @@
 #include <string_view>
 #include <filesystem>
 #include <source_location>
-#include <EASTL/tuple.h>
-#include <EASTL/string.h>
 #include <sys/stat.h>
 
 #define OC_FORWARD(arg) std::forward<decltype(arg)>(arg)
@@ -143,7 +141,11 @@ using std::cout;
 using std::endl;
 
 // ptr
-using eastl::move_only_function;
+// Core intentionally uses only the C++ standard library.  The former Ocarina
+// implementation used EASTL here, but that made the foundation depend on an
+// external allocator and tuple implementation.
+template<typename Signature>
+using move_only_function = std::function<Signature>;
 using std::const_pointer_cast;
 using std::dynamic_pointer_cast;
 using std::enable_shared_from_this;
@@ -279,14 +281,9 @@ using std::unordered_map;
 using std::unordered_set;
 using std::vector;
 
-#if 1
 // tuple
-using eastl::get;
-using eastl::tuple;
-#else
 using std::get;
 using std::tuple;
-#endif
 
 namespace detail {
 template<typename T>
@@ -297,8 +294,6 @@ struct tuple_size_impl {
 template<typename... Ts>
 struct tuple_size_impl<std::tuple<Ts...>> : public std::tuple_size<std::tuple<Ts...>> {};
 
-template<typename... Ts>
-struct tuple_size_impl<eastl::tuple<Ts...>> : public eastl::tuple_size<eastl::tuple<Ts...>> {};
 }// namespace detail
 template<typename T>
 using tuple_size = typename detail::tuple_size_impl<std::remove_cvref_t<T>>;
@@ -314,20 +309,12 @@ struct tuple_element {
 template<size_t i, typename... Ts>
 struct tuple_element<i, std::tuple<Ts...>> : public std::tuple_element<i, std::tuple<Ts...>> {};
 
-template<size_t i, typename... Ts>
-struct tuple_element<i, eastl::tuple<Ts...>> : public eastl::tuple_element<i, eastl::tuple<Ts...>> {};
-
 template<size_t i, typename T>
 using tuple_element_t = typename tuple_element<i, T>::type;
 
 template<size_t i, typename... Ts>
 auto tuple_get(const std::tuple<Ts...> &tp) noexcept {
     return std::get<i>(tp);
-}
-
-template<size_t i, typename... Ts>
-auto tuple_get(const eastl::tuple<Ts...> &tp) noexcept {
-    return eastl::get<i>(tp);
 }
 
 template<size_t i = 0, typename Tuple, typename Func>

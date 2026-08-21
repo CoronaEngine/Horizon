@@ -15,6 +15,11 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/kernel/*.h"
 )
 
+add_subdirectory(core)
+add_subdirectory(math)
+add_subdirectory(ast)
+add_subdirectory(dsl)
+
 set(PUBLIC_HEADERS
     "${PROJECT_SOURCE_DIR}/include/horizon.h"
     "${PROJECT_SOURCE_DIR}/include/corona/kernel/core/i_logger.h"

@@ -13,10 +13,9 @@
 #include "api/syntax.h"
 #include "api/operators.h"
 #include "api/func.h"
-#include "tensor/tensor.h"
 #include "types/soa.h"
 #include "types/struct.h"
-#include "rtx.h"
-#include "core/ref.inl"
-#include "diagnostics/env.h"
-#include "types/polymorphic.h"
+
+// Backend-facing tensor, RTX, diagnostics and polymorphic-resource adapters
+// remain opt-in headers.  Keeping them out of the base aggregate makes the
+// embedded DSL layer usable without an RHI or code-generation backend.

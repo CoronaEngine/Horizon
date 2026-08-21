@@ -7,7 +7,7 @@
 #include "math/basic_types.h"
 #include "dsl/dsl.h"
 #include "core/concepts.h"
-#include "math/box.h"
+#include "box.h"
 #include "quaternion.h"
 
 namespace horizon::math {

@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "constants.h"
-#include "scalar_func.h"
+#include "math/constants.h"
+#include "math/scalar_func.h"
 #include "dsl/api/operators.h"
 #include "dsl/core/type_trait.h"
 
@@ -289,5 +289,5 @@ requires horizon::math::is_vector4_v<expr_value_t<V>>
            (make_8bit(color.z) << 16) +
            (make_8bit(color.w) << 24);
 }
-#include "common_lib.inl.h"
+#include "math/common_lib.inl.h"
 }// namespace horizon::math

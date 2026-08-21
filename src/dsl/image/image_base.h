@@ -5,7 +5,8 @@
 #pragma once
 
 #include "core/stl.h"
-#include "math/basic_types.h"
+#include "core/image/image_format.h"
+#include "core/numeric/basic_types.h"
 #include "core/concepts.h"
 
 namespace horizon::core {
@@ -20,22 +21,6 @@ enum EToneMap {
     Filmic,
     Reinhard,
     Linear
-};
-
-enum struct PixelStorage : uint {
-    BYTE1,
-    BYTE2,
-    BYTE4,
-
-    UINT1,
-    UINT2,
-    UINT4,
-
-    FLOAT1,
-    FLOAT2,
-    FLOAT4,
-
-    UNKNOWN
 };
 
 enum struct ImageWrap : uint8_t {

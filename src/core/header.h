@@ -110,7 +110,10 @@ namespace horizon::ast {}
 namespace horizon::dsl {}
 
 namespace horizon::core {
-using namespace horizon::math;
+using uint = uint32_t;
+using ulong = uint64_t;
+using uchar = unsigned char;
+using ushort = unsigned short;
 using handle_ty = uint64_t;
 }
 

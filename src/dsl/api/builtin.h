@@ -8,7 +8,7 @@
 #include "../core/expr.h"
 #include "operators.h"
 #include "core/concepts.h"
-#include "math/base.h"
+#include "dsl/math/base.h"
 #include "ast/expression.h"
 #include "../core/var.h"
 #include "../data/dynamic_array.h"

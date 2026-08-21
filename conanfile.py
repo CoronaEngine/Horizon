@@ -76,6 +76,9 @@ class HorizonConan(ConanFile):
         self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
         self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
+        self.requires("fmt/12.1.0")
+        self.requires("spdlog/1.17.0")
+        self.requires("xxhash/0.8.3")
 
         if bool(self.options.with_tracy):
             self.requires("tracy/0.13.1", options={"on_demand": True})
@@ -86,11 +89,6 @@ class HorizonConan(ConanFile):
             self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
             self.requires("imgui/1.92.8")
-
-        if bool(self.options.with_ocarina) and bool(self.options.with_cuda):
-            self.requires("fmt/12.1.0")
-            self.requires("spdlog/1.17.0")
-            self.requires("xxhash/0.8.3")
 
     def validate(self):
         if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):

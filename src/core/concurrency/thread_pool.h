@@ -12,8 +12,7 @@
 #include <functional>
 #include <condition_variable>
 
-#include <core/stl.h>
-#include "math/basic_types.h"
+#include "core/stl.h"
 #include "core/header.h"
 
 /// reference :https://github.com/LuisaGroup/LuisaCompute/src/core/concurrency/thread_pool.h

@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "core/image/image_base.h"
+#include "image_base.h"
 
 namespace horizon::core {
 
