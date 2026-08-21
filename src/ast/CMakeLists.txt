@@ -7,4 +7,4 @@ target_include_directories(horizon-ast
     "${PROJECT_SOURCE_DIR}/src"
 )
 target_link_libraries(horizon-ast PUBLIC horizon-core horizon-math)
-target_compile_definitions(horizon-ast PRIVATE OC_AST_EXPORT_DLL=1)
+target_compile_definitions(horizon-ast PRIVATE OC_AST_EXPORT_DLL=1 OC_CORE_EXPORT_DLL=1)

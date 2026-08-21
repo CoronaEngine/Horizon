@@ -335,28 +335,30 @@ const Type *TypeParser::parse_type_locked(horizon::core::string_view desc) noexc
         type->dimension_ = 1;
     }
 
-    if (desc.starts_with("vector")) {
-        parse_vector_locked(type.get(), desc);
-    } else if (desc.starts_with("matrix")) {
-        parse_matrix_locked(type.get(), desc);
-    } else if (desc.starts_with("array")) {
-        parse_array_locked(type.get(), desc);
-    } else if (desc.starts_with("struct")) {
-        parse_struct_locked(type.get(), desc);
-    } else if (desc.starts_with("bytebuffer")) {
-        parse_byte_buffer_locked(type.get(), desc);
-    } else if (desc.starts_with("buffer")) {
-        parse_buffer_locked(type.get(), desc);
-    } else if (desc.starts_with("texture3d")) {
-        parse_texture3d_locked(type.get(), desc);
-    } else if (desc.starts_with("texture2d")) {
-        parse_texture2d_locked(type.get(), desc);
-    } else if (desc.starts_with("accel")) {
-        parse_accel_locked(type.get(), desc);
-    } else if (desc.starts_with("bindlessArray")) {
-        parse_bindless_array_locked(type.get(), desc);
-    } else {
-        OC_ERROR("invalid data type ", desc);
+    if (type->tag_ == Type::Tag::NONE) {
+        if (desc.starts_with("vector")) {
+            parse_vector_locked(type.get(), desc);
+        } else if (desc.starts_with("matrix")) {
+            parse_matrix_locked(type.get(), desc);
+        } else if (desc.starts_with("array")) {
+            parse_array_locked(type.get(), desc);
+        } else if (desc.starts_with("struct")) {
+            parse_struct_locked(type.get(), desc);
+        } else if (desc.starts_with("bytebuffer")) {
+            parse_byte_buffer_locked(type.get(), desc);
+        } else if (desc.starts_with("buffer")) {
+            parse_buffer_locked(type.get(), desc);
+        } else if (desc.starts_with("texture3d")) {
+            parse_texture3d_locked(type.get(), desc);
+        } else if (desc.starts_with("texture2d")) {
+            parse_texture2d_locked(type.get(), desc);
+        } else if (desc.starts_with("accel")) {
+            parse_accel_locked(type.get(), desc);
+        } else if (desc.starts_with("bindlessArray")) {
+            parse_bindless_array_locked(type.get(), desc);
+        } else {
+            OC_ERROR("invalid data type ", desc);
+        }
     }
     type->set_description(desc);
     return add_type_locked(horizon::core::move(type));

@@ -5,7 +5,6 @@
 #include "core/util/logging.h"
 
 namespace horizon::core {
-inline namespace core {
 spdlog::logger &logger() noexcept {
     static auto logger = [] {
         auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
@@ -27,5 +26,4 @@ void log_level_warning() noexcept { logger().set_level(spdlog::level::warn); }
 void log_level_error() noexcept { logger().set_level(spdlog::level::err); }
 
 void log_flush() noexcept { logger().flush(); }
-}
 }// namespace horizon::core

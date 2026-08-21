@@ -1,4 +1,5 @@
 add_subdirectory(math)
+add_subdirectory(ast)
 
 add_test(
     NAME horizon.architecture.core_math_boundary
