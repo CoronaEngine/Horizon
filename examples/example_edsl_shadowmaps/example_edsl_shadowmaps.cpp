@@ -75,10 +75,20 @@ struct SmxVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LoadedMesh
 {
     std::vector<SmxVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -188,11 +198,18 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -217,17 +234,20 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    Corona::Horizon::HardwareBuffer vb;
-    Corona::Horizon::HardwareBuffer ib;
+    horizon::HardwareBuffer vb;
+    horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
+    // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
+    std::vector<MeshGroup> groups;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        Corona::Horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
+        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
+        mesh.groups,
     };
 }
 
@@ -279,38 +299,39 @@ void run_example_edsl_shadowmaps()
         { { -1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
         { { 1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
     };
-    const std::vector<uint32_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
+    const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     GpuMesh floor_plane {
-        Corona::Horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
-        Corona::Horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
+        horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
+        horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
+        { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } },
     };
 
     // Pass 1 目标：1024x1024 RGBA8 打包深度 + 独立 D32
-    Corona::Horizon::HardwareImage shadow_map_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        shadow_map_size, shadow_map_size, Corona::Horizon::Format::RGBA8_UNORM,
-        Corona::Horizon::ImageUsageFlags::ColorAttachment | Corona::Horizon::ImageUsageFlags::Sampled,
+    horizon::HardwareImage shadow_map_image(horizon::HardwareImageDesc::texture_2d(
+        shadow_map_size, shadow_map_size, horizon::Format::RGBA8_UNORM,
+        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled,
         "example_shadowmaps.shadowmap"));
     shadow_map_image.set_clear_color(1.0f, 1.0f, 1.0f, 1.0f); // 白 = 最远深度
 
-    Corona::Horizon::HardwareImage shadow_depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        shadow_map_size, shadow_map_size, Corona::Horizon::Format::D32, "example_shadowmaps.shadow_depth"));
+    horizon::HardwareImage shadow_depth_image(horizon::HardwareImageDesc::depth_attachment(
+        shadow_map_size, shadow_map_size, horizon::Format::D32, "example_shadowmaps.shadow_depth"));
     shadow_depth_image.set_clear_depth(1.0f, 0);
 
     // Pass 2 目标：主输出
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        smx_width, smx_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        smx_width, smx_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_shadowmaps.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f); // 雾色黑
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        smx_width, smx_height, Corona::Horizon::Format::D32, "example_shadowmaps.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        smx_width, smx_height, horizon::Format::D32, "example_shadowmaps.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc pack_desc;
+    horizon::RasterizerPipelineDesc pack_desc;
     pack_desc.blend_enabled = false;
 
     Texture2D<ktm::fvec4> pack_out_color = shadow_map_image;
@@ -441,20 +462,20 @@ void run_example_edsl_shadowmaps()
         scene_out_color << Float4(mix(fogColor,final,fogFactor),1.f);
     };
 
-    Corona::Horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert, shadowmaps_pack_frag, pack_desc);
+    horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert, shadowmaps_pack_frag, pack_desc);
     //pack_rasterizer.outColor = shadow_map_image;
     pack_rasterizer.bind_depth_target(shadow_depth_image);
 
-    Corona::Horizon::RasterizerPipelineDesc scene_desc;
+    horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert, shadowmaps_scene_frag, scene_desc);
+    horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert, shadowmaps_scene_frag, scene_desc);
     //scene_rasterizer.outColor = final_output_image;
     scene_rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(smx_width) / static_cast<float>(smx_height);
     // 原版 相机 (0,60,-105)、垂直角 -0.45 rad（俯视）
@@ -560,20 +581,47 @@ void run_example_edsl_shadowmaps()
                                   glm::eulerAngleY(-float(i)) * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f)) });
         }
 
-        // Pass 1：光源视角打包深度
+        // Pass 1：光源视角打包深度 - Convert to indirect
         pack_rasterizer.clear_records();
+        std::vector<horizon::DrawIndexedIndirectCommand> pack_indirect_cmds;
+
         for (const DrawItem& item : items)
         {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
-            params.index_count = item.mesh->index_count;
-
             mvp = to_edsl_matrix((light_view_proj * item.model));
-            pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            for (const MeshGroup& group : item.mesh->groups)
+            {
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(pack_indirect_cmds.size());
+                pack_indirect_cmds.push_back(cmd);
+            }
         }
 
-        // Pass 2：场景光照 + 硬阴影
+        if (!pack_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer pack_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(pack_indirect_cmds.data()),
+                    pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_shadowmaps.pack_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams pack_params;
+            pack_params.draw_count = static_cast<uint32_t>(pack_indirect_cmds.size());
+            pack_params.indirect_offset = 0;
+            pack_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            pack_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, pack_indirect_buffer, pack_params);
+        }
+
+        // Pass 2：场景光照 + 硬阴影 - Convert to indirect
         scene_rasterizer.clear_records();
+        std::vector<horizon::DrawIndexedIndirectCommand> scene_indirect_cmds;
+
         // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
         proj_view       = to_edsl_matrix(view_proj);
         view_matrix     = to_edsl_matrix(view);
@@ -591,25 +639,49 @@ void run_example_edsl_shadowmaps()
         material_ks = ktm::fvec4(c_material_ks.x,c_material_ks.y,c_material_ks.z,c_material_ks.w);
         color = ktm::fvec4(1.0f);
         params1 = ktm::fvec4(shadow_bias, shadow_normal_offset, 1.0f / shadow_map_size, 0.0f);
+
         for (const DrawItem& item : items)
         {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
-            params.index_count = item.mesh->index_count;
-
             model = to_edsl_matrix(item.model); // per-draw；VS 从中计算 mvp/model_view/light_mtx
-            scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            for (const MeshGroup& group : item.mesh->groups)
+            {
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(scene_indirect_cmds.size());
+                scene_indirect_cmds.push_back(cmd);
+            }
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << pack_rasterizer(shadow_map_size, shadow_map_size)
-                            << scene_rasterizer(smx_width, smx_height)
-                            << Corona::Horizon::commit();
+        if (!scene_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer scene_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(scene_indirect_cmds.data()),
+                    scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_shadowmaps.scene_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams scene_params;
+            scene_params.draw_count = static_cast<uint32_t>(scene_indirect_cmds.size());
+            scene_params.indirect_offset = 0;
+            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            scene_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, scene_indirect_buffer, scene_params);
+        }
+
+        horizon::SubmitReceipt render_receipt =
+            render_executor << pack_rasterizer.extent(shadow_map_size, shadow_map_size)
+                            << scene_rasterizer.extent(smx_width, smx_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

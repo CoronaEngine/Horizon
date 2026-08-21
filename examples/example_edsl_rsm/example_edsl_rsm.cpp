@@ -53,7 +53,7 @@ ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
 
 constexpr uint32_t rsm_width = 1280;
 constexpr uint32_t rsm_height = 720;
-constexpr uint32_t rsm_map_size = 1024; // RSM 分辨率（阴影比较共用）
+constexpr uint32_t rsm_map_size = 512; // RSM 分辨率（间接光照低频，从1024降低减少4倍开销）
 constexpr float rsm_near = 1.0f;
 constexpr float rsm_far = 250.0f;
 constexpr float rsm_shadow_bias = 0.0035f;
@@ -74,10 +74,20 @@ struct RsmVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LoadedMesh
 {
     std::vector<RsmVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -187,11 +197,18 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -216,32 +233,36 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    Corona::Horizon::HardwareBuffer vb;
-    Corona::Horizon::HardwareBuffer ib;
+    horizon::HardwareBuffer vb;
+    horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
+    // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
+    std::vector<MeshGroup> groups;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        Corona::Horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
+        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
+        mesh.groups,
     };
 }
 
-// 预缩放的单面四边形（默认 CullMode::None，绕向不敏感）
+// 预缩放的单面四边形（不剔除背面，绕向不敏感）
 GpuMesh make_quad(const std::array<glm::vec3, 4>& corners, const glm::vec3& normal, const std::string& name)
 {
     std::vector<RsmVertex> vertices;
     vertices.reserve(4);
     for (const glm::vec3& c : corners)
         vertices.push_back({ { c.x, c.y, c.z }, { normal.x, normal.y, normal.z } });
-    const std::vector<uint32_t> indices = { 0, 1, 2, 1, 3, 2 };
+    const std::vector<uint16_t> indices = { 0, 1, 2, 1, 3, 2 };
     return GpuMesh {
-        Corona::Horizon::HardwareBuffer::vertex(vertices, name + ".vb"),
-        Corona::Horizon::HardwareBuffer::index(indices, name + ".ib"),
+        horizon::HardwareBuffer::vertex(vertices, name + ".vb"),
+        horizon::HardwareBuffer::index(indices, name + ".ib"),
         static_cast<uint32_t>(indices.size()),
+        { MeshGroup { 0, static_cast<uint32_t>(indices.size()), 0 } },
     };
 }
 
@@ -301,44 +322,44 @@ void run_example_edsl_rsm()
         glm::vec3(0.0f, 0.0f, -1.0f), "example_edsl_rsm.wall_blue");
 
     // Pass 1 目标：1024x1024 RSM 三附件 + D32
-    const auto rsm_rt_usage = Corona::Horizon::ImageUsageFlags::ColorAttachment |
-                              Corona::Horizon::ImageUsageFlags::Sampled;
+    const auto rsm_rt_usage = horizon::ImageUsage_ColorAttachment |
+                              horizon::ImageUsage_Sampled;
 
     // xyz: 世界坐标, w: 光空间深度（清屏 w=1 → 最远，阴影比较视为无遮挡）
-    Corona::Horizon::HardwareImage rsm_position_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        rsm_map_size, rsm_map_size, Corona::Horizon::Format::RGBA32_FLOAT, rsm_rt_usage, "example_edsl_rsm.position"));
+    horizon::HardwareImage rsm_position_image(horizon::HardwareImageDesc::texture_2d(
+        rsm_map_size, rsm_map_size, horizon::Format::RGBA32_FLOAT, rsm_rt_usage, "example_edsl_rsm.position"));
     rsm_position_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage rsm_normal_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        rsm_map_size, rsm_map_size, Corona::Horizon::Format::RGBA16_FLOAT, rsm_rt_usage, "example_edsl_rsm.normal"));
+    horizon::HardwareImage rsm_normal_image(horizon::HardwareImageDesc::texture_2d(
+        rsm_map_size, rsm_map_size, horizon::Format::RGBA16_FLOAT, rsm_rt_usage, "example_edsl_rsm.normal"));
     rsm_normal_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // 零法线 → gather 无贡献
 
-    Corona::Horizon::HardwareImage rsm_flux_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        rsm_map_size, rsm_map_size, Corona::Horizon::Format::RGBA16_FLOAT, rsm_rt_usage, "example_edsl_rsm.flux"));
+    horizon::HardwareImage rsm_flux_image(horizon::HardwareImageDesc::texture_2d(
+        rsm_map_size, rsm_map_size, horizon::Format::RGBA16_FLOAT, rsm_rt_usage, "example_edsl_rsm.flux"));
     rsm_flux_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // 零 flux → gather 无贡献
 
-    Corona::Horizon::HardwareImage rsm_depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        rsm_map_size, rsm_map_size, Corona::Horizon::Format::D32, "example_edsl_rsm.rsm_depth"));
+    horizon::HardwareImage rsm_depth_image(horizon::HardwareImageDesc::depth_attachment(
+        rsm_map_size, rsm_map_size, horizon::Format::D32, "example_edsl_rsm.rsm_depth"));
     rsm_depth_image.set_clear_depth(1.0f, 0);
 
     // Pass 2 目标：主输出
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        rsm_width, rsm_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        rsm_width, rsm_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_edsl_rsm.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        rsm_width, rsm_height, Corona::Horizon::Format::D32, "example_edsl_rsm.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        rsm_width, rsm_height, horizon::Format::D32, "example_edsl_rsm.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
     // ========================================================================
     // Pass 1：RSM 生成（EDSL，单 pass MRT：position / normal / flux）
     // ========================================================================
     // 混合状态给一份即可,运行时会复制到全部颜色附件
-    Corona::Horizon::RasterizerPipelineDesc pack_desc;
+    horizon::RasterizerPipelineDesc pack_desc;
     pack_desc.blend_enabled = false;
 
     Texture2D<ktm::fvec4> pack_out_position = rsm_position_image;
@@ -506,18 +527,18 @@ void run_example_edsl_rsm()
         scene_out_color << Float4(pow(abs(final_color), Float3(t, t, t)), 1.f);
     };
 
-    Corona::Horizon::RasterizerPipeline pack_rasterizer(rsm_pack_vert, rsm_pack_frag, pack_desc);
+    horizon::RasterizerPipeline pack_rasterizer(rsm_pack_vert, rsm_pack_frag, pack_desc);
     pack_rasterizer.bind_depth_target(rsm_depth_image);
 
-    Corona::Horizon::RasterizerPipelineDesc scene_desc;
+    horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline scene_rasterizer(rsm_scene_vert, rsm_scene_frag, scene_desc);
+    horizon::RasterizerPipeline scene_rasterizer(rsm_scene_vert, rsm_scene_frag, scene_desc);
     scene_rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(rsm_width) / static_cast<float>(rsm_height);
     // 与 shadowmaps 相同的固定俯视相机
@@ -557,6 +578,15 @@ void run_example_edsl_rsm()
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
+    // HORIZON_FIXED_DT=<秒>：用固定步长取代墙钟，使逐帧画面可复现（仅供像素比对）。
+    const float fixed_dt = [] {
+        if (const char* value = std::getenv("HORIZON_FIXED_DT"))
+        {
+            return static_cast<float>(std::atof(value));
+        }
+        return 0.0f;
+    }();
+    uint64_t frame_index = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -571,9 +601,15 @@ void run_example_edsl_rsm()
         ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
-        const float dt = std::chrono::duration<float>(now - prev_time).count();
-        const float time = std::chrono::duration<float>(now - start_time).count();
+        float dt = std::chrono::duration<float>(now - prev_time).count();
+        float time = std::chrono::duration<float>(now - start_time).count();
         prev_time = now;
+        if (fixed_dt > 0.0f)
+        {
+            dt = fixed_dt;
+            time = fixed_dt * static_cast<float>(frame_index);
+        }
+        ++frame_index;
 
         fps_accum_seconds += dt;
         ++fps_frame_count;
@@ -633,25 +669,50 @@ void run_example_edsl_rsm()
         const float cos_inner = std::cos(glm::radians(spot_inner_angle));
         const float cos_outer = std::cos(glm::radians(spot_outer_angle));
 
-        // Pass 1：光源视角生成 RSM（position+depth / normal / flux 三个单目标 pass）
+        // Pass 1：光源视角生成 RSM（position+depth / normal / flux 三个单目标 pass）- Convert to indirect
         pack_rasterizer.clear_records();
         pk_light_view_proj = to_edsl_matrix(light_view_proj);
         pk_light_pos_ws = ktm::fvec4(c_light_pos.x, c_light_pos.y, c_light_pos.z, 0.0f);
         pk_light_dir_ws = ktm::fvec4(c_spot_dir.x, c_spot_dir.y, c_spot_dir.z, 0.0f);
         pk_light_color = ktm::fvec4(c_light_color.x, c_light_color.y, c_light_color.z, 0.0f);
         pk_spot_params = ktm::fvec4(cos_inner, cos_outer, 0.0f, 0.0f);
+
+        std::vector<horizon::DrawIndexedIndirectCommand> pack_indirect_cmds;
         for (const DrawItem& item : items)
         {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
-            params.index_count = item.mesh->index_count;
-
             pk_model = to_edsl_matrix(item.model);
             pk_albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
-            pack_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            for (const MeshGroup& group : item.mesh->groups)
+            {
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(pack_indirect_cmds.size());
+                pack_indirect_cmds.push_back(cmd);
+            }
         }
 
-        // Pass 2：场景直接光 + 硬阴影 + RSM 间接光
+        if (!pack_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer pack_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(pack_indirect_cmds.data()),
+                    pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_rsm.pack_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams pack_params;
+            pack_params.draw_count = static_cast<uint32_t>(pack_indirect_cmds.size());
+            pack_params.indirect_offset = 0;
+            pack_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            pack_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, pack_indirect_buffer, pack_params);
+        }
+
+        // Pass 2：场景直接光 + 硬阴影 + RSM 间接光 - Convert to indirect
         scene_rasterizer.clear_records();
         proj_view = to_edsl_matrix(view_proj);
         light_proj_view = to_edsl_matrix(shadow_mtx); // bias * light_proj * light_view
@@ -661,26 +722,51 @@ void run_example_edsl_rsm()
         spot_params = ktm::fvec4(cos_inner, cos_outer, rsm_shadow_bias, rsm_normal_offset);
         rsm_params = ktm::fvec4(sample_radius, indirect_intensity, static_cast<float>(debug_mode), 0.0f);
         camera_pos_ws = ktm::fvec4(eye.x, eye.y, eye.z, 0.0f);
+
+        std::vector<horizon::DrawIndexedIndirectCommand> scene_indirect_cmds;
         for (const DrawItem& item : items)
         {
-            Corona::Horizon::DrawIndexedParams params;
-            params.index_type = Corona::Horizon::IndexType::UInt32;
-            params.index_count = item.mesh->index_count;
-
             model = to_edsl_matrix(item.model);
             albedo = ktm::fvec4(item.albedo.x, item.albedo.y, item.albedo.z, item.albedo.w);
-            scene_rasterizer.record(item.mesh->ib, item.mesh->vb, params);
+            for (const MeshGroup& group : item.mesh->groups)
+            {
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = group.index_count;
+                cmd.first_index = group.first_index;
+                cmd.vertex_offset = group.base_vertex;
+                cmd.instance_count = 1;
+                cmd.first_instance = static_cast<uint32_t>(scene_indirect_cmds.size());
+                scene_indirect_cmds.push_back(cmd);
+            }
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << pack_rasterizer(rsm_map_size, rsm_map_size)
-                            << scene_rasterizer(rsm_width, rsm_height)
-                            << Corona::Horizon::commit();
+        if (!scene_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer scene_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(scene_indirect_cmds.data()),
+                    scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_edsl_rsm.scene_indirect");
+
+            const DrawItem& first_item = items[0];
+            horizon::DrawIndexedIndirectParams scene_params;
+            scene_params.draw_count = static_cast<uint32_t>(scene_indirect_cmds.size());
+            scene_params.indirect_offset = 0;
+            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            scene_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, scene_indirect_buffer, scene_params);
+        }
+
+        horizon::SubmitReceipt render_receipt =
+            render_executor << pack_rasterizer.extent(rsm_map_size, rsm_map_size)
+                            << scene_rasterizer.extent(rsm_width, rsm_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

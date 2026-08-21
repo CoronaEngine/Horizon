@@ -41,14 +41,14 @@ HardwareImage upload_font_atlas()
 
     HardwareImageDesc desc = HardwareImageDesc::texture_2d(
         static_cast<uint32_t>(width), static_cast<uint32_t>(height), Format::RGBA8_UNORM,
-        ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst, "imgui.font_atlas");
+        ImageUsage_Sampled | ImageUsage_TransferDst, "imgui.font_atlas");
     HardwareImage image(desc);
 
     const size_t byte_count = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
     HardwareBufferDesc staging_desc;
     staging_desc.element_count = byte_count;
     staging_desc.element_size = 1;
-    staging_desc.usage = BufferUsageFlags::TransferSrc;
+    staging_desc.usage = BufferUsage_TransferSrc;
     staging_desc.cpu_access = CpuAccessMode::Write;
     HardwareBuffer staging(staging_desc, std::as_bytes(std::span<const unsigned char>(pixels, byte_count)));
 
@@ -167,7 +167,8 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
             std::array<float, 2> { -1.0f - display_pos.x * scale[0], -1.0f - display_pos.y * scale[1] };
         impl.pipeline.outColor = target;
 
-        impl.pipeline.clear_records();
+        // 收集所有 ImGui draw commands 到 indirect buffer（CPU 端构造）
+        std::vector<DrawIndexedIndirectCommand> indirect_commands;
         uint32_t global_index_offset = 0;
         int32_t global_vertex_offset = 0;
         for (int list_index = 0; list_index < draw_data->CmdListsCount; ++list_index)
@@ -185,29 +186,39 @@ void HorizonImGuiLayer::draw_overlay(HardwareExecutor& display_executor,
                 if (clip_max_x <= clip_min_x || clip_max_y <= clip_min_y || cmd.ElemCount == 0)
                     continue;
 
-                DrawIndexedParams params;
-                params.index_count = cmd.ElemCount;
-                params.first_index = global_index_offset + cmd.IdxOffset;
-                params.vertex_offset = global_vertex_offset + static_cast<int32_t>(cmd.VtxOffset);
-                params.index_type = IndexType::UInt16;
-                params.enable_scissor = true;
-                params.scissor = ScissorRect {
-                    static_cast<int32_t>(clip_min_x),
-                    static_cast<int32_t>(clip_min_y),
-                    static_cast<uint32_t>(clip_max_x - clip_min_x),
-                    static_cast<uint32_t>(clip_max_y - clip_min_y),
-                };
-                params.debug_label = "imgui.draw";
-                impl.pipeline.record(index_buffer, vertex_buffer, params);
+                // per-draw scissor 已从 Horizon 移除：clip rect 只用于跳过零面积 cmd，
+                // 不再做实际裁剪。超出窗口的 UI 内容不会被裁掉。
+                DrawIndexedIndirectCommand indirect_cmd;
+                indirect_cmd.index_count = cmd.ElemCount;
+                indirect_cmd.instance_count = 1;
+                indirect_cmd.first_index = global_index_offset + cmd.IdxOffset;
+                indirect_cmd.vertex_offset = global_vertex_offset + static_cast<int32_t>(cmd.VtxOffset);
+                indirect_cmd.first_instance = 0;
+                indirect_commands.push_back(indirect_cmd);
             }
             global_index_offset += static_cast<uint32_t>(list->IdxBuffer.Size);
             global_vertex_offset += list->VtxBuffer.Size;
         }
 
+        // 转为 indirect draw：单次批量提交所有 UI draw calls
+        impl.pipeline.clear_records();
+        if (!indirect_commands.empty())
+        {
+            HardwareBuffer indirect_buffer =
+                HardwareBuffer::indirect(std::span<const DrawIndexedIndirectCommand>(indirect_commands), "imgui.indirect");
+
+            DrawIndexedIndirectParams params;
+            params.draw_count = static_cast<uint32_t>(indirect_commands.size());
+            params.indirect_offset = 0;
+            params.stride = 0;
+            params.debug_label = "imgui.batch";
+            impl.pipeline.record_indirect(index_buffer, vertex_buffer, indirect_buffer, params);
+        }
+
         // GPU 顺序：场景 → UI。
         display_executor.wait(scene_receipt);
         SubmitReceipt ui_receipt = display_executor.stream()
-            << impl.pipeline(impl.width, impl.height)
+            << impl.pipeline.extent(impl.width, impl.height)
             << commit();
 
         // 挂到 pending waits：同一 executor 上示例随后的 present commit 会等待 UI 完成。

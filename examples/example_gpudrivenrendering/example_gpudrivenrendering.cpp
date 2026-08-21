@@ -191,7 +191,7 @@ const std::vector<PosVertex> cube_vertices = {
     { { 0.5f, -0.5f, -0.5f } },
 };
 
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 1, 2, 1, 3, 2,
     4, 6, 5, 5, 6, 7,
     0, 2, 4, 4, 2, 6,
@@ -283,15 +283,15 @@ void pack_instance_row(std::array<glm::vec4, 4>& rows, const glm::mat4& world, f
     rows[3] = world[3];
 }
 
-Corona::Horizon::HardwareImage make_hi_z_image(uint32_t width, uint32_t height, const std::string& name)
+horizon::HardwareImage make_hi_z_image(uint32_t width, uint32_t height, const std::string& name)
 {
-    return Corona::Horizon::HardwareImage(Corona::Horizon::HardwareImageDesc::texture_2d(
+    return horizon::HardwareImage(horizon::HardwareImageDesc::texture_2d(
         width,
         height,
-        Corona::Horizon::Format::R32_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+        horizon::Format::R32_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         name));
 }
 
@@ -302,7 +302,7 @@ struct SceneData
     std::vector<glm::vec4> bbox_data;
     std::vector<uint32_t> indirect_const;
     std::vector<PosVertex> merged_vertices;
-    std::vector<uint32_t> merged_indices;
+    std::vector<uint16_t> merged_indices;
 };
 
 SceneData build_scene(std::mt19937& rng)
@@ -428,7 +428,7 @@ SceneData build_scene(std::mt19937& rng)
 }
 
 template <typename OccludePipeline>
-void fill_hi_z_mip_ids(OccludePipeline& pipeline, const std::vector<Corona::Horizon::HardwareImage>& hi_z_mips)
+void fill_hi_z_mip_ids(OccludePipeline& pipeline, const std::vector<horizon::HardwareImage>& hi_z_mips)
 {
     std::array<glm::uvec4, 4> packed {};
     for (uint32_t mip = 0; mip < hi_z_mips.size() && mip < 16u; ++mip)
@@ -460,62 +460,79 @@ void run_example_gpudrivenrendering()
     const uint32_t instances_pow2 =
         1u << (static_cast<uint32_t>(std::floor(std::log2(static_cast<float>(k_total_instances)))) + 1u);
 
-    Corona::Horizon::HardwareBuffer cube_vb =
-        Corona::Horizon::HardwareBuffer::vertex(cube_vertices, "example_gpudrivenrendering.cube_vb");
-    Corona::Horizon::HardwareBuffer cube_ib =
-        Corona::Horizon::HardwareBuffer::index(cube_indices, "example_gpudrivenrendering.cube_ib");
-    Corona::Horizon::HardwareBuffer merged_vb =
-        Corona::Horizon::HardwareBuffer::vertex(scene.merged_vertices, "example_gpudrivenrendering.merged_vb");
-    Corona::Horizon::HardwareBuffer merged_ib =
-        Corona::Horizon::HardwareBuffer::index(scene.merged_indices, "example_gpudrivenrendering.merged_ib");
+    horizon::HardwareBuffer cube_vb =
+        horizon::HardwareBuffer::vertex(cube_vertices, "example_gpudrivenrendering.cube_vb");
+    horizon::HardwareBuffer cube_ib =
+        horizon::HardwareBuffer::index(cube_indices, "example_gpudrivenrendering.cube_ib");
 
-    Corona::Horizon::HardwareBuffer instance_in_buffer(
-        Corona::Horizon::HardwareBufferDesc::typed<glm::vec4>(
+    // Indirect args buffer for occlusion pass (wall cubes)
+    horizon::DrawIndexedIndirectCommand occlusion_indirect_cmd;
+    occlusion_indirect_cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+    occlusion_indirect_cmd.instance_count = 0;  // Will be updated per-frame
+    occlusion_indirect_cmd.first_index = 0;
+    occlusion_indirect_cmd.vertex_offset = 0;
+    occlusion_indirect_cmd.first_instance = 0;
+
+    horizon::HardwareBuffer occlusion_indirect_args = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(&occlusion_indirect_cmd),
+            sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_gpudrivenrendering.occlusion_indirect");
+
+    horizon::HardwareBuffer merged_vb =
+        horizon::HardwareBuffer::vertex(scene.merged_vertices, "example_gpudrivenrendering.merged_vb");
+    horizon::HardwareBuffer merged_ib =
+        horizon::HardwareBuffer::index(scene.merged_indices, "example_gpudrivenrendering.merged_ib");
+
+    horizon::HardwareBuffer instance_in_buffer(
+        horizon::HardwareBufferDesc::typed<glm::vec4>(
             scene.instance_data.size(),
-            Corona::Horizon::BufferUsageFlags::Storage | Corona::Horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.instances_in"),
         std::as_bytes(std::span(scene.instance_data)));
 
-    Corona::Horizon::HardwareBuffer instance_out_buffer(
-        Corona::Horizon::HardwareBufferDesc::typed<glm::vec4>(
+    horizon::HardwareBuffer instance_out_buffer(
+        horizon::HardwareBufferDesc::typed<glm::vec4>(
             scene.instance_data.size(),
-            Corona::Horizon::BufferUsageFlags::Storage | Corona::Horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.instances_out"),
         {});
 
-    Corona::Horizon::HardwareBuffer bbox_buffer(
-        Corona::Horizon::HardwareBufferDesc::typed<glm::vec4>(
+    horizon::HardwareBuffer bbox_buffer(
+        horizon::HardwareBufferDesc::typed<glm::vec4>(
             scene.bbox_data.size(),
-            Corona::Horizon::BufferUsageFlags::Storage | Corona::Horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.bboxes"),
         std::as_bytes(std::span(scene.bbox_data)));
 
     std::vector<uint32_t> zero_counts(s_max_noof_props, 0u);
-    Corona::Horizon::HardwareBuffer count_buffer(
-        Corona::Horizon::HardwareBufferDesc::typed<uint32_t>(
+    horizon::HardwareBuffer count_buffer(
+        horizon::HardwareBufferDesc::typed<uint32_t>(
             s_max_noof_props,
-            Corona::Horizon::BufferUsageFlags::Storage | Corona::Horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.counts"),
         std::as_bytes(std::span(zero_counts)));
 
     // Stream compaction scans a power-of-two range (and bgfx uses s_maxNoofInstances=2048).
     constexpr uint32_t k_max_instances = 2048;
     std::vector<uint32_t> zero_predicates(k_max_instances, 0u);
-    Corona::Horizon::HardwareBuffer predicate_buffer(
-        Corona::Horizon::HardwareBufferDesc::typed<uint32_t>(
+    horizon::HardwareBuffer predicate_buffer(
+        horizon::HardwareBufferDesc::typed<uint32_t>(
             k_max_instances,
-            Corona::Horizon::BufferUsageFlags::Storage | Corona::Horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.predicates"),
         std::as_bytes(std::span(zero_predicates)));
 
-    Corona::Horizon::HardwareBuffer indirect_const_buffer(
-        Corona::Horizon::HardwareBufferDesc::typed<uint32_t>(
+    horizon::HardwareBuffer indirect_const_buffer(
+        horizon::HardwareBufferDesc::typed<uint32_t>(
             scene.indirect_const.size(),
-            Corona::Horizon::BufferUsageFlags::Storage | Corona::Horizon::BufferUsageFlags::TransferDst,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
             "example_gpudrivenrendering.indirect_const"),
         std::as_bytes(std::span(scene.indirect_const)));
 
-    std::vector<Corona::Horizon::DrawIndexedIndirectCommand> initial_indirect(k_num_props);
+    std::vector<horizon::DrawIndexedIndirectCommand> initial_indirect(k_num_props);
     for (uint32_t i = 0; i < k_num_props; ++i)
     {
         initial_indirect[i].index_count = scene.props[i].index_count;
@@ -524,13 +541,13 @@ void run_example_gpudrivenrendering()
         initial_indirect[i].vertex_offset = scene.props[i].base_vertex;
         initial_indirect[i].first_instance = scene.props[i].first_instance;
     }
-    Corona::Horizon::HardwareBuffer indirect_buffer =
-        Corona::Horizon::HardwareBuffer::indirect(initial_indirect, "example_gpudrivenrendering.indirect");
+    horizon::HardwareBuffer indirect_buffer =
+        horizon::HardwareBuffer::indirect(initial_indirect, "example_gpudrivenrendering.indirect");
     // Untouched by stream compaction ΓÇö used when Hi-Z is disabled but indirect draw stays on.
-    Corona::Horizon::HardwareBuffer indirect_full_buffer =
-        Corona::Horizon::HardwareBuffer::indirect(initial_indirect, "example_gpudrivenrendering.indirect_full");
+    horizon::HardwareBuffer indirect_full_buffer =
+        horizon::HardwareBuffer::indirect(initial_indirect, "example_gpudrivenrendering.indirect_full");
 
-    std::vector<Corona::Horizon::HardwareImage> hi_z_mips;
+    std::vector<horizon::HardwareImage> hi_z_mips;
     hi_z_mips.reserve(num_hi_z_mips);
     uint32_t mip_w = hi_z_width;
     uint32_t mip_h = hi_z_height;
@@ -542,36 +559,35 @@ void run_example_gpudrivenrendering()
         mip_h = std::max(1u, mip_h / 2u);
     }
 
-    Corona::Horizon::HardwareImage hi_z_depth(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        hi_z_width, hi_z_height, Corona::Horizon::Format::D32, "example_gpudrivenrendering.hiz.depth"));
+    horizon::HardwareImage hi_z_depth(horizon::HardwareImageDesc::depth_attachment(
+        hi_z_width, hi_z_height, horizon::Format::D32, "example_gpudrivenrendering.hiz.depth"));
     hi_z_depth.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
         gdr_width,
         gdr_height,
-        Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+        horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_gpudrivenrendering.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 
-    Corona::Horizon::HardwareImage main_depth(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        gdr_width, gdr_height, Corona::Horizon::Format::D32, "example_gpudrivenrendering.depth"));
+    horizon::HardwareImage main_depth(horizon::HardwareImageDesc::depth_attachment(
+        gdr_width, gdr_height, horizon::Format::D32, "example_gpudrivenrendering.depth"));
     main_depth.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc opaque_desc;
+    horizon::RasterizerPipelineDesc opaque_desc;
     opaque_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipelineDesc main_desc = opaque_desc;
-    main_desc.cull_mode = Corona::Horizon::CullMode::Front;
+    horizon::RasterizerPipelineDesc main_desc = opaque_desc;
 
-    Corona::Horizon::RasterizerPipeline occlusion_rasterizer(
+    horizon::RasterizerPipeline occlusion_rasterizer(
         gdr_occlusion_vert_glsl, gdr_occlusion_frag_glsl, opaque_desc);
     occlusion_rasterizer.outDepth = hi_z_mips[0];
     occlusion_rasterizer.bind_depth_target(hi_z_depth);
 
-    Corona::Horizon::RasterizerPipeline main_rasterizer(gdr_main_vert_glsl, gdr_main_frag_glsl, main_desc);
+    horizon::RasterizerPipeline main_rasterizer(gdr_main_vert_glsl, gdr_main_frag_glsl, main_desc);
     main_rasterizer.outColor = final_output_image;
     main_rasterizer.bind_depth_target(main_depth);
 
@@ -580,13 +596,13 @@ void run_example_gpudrivenrendering()
     main_rasterizer.materials.color2 = scene.props[2].material_color;
     main_rasterizer.materials.color3 = scene.props[3].material_color;
 
-    Corona::Horizon::ComputePipeline downscale(gdr_downscale_hi_z_glsl, ktm::uvec3(16, 16, 1));
-    Corona::Horizon::ComputePipeline occlude(gdr_occlude_props_glsl, ktm::uvec3(64, 1, 1));
-    Corona::Horizon::ComputePipeline compact(gdr_stream_compaction_glsl, ktm::uvec3(1024, 1, 1));
+    horizon::ComputePipeline downscale(gdr_downscale_hi_z_glsl, ktm::uvec3(16, 16, 1));
+    horizon::ComputePipeline occlude(gdr_occlude_props_glsl, ktm::uvec3(64, 1, 1));
+    horizon::ComputePipeline compact(gdr_stream_compaction_glsl, ktm::uvec3(1024, 1, 1));
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     HorizonImGuiLayer ui(window, gdr_width, gdr_height);
 
@@ -627,9 +643,8 @@ void run_example_gpudrivenrendering()
     compact.u.cullingConfig =
         glm::vec4(float(k_total_instances), float(instances_pow2), 0.0f, float(k_num_props));
 
-    Corona::Horizon::DrawIndexedIndirectParams indirect_params;
+    horizon::DrawIndexedIndirectParams indirect_params;
     indirect_params.draw_count = k_num_props;
-    indirect_params.index_type = Corona::Horizon::IndexType::UInt32;
 
     bool use_indirect = true;
     bool hiz_enable = true; // default: current full Hi-Z ΓåÆ occlude ΓåÆ compact path
@@ -638,7 +653,7 @@ void run_example_gpudrivenrendering()
     auto prev_time = std::chrono::high_resolution_clock::now();
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
-    Corona::Horizon::SubmitReceipt render_receipt;
+    horizon::SubmitReceipt render_receipt;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -722,12 +737,28 @@ void run_example_gpudrivenrendering()
         occlusion_rasterizer.clear_records();
         if (hiz_enable)
         {
-            Corona::Horizon::DrawIndexedParams wall_params;
-            wall_params.index_type = Corona::Horizon::IndexType::UInt32;
-            wall_params.index_count = static_cast<uint32_t>(cube_indices.size());
-            wall_params.instance_count = scene.props[1].instance_count;
-            wall_params.first_instance = k_wall_start_instance;
-            occlusion_rasterizer.record(cube_ib, cube_vb, wall_params);
+            // Update indirect command with current instance count
+            horizon::DrawIndexedIndirectCommand occlusion_cmd;
+            occlusion_cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+            occlusion_cmd.instance_count = scene.props[1].instance_count;
+            occlusion_cmd.first_index = 0;
+            occlusion_cmd.vertex_offset = 0;
+            occlusion_cmd.first_instance = k_wall_start_instance;
+
+            // Upload updated command
+            horizon::HardwareBuffer occlusion_indirect_frame = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(&occlusion_cmd),
+                    sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_gpudrivenrendering.occlusion_indirect_frame");
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = 1;
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = 0;
+            occlusion_rasterizer.record_indirect(cube_ib, cube_vb, occlusion_indirect_frame, indirect_params);
         }
 
         main_rasterizer.clear_records();
@@ -749,20 +780,39 @@ void run_example_gpudrivenrendering()
         }
         else
         {
+            // Fallback path: convert loop to multi-draw indirect
+            std::vector<horizon::DrawIndexedIndirectCommand> fallback_commands;
             main_rasterizer.pc.instanceBufferID = instance_in_id;
+
             for (const PropDesc& prop : scene.props)
             {
                 if (!prop.main_pass)
                     continue;
 
-                Corona::Horizon::DrawIndexedParams params;
-                params.index_type = Corona::Horizon::IndexType::UInt32;
-                params.index_count = prop.index_count;
-                params.first_index = prop.first_index;
-                params.vertex_offset = prop.base_vertex;
-                params.instance_count = prop.instance_count;
-                params.first_instance = prop.first_instance;
-                main_rasterizer.record(merged_ib, merged_vb, params);
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = prop.index_count;
+                cmd.first_index = prop.first_index;
+                cmd.vertex_offset = prop.base_vertex;
+                cmd.instance_count = prop.instance_count;
+                cmd.first_instance = prop.first_instance;
+                fallback_commands.push_back(cmd);
+            }
+
+            if (!fallback_commands.empty())
+            {
+                horizon::HardwareBuffer fallback_indirect = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(fallback_commands.data()),
+                        fallback_commands.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(fallback_commands.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_gpudrivenrendering.fallback_indirect");
+
+                horizon::DrawIndexedIndirectParams indirect_params;
+                indirect_params.draw_count = static_cast<uint32_t>(fallback_commands.size());
+                indirect_params.indirect_offset = 0;
+                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                main_rasterizer.record_indirect(merged_ib, merged_vb, fallback_indirect, indirect_params);
             }
         }
 
@@ -779,10 +829,10 @@ void run_example_gpudrivenrendering()
 
         const uint32_t occlude_groups_x = (k_total_instances + 63u) / 64u;
 
-        Corona::Horizon::HardwareStream stream = render_executor.stream();
+        horizon::HardwareStream stream = render_executor.stream();
         if (hiz_enable)
         {
-            stream << occlusion_rasterizer(hi_z_width, hi_z_height);
+            stream << occlusion_rasterizer.extent(hi_z_width, hi_z_height);
 
             uint32_t src_w = hi_z_width;
             uint32_t src_h = hi_z_height;
@@ -794,9 +844,7 @@ void run_example_gpudrivenrendering()
                 downscale.pc.dstID = hi_z_mips[mip].store_descriptor();
                 downscale.pc.srcWidth = src_w;
                 downscale.pc.srcHeight = src_h;
-                const Corona::Horizon::ComputePipelineBase::DispatchGroups groups =
-                    downscale.dispatch_groups(dst_w, dst_h);
-                stream << downscale(groups.x, groups.y, 1);
+                stream << downscale.dispatch_extent(dst_w, dst_h);
 
                 src_w = dst_w;
                 src_h = dst_h;
@@ -804,10 +852,10 @@ void run_example_gpudrivenrendering()
                 dst_h = std::max(1u, src_h / 2u);
             }
 
-            stream << occlude(occlude_groups_x, 1, 1) << compact(1, 1, 1);
+            stream << occlude.groups(occlude_groups_x, 1, 1) << compact.groups(1, 1, 1);
         }
 
-        render_receipt = (stream << main_rasterizer(gdr_width, gdr_height) << Corona::Horizon::commit());
+        render_receipt = (stream << main_rasterizer.extent(gdr_width, gdr_height) << horizon::commit());
 
         first_frame = false;
 
@@ -815,8 +863,8 @@ void run_example_gpudrivenrendering()
         // Serialize CPU submit rate against the GPU (also covers IMGUI-render-off path
         // where draw_overlay returns without waiting).
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

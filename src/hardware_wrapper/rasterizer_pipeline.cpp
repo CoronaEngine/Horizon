@@ -3,6 +3,7 @@
 #include "horizon.h"
 #include "validation/hardware_validation.h"
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -101,29 +102,19 @@ namespace Corona::Horizon
         return ResourceHandle::operator bool();
     }
 
-    RasterizerPipelineBase& RasterizerPipelineBase::operator()(uint16_t width, uint16_t height)
+    RasterizerPipelineBase& RasterizerPipelineBase::extent(uint32_t width, uint32_t height)
     {
+        // set_extent 收 uint16_t；公共签名统一 uint32_t（与 HardwareImageDesc 的
+        // extent 同类型），这里检查后窄化。
+        constexpr uint32_t max_extent = std::numeric_limits<uint16_t>::max();
+        if (width > max_extent || height > max_extent)
+            throw std::out_of_range("RasterizerPipeline render extent exceeds 65535 per dimension.");
+
         std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
 
         bind_auto_resources(impl);
-        impl->set_extent(width, height);
-        return *this;
-    }
-
-    RasterizerPipelineBase& RasterizerPipelineBase::record(const HardwareBuffer& index_buffer,
-                                                           const HardwareBuffer& vertex_buffer,
-                                                           const DrawIndexedParams& params)
-    {
-        if (!validate_rasterizer_pipeline_record(index_buffer, vertex_buffer, params))
-            return *this;
-
-        std::shared_ptr<IResourceRef> token;
-        token = ResourceBridge::token(*this);
-
-        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
-        bind_auto_resources(impl);
-        impl->record(this, index_buffer, vertex_buffer, params);
+        impl->set_extent(static_cast<uint16_t>(width), static_cast<uint16_t>(height));
         return *this;
     }
 

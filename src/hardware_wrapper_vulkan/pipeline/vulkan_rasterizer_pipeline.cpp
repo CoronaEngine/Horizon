@@ -1,6 +1,6 @@
 #include "vulkan_rasterizer_pipeline.h"
 
-#include <horizon.h>  // profiling macros merged from horizon_profiling.h
+#include "horizon_profiling.h"
 
 #include "hardware_wrapper/validation/hardware_validation.h"
 #include "hardware_wrapper_vulkan/frame_ring.h"
@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -117,42 +118,6 @@ namespace Corona::Horizon
             return reflected_binding_coordinates(shaders.fragment, entry);
         }
 
-        [[nodiscard]] VkPrimitiveTopology to_vk_topology(PrimitiveTopology topology) noexcept
-        {
-            switch (topology)
-            {
-            case PrimitiveTopology::TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-            case PrimitiveTopology::LineList: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-            case PrimitiveTopology::LineStrip: return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-            case PrimitiveTopology::PointList: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-            case PrimitiveTopology::TriangleList:
-            default: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            }
-        }
-
-        [[nodiscard]] VkPolygonMode to_vk_polygon_mode(PolygonFillMode mode) noexcept
-        {
-            switch (mode)
-            {
-            case PolygonFillMode::Line: return VK_POLYGON_MODE_LINE;
-            case PolygonFillMode::Point: return VK_POLYGON_MODE_POINT;
-            case PolygonFillMode::Fill:
-            default: return VK_POLYGON_MODE_FILL;
-            }
-        }
-
-        [[nodiscard]] VkCullModeFlags to_vk_cull_mode(CullMode mode) noexcept
-        {
-            switch (mode)
-            {
-            case CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
-            case CullMode::Back: return VK_CULL_MODE_BACK_BIT;
-            case CullMode::None:
-            default: return VK_CULL_MODE_NONE;
-            }
-        }
-
-
         [[nodiscard]] VkCompareOp to_vk_compare_op(CompareOp op) noexcept
         {
             switch (op)
@@ -206,13 +171,13 @@ namespace Corona::Horizon
         [[nodiscard]] VkColorComponentFlags to_vk_color_mask(ColorWriteMask mask) noexcept
         {
             VkColorComponentFlags flags = 0;
-            if ((mask & ColorWriteMask::R) == ColorWriteMask::R)
+            if ((mask & ColorWrite_R) == ColorWrite_R)
                 flags |= VK_COLOR_COMPONENT_R_BIT;
-            if ((mask & ColorWriteMask::G) == ColorWriteMask::G)
+            if ((mask & ColorWrite_G) == ColorWrite_G)
                 flags |= VK_COLOR_COMPONENT_G_BIT;
-            if ((mask & ColorWriteMask::B) == ColorWriteMask::B)
+            if ((mask & ColorWrite_B) == ColorWrite_B)
                 flags |= VK_COLOR_COMPONENT_B_BIT;
-            if ((mask & ColorWriteMask::A) == ColorWriteMask::A)
+            if ((mask & ColorWrite_A) == ColorWrite_A)
                 flags |= VK_COLOR_COMPONENT_A_BIT;
             return flags;
         }
@@ -510,38 +475,6 @@ namespace Corona::Horizon
             return manager->store_storage_descriptor(*native);
         }
 
-        [[nodiscard]] DrawIndexedParams normalize_draw_params(const HardwareBuffer& index_buffer, DrawIndexedParams params)
-        {
-            if (params.index_count != 0)
-                return params;
-
-            const uint64_t element_count = index_buffer.get_element_count();
-            if (params.first_index >= element_count)
-                return params;
-
-            const uint64_t resolved_count = element_count - params.first_index;
-            if (resolved_count > std::numeric_limits<uint32_t>::max())
-                throw std::overflow_error("RasterizerPipeline draw index_count exceeds uint32_t.");
-
-            params.index_count = static_cast<uint32_t>(resolved_count);
-            return params;
-        }
-
-        [[nodiscard]] DrawIndexedDesc to_draw_desc(const DrawIndexedParams& params)
-        {
-            DrawIndexedDesc desc;
-            desc.index_count = params.index_count;
-            desc.instance_count = params.instance_count;
-            desc.first_index = params.first_index;
-            desc.vertex_offset = params.vertex_offset;
-            desc.first_instance = params.first_instance;
-            desc.index_type = params.index_type;
-            desc.enable_scissor = params.enable_scissor;
-            desc.scissor = params.scissor;
-            desc.debug_label = params.debug_label;
-            return desc;
-        }
-
         [[nodiscard]] VkShaderModule create_shader_module(VkDevice device, const EmbeddedShader::ShaderCodeModule& module, const char* label)
         {
             if (!std::holds_alternative<std::vector<uint32_t>>(module.shaderCode))
@@ -731,7 +664,7 @@ namespace Corona::Horizon
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly {};
             input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-            input_assembly.topology = to_vk_topology(desc_.topology);
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             input_assembly.primitiveRestartEnable = VK_FALSE;
 
             VkPipelineViewportStateCreateInfo viewport_state {};
@@ -743,8 +676,8 @@ namespace Corona::Horizon
             rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
             rasterization.depthClampEnable = desc_.depth_clamp_enabled ? VK_TRUE : VK_FALSE;
             rasterization.rasterizerDiscardEnable = desc_.rasterizer_discard_enabled ? VK_TRUE : VK_FALSE;
-            rasterization.polygonMode = to_vk_polygon_mode(desc_.fill_mode);
-            rasterization.cullMode = to_vk_cull_mode(desc_.cull_mode);
+            rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+            rasterization.cullMode = VK_CULL_MODE_NONE;
             rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             rasterization.depthBiasEnable = VK_FALSE;
             rasterization.lineWidth = desc_.line_width;
@@ -1193,10 +1126,11 @@ namespace Corona::Horizon
                 if (binding_layout.descriptor_type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                     continue;
 
-                auto uniform = std::ranges::find_if(draw.uniform_buffers, [&](const UniformBufferBindingData& item) {
+                const std::vector<UniformBufferBindingData>& draw_uniforms = draw.uniform_buffers();
+                auto uniform = std::ranges::find_if(draw_uniforms, [&](const UniformBufferBindingData& item) {
                     return item.set == binding_layout.set && item.binding == binding_layout.binding;
                 });
-                if (uniform == draw.uniform_buffers.end() || !uniform->gpu_buffer)
+                if (uniform == draw_uniforms.end() || !uniform->gpu_buffer)
                     throw std::logic_error("RasterizerPipeline uniform buffer descriptor is missing persistent GPU buffer.");
 
                 // 直接使用持久 buffer，跳过 from_bytes VkBuffer 分配
@@ -1247,6 +1181,7 @@ namespace Corona::Horizon
         if (is_push_constant_member(bind_type))
         {
             write_bytes(push_constant_data_, push_constant_size(), byte_offset, data, size, "RasterizerPipeline push constant");
+            push_constant_snapshot_.reset();
             return;
         }
 
@@ -1277,6 +1212,7 @@ namespace Corona::Horizon
                                     type_size,
                                     descriptor_index,
                                     "RasterizerPipeline bindless storage buffer");
+            push_constant_snapshot_.reset();
 
             auto found = std::ranges::find_if(bound_buffers_, [&](const BoundBuffer& bound) {
                 return bound.byte_offset == byte_offset &&
@@ -1352,6 +1288,7 @@ namespace Corona::Horizon
                                     type_size,
                                     descriptor_index,
                                     "RasterizerPipeline bindless image");
+            push_constant_snapshot_.reset();
 
             auto found = std::ranges::find_if(bound_images_, [&](const BoundImage& bound) {
                 if (is_stage_output(bind_type) || is_stage_output(bound.bind_type))
@@ -1420,12 +1357,6 @@ namespace Corona::Horizon
 
     void VulkanRasterizerPipeline::bind_auto_resources()
     {
-        struct AutoImage
-        {
-            EmbeddedShader::AutoBindEntry entry;
-            HardwareImage image;
-        };
-
         struct AutoValue
         {
             EmbeddedShader::AutoBindEntry entry;
@@ -1433,9 +1364,25 @@ namespace Corona::Horizon
         };
 
         std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareImage>> images;
+        std::vector<std::pair<EmbeddedShader::AutoBindEntry, HardwareBuffer>> buffers;
         std::vector<AutoValue> values;
         {
             std::lock_guard lock(mutex_);
+
+            // 绝大多数 draw 没有任何 entry 变脏。先扫一遍再决定是否建容器，
+            // 否则每次 record() 都要为两个空 vector 各付一次堆分配。
+            bool any_dirty = false;
+            for (const EmbeddedShader::AutoBindEntry& entry : shaders_.auto_bind_entries)
+            {
+                if (*entry.dirtyVersion != entry.currentDirtyVersion)
+                {
+                    any_dirty = true;
+                    break;
+                }
+            }
+            if (!any_dirty)
+                return;
+
             images.reserve(shaders_.auto_bind_entries.size());
             values.reserve(shaders_.auto_bind_entries.size());
             for (EmbeddedShader::AutoBindEntry& entry : shaders_.auto_bind_entries)
@@ -1444,7 +1391,11 @@ namespace Corona::Horizon
                 {
                     if (entry.boundResourceRef != nullptr && *entry.boundResourceRef != nullptr)
                     {
-                        images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
+                        // EDSL 的 Array<T> 绑的是 HardwareBuffer；纹理绑 HardwareImage。
+                        if (entry.boundResourceIsBuffer)
+                            buffers.push_back({ entry, *static_cast<HardwareBuffer*>(*entry.boundResourceRef) });
+                        else
+                            images.push_back({ entry, *static_cast<HardwareImage*>(*entry.boundResourceRef) });
                     }
                     else if (entry.boundValueRef != nullptr && entry.boundValueSize != 0)
                     {
@@ -1469,6 +1420,17 @@ namespace Corona::Horizon
                                 entry.location);
         }
 
+        // buffer 的重载签名少一个 location 形参（set/binding 直接给）。
+        for (const auto& [entry, buffer] : buffers)
+        {
+            set_resource_direct(entry.byteOffset,
+                                entry.typeSize,
+                                buffer,
+                                entry.bindType,
+                                0,
+                                entry.location);
+        }
+
         for (const AutoValue& value : values)
         {
             set_push_constant_direct(value.entry.byteOffset,
@@ -1486,33 +1448,11 @@ namespace Corona::Horizon
         return shaders_.auto_bind_entries;
     }
 
-    void VulkanRasterizerPipeline::record(RasterizerPipelineBase* pipeline,
-                                          const HardwareBuffer& index_buffer,
-                                          const HardwareBuffer& vertex_buffer,
-                                          const DrawIndexedParams& params)
+    std::shared_ptr<const std::vector<std::byte>> VulkanRasterizerPipeline::push_constant_snapshot_unlocked()
     {
-        if (!validate_rasterizer_pipeline_record(index_buffer, vertex_buffer, params))
-            return;
-
-        HORIZON_PROFILE_SCOPE_N("RasterizerPipeline::record");
-
-        RecordedDraw draw;
-        draw.pipeline = pipeline;
-        draw.index_buffer = index_buffer;
-        draw.vertex_buffer = vertex_buffer;
-        draw.params = normalize_draw_params(index_buffer, params);
-
-        std::lock_guard lock(mutex_);
-        draw.push_constant_data = push_constant_data_;
-        // UBO 不再逐 draw 拷贝：它是批次公共数据，批次构建时统一取本帧槽的句柄。
-        draws_.push_back(std::move(draw));
-    }
-
-    void VulkanRasterizerPipeline::record(const HardwareBuffer& index_buffer,
-                                          const HardwareBuffer& vertex_buffer,
-                                          const DrawIndexedParams& params)
-    {
-        record({}, index_buffer, vertex_buffer, params);
+        if (!push_constant_snapshot_)
+            push_constant_snapshot_ = std::make_shared<const std::vector<std::byte>>(push_constant_data_);
+        return push_constant_snapshot_;
     }
 
     void VulkanRasterizerPipeline::record_indirect(RasterizerPipelineBase* pipeline,
@@ -1531,14 +1471,13 @@ namespace Corona::Horizon
         draw.params = params;
 
         std::lock_guard lock(mutex_);
-        draw.push_constant_data = push_constant_data_;
+        draw.push_constant_data = push_constant_snapshot_unlocked();
         indirect_draws_.push_back(std::move(draw));
     }
 
     void VulkanRasterizerPipeline::clear_records()
     {
         std::lock_guard lock(mutex_);
-        draws_.clear();
         indirect_draws_.clear();
     }
 
@@ -1580,7 +1519,7 @@ namespace Corona::Horizon
             while (ring.size() < ring_size)
                 ring.push_back(HardwareBuffer::from_bytes(
                     std::span<const std::byte>(ubo.data),
-                    1, BufferUsageFlags::Uniform, "RasterizerPipeline.ubo_persistent"));
+                    1, BufferUsage_Uniform, "RasterizerPipeline.ubo_persistent"));
 
             HardwareBuffer& target = ring[static_cast<size_t>(slot)];
             // 换槽时必须整份写：该槽上一次被写的是第 i-N 帧的数据。
@@ -1614,58 +1553,37 @@ namespace Corona::Horizon
 
             // 本帧槽的 UBO 落盘一次，之后所有 draw 共享同一批句柄。
             sync_ubo_slot_unlocked();
-            // 只带 execution 需要的 (set, binding, gpu_buffer)，不拷 CPU 影子数据。
-            std::vector<UniformBufferBindingData> frame_uniforms;
-            frame_uniforms.reserve(uniform_buffers_.size());
+            // 整批共享一份公共载荷（条件信息 + 本帧 UBO 句柄）。原先逐 draw 各拷
+            // 三个 vector；现在整批建一次，各 draw 只持一个 shared_ptr。
+            auto shared_payload = std::make_shared<DrawSharedPayload>();
+            shared_payload->uniform_buffers.reserve(uniform_buffers_.size());
             for (const UniformBufferBindingData& ubo : uniform_buffers_)
             {
                 if (ubo.data.empty())
                     continue;
-                frame_uniforms.push_back({ .set = ubo.set, .binding = ubo.binding, .data = {}, .gpu_buffer = ubo.gpu_buffer });
+                shared_payload->uniform_buffers.push_back(
+                    { .set = ubo.set, .binding = ubo.binding, .data = {}, .gpu_buffer = ubo.gpu_buffer });
             }
 
-            // 条件信息在一个批次内对所有 draw 相同（getCurrentConditionInfo 返回
-            // vector<bool>，原先每 draw 调两次 = 每 draw 两次堆分配），提到循环外。
-            EmbeddedShader::ShaderCodeCompiler::ConditionInfo vert_condition_info;
-            EmbeddedShader::ShaderCodeCompiler::ConditionInfo frag_condition_info;
             if (const auto& object = shaders_.object; object)
             {
-                vert_condition_info = object->vertex->getCurrentConditionInfo();
-                frag_condition_info = object->fragment->getCurrentConditionInfo();
+                shared_payload->vert_condition_info = object->vertex->getCurrentConditionInfo();
+                shared_payload->frag_condition_info = object->fragment->getCurrentConditionInfo();
             }
 
-            plan.batch.draws.reserve(draws_.size());
-            for (const RecordedDraw& draw : draws_)
-            {
-                DrawIndexedDesc draw_desc = to_draw_desc(draw.params);
-                draw_desc.pipeline = draw.pipeline;
-                draw_desc.vert_condition_info = vert_condition_info;
-                draw_desc.frag_condition_info = frag_condition_info;
-                draw_desc.push_constant_data = draw.push_constant_data;
-                draw_desc.uniform_buffers = frame_uniforms;
+            std::shared_ptr<const DrawSharedPayload> shared = std::move(shared_payload);
 
-                plan.batch.draws.push_back({
-                    .index = buffer_ref(draw.index_buffer),
-                    .vertex = buffer_ref(draw.vertex_buffer),
-                    .draw = std::move(draw_desc),
-                });
-            }
-
+            // 处理所有 indirect draws
             plan.indirect_draws.reserve(indirect_draws_.size());
             for (const RecordedIndirectDraw& draw : indirect_draws_)
             {
                 DrawIndexedIndirectDesc indirect_desc;
                 indirect_desc.pipeline = draw.pipeline;
-                indirect_desc.vert_condition_info = vert_condition_info;
-                indirect_desc.frag_condition_info = frag_condition_info;
+                indirect_desc.shared = shared;
                 indirect_desc.indirect_offset = draw.params.indirect_offset;
                 indirect_desc.draw_count = draw.params.draw_count;
                 indirect_desc.stride = draw.params.stride;
-                indirect_desc.index_type = draw.params.index_type;
-                indirect_desc.enable_scissor = draw.params.enable_scissor;
-                indirect_desc.scissor = draw.params.scissor;
-                indirect_desc.push_constant_data = draw.push_constant_data;
-                indirect_desc.uniform_buffers = frame_uniforms;
+                indirect_desc.push_constants = draw.push_constant_data;
                 indirect_desc.debug_label = draw.params.debug_label;
 
                 plan.indirect_draws.emplace_back(buffer_ref(draw.index_buffer),
@@ -1711,8 +1629,6 @@ namespace Corona::Horizon
         if (plan.has_rendering_scope)
             recorder.begin_rendering(plan.rendering);
 
-        if (!plan.batch.draws.empty())
-            recorder.draw_indexed_batch(std::move(plan.batch));
         for (auto& [index, vertex, indirect, draw] : plan.indirect_draws)
             recorder.draw_indexed_indirect(index, vertex, indirect, std::move(draw));
 

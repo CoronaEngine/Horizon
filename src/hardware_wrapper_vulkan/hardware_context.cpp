@@ -1267,6 +1267,8 @@ namespace Corona::Horizon
             VkPhysicalDeviceVulkan11Features features11 {};
             features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
             features11.multiview = VK_TRUE;
+            // gl_DrawID / SV_DrawIndex：全量 indirect 迁移里 per-draw 数据的索引来源。
+            features11.shaderDrawParameters = VK_TRUE;
 
             VkPhysicalDeviceVulkan12Features features12 {};
             features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;

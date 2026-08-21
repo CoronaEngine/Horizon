@@ -31,9 +31,6 @@ class HorizonConan(ConanFile):
         "with_hardcode_shaders": [True, False],
         "with_tracy": [True, False],
         "enable_imgui_render": [True, False],
-        "enable_debug_validation": [True, False],
-        "enable_relwithdebinfo_validation": [True, False],
-        "enable_release_validation": [True, False],
     }
 
     default_options = {
@@ -49,9 +46,6 @@ class HorizonConan(ConanFile):
         "with_hardcode_shaders": False,
         "with_tracy": True,
         "enable_imgui_render": True,
-        "enable_debug_validation": False,
-        "enable_relwithdebinfo_validation": False,
-        "enable_release_validation": False,
         "spirv-tools/*:shared": False,
         "spirv-tools/*:build_executables": False,
         "glfw/*:shared": False,
@@ -116,11 +110,6 @@ class HorizonConan(ConanFile):
         variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
         variables["HORIZON_ENABLE_TRACY"] = bool(self.options.with_tracy)
         variables["HORIZON_ENABLE_IMGUI_RENDER"] = bool(self.options.enable_imgui_render)
-        variables["HORIZON_ENABLE_DEBUG_VALIDATION"] = bool(self.options.enable_debug_validation)
-        variables["HORIZON_ENABLE_RELWITHDEBINFO_VALIDATION"] = bool(
-            self.options.enable_relwithdebinfo_validation
-        )
-        variables["HORIZON_ENABLE_RELEASE_VALIDATION"] = bool(self.options.enable_release_validation)
         if bool(self.options.with_examples):
             variables["HORIZON_IMGUI_BINDINGS_DIR"] = os.path.join(
                 self.dependencies["imgui"].package_folder,

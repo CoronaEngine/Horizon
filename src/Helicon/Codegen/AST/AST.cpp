@@ -220,6 +220,33 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getDispa
 	return idOutput;
 }
 
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getDrawIndexInput()
+{
+	auto& drawIdx = Parser::currentParser->drawIndexInput;
+	if (drawIdx)
+		return drawIdx;
+	drawIdx = Generator::SlangGenerator::getDrawIndexInput();
+	return drawIdx;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getInstanceIndexInput()
+{
+	auto& instanceIdx = Parser::currentParser->instanceIndexInput;
+	if (instanceIdx)
+		return instanceIdx;
+	instanceIdx = Generator::SlangGenerator::getInstanceIndexInput();
+	return instanceIdx;
+}
+
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getVertexIndexInput()
+{
+	auto& vertexIdx = Parser::currentParser->vertexIndexInput;
+	if (vertexIdx)
+		return vertexIdx;
+	vertexIdx = Generator::SlangGenerator::getVertexIndexInput();
+	return vertexIdx;
+}
+
 std::shared_ptr<EmbeddedShader::Ast::ElementValue> EmbeddedShader::Ast::AST::at(
 	std::shared_ptr<Value> array, uint32_t index)
 {

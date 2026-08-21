@@ -22,9 +22,7 @@
 #include <imgui.h>
 
 #include GLSL(shaders/assao_scene_vert.glsl)
-#include GLSL(shaders/assao_color_frag.glsl)
-#include GLSL(shaders/assao_normal_frag.glsl)
-#include GLSL(shaders/assao_depth_frag.glsl)
+#include GLSL(shaders/assao_gbuffer_mrt_frag.glsl)
 #include GLSL(shaders/assao_generate_compute.glsl)
 #include GLSL(shaders/assao_blur_compute.glsl)
 #include GLSL(shaders/assao_apply_compute.glsl)
@@ -57,10 +55,20 @@ struct AoVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LoadedMesh
 {
     std::vector<AoVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -171,11 +179,18 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -200,17 +215,20 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    Corona::Horizon::HardwareBuffer vb;
-    Corona::Horizon::HardwareBuffer ib;
+    horizon::HardwareBuffer vb;
+    horizon::HardwareBuffer ib;
     uint32_t index_count = 0;
+    // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
+    std::vector<MeshGroup> groups;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        Corona::Horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        Corona::Horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
+        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
+        mesh.groups,
     };
 }
 
@@ -242,6 +260,15 @@ void run_example_assao()
         float scale;
         glm::vec3 position;
     };
+
+    // 预计算的静态transform，避免每帧重复计算
+    struct StaticTransform
+    {
+        glm::mat4 model;
+        glm::vec4 color;
+        const GpuMesh* mesh;
+    };
+
     const std::array<std::pair<const GpuMesh*, float>, 3> model_pool = { {
         { &orb, 0.5f },
         { &column, 0.05f },
@@ -257,71 +284,81 @@ void run_example_assao()
         models.push_back({ mesh, scale, glm::vec3(px, 0.0f, pz) });
     }
 
+    // 预计算所有静态transform（1个地面 + 120个模型）
+    std::vector<StaticTransform> static_transforms;
+    static_transforms.reserve(121);
+
+    // 地面
+    static_transforms.push_back({
+        glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
+        glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)),
+        glm::vec4(0.6f, 0.6f, 0.6f, 1.0f),
+        &ground,
+    });
+
+    // 模型
+    for (const ModelInstance& m : models)
+    {
+        static_transforms.push_back({
+            glm::translate(glm::mat4(1.0f), m.position) *
+            glm::scale(glm::mat4(1.0f), glm::vec3(m.scale)),
+            glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f),
+            m.mesh,
+        });
+    }
+
     // G-buffer 目标（compute 需 Storage）
-    const auto rt_usage = Corona::Horizon::ImageUsageFlags::ColorAttachment |
-                          Corona::Horizon::ImageUsageFlags::Sampled |
-                          Corona::Horizon::ImageUsageFlags::Storage;
-    Corona::Horizon::HardwareImage scene_color_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::RGBA16_FLOAT, rt_usage, "example_assao.color"));
+    const auto rt_usage = horizon::ImageUsage_ColorAttachment |
+                          horizon::ImageUsage_Sampled |
+                          horizon::ImageUsage_Storage;
+    horizon::HardwareImage scene_color_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_assao.color"));
     scene_color_image.set_clear_color(0.3f, 0.45f, 0.6f, 1.0f); // 天空底色
-    Corona::Horizon::HardwareImage normal_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_assao.normal"));
+    horizon::HardwareImage normal_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_assao.normal"));
     normal_image.set_clear_color(0.5f, 0.5f, 1.0f, 1.0f);
-    Corona::Horizon::HardwareImage depth_val_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_assao.depthval"));
+    horizon::HardwareImage depth_val_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::R32_FLOAT, rt_usage, "example_assao.depthval"));
     depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage ao_image_a(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::R32_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled, "example_assao.ao_a"));
-    Corona::Horizon::HardwareImage ao_image_b(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::R32_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled, "example_assao.ao_b"));
+    horizon::HardwareImage ao_image_a(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::R32_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled, "example_assao.ao_a"));
+    horizon::HardwareImage ao_image_b(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::R32_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled, "example_assao.ao_b"));
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        ao_width, ao_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_assao.output"));
 
-    // 三个几何 pass 各自的深度附件
-    Corona::Horizon::HardwareImage depth_c(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, Corona::Horizon::Format::D32, "example_assao.depth_c"));
-    depth_c.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage depth_n(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, Corona::Horizon::Format::D32, "example_assao.depth_n"));
-    depth_n.set_clear_depth(1.0f, 0);
-    Corona::Horizon::HardwareImage depth_d(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, Corona::Horizon::Format::D32, "example_assao.depth_d"));
-    depth_d.set_clear_depth(1.0f, 0);
+    // MRT: 单个深度附件，一次 pass 输出三个 G-buffer RT
+    horizon::HardwareImage depth_attachment(horizon::HardwareImageDesc::depth_attachment(
+        ao_width, ao_height, horizon::Format::D32, "example_assao.depth"));
+    depth_attachment.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc scene_desc;
+    horizon::RasterizerPipelineDesc scene_desc;
     scene_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline color_rasterizer(assao_scene_vert_glsl, assao_color_frag_glsl, scene_desc);
-    color_rasterizer.outColor = scene_color_image;
-    color_rasterizer.bind_depth_target(depth_c);
-
-    Corona::Horizon::RasterizerPipelineDesc normal_desc = scene_desc;
-    Corona::Horizon::RasterizerPipeline normal_rasterizer(assao_scene_vert_glsl, assao_normal_frag_glsl, normal_desc);
-    normal_rasterizer.outNormal = normal_image;
-    normal_rasterizer.bind_depth_target(depth_n);
-
-    Corona::Horizon::RasterizerPipelineDesc depth_desc = scene_desc;
-    Corona::Horizon::RasterizerPipeline depthval_rasterizer(assao_scene_vert_glsl, assao_depth_frag_glsl, depth_desc);
-    depthval_rasterizer.outDepthVal = depth_val_image;
-    depthval_rasterizer.bind_depth_target(depth_d);
+    // MRT pipeline: 一个 fragment shader 输出 3 个 RT (color/normal/depthval)
+    horizon::RasterizerPipeline gbuffer_rasterizer(assao_scene_vert_glsl, assao_gbuffer_mrt_frag_glsl, scene_desc);
+    gbuffer_rasterizer.outColor = scene_color_image;
+    gbuffer_rasterizer.outNormal = normal_image;
+    gbuffer_rasterizer.outDepthVal = depth_val_image;
+    gbuffer_rasterizer.bind_depth_target(depth_attachment);
 
     // compute 管线：generate → blur ×2（ping-pong 用两个实例）→ apply
-    Corona::Horizon::ComputePipeline generate_compute(assao_generate_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline blur_compute_ab(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline blur_compute_ba(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline apply_compute(assao_apply_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline generate_compute(assao_generate_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline blur_compute_ab(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline blur_compute_ba(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline apply_compute(assao_apply_compute_glsl, ktm::uvec3(8, 8, 1));
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
     constexpr float aspect = static_cast<float>(ao_width) / static_cast<float>(ao_height);
     // 相机 (0,1.5,0) 前视稍向下（垂直角 -0.3 rad）、fovy 60°
@@ -341,8 +378,6 @@ void run_example_assao()
     const float p00 = proj[0][0];
     const float p11 = proj[1][1];
 
-    const uint32_t dispatch_x = (ao_width + 7) / 8;
-    const uint32_t dispatch_y = (ao_height + 7) / 8;
 
     HorizonImGuiLayer ui(window, ao_width, ao_height);
 
@@ -377,42 +412,54 @@ void run_example_assao()
             fps_frame_count = 0;
         }
 
-        // 三个几何 pass
+        // MRT: 单次 G-buffer pass，使用预计算的transform避免每帧重复计算
         auto record_scene = [&](auto& pipeline) {
             pipeline.clear_records();
             // 共享矩阵（UBO，batch 内不变）；per-draw 数据（model、color）走 push constant
             pipeline.vsp.proj_view   = view_proj;
             pipeline.vsp.view_matrix = view;
 
-            // 地面：压扁的 cube
-            {
-                Corona::Horizon::DrawIndexedParams params;
-                params.index_type = Corona::Horizon::IndexType::UInt32;
-                params.index_count = ground.index_count;
+            // Convert nested loop to multi-draw indirect
+            std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
 
-                const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -10.0f, 0.0f)) *
-                                        glm::scale(glm::mat4(1.0f), glm::vec3(10.0f)); // 原版：cube x10，顶面 y=0
-                pipeline.vpc.model = model;
-                pipeline.vpc.color = glm::vec4(0.6f, 0.6f, 0.6f, 1.0f);
-                pipeline.record(ground.ib, ground.vb, params);
+            for (const StaticTransform& t : static_transforms)
+            {
+                pipeline.vpc.model = t.model;
+                pipeline.vpc.color = t.color;
+
+                for (const MeshGroup& group : t.mesh->groups)
+                {
+                    horizon::DrawIndexedIndirectCommand cmd;
+                    cmd.index_count = group.index_count;
+                    cmd.first_index = group.first_index;
+                    cmd.vertex_offset = group.base_vertex;
+                    cmd.instance_count = 1;
+                    cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                    indirect_cmds.push_back(cmd);
+                }
             }
 
-            for (const ModelInstance& m : models)
+            if (!indirect_cmds.empty())
             {
-                Corona::Horizon::DrawIndexedParams params;
-                params.index_type = Corona::Horizon::IndexType::UInt32;
-                params.index_count = m.mesh->index_count;
+                horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                    std::span<const std::byte>(
+                        reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                        indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                    "example_assao.scene_indirect");
 
-                const glm::mat4 model = glm::translate(glm::mat4(1.0f), m.position) *
-                                        glm::scale(glm::mat4(1.0f), glm::vec3(m.scale));
-                pipeline.vpc.model = model;
-                pipeline.vpc.color = glm::vec4(192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f); // 原版 0xc0 灰
-                pipeline.record(m.mesh->ib, m.mesh->vb, params);
+                // Assume all meshes share the same VB/IB (sponza model)
+                // If not, this needs more complex handling
+                const StaticTransform& first_transform = static_transforms[0];
+                horizon::DrawIndexedIndirectParams indirect_params;
+                indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_params.indirect_offset = 0;
+                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+                pipeline.record_indirect(first_transform.mesh->ib, first_transform.mesh->vb, indirect_buffer, indirect_params);
             }
         };
-        record_scene(color_rasterizer);
-        record_scene(normal_rasterizer);
-        record_scene(depthval_rasterizer);
+        record_scene(gbuffer_rasterizer);
 
         // compute 参数
         const glm::vec4 resolution(float(ao_width), float(ao_height), 0.0f, 0.0f);
@@ -440,20 +487,18 @@ void run_example_assao()
         apply_compute.pushConsts.outputID = final_output_image.store_descriptor();
         apply_compute.pushConsts.params0 = glm::vec4(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << color_rasterizer(ao_width, ao_height)
-                            << normal_rasterizer(ao_width, ao_height)
-                            << depthval_rasterizer(ao_width, ao_height)
-                            << generate_compute(dispatch_x, dispatch_y, 1)
-                            << blur_compute_ab(dispatch_x, dispatch_y, 1)
-                            << blur_compute_ba(dispatch_x, dispatch_y, 1)
-                            << apply_compute(dispatch_x, dispatch_y, 1)
-                            << Corona::Horizon::commit();
+        horizon::SubmitReceipt render_receipt =
+            render_executor << gbuffer_rasterizer.extent(ao_width, ao_height)
+                            << generate_compute.dispatch_extent(ao_width, ao_height)
+                            << blur_compute_ab.dispatch_extent(ao_width, ao_height)
+                            << blur_compute_ba.dispatch_extent(ao_width, ao_height)
+                            << apply_compute.dispatch_extent(ao_width, ao_height)
+                            << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

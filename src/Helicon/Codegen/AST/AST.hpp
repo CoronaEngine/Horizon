@@ -99,6 +99,9 @@ namespace EmbeddedShader::Ast
 		static std::shared_ptr<Variate> getPositionOutput();
 		static std::shared_ptr<Variate> getIsFrontFaceOutput();
 		static std::shared_ptr<Variate> getDispatchThreadIDInput();
+		static std::shared_ptr<Variate> getDrawIndexInput();
+		static std::shared_ptr<Variate> getInstanceIndexInput();
+		static std::shared_ptr<Variate> getVertexIndexInput();
 
 		static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, uint32_t index);
 		static std::shared_ptr<ElementValue> at(std::shared_ptr<Value> array, const std::shared_ptr<Value>& index);

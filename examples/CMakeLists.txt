@@ -94,6 +94,17 @@ target_link_libraries(HorizonExamples PRIVATE
 target_compile_definitions(HorizonExamples PRIVATE
     HORIZON_IMGUI_RENDER_ENABLED=$<BOOL:${HORIZON_ENABLE_IMGUI_RENDER}>)
 
+# Profiling opt-in。Horizon 以 PRIVATE 持有 Tracy（profiling 不是公共 API），所以
+# 想埋点的目标得自己声明。example_drawstress 的应用侧 zone 与引擎侧的
+# Horizon::encode / Horizon::commit 配对才能读出提交路径的时间分布。
+#
+# 由同一个 HORIZON_ENABLE_TRACY 驱动，避免与 src/ 那处不一致。缺 define 时埋点宏
+# 静默展开为空，不会报错——改这里之后请 grep 产物里的 zone 名验证。
+if(HORIZON_ENABLE_TRACY)
+    target_link_libraries(HorizonExamples PRIVATE Tracy::TracyClient)
+    target_compile_definitions(HorizonExamples PRIVATE HORIZON_TRACY_ENABLED=1)
+endif()
+
 add_custom_command(TARGET HorizonExamples POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/shaders"

@@ -63,7 +63,7 @@ std::vector<std::byte> read_file_bytes(const std::filesystem::path& path)
 }
 
 // 传统 DDS 头（128 字节）+ BC 压缩 payload 直接上传（含全 mip 链）
-Corona::Horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, const std::string& name)
+horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, const std::string& name)
 {
     const std::vector<std::byte> bytes = read_file_bytes(path);
 
@@ -78,31 +78,31 @@ Corona::Horizon::HardwareImage create_bc_texture(const std::filesystem::path& pa
 
     constexpr uint32_t fourcc_dxt3 = 0x33545844; // "DXT3" -> BC2
     constexpr uint32_t fourcc_ati2 = 0x32495441; // "ATI2" -> BC5
-    Corona::Horizon::Format format;
+    horizon::Format format;
     if (four_cc == fourcc_dxt3)
-        format = Corona::Horizon::Format::BC2_UNORM;
+        format = horizon::Format::BC2_UNORM;
     else if (four_cc == fourcc_ati2)
-        format = Corona::Horizon::Format::BC5_UNORM;
+        format = horizon::Format::BC5_UNORM;
     else
         throw std::runtime_error("Unsupported DDS fourcc: " + path.string());
 
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::texture_2d(
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
         width, height, format,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = mip_count;
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
 
     const std::span<const std::byte> payload(bytes.data() + 128, bytes.size() - 128);
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(staging_desc, payload);
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(staging_desc, payload);
 
-    Corona::Horizon::HardwareExecutor executor;
-    Corona::Horizon::HardwareStream stream = executor.stream();
+    horizon::HardwareExecutor executor;
+    horizon::HardwareStream stream = executor.stream();
     uint64_t offset = 0;
     for (uint32_t mip = 0; mip < mip_count; ++mip)
     {
@@ -113,7 +113,7 @@ Corona::Horizon::HardwareImage create_bc_texture(const std::filesystem::path& pa
         stream << image.copy_from(staging, offset, 0, mip);
         offset += blocks_x * blocks_y * 16; // BC2/BC5 均为 16 字节/块
     }
-    (void)(stream << Corona::Horizon::commit());
+    (void)(stream << horizon::commit());
 
     return image;
 }
@@ -165,7 +165,7 @@ std::vector<BumpVertex> build_cube_vertices()
     return vertices;
 }
 
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 2, 1, 1, 2, 3,
     4, 5, 6, 5, 7, 6,
     8, 10, 9, 9, 10, 11,
@@ -174,7 +174,7 @@ const std::vector<uint32_t> cube_indices = {
     20, 21, 22, 21, 23, 22,
 };
 
-void calc_tangents(std::vector<BumpVertex>& vertices, const std::vector<uint32_t>& indices)
+void calc_tangents(std::vector<BumpVertex>& vertices, const std::vector<uint16_t>& indices)
 {
     std::vector<glm::vec3> tan_accum(vertices.size(), glm::vec3(0.0f));
     std::vector<glm::vec3> bitan_accum(vertices.size(), glm::vec3(0.0f));
@@ -242,42 +242,59 @@ void run_example_bump()
     std::vector<BumpVertex> cube_vertices = build_cube_vertices();
     calc_tangents(cube_vertices, cube_indices);
 
-    Corona::Horizon::HardwareBuffer cube_vb = Corona::Horizon::HardwareBuffer::vertex(cube_vertices, "example_bump.vb");
-    Corona::Horizon::HardwareBuffer cube_ib = Corona::Horizon::HardwareBuffer::index(cube_indices, "example_bump.ib");
+    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_bump.vb");
+    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_bump.ib");
 
-    Corona::Horizon::HardwareImage color_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-rgba.dds", "example_bump.texColor");
-    Corona::Horizon::HardwareImage normal_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-n.dds", "example_bump.texNormal");
+    // Indirect args buffer for 3×3=9 cubes (static)
+    constexpr uint32_t cube_count = 9;
+    std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds(cube_count);
+    for (uint32_t i = 0; i < cube_count; ++i)
+    {
+        indirect_cmds[i].index_count = static_cast<uint32_t>(cube_indices.size());
+        indirect_cmds[i].instance_count = 1;
+        indirect_cmds[i].first_index = 0;
+        indirect_cmds[i].vertex_offset = 0;
+        indirect_cmds[i].first_instance = i;  // Use first_instance as draw index
+    }
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        bump_width, bump_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+            indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_bump.indirect_args");
+
+    horizon::HardwareImage color_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-rgba.dds", "example_bump.texColor");
+    horizon::HardwareImage normal_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-n.dds", "example_bump.texNormal");
+
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        bump_width, bump_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_bump.output"));
     final_output_image.set_clear_color(0x30 / 255.0f, 0x30 / 255.0f, 0x30 / 255.0f, 1.0f); // 原版 0x303030ff
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        bump_width, bump_height, Corona::Horizon::Format::D32, "example_bump.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        bump_width, bump_height, horizon::Format::D32, "example_bump.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
-    desc.depth_compare_op = Corona::Horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
+    desc.depth_compare_op = horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
 
-    Corona::Horizon::RasterizerPipeline rasterizer(bump_vert_glsl, bump_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(bump_vert_glsl, bump_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
     // 纹理存入 bindless combined-texture 表（set 0），索引经 push constant 传入 shader。
     rasterizer.model_pc.texColorIndex = color_image.store_descriptor();
     rasterizer.model_pc.texNormalIndex = normal_image.store_descriptor();
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams draw_params;
-    draw_params.index_type = Corona::Horizon::IndexType::UInt32;
-    draw_params.index_count = static_cast<uint32_t>(cube_indices.size());
 
     constexpr float aspect = static_cast<float>(bump_width) / static_cast<float>(bump_height);
     // 原版左手系：mtxLookAt (0,0,-7)->(0,0,0)、mtxProj fovy 60°
@@ -351,6 +368,14 @@ void run_example_bump()
         rasterizer.vsp.light2_rgb_inner_r = light_rgb_inner_r[2];
         rasterizer.vsp.light3_rgb_inner_r = light_rgb_inner_r[3];
 
+        // Convert 3×3 loop to single multi-draw indirect
+        // Note: Per-draw data (model matrix) still set via push constant per-draw
+        // TODO: Move to SSBO for true GPU-driven rendering
+        rasterizer.clear_records();
+
+        std::vector<horizon::DrawIndexedIndirectCommand> frame_indirect_cmds;
+        frame_indirect_cmds.reserve(9);
+
         for (uint32_t yy = 0; yy < 3; ++yy)
         {
             for (uint32_t xx = 0; xx < 3; ++xx)
@@ -360,17 +385,38 @@ void run_example_bump()
                 model[3] = glm::vec4(-3.0f + xx * 3.0f, -3.0f + yy * 3.0f, 0.0f, 1.0f);
 
                 rasterizer.model_pc.model = model;
-                rasterizer.record(cube_ib, cube_vb, draw_params);
+
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+                cmd.instance_count = 1;
+                cmd.first_index = 0;
+                cmd.vertex_offset = 0;
+                cmd.first_instance = static_cast<uint32_t>(frame_indirect_cmds.size());
+                frame_indirect_cmds.push_back(cmd);
             }
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(bump_width, bump_height) << Corona::Horizon::commit();
+        horizon::HardwareBuffer frame_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(frame_indirect_cmds.data()),
+                frame_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            static_cast<uint32_t>(frame_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_bump.frame_indirect");
+
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = static_cast<uint32_t>(frame_indirect_cmds.size());
+        indirect_params.indirect_offset = 0;
+        indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+        rasterizer.record_indirect(cube_ib, cube_vb, frame_indirect_buffer, indirect_params);
+
+        horizon::SubmitReceipt render_receipt =
+            render_executor << rasterizer.extent(bump_width, bump_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

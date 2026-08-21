@@ -14,6 +14,7 @@
 #include "Codegen/ControlFlows.h"
 #include "common.h"
 #include "horizon.h"
+#include "horizon_profiling.h"  // 内部头（src/），埋点需在 CMake 里 opt-in
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -27,6 +28,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <span>
 #include <vector>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -57,7 +59,7 @@ const std::vector<StressVertex> cube_vertices = {
     { { 1.0f, -1.0f, -1.0f }, { 1.0f, 1.0f, 1.0f } },  // 0xffffffff
 };
 
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 1, 2, 1, 3, 2,
     4, 6, 5, 5, 6, 7,
     0, 2, 4, 4, 2, 6,
@@ -111,35 +113,89 @@ void run_example_drawstress()
               << "  + / - : dim +2 / -2 (draws = dim^3)\n"
               << "  Esc   : quit\n";
 
-    Corona::Horizon::HardwareBuffer cube_vb = Corona::Horizon::HardwareBuffer::vertex(cube_vertices, "example_drawstress.vb");
-    Corona::Horizon::HardwareBuffer cube_ib = Corona::Horizon::HardwareBuffer::index(cube_indices, "example_drawstress.ib");
+    // VB 额外带 Storage 用法:顶点由 shader 从 bindless SSBO 拉取,不再走顶点属性。
+    // 仍保留 Vertex 用法与 record() 时的 VB 绑定——pipeline 顶点属性表为空使绑定成为
+    // 空操作,但保住了自动 MDI 合批 key 里的 VB 项。
+    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(cube_vertices.data()),
+                                   cube_vertices.size() * sizeof(StressVertex)),
+        static_cast<uint32_t>(sizeof(StressVertex)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Vertex
+            | horizon::BufferUsage_Storage,
+        "example_drawstress.vb");
+    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_drawstress.ib");
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        stress_width, stress_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        stress_width, stress_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_drawstress.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        stress_width, stress_height, Corona::Horizon::Format::D32, "example_drawstress.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        stress_width, stress_height, horizon::Format::D32, "example_drawstress.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(drawstress_vert_glsl, drawstress_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(drawstress_vert_glsl, drawstress_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    // P2: per-draw MVP SSBO. Initial capacity 64000 mat4 = 4MB.
+    // Always allocate max capacity to avoid recreating the buffer (which invalidates descriptors).
+    struct PerDrawData
+    {
+        glm::mat4 mvp;
+    };
+    constexpr size_t max_draws = dim_max * dim_max * dim_max;
+    horizon::HardwareBuffer per_draw_ssbo = horizon::HardwareBuffer(
+        horizon::HardwareBufferDesc::typed<PerDrawData>(max_draws,
+            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
+            "drawstress.per_draw_ssbo"));
+    // Get bindless descriptor index once at initialization
+    const uint32_t ssbo_descriptor_index = per_draw_ssbo.store_descriptor();
+    // 顶点表也注册进 bindless,顶点阶段靠 push constant 里的 vertex_ssbo_index 选表。
+    const uint32_t vertex_descriptor_index = cube_vb.store_descriptor();
+    std::cout << "[DEBUG] SSBO descriptor_index=" << ssbo_descriptor_index
+              << ", vertex descriptor_index=" << vertex_descriptor_index
+              << ", capacity=" << max_draws << std::endl;
 
-    Corona::Horizon::DrawIndexedParams cube_params;
-    cube_params.index_type = Corona::Horizon::IndexType::UInt32;
-    cube_params.index_count = static_cast<uint32_t>(cube_indices.size());
+    // 方案 A：静态 indirect args buffer，一次性构建 64000 个 draw command。
+    // 每个 command 使用相同的几何参数（36 indices, same IB/VB），
+    // 通过 first_instance 携带 draw index → shader 的 gl_InstanceIndex。
+    std::vector<horizon::DrawIndexedIndirectCommand> static_indirect_args;
+    static_indirect_args.reserve(max_draws);
+    for (size_t i = 0; i < max_draws; ++i)
+    {
+        horizon::DrawIndexedIndirectCommand cmd;
+        cmd.index_count = 36;          // cube 的索引数
+        cmd.instance_count = 1;        // 每个 draw 1 instance
+        cmd.first_index = 0;           // 所有 cube 共享同一个 IB
+        cmd.vertex_offset = 0;         // 所有 cube 共享同一个 VB
+        cmd.first_instance = static_cast<uint32_t>(i);  // 携带 draw index
+        static_indirect_args.push_back(cmd);
+    }
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(static_indirect_args.data()),
+            static_indirect_args.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "drawstress.indirect_args");
+
+    std::cout << "[DEBUG] Static indirect args buffer created: "
+              << static_indirect_args.size() << " commands, "
+              << (static_indirect_args.size() * sizeof(horizon::DrawIndexedIndirectCommand)) << " bytes"
+              << std::endl;
+
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+
 
     constexpr float aspect = static_cast<float>(stress_width) / static_cast<float>(stress_height);
     // bgfx 左手系：mtxLookAt (0,0,-35)->(0,0,0)、mtxProj fovy 60°
@@ -158,6 +214,15 @@ void run_example_drawstress()
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
+    // HORIZON_FIXED_DT=<秒>：用固定步长取代墙钟，使逐帧画面可复现（仅供像素比对）。
+    const float fixed_dt = [] {
+        if (const char* value = std::getenv("HORIZON_FIXED_DT"))
+        {
+            return static_cast<float>(std::atof(value));
+        }
+        return 0.0f;
+    }();
+    uint64_t frame_index = 0;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -168,9 +233,15 @@ void run_example_drawstress()
         ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
-        const float dt = std::chrono::duration<float>(now - prev_time).count();
-        const float time = std::chrono::duration<float>(now - start_time).count();
+        float dt = std::chrono::duration<float>(now - prev_time).count();
+        float time = std::chrono::duration<float>(now - start_time).count();
         prev_time = now;
+        if (fixed_dt > 0.0f)
+        {
+            dt = fixed_dt;
+            time = fixed_dt * static_cast<float>(frame_index);
+        }
+        ++frame_index;
 
         fps_accum_seconds += dt;
         ++fps_frame_count;
@@ -192,6 +263,10 @@ void run_example_drawstress()
 
         HORIZON_PROFILE_PLOT("draw calls", dim * dim * dim);
 
+        // P2: build per-draw MVP array and upload to SSBO.
+        std::vector<PerDrawData> per_draw_array;
+        per_draw_array.reserve(dim * dim * dim);
+
         rasterizer.clear_records();
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::build_records");
@@ -201,30 +276,55 @@ void run_example_drawstress()
                 {
                     for (int xx = 0; xx < dim; ++xx)
                     {
-                        // 等价于 bgfx 的 mtxScale(0.25) × mtxRotateXYZ(...)（行向量约定），
-                        // 换到 glm 列向量为 Rz·Ry·Rx·S，再直接写入平移列。
                         glm::mat4 model = glm::eulerAngleZYX(time + zz * 0.13f, time + yy * 0.37f, time + xx * 0.21f) * scale_mtx;
                         model[3] = glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f);
 
-                        rasterizer.model_pc.mvp = view_proj * model;
-                        rasterizer.record(cube_ib, cube_vb, cube_params);
+                        per_draw_array.push_back({ view_proj * model });
                     }
                 }
             }
+
+            // Upload per-draw data to SSBO (buffer was pre-allocated at max capacity).
+            const size_t upload_size = per_draw_array.size();
+
+            if (!per_draw_ssbo.write_bytes(std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(per_draw_array.data()),
+                upload_size * sizeof(PerDrawData)), 0))
+            {
+                std::cerr << "[ERROR] Failed to write SSBO data!" << std::endl;
+            }
+
+            if (frame_index < 3)
+            {
+                std::cout << "[DEBUG] Frame " << frame_index
+                          << ": draws=" << upload_size << std::endl;
+            }
+
+            // 方案 A：单次 indirect draw，替代 64000 次 record() 循环。
+            // Push constant 对整个 pass 恒定，indirect args buffer 携带所有 draw 参数。
+            rasterizer.model_pc.per_draw_ssbo_index = ssbo_descriptor_index;
+            rasterizer.model_pc.vertex_ssbo_index = vertex_descriptor_index;
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = static_cast<uint32_t>(upload_size);
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = 0;  // 紧凑排列，使用结构体自然大小
+
+            rasterizer.record_indirect(cube_ib, cube_vb, indirect_args_buffer, indirect_params);
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt;
+        horizon::SubmitReceipt render_receipt;
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
-            render_receipt = render_executor << rasterizer(stress_width, stress_height) << Corona::Horizon::commit();
+            render_receipt = render_executor << rasterizer.extent(stress_width, stress_height) << horizon::commit();
         }
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::wait_present");
             ui.draw_overlay(display_executor, final_output_image, render_receipt);
             display_executor.wait(render_receipt);
-            (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                             << Corona::Horizon::commit());
+            (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                             << horizon::commit());
         }
     }
 

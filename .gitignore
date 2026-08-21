@@ -84,3 +84,9 @@ Src/Helicon/Compiler/HardcodeShaders/*
 /tools/dashboard/
 __pycache__/
 *.py[cod]
+
+# Benchmark and verification artifacts
+bench_*.txt
+compare_dump.ps1
+dumps/
+imgui.ini

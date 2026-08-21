@@ -177,4 +177,26 @@ namespace Corona::Horizon
 
         return resource_manager().export_buffer(*buffer);
     }
+
+    // 以下两个从 horizon.h 移出（原为 inline）。只为压缩公共头，语义未变。
+    uint64_t HardwareBufferDesc::byte_size() const
+    {
+        if (element_count == 0 || element_size == 0)
+            return 0;
+
+        if (element_count > std::numeric_limits<uint64_t>::max() / element_size)
+            throw std::overflow_error("HardwareBufferDesc total byte size overflow.");
+
+        return element_count * uint64_t(element_size);
+    }
+
+    uint64_t HardwareBuffer::get_byte_size() const
+    {
+        const uint64_t element_count = get_element_count();
+        const uint64_t element_size = get_element_size();
+        if (element_size != 0 && element_count > std::numeric_limits<uint64_t>::max() / element_size)
+            throw std::overflow_error("HardwareBuffer total byte size overflow.");
+
+        return element_count * element_size;
+    }
 }

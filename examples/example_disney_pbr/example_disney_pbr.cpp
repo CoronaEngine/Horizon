@@ -89,26 +89,26 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
 {
     constexpr uint32_t bytes_per_pixel = 8;
 
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::cube(
-        dds.size, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
+        dds.size, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
 
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
-    Corona::Horizon::HardwareExecutor executor;
-    Corona::Horizon::HardwareStream stream = executor.stream();
+    horizon::HardwareExecutor executor;
+    horizon::HardwareStream stream = executor.stream();
     uint64_t offset = 0;
     for (uint32_t face = 0; face < 6; ++face)
     {
@@ -119,15 +119,15 @@ Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, cons
             offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
         }
     }
-    (void)(stream << Corona::Horizon::commit());
+    (void)(stream << horizon::commit());
 
     return image;
 }
 
 struct LightProbe
 {
-    Corona::Horizon::HardwareImage lod;
-    Corona::Horizon::HardwareImage irr;
+    horizon::HardwareImage lod;
+    horizon::HardwareImage irr;
 };
 
 LightProbe load_light_probe(const std::string& name)
@@ -149,7 +149,7 @@ struct IblVertex
 struct IblMesh
 {
     std::vector<IblVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
 };
 
 IblMesh make_uv_sphere(int slices, int stacks)
@@ -183,10 +183,10 @@ IblMesh make_uv_sphere(int slices, int stacks)
     {
         for (int x = 0; x < slices; ++x)
         {
-            const uint32_t i0 = static_cast<uint32_t>(y * (slices + 1) + x);
-            const uint32_t i1 = i0 + 1;
-            const uint32_t i2 = i0 + static_cast<uint32_t>(slices + 1);
-            const uint32_t i3 = i2 + 1;
+            const uint16_t i0 = static_cast<uint16_t>(y * (slices + 1) + x);
+            const uint16_t i1 = static_cast<uint16_t>(i0 + 1);
+            const uint16_t i2 = static_cast<uint16_t>(i0 + slices + 1);
+            const uint16_t i3 = static_cast<uint16_t>(i2 + 1);
 
             mesh.indices.push_back(i0);
             mesh.indices.push_back(i2);
@@ -366,7 +366,7 @@ struct InputContext
 };
 
 template <typename VertShader, typename FragShader>
-void apply_material_to_pipeline(Corona::Horizon::RasterizerPipeline<VertShader, FragShader>& rasterizer,
+void apply_material_to_pipeline(horizon::RasterizerPipeline<VertShader, FragShader>& rasterizer,
                                 const DisneyMaterial& material, float aspect)
 {
     rasterizer.vpc.mat0 = glm::vec4(material.base_color, material.metallic);
@@ -436,36 +436,50 @@ void run_example_disney_pbr()
     LightProbe probes[2] = { load_light_probe("bolonga"), load_light_probe("kyoto") };
     IblMesh sphere_mesh = make_uv_sphere(48, 24);
 
-    Corona::Horizon::HardwareBuffer sphere_vb =
-        Corona::Horizon::HardwareBuffer::vertex(sphere_mesh.vertices, "example_disney_pbr.sphere.vb");
-    Corona::Horizon::HardwareBuffer sphere_ib =
-        Corona::Horizon::HardwareBuffer::index(sphere_mesh.indices, "example_disney_pbr.sphere.ib");
+    horizon::HardwareBuffer sphere_vb =
+        horizon::HardwareBuffer::vertex(sphere_mesh.vertices, "example_disney_pbr.sphere.vb");
+    horizon::HardwareBuffer sphere_ib =
+        horizon::HardwareBuffer::index(sphere_mesh.indices, "example_disney_pbr.sphere.ib");
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        disney_width, disney_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    // Indirect args buffer for single draw
+    horizon::DrawIndexedIndirectCommand indirect_cmd;
+    indirect_cmd.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
+    indirect_cmd.instance_count = 1;
+    indirect_cmd.first_index = 0;
+    indirect_cmd.vertex_offset = 0;
+    indirect_cmd.first_instance = 0;
+
+    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(&indirect_cmd),
+            sizeof(horizon::DrawIndexedIndirectCommand)),
+        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
+        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+        "example_disney_pbr.indirect_args");
+
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        disney_width, disney_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_disney_pbr.output"));
     final_output_image.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        disney_width, disney_height, Corona::Horizon::Format::D32, "example_disney_pbr.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        disney_width, disney_height, horizon::Format::D32, "example_disney_pbr.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(disney_pbr_vert_glsl, disney_pbr_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(disney_pbr_vert_glsl, disney_pbr_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams sphere_params;
-    sphere_params.index_type = Corona::Horizon::IndexType::UInt32;
     sphere_params.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
 
     constexpr float aspect = static_cast<float>(disney_width) / static_cast<float>(disney_height);
@@ -544,6 +558,10 @@ void run_example_disney_pbr()
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
         rasterizer.vsp.exposurePad = glm::vec4(s.exposure, 0.0f, 0.0f, 0.0f);
 
+        // Build indirect commands for all spheres in the material chart
+        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+        indirect_cmds.reserve(chart_row_count * chart_col_count);
+
         for (int row = 0; row < chart_row_count; ++row)
         {
             for (int col = 0; col < chart_col_count; ++col)
@@ -555,17 +573,38 @@ void run_example_disney_pbr()
 
                 rasterizer.vpc.model = model;
                 apply_material_to_pipeline(rasterizer, chart_materials[index], aspect);
-                rasterizer.record(sphere_ib, sphere_vb, sphere_params);
+
+                horizon::DrawIndexedIndirectCommand cmd;
+                cmd.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
+                cmd.instance_count = 1;
+                cmd.first_index = 0;
+                cmd.vertex_offset = 0;
+                cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_cmds.push_back(cmd);
             }
         }
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(disney_width, disney_height) << Corona::Horizon::commit();
+        horizon::HardwareBuffer frame_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_disney_pbr.frame_indirect");
+
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+        indirect_params.indirect_offset = 0;
+        indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+        rasterizer.record_indirect(sphere_ib, sphere_vb, frame_indirect_buffer, indirect_params);
+
+        horizon::SubmitReceipt render_receipt =
+            render_executor << rasterizer.extent(disney_width, disney_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

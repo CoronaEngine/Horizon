@@ -76,7 +76,7 @@ struct Vertex
 
 struct TextureLoadResult
 {
-    Corona::Horizon::HardwareImage texture;
+    horizon::HardwareImage texture;
     uint32_t descriptorID = 0;
     bool success = false;
 };
@@ -131,7 +131,7 @@ struct VertexHash
 struct Mesh
 {
     std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
 };
 
 inline Mesh load_mesh(const std::filesystem::path& model_path)
@@ -175,8 +175,12 @@ inline Mesh load_mesh(const std::filesystem::path& model_path)
 
             auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(mesh.vertices.size()));
             if (inserted)
+            {
+                if (mesh.vertices.size() >= 0x10000u)
+                    throw std::runtime_error("Mesh exceeds the 65536-vertex 16-bit index limit: " + model_path_str);
                 mesh.vertices.push_back(vertex);
-            mesh.indices.push_back(found->second);
+            }
+            mesh.indices.push_back(static_cast<uint16_t>(found->second));
         }
     }
 

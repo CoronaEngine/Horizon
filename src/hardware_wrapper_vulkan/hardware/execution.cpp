@@ -1,8 +1,10 @@
 #include "execution.h"
 
-#include <horizon.h>  // profiling macros merged from horizon_profiling.h
+#include "horizon_profiling.h"
 
 #include "device_manager.h"
+#include "frame_hash.h"
+#include "gpu_timestamps.h"
 #include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/display/display_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
@@ -481,55 +483,12 @@ namespace Corona::Horizon
             image.image_layout = new_layout;
         }
 
-        [[nodiscard]] VkIndexType resolve_index_type(const DrawIndexedDesc& draw, const BufferWrap& index_buffer) noexcept
-        {
-            switch (draw.index_type)
-            {
-            case IndexType::UInt32:
-                return VK_INDEX_TYPE_UINT32;
-            case IndexType::UInt16:
-                return VK_INDEX_TYPE_UINT16;
-            case IndexType::Auto:
-            default:
-                return index_buffer.desc.element_size == sizeof(uint32_t) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
-            }
-        }
-
         [[nodiscard]] VkRect2D full_scissor(uint32_t width, uint32_t height) noexcept
         {
             return {
                 .offset = { 0, 0 },
                 .extent = { width, height },
             };
-        }
-
-        [[nodiscard]] VkRect2D draw_scissor(const DrawIndexedDesc& draw, uint32_t width, uint32_t height) noexcept
-        {
-            if (!draw.enable_scissor)
-                return full_scissor(width, height);
-
-            const int32_t x = std::max<int32_t>(0, draw.scissor.x);
-            const int32_t y = std::max<int32_t>(0, draw.scissor.y);
-            const int32_t right = std::min<int32_t>(static_cast<int32_t>(width),
-                                                    draw.scissor.x + static_cast<int32_t>(draw.scissor.width));
-            const int32_t bottom = std::min<int32_t>(static_cast<int32_t>(height),
-                                                     draw.scissor.y + static_cast<int32_t>(draw.scissor.height));
-
-            if (right <= x || bottom <= y)
-                return { .offset = { 0, 0 }, .extent = { 0, 0 } };
-
-            return {
-                .offset = { x, y },
-                .extent = { static_cast<uint32_t>(right - x), static_cast<uint32_t>(bottom - y) },
-            };
-        }
-
-        [[nodiscard]] VkRect2D draw_scissor(bool enable_scissor, const ScissorRect& scissor, uint32_t width, uint32_t height) noexcept
-        {
-            DrawIndexedDesc draw;
-            draw.enable_scissor = enable_scissor;
-            draw.scissor = scissor;
-            return draw_scissor(draw, width, height);
         }
 
         [[nodiscard]] std::shared_ptr<VulkanRasterizerPipeline> rasterizer_impl(const ResourceHandle& handle)
@@ -1431,6 +1390,8 @@ namespace Corona::Horizon
 
         VkCommandBuffer command_buffer = submission.command_buffer->vk();
 
+        GpuTimes::begin_command_buffer(device_, command_buffer);
+
         DescriptorBindingCache graphics_descriptors;
         DescriptorBindingCache compute_descriptors;
 
@@ -1449,8 +1410,6 @@ namespace Corona::Horizon
         {
             const IResourceRef* index_token { nullptr };
             VkBuffer index_buffer { VK_NULL_HANDLE };
-            IndexType index_type_request { IndexType::Auto };
-            VkIndexType index_type { VK_INDEX_TYPE_UINT32 };
 
             const IResourceRef* vertex_token { nullptr };
             VkBuffer vertex_buffer { VK_NULL_HANDLE };
@@ -1461,10 +1420,55 @@ namespace Corona::Horizon
             bool prepared_valid { false };
             VulkanRasterizerPipeline::PreparedDraw prepared {};
 
+            // 已经下发到命令缓冲的绑定状态。上面那些字段缓存的是"取值"，这三个记的是
+            // "已 bind 过什么"——同一批次里连续 draw 绝大多数共用同一 pipeline/IB/VB，
+            // 相邻 descriptor set 绑定早有判等跳过，这三个 vkCmd* 却一直无条件重发。
+            //
+            // 只比句柄是安全的：IB 的 offset/indexType 与 VB 的 offset/binding 在本
+            // 路径里都是常量（0 / UINT16 / slot 0），不参与判等。句柄的 ABA 风险由
+            // submission.keep_alive 覆盖（encode 期间资源不可能被销毁）；pipeline 句柄
+            // 在 rebuild 时会被销毁并可能复用同值，故 rebuild 处必须调
+            // invalidate_bindings()，否则会绑到已销毁的 VkPipeline。
+            VkPipeline bound_pipeline { VK_NULL_HANDLE };
+            VkBuffer bound_index_buffer { VK_NULL_HANDLE };
+            VkBuffer bound_vertex_buffer { VK_NULL_HANDLE };
+
             void reset() noexcept
             {
                 index_token = nullptr;
                 vertex_token = nullptr;
+                pipeline_key = nullptr;
+                pipeline_impl.reset();
+                prepared_valid = false;
+                prepared = {};
+                invalidate_bindings();
+            }
+
+            void invalidate_prepared() noexcept
+            {
+                prepared_valid = false;
+                prepared = {};
+            }
+
+            void invalidate_bindings() noexcept
+            {
+                bound_pipeline = VK_NULL_HANDLE;
+                bound_index_buffer = VK_NULL_HANDLE;
+                bound_vertex_buffer = VK_NULL_HANDLE;
+            }
+        } draw_cache;
+
+        // Compute dispatch 的类似缓存：避免相同 pipeline 重复 prepare_dispatch。
+        // 同样只在 uniform_buffers 为空时复用（bindless + push constant 常见路径）。
+        struct DispatchEncodeCache
+        {
+            const ComputePipelineBase* pipeline_key { nullptr };
+            std::shared_ptr<VulkanComputePipeline> pipeline_impl;
+            bool prepared_valid { false };
+            VulkanComputePipeline::PreparedDispatch prepared {};
+
+            void reset() noexcept
+            {
                 pipeline_key = nullptr;
                 pipeline_impl.reset();
                 prepared_valid = false;
@@ -1476,7 +1480,7 @@ namespace Corona::Horizon
                 prepared_valid = false;
                 prepared = {};
             }
-        } draw_cache;
+        } dispatch_cache;
 
         // 三个 bindless set 全submission只取一次：省掉每 draw/dispatch 一次
         // ResourceManager 全局锁 + 数组拷贝。
@@ -1500,7 +1504,7 @@ namespace Corona::Horizon
 
             // IB / VB：句柄与上一 draw 相同则复用已取出的值，不再进 resource store。
             const IResourceRef* index_token = ResourceBridge::token(index_ref.handle).get();
-            if (draw_cache.index_token != index_token || draw_cache.index_type_request != draw.index_type)
+            if (draw_cache.index_token != index_token)
             {
                 BufferStore::Read index = read_buffer(index_ref.handle);
                 if (!index || index->buffer_handle == VK_NULL_HANDLE)
@@ -1508,8 +1512,6 @@ namespace Corona::Horizon
 
                 draw_cache.index_token = index_token;
                 draw_cache.index_buffer = index->buffer_handle;
-                draw_cache.index_type_request = draw.index_type;
-                draw_cache.index_type = resolve_index_type(draw, *index);
             }
 
             const IResourceRef* vertex_token = ResourceBridge::token(vertex_ref.handle).get();
@@ -1529,7 +1531,7 @@ namespace Corona::Horizon
             }
 
             auto rasterizerPipeline = draw.pipeline;
-            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info, draw.frag_condition_info))
+            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info(), draw.frag_condition_info()))
             {
                 // 重建可能销毁旧 VulkanRasterizerPipeline 连带其 VkPipelineLayout，
                 // 新建的 layout 有可能复用同一句柄值（ABA）。缓存按句柄相等判定，
@@ -1540,6 +1542,8 @@ namespace Corona::Horizon
                 draw_cache.pipeline_key = nullptr;
                 draw_cache.pipeline_impl.reset();
                 draw_cache.invalidate_prepared();
+                // 旧 VkPipeline 已销毁，新句柄可能复用同值；不清则会跳过重绑。
+                draw_cache.invalidate_bindings();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1555,7 +1559,7 @@ namespace Corona::Horizon
             // memo），stride 变化上面已作废。uniform_buffers 非空时逐 draw 比较签名不
             // 一定比直接调用便宜，保守起见只在它为空（纹理全 bindless + push constant
             // 的常见路径）时复用。
-            if (!draw_cache.prepared_valid || !draw.uniform_buffers.empty())
+            if (!draw_cache.prepared_valid || !draw.uniform_buffers().empty())
             {
                 const std::array<VkFormat, 4> color_formats {
                     active_rendering.color_format,
@@ -1568,13 +1572,19 @@ namespace Corona::Horizon
                                                             active_rendering.depth_format,
                                                             draw_cache.vertex_stride,
                                                             draw);
-                draw_cache.prepared_valid = draw.uniform_buffers.empty();
+                draw_cache.prepared_valid = draw.uniform_buffers().empty();
             }
             const VulkanRasterizerPipeline::PreparedDraw& prepared = draw_cache.prepared;
             if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                 throw std::logic_error("DrawIndexed resolved an invalid graphics pipeline.");
 
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+            if (draw_cache.bound_pipeline != prepared.pipeline)
+            {
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+                draw_cache.bound_pipeline = prepared.pipeline;
+            }
+            // use_layout 是纯 CPU 侧缓存判定，必须无条件调：layout 变了要丢弃 descriptor
+            // 缓存，与上面是否真的重绑 pipeline 无关。
             graphics_descriptors.use_layout(prepared.layout);
             if (prepared.uses_bindless && !graphics_descriptors.bindless_bound)
             {
@@ -1601,30 +1611,52 @@ namespace Corona::Horizon
                 graphics_descriptors.remember_uniform_sets(prepared.uniform_sets);
             }
 
-            VkBuffer vertex_buffer = draw_cache.vertex_buffer;
-            VkDeviceSize vertex_offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, draw_cache.index_type);
+            if (draw_cache.bound_vertex_buffer != draw_cache.vertex_buffer)
+            {
+                VkBuffer vertex_buffer = draw_cache.vertex_buffer;
+                VkDeviceSize vertex_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+                draw_cache.bound_vertex_buffer = draw_cache.vertex_buffer;
+            }
+            if (draw_cache.bound_index_buffer != draw_cache.index_buffer)
+            {
+                vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+                draw_cache.bound_index_buffer = draw_cache.index_buffer;
+            }
 
-            if (!draw.push_constant_data.empty())
+            const std::vector<std::byte>& push_constants = draw.push_constant_data();
+            if (!push_constants.empty())
             {
                 vkCmdPushConstants(command_buffer,
                                    prepared.layout,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                    0,
-                                   static_cast<uint32_t>(draw.push_constant_data.size()),
-                                   draw.push_constant_data.data());
+                                   static_cast<uint32_t>(push_constants.size()),
+                                   push_constants.data());
             }
-            VkRect2D scissor = draw_scissor(draw, active_rendering.width, active_rendering.height);
-            if (scissor.extent.width == 0 || scissor.extent.height == 0)
+            // scissor 不再逐 draw 设置：BeginRendering 已把它设为全幅，且是 pass 内不变量。
+            // 退化尺寸的 pass 在这里直接跳过，省掉整批 draw。
+            if (active_rendering.width == 0 || active_rendering.height == 0)
                 return;
-            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+            // 逐 draw 计时（仅 HORIZON_GPU_TIMES_DRAWS=1）：pass 级别的数字无法区分
+            // 同一 pass 内哪个 draw 贵。draws 很多时会打爆 512 查询预算，故单独开关。
+            const bool time_this_draw = GpuTimes::draws_enabled();
+            if (time_this_draw)
+            {
+                GpuTimes::begin_scope(command_buffer,
+                                      "  draw idx=" + std::to_string(draw.index_count) +
+                                          " inst=" + std::to_string(draw.instance_count));
+            }
             vkCmdDrawIndexed(command_buffer,
                              draw.index_count,
                              draw.instance_count,
                              draw.first_index,
                              draw.vertex_offset,
                              draw.first_instance);
+            if (time_this_draw)
+            {
+                GpuTimes::end_scope(command_buffer);
+            }
         };
 
         auto encode_indexed_indirect_draw = [&](BufferRef index_ref,
@@ -1642,18 +1674,14 @@ namespace Corona::Horizon
             const IResourceRef* index_token = ResourceBridge::token(index_ref.handle).get();
             DrawIndexedDesc prepare_desc;
             prepare_desc.pipeline = draw.pipeline;
-            prepare_desc.vert_condition_info = draw.vert_condition_info;
-            prepare_desc.frag_condition_info = draw.frag_condition_info;
+            // 共享载荷与 push constant 现在都是指针，逐 draw 只拷指针。
+            prepare_desc.shared = draw.shared;
             prepare_desc.index_count = 1;
             prepare_desc.instance_count = 1;
-            prepare_desc.index_type = draw.index_type;
-            prepare_desc.enable_scissor = draw.enable_scissor;
-            prepare_desc.scissor = draw.scissor;
             prepare_desc.resource_uses = draw.resource_uses;
-            prepare_desc.push_constant_data = draw.push_constant_data;
-            prepare_desc.uniform_buffers = draw.uniform_buffers;
+            prepare_desc.push_constants = draw.push_constants;
             prepare_desc.debug_label = draw.debug_label;
-            if (draw_cache.index_token != index_token || draw_cache.index_type_request != draw.index_type)
+            if (draw_cache.index_token != index_token)
             {
                 BufferStore::Read index = read_buffer(index_ref.handle);
                 if (!index || index->buffer_handle == VK_NULL_HANDLE)
@@ -1661,8 +1689,6 @@ namespace Corona::Horizon
 
                 draw_cache.index_token = index_token;
                 draw_cache.index_buffer = index->buffer_handle;
-                draw_cache.index_type_request = draw.index_type;
-                draw_cache.index_type = resolve_index_type(prepare_desc, *index);
             }
 
             const IResourceRef* vertex_token = ResourceBridge::token(vertex_ref.handle).get();
@@ -1686,7 +1712,7 @@ namespace Corona::Horizon
                 throw std::logic_error("DrawIndexedIndirect requires a valid indirect HardwareBuffer.");
 
             auto rasterizerPipeline = draw.pipeline;
-            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info, draw.frag_condition_info))
+            if (rasterizerPipeline->sync_shader_conditions(draw.vert_condition_info(), draw.frag_condition_info()))
             {
                 // 同上：layout 句柄可能 ABA 复用，缓存整体作废。
                 graphics_descriptors.reset();
@@ -1694,6 +1720,7 @@ namespace Corona::Horizon
                 draw_cache.pipeline_key = nullptr;
                 draw_cache.pipeline_impl.reset();
                 draw_cache.invalidate_prepared();
+                draw_cache.invalidate_bindings();
             }
 
             if (draw_cache.pipeline_key != rasterizerPipeline || !draw_cache.pipeline_impl)
@@ -1704,7 +1731,7 @@ namespace Corona::Horizon
             }
             const std::shared_ptr<VulkanRasterizerPipeline>& pipeline = draw_cache.pipeline_impl;
 
-            if (!draw_cache.prepared_valid || !draw.uniform_buffers.empty())
+            if (!draw_cache.prepared_valid || !draw.uniform_buffers().empty())
             {
                 const std::array<VkFormat, 4> color_formats {
                     active_rendering.color_format,
@@ -1717,13 +1744,17 @@ namespace Corona::Horizon
                                                             active_rendering.depth_format,
                                                             draw_cache.vertex_stride,
                                                             prepare_desc);
-                draw_cache.prepared_valid = draw.uniform_buffers.empty();
+                draw_cache.prepared_valid = draw.uniform_buffers().empty();
             }
             const VulkanRasterizerPipeline::PreparedDraw& prepared = draw_cache.prepared;
             if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                 throw std::logic_error("DrawIndexedIndirect resolved an invalid graphics pipeline.");
 
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+            if (draw_cache.bound_pipeline != prepared.pipeline)
+            {
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, prepared.pipeline);
+                draw_cache.bound_pipeline = prepared.pipeline;
+            }
             graphics_descriptors.use_layout(prepared.layout);
             if (prepared.uses_bindless && !graphics_descriptors.bindless_bound)
             {
@@ -1748,25 +1779,33 @@ namespace Corona::Horizon
                 graphics_descriptors.remember_uniform_sets(prepared.uniform_sets);
             }
 
-            VkBuffer vertex_buffer = draw_cache.vertex_buffer;
-            VkDeviceSize vertex_offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
-            vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, draw_cache.index_type);
+            if (draw_cache.bound_vertex_buffer != draw_cache.vertex_buffer)
+            {
+                VkBuffer vertex_buffer = draw_cache.vertex_buffer;
+                VkDeviceSize vertex_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &vertex_buffer, &vertex_offset);
+                draw_cache.bound_vertex_buffer = draw_cache.vertex_buffer;
+            }
+            if (draw_cache.bound_index_buffer != draw_cache.index_buffer)
+            {
+                vkCmdBindIndexBuffer(command_buffer, draw_cache.index_buffer, 0, VK_INDEX_TYPE_UINT16);
+                draw_cache.bound_index_buffer = draw_cache.index_buffer;
+            }
 
-            if (!draw.push_constant_data.empty())
+            const std::vector<std::byte>& push_constants = draw.push_constant_data();
+            if (!push_constants.empty())
             {
                 vkCmdPushConstants(command_buffer,
                                    prepared.layout,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                    0,
-                                   static_cast<uint32_t>(draw.push_constant_data.size()),
-                                   draw.push_constant_data.data());
+                                   static_cast<uint32_t>(push_constants.size()),
+                                   push_constants.data());
             }
 
-            VkRect2D scissor = draw_scissor(draw.enable_scissor, draw.scissor, active_rendering.width, active_rendering.height);
-            if (scissor.extent.width == 0 || scissor.extent.height == 0)
+            // 同 direct 路径：scissor 由 BeginRendering 一次设定。
+            if (active_rendering.width == 0 || active_rendering.height == 0)
                 return;
-            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
             const uint32_t stride = draw.stride != 0
                 ? draw.stride
@@ -1909,9 +1948,26 @@ namespace Corona::Horizon
                     graphics_descriptors.reset();
                     compute_descriptors.reset();
                     draw_cache.reset();
+                    dispatch_cache.reset();
                 }
 
                 std::shared_ptr<VulkanComputePipeline> pipeline = compute_impl(*command.payload.dispatch.pipeline);
+
+                // 缓存 prepare_dispatch 结果，避免每 dispatch 重复调用。
+                // 只在 uniform_buffers 为空时复用（类似 draw_cache 的策略）。
+                if (dispatch_cache.pipeline_key != computePipeline || !dispatch_cache.pipeline_impl)
+                {
+                    dispatch_cache.pipeline_impl = pipeline;
+                    dispatch_cache.pipeline_key = computePipeline;
+                    dispatch_cache.invalidate_prepared();
+                }
+
+                if (!dispatch_cache.prepared_valid || !dispatch.uniform_buffers.empty())
+                {
+                    dispatch_cache.prepared = pipeline->prepare_dispatch(device_, dispatch);
+                    dispatch_cache.prepared_valid = dispatch.uniform_buffers.empty();
+                }
+                const VulkanComputePipeline::PreparedDispatch& prepared = dispatch_cache.prepared;
 
                 for (const DispatchResourceBinding& binding : dispatch.bindings)
                 {
@@ -1933,7 +1989,6 @@ namespace Corona::Horizon
                                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
                 }
 
-                VulkanComputePipeline::PreparedDispatch prepared = pipeline->prepare_dispatch(device_, dispatch);
                 if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)
                     throw std::logic_error("Dispatch resolved an invalid compute pipeline.");
 
@@ -1977,10 +2032,18 @@ namespace Corona::Horizon
                                        dispatch.push_constant_data.data());
                 }
 
+                if (GpuTimes::enabled())
+                {
+                    GpuTimes::begin_scope(command_buffer,
+                                          command.debug_label.empty()
+                                              ? std::string("dispatch")
+                                              : "dispatch:" + command.debug_label);
+                }
                 vkCmdDispatch(command_buffer,
                               std::max(1u, dispatch.groups_x),
                               std::max(1u, dispatch.groups_y),
                               std::max(1u, dispatch.groups_z));
+                GpuTimes::end_scope(command_buffer);
                 break;
             }
             case CommandOp::BeginRendering:
@@ -2106,6 +2169,17 @@ namespace Corona::Horizon
                 rendering_info.pDepthAttachment = rendering.depth.handle ? &depth_attachment : nullptr;
 
                 vkCmdBeginRendering(command_buffer, &rendering_info);
+                if (GpuTimes::enabled())
+                {
+                    // 尺寸/MRT 数进标签：例子里 debug_label 基本都是空的，光看
+                    // "rendering" 无法区分同一帧里的多个 pass。序号由 GpuTimes 内部加，
+                    // 因为一帧可能有多个命令缓冲，调用点的计数器会每个缓冲从 0 重来。
+                    std::string label = command.debug_label.empty() ? std::string("pass") : command.debug_label;
+                    label += " " + std::to_string(rendering.width) + "x" + std::to_string(rendering.height);
+                    if (color_attachment_count > 1)
+                        label += " mrt" + std::to_string(color_attachment_count);
+                    GpuTimes::begin_scope(command_buffer, label);
+                }
 
                 VkViewport viewport {};
                 viewport.x = 0.0f;
@@ -2130,6 +2204,7 @@ namespace Corona::Horizon
             case CommandOp::EndRendering:
                 if (active_rendering.active)
                 {
+                    GpuTimes::end_scope(command_buffer);
                     vkCmdEndRendering(command_buffer);
 
                     for (uint32_t i = 0; i < active_rendering.color_handle_count; ++i)
@@ -2144,8 +2219,8 @@ namespace Corona::Horizon
 
                         const bool hi_z_style =
                             color->desc.format == Format::R32_FLOAT &&
-                            has_flag(color->desc.usage, ImageUsageFlags::Storage) &&
-                            has_flag(color->desc.usage, ImageUsageFlags::Sampled);
+                            (color->desc.usage & ImageUsage_Storage) &&
+                            (color->desc.usage & ImageUsage_Sampled);
                         if (!hi_z_style)
                             continue;
 
@@ -2207,6 +2282,7 @@ namespace Corona::Horizon
                                  VK_ACCESS_2_TRANSFER_WRITE_BIT,
                                  VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
+                GpuTimes::begin_scope(command_buffer, "present-copy");
                 if (src->image_format == dst->image_format &&
                     src_extent.width == dst_extent.width &&
                     src_extent.height == dst_extent.height &&
@@ -2251,6 +2327,17 @@ namespace Corona::Horizon
                                    1,
                                    &blit,
                                    VK_FILTER_NEAREST);
+                }
+
+                GpuTimes::end_scope(command_buffer);
+
+                if (FrameHash::wants_capture())
+                {
+                    FrameHash::capture(command_buffer,
+                                       src->image_handle,
+                                       src_extent.width,
+                                       src_extent.height,
+                                       src->image_format);
                 }
 
                 transition_image(command_buffer,

@@ -225,10 +225,20 @@ struct LandscapeVertex
     std::array<float, 2> texcoord {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct LandscapeMesh
 {
     std::vector<LandscapeVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -351,11 +361,15 @@ LandscapeMesh load_landscape_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -380,7 +394,7 @@ LandscapeMesh load_landscape_mesh(const std::filesystem::path& path)
     return mesh;
 }
 
-Corona::Horizon::HardwareImage upload_rgba8_texture(uint32_t width,
+horizon::HardwareImage upload_rgba8_texture(uint32_t width,
                                                     uint32_t height,
                                                     std::span<const std::byte> rgba,
                                                     const std::string& debug_name)
@@ -388,28 +402,28 @@ Corona::Horizon::HardwareImage upload_rgba8_texture(uint32_t width,
     // GPU textures default to CpuAccessMode::None, so HardwareImage::write() is rejected
     // by validation (hardware_validation.cpp). Upload via host-visible staging + GPU copy,
     // matching examples/common.cpp::create_uploaded_image.
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::texture_2d(
-        width, height, Corona::Horizon::Format::RGBA8_UNORM,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
+        width, height, horizon::Format::RGBA8_UNORM,
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
         debug_name);
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
     if (!rgba.empty())
     {
-        Corona::Horizon::HardwareBufferDesc staging_desc;
+        horizon::HardwareBufferDesc staging_desc;
         staging_desc.element_count = rgba.size_bytes();
         staging_desc.element_size = 1;
-        staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-        staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
+        staging_desc.usage = horizon::BufferUsage_TransferSrc;
+        staging_desc.cpu_access = horizon::CpuAccessMode::Write;
 
-        Corona::Horizon::HardwareBuffer staging(staging_desc, rgba);
-        Corona::Horizon::HardwareExecutor executor;
-        (void)(executor.stream() << image.copy_from(staging) << Corona::Horizon::commit());
+        horizon::HardwareBuffer staging(staging_desc, rgba);
+        horizon::HardwareExecutor executor;
+        (void)(executor.stream() << image.copy_from(staging) << horizon::commit());
     }
     return image;
 }
 
-Corona::Horizon::HardwareImage load_ktx_rgba8_or_white(const std::filesystem::path& path)
+horizon::HardwareImage load_ktx_rgba8_or_white(const std::filesystem::path& path)
 {
     try
     {
@@ -461,7 +475,7 @@ Corona::Horizon::HardwareImage load_ktx_rgba8_or_white(const std::filesystem::pa
 }
 
 void build_sky_grid(int vertical_count, int horizontal_count,
-                    std::vector<ScreenPosVertex>& vertices, std::vector<uint32_t>& indices)
+                    std::vector<ScreenPosVertex>& vertices, std::vector<uint16_t>& indices)
 {
     vertices.clear();
     indices.clear();
@@ -482,10 +496,10 @@ void build_sky_grid(int vertical_count, int horizontal_count,
     {
         for (int j = 0; j < horizontal_count - 1; ++j)
         {
-            const uint32_t i0 = static_cast<uint32_t>(j + 0 + horizontal_count * (i + 0));
-            const uint32_t i1 = static_cast<uint32_t>(j + 1 + horizontal_count * (i + 0));
-            const uint32_t i2 = static_cast<uint32_t>(j + 0 + horizontal_count * (i + 1));
-            const uint32_t i3 = static_cast<uint32_t>(j + 1 + horizontal_count * (i + 1));
+            const uint16_t i0 = static_cast<uint16_t>(j + 0 + horizontal_count * (i + 0));
+            const uint16_t i1 = static_cast<uint16_t>(j + 1 + horizontal_count * (i + 0));
+            const uint16_t i2 = static_cast<uint16_t>(j + 0 + horizontal_count * (i + 1));
+            const uint16_t i3 = static_cast<uint16_t>(j + 1 + horizontal_count * (i + 1));
             indices.push_back(i0);
             indices.push_back(i1);
             indices.push_back(i2);
@@ -512,68 +526,80 @@ void run_example_sky()
     glfwSetKeyCallback(window, key_callback);
 
     std::vector<ScreenPosVertex> sky_vertices;
-    std::vector<uint32_t> sky_indices;
+    std::vector<uint16_t> sky_indices;
     build_sky_grid(sky_grid, sky_grid, sky_vertices, sky_indices);
 
     LandscapeMesh landscape = load_landscape_mesh(sky_asset_root / "meshes" / "test_scene.bin");
-    Corona::Horizon::HardwareImage lightmap = load_ktx_rgba8_or_white(sky_asset_root / "textures" / "lightmap.ktx");
+    horizon::HardwareImage lightmap = load_ktx_rgba8_or_white(sky_asset_root / "textures" / "lightmap.ktx");
 
-    Corona::Horizon::HardwareBuffer sky_vb =
-        Corona::Horizon::HardwareBuffer::vertex(sky_vertices, "example_sky.sky.vb");
-    Corona::Horizon::HardwareBuffer sky_ib =
-        Corona::Horizon::HardwareBuffer::index(sky_indices, "example_sky.sky.ib");
-    Corona::Horizon::HardwareBuffer landscape_vb =
-        Corona::Horizon::HardwareBuffer::vertex(landscape.vertices, "example_sky.landscape.vb");
-    Corona::Horizon::HardwareBuffer landscape_ib =
-        Corona::Horizon::HardwareBuffer::index(landscape.indices, "example_sky.landscape.ib");
+    horizon::HardwareBuffer sky_vb =
+        horizon::HardwareBuffer::vertex(sky_vertices, "example_sky.sky.vb");
+    horizon::HardwareBuffer sky_ib =
+        horizon::HardwareBuffer::index(sky_indices, "example_sky.sky.ib");
+    horizon::HardwareBuffer landscape_vb =
+        horizon::HardwareBuffer::vertex(landscape.vertices, "example_sky.landscape.vb");
+    horizon::HardwareBuffer landscape_ib =
+        horizon::HardwareBuffer::index(landscape.indices, "example_sky.landscape.ib");
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        sky_width, sky_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        sky_width, sky_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_sky.output"));
     final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        sky_width, sky_height, Corona::Horizon::Format::D32, "example_sky.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        sky_width, sky_height, horizon::Format::D32, "example_sky.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
     // Landscape first (clears color+depth), then sky into remaining far-plane pixels.
-    Corona::Horizon::RasterizerPipelineDesc landscape_desc;
+    horizon::RasterizerPipelineDesc landscape_desc;
     landscape_desc.blend_enabled = false;
     landscape_desc.clear_color_target = true;
     landscape_desc.clear_depth_target = true;
 
-    Corona::Horizon::RasterizerPipeline landscape_pipeline(sky_landscape_vert_glsl, sky_landscape_frag_glsl,
+    horizon::RasterizerPipeline landscape_pipeline(sky_landscape_vert_glsl, sky_landscape_frag_glsl,
                                                           landscape_desc);
     landscape_pipeline.outColor = final_output_image;
     landscape_pipeline.bind_depth_target(depth_image);
     landscape_pipeline.pc.lightmapIndex = lightmap.store_descriptor();
 
-    Corona::Horizon::RasterizerPipelineDesc sky_desc;
+    horizon::RasterizerPipelineDesc sky_desc;
     sky_desc.blend_enabled = false;
     sky_desc.depth_test_enabled = true;
     sky_desc.depth_write_enabled = false;
-    sky_desc.depth_compare_op = Corona::Horizon::CompareOp::Equal;
+    sky_desc.depth_compare_op = horizon::CompareOp::Equal;
     sky_desc.clear_color_target = false;
     sky_desc.clear_depth_target = false;
 
-    Corona::Horizon::RasterizerPipeline sky_pipeline(sky_vert_glsl, sky_frag_glsl, sky_desc);
+    horizon::RasterizerPipeline sky_pipeline(sky_vert_glsl, sky_frag_glsl, sky_desc);
     sky_pipeline.outColor = final_output_image;
     sky_pipeline.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams sky_params;
-    sky_params.index_type = Corona::Horizon::IndexType::UInt32;
-    sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
+    horizon::DrawIndexedIndirectCommand sky_cmd;
+    sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());
+    sky_cmd.instance_count = 1;
+    sky_cmd.first_index = 0;
+    sky_cmd.vertex_offset = 0;
+    sky_cmd.first_instance = 0;
 
-    Corona::Horizon::DrawIndexedParams landscape_params;
-    landscape_params.index_type = Corona::Horizon::IndexType::UInt32;
-    landscape_params.index_count = static_cast<uint32_t>(landscape.indices.size());
+    std::vector<horizon::DrawIndexedIndirectCommand> landscape_commands;
+    landscape_commands.reserve(landscape.groups.size());
+    for (const MeshGroup& group : landscape.groups)
+    {
+        horizon::DrawIndexedIndirectCommand cmd;
+        cmd.index_count = group.index_count;
+        cmd.instance_count = 1;
+        cmd.first_index = group.first_index;
+        cmd.vertex_offset = group.base_vertex;
+        cmd.first_instance = 0;
+        landscape_commands.push_back(cmd);
+    }
 
     DynamicValueController sun_lum_xyz;
     DynamicValueController sky_lum_xyz;
@@ -605,7 +631,7 @@ void run_example_sky()
     auto prev_time = std::chrono::high_resolution_clock::now();
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
-    Corona::Horizon::SubmitReceipt render_receipt;
+    horizon::SubmitReceipt render_receipt;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -675,7 +701,20 @@ void run_example_sky()
         sky_pipeline.sky_fs.perez2 = perez[2];
         sky_pipeline.sky_fs.perez3 = perez[3];
         sky_pipeline.sky_fs.perez4 = perez[4];
-        sky_pipeline.record(sky_ib, sky_vb, sky_params);
+
+        horizon::HardwareBuffer sky_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+            std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(&sky_cmd),
+                sizeof(horizon::DrawIndexedIndirectCommand)),
+            sizeof(horizon::DrawIndexedIndirectCommand),
+            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+            "example_sky.sky_indirect");
+
+        horizon::DrawIndexedIndirectParams sky_indirect_params;
+        sky_indirect_params.draw_count = 1;
+        sky_indirect_params.indirect_offset = 0;
+        sky_indirect_params.stride = 0;
+        sky_pipeline.record_indirect(sky_ib, sky_vb, sky_indirect_buffer, sky_indirect_params);
 
         landscape_pipeline.clear_records();
         landscape_pipeline.ls.viewProj = view_proj;
@@ -691,16 +730,41 @@ void run_example_sky()
         landscape_pipeline.ls_fs.parameters = parameters;
         landscape_pipeline.pc.model = glm::mat4(1.0f);
         landscape_pipeline.pc.lightmapIndex = lightmap.store_descriptor();
-        landscape_pipeline.record(landscape_ib, landscape_vb, landscape_params);
 
-        render_receipt = render_executor << landscape_pipeline(sky_width, sky_height)
-                                         << sky_pipeline(sky_width, sky_height)
-                                         << Corona::Horizon::commit();
+        std::vector<horizon::DrawIndexedIndirectCommand> landscape_indirect_cmds;
+        landscape_indirect_cmds.reserve(landscape_commands.size());
+        for (const horizon::DrawIndexedIndirectCommand& base_cmd : landscape_commands)
+        {
+            horizon::DrawIndexedIndirectCommand cmd = base_cmd;
+            cmd.first_instance = static_cast<uint32_t>(landscape_indirect_cmds.size());
+            landscape_indirect_cmds.push_back(cmd);
+        }
+
+        if (!landscape_indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer landscape_indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(landscape_indirect_cmds.data()),
+                    landscape_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(landscape_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_sky.landscape_indirect");
+
+            horizon::DrawIndexedIndirectParams landscape_indirect_params;
+            landscape_indirect_params.draw_count = static_cast<uint32_t>(landscape_indirect_cmds.size());
+            landscape_indirect_params.indirect_offset = 0;
+            landscape_indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            landscape_pipeline.record_indirect(landscape_ib, landscape_vb, landscape_indirect_buffer, landscape_indirect_params);
+        }
+
+        render_receipt = render_executor << landscape_pipeline.extent(sky_width, sky_height)
+                                         << sky_pipeline.extent(sky_width, sky_height)
+                                         << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     display_executor.wait_idle(render_receipt);

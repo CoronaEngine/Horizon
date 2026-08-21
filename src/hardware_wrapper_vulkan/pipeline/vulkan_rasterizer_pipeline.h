@@ -41,15 +41,6 @@ namespace Corona::Horizon
             HardwareImage image {};
         };
 
-        struct RecordedDraw
-        {
-            RasterizerPipelineBase* pipeline;
-            HardwareBuffer index_buffer {};
-            HardwareBuffer vertex_buffer {};
-            DrawIndexedParams params {};
-            std::vector<std::byte> push_constant_data;
-        };
-
         struct RecordedIndirectDraw
         {
             RasterizerPipelineBase* pipeline;
@@ -57,7 +48,7 @@ namespace Corona::Horizon
             HardwareBuffer vertex_buffer {};
             HardwareBuffer indirect_buffer {};
             DrawIndexedIndirectParams params {};
-            std::vector<std::byte> push_constant_data;
+            std::shared_ptr<const std::vector<std::byte>> push_constant_data;
         };
 
         explicit VulkanRasterizerPipeline(RasterizerPipelineDesc desc,
@@ -76,8 +67,6 @@ namespace Corona::Horizon
         void set_depth_target(const HardwareImage& image);
         void bind_auto_resources();
         [[nodiscard]] std::vector<EmbeddedShader::AutoBindEntry> auto_bind_entries() const;
-        void record(RasterizerPipelineBase* pipeline, const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
-        void record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
         void record_indirect(RasterizerPipelineBase* pipeline,
                              const HardwareBuffer& index_buffer,
                              const HardwareBuffer& vertex_buffer,
@@ -169,7 +158,6 @@ namespace Corona::Horizon
         {
             bool has_rendering_scope { false };
             RenderingDesc rendering {};
-            DrawIndexedBatchDesc batch {};
             std::vector<std::tuple<BufferRef, BufferRef, BufferRef, DrawIndexedIndirectDesc>> indirect_draws;
         };
 
@@ -187,6 +175,8 @@ namespace Corona::Horizon
         // 把 uniform_buffers_ 的 CPU 影子数据落到本帧槽的持久 buffer，并让
         // gpu_buffer 指向该槽。槽未变且影子未脏时是空操作。
         void sync_ubo_slot_unlocked() const;
+        // 取 push_constant_data_ 的共享快照；快照失效时才真正拷贝一次。
+        [[nodiscard]] std::shared_ptr<const std::vector<std::byte>> push_constant_snapshot_unlocked();
 
         RasterizerPipelineDesc desc_;
         RasterizerPipelineShaders shaders_;
@@ -196,6 +186,9 @@ namespace Corona::Horizon
         uint32_t width_ { 0 };
         uint32_t height_ { 0 };
         std::vector<std::byte> push_constant_data_;
+        // push_constant_data_ 的不可变快照。record() 把它按指针交给 draw，未再写入
+        // 时多个 draw 共享同一份；任何写入都要 reset()（见 invalidate_push_constant_snapshot_unlocked）。
+        std::shared_ptr<const std::vector<std::byte>> push_constant_snapshot_;
         // CPU 影子数据 + 本帧槽的 gpu_buffer 句柄。setter 只写影子并置脏，
         // 真正的 flush 推迟到 build_draw_plan()（const，故 mutable）。
         mutable std::vector<UniformBufferBindingData> uniform_buffers_;
@@ -206,10 +199,13 @@ namespace Corona::Horizon
         // 上次 sync 使用的槽；-1 表示还没 sync 过。
         mutable int64_t ubo_slot_ { -1 };
         mutable bool ubo_dirty_ { true };
+        // per-draw data SSBO 环形缓冲（P2）。每帧槽一个 buffer，存 mat4[] 等
+        // per-draw payload，shader 用 drawIndex 索引。初始 1024 mat4 = 64KB。
+        mutable std::vector<HardwareBuffer> per_draw_data_ring_;
+        mutable int64_t per_draw_data_slot_ { -1 };
         std::vector<BoundBuffer> bound_buffers_;
         std::vector<BoundImage> bound_images_;
         HardwareImage depth_target_;
-        std::vector<RecordedDraw> draws_;
         std::vector<RecordedIndirectDraw> indirect_draws_;
         mutable std::vector<PipelineState> pipeline_cache_;
     };

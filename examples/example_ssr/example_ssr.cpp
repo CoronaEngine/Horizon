@@ -84,7 +84,7 @@ std::vector<SsrVertex> build_cube_vertices()
 }
 
 // 与 example_deferred 的立方体索引一致（左手系正面朝外）
-const std::vector<uint32_t> cube_indices = {
+const std::vector<uint16_t> cube_indices = {
     0, 2, 1, 1, 2, 3,
     4, 5, 6, 5, 7, 6,
     8, 10, 9, 9, 10, 11,
@@ -133,66 +133,66 @@ void run_example_ssr()
     glfwSetKeyCallback(window, key_callback);
 
     const std::vector<SsrVertex> cube_vertices = build_cube_vertices();
-    Corona::Horizon::HardwareBuffer cube_vb = Corona::Horizon::HardwareBuffer::vertex(cube_vertices, "example_ssr.cube.vb");
-    Corona::Horizon::HardwareBuffer cube_ib = Corona::Horizon::HardwareBuffer::index(cube_indices, "example_ssr.cube.ib");
+    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_ssr.cube.vb");
+    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_ssr.cube.ib");
 
     // ---- G-buffer / 中间目标 ----
-    const auto rt_usage = Corona::Horizon::ImageUsageFlags::ColorAttachment |
-                          Corona::Horizon::ImageUsageFlags::Sampled |
-                          Corona::Horizon::ImageUsageFlags::Storage;
+    const auto rt_usage = horizon::ImageUsage_ColorAttachment |
+                          horizon::ImageUsage_Sampled |
+                          horizon::ImageUsage_Storage;
 
-    Corona::Horizon::HardwareImage color_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::RGBA16_FLOAT, rt_usage, "example_ssr.color"));
+    horizon::HardwareImage color_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_ssr.color"));
     color_image.set_clear_color(0.14f, 0.19f, 0.28f, 0.0f);
 
-    Corona::Horizon::HardwareImage normal_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.normal"));
+    horizon::HardwareImage normal_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.normal"));
     normal_image.set_clear_color(0.5f, 0.5f, 1.0f, 1.0f);
 
-    Corona::Horizon::HardwareImage albedo_met_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.albedo_met"));
+    horizon::HardwareImage albedo_met_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.albedo_met"));
     albedo_met_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage depth_val_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::R32_FLOAT, rt_usage, "example_ssr.depthval"));
+    horizon::HardwareImage depth_val_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::R32_FLOAT, rt_usage, "example_ssr.depthval"));
     depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
 
-    Corona::Horizon::HardwareImage linear_depth_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::R32_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled,
+    horizon::HardwareImage linear_depth_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::R32_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
         "example_ssr.lineardepth"));
 
-    Corona::Horizon::HardwareImage ssr_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::Sampled,
+    horizon::HardwareImage ssr_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
         "example_ssr.ssr"));
 
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        ssr_width, ssr_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_ssr.output"));
 
-    Corona::Horizon::HardwareImage scene_depth(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ssr_width, ssr_height, Corona::Horizon::Format::D32, "example_ssr.depth"));
+    horizon::HardwareImage scene_depth(horizon::HardwareImageDesc::depth_attachment(
+        ssr_width, ssr_height, horizon::Format::D32, "example_ssr.depth"));
     scene_depth.set_clear_depth(1.0f, 0);
 
     // ---- 管线 ----
-    Corona::Horizon::RasterizerPipelineDesc geom_desc;
+    horizon::RasterizerPipelineDesc geom_desc;
     geom_desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline geom_rasterizer(ssr_geom_vert_glsl, ssr_geom_mrt_frag_glsl, geom_desc);
+    horizon::RasterizerPipeline geom_rasterizer(ssr_geom_vert_glsl, ssr_geom_mrt_frag_glsl, geom_desc);
     geom_rasterizer.outColor      = color_image;
     geom_rasterizer.outNormal     = normal_image;
     geom_rasterizer.outDepthVal   = depth_val_image;
     geom_rasterizer.outAlbedoMet  = albedo_met_image;
     geom_rasterizer.bind_depth_target(scene_depth);
 
-    Corona::Horizon::ComputePipeline linear_depth_compute(ssr_linear_depth_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline trace_compute(ssr_trace_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline composite_compute(ssr_composite_compute_glsl, ktm::uvec3(8, 8, 1));
-    Corona::Horizon::ComputePipeline pathtrace_compute(ssr_pathtrace_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline linear_depth_compute(ssr_linear_depth_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline trace_compute(ssr_trace_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline composite_compute(ssr_composite_compute_glsl, ktm::uvec3(8, 8, 1));
+    horizon::ComputePipeline pathtrace_compute(ssr_pathtrace_compute_glsl, ktm::uvec3(8, 8, 1));
 
     const uint32_t color_id        = color_image.store_descriptor();
     const uint32_t normal_id       = normal_image.store_descriptor();
@@ -202,13 +202,10 @@ void run_example_ssr()
     const uint32_t ssr_id          = ssr_image.store_descriptor();
     const uint32_t output_id       = final_output_image.store_descriptor();
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams cube_params;
-    cube_params.index_type  = Corona::Horizon::IndexType::UInt32;
-    cube_params.index_count = static_cast<uint32_t>(cube_indices.size());
 
     // ---- 相机 ----
     constexpr float aspect = static_cast<float>(ssr_width) / static_cast<float>(ssr_height);
@@ -234,8 +231,6 @@ void run_example_ssr()
     const glm::vec3 light_dir_vs    = glm::normalize(glm::vec3(view * glm::vec4(light_dir_world, 0.0f)));
     constexpr float ambient         = 0.22f;
 
-    const uint32_t dispatch_x = (ssr_width + 7) / 8;
-    const uint32_t dispatch_y = (ssr_height + 7) / 8;
 
     // ---- Disney 材质（全局共享，imgui 可调）----
     DisneyMaterial mat;
@@ -372,11 +367,39 @@ void run_example_ssr()
                                                   mat.sheen, mat.sheen_tint);
         geom_rasterizer.vsp.disney_c = glm::vec4(mat.clearcoat, mat.clearcoat_gloss, 0.0f, 0.0f);
 
+        // Convert instance loop to multi-draw indirect
+        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+        indirect_cmds.reserve(instances.size());
+
         for (const Instance& inst : instances)
         {
             geom_rasterizer.vpc.model    = inst.model;
             geom_rasterizer.vpc.material = glm::vec4(inst.albedo, 0.0f);
-            geom_rasterizer.record(cube_ib, cube_vb, cube_params);
+
+            horizon::DrawIndexedIndirectCommand cmd;
+            cmd.index_count = static_cast<uint32_t>(cube_indices.size());
+            cmd.instance_count = 1;
+            cmd.first_index = 0;
+            cmd.vertex_offset = 0;
+            cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+            indirect_cmds.push_back(cmd);
+        }
+
+        if (!indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                    indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_ssr.geom_indirect");
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            geom_rasterizer.record_indirect(cube_ib, cube_vb, indirect_buffer, indirect_params);
         }
 
         // Pass 2：器件深度 → view 空间线性深度
@@ -419,25 +442,25 @@ void run_example_ssr()
         pathtrace_compute.pushConsts.pt2 = glm::vec4(pt_right, float(ssr_width));
         pathtrace_compute.pushConsts.pt3 = glm::vec4(pt_up, float(ssr_height));
 
-        Corona::Horizon::SubmitReceipt render_receipt;
+        horizon::SubmitReceipt render_receipt;
         if (pathtrace_mode)
         {
-            render_receipt = render_executor.stream() << pathtrace_compute(dispatch_x, dispatch_y, 1)
-                                                      << Corona::Horizon::commit();
+            render_receipt = render_executor.stream() << pathtrace_compute.dispatch_extent(ssr_width, ssr_height)
+                                                      << horizon::commit();
         }
         else
         {
-            render_receipt = render_executor << geom_rasterizer(ssr_width, ssr_height)
-                                             << linear_depth_compute(dispatch_x, dispatch_y, 1)
-                                             << trace_compute(dispatch_x, dispatch_y, 1)
-                                             << composite_compute(dispatch_x, dispatch_y, 1)
-                                             << Corona::Horizon::commit();
+            render_receipt = render_executor << geom_rasterizer.extent(ssr_width, ssr_height)
+                                             << linear_depth_compute.dispatch_extent(ssr_width, ssr_height)
+                                             << trace_compute.dispatch_extent(ssr_width, ssr_height)
+                                             << composite_compute.dispatch_extent(ssr_width, ssr_height)
+                                             << horizon::commit();
         }
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
 
         ++frame_index;
     }

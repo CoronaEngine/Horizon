@@ -34,19 +34,19 @@ namespace Corona::Horizon
         {
             VkBufferUsageFlags result = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-            if (has_flag(usage, BufferUsageFlags::Vertex))
+            if (usage & BufferUsage_Vertex)
                 result |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
-            if (has_flag(usage, BufferUsageFlags::Index))
+            if (usage & BufferUsage_Index)
                 result |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
-            if (has_flag(usage, BufferUsageFlags::Uniform))
+            if (usage & BufferUsage_Uniform)
                 result |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 
-            if (has_flag(usage, BufferUsageFlags::Storage))
+            if (usage & BufferUsage_Storage)
                 result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-            if (has_flag(usage, BufferUsageFlags::Indirect))
+            if (usage & BufferUsage_Indirect)
                 result |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
             return result;
@@ -151,16 +151,16 @@ namespace Corona::Horizon
         {
             VkImageUsageFlags result = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-            if (has_flag(usage, ImageUsageFlags::Sampled))
+            if (usage & ImageUsage_Sampled)
                 result |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
-            if (has_flag(usage, ImageUsageFlags::Storage))
+            if (usage & ImageUsage_Storage)
                 result |= VK_IMAGE_USAGE_STORAGE_BIT;
 
-            if (has_flag(usage, ImageUsageFlags::ColorAttachment))
+            if (usage & ImageUsage_ColorAttachment)
                 result |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-            if (has_flag(usage, ImageUsageFlags::DepthStencilAttachment))
+            if (usage & ImageUsage_DepthStencilAttachment)
                 result |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
             return result;
@@ -219,7 +219,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] VkImageLayout sampled_descriptor_layout(const ImageWrap& image) noexcept
         {
-            if (has_flag(image.desc.usage, ImageUsageFlags::Storage))
+            if (image.desc.usage & ImageUsage_Storage)
             {
                 return VK_IMAGE_LAYOUT_GENERAL;
             }
@@ -1762,7 +1762,7 @@ namespace Corona::Horizon
         image.desc = HardwareImageDesc::texture_2d(extent.width,
                                                    extent.height,
                                                    from_vk_format(format),
-                                                   ImageUsageFlags::ColorAttachment | ImageUsageFlags::TransferDst,
+                                                   static_cast<ImageUsageFlags>(uint32_t(ImageUsage_ColorAttachment) | uint32_t(ImageUsage_TransferDst)),
                                                    std::move(debug_name));
         image.range = ImageSubresourceRange::whole();
         image.image_handle = native_image;
@@ -1862,8 +1862,8 @@ namespace Corona::Horizon
 
     uint32_t ResourceManager::store_descriptor(ImageWrap& image)
     {
-        const bool supports_sampled = has_flag(image.desc.usage, ImageUsageFlags::Sampled);
-        const bool supports_storage = has_flag(image.desc.usage, ImageUsageFlags::Storage);
+        const bool supports_sampled = image.desc.usage & ImageUsage_Sampled;
+        const bool supports_storage = image.desc.usage & ImageUsage_Storage;
 
         if (supports_sampled && !supports_storage)
             return store_sampled_descriptor(image);
@@ -1884,7 +1884,7 @@ namespace Corona::Horizon
 
         if (!supports_sampled && !supports_storage)
         {
-            throw std::invalid_argument("HardwareImage bindless descriptor requires ImageUsageFlags::Sampled or ImageUsageFlags::Storage.");
+            throw std::invalid_argument("HardwareImage bindless descriptor requires ImageUsage_Sampled or ImageUsage_Storage.");
         }
 
         create_combined_texture_descriptors();
@@ -1959,9 +1959,9 @@ namespace Corona::Horizon
             throw std::invalid_argument("ResourceManager::store_descriptor requires a valid HardwareImage.");
         }
 
-        if (!has_flag(image.desc.usage, ImageUsageFlags::Sampled))
+        if (!(image.desc.usage & ImageUsage_Sampled))
         {
-            throw std::invalid_argument("HardwareImage sampled bindless descriptor requires ImageUsageFlags::Sampled.");
+            throw std::invalid_argument("HardwareImage sampled bindless descriptor requires ImageUsage_Sampled.");
         }
 
         create_combined_texture_descriptors();
@@ -2015,9 +2015,9 @@ namespace Corona::Horizon
             throw std::invalid_argument("ResourceManager::store_descriptor requires a valid HardwareImage.");
         }
 
-        if (!has_flag(image.desc.usage, ImageUsageFlags::Storage))
+        if (!(image.desc.usage & ImageUsage_Storage))
         {
-            throw std::invalid_argument("HardwareImage storage bindless descriptor requires ImageUsageFlags::Storage.");
+            throw std::invalid_argument("HardwareImage storage bindless descriptor requires ImageUsage_Storage.");
         }
 
         create_storage_image_descriptors();

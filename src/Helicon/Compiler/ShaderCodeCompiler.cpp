@@ -12,6 +12,11 @@
 #include <Compiler/ShaderCommon.h>
 #include <shared_mutex>
 #include <ranges>
+#include <atomic>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 
 namespace EmbeddedShader
 {
@@ -169,6 +174,24 @@ namespace EmbeddedShader
     {
         compilerOption = option;
         sourceStage = inputStage;
+
+        // HORIZON_SLANG_DUMP=<dir>：把生成的 Slang 源码逐 stage 落盘。
+        // EDSL 生成的代码平时无从查看（Release 下没有 ShaderHardcodeManager），
+        // 排查"编译通过但渲染不对"时这是唯一能看到真实产物的手段。
+        if (const char* dumpDir = std::getenv("HORIZON_SLANG_DUMP"))
+        {
+            static std::atomic<uint32_t> dumpCounter{0};
+            const uint32_t seq = dumpCounter++;
+            std::error_code ec;
+            std::filesystem::create_directories(dumpDir, ec);
+            std::ostringstream name;
+            name << dumpDir << "/" << std::setw(3) << std::setfill('0') << seq << "_"
+                 << "stage" << static_cast<int>(inputStage)
+                 << (Ast::Parser::getBindless() ? "_bindless" : "") << ".slang";
+            if (std::ofstream out{name.str()}; out)
+                out << shaderCode;
+        }
+
         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
             compiledOutputs_[itemName] = code;

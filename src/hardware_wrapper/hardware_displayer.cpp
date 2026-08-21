@@ -23,4 +23,13 @@ namespace Corona::Horizon
     }
 
     HardwareDisplayer::~HardwareDisplayer() = default;
+
+    // 从 horizon.h 移出（原为 inline）。只为压缩公共头，语义未变。
+    PresentCommand present(const HardwareDisplayer& displayer,
+                           const HardwareImage& image,
+                           DeviceId present_device,
+                           bool allow_cpu_bridge_fallback)
+    {
+        return { displayer, image, present_device, allow_cpu_bridge_fallback };
+    }
 }

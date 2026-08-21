@@ -4,13 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <ranges>
 #include <source_location>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -24,19 +22,8 @@
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
 
-#ifndef HORIZON_ENABLE_HARDWARE_VALIDATION
-#if defined(NDEBUG)
-#define HORIZON_ENABLE_HARDWARE_VALIDATION 0
-#else
-#define HORIZON_ENABLE_HARDWARE_VALIDATION 1
-#endif
-#endif
-
 namespace Corona::Horizon
 {
-    // ================================================================
-    // [merged from resource.h]  Resource handle bridge
-    // ================================================================
 
     struct ResourceBridge;
 
@@ -59,7 +46,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept
         {
-            // Avoid shared_ptr copy to prevent refcount operation
+
             return resource_ != nullptr && resource_->valid();
         }
 
@@ -92,11 +79,6 @@ namespace Corona::Horizon
             return owner.resource_;
         }
     };
-
-
-    // ================================================================
-    // [merged from format.h]  Format / buffer / image / draw / state enums
-    // ================================================================
 
     enum class Format : uint8_t
     {
@@ -185,12 +167,6 @@ namespace Corona::Horizon
         COUNT,
     };
 
-
-
-    // ================================================================
-    // Buffer
-    // ================================================================
-
     enum class CpuAccessMode
     {
         None,
@@ -199,39 +175,19 @@ namespace Corona::Horizon
         ReadWrite,
     };
 
-    enum class BufferUsageFlags : uint32_t
+    using BufferUsageFlags = uint32_t;
+
+    enum : BufferUsageFlags
     {
-        None = 0,
-        TransferSrc = 1 << 0,
-        TransferDst = 1 << 1,
-        Vertex = 1 << 2,
-        Index = 1 << 3,
-        Uniform = 1 << 4,
-        Storage = 1 << 5,
-        // GPU-readable draw arguments for vkCmdDraw*Indirect / MultiDrawIndirect.
-        Indirect = 1 << 6,
+        BufferUsage_None = 0,
+        BufferUsage_TransferSrc = 1 << 0,
+        BufferUsage_TransferDst = 1 << 1,
+        BufferUsage_Vertex = 1 << 2,
+        BufferUsage_Index = 1 << 3,
+        BufferUsage_Uniform = 1 << 4,
+        BufferUsage_Storage = 1 << 5,
+        BufferUsage_Indirect = 1 << 6,
     };
-
-    constexpr BufferUsageFlags operator|(BufferUsageFlags a, BufferUsageFlags b)
-    {
-        return BufferUsageFlags(uint32_t(a) | uint32_t(b));
-    }
-
-    constexpr BufferUsageFlags operator&(BufferUsageFlags a, BufferUsageFlags b)
-    {
-        return BufferUsageFlags(uint32_t(a) & uint32_t(b));
-    }
-
-    constexpr BufferUsageFlags &operator|=(BufferUsageFlags& a, BufferUsageFlags b) noexcept
-    {
-        a = a | b;
-        return a;
-    }
-
-    constexpr bool has_flag(BufferUsageFlags flags, BufferUsageFlags bit) noexcept
-    {
-        return uint32_t(flags & bit) != 0;
-    }
 
     struct BufferRange
     {
@@ -255,12 +211,6 @@ namespace Corona::Horizon
             return result;
         }
     };
-
-
-
-    // ================================================================
-    // Native Interop
-    // ================================================================
 
     enum class ExternalMemoryHandleType : uint8_t
     {
@@ -300,12 +250,6 @@ namespace Corona::Horizon
         }
     };
 
-
-
-    // ================================================================
-    // Image
-    // ================================================================
-
     enum class ImageDimension : uint8_t
     {
         Image1D,
@@ -316,37 +260,18 @@ namespace Corona::Horizon
         CubeArray,
     };
 
-    enum class ImageUsageFlags : uint32_t
+    using ImageUsageFlags = uint32_t;
+
+    enum : ImageUsageFlags
     {
-        None = 0,
-        TransferSrc = 1 << 0,
-        TransferDst = 1 << 1,
-        Sampled = 1 << 2,
-        Storage = 1 << 3,
-        ColorAttachment = 1 << 4,
-        DepthStencilAttachment = 1 << 5,
+        ImageUsage_None = 0,
+        ImageUsage_TransferSrc = 1 << 0,
+        ImageUsage_TransferDst = 1 << 1,
+        ImageUsage_Sampled = 1 << 2,
+        ImageUsage_Storage = 1 << 3,
+        ImageUsage_ColorAttachment = 1 << 4,
+        ImageUsage_DepthStencilAttachment = 1 << 5,
     };
-
-    constexpr ImageUsageFlags operator|(ImageUsageFlags a, ImageUsageFlags b) noexcept
-    {
-        return ImageUsageFlags(uint32_t(a) | uint32_t(b));
-    }
-
-    constexpr ImageUsageFlags operator&(ImageUsageFlags a, ImageUsageFlags b) noexcept
-    {
-        return ImageUsageFlags(uint32_t(a) & uint32_t(b));
-    }
-
-    constexpr ImageUsageFlags& operator|=(ImageUsageFlags& a, ImageUsageFlags b) noexcept
-    {
-        a = a | b;
-        return a;
-    }
-
-    constexpr bool has_flag(ImageUsageFlags flags, ImageUsageFlags bit) noexcept
-    {
-        return uint32_t(flags & bit) != 0;
-    }
 
     struct ImageExtent
     {
@@ -381,39 +306,7 @@ namespace Corona::Horizon
         }
     };
 
-    // ================================================================
-    // Draw
-    // ================================================================
 
-    enum class IndexType : uint32_t
-    {
-        Auto = 0,
-        UInt16 = 1,
-        UInt32 = 2,
-    };
-
-    struct ScissorRect
-    {
-        int32_t x = 0;
-        int32_t y = 0;
-        uint32_t width = 0;
-        uint32_t height = 0;
-    };
-
-    struct DrawIndexedParams
-    {
-        uint32_t index_count = 0;
-        uint32_t instance_count = 1;
-        uint32_t first_index = 0;
-        int32_t vertex_offset = 0;
-        uint32_t first_instance = 0;
-        IndexType index_type = IndexType::Auto;
-        bool enable_scissor = false;
-        ScissorRect scissor{};
-        std::string debug_label;
-    };
-
-    // Matches VkDrawIndexedIndirectCommand (20 bytes, tightly packed).
     struct DrawIndexedIndirectCommand
     {
         uint32_t index_count = 0;
@@ -428,40 +321,9 @@ namespace Corona::Horizon
     {
         uint32_t draw_count = 0;
         uint64_t indirect_offset = 0;
-        // 0 means sizeof(DrawIndexedIndirectCommand).
+
         uint32_t stride = 0;
-        IndexType index_type = IndexType::Auto;
-        bool enable_scissor = false;
-        ScissorRect scissor{};
         std::string debug_label;
-    };
-
-    // ================================================================
-    // Pipeline Enums
-    // ================================================================
-
-    enum class PrimitiveTopology : uint16_t
-    {
-        TriangleList = 0,
-        TriangleStrip,
-        LineList,
-        LineStrip,
-        PointList,
-    };
-
-    enum class PolygonFillMode : uint16_t
-    {
-        Fill = 0,
-        Line,
-        Point,
-    };
-
-    enum class CullMode : uint16_t
-    {
-        None = 0,
-        Front,
-        Back,
-        FrontAndBack,
     };
 
     enum class CompareOp : uint16_t
@@ -508,41 +370,18 @@ namespace Corona::Horizon
         Count16 = 16,
     };
 
-    enum class ColorWriteMask : uint8_t
+    using ColorWriteMask = uint32_t;
+
+    enum : ColorWriteMask
     {
-        None = 0,
-        R = 1 << 0,
-        G = 1 << 1,
-        B = 1 << 2,
-        A = 1 << 3,
-        RGB = R | G | B,
-        RGBA = R | G | B | A,
+        ColorWrite_None = 0,
+        ColorWrite_R = 1 << 0,
+        ColorWrite_G = 1 << 1,
+        ColorWrite_B = 1 << 2,
+        ColorWrite_A = 1 << 3,
+        ColorWrite_RGB = ColorWrite_R | ColorWrite_G | ColorWrite_B,
+        ColorWrite_RGBA = ColorWrite_R | ColorWrite_G | ColorWrite_B | ColorWrite_A,
     };
-
-    constexpr ColorWriteMask operator|(ColorWriteMask a, ColorWriteMask b) noexcept
-    {
-        return ColorWriteMask(uint8_t(a) | uint8_t(b));
-    }
-
-    constexpr ColorWriteMask operator&(ColorWriteMask a, ColorWriteMask b) noexcept
-    {
-        return ColorWriteMask(uint8_t(a) & uint8_t(b));
-    }
-
-    constexpr ColorWriteMask &operator|=(ColorWriteMask& a, ColorWriteMask b) noexcept
-    {
-        a = a | b;
-        return a;
-    }
-
-
-
-    // ================================================================
-    // Execution Front End
-    // ----------------------------------------------------------------
-    // 光栅/深度/混合/多重采样状态一律直接摊在 RasterizerPipelineDesc 上，不再分组成
-    // 独立的 *StateDesc。
-    // ================================================================
 
     class HardwareBuffer;
     class HardwareImage;
@@ -559,8 +398,6 @@ namespace Corona::Horizon
     class HardwareExecutor;
     class HardwareDisplayer;
 
-    // 执行层与资源引用类型由内部 command IR 头定义；这里只保留公共 API 签名里
-    // 按值出现的三个叶子类型，以及 recorder / pipeline / executor 依赖的前置声明。
     class CommandRecorder;
     class Queue;
     class ExecutionCompiler;
@@ -586,10 +423,6 @@ namespace Corona::Horizon
         std::uintptr_t id { 0 };
     };
 
-
-    // SubmitReceipt 的完整载荷（SubmissionToken / PresentResult 序列）由内部
-    // SubmitReceiptData 持有，经 shared_ptr<const void> 不透明传递。公共用户只
-    // 能读 serial、并把它当作 wait / wait_idle 的参数，不触达内部 token。
     struct SubmitReceipt
     {
         uint64_t serial { 0 };
@@ -634,12 +467,10 @@ namespace Corona::Horizon
 
         ~HardwareStream();
 
-        // 便捷门面：pipeline 直接录进当前 recorder。
         HardwareStream& operator<<(ComputePipelineBase& pipeline);
         HardwareStream& operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt operator<<(CommitCommand command);
 
-        // 值命令门面（CopyBufferToImageCommand、PresentCommand 等）直接录进 recorder。
         template <typename Command>
             requires(!std::is_same_v<std::remove_cvref_t<Command>, CommitCommand> &&
                      !std::is_same_v<std::remove_cvref_t<Command>, ComputePipelineBase> &&
@@ -658,8 +489,7 @@ namespace Corona::Horizon
         void ensure_open() const;
 
         HardwareExecutor* executor_ {};
-        // CommandRecorder 定义在内部 command_ir.h；公共头只反声明，故按值成员改为
-        // 独占指针，实例化与 reset 都发生在硬件层。
+
         std::unique_ptr<CommandRecorder> recorder_ {};
         bool committed_ { false };
     };
@@ -678,8 +508,7 @@ namespace Corona::Horizon
         HardwareExecutor& operator=(HardwareExecutor&&) = delete;
 
         [[nodiscard]] HardwareStream stream();
-        // 便捷门面：`executor << pipeline` 直接开流，免去显式 `.stream()`。
-        // 光栅与计算两条路径对称提供，否则 `executor << compute` 会莫名编译不过。
+
         [[nodiscard]] HardwareStream operator<<(RasterizerPipelineBase& pipeline);
         [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
@@ -697,43 +526,27 @@ namespace Corona::Horizon
         QueueResolver queue_resolver_ {};
         mutable std::mutex mutex_;
         uint64_t next_submit_serial_ { 0 };
-        // SubmissionToken 定义在内部 command_ir.h，公共头不可按值持有，故用 shared_ptr。
+
         std::vector<std::shared_ptr<SubmissionToken>> pending_waits_;
     };
 
-
-    // ================================================================
-    // HardwareBuffer
-    // ================================================================
-
-    // Hardware data must be plain value data; do not store CPU pointers inside transferred structs.
     template <typename T>
     concept HardwareTransferable = std::is_trivially_copyable_v<std::remove_cvref_t<T>> && !std::is_pointer_v<std::remove_cvref_t<T>>;
 
-    // index limited to uint16_t/uint32_t.
     template <typename T>
-    concept HardwareIndexType = std::same_as<std::remove_cvref_t<T>, uint16_t> || std::same_as<std::remove_cvref_t<T>, uint32_t>;
+    concept HardwareIndexType = std::same_as<std::remove_cvref_t<T>, uint16_t>;
 
     struct HardwareBufferDesc
     {
         uint64_t element_count = 0;
         uint32_t element_size = 0;
-        BufferUsageFlags usage = BufferUsageFlags::None;
+        BufferUsageFlags usage = BufferUsage_None;
         CpuAccessMode cpu_access = CpuAccessMode::Write;
         bool dedicated = false;
         bool exportable = false;
         std::string debug_name;
 
-        [[nodiscard]] uint64_t byte_size() const
-        {
-            if (element_count == 0 || element_size == 0)
-                return 0;
-
-            if (element_count > std::numeric_limits<uint64_t>::max() / element_size)
-                throw std::overflow_error("HardwareBufferDesc total byte size overflow.");
-
-            return element_count * uint64_t(element_size);
-        }
+        [[nodiscard]] uint64_t byte_size() const;
 
         template <HardwareTransferable T>
         [[nodiscard]] static HardwareBufferDesc typed(uint64_t count, BufferUsageFlags usage, std::string name = {})
@@ -750,20 +563,20 @@ namespace Corona::Horizon
         template <HardwareTransferable T>
         [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Vertex, std::move(name));
+            return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Vertex, std::move(name));
         }
 
         template <HardwareIndexType T>
         [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {})
         {
-            return typed<T>(count, BufferUsageFlags::TransferDst | BufferUsageFlags::Index, std::move(name));
+            return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Index, std::move(name));
         }
 
         [[nodiscard]] static HardwareBufferDesc indirect(uint64_t command_count, std::string name = {})
         {
             return typed<DrawIndexedIndirectCommand>(
                 command_count,
-                BufferUsageFlags::TransferDst | BufferUsageFlags::Indirect | BufferUsageFlags::Storage,
+                BufferUsage_TransferDst | BufferUsage_Indirect | BufferUsage_Storage,
                 std::move(name));
         }
     };
@@ -774,7 +587,6 @@ namespace Corona::Horizon
         HardwareBuffer() = default;
         HardwareBuffer(const HardwareBufferDesc& desc, std::span<const std::byte> upload_data = {});
 
-        // Copies share the same underlying GPU buffer handle.
         HardwareBuffer(const HardwareBuffer& other) noexcept = default;
         HardwareBuffer(HardwareBuffer&& other) noexcept = default;
         ~HardwareBuffer() = default;
@@ -785,15 +597,7 @@ namespace Corona::Horizon
 
         [[nodiscard]] uint64_t get_element_size() const;
         [[nodiscard]] uint64_t get_element_count() const;
-        [[nodiscard]] uint64_t get_byte_size() const
-        {
-            const uint64_t element_count = get_element_count();
-            const uint64_t element_size = get_element_size();
-            if (element_size != 0 && element_count > std::numeric_limits<uint64_t>::max() / element_size)
-                throw std::overflow_error("HardwareBuffer total byte size overflow.");
-
-            return element_count * element_size;
-        }
+        [[nodiscard]] uint64_t get_byte_size() const;
         [[nodiscard]] void* get_mapped_data() const;
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
@@ -835,18 +639,12 @@ namespace Corona::Horizon
         friend class HardwareImage;
     };
 
-
-
-    // ================================================================
-    // HardwareImage
-    // ================================================================
-
     struct HardwareImageDesc
     {
         ImageDimension dimension = ImageDimension::Image2D;
         ImageExtent extent {};
         Format format = Format::UNKNOWN;
-        ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst;
+        ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst;
         CpuAccessMode cpu_access = CpuAccessMode::None;
         uint32_t array_layers = 1;
         uint32_t mip_levels = 1;
@@ -858,61 +656,25 @@ namespace Corona::Horizon
         static HardwareImageDesc texture_2d(uint32_t width,
                                             uint32_t height,
                                             Format format,
-                                            ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                            std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Image2D;
-            desc.extent = { width, height, 1 };
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
+                                            ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst,
+                                            std::string name = {});
 
         static HardwareImageDesc texture_2d_array(uint32_t width,
                                                   uint32_t height,
                                                   uint32_t layers,
                                                   Format format,
-                                                  ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                                  std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Image2DArray;
-            desc.extent = { width, height, 1 };
-            desc.array_layers = layers;
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
+                                                  ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst,
+                                                  std::string name = {});
 
         static HardwareImageDesc cube(uint32_t size,
                                       Format format,
-                                      ImageUsageFlags usage = ImageUsageFlags::Sampled | ImageUsageFlags::TransferDst,
-                                      std::string name = {})
-        {
-            HardwareImageDesc desc;
-            desc.dimension = ImageDimension::Cube;
-            desc.extent = { size, size, 1 };
-            desc.array_layers = 6;
-            desc.format = format;
-            desc.usage = usage;
-            desc.debug_name = std::move(name);
-            return desc;
-        }
+                                      ImageUsageFlags usage = ImageUsage_Sampled | ImageUsage_TransferDst,
+                                      std::string name = {});
 
         static HardwareImageDesc depth_attachment(uint32_t width,
                                                   uint32_t height,
                                                   Format format,
-                                                  std::string name = {})
-        {
-            return texture_2d(width,
-                              height,
-                              format,
-                              ImageUsageFlags::DepthStencilAttachment | ImageUsageFlags::Sampled | ImageUsageFlags::TransferSrc | ImageUsageFlags::TransferDst,
-                              std::move(name));
-        }
+                                                  std::string name = {});
     };
 
     class HardwareImage : public ResourceHandle
@@ -946,15 +708,6 @@ namespace Corona::Horizon
         friend class HardwareBuffer;
     };
 
-
-
-    // ================================================================
-    // Pipeline Descriptors
-    // ================================================================
-
-    // 管线持有的 shader 载荷：编译产物 + EDSL 管线对象 + auto-bind 表。
-    // 与 *PipelineDesc 分家的理由：Desc 是调用方写的渲染状态，按值传来传去；
-    // shader 侧是 SPIR-V + 反射表，深拷贝很贵。分开后 desc() 只搬状态。
     struct ComputePipelineShaders
     {
         EmbeddedShader::ShaderCodeModule compute;
@@ -972,33 +725,20 @@ namespace Corona::Horizon
 
     struct ComputePipelineDesc
     {
-        // 反射缺失时的 workgroup local size 回退值，见 compute_pipeline.cpp 的解析逻辑。
-        // 这里没有 debug_name：和 RasterizerPipelineDesc 不同，计算管线的调试名全仓
-        // 无写入点，恒为 "horizon.compute_pipeline"，字段已删。
+
         ktm::uvec3 thread_group_size = { 1, 1, 1 };
     };
 
     struct RasterizerPipelineDesc
     {
-        // --- 光栅 ---
-        PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-        PolygonFillMode fill_mode = PolygonFillMode::Fill;
-        CullMode cull_mode = CullMode::None;
         bool depth_clamp_enabled = false;
         bool rasterizer_discard_enabled = false;
         float line_width = 1.0f;
 
-        // --- 深度 ---
-        // 没有模板状态：动态渲染路径把 stencilAttachmentFormat 恒定写成 UNDEFINED
-        // (vulkan_rasterizer_pipeline.cpp)，从来绑不上模板附件，所以不暴露永远
-        // 无效果的模板旋钮。需要模板效果的例子(shadowvolumes)走 R32F 计数纹理。
         bool depth_test_enabled = true;
         bool depth_write_enabled = true;
         CompareOp depth_compare_op = CompareOp::LessOrEqual;
 
-        // --- 混合 ---
-        // 后端把这一份状态广播给全部颜色附件（从来没有过 per-attachment 独立混合），
-        // 所以这里是单份值而非 vector。默认开 alpha 混合，与摊平前的默认行为一致。
         bool blend_enabled = true;
         BlendFactor src_color_blend_factor = BlendFactor::SrcAlpha;
         BlendFactor dst_color_blend_factor = BlendFactor::OneMinusSrcAlpha;
@@ -1006,10 +746,9 @@ namespace Corona::Horizon
         BlendFactor src_alpha_blend_factor = BlendFactor::One;
         BlendFactor dst_alpha_blend_factor = BlendFactor::OneMinusSrcAlpha;
         BlendOp alpha_blend_op = BlendOp::Add;
-        ColorWriteMask color_write_mask = ColorWriteMask::RGBA;
+        ColorWriteMask color_write_mask = ColorWrite_RGBA;
         bool logic_op_enabled = false;
 
-        // --- 多重采样 ---
         SampleCount sample_count = SampleCount::Count1;
         bool sample_shading_enabled = false;
         float min_sample_shading = 1.0f;
@@ -1017,29 +756,15 @@ namespace Corona::Horizon
         uint32_t multiview_count = 1;
 
         bool clear_color_target = true;
-        // When a depth target is bound, clear it at pass begin unless the caller opts out
-        // (needed for landscape-then-sky with depth Equal on the sky pass).
+
         bool clear_depth_target = true;
 
         std::string debug_name;
     };
 
-    // ================================================================
-    // Slang 编译
-    // ================================================================
-
-    // 编译单个 Slang shader module 为 ShaderCodeModule。EDSL 路径（栅格 + compute）
-    // 共用：填 SlangCompileArgs2 → slangCompilerWithModules → 取 SPIR-V → 反射短名裁剪。
-    // 集中成一处，避免两份手抄在改约定（短名裁剪）时静默漂移。
-    // 实现在 src/hardware_wrapper/slang_stage.cpp —— 留在头里会把
-    // ShaderLanguageConverter.h (slang-com-ptr / slang-com-helper) 塞给每个消费者。
     [[nodiscard]] EmbeddedShader::ShaderCodeModule compile_slang_stage(
         EmbeddedShader::ShaderStage stage,
         EmbeddedShader::SlangModule& module);
-
-    // ================================================================
-    // Pipeline Binding
-    // ================================================================
 
     template <typename T>
     concept ReflectedBindingKey = requires(const T& t)
@@ -1090,9 +815,7 @@ namespace Corona::Horizon
             if constexpr (requires { key.binding; })
             {
                 slot.binding = key.binding;
-                // Legacy codegen packed descriptor binding into `location` and left
-                // `set`/`binding` unset (0). Prefer that encoding only when the
-                // explicit set/binding metadata was never populated.
+
                 if (slot.set == 0 && slot.binding == 0)
                     slot.binding = slot.location;
             }
@@ -1105,8 +828,6 @@ namespace Corona::Horizon
         }
     };
 
-    // 非虚绑定分派 (旧 friend 两指针设计): ResourceProxy 模板持具体管线引用,
-    // 直接调基类的 public bind_* 成员, 无抽象基、无 virtual、无继承。
     template <typename Pipeline>
     class ResourceProxy
     {
@@ -1142,14 +863,10 @@ namespace Corona::Horizon
         BindingSlot slot_;
     };
 
-    // ================================================================
-    // Pipeline Runtime
-    // ================================================================
-
     class ComputePipelineBase : public ResourceHandle
     {
     public:
-        // record_into / sync_shader_conditions 的签名引用内部 IR 类型，只给执行层看。
+
         friend class HardwareExecutor;
         friend class HardwareStream;
         friend class VulkanCommandEncoder;
@@ -1165,17 +882,12 @@ namespace Corona::Horizon
 
         ComputePipelineBase& operator=(const ComputePipelineBase& other);
         ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
-        ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
 
-        // 根据管线自身的 workgroup local size 将像素尺寸换算为 dispatch group 数。
-        // 消除调用方对 local_size 的硬编码依赖（ceil(w/tgs.x), ceil(h/tgs.y)）。
-        // local size 优先取自反射（编译进 shader 的真实值），构造参数仅作反射缺失时的回退。
-        struct DispatchGroups { uint32_t x; uint32_t y; };
-        [[nodiscard]] DispatchGroups dispatch_groups(uint32_t width, uint32_t height) const;
+        ComputePipelineBase& groups(uint32_t groups_x, uint32_t groups_y, uint32_t groups_z = 1);
+        ComputePipelineBase& dispatch_extent(uint32_t width, uint32_t height);
 
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
@@ -1194,9 +906,6 @@ namespace Corona::Horizon
     private:
         void record_into(CommandRecorder& recorder);
 
-        // 条件信息(EDSL 条件编译)与上次构建不同时重编译 shader 并重建管线,相同则什么都不做。
-        // 返回是否真的重建过：调用方据此作废自己缓存的 pipeline / layout 句柄(重建销毁旧
-        // layout,新句柄可能复用同一地址值)。
         bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& conditionInfo);
 
         void set_push_constant_direct(uint64_t byte_offset, const void* data, size_t size, int32_t bind_type, uint32_t set = 0, uint32_t binding = 0);
@@ -1213,7 +922,7 @@ namespace Corona::Horizon
     class RasterizerPipelineBase : public ResourceHandle
     {
     public:
-        // 同 ComputePipelineBase：内部 IR 入口只对执行层开放。
+
         friend class HardwareExecutor;
         friend class HardwareStream;
         friend class VulkanCommandEncoder;
@@ -1230,8 +939,7 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(const RasterizerPipelineBase& other);
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
-        RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
-        RasterizerPipelineBase& record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
+        RasterizerPipelineBase& extent(uint32_t width, uint32_t height);
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
                                                 const HardwareBuffer& indirect_buffer,
@@ -1240,7 +948,6 @@ namespace Corona::Horizon
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        // 非虚绑定转发入口 (ResourceProxy 直接调用); set_*_direct 保留私有。
         void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
         {
             set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
@@ -1259,7 +966,6 @@ namespace Corona::Horizon
     private:
         void record_into(CommandRecorder& recorder) const;
 
-        // 同 ComputePipelineBase::sync_shader_conditions，只重编译条件真的变了的那个 stage。
         bool sync_shader_conditions(const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& vertConditionInfo,
                                     const EmbeddedShader::ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
 
@@ -1313,7 +1019,6 @@ namespace Corona::Horizon
             !GeneratedRasterizerShaderObjects<VS, FS>;
     }
 
-
     template <>
     class ComputePipeline<void> : public ComputePipelineBase
     {
@@ -1333,9 +1038,7 @@ namespace Corona::Horizon
         }
 
     private:
-        // 编译选项曾由 EdslPipelineOptions 形参带入，但全仓没有一个调用方传过它，
-        // 于是连同它撑起的 4 条 CTAD 指引一起删掉。要重新开放 enableBindless /
-        // auto_bind 时，在这里加回一个显式形参即可。
+
         template <typename F>
         static ComputePipelineShaders compile_edsl(F&& compute_shader_code,
                                                   ktm::uvec3 numthreads,
@@ -1407,10 +1110,6 @@ namespace Corona::Horizon
         }
     };
 
-    // 别想着用 `(CS, Rest...)` 变参尾巴合并成两条：主模板的构造函数会生成隐式推导
-    // 指引，它是定参的，在偏序上比变参 guide 更特化，于是 EDSL lambda 会被推成
-    // RasterizerPipeline<lambda,lambda> / ComputePipeline<lambda> 而不是空参特化。
-    // 显式 guide 只有在与隐式 guide 同样好时才优先，所以必须逐个 arity 写死。
     ComputePipeline() -> ComputePipeline<>;
     template <PipelineDetail::GeneratedComputeShaderObject CS>
     ComputePipeline(CS) -> ComputePipeline<std::remove_cvref_t<CS>>;
@@ -1448,7 +1147,7 @@ namespace Corona::Horizon
         }
 
     private:
-        // 同 ComputePipeline<void>::compile_edsl：EdslPipelineOptions 形参零调用方，已删。
+
         template <typename VS, typename FS>
         static RasterizerPipelineShaders compile_edsl(VS&& vertex_shader_code,
                                                      FS&& fragment_shader_code,
@@ -1538,7 +1237,6 @@ namespace Corona::Horizon
         }
     };
 
-    // 同上，不能用变参尾巴合并——见 ComputePipeline 推导指引处的说明。
     RasterizerPipeline() -> RasterizerPipeline<>;
     template <typename VS, typename FS>
         requires PipelineDetail::GeneratedRasterizerShaderObjects<VS, FS>
@@ -1558,10 +1256,6 @@ namespace Corona::Horizon
     template <typename VS, typename FS>
         requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
     RasterizerPipeline(VS, FS, RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<>;
-
-    // ================================================================
-    // Value Command Facades
-    // ================================================================
 
     struct CopyBufferToImageCommand
     {
@@ -1585,15 +1279,16 @@ namespace Corona::Horizon
         void record(CommandRecorder& recorder) const;
     };
 
-    [[nodiscard]] inline PresentCommand present(const HardwareDisplayer& displayer,
-                                                const HardwareImage& image,
-                                                DeviceId present_device = {},
-                                                bool allow_cpu_bridge_fallback = true)
-    {
-        return { displayer, image, present_device, allow_cpu_bridge_fallback };
-    }
+    [[nodiscard]] PresentCommand present(const HardwareDisplayer& displayer,
+                                         const HardwareImage& image,
+                                         DeviceId present_device = {},
+                                         bool allow_cpu_bridge_fallback = true);
 
 }
+
+#ifndef HORIZON_NO_SHORT_NAMESPACE
+namespace horizon = Corona::Horizon;
+#endif
 
 template <typename PipelineType>
 template <typename T>
@@ -1603,35 +1298,3 @@ EmbeddedShader::BoundField<PipelineType>& EmbeddedShader::BoundField<PipelineTyp
     proxy = value;
     return *this;
 }
-
-// ================================================================
-// Profiling instrumentation (merged from horizon_profiling.h)
-// ----------------------------------------------------------------
-// Tracy wrapper. When HORIZON_TRACY_ENABLED is OFF the macros expand to
-// nothing, so call sites never need #ifdef guards. Enabled via
-// HORIZON_ENABLE_TRACY (see src/CMakeLists.txt).
-// ================================================================
-#if defined(HORIZON_TRACY_ENABLED)
-
-#include <tracy/Tracy.hpp>
-
-// Marks the end of a frame (call once per presented frame).
-#define HORIZON_PROFILE_FRAME() FrameMark
-// Scoped CPU zone named after the enclosing function.
-#define HORIZON_PROFILE_SCOPE() ZoneScoped
-// Scoped CPU zone with an explicit name (string literal).
-#define HORIZON_PROFILE_SCOPE_N(name) ZoneScopedN(name)
-// Plots a numeric value over time (name must be a string literal).
-#define HORIZON_PROFILE_PLOT(name, value) TracyPlot(name, static_cast<double>(value))
-// Names the current thread in the Tracy UI.
-#define HORIZON_PROFILE_THREAD(name) tracy::SetThreadName(name)
-
-#else
-
-#define HORIZON_PROFILE_FRAME()
-#define HORIZON_PROFILE_SCOPE()
-#define HORIZON_PROFILE_SCOPE_N(name)
-#define HORIZON_PROFILE_PLOT(name, value)
-#define HORIZON_PROFILE_THREAD(name)
-
-#endif

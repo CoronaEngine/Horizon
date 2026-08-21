@@ -97,26 +97,26 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
 {
     constexpr uint32_t bytes_per_pixel = 8; // RGBA16F
 
-    Corona::Horizon::HardwareImageDesc desc = Corona::Horizon::HardwareImageDesc::cube(
-        dds.size, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferDst, name);
+    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
+        dds.size, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
     desc.mip_levels = dds.mip_count;
 
-    Corona::Horizon::HardwareImage image(desc);
+    horizon::HardwareImage image(desc);
 
-    Corona::Horizon::HardwareBufferDesc staging_desc;
+    horizon::HardwareBufferDesc staging_desc;
     staging_desc.element_count = dds.payload.size();
     staging_desc.element_size = 1;
-    staging_desc.usage = Corona::Horizon::BufferUsageFlags::TransferSrc;
-    staging_desc.cpu_access = Corona::Horizon::CpuAccessMode::Write;
-    Corona::Horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
+    staging_desc.usage = horizon::BufferUsage_TransferSrc;
+    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
+    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
-    Corona::Horizon::HardwareExecutor executor;
-    Corona::Horizon::HardwareStream stream = executor.stream();
+    horizon::HardwareExecutor executor;
+    horizon::HardwareStream stream = executor.stream();
     uint64_t offset = 0;
     for (uint32_t face = 0; face < 6; ++face)
     {
@@ -127,15 +127,15 @@ Corona::Horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, cons
             offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
         }
     }
-    (void)(stream << Corona::Horizon::commit());
+    (void)(stream << horizon::commit());
 
     return image;
 }
 
 struct LightProbe
 {
-    Corona::Horizon::HardwareImage lod;
-    Corona::Horizon::HardwareImage irr;
+    horizon::HardwareImage lod;
+    horizon::HardwareImage irr;
 };
 
 LightProbe load_light_probe(const std::string& name)
@@ -156,10 +156,20 @@ struct IblVertex
     std::array<float, 3> normal {};
 };
 
+// bgfx 的网格按 group 切分，每个 group 的顶点数天然 <=65535；索引保持 group
+// 相对，base_vertex 在 draw 时通过 vertex_offset 补回，从而全程用 16-bit 索引。
+struct MeshGroup
+{
+    uint32_t first_index = 0;
+    uint32_t index_count = 0;
+    int32_t base_vertex = 0;
+};
+
 struct IblMesh
 {
     std::vector<IblVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indices;
+    std::vector<MeshGroup> groups;
 };
 
 uint32_t fourcc(char a, char b, char c, uint8_t d)
@@ -270,11 +280,18 @@ IblMesh load_bgfx_mesh(const std::filesystem::path& path)
         {
             const uint32_t num_indices = read_pod<uint32_t>(bytes, cursor);
             mesh.indices.reserve(mesh.indices.size() + num_indices);
+
+            // 索引保持 group 相对（bgfx 原样的 16-bit 值），group 的顶点基址
+            // 交给 draw 的 vertex_offset。否则 bunny/orb 这类多 group 网格
+            // 累加后会越过 65535，16-bit 索引直接回绕。
+            MeshGroup group;
+            group.first_index = static_cast<uint32_t>(mesh.indices.size());
+            group.index_count = num_indices;
+            group.base_vertex = static_cast<int32_t>(group_base_vertex);
+            mesh.groups.push_back(group);
+
             for (uint32_t i = 0; i < num_indices; ++i)
-            {
-                const uint16_t index = read_pod<uint16_t>(bytes, cursor);
-                mesh.indices.push_back(group_base_vertex + index);
-            }
+                mesh.indices.push_back(read_pod<uint16_t>(bytes, cursor));
         }
         else if (chunk == chunk_pri)
         {
@@ -503,51 +520,65 @@ void run_example_ibl()
         { { 3.0f, -1.0f, 1.0f }, {} },
         { { -1.0f, 3.0f, 1.0f }, {} },
     };
-    const std::vector<uint32_t> sky_indices = { 0, 1, 2 };
+    const std::vector<uint16_t> sky_indices = { 0, 1, 2 };
 
-    Corona::Horizon::HardwareBuffer bunny_vb = Corona::Horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_ibl.bunny.vb");
-    Corona::Horizon::HardwareBuffer bunny_ib = Corona::Horizon::HardwareBuffer::index(bunny_mesh.indices, "example_ibl.bunny.ib");
-    Corona::Horizon::HardwareBuffer orb_vb = Corona::Horizon::HardwareBuffer::vertex(orb_mesh.vertices, "example_ibl.orb.vb");
-    Corona::Horizon::HardwareBuffer orb_ib = Corona::Horizon::HardwareBuffer::index(orb_mesh.indices, "example_ibl.orb.ib");
-    Corona::Horizon::HardwareBuffer sky_vb = Corona::Horizon::HardwareBuffer::vertex(sky_vertices, "example_ibl.sky.vb");
-    Corona::Horizon::HardwareBuffer sky_ib = Corona::Horizon::HardwareBuffer::index(sky_indices, "example_ibl.sky.ib");
+    horizon::HardwareBuffer bunny_vb = horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_ibl.bunny.vb");
+    horizon::HardwareBuffer bunny_ib = horizon::HardwareBuffer::index(bunny_mesh.indices, "example_ibl.bunny.ib");
+    horizon::HardwareBuffer orb_vb = horizon::HardwareBuffer::vertex(orb_mesh.vertices, "example_ibl.orb.vb");
+    horizon::HardwareBuffer orb_ib = horizon::HardwareBuffer::index(orb_mesh.indices, "example_ibl.orb.ib");
+    horizon::HardwareBuffer sky_vb = horizon::HardwareBuffer::vertex(sky_vertices, "example_ibl.sky.vb");
+    horizon::HardwareBuffer sky_ib = horizon::HardwareBuffer::index(sky_indices, "example_ibl.sky.ib");
 
     // ---- 渲染目标 ----
-    Corona::Horizon::HardwareImage final_output_image(Corona::Horizon::HardwareImageDesc::texture_2d(
-        ibl_width, ibl_height, Corona::Horizon::Format::RGBA16_FLOAT,
-        Corona::Horizon::ImageUsageFlags::Storage | Corona::Horizon::ImageUsageFlags::ColorAttachment |
-            Corona::Horizon::ImageUsageFlags::Sampled | Corona::Horizon::ImageUsageFlags::TransferSrc |
-            Corona::Horizon::ImageUsageFlags::TransferDst,
+    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
+        ibl_width, ibl_height, horizon::Format::RGBA16_FLOAT,
+        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
+            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
+            horizon::ImageUsage_TransferDst,
         "example_ibl.output"));
     final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
 
-    Corona::Horizon::HardwareImage depth_image(Corona::Horizon::HardwareImageDesc::depth_attachment(
-        ibl_width, ibl_height, Corona::Horizon::Format::D32, "example_ibl.depth"));
+    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
+        ibl_width, ibl_height, horizon::Format::D32, "example_ibl.depth"));
     depth_image.set_clear_depth(1.0f, 0);
 
     // ---- Pipeline ----
-    Corona::Horizon::RasterizerPipelineDesc desc;
+    horizon::RasterizerPipelineDesc desc;
     desc.blend_enabled = false;
 
-    Corona::Horizon::RasterizerPipeline rasterizer(ibl_vert_glsl, ibl_frag_glsl, desc);
+    horizon::RasterizerPipeline rasterizer(ibl_vert_glsl, ibl_frag_glsl, desc);
     rasterizer.outColor = final_output_image;
     rasterizer.bind_depth_target(depth_image);
 
-    Corona::Horizon::HardwareExecutor render_executor;
-    Corona::Horizon::HardwareExecutor display_executor;
-    Corona::Horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareExecutor render_executor;
+    horizon::HardwareExecutor display_executor;
+    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    Corona::Horizon::DrawIndexedParams bunny_params;
-    bunny_params.index_type = Corona::Horizon::IndexType::UInt32;
-    bunny_params.index_count = static_cast<uint32_t>(bunny_mesh.indices.size());
+    // 每个 bgfx group 一组 indirect command：索引是 group 相对的，base_vertex 走 vertex_offset。
+    const auto group_commands = [](const IblMesh& mesh) {
+        std::vector<horizon::DrawIndexedIndirectCommand> out;
+        out.reserve(mesh.groups.size());
+        for (const MeshGroup& group : mesh.groups)
+        {
+            horizon::DrawIndexedIndirectCommand cmd;
+            cmd.index_count = group.index_count;
+            cmd.instance_count = 1;
+            cmd.first_index = group.first_index;
+            cmd.vertex_offset = group.base_vertex;
+            cmd.first_instance = 0;
+            out.push_back(cmd);
+        }
+        return out;
+    };
+    const std::vector<horizon::DrawIndexedIndirectCommand> bunny_commands = group_commands(bunny_mesh);
+    const std::vector<horizon::DrawIndexedIndirectCommand> orb_commands = group_commands(orb_mesh);
 
-    Corona::Horizon::DrawIndexedParams orb_params;
-    orb_params.index_type = Corona::Horizon::IndexType::UInt32;
-    orb_params.index_count = static_cast<uint32_t>(orb_mesh.indices.size());
-
-    Corona::Horizon::DrawIndexedParams sky_params;
-    sky_params.index_type = Corona::Horizon::IndexType::UInt32;
-    sky_params.index_count = static_cast<uint32_t>(sky_indices.size());
+    horizon::DrawIndexedIndirectCommand sky_cmd;
+    sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());
+    sky_cmd.instance_count = 1;
+    sky_cmd.first_index = 0;
+    sky_cmd.vertex_offset = 0;
+    sky_cmd.first_instance = 0;
 
     constexpr float aspect = static_cast<float>(ibl_width) / static_cast<float>(ibl_height);
     // bgfx 是左手系（屏幕右 = 世界 +x），跟随之以保证天空盒方向基与网格反射一致。
@@ -617,6 +648,8 @@ void run_example_ibl()
         rasterizer.vsp.envMtx = env_rot;
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
 
+        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+
         // ---- 网格 draw（先画，深度 LessOrEqual 下天空盒只补背景）----
         if (s.mesh_selection == 0)
         {
@@ -626,7 +659,12 @@ void run_example_ibl()
             rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
             rasterizer.vpc.model   = model;
             rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-            rasterizer.record(bunny_ib, bunny_vb, bunny_params);
+            for (const horizon::DrawIndexedIndirectCommand& base_cmd : bunny_commands)
+            {
+                horizon::DrawIndexedIndirectCommand cmd = base_cmd;
+                cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                indirect_cmds.push_back(cmd);
+            }
         }
         else
         {
@@ -649,7 +687,12 @@ void run_example_ibl()
                     rasterizer.vpc.model   = model;
                     rasterizer.vpc.params0 =
                         glm::vec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
-                    rasterizer.record(orb_ib, orb_vb, orb_params);
+                    for (const horizon::DrawIndexedIndirectCommand& base_cmd : orb_commands)
+                    {
+                        horizon::DrawIndexedIndirectCommand cmd = base_cmd;
+                        cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+                        indirect_cmds.push_back(cmd);
+                    }
                 }
             }
         }
@@ -658,15 +701,39 @@ void run_example_ibl()
         rasterizer.vpc.misc    = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
         rasterizer.vpc.model   = glm::mat4(1.0f); // identity，skybox 路径不使用 model
         rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-        rasterizer.record(sky_ib, sky_vb, sky_params);
 
-        Corona::Horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer(ibl_width, ibl_height) << Corona::Horizon::commit();
+        horizon::DrawIndexedIndirectCommand sky_draw = sky_cmd;
+        sky_draw.first_instance = static_cast<uint32_t>(indirect_cmds.size());
+        indirect_cmds.push_back(sky_cmd);
+
+        if (!indirect_cmds.empty())
+        {
+            horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
+                std::span<const std::byte>(
+                    reinterpret_cast<const std::byte*>(indirect_cmds.data()),
+                    indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
+                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
+                "example_ibl.indirect");
+
+            // Use first mesh's buffers (bunny or orb depending on selection, sky uses same)
+            const horizon::HardwareBuffer& ib = (s.mesh_selection == 0) ? bunny_ib : orb_ib;
+            const horizon::HardwareBuffer& vb = (s.mesh_selection == 0) ? bunny_vb : orb_vb;
+
+            horizon::DrawIndexedIndirectParams indirect_params;
+            indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
+            indirect_params.indirect_offset = 0;
+            indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
+            rasterizer.record_indirect(ib, vb, indirect_buffer, indirect_params);
+        }
+
+        horizon::SubmitReceipt render_receipt =
+            render_executor << rasterizer.extent(ibl_width, ibl_height) << horizon::commit();
 
         ui.draw_overlay(display_executor, final_output_image, render_receipt);
         display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << Corona::Horizon::present(display, final_output_image)
-                                         << Corona::Horizon::commit());
+        (void)(display_executor.stream() << horizon::present(display, final_output_image)
+                                         << horizon::commit());
     }
 
     glfwDestroyWindow(window);

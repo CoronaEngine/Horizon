@@ -7,11 +7,13 @@
 
 #include "display_manager.h"
 
-#include <horizon.h>  // profiling macros merged from horizon_profiling.h
+#include "horizon_profiling.h"
 
 #include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/frame_ring.h"
 #include "hardware_wrapper_vulkan/hardware/device_manager.h"
+#include "hardware_wrapper_vulkan/hardware/frame_hash.h"
+#include "hardware_wrapper_vulkan/hardware/gpu_timestamps.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
@@ -19,9 +21,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -30,6 +34,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -127,12 +132,26 @@ namespace Corona::Horizon
                                 "vkGetPhysicalDeviceSurfacePresentModesKHR");
             }
 
-            for (VkPresentModeKHR mode : modes)
+            const auto supported = [&modes](VkPresentModeKHR wanted) {
+                return std::ranges::find(modes, wanted) != modes.end();
+            };
+
+            // HORIZON_PRESENT_MODE=immediate|mailbox|fifo 可覆盖：跑分必须用 immediate，
+            // 否则帧时间被呈现节奏封顶，测不出 GPU 侧的真实变化。
+            if (const char* requested = std::getenv("HORIZON_PRESENT_MODE"))
             {
-                if (mode == VK_PRESENT_MODE_MAILBOX_KHR)
-                {
-                    return mode;
-                }
+                const std::string_view name { requested };
+                if (name == "immediate" && supported(VK_PRESENT_MODE_IMMEDIATE_KHR))
+                    return VK_PRESENT_MODE_IMMEDIATE_KHR;
+                if (name == "mailbox" && supported(VK_PRESENT_MODE_MAILBOX_KHR))
+                    return VK_PRESENT_MODE_MAILBOX_KHR;
+                if (name == "fifo")
+                    return VK_PRESENT_MODE_FIFO_KHR;
+            }
+
+            if (supported(VK_PRESENT_MODE_MAILBOX_KHR))
+            {
+                return VK_PRESENT_MODE_MAILBOX_KHR;
             }
 
             return VK_PRESENT_MODE_FIFO_KHR;
@@ -655,35 +674,11 @@ namespace Corona::Horizon
         }
 
         HORIZON_PROFILE_SCOPE_N("display::await_frame_slot");
-        // [TEMP INSTRUMENTATION] 统计闸门实际阻塞的频率与时长。
-        static std::atomic<uint64_t> gate_total { 0 };
-        static std::atomic<uint64_t> gate_blocked { 0 };
-        static std::atomic<uint64_t> gate_blocked_us { 0 };
-
-        gate_total.fetch_add(1, std::memory_order_relaxed);
         if (completed_value_for_token(*submitted_queue, *token) < token->value)
         {
-            const auto block_start = std::chrono::steady_clock::now();
             submitted_queue->wait_for(*token);
-            const auto blocked_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - block_start).count();
-            gate_blocked.fetch_add(1, std::memory_order_relaxed);
-            gate_blocked_us.fetch_add(static_cast<uint64_t>(blocked_us), std::memory_order_relaxed);
         }
 
-        const uint64_t total = gate_total.load(std::memory_order_relaxed);
-        if (total % 300 == 0)
-        {
-            const uint64_t blocked = gate_blocked.load(std::memory_order_relaxed);
-            const uint64_t blocked_us = gate_blocked_us.load(std::memory_order_relaxed);
-            Diagnostics::write(Diagnostics::Level::Info,
-                               "HORIZON GATE",
-                               "frames=" + std::to_string(total) +
-                                   " blocked=" + std::to_string(blocked) +
-                                   " (" + std::to_string(blocked * 100 / total) + "%)" +
-                                   " avg_block=" + std::to_string(blocked == 0 ? 0 : blocked_us / blocked) + "us" +
-                                   " avg_per_frame=" + std::to_string(blocked_us / total) + "us");
-        }
         submitted_queue->retire_completed();
     }
 
@@ -695,6 +690,17 @@ namespace Corona::Horizon
             gate = rotate_frame_unlocked(producer);
         }
         await_frame_slot(gate);
+    }
+
+    namespace
+    {
+        // acquire 计时的累加器。放在这里（而不是和 bench_tick 的 BenchSegments 一起）
+        // 是因为 acquire 在文件中更早出现。
+        [[nodiscard]] double& bench_acquire_accumulator() noexcept
+        {
+            static double accumulated = 0.0;
+            return accumulated;
+        }
     }
 
     SwapchainAcquire DisplayManager::acquire_next_image()
@@ -727,12 +733,15 @@ namespace Corona::Horizon
         const uint32_t frame = frame_ring_slot() % static_cast<uint32_t>(image_available_.size());
         acquire.frame_index = frame;
 
+        const auto acquire_start = std::chrono::steady_clock::now();
         const VkResult result = vkAcquireNextImageKHR(device_,
                                                       swapchain_,
                                                       swapchain_acquire_timeout_ns(),
                                                       image_available_[frame],
                                                       VK_NULL_HANDLE,
                                                       &acquire.image_index);
+        bench_acquire_accumulator() +=
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - acquire_start).count();
 
         if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
         {
@@ -872,6 +881,91 @@ namespace Corona::Horizon
         return prepared;
     }
 
+    namespace
+    {
+        // 逐帧分段计时：把一帧拆成"CPU 阻塞在 GPU 上"和"其余"两段，用来判断瓶颈在哪一侧。
+        struct BenchSegments
+        {
+            double gate_wait_ms { 0.0 };
+        };
+
+        [[nodiscard]] BenchSegments& bench_segments() noexcept
+        {
+            static BenchSegments segments;
+            return segments;
+        }
+
+        // 引擎侧跑分：HORIZON_BENCH_FRAMES=N 时每 present 记一帧，跑满打印统计并退出。
+        // 放在 present 里而不是各 example 的循环里 —— 25 个 example 一处改动全覆盖。
+        void bench_tick()
+        {
+            static const unsigned long budget = [] {
+                const char* value = std::getenv("HORIZON_BENCH_FRAMES");
+                return value == nullptr ? 0UL : std::strtoul(value, nullptr, 10);
+            }();
+            if (budget == 0)
+                return;
+
+            static const unsigned long warmup = [] {
+                const char* value = std::getenv("HORIZON_BENCH_WARMUP");
+                return value == nullptr ? 100UL : std::strtoul(value, nullptr, 10);
+            }();
+            static const std::string label = [] {
+                const char* value = std::getenv("HORIZON_BENCH_LABEL");
+                return value == nullptr ? std::string("example") : std::string(value);
+            }();
+
+            static std::vector<double> samples;
+            static std::vector<double> gate_samples;
+            static std::vector<double> acquire_samples;
+            static unsigned long seen = 0;
+            static auto previous = std::chrono::steady_clock::now();
+
+            const auto now = std::chrono::steady_clock::now();
+            const double ms = std::chrono::duration<double, std::milli>(now - previous).count();
+            previous = now;
+            ++seen;
+
+            BenchSegments& segments = bench_segments();
+            double& acquire_accumulator = bench_acquire_accumulator();
+            if (seen > warmup)
+            {
+                samples.push_back(ms);
+                gate_samples.push_back(segments.gate_wait_ms);
+                acquire_samples.push_back(acquire_accumulator);
+            }
+            segments = {};
+            acquire_accumulator = 0.0;
+            if (seen < budget || samples.empty())
+                return;
+
+            const auto average = [](const std::vector<double>& values) {
+                return values.empty()
+                           ? 0.0
+                           : std::accumulate(values.begin(), values.end(), 0.0) /
+                                 static_cast<double>(values.size());
+            };
+            const double gate_mean = average(gate_samples);
+            const double acquire_mean = average(acquire_samples);
+
+            std::sort(samples.begin(), samples.end());
+            const double mean = std::accumulate(samples.begin(), samples.end(), 0.0) /
+                                static_cast<double>(samples.size());
+            const auto pct = [](double p) {
+                return samples[static_cast<size_t>(p * static_cast<double>(samples.size() - 1))];
+            };
+            std::printf("[bench] %s frames=%zu mean=%.3fms p50=%.3fms p95=%.3fms p99=%.3fms fps=%.1f "
+                        "gate=%.3fms acquire=%.3fms\n",
+                        label.c_str(), samples.size(), mean, pct(0.50), pct(0.95), pct(0.99),
+                        mean > 0.0 ? 1000.0 / mean : 0.0, gate_mean, acquire_mean);
+            std::fflush(stdout);
+            GpuTimes::report();
+            FrameHash::report();
+            // 各 example 的窗口循环条件互不相同，跑分模式下直接退出最省事。
+            std::_Exit(0);
+        }
+    }
+
     PresentResult DisplayManager::present(const PresentDesc& desc, const SubmissionToken& producer)
     {
         HORIZON_PROFILE_SCOPE_N("Horizon::present");
@@ -888,7 +982,18 @@ namespace Corona::Horizon
             std::lock_guard lock(mutex_);
             result = present_locked(desc, producer, gate);
         }
+        const auto gate_start = std::chrono::steady_clock::now();
         await_frame_slot(gate);
+        bench_segments().gate_wait_ms +=
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gate_start).count();
+        // gate 已保证 ring 上最旧那帧的 GPU 工作完成，此处回读 timestamp 不额外阻塞。
+        GpuTimes::collect_and_rotate();
+        if (FrameHash::enabled())
+        {
+            FrameHash::set_device(device_, device_manager_->physical_device());
+            FrameHash::end_frame();
+        }
+        bench_tick();
         return result;
     }
 
