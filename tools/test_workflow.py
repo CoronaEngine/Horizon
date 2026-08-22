@@ -91,6 +91,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('#define OC_DLL_EXPORT [[gnu::visibility("default")]]', header)
         self.assertIn("#define OC_DLL_EXPORT\n#define OC_DLL_IMPORT\n#endif", header)
 
+    def test_core_stl_does_not_call_msvc_allocation_or_conversion_apis(self) -> None:
+        stl = (
+            Path("src/core/stl.h").read_text(encoding="utf-8")
+            + Path("src/core/stl.cpp").read_text(encoding="utf-8")
+        )
+
+        self.assertNotIn("_aligned_malloc", stl)
+        self.assertNotIn("_aligned_free", stl)
+        self.assertNotIn("wcstombs_s", stl)
+        self.assertNotIn("std::wmemcpy", stl)
+
     def test_core_conan_graph_excludes_engine_packages(self) -> None:
         recipe = Path("conanfile.py").read_text(encoding="utf-8")
         requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]

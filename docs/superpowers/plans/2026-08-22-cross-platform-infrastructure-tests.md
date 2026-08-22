@@ -539,6 +539,8 @@ python tools/dev.py build horizon-test-core-platform --configuration Debug --tar
 
 所有现有模块 API 宏改为使用 `OC_DLL_EXPORT`/`OC_DLL_IMPORT`。`horizon-core` 通过 `target_compile_definitions(horizon-core PUBLIC OC_STATIC_LINK=1)` 将静态链接模式传递给消费者。更新 `test_core_header_keeps_api_macros_portable`，检查非 MSVC 可见性宏、静态链接分支，并确认公共头不再包含 `oc_windows.h`。
 
+同时移除 Core STL 兼容层中的 `_aligned_malloc`、`_aligned_free` 和 `wcstombs_s`，保留现有函数签名与兼容参数，但统一转发至标准分配器并用 `std::wcsrtombs` 完成宽字符串转换。`oc_memcpy` 在全部平台统一按字节调用 `std::memcpy`。增加静态回归检查以及宽字符串转换和精确字节复制的行为测试。
+
 - [ ] **步骤 4：实现 POSIX 后端**
 
 `src/core/runtime/platform_posix.cpp` 使用以下结构和 API：

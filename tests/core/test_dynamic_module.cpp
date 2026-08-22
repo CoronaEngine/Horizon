@@ -1,5 +1,6 @@
 #include "core/runtime/platform.h"
 
+#include <array>
 #include <filesystem>
 #include <iostream>
 
@@ -46,5 +47,12 @@ int main(int argc, char **argv) {
 #endif
 
     expect(!horizon::core::traceback().empty(), "traceback returns at least one frame");
+    expect(horizon::core::wstring_to_string(L"Horizon") == "Horizon",
+           "wide strings convert through the portable Core API");
+
+    const std::array<unsigned char, 4> source{1u, 2u, 3u, 4u};
+    std::array<unsigned char, 4> destination{};
+    horizon::core::oc_memcpy(destination.data(), source.data(), source.size());
+    expect(destination == source, "oc_memcpy copies an exact byte count");
     return failures == 0 ? 0 : 1;
 }

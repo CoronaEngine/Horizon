@@ -70,6 +70,8 @@ Conan 增加对应的布尔选项 `with_engine`，默认值同样为 `True`。`c
 
 公共头 `core/header.h` 不得包含 `windows.h`。DLL 标注宏只能在 MSVC 的动态链接模式下使用 `__declspec`，在其他编译器下应展开为可移植的可见性标注。当前四个模块是静态库，通过公共的 `OC_STATIC_LINK` 定义让 API 宏展开为空，避免静态库消费者错误地产生 `dllimport` 引用。
 
+Core 的 STL 兼容层不得调用 `_aligned_malloc`、`_aligned_free`、`wcstombs_s` 等 MSVC 专属 API；兼容参数继续保留，但分配和宽字符串转换统一使用标准 C++ 实现。`oc_memcpy` 在所有平台都按字节调用 `std::memcpy`，不能按 `wchar_t` 数量扩大复制范围。
+
 遇到不支持的操作系统时，CMake 必须明确配置失败，不能静默产出缺少实现的库。
 
 ## 平台回归测试

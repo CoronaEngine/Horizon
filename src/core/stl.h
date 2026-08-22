@@ -89,11 +89,10 @@ struct allocator {
 
 template<typename T = std::byte>
 [[nodiscard]] inline auto allocate(size_t n = 1u, bool use_ea = true) noexcept {
-    if (use_ea) {
-        return allocator<T>{}.allocate(n);
-    } else {
-        return reinterpret_cast<T *>(_aligned_malloc(sizeof(T) * n, alignof(T)));
-    }
+    // Core no longer has a separate EASTL allocator. Keep the flag for source
+    // compatibility while routing both modes through the standard allocator.
+    static_cast<void>(use_ea);
+    return allocator<T>{}.allocate(n);
 }
 
 template<typename T>
@@ -119,11 +118,8 @@ inline void delete_with_allocator(T *p, bool use_ea = true) noexcept {
         return;
     }
     std::destroy_at(p);
-    if (use_ea) {
-        deallocate(p);
-    } else {
-        _aligned_free(p);
-    }
+    static_cast<void>(use_ea);
+    deallocate(p);
 }
 
 template<typename T = std::byte>
@@ -222,11 +218,7 @@ template<typename T>
 using WP = weak_ptr<T>;
 
 inline void oc_memcpy(void *dst, const void *src, size_t size) {
-#ifdef _MSC_VER
     std::memcpy(dst, src, size);
-#else
-    std::wmemcpy(reinterpret_cast<wchar_t *>(dst), reinterpret_cast<const wchar_t *>(src), size);
-#endif
 }
 
 struct MemoryBlock {
