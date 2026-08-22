@@ -101,6 +101,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("wcstombs_s", stl)
         self.assertNotIn("std::wmemcpy", stl)
 
+    def test_core_type_source_includes_its_ranges_algorithm_dependency(self) -> None:
+        source = Path("src/core/type_system/type.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("#include <algorithm>", source)
+        self.assertIn("std::ranges::any_of", source)
+
     def test_core_conan_graph_excludes_engine_packages(self) -> None:
         recipe = Path("conanfile.py").read_text(encoding="utf-8")
         requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]
