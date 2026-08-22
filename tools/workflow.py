@@ -155,6 +155,7 @@ def conan_install(
         f"user.horizon:target_family={target_family}",
     ]
     if system_name != "Windows":
+        command.extend(("-c:a", "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config"))
         command.extend(("-s:a", f"build_type={configuration}"))
         command.extend(("-s:b", f"build_type={configuration}"))
         command.extend(("-s:a", "compiler.cppstd=20"))

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -23,6 +24,32 @@ from dev import conan_options, target_family_for_target, target_family_for_targe
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_posix_conan_install_uses_multi_config_layout(self) -> None:
+        with (
+            patch.object(workflow_module.platform, "system", return_value="Linux"),
+            patch.object(workflow_module, "run_command") as run_command,
+            patch.object(workflow_module, "write_cmake_build_environment"),
+        ):
+            workflow_module.conan_install(
+                Path("/repo"),
+                "Debug",
+                target_family="core",
+                options=(),
+                recipes=(),
+                recipe_toggle_env="HORIZON_TEST_RECIPES",
+            )
+
+        install_command = next(
+            call.args[0]
+            for call in run_command.call_args_list
+            if tuple(call.args[0][:2]) == ("conan", "install")
+        )
+        generator_index = install_command.index("-c:a")
+        self.assertEqual(
+            install_command[generator_index + 1],
+            "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config",
+        )
+
     def test_conan_profiles_are_native_to_the_host(self) -> None:
         self.assertTrue(hasattr(workflow_module, "conan_profile"))
         conan_profile = workflow_module.conan_profile

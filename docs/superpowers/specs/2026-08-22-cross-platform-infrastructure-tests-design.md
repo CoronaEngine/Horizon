@@ -83,7 +83,7 @@ Conan 增加对应的布尔选项 `with_engine`，默认值同样为 `True`。`c
 `tools/dev.py` 继续作为唯一 CI 入口。
 
 - Windows 继续使用仓库中按配置维护的 MSVC profile。
-- Linux 和 macOS 使用 `conan profile detect --force` 创建具名 Conan profile，并覆盖所请求配置的 build type 和 C++ 标准。
+- Linux 和 macOS 使用 `conan profile detect --force` 创建具名 Conan profile，并覆盖所请求配置的 build type、C++ 标准和 `Ninja Multi-Config` 生成器，确保 Conan 与项目 preset 使用相同的多配置目录布局。
 - Windows 从 `.bat` 文件加载 Conan 构建环境；POSIX 系统通过 `/bin/sh` source `.sh` 文件，再由当前 Python 进程以 JSON 传回完整环境，避免依赖 GNU `env -0`。
 - CMake 继续使用现有按目标族和配置隔离的构建目录与 preset。
 

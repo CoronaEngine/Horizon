@@ -733,9 +733,10 @@ Windows profile 不存在时明确报错；POSIX 在 `conan install` 前执行�
 run_command(("conan", "profile", "detect", "--force", "--name", profile), cwd=repo_root)
 ```
 
-安装命令显式覆盖：
+安装命令显式固定与项目 preset 相同的多配置生成器，并覆盖配置：
 
 ```python
+command.extend(("-c:a", "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config"))
 command.extend(("-s:a", f"build_type={configuration}"))
 command.extend(("-s:b", f"build_type={configuration}"))
 command.extend(("-s:a", "compiler.cppstd=20"))
