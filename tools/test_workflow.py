@@ -113,6 +113,11 @@ class WorkflowTests(unittest.TestCase):
         for suffix in ("kb", "mb", "gb"):
             self.assertIn(f'operator""_{suffix}(unsigned long long bytes)', header)
 
+    def test_math_scalar_functions_include_the_standard_math_header(self) -> None:
+        header = Path("src/math/scalar_func.h").read_text(encoding="utf-8")
+
+        self.assertIn("#include <cmath>", header)
+
     def test_core_conan_graph_excludes_engine_packages(self) -> None:
         recipe = Path("conanfile.py").read_text(encoding="utf-8")
         requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]
