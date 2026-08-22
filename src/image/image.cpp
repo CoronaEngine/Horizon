@@ -477,9 +477,10 @@ void Image::save_exr(const fs::path &fn, PixelStorage pixel_storage,
         {"A", "B", "G", "R"},
     };
     for (int channel = 0; channel < c; ++channel) {
-        strcpy_s(header.channels[channel].name,
-                 sizeof(header.channels[channel].name),
-                 channel_names[c - 1][channel]);
+        const char *channel_name = channel_names[c - 1][channel];
+        std::memcpy(header.channels[channel].name,
+                    channel_name,
+                    std::strlen(channel_name) + 1u);
     }
     const char *err = nullptr;
     if (auto ret = SaveEXRImageToFile(&image, &header, fn.string().c_str(), &err); ret != TINYEXR_SUCCESS) {
