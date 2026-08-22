@@ -9,7 +9,10 @@
 #include "math/basic_types.h"
 #include "core/concepts.h"
 
-namespace horizon::core {
+namespace horizon::image {
+
+using namespace horizon::core;
+using namespace horizon::math;
 
 enum ColorSpace {
     LINEAR,
@@ -115,7 +118,7 @@ OC_NDSC_INLINE uint32_t format_size_in_bytes(PixelStorage pixel_storage) {
     }
 }
 
-class OC_CORE_API ImageBase : public concepts::Noncopyable {
+class OC_IMAGE_API ImageBase : public concepts::Noncopyable {
 protected:
     PixelStorage pixel_storage_{PixelStorage::UNKNOWN};
     uint2 resolution_{};
@@ -134,7 +137,7 @@ public:
     }
     ImageBase() = default;
     ImageBase &operator=(ImageBase &&) = default;
-    [[nodiscard]] int channel_num() const { return ::horizon::core::channel_num(pixel_storage_); }
+    [[nodiscard]] int channel_num() const { return ::horizon::image::channel_num(pixel_storage_); }
     [[nodiscard]] uint2 resolution() const { return resolution_; }
     [[nodiscard]] uint width() const { return resolution_.x; }
     [[nodiscard]] uint height() const { return resolution_.y; }
@@ -166,4 +169,4 @@ public:
     }
 };
 
-}// namespace horizon::core
+}// namespace horizon::image

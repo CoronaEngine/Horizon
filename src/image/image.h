@@ -6,9 +6,12 @@
 
 #include "image_base.h"
 
-namespace horizon::core {
+namespace horizon::image {
 
-class OC_CORE_API ImageView : public ImageBase {
+using namespace horizon::core;
+using namespace horizon::math;
+
+class OC_IMAGE_API ImageView : public ImageBase {
 private:
     const std::byte *pixel_{nullptr};
 
@@ -28,7 +31,7 @@ public:
     T *pixel_ptr() { return reinterpret_cast<T *>(const_cast<std::byte *>(pixel_)); }
 };
 
-class OC_CORE_API Image : public ImageBase {
+class OC_IMAGE_API Image : public ImageBase {
 private:
     fs::path path_;
     std::unique_ptr<const std::byte[]> pixel_;
@@ -56,10 +59,10 @@ public:
     [[nodiscard]] static Image load_exr(const fs::path &fn, ColorSpace color_space, float3 scale = make_float3(1.f));
     [[nodiscard]] static Image create_empty(PixelStorage pixel_format, uint2 res);
     template<typename T>
-    static Image from_data(T *data, uint2 res) {
+    static Image from_data(const T *data, uint2 res) {
         size_t size_in_bytes = sizeof(T) * res.x * res.y;
-        auto pixel = allocate(size_in_bytes);
-        auto pixel_format = PixelStorageImpl<T>::storage;
+        auto pixel = new_array<std::byte>(size_in_bytes);
+        auto pixel_format = PixelStorageImpl<std::remove_cv_t<T>>::storage;
         oc_memcpy(pixel, data, size_in_bytes);
         return {pixel_format, pixel, res};
     }
@@ -107,4 +110,4 @@ public:
     static void save_other(const fs::path &fn, PixelStorage pixel_format,
                            uint2 res, const std::byte *ptr);
 };
-}// namespace horizon::core
+}// namespace horizon::image

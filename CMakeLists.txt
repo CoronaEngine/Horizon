@@ -52,6 +52,7 @@ add_compile_definitions(
 )
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_image_dependencies.cmake)
 
 if(HORIZON_BUILD_ENGINE)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_engine_dependencies.cmake)

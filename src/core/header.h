@@ -71,6 +71,12 @@
 #define OC_MATH_API OC_DLL_IMPORT
 #endif
 
+#ifdef OC_IMAGE_EXPORT_DLL
+#define OC_IMAGE_API OC_DLL_EXPORT
+#else
+#define OC_IMAGE_API OC_DLL_IMPORT
+#endif
+
 #ifdef OC_GUI_EXPORT_DLL
 #define OC_GUI_API OC_DLL_EXPORT
 #else

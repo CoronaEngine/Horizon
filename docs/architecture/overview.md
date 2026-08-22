@@ -1,12 +1,12 @@
 # Horizon 核心语言层架构概览
 
 > 状态：迁移中  
-> 文档范围：仅覆盖 `src/core`、`src/math`、`src/ast`、`src/dsl`  
+> 文档范围：覆盖 `src/core`、`src/math`、`src/image`、`src/ast`、`src/dsl`
 > 不在范围内：`src/` 下其他目录、旧 Ocarina 的 generator、RHI、后端及运行时集成
 
 ## 1. 文档目的
 
-本文档描述 Horizon 当前正在迁移的四个基础模块，统一说明它们的职责、依赖方向、数据流和必须保持的架构不变量。
+本文档描述 Horizon 当前正在迁移的语言层基础模块，以及已经从 DSL 中拆出的 host Image 模块，统一说明它们的职责、依赖方向、数据流和必须保持的架构不变量。
 
 文档中的内容分为两类：
 
@@ -25,6 +25,7 @@ flowchart LR
     DSL[horizon::dsl]
     AST[horizon::ast]
     Math[horizon::math]
+    Image[horizon::image]
     Core[horizon::core]
 
     User --> DSL
@@ -34,12 +35,15 @@ flowchart LR
     AST --> Math
     AST --> Core
     Math --> Core
+    Image --> Math
+    Image --> Core
 ```
 
 目标依赖方向为：
 
 ```text
 dsl -> ast -> math -> core
+image -> math -> core
 ```
 
 箭头表示左侧模块可以依赖右侧模块。上层模块也可以直接使用更底层的公共接口，例如 DSL 可以直接使用 Core 类型，但底层模块不能反向依赖上层模块。
@@ -50,6 +54,7 @@ dsl -> ast -> math -> core
 | --- | --- | --- | --- |
 | `src/core` | `horizon::core` | 基础类型、类型系统、容器封装、通用工具、并发与基础运行时设施 | AST 节点、DSL 语义、面向 DSL 的模板特化 |
 | `src/math` | `horizon::math` | 标量、向量、矩阵、区间、几何类型及数学算法 | AST 所有权、DSL 表达式构造、运行时资源管理 |
+| `src/image` | `horizon::image` | CPU 图像存储、像素转换及 PNG/JPEG/BMP/TGA/HDR/EXR 编解码 | AST/DSL 表达式、GPU texture、RHI/Vulkan Image |
 | `src/ast` | `horizon::ast` | 唯一一套 AST 模型、节点所有权、Context、Visitor、校正和布局解析 | 用户 DSL 包装、第二套语法树、后端代码生成 |
 | `src/dsl` | `horizon::dsl` | 用户可见的表达式和语句构造接口，将 C++ 操作转换为 AST | 复制 AST 状态、绕过 AST 工厂自行管理节点、基础类型系统实现 |
 
@@ -61,7 +66,7 @@ Core 是四个模块的基础层，主要内容包括：
 - 通用 concepts、hash、日志、字符串及实用工具。
 - `Type`、类型描述、类型注册和精度策略。
 - 动态 Buffer 的布局描述、编码和主机端存储。
-- 基础并发、平台、动态库和图像设施。
+- 基础并发、平台和动态库设施，以及不依赖 Math 的 `PixelStorage` 格式协议。
 
 Core 对上层提供稳定的基础类型和公共服务。Core 不应知道 Math 的具体类型，也不应知道 AST 节点、DSL 包装类型或 DSL 的构造过程。
 
@@ -98,6 +103,16 @@ Math 当前不直接包含 AST 或 DSL。DSL 对 Math traits 的扩展仍是后�
 - [`src/math/vector_types.h`](../../src/math/vector_types.h)
 - [`src/math/matrix_types.h`](../../src/math/matrix_types.h)
 - [`src/math/storage_traits.h`](../../src/math/storage_traits.h)
+
+### 5.1 Image
+
+Image 是独立的 host 侧图像模块，负责 CPU 像素缓冲、格式转换和文件编解码。它可以使用 Math 的向量类型与 Core 的 `PixelStorage`，但不依赖 AST、DSL、RHI 或 Vulkan。GPU texture 上传属于未来 GPU 集成层，不属于 `horizon-image`。
+
+关键入口包括：
+
+- [`src/image/image_base.h`](../../src/image/image_base.h)
+- [`src/image/image.h`](../../src/image/image.h)
+- [`src/core/image/image_format.h`](../../src/core/image/image_format.h)
 
 ## 6. AST
 
@@ -191,10 +206,13 @@ DSL 不应直接 `new` AST 节点，也不应复制 AST 节点或 Function 状�
 flowchart LR
     Core[core]
     Math[math]
+    Image[image]
     AST[ast]
     DSL[dsl]
 
     Math --> Core
+    Image --> Math
+    Image --> Core
     AST --> Core
     AST --> Math
     DSL --> Core
@@ -214,11 +232,11 @@ flowchart LR
 
 ## 9. 构建接入状态
 
-这四个目录已经接入根工程的 `src/CMakeLists.txt`，并分别生成 `horizon-core`、`horizon-math`、`horizon-ast` 和 `horizon-dsl` target。测试 target 默认启用，用于验证 Math 运算和 Core/Math 依赖边界。
+这五个目录已经接入根工程的 `src/CMakeLists.txt`，并分别生成 `horizon-core`、`horizon-math`、`horizon-image`、`horizon-ast` 和 `horizon-dsl` target。测试 target 默认启用，用于验证基础模块行为、图像格式往返以及 Core/Math、Image/DSL 依赖边界。
 
-`HORIZON_BUILD_ENGINE=OFF` 时，工程只配置四个基础设施模块及其测试，不配置 Helicon、顶层 `Horizon` target 或引擎专用依赖。`core` 目标族使用这一模式；直接构建完整 `Horizon` 时使用独立的 `engine` 目标族。
+`HORIZON_BUILD_ENGINE=OFF` 时，工程只配置这五个基础设施模块及其测试，不配置 Helicon、顶层 `Horizon` target 或引擎专用依赖。`core` 目标族使用这一模式；直接构建完整 `Horizon` 时使用独立的 `engine` 目标族。
 
-四个基础设施 target 的 host 构建范围为 Windows、Linux 和 macOS。Core 平台运行时由 CMake 在 Windows 后端与 POSIX 后端之间选择。该范围不表示 Helicon、Vulkan、Slang、Ocarina、示例和工具已经完整支持 Linux 或 macOS。
+五个基础设施 target 的 host 构建范围为 Windows、Linux 和 macOS。Core 平台运行时由 CMake 在 Windows 后端与 POSIX 后端之间选择。该范围不表示 Helicon、Vulkan、Slang、Ocarina、示例和工具已经完整支持 Linux 或 macOS。
 
 各目录中的局部 `CMakeLists.txt` 已按 Horizon target 命名；旧 Ocarina 目录不属于本架构的验证范围。
 

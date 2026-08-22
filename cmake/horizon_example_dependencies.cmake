@@ -20,10 +20,6 @@ function(_horizon_example_require_target target_name detail)
     endif()
 endfunction()
 
-find_package(stb CONFIG REQUIRED)
-_horizon_example_alias_target(horizon::stb stb::stb stb)
-_horizon_example_require_target(horizon::stb "stb is required by HorizonExamples")
-
 find_package(glfw3 CONFIG REQUIRED)
 _horizon_example_alias_target(horizon::glfw glfw glfw::glfw glfw3)
 _horizon_example_require_target(horizon::glfw "glfw is required by HorizonExamples")

@@ -69,6 +69,8 @@ class HorizonConan(ConanFile):
         self.requires("fmt/12.1.0")
         self.requires("spdlog/1.17.0")
         self.requires("xxhash/0.8.3")
+        self.requires("stb/cci.20240531")
+        self.requires("tinyexr/1.0.7")
 
         if bool(self.options.with_engine):
             self.requires("ktm/0.2.14", transitive_headers=True)
@@ -82,7 +84,6 @@ class HorizonConan(ConanFile):
                 self.requires("tracy/0.13.1", options={"on_demand": True})
 
         if bool(self.options.with_examples):
-            self.requires("stb/cci.20240531")
             self.requires("glfw/3.4")
             self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
