@@ -33,7 +33,8 @@ RECIPE_TOGGLE_ENV = "HORIZON_CONAN_EXPORT_LOCAL_RECIPES"
 
 
 TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
-    "core": ("&:with_tests=True",),
+    "core": ("&:with_engine=False", "&:with_tests=True"),
+    "engine": ("&:with_engine=True",),
     "tools": ("&:with_tools=True",),
     "examples": ("&:with_examples=True",),
     "ocarina": ("&:with_ocarina=True", "&:with_cuda=True"),
@@ -51,6 +52,8 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
 
 
 def target_family_for_target(target: str) -> str:
+    if target == "Horizon":
+        return "engine"
     if target == "ShaderCompileScripts":
         return "tools"
     if target == "HorizonExamples":

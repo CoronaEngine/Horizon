@@ -8,10 +8,23 @@ on:
 permissions:
   contents: read
 
+env:
+  HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "false"
+
 jobs:
   test:
-    name: Windows Core Tests
-    runs-on: windows-latest
+    name: ${{ matrix.name }} Core Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest
+          - name: macOS
+            os: macos-latest
 
     steps:
       - name: Check out source
@@ -24,24 +37,28 @@ jobs:
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.os == 'windows-latest'
 
       - name: Install build tools
         run: python -m pip install --upgrade conan cmake ninja
 
       - name: Prefer pip build tools
-        shell: pwsh
+        shell: python
         run: |
-          $scriptsPath = python -c "import sysconfig; print(sysconfig.get_path('scripts'))"
-          $scriptsPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          import os
+          import sysconfig
+
+          with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
+              output.write(sysconfig.get_path("scripts") + "\n")
 
       - name: Verify CMake version
         run: cmake --version
 
-      - name: Build all registered test targets
+      - name: Build all registered infrastructure test targets
         run: python tools/dev.py build horizon-tests --configuration Debug --target-family core
 
       - name: Verify generated tuple header
         run: python src/core/generate_tuple.py --max-arity 32 --check
 
-      - name: Run all registered tests
+      - name: Run all registered infrastructure tests
         run: ctest --test-dir build/conan/core/debug -C Debug --output-on-failure

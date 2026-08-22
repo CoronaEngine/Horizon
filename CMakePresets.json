@@ -47,6 +47,46 @@
       }
     },
     {
+      "name": "engine-debug",
+      "displayName": "Engine - Debug",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/engine/debug",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Debug",
+        "HORIZON_DEV_TARGET_FAMILY": "engine"
+      }
+    },
+    {
+      "name": "engine-relwithdebinfo",
+      "displayName": "Engine - RelWithDebInfo",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/engine/relwithdebinfo",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
+        "HORIZON_DEV_TARGET_FAMILY": "engine"
+      }
+    },
+    {
+      "name": "engine-release",
+      "displayName": "Engine - Release",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/engine/release",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "Release",
+        "HORIZON_DEV_TARGET_FAMILY": "engine"
+      }
+    },
+    {
+      "name": "engine-minsizerel",
+      "displayName": "Engine - MinSizeRel",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/conan/engine/minsizerel",
+      "cacheVariables": {
+        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
+        "HORIZON_DEV_TARGET_FAMILY": "engine"
+      }
+    },
+    {
       "name": "tools-debug",
       "displayName": "Tools - Debug",
       "generator": "Ninja Multi-Config",
@@ -272,6 +312,10 @@
     { "name": "core-relwithdebinfo", "configurePreset": "core-relwithdebinfo", "configuration": "RelWithDebInfo" },
     { "name": "core-release", "configurePreset": "core-release", "configuration": "Release" },
     { "name": "core-minsizerel", "configurePreset": "core-minsizerel", "configuration": "MinSizeRel" },
+    { "name": "engine-debug", "configurePreset": "engine-debug", "configuration": "Debug" },
+    { "name": "engine-relwithdebinfo", "configurePreset": "engine-relwithdebinfo", "configuration": "RelWithDebInfo" },
+    { "name": "engine-release", "configurePreset": "engine-release", "configuration": "Release" },
+    { "name": "engine-minsizerel", "configurePreset": "engine-minsizerel", "configuration": "MinSizeRel" },
     { "name": "tools-debug", "configurePreset": "tools-debug", "configuration": "Debug" },
     { "name": "tools-relwithdebinfo", "configurePreset": "tools-relwithdebinfo", "configuration": "RelWithDebInfo" },
     { "name": "tools-release", "configurePreset": "tools-release", "configuration": "Release" },

@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import workflow as workflow_module
 from workflow import (
     DEFAULT_TARGET_FAMILY,
     _cmake_bracket,
@@ -22,6 +23,59 @@ from dev import conan_options, target_family_for_target, target_family_for_targe
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_conan_profiles_are_native_to_the_host(self) -> None:
+        self.assertTrue(hasattr(workflow_module, "conan_profile"))
+        conan_profile = workflow_module.conan_profile
+        root = Path("C:/repo")
+        self.assertEqual(
+            conan_profile(root, "Debug", "Windows"),
+            str(root / "conan" / "profiles" / "windows-msvc-debug"),
+        )
+        self.assertEqual(conan_profile(root, "Debug", "Linux"), "horizon-linux-debug")
+        self.assertEqual(conan_profile(root, "Release", "Darwin"), "horizon-darwin-release")
+
+    def test_json_environment_is_parsed_without_losing_values(self) -> None:
+        self.assertTrue(hasattr(workflow_module, "_parse_json_environment"))
+        parse_json_environment = workflow_module._parse_json_environment
+        environment = parse_json_environment(
+            '{"PATH": "/usr/bin", "TOKEN": "left=right", "MULTILINE": "a\\nb"}'
+        )
+        self.assertEqual(environment["TOKEN"], "left=right")
+        self.assertEqual(environment["MULTILINE"], "a\nb")
+
+    def test_core_test_workflow_covers_all_host_platforms(self) -> None:
+        workflow = Path(".github/workflows/core-tests.yml").read_text(encoding="utf-8")
+
+        self.assertIn("matrix:", workflow)
+        self.assertIn("windows-latest", workflow)
+        self.assertIn("ubuntu-latest", workflow)
+        self.assertIn("macos-latest", workflow)
+        self.assertIn('HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "false"', workflow)
+
+    def test_core_header_keeps_api_macros_portable(self) -> None:
+        header = Path("src/core/header.h").read_text(encoding="utf-8")
+
+        self.assertNotIn('#include "core/runtime/oc_windows.h"', header)
+        self.assertIn(
+            "#if defined(_MSC_VER) && !defined(OC_STATIC_LINK)\n"
+            "#define OC_DLL_EXPORT __declspec(dllexport)",
+            header,
+        )
+        self.assertIn('#define OC_DLL_EXPORT [[gnu::visibility("default")]]', header)
+        self.assertIn("#define OC_DLL_EXPORT\n#define OC_DLL_IMPORT\n#endif", header)
+
+    def test_core_conan_graph_excludes_engine_packages(self) -> None:
+        recipe = Path("conanfile.py").read_text(encoding="utf-8")
+        requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]
+
+        self.assertIn("if bool(self.options.with_engine):", requirements)
+        engine_guard = requirements.index("if bool(self.options.with_engine):")
+        for package in ("ktm", "pfr", "spirv-tools", "volk", "vulkan-headers",
+                        "vulkan-memory-allocator", "slang", "tracy"):
+            self.assertGreater(requirements.index(f'self.requires("{package}/'), engine_guard)
+        for package in ("quill", "fmt", "spdlog", "xxhash"):
+            self.assertLess(requirements.index(f'self.requires("{package}/'), engine_guard)
+
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")
         self.assertEqual(configuration_slug("RelWithDebInfo"), "relwithdebinfo")
@@ -42,7 +96,7 @@ class WorkflowTests(unittest.TestCase):
             target_family_slug("everything")
 
     def test_target_families_match_cmake_targets(self) -> None:
-        self.assertEqual(target_family_for_target("Horizon"), "core")
+        self.assertEqual(target_family_for_target("Horizon"), "engine")
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
@@ -56,7 +110,12 @@ class WorkflowTests(unittest.TestCase):
             target_family_for_targets(["HorizonExamples", "ocarina-native"])
 
     def test_target_families_select_conan_options(self) -> None:
-        self.assertEqual(conan_options("core"), ["&:with_tests=True"])
+        self.assertEqual(
+            conan_options("core"),
+            ["&:with_engine=False", "&:with_tests=True"],
+        )
+        self.assertEqual(conan_options("engine"), ["&:with_engine=True"])
+        self.assertEqual(target_family_slug("engine"), "engine")
         self.assertEqual(conan_options("examples"), ["&:with_examples=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),

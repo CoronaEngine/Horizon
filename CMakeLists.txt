@@ -13,6 +13,7 @@ project(
 )
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(HORIZON_BUILD_ENGINE "Build Helicon and the complete Horizon engine target" ON)
 option(HORIZON_BUILD_TOOLS "Build Horizon tool executables" OFF)
 option(HORIZON_BUILD_EXAMPLES "Build Horizon examples (and ocarina tests when ocarina is enabled)" ${PROJECT_IS_TOP_LEVEL})
 option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" ON)
@@ -23,6 +24,12 @@ option(HORIZON_BUILD_VISION_HOTFIX "Build Vision hotfix support targets" OFF)
 option(HORIZON_ENABLE_HARDCODE_SHADERS "Compile and use generated Helicon hardcoded shader cache" OFF)
 option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 option(HORIZON_ENABLE_IMGUI_RENDER "Render the ImGui overlay in Horizon examples" ON)
+
+if(NOT HORIZON_BUILD_ENGINE AND
+   (HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES OR HORIZON_BUILD_OCARINA OR HORIZON_BUILD_VISION_HOTFIX))
+    message(FATAL_ERROR
+        "HORIZON_BUILD_ENGINE=OFF is incompatible with tools, examples, Ocarina, and Vision hotfix targets")
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -44,13 +51,17 @@ add_compile_definitions(
     $<$<CONFIG:MinSizeRel>:CABBAGE_ENGINE_RELEASE>
 )
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_core_dependencies.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_tracy.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
 
-# ======================== Shader 自动编译模块 ========================
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
+if(HORIZON_BUILD_ENGINE)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_engine_dependencies.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_slang.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_tracy.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_runtime_deps.cmake)
+
+    # ======================== Shader 自动编译模块 ========================
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/HeliconShaderCompile.cmake)
+endif()
 
 add_subdirectory(src)
 
@@ -78,7 +89,9 @@ if (MSVC)
     add_compile_options(/Zi)
     add_link_options(/INCREMENTAL:NO)
 
-    target_compile_options(Helicon PUBLIC /utf-8)
+    if(TARGET Helicon)
+        target_compile_options(Helicon PUBLIC /utf-8)
+    endif()
 endif()
 
 find_package(Python)
