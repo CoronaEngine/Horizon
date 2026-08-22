@@ -92,11 +92,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("#define OC_DLL_EXPORT\n#define OC_DLL_IMPORT\n#endif", header)
 
     def test_core_stl_does_not_call_msvc_allocation_or_conversion_apis(self) -> None:
-        stl = (
-            Path("src/core/stl.h").read_text(encoding="utf-8")
-            + Path("src/core/stl.cpp").read_text(encoding="utf-8")
-        )
+        header = Path("src/core/stl.h").read_text(encoding="utf-8")
+        stl = header + Path("src/core/stl.cpp").read_text(encoding="utf-8")
 
+        self.assertIn("#include <cstring>", header)
         self.assertNotIn("_aligned_malloc", stl)
         self.assertNotIn("_aligned_free", stl)
         self.assertNotIn("wcstombs_s", stl)

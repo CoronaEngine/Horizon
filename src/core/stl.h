@@ -6,6 +6,7 @@
 
 #include "header.h"
 #include "tuple.h"
+#include <cstring>
 #include <functional>
 #include <deque>
 #include <stack>
