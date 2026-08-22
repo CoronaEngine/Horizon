@@ -118,6 +118,15 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertIn("#include <cmath>", header)
 
+    def test_dsl_host_size_calculations_use_host_min_and_ulong_is_scalar(self) -> None:
+        soa = Path("src/dsl/types/soa.h").read_text(encoding="utf-8")
+        traits = Path("src/math/basic_traits.h").read_text(encoding="utf-8")
+
+        self.assertIn("#include <algorithm>", soa)
+        self.assertIn("std::is_same<std::remove_cvref_t<T>, ulong>", traits)
+        self.assertIn("std::min(view_size, uint(buffer_view_.size_in_byte()))", soa)
+        self.assertIn("std::min(uint(buffer.size_in_byte()), view_size)", soa)
+
     def test_core_conan_graph_excludes_engine_packages(self) -> None:
         recipe = Path("conanfile.py").read_text(encoding="utf-8")
         requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]

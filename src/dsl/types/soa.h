@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <new>
 #include <utility>
 
@@ -194,7 +195,7 @@ template<typename T>
         SOAView() = default;                                                                            \
         SOAView(TBuffer bv, uint view_size = horizon::dsl::InvalidUI32,                                      \
                 uint ofs = 0u, uint stride = 0u)                                                        \
-            : buffer_view_(bv), view_size_(horizon::dsl::min(view_size, uint(buffer_view_.size_in_byte()))), \
+            : buffer_view_(bv), view_size_(std::min(view_size, uint(buffer_view_.size_in_byte()))),          \
               offset_(ofs),                                                                             \
               stride_(horizon::dsl::resolved_soa_stride<atomic_type>(stride)),                               \
               type_size_(horizon::dsl::resolved_soa_type_size<atomic_type>()) {}                             \
@@ -320,7 +321,7 @@ OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA horizon::dsl::uint N OC_COM
         SOAView() = default;                                                           \
         explicit SOAView(TBuffer bv, horizon::dsl::uint view_size = horizon::dsl::InvalidUI32,   \
                          horizon::dsl::uint ofs = 0u, horizon::dsl::uint stride = 0u) {          \
-            view_size = horizon::dsl::min(uint(bv.size_in_byte()), view_size);              \
+            view_size = std::min(uint(bv.size_in_byte()), view_size);                       \
             stride = horizon::dsl::resolved_soa_stride<struct_type>(stride);                \
             MAP(OC_MAKE_STRUCT_SOA_VIEW_CONSTRUCT, first_member, ##__VA_ARGS__)        \
         }                                                                              \
@@ -353,7 +354,7 @@ OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA horizon::dsl::uint N OC_COM
         SOAView() = default;                                                 \
         explicit SOAView(TBuffer bv, uint view_size = horizon::dsl::InvalidUI32,  \
                          uint offset = 0u, uint stride = 0u) {               \
-            view_size = horizon::dsl::min(bv.size_in_byte(), view_size);          \
+            view_size = std::min(bv.size_in_byte(), view_size);                   \
             stride = horizon::dsl::resolved_soa_stride<struct_type>(stride);      \
             for (uint i = 0; i < N; ++i) {                                   \
                 array_[i] = horizon::dsl::SOAView{bv, view_size, offset, stride}; \
@@ -473,7 +474,7 @@ public:
     SOAView() = default;
     explicit SOAView(TBuffer buffer, uint view_size = InvalidUI32,
                      uint offset = 0u, uint stride = 0u) {
-        view_size = min(uint(buffer.size_in_byte()), view_size);
+        view_size = std::min(uint(buffer.size_in_byte()), view_size);
         stride = resolved_soa_stride<struct_type>(stride);
         for (uint i = 0; i < M; ++i) {
             array_[i] = SOAView<column_type, TBuffer>(buffer, view_size, offset, stride);
