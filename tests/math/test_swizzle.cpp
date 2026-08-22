@@ -1,4 +1,5 @@
 #include "math/basic_types.h"
+#include "math/interval.h"
 
 #include <cmath>
 #include <iostream>
@@ -172,6 +173,13 @@ void test_swizzle_aliases_and_operations() {
            "swizzle values preserve host vector data");
 }
 
+void test_positive_interval() {
+    const auto positive = horizon::math::interval<float>::positive();
+    expect_equal(positive.begin, 0.f, "positive interval starts at zero");
+    expect(std::isinf(positive.end) && positive.end > 0.f,
+           "positive interval ends at positive infinity");
+}
+
 }// namespace
 
 int main() {
@@ -181,5 +189,6 @@ int main() {
     test_swizzle_reads();
     test_swizzle_writes();
     test_swizzle_aliases_and_operations();
+    test_positive_interval();
     return failures == 0 ? 0 : 1;
 }

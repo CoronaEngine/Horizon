@@ -4,9 +4,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import workflow as workflow_module
 from workflow import (
     DEFAULT_TARGET_FAMILY,
     _cmake_bracket,
@@ -22,6 +24,121 @@ from dev import conan_options, target_family_for_target, target_family_for_targe
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_posix_conan_install_uses_multi_config_layout(self) -> None:
+        with (
+            patch.object(workflow_module.platform, "system", return_value="Linux"),
+            patch.object(workflow_module, "run_command") as run_command,
+            patch.object(workflow_module, "write_cmake_build_environment"),
+        ):
+            workflow_module.conan_install(
+                Path("/repo"),
+                "Debug",
+                target_family="core",
+                options=(),
+                recipes=(),
+                recipe_toggle_env="HORIZON_TEST_RECIPES",
+            )
+
+        install_command = next(
+            call.args[0]
+            for call in run_command.call_args_list
+            if tuple(call.args[0][:2]) == ("conan", "install")
+        )
+        generator_index = install_command.index("-c:a")
+        self.assertEqual(
+            install_command[generator_index + 1],
+            "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config",
+        )
+
+    def test_conan_profiles_are_native_to_the_host(self) -> None:
+        self.assertTrue(hasattr(workflow_module, "conan_profile"))
+        conan_profile = workflow_module.conan_profile
+        root = Path("C:/repo")
+        self.assertEqual(
+            conan_profile(root, "Debug", "Windows"),
+            str(root / "conan" / "profiles" / "windows-msvc-debug"),
+        )
+        self.assertEqual(conan_profile(root, "Debug", "Linux"), "horizon-linux-debug")
+        self.assertEqual(conan_profile(root, "Release", "Darwin"), "horizon-darwin-release")
+
+    def test_json_environment_is_parsed_without_losing_values(self) -> None:
+        self.assertTrue(hasattr(workflow_module, "_parse_json_environment"))
+        parse_json_environment = workflow_module._parse_json_environment
+        environment = parse_json_environment(
+            '{"PATH": "/usr/bin", "TOKEN": "left=right", "MULTILINE": "a\\nb"}'
+        )
+        self.assertEqual(environment["TOKEN"], "left=right")
+        self.assertEqual(environment["MULTILINE"], "a\nb")
+
+    def test_core_test_workflow_covers_all_host_platforms(self) -> None:
+        workflow = Path(".github/workflows/core-tests.yml").read_text(encoding="utf-8")
+
+        self.assertIn("matrix:", workflow)
+        self.assertIn("windows-latest", workflow)
+        self.assertIn("ubuntu-latest", workflow)
+        self.assertIn("macos-latest", workflow)
+        self.assertIn('HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "false"', workflow)
+
+    def test_core_header_keeps_api_macros_portable(self) -> None:
+        header = Path("src/core/header.h").read_text(encoding="utf-8")
+
+        self.assertNotIn('#include "core/runtime/oc_windows.h"', header)
+        self.assertIn(
+            "#if defined(_MSC_VER) && !defined(OC_STATIC_LINK)\n"
+            "#define OC_DLL_EXPORT __declspec(dllexport)",
+            header,
+        )
+        self.assertIn('#define OC_DLL_EXPORT [[gnu::visibility("default")]]', header)
+        self.assertIn("#define OC_DLL_EXPORT\n#define OC_DLL_IMPORT\n#endif", header)
+
+    def test_core_stl_does_not_call_msvc_allocation_or_conversion_apis(self) -> None:
+        header = Path("src/core/stl.h").read_text(encoding="utf-8")
+        stl = header + Path("src/core/stl.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("#include <cstring>", header)
+        self.assertNotIn("_aligned_malloc", stl)
+        self.assertNotIn("_aligned_free", stl)
+        self.assertNotIn("wcstombs_s", stl)
+        self.assertNotIn("std::wmemcpy", stl)
+
+    def test_core_type_source_includes_its_ranges_algorithm_dependency(self) -> None:
+        source = Path("src/core/type_system/type.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("#include <algorithm>", source)
+        self.assertIn("std::ranges::any_of", source)
+
+    def test_core_size_literals_use_the_standard_integer_parameter_type(self) -> None:
+        header = Path("src/core/util/util.h").read_text(encoding="utf-8")
+
+        for suffix in ("kb", "mb", "gb"):
+            self.assertIn(f'operator""_{suffix}(unsigned long long bytes)', header)
+
+    def test_math_scalar_functions_include_the_standard_math_header(self) -> None:
+        header = Path("src/math/scalar_func.h").read_text(encoding="utf-8")
+
+        self.assertIn("#include <cmath>", header)
+
+    def test_dsl_host_size_calculations_use_host_min_and_ulong_is_scalar(self) -> None:
+        soa = Path("src/dsl/types/soa.h").read_text(encoding="utf-8")
+        traits = Path("src/math/basic_traits.h").read_text(encoding="utf-8")
+
+        self.assertIn("#include <algorithm>", soa)
+        self.assertIn("std::is_same<std::remove_cvref_t<T>, ulong>", traits)
+        self.assertIn("std::min(view_size, uint(buffer_view_.size_in_byte()))", soa)
+        self.assertIn("std::min(uint(buffer.size_in_byte()), view_size)", soa)
+
+    def test_core_conan_graph_excludes_engine_packages(self) -> None:
+        recipe = Path("conanfile.py").read_text(encoding="utf-8")
+        requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]
+
+        self.assertIn("if bool(self.options.with_engine):", requirements)
+        engine_guard = requirements.index("if bool(self.options.with_engine):")
+        for package in ("ktm", "pfr", "spirv-tools", "volk", "vulkan-headers",
+                        "vulkan-memory-allocator", "slang", "tracy"):
+            self.assertGreater(requirements.index(f'self.requires("{package}/'), engine_guard)
+        for package in ("quill", "fmt", "spdlog", "xxhash"):
+            self.assertLess(requirements.index(f'self.requires("{package}/'), engine_guard)
+
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")
         self.assertEqual(configuration_slug("RelWithDebInfo"), "relwithdebinfo")
@@ -42,7 +159,7 @@ class WorkflowTests(unittest.TestCase):
             target_family_slug("everything")
 
     def test_target_families_match_cmake_targets(self) -> None:
-        self.assertEqual(target_family_for_target("Horizon"), "core")
+        self.assertEqual(target_family_for_target("Horizon"), "engine")
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
@@ -56,7 +173,12 @@ class WorkflowTests(unittest.TestCase):
             target_family_for_targets(["HorizonExamples", "ocarina-native"])
 
     def test_target_families_select_conan_options(self) -> None:
-        self.assertEqual(conan_options("core"), [])
+        self.assertEqual(
+            conan_options("core"),
+            ["&:with_engine=False", "&:with_tests=True"],
+        )
+        self.assertEqual(conan_options("engine"), ["&:with_engine=True"])
+        self.assertEqual(target_family_slug("engine"), "engine")
         self.assertEqual(conan_options("examples"), ["&:with_examples=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),

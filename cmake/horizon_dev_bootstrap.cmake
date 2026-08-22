@@ -20,8 +20,8 @@ function(horizon_dev_bootstrap)
     endif()
 
     set_property(CACHE HORIZON_DEV_TARGET_FAMILY PROPERTY STRINGS
-        core tools examples ocarina ocarina-tests vision-hotfix)
-    set(_horizon_target_families core tools examples ocarina ocarina-tests vision-hotfix)
+        core engine tools examples ocarina ocarina-tests vision-hotfix)
+    set(_horizon_target_families core engine tools examples ocarina ocarina-tests vision-hotfix)
     list(FIND _horizon_target_families "${HORIZON_DEV_TARGET_FAMILY}" _horizon_target_family_index)
     if(_horizon_target_family_index EQUAL -1)
         message(FATAL_ERROR

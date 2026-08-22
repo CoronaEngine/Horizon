@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
+import platform
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -11,6 +15,7 @@ CONFIGURATIONS = ("Debug", "Release", "RelWithDebInfo", "MinSizeRel")
 DEFAULT_CONFIGURATION = "RelWithDebInfo"
 TARGET_FAMILIES = (
     "core",
+    "engine",
     "tools",
     "examples",
     "ocarina",
@@ -60,8 +65,22 @@ def generators_dir(
     return build_dir(repo_root, configuration, target_family) / "generators"
 
 
+def conan_profile(
+    repo_root: Path,
+    configuration: str,
+    system_name: str | None = None,
+) -> str:
+    system_name = system_name or platform.system()
+    slug = configuration_slug(configuration)
+    if system_name == "Windows":
+        return str(repo_root / "conan" / "profiles" / f"windows-msvc-{slug}")
+    if system_name not in {"Linux", "Darwin"}:
+        raise RuntimeError(f"Unsupported host operating system: {system_name}")
+    return f"horizon-{system_name.lower()}-{slug}"
+
+
 def profile_path(repo_root: Path, configuration: str) -> Path:
-    return repo_root / "conan" / "profiles" / f"windows-msvc-{configuration_slug(configuration)}"
+    return Path(conan_profile(repo_root, configuration, "Windows"))
 
 
 def run_command(
@@ -116,9 +135,13 @@ def conan_install(
 ) -> None:
     export_local_recipes(repo_root, recipes, toggle_env=recipe_toggle_env)
     target_family = target_family_slug(target_family)
-    profile = profile_path(repo_root, configuration)
-    if not profile.is_file():
-        raise RuntimeError(f"Conan profile was not found: {profile}")
+    system_name = platform.system()
+    profile = conan_profile(repo_root, configuration, system_name)
+    if system_name == "Windows":
+        if not Path(profile).is_file():
+            raise RuntimeError(f"Conan profile was not found: {profile}")
+    else:
+        run_command(("conan", "profile", "detect", "--force", "--name", profile), cwd=repo_root)
 
     command: list[str | os.PathLike[str]] = [
         "conan",
@@ -131,6 +154,11 @@ def conan_install(
         "-c:h",
         f"user.horizon:target_family={target_family}",
     ]
+    if system_name != "Windows":
+        command.extend(("-c:a", "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config"))
+        command.extend(("-s:a", f"build_type={configuration}"))
+        command.extend(("-s:b", f"build_type={configuration}"))
+        command.extend(("-s:a", "compiler.cppstd=20"))
     for option in options:
         command.extend(("-o", option))
     command.append("--build=missing")
@@ -146,28 +174,70 @@ def load_conan_build_environment(
     target_family: str = DEFAULT_TARGET_FAMILY,
 ) -> dict[str, str]:
     environment = dict(os.environ)
-    batch_file = generators_dir(repo_root, configuration, target_family) / "conanbuild.bat"
-    if not batch_file.is_file():
-        raise RuntimeError(f"Conan build environment was not found: {batch_file}")
-
-    command = f'call "{batch_file}" >nul && set'
-    result = subprocess.run(
-        command,
-        cwd=repo_root,
-        shell=True,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    generators = generators_dir(repo_root, configuration, target_family)
+    if platform.system() == "Windows":
+        environment_file = generators / "conanbuild.bat"
+        if not environment_file.is_file():
+            raise RuntimeError(f"Conan build environment was not found: {environment_file}")
+        command: str | tuple[str, ...] = f'call "{environment_file}" >nul && set'
+        result = subprocess.run(
+            command,
+            cwd=repo_root,
+            shell=True,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    else:
+        environment_file = generators / "conanbuild.sh"
+        if not environment_file.is_file():
+            raise RuntimeError(f"Conan build environment was not found: {environment_file}")
+        environment_script = "import json, os; print(json.dumps(dict(os.environ)))"
+        command = (
+            "/bin/sh",
+            "-c",
+            f". {shlex.quote(str(environment_file))} >/dev/null && "
+            f"{shlex.quote(sys.executable)} -c {shlex.quote(environment_script)}",
+        )
+        result = subprocess.run(
+            command,
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
     if result.returncode != 0:
         if result.stderr:
             print(result.stderr, end="", file=os.sys.stderr)
-        raise CommandError((command,), result.returncode)
+        failed_command = (command,) if isinstance(command, str) else command
+        raise CommandError(failed_command, result.returncode)
 
-    for line in result.stdout.splitlines():
+    loaded_environment = (
+        _parse_json_environment(result.stdout)
+        if platform.system() != "Windows"
+        else _parse_line_environment(result.stdout)
+    )
+    for name, value in loaded_environment.items():
+        _set_environment_value(environment, name, value)
+    return environment
+
+
+def _parse_line_environment(output: str) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for line in output.splitlines():
         separator = line.find("=")
         if separator > 0:
-            _set_environment_value(environment, line[:separator], line[separator + 1 :])
+            environment[line[:separator]] = line[separator + 1 :]
+    return environment
+
+
+def _parse_json_environment(output: str) -> dict[str, str]:
+    environment = json.loads(output)
+    if not isinstance(environment, dict) or not all(
+        isinstance(name, str) and isinstance(value, str)
+        for name, value in environment.items()
+    ):
+        raise RuntimeError("Conan build environment did not produce a string environment map")
     return environment
 
 
@@ -201,7 +271,8 @@ def write_cmake_build_environment(
     environment = load_conan_build_environment(repo_root, configuration, target_family)
     output = generators_dir(repo_root, configuration, target_family) / "dev_build_environment.cmake"
     names = (
-        "PATH", "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir",
+        "PATH", "CC", "CXX", "PKG_CONFIG_PATH",
+        "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir",
         "VSINSTALLDIR", "WindowsSdkDir", "WindowsSDKVersion", "UniversalCRTSdkDir", "UCRTVersion",
     )
     lines = ["# Generated by tools/workflow.py. Do not edit."]

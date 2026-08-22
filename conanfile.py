@@ -11,6 +11,7 @@ class HorizonConan(ConanFile):
     settings = "os", "arch", "compiler", "build_type"
     _target_families = (
         "core",
+        "engine",
         "tools",
         "examples",
         "ocarina",
@@ -20,6 +21,7 @@ class HorizonConan(ConanFile):
 
     options = {
         "shared": [True, False],
+        "with_engine": [True, False],
         "with_ocarina": [True, False],
         "with_vision_hotfix": [True, False],
         "with_cuda": [True, False],
@@ -35,6 +37,7 @@ class HorizonConan(ConanFile):
 
     default_options = {
         "shared": False,
+        "with_engine": True,
         "with_ocarina": False,
         "with_vision_hotfix": False,
         "with_cuda": False,
@@ -62,20 +65,21 @@ class HorizonConan(ConanFile):
         cmake_layout(self, build_folder=f"build/conan/{target_family}/{configuration}")
 
     def requirements(self):
-        self.requires("ktm/0.2.14", transitive_headers=True)
-        self.requires("pfr/1.91.0", transitive_headers=True)
-        self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
-        self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
-        self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
-        self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
-        self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
         self.requires("fmt/12.1.0")
         self.requires("spdlog/1.17.0")
         self.requires("xxhash/0.8.3")
 
-        if bool(self.options.with_tracy):
-            self.requires("tracy/0.13.1", options={"on_demand": True})
+        if bool(self.options.with_engine):
+            self.requires("ktm/0.2.14", transitive_headers=True)
+            self.requires("pfr/1.91.0", transitive_headers=True)
+            self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
+            self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
+            self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
+            self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
+            self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
+            if bool(self.options.with_tracy):
+                self.requires("tracy/0.13.1", options={"on_demand": True})
 
         if bool(self.options.with_examples):
             self.requires("stb/cci.20240531")
@@ -85,6 +89,17 @@ class HorizonConan(ConanFile):
             self.requires("imgui/1.92.8")
 
     def validate(self):
+        engine_features = {
+            "with_tools": bool(self.options.with_tools),
+            "with_examples": bool(self.options.with_examples),
+            "with_ocarina": bool(self.options.with_ocarina),
+            "with_vision_hotfix": bool(self.options.with_vision_hotfix),
+        }
+        enabled_engine_features = [name for name, enabled in engine_features.items() if enabled]
+        if enabled_engine_features and not bool(self.options.with_engine):
+            raise ConanInvalidConfiguration(
+                "with_engine=False is incompatible with: " + ", ".join(enabled_engine_features)
+            )
         if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):
             raise ConanInvalidConfiguration("with_ocarina=True requires with_cuda=True")
         if bool(self.options.with_ocarina) and not os.environ.get("CUDA_PATH"):
@@ -100,6 +115,7 @@ class HorizonConan(ConanFile):
         toolchain.user_presets_path = None
         variables = toolchain.variables
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
+        variables["HORIZON_BUILD_ENGINE"] = bool(self.options.with_engine)
         variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina and self.options.with_cuda)
         variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)

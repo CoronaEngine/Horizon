@@ -5,6 +5,7 @@
 #include "core/type_system/type_desc.h"
 #include "core/type_system/type_registry.h"
 
+#include <algorithm>
 #include <cctype>
 #include <utility>
 

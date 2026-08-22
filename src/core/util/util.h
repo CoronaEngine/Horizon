@@ -57,15 +57,15 @@ requires concepts::subscriptable<T>
 }
 
 inline namespace size_literals {
-[[nodiscard]] constexpr auto operator""_kb(size_t bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_kb(unsigned long long bytes) noexcept {
     return static_cast<size_t>(bytes * 1024u);
 }
 
-[[nodiscard]] constexpr auto operator""_mb(size_t bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_mb(unsigned long long bytes) noexcept {
     return static_cast<size_t>(bytes * 1024u * 1024u);
 }
 
-[[nodiscard]] constexpr auto operator""_gb(size_t bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_gb(unsigned long long bytes) noexcept {
     return static_cast<size_t>(bytes * 1024u * 1024u * 1024u);
 }
 }// namespace size_literals

@@ -8,6 +8,7 @@
 #include "real.h"
 #include "constants.h"
 #include "core/concepts.h"
+#include <cmath>
 #include <numeric>
 
 namespace horizon::math {

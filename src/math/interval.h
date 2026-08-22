@@ -49,7 +49,7 @@ struct interval {
     [[nodiscard]] interval<T> including(const T &t) { return interval<T>(std::min(begin, t), std::max(end, t)); }
 
     [[nodiscard]] static interval<T> positive() {
-        return interval<T>(0.f, empty_range_upper<T>());
+        return interval<T>(T{0}, pos_infinity_v<T>);
     }
 };
 

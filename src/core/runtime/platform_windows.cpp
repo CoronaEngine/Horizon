@@ -98,10 +98,6 @@ vector<TraceItem> traceback(int top) noexcept {
             item.address = address;
             item.offset = displacement;
             trace.emplace_back(std::move(item));
-        } else {
-//            OC_WARNING_FORMAT(
-//                "Failed to get stacktrace at 0x{:012}: {}",
-//                address, detail::win32_last_error_message());
         }
     }
     return trace;

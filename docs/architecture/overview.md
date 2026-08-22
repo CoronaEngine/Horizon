@@ -216,6 +216,10 @@ flowchart LR
 
 这四个目录已经接入根工程的 `src/CMakeLists.txt`，并分别生成 `horizon-core`、`horizon-math`、`horizon-ast` 和 `horizon-dsl` target。测试 target 默认启用，用于验证 Math 运算和 Core/Math 依赖边界。
 
+`HORIZON_BUILD_ENGINE=OFF` 时，工程只配置四个基础设施模块及其测试，不配置 Helicon、顶层 `Horizon` target 或引擎专用依赖。`core` 目标族使用这一模式；直接构建完整 `Horizon` 时使用独立的 `engine` 目标族。
+
+四个基础设施 target 的 host 构建范围为 Windows、Linux 和 macOS。Core 平台运行时由 CMake 在 Windows 后端与 POSIX 后端之间选择。该范围不表示 Helicon、Vulkan、Slang、Ocarina、示例和工具已经完整支持 Linux 或 macOS。
+
 各目录中的局部 `CMakeLists.txt` 已按 Horizon target 命名；旧 Ocarina 目录不属于本架构的验证范围。
 
 修改这四个模块时至少需要：
