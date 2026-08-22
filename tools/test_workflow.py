@@ -107,6 +107,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("#include <algorithm>", source)
         self.assertIn("std::ranges::any_of", source)
 
+    def test_core_size_literals_use_the_standard_integer_parameter_type(self) -> None:
+        header = Path("src/core/util/util.h").read_text(encoding="utf-8")
+
+        for suffix in ("kb", "mb", "gb"):
+            self.assertIn(f'operator""_{suffix}(unsigned long long bytes)', header)
+
     def test_core_conan_graph_excludes_engine_packages(self) -> None:
         recipe = Path("conanfile.py").read_text(encoding="utf-8")
         requirements = recipe.split("def requirements(self):", 1)[1].split("def validate(self):", 1)[0]
