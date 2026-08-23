@@ -704,8 +704,6 @@ void run_example_edsl_ssr()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    cube_params.index_count = static_cast<uint32_t>(essr_cube_indices.size());
-
     // ---- 相机（与 GLSL 版一致）----
     constexpr float aspect = static_cast<float>(essr_width) / static_cast<float>(essr_height);
     const glm::vec3 eye(0.0f, 2.6f, -10.5f);

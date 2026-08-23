@@ -480,8 +480,6 @@ void run_example_disney_pbr()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    sphere_params.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
-
     constexpr float aspect = static_cast<float>(disney_width) / static_cast<float>(disney_height);
     constexpr float sphere_scale = 0.42f;
     const glm::mat4 proj = [] {

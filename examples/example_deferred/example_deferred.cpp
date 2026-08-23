@@ -360,9 +360,19 @@ void run_example_deferred()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    cube_params.index_count = static_cast<uint32_t>(cube_indices.size());
+    horizon::DrawIndexedIndirectCommand cube_cmd_base;
+    cube_cmd_base.index_count = static_cast<uint32_t>(cube_indices.size());
+    cube_cmd_base.instance_count = 1;
+    cube_cmd_base.first_index = 0;
+    cube_cmd_base.vertex_offset = 0;
+    cube_cmd_base.first_instance = 0;
 
-    quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
+    horizon::DrawIndexedIndirectCommand quad_cmd_base;
+    quad_cmd_base.index_count = static_cast<uint32_t>(corner_indices.size());
+    quad_cmd_base.instance_count = 1;
+    quad_cmd_base.first_index = 0;
+    quad_cmd_base.vertex_offset = 0;
+    quad_cmd_base.first_instance = 0;
 
     constexpr float aspect = static_cast<float>(dfr_width) / static_cast<float>(dfr_height);
     // 原版 相机 (0,0,-15) 朝 +Z（垂直角 0）
@@ -428,11 +438,7 @@ void run_example_deferred()
 
                     pipeline.model_pc.model = model;
 
-                    horizon::DrawIndexedIndirectCommand cmd;
-                    cmd.index_count = cube_params.index_count;
-                    cmd.first_index = cube_params.first_index;
-                    cmd.vertex_offset = cube_params.vertex_offset;
-                    cmd.instance_count = 1;
+                    horizon::DrawIndexedIndirectCommand cmd = cube_cmd_base;
                     cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
                     indirect_cmds.push_back(cmd);
                 }
@@ -513,11 +519,7 @@ void run_example_deferred()
                 0.8f);
             light_rasterizer.vpc.rect = glm::vec4(rect_min, rect_max);
 
-            horizon::DrawIndexedIndirectCommand cmd;
-            cmd.index_count = quad_params.index_count;
-            cmd.first_index = quad_params.first_index;
-            cmd.vertex_offset = quad_params.vertex_offset;
-            cmd.instance_count = 1;
+            horizon::DrawIndexedIndirectCommand cmd = quad_cmd_base;
             cmd.first_instance = static_cast<uint32_t>(light_indirect_cmds.size());
             light_indirect_cmds.push_back(cmd);
         }
@@ -541,12 +543,7 @@ void run_example_deferred()
 
         // Pass 3：albedo × light 合成 - Convert to indirect
         combine_rasterizer.clear_records();
-        horizon::DrawIndexedIndirectCommand combine_cmd;
-        combine_cmd.index_count = quad_params.index_count;
-        combine_cmd.first_index = quad_params.first_index;
-        combine_cmd.vertex_offset = quad_params.vertex_offset;
-        combine_cmd.instance_count = 1;
-        combine_cmd.first_instance = 0;
+        horizon::DrawIndexedIndirectCommand combine_cmd = quad_cmd_base;
 
         horizon::HardwareBuffer combine_indirect_buffer = horizon::HardwareBuffer::from_bytes(
             std::span<const std::byte>(
