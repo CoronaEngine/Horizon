@@ -11,7 +11,6 @@
 #include "../data/encodable.h"
 #include "core/util/hash.h"
 #include "../data/registrable.h"
-#include "../diagnostics/env.h"
 
 namespace horizon::dsl {
 using namespace horizon::core;

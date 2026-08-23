@@ -7,6 +7,14 @@
 > - 首个后端：Vulkan
 > - 首期能力：Compute Shader、光栅化、硬件光线追踪
 
+> 迁移记录（2026-08-23）：`src/dsl/diagnostics` 与 `src/dsl/tensor` 已删除，
+> 原 `diagnostics/env.cpp` 中的 DSL 越界保护 helper 已迁入
+> `src/dsl/core/ref_func.cpp`，并去除 `Env::valid_check()` 与 GPU Printer 依赖：现在始终
+> 生成越界分支，以静态 Comment 代替 GPU 警告输出。新的 GPU Printer、Debugger 与 Tensor runtime 尚未实现；
+> `registrable`、managed resource 和 polymorphic resource 仍是后续迁移债务。
+> 由于 `src/rhi` 尚未引入，这些 opt-in resource adapter 当前也尚未接入可编译目标；
+> 本阶段的可用性边界是纯 DSL/AST 核心。
+
 ## 1. 文档目的
 
 本文解释旧 Ocarina 的 DSL 与 RHI 为什么形成双向依赖，并定义迁入 Horizon `src/` 后的新模块边界。

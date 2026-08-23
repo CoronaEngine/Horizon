@@ -319,8 +319,6 @@ struct is_kernel : std::false_type {};
 template<typename T>
 struct is_kernel<Kernel<T>> : std::true_type {};
 
-OC_DSL_API void clear_global_vars() noexcept; // implement in env.cpp
-
 template<typename... Args>
 class Kernel<void(Args...)> : public FuncWrapper {
 private:
@@ -332,7 +330,6 @@ public:
     Kernel(Func &&func) noexcept
         : FuncWrapper(std::move(Function::define_kernel([&] {
               detail::create<Args...>(OC_FORWARD(func), horizon::dsl::index_sequence_for<Args...>());
-              clear_global_vars();
           }))) {}
 
     template<typename... A>

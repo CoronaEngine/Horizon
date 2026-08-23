@@ -4,7 +4,6 @@
 
 #include "../types/rtx.h"
 #include "../api/stmt_builder.h"
-#include "../diagnostics/printer.h"
 
 namespace horizon::dsl::detail {
 using namespace horizon::core;

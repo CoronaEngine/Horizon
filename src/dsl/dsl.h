@@ -16,6 +16,6 @@
 #include "types/soa.h"
 #include "types/struct.h"
 
-// Backend-facing tensor, RTX, diagnostics and polymorphic-resource adapters
-// remain opt-in headers.  Keeping them out of the base aggregate makes the
-// embedded DSL layer usable without an RHI or code-generation backend.
+// RTX shader semantics and legacy polymorphic-resource adapters remain
+// opt-in headers. Keeping them out of the base aggregate makes the embedded
+// DSL layer usable without an RHI or code-generation backend.
