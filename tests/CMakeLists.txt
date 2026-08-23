@@ -32,5 +32,6 @@ add_test(
     NAME horizon.architecture.dsl_runtime_boundary
     COMMAND ${CMAKE_COMMAND}
             -DDSL_SOURCE_DIR=${PROJECT_SOURCE_DIR}/src/dsl
+            -DRUNTIME_SOURCE_DIR=${PROJECT_SOURCE_DIR}/src/runtime
             -P ${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_dsl_runtime_boundary.cmake
 )

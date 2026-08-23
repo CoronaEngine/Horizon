@@ -46,7 +46,7 @@ horizon-math -> horizon-image
 horizon-dsl -> horizon-image   // 基础 DSL 不应因图像 I/O 增加依赖
 ```
 
-未来的 GPU 上传便利接口应位于 `horizon-gpu`，由该层同时依赖 `horizon-image` 和 `horizon-rhi`。
+未来的 GPU 上传便利接口应位于 `horizon-runtime`，由该层同时依赖 `horizon-image` 和 `horizon-rhi`。
 
 ## 4. 模块职责
 
@@ -57,7 +57,7 @@ horizon-dsl -> horizon-image   // 基础 DSL 不应因图像 I/O 增加依赖
 - `core::PixelStorage`
 - 像素格式的通道数、标量类型和字节尺寸等纯值信息
 
-这些类型可由类型系统、Image、未来 RHI 和 GPU 层共同使用。Core 不拥有 CPU 图像缓冲、文件路径或编解码实现。
+这些类型可由类型系统、Image、未来 RHI 和 Runtime 层共同使用。Core 不拥有 CPU 图像缓冲、文件路径或编解码实现。
 
 ### 4.2 Image 模块拥有的内容
 
@@ -83,7 +83,7 @@ horizon-dsl -> horizon-image   // 基础 DSL 不应因图像 I/O 增加依赖
 - DSL texture expression、sample、load 和 store
 - AST image type、resource binding 和 reflection
 
-CPU `image::Image`、运行时 `gpu::Texture`、底层 `rhi::Image` 和 shader 侧 `dsl::TextureRef` 是不同身份，不能合并为一个通用 Image 类型。
+CPU `image::Image`、运行时 `runtime::Texture`、底层 `rhi::Image` 和 shader 侧 `dsl::TextureRef` 是不同身份，不能合并为一个通用 Image 类型。
 
 ## 5. 目录与公开接口
 

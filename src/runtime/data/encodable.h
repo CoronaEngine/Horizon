@@ -5,13 +5,14 @@
 #pragma once
 
 #include "core/util/util.h"
-#include "../core/type_trait.h"
-#include "dynamic_array.h"
+#include "dsl/core/type_trait.h"
+#include "dsl/data/dynamic_array.h"
 
-namespace horizon::dsl {
+namespace horizon::runtime {
 using namespace horizon::core;
 using namespace horizon::math;
 using namespace horizon::ast;
+using namespace horizon::dsl;
 
 template<typename T>
 class RegistrableManaged;
@@ -219,7 +220,7 @@ public:
         update(data);
     }
 
-    [[nodiscard]] uint cal_offset(horizon::dsl::uint prev_size) const noexcept override {
+    [[nodiscard]] uint cal_offset(horizon::core::uint prev_size) const noexcept override {
         offset_ = mem_offset(prev_size, alignment());
         uint ret = offset_ + compacted_size();
         return ret;
@@ -345,7 +346,7 @@ public:
         const_cast<decltype(device_value_) *>(&device_value_)->emplace(_decode(array, 0));
     }
 
-    void decode(const DynamicArray<horizon::dsl::buffer_ty> &array) const noexcept override {
+    void decode(const DynamicArray<horizon::runtime::buffer_ty> &array) const noexcept override {
         const_cast<decltype(device_value_) *>(&device_value_)->emplace(_decode(array, offset_));
     }
 };
@@ -362,16 +363,16 @@ OC_MAKE_AUTO_MEMBER_FUNC(cal_offset)
 OC_MAKE_AUTO_MEMBER_FUNC(alignment)
 }// namespace detail
 
-#define OC_ENCODE_ELEMENT(name) horizon::dsl::detail::encode(name, datas);
-#define OC_UPDATE_ELEMENT(name) horizon::dsl::detail::update(name, datas);
-#define OC_INVALIDATE_ELEMENT(name) horizon::dsl::detail::invalidate(name);
-#define OC_DECODE_ELEMENT_DA(name) horizon::dsl::detail::decode(name, da);
-#define OC_DECODE_ELEMENT(name) horizon::dsl::detail::decode(name, array);
-#define OC_RESET_DEVICE_ELEMENT(name) horizon::dsl::detail::after_decode(name);
-#define OC_VALID_ELEMENT(name) &&horizon::dsl::detail::has_device_value(name)
-#define OC_SIZE_ELEMENT(name) +horizon::dsl::detail::compacted_size(name)
-#define OC_CAL_OFFSET(name) ret = horizon::dsl::detail::cal_offset(name, ret);
-#define OC_ALIGNMENT(name) ret = horizon::dsl::max(ret, horizon::dsl::detail::alignment(name));
+#define OC_ENCODE_ELEMENT(name) horizon::runtime::detail::encode(name, datas);
+#define OC_UPDATE_ELEMENT(name) horizon::runtime::detail::update(name, datas);
+#define OC_INVALIDATE_ELEMENT(name) horizon::runtime::detail::invalidate(name);
+#define OC_DECODE_ELEMENT_DA(name) horizon::runtime::detail::decode(name, da);
+#define OC_DECODE_ELEMENT(name) horizon::runtime::detail::decode(name, array);
+#define OC_RESET_DEVICE_ELEMENT(name) horizon::runtime::detail::after_decode(name);
+#define OC_VALID_ELEMENT(name) &&horizon::runtime::detail::has_device_value(name)
+#define OC_SIZE_ELEMENT(name) +horizon::runtime::detail::compacted_size(name)
+#define OC_CAL_OFFSET(name) ret = horizon::runtime::detail::cal_offset(name, ret);
+#define OC_ALIGNMENT(name) ret = std::max(ret, horizon::runtime::detail::alignment(name));
 
 #define OC_ENCODABLE_FUNC(Super, ...)                                           \
     [[nodiscard]] uint compacted_size() const noexcept override {               \
@@ -414,4 +415,4 @@ OC_MAKE_AUTO_MEMBER_FUNC(alignment)
         MAP(OC_ALIGNMENT, __VA_ARGS__)                                          \
         return ret;                                                             \
     }
-}// namespace horizon::dsl
+}// namespace horizon::runtime

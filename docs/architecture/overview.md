@@ -4,6 +4,9 @@
 > 文档范围：覆盖 `src/core`、`src/math`、`src/image`、`src/ast`、`src/dsl`
 > 不在范围内：`src/` 下其他目录、旧 Ocarina 的 generator、RHI、后端及运行时集成
 
+IR、Shader compiler、RHI、Vulkan 后端与 Runtime 集成层的简明目标设计见
+[Horizon GPU 编程架构](gpu-programming-stack.md)。
+
 ## 1. 文档目的
 
 本文档描述 Horizon 当前正在迁移的语言层基础模块，以及已经从 DSL 中拆出的 host Image 模块，统一说明它们的职责、依赖方向、数据流和必须保持的架构不变量。
@@ -106,7 +109,7 @@ Math 当前不直接包含 AST 或 DSL。DSL 对 Math traits 的扩展仍是后�
 
 ### 5.1 Image
 
-Image 是独立的 host 侧图像模块，负责 CPU 像素缓冲、格式转换和文件编解码。它可以使用 Math 的向量类型与 Core 的 `PixelStorage`，但不依赖 AST、DSL、RHI 或 Vulkan。GPU texture 上传属于未来 GPU 集成层，不属于 `horizon-image`。
+Image 是独立的 host 侧图像模块，负责 CPU 像素缓冲、格式转换和文件编解码。它可以使用 Math 的向量类型与 Core 的 `PixelStorage`，但不依赖 AST、DSL、RHI 或 Vulkan。GPU texture 上传属于未来 Runtime 集成层，不属于 `horizon-image`。
 
 关键入口包括：
 
@@ -173,7 +176,7 @@ DSL 主要包含：
 
 旧 diagnostics 与 Tensor runtime 已从 `src/dsl` 删除。纯 AST 的 `PrintStmt` 与
 `print()` 构造能力仍然保留；需要 GPU buffer、device、command 或下载回读的
-Printer、Debugger 与 Tensor 执行能力将在未来由 GPU 集成层重新提供；这不表示
+Printer、Debugger 与 Tensor 执行能力将在未来由 Runtime 集成层重新提供；这不表示
 对应的 GPU 功能已经实现。
 
 DSL 的核心职责是“翻译”，而不是拥有另一套语义状态：

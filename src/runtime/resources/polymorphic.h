@@ -4,18 +4,19 @@
 
 #pragma once
 
-#include "../core/type_trait.h"
-#include "../api/stmt_builder.h"
+#include "dsl/core/type_trait.h"
+#include "dsl/api/stmt_builder.h"
 #include "core/stl.h"
 #include "core/util/util.h"
-#include "../data/encodable.h"
+#include "runtime/data/encodable.h"
 #include "core/util/hash.h"
-#include "../data/registrable.h"
+#include "runtime/resources/registrable.h"
 
-namespace horizon::dsl {
+namespace horizon::runtime {
 using namespace horizon::core;
 using namespace horizon::math;
 using namespace horizon::ast;
+using namespace horizon::dsl;
 
 enum PolymorphicMode {
     EInstance = 0,
@@ -44,7 +45,7 @@ public:
 
 protected:
     Uint tag_{};
-    horizon::dsl::unordered_map<uint64_t, uint> tags_;
+    horizon::core::unordered_map<uint64_t, uint> tags_;
 
 public:
     template<typename Derive>
@@ -56,7 +57,7 @@ public:
         Derive *ret = nullptr;
         if (first) {
             ret = elm.get();
-            Super::push_back(horizon::dsl::move(elm));
+            Super::push_back(std::move(elm));
         } else {
             ret = dynamic_cast<Derive *>(Super::at(index).get());
             OC_ASSERT(ret != nullptr);
@@ -74,15 +75,15 @@ public:
     requires std::is_base_of_v<element_ty, Derive>
     Derive *link(UP<Derive> elm) noexcept {
         uint64_t hash = elm->topology_hash();
-        return link(hash, horizon::dsl::move(elm));
+        return link(hash, std::move(elm));
     }
 
     template<typename Func>
     void dispatch(Func &&func) const noexcept {
-        comment(horizon::dsl::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
-        auto index = detail::correct_index(tag_, static_cast<uint>(Super::size()),
-                                           horizon::dsl::format("PolyEvaluator dispatch {}", typeid(*this).name()),
-                                           traceback_string(1));
+        comment(horizon::core::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
+        auto index = horizon::dsl::detail::correct_index(tag_, static_cast<uint>(Super::size()),
+                                                         horizon::core::format("PolyEvaluator dispatch {}", typeid(*this).name()),
+                                                         traceback_string(1));
         if (Super::size() == 1) {
             comment(typeid(*Super::at(0u)).name());
             func(raw_ptr(Super::at(0u)));
@@ -105,10 +106,10 @@ public:
 
     template<typename Func>
     void dispatch(Func &&func) noexcept {
-        comment(horizon::dsl::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
-        auto index = detail::correct_index(tag_, static_cast<uint>(Super::size()),
-                                           horizon::dsl::format("PolyEvaluator dispatch {}", typeid(*this).name()),
-                                           traceback_string(1));
+        comment(horizon::core::format("PolyEvaluator dispatch {}, case num = {}", typeid(T).name(), Super::size()));
+        auto index = horizon::dsl::detail::correct_index(tag_, static_cast<uint>(Super::size()),
+                                                         horizon::core::format("PolyEvaluator dispatch {}", typeid(*this).name()),
+                                                         traceback_string(1));
         if (Super::size() == 1) {
             comment(typeid(*Super::at(0u)).name());
             func(raw_ptr(Super::at(0u)));
@@ -354,7 +355,7 @@ public:
     }
     [[nodiscard]] uint data_index(const ptr_type *object) const noexcept {
         uint64_t hash_code = object->topology_hash();
-        return horizon::dsl::get_index(group_mgr_.group_map.at(hash_code).objects, [&](auto obj) {
+        return horizon::core::get_index(group_mgr_.group_map.at(hash_code).objects, [&](auto obj) {
             return object == raw_ptr(obj);
         });
     }
@@ -422,16 +423,16 @@ public:
     }
 
     void set_datas(const ptr_type *object, datas_type &&datas) noexcept {
-        group_mgr_.group_map.at(object->topology_hash()).data_set = horizon::dsl::move(datas);
+        group_mgr_.group_map.at(object->topology_hash()).data_set = std::move(datas);
     }
     void set_mode(PolymorphicMode mode) noexcept { mode_ = mode; }
     [[nodiscard]] PolymorphicMode mode() const noexcept { return mode_; }
     [[nodiscard]] uint encode_id(uint id, const ptr_type *object) const noexcept {
         switch (mode_) {
             case EInstance:
-                return horizon::dsl::encode_id<H>(id, topology_index(object));
+                return horizon::runtime::encode_id<H>(id, topology_index(object));
             case ETopology:
-                return horizon::dsl::encode_id<H>(data_index(object), topology_index(object));
+                return horizon::runtime::encode_id<H>(data_index(object), topology_index(object));
         }
         OC_ASSERT(false);
         return InvalidUI32;
@@ -454,7 +455,7 @@ public:
                     for (ptr_type *object : group_data.objects) {
                         object->encode(group_data.data_set);
                     }
-                    auto desc = horizon::dsl::format("polymorphic: {}::type_buffer", group_data.class_name.c_str());
+                    auto desc = horizon::core::format("polymorphic: {}::type_buffer", group_data.class_name.c_str());
                     group_data.data_set.reset_device_buffer_immediately(device, desc);
                     group_data.data_set.register_self();
                     if (!group_data.data_set.empty()) {
@@ -470,7 +471,7 @@ public:
     template<typename ObjectID, typename Func>
     requires is_integral_expr_v<ObjectID>
     void dispatch(ObjectID &&object_id, const Func &func) const noexcept {
-        auto [inst_id, type_id] = horizon::dsl::decode_id<D>(OC_FORWARD(object_id));
+        auto [inst_id, type_id] = horizon::runtime::decode_id<D>(OC_FORWARD(object_id));
         dispatch(type_id, inst_id, func);
     }
 
@@ -504,10 +505,10 @@ public:
         if (Super::empty()) [[unlikely]] {
             return;
         }
-        Uint corrected = detail::correct_index(index, all_instance_num(),
-                                               horizon::dsl::format("dispatch_instance {}", typeid(*this).name()),
-                                               traceback_string(1));
-        comment(horizon::dsl::format("const dispatch_instance, case num = {}", Super::size()));
+        Uint corrected = horizon::dsl::detail::correct_index(index, all_instance_num(),
+                                                              horizon::core::format("dispatch_instance {}", typeid(*this).name()),
+                                                              traceback_string(1));
+        comment(horizon::core::format("const dispatch_instance, case num = {}", Super::size()));
         comment(typeid(*this).name());
         if (Super::size() == 1) {
             comment(typeid(*Super::at(0u)).name());
@@ -535,10 +536,10 @@ public:
         if (group_mgr_.empty()) [[unlikely]] {
             return;
         }
-        Uint corrected = detail::correct_index(index, topology_num(),
-                                               horizon::dsl::format("dispatch_topology {}", typeid(*this).name()),
-                                               traceback_string(1));
-        comment(horizon::dsl::format("const dispatch_topology, case num = {}", topology_num()));
+        Uint corrected = horizon::dsl::detail::correct_index(index, topology_num(),
+                                                              horizon::core::format("dispatch_topology {}", typeid(*this).name()),
+                                                              traceback_string(1));
+        comment(horizon::core::format("const dispatch_topology, case num = {}", topology_num()));
         comment(typeid(*this).name());
         if (group_mgr_.size() == 1) {
             ptr_type *elm = group_mgr_.group_map.begin()->second.objects[0];
@@ -576,7 +577,7 @@ public:
 
     template<typename Func>
     [[nodiscard]] uint get_index(Func &&func) const noexcept {
-        return horizon::dsl::get_index(*this, OC_FORWARD(func));
+        return horizon::core::get_index(*this, OC_FORWARD(func));
     }
 
     template<typename Func>
@@ -603,4 +604,4 @@ public:
     }
 };
 
-}// namespace horizon::dsl
+}// namespace horizon::runtime

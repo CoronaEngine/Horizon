@@ -4,15 +4,16 @@
 
 #pragma once
 
-#include "encodable.h"
+#include "runtime/data/encodable.h"
 #include "rhi/resources/managed.h"
 #include "core/runtime/platform.h"
 #include "rhi/resources/byte_buffer.h"
 
-namespace horizon::dsl {
+namespace horizon::runtime {
 using namespace horizon::core;
 using namespace horizon::math;
 using namespace horizon::ast;
+using namespace horizon::dsl;
 
 class Registrable : public Encodable {
 protected:
@@ -98,7 +99,7 @@ public:
     }
 
     template<typename Index, typename Val>
-    requires concepts::integral<expr_value_t<Index>> && horizon::dsl::is_same_v<T, expr_value_t<Val>>
+    requires concepts::integral<expr_value_t<Index>> && std::is_same_v<T, expr_value_t<Val>>
     void write(Index &&index, Val &&elm) {
         if (!has_registered()) {
             Super::write(OC_FORWARD(index), OC_FORWARD(elm));
@@ -372,7 +373,7 @@ public:
     }
 
     template<typename Index, typename Val>
-    requires concepts::integral<expr_value_t<Index>> && horizon::dsl::is_same_v<T, expr_value_t<Val>>
+    requires concepts::integral<expr_value_t<Index>> && std::is_same_v<T, expr_value_t<Val>>
     void write(Index &&index, Val &&elm) {
         if (!has_registered()) {
             Super::write(OC_FORWARD(index), OC_FORWARD(elm));
@@ -421,4 +422,4 @@ public:
         return Texture3D::write(OC_FORWARD(args)...);
     }
 };
-}// namespace horizon::dsl
+}// namespace horizon::runtime

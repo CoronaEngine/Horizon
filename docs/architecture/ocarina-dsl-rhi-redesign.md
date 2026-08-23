@@ -7,6 +7,9 @@
 > - 首个后端：Vulkan
 > - 首期能力：Compute Shader、光栅化、硬件光线追踪
 
+> 简明目标架构见 [Horizon GPU 编程架构](gpu-programming-stack.md)；本文保留旧耦合分析、
+> 详细数据流与迁移验收标准。
+
 > 迁移记录（2026-08-23）：`src/dsl/diagnostics` 与 `src/dsl/tensor` 已删除，
 > 原 `diagnostics/env.cpp` 中的 DSL 越界保护 helper 已迁入
 > `src/dsl/core/ref_func.cpp`，并去除 `Env::valid_check()` 与 GPU Printer 依赖：现在始终
@@ -14,6 +17,9 @@
 > `registrable`、managed resource 和 polymorphic resource 仍是后续迁移债务。
 > 由于 `src/rhi` 尚未引入，这些 opt-in resource adapter 当前也尚未接入可编译目标；
 > 本阶段的可用性边界是纯 DSL/AST 核心。
+> `src/runtime` 已建立迁移目录，`encodable`、`registrable` 与当前未拆分的
+> `polymorphic` 已先移动到该目录并切换到 `horizon::runtime` 命名空间；待新 RHI
+> 接入后再完成类型拆分和 target 接入。
 
 ## 1. 文档目的
 
@@ -32,7 +38,7 @@
 
 典型表现是同一个 `Buffer<T>` 既表示主机侧 GPU 资源，又能通过 `Function::current()` 变成 DSL 表达式；同一个 `Device` 既创建底层资源，又直接接收 `Kernel<T>` 编译 shader。只移动头文件或调整 CMake 链接方向无法消除这种语义耦合。
 
-目标架构应增加独立的 `horizon::gpu` 集成层：DSL 与 RHI 互不依赖，GPU 集成层单向依赖二者，并负责 shader 编译、反射绑定和便利 API。
+目标架构应增加独立的 `horizon::runtime` 集成层：DSL 与 RHI 互不依赖，Runtime 集成层单向依赖二者，并负责自动资源捕获、shader 编译、反射绑定和运行时诊断。
 
 ## 3. 当前双向依赖的形成原因
 
@@ -121,18 +127,19 @@ RHI command 本应只记录已经解析完成的 pipeline、descriptor、push co
 - RHI 可以使用预编译 SPIR-V 独立创建资源、管线和命令，不需要 AST 或 DSL。
 - 同一套 AST 支持 Compute、光栅化 shader stage 和光追 shader stage。
 - Vulkan 是首个且当前唯一实现后端，公共接口允许采用 Vulkan 风格的显式资源与同步模型。
-- 用户仍可获得类似 `compile(kernel)` 和 typed dispatch 的便利体验，但便利接口属于 GPU 集成层。
+- 用户仍可获得类似 `compile(kernel)` 和 typed dispatch 的便利体验，但便利接口属于 Runtime 集成层。
 - 资源绑定发生在 pipeline 使用时，不把物理 GPU 资源捕获进 AST。
 
 ### 5.2 必须保持的依赖不变量
 
-1. `horizon-dsl` 不包含 RHI 或 Vulkan 头文件。
-2. `horizon-rhi` 和 Vulkan 实现不包含 DSL、AST 或 shader generator 头文件。
-3. `horizon-shader-compiler` 只消费 AST，不管理 GPU 资源。
-4. `horizon-gpu` 是唯一允许同时依赖 DSL/compiler 与 RHI 的模块。
-5. RHI 公共接口不出现 `Kernel`、`Function`、`Expression`、`Var` 或 DSL traits。
-6. DSL 公共接口不出现 Vulkan handle、RHI device、command list 或物理资源所有权。
-7. AST 只保存逻辑资源参数及其访问语义，不保存 RHI handle、device 指针或资源对象地址。
+1. `horizon-dsl` 不包含 IR、compiler、Runtime、RHI 或 Vulkan 头文件。
+2. `horizon-rhi` 和 Vulkan 实现不包含 DSL、AST、IR、compiler 或 generator 头文件。
+3. `horizon-ir` 不依赖 AST、DSL、RHI 或 Vulkan。
+4. `horizon-shader-compiler` 负责 AST、IR 与目标二进制之间的转换，不管理 GPU 资源。
+5. `horizon-runtime` 是唯一允许同时依赖 DSL/compiler 与 RHI 的模块。
+6. RHI 公共接口不出现 `Kernel`、`Function`、`Expression`、`Var` 或 DSL traits。
+7. DSL 公共接口不出现 Vulkan handle、RHI device、command list 或物理资源所有权。
+8. AST 只保存逻辑资源参数及其访问语义，不保存 RHI handle、device 指针或资源对象地址。
 
 ## 6. 目标模块与依赖拓扑
 
@@ -142,24 +149,26 @@ RHI command 本应只记录已经解析完成的 pipeline、descriptor、push co
 flowchart LR
     DSL[horizon-dsl]
     AST[horizon-ast]
+    IR[horizon-ir]
     Compiler[horizon-shader-compiler]
-    GPU[horizon-gpu]
+    Runtime[horizon-runtime]
     RHI[horizon-rhi]
     Vulkan[horizon-rhi-vulkan]
     Core[horizon-core / horizon-math]
 
     DSL --> AST
     AST --> Core
+    IR --> Core
     Compiler --> AST
-    Compiler --> Core
+    Compiler --> IR
     RHI --> Core
     Vulkan --> RHI
-    GPU --> DSL
-    GPU --> Compiler
-    GPU --> RHI
+    Runtime --> DSL
+    Runtime --> Compiler
+    Runtime --> RHI
 ```
 
-应用层主要使用 `horizon::dsl` 描述 shader，使用 `horizon::gpu` 创建 typed 资源、编译 pipeline 并提交工作。只有需要底层控制或 native interop 的代码直接使用 `horizon::rhi`。
+应用层主要使用 `horizon::dsl` 描述 shader，使用 `horizon::runtime` 创建 typed 资源、编译 pipeline 并提交工作。只有需要底层控制或 native interop 的代码直接使用 `horizon::rhi`。
 
 ### 6.1 `horizon::dsl`
 
@@ -177,12 +186,22 @@ flowchart LR
 - 创建 pipeline、descriptor 或 command。
 - 捕获主机侧 GPU 资源对象。
 
-### 6.2 `horizon::shader_compiler`
+### 6.2 `horizon::ir`
 
 职责：
 
-- 校验并降低 `ast::Function`。
-- 生成 SPIR-V。
+- 定义独立的 Shader IR module、function、basic block、value 和 instruction。
+- 为 compiler pass 和不同目标 emitter 提供稳定的中间表示。
+- 不保存 AST 节点指针，不负责 AST lowering 或目标代码生成。
+
+IR 位于顶级 `src/ir`，因为 Horizon 的领域就是 GPU 编程与 Shader 基础设施；这里不规划材质 IR、渲染图 IR 等引擎领域模型。
+
+### 6.3 `horizon::shader_compiler`
+
+职责：
+
+- 校验 `ast::Function` 并降低为 `ir::Module`。
+- 执行 IR validation、canonicalization 和资源 lowering，再生成 SPIR-V。
 - 产生与 SPIR-V 对应的反射数据和结构化诊断。
 - 保证相同 AST、stage 和编译选项得到可缓存的稳定 artifact key。
 
@@ -200,9 +219,9 @@ ShaderArtifact
 └─ diagnostics and artifact key
 ```
 
-RHI 不直接消费 AST；GPU 集成层把 `ShaderArtifact` 转换为明确的 RHI shader module 和 pipeline 描述。
+RHI 不直接消费 AST；Runtime 集成层把 `ShaderArtifact` 转换为明确的 RHI shader module 和 pipeline 描述。
 
-### 6.3 `horizon::rhi`
+### 6.4 `horizon::rhi`
 
 职责：
 
@@ -211,11 +230,11 @@ RHI 不直接消费 AST；GPU 集成层把 `ShaderArtifact` 转换为明确的 R
 - 定义 command list、queue、fence、semaphore、barrier 和资源状态转换。
 - 定义光栅化 attachment、dynamic rendering、draw 和 indirect draw。
 - 定义 BLAS/TLAS build、SBT 和 trace rays 所需的底层描述。
-- 提供显式 native Vulkan interop 入口，但不让 Vulkan 类型渗入普通 DSL 或 GPU facade API。
+- 提供显式 native Vulkan interop 入口，但不让 Vulkan 类型渗入普通 DSL 或 Runtime facade API。
 
 RHI buffer 是一段无类型字节存储；元素类型属于 DSL 或 GPU typed wrapper。RHI 只接受 SPIR-V、显式 pipeline layout 和已解析的 descriptor/push constant 数据。
 
-### 6.4 `horizon::rhi::vulkan`
+### 6.5 `horizon::rhi::vulkan`
 
 职责：
 
@@ -226,13 +245,13 @@ RHI buffer 是一段无类型字节存储；元素类型属于 DSL 或 GPU typed
 
 首期不要求设计或实现 DX12/CUDA 后端，也不为假想后端削弱 Vulkan 的显式能力模型。Vulkan 专用扩展能力通过 capability 与 extension 接口表达，不进入 DSL。
 
-### 6.5 `horizon::gpu`
+### 6.6 `horizon::runtime`
 
 这是从旧 DSL/RHI 混合代码中抽离出的集成封装层，也是解决循环依赖的关键。
 
 职责：
 
-- 提供用户可见的 typed host 资源，如 `gpu::Buffer<T>`、typed texture view 和 acceleration structure wrapper。
+- 提供用户可见的 typed host 资源，如 `runtime::Buffer<T>`、typed texture view 和 acceleration structure wrapper。
 - 接受 DSL kernel/stage，调用 shader compiler，并创建 RHI shader module 与 pipeline。
 - 根据 reflection 验证参数类型、资源访问模式、stage IO 和 pipeline layout。
 - 把 typed 参数转换为 descriptor write、push constant 和 RHI resource view。
@@ -240,7 +259,7 @@ RHI buffer 是一段无类型字节存储；元素类型属于 DSL 或 GPU typed
 - 管理 shader/pipeline cache、SBT 组装及与编译产物相关的运行时元数据。
 - 承接旧 DSL 中的 debugger、printer、managed resource 等确实需要同时使用 DSL 与 RHI 的设施。
 
-GPU 层可以提供 `device.compile(kernel)` 风格的 facade，但其内部必须保持“先编译 artifact，再创建 RHI pipeline”的阶段边界。
+Runtime 层可以提供 `compile(kernel)` 风格的 facade，但其内部必须保持“先编译 artifact，再创建 RHI pipeline”的阶段边界。`horizon::runtime` 是高层集成模块；现有 `src/core/runtime` 仍属于 `horizon::core` 基础工具，底层设备接口仍是 `rhi::Device`。
 
 ## 7. 三种资源身份必须分离
 
@@ -250,7 +269,7 @@ GPU 层可以提供 `device.compile(kernel)` 风格的 facade，但其内部必�
 | --- | --- | --- |
 | Shader 构造 | `dsl::BufferRef<T>`、`dsl::TextureRef<T>`、`dsl::AccelRef` | AST 表达式和逻辑参数，不拥有物理资源 |
 | Vulkan 执行 | `rhi::Buffer`、`rhi::Image`、`rhi::AccelerationStructure` | 无类型物理资源及其生命周期 |
-| 用户运行时 | `gpu::Buffer<T>`、`gpu::Texture<T>`、`gpu::AccelerationStructure` | typed host wrapper，内部持有或引用 RHI 资源 |
+| 用户运行时 | `runtime::Buffer<T>`、`runtime::Texture<T>`、`runtime::AccelerationStructure` | typed host wrapper，内部持有或引用 RHI 资源 |
 
 禁止重新引入一个跨三层通用的 `Buffer<T>`。模板元素类型、访问操作与 AST 表达式属于 DSL/GPU；device address、allocation 和 native handle 属于 RHI。
 
@@ -267,13 +286,13 @@ auto kernel = dsl::compute_kernel(
     });
 ```
 
-构造 AST 时不传入 `gpu::Buffer<float>` 或 `rhi::Buffer`，也不通过资源地址形成 captured resource。实际资源在 dispatch 时绑定：
+构造 AST 时不传入 `runtime::Buffer<float>` 或 `rhi::Buffer`，也不通过资源地址形成 captured resource。实际资源在 dispatch 时绑定：
 
 ```cpp
 pipeline.dispatch(command_list, dispatch_size, input_buffer, output_buffer, count);
 ```
 
-GPU facade 可以提供具名参数或生成的 typed binding wrapper，但绑定对象始终与 AST 分离。
+Runtime facade 可以提供具名参数或生成的 typed binding wrapper，但绑定对象始终与 AST 分离。
 
 ## 8. 编译与执行数据流
 
@@ -284,7 +303,7 @@ DSL compute kernel
     -> AST Function
     -> shader_compiler::compile
     -> ShaderArtifact(SPIR-V + reflection)
-    -> gpu::ComputePipeline
+    -> runtime::ComputePipeline
     -> rhi::ComputePipeline
     -> bind resources / push values
     -> rhi::CommandList::dispatch
@@ -319,7 +338,7 @@ DSL raygen / miss / hit stages
     -> trace rays command
 ```
 
-shader 内的 `trace_ray`、ray query、payload 和 hit attribute 是 DSL/AST 语义。BLAS/TLAS 的内存、build flags、scratch buffer、compaction、SBT 地址和 Vulkan handle 是 RHI 语义。GPU 层负责把二者连接起来。
+shader 内的 `trace_ray`、ray query、payload 和 hit attribute 是 DSL/AST 语义。BLAS/TLAS 的内存、build flags、scratch buffer、compaction、SBT 地址和 Vulkan handle 是 RHI 语义。Runtime 层负责把二者连接起来。
 
 ## 9. 参数反射与绑定规则
 
@@ -332,7 +351,7 @@ shader 内的 `trace_ray`、ray query、payload 和 hit attribute 是 DSL/AST �
 - descriptor set/binding 的确定性分配结果。
 - push constant 或普通 uniform 的布局。
 
-GPU 层在 pipeline 创建或首次绑定时完成以下验证：
+Runtime 层在 pipeline 创建或首次绑定时完成以下验证：
 
 1. 参数数量与类别匹配。
 2. typed buffer 的元素布局与 shader 逻辑类型匹配。
@@ -350,7 +369,7 @@ GPU 层在 pipeline 创建或首次绑定时完成以下验证：
 
 - DSL 不创建运行时命令。
 - RHI command list 只记录已经解析的底层操作。
-- GPU pipeline facade 可以把 typed 调用展开为一组 RHI 操作，但不能把 DSL Function 或表达式保存在 command 中。
+- Runtime pipeline facade 可以把 typed 调用展开为一组 RHI 操作，但不能把 DSL Function 或表达式保存在 command 中。
 - command 必须通过资源引用或 keep-alive token 保证执行期生命周期，不依赖 AST captured resource 延长生命周期。
 - barrier、queue ownership 和同步属于 RHI；DSL 不推断 Vulkan 同步。
 
@@ -361,8 +380,8 @@ GPU 层在 pipeline 创建或首次绑定时完成以下验证：
 错误应在最了解语义的层报告：
 
 - DSL/AST：跨 Function Context、非法表达式、非法 stage builtin。
-- Shader compiler：AST lowering、SPIR-V 生成、stage interface 和编译诊断。
-- GPU：资源类型不匹配、缺少绑定、pipeline 组合错误、光追 shader group 错误。
+- Shader compiler：AST → IR、IR pass、SPIR-V 生成、stage interface 和编译诊断。
+- Runtime：资源类型不匹配、缺少绑定、pipeline 组合错误、光追 shader group 错误。
 - RHI/Vulkan：不支持的 feature、资源创建失败、非法 usage、Vulkan 调用和 device lost。
 
 旧代码中大量可能失败的创建与编译接口被标为 `noexcept`。新公共接口不得在失败路径实际存在时无条件 `noexcept`。编译接口返回包含 diagnostics 的结果对象；RHI/Vulkan 失败转换为带 operation、object 和 `VkResult` 信息的结构化错误。
@@ -377,7 +396,8 @@ GPU 层在 pipeline 创建或首次绑定时完成以下验证：
 
 ### 12.2 Compiler 独立测试
 
-- 使用固定 AST fixture 生成 SPIR-V 与 reflection。
+- 使用固定 AST fixture 生成独立 IR，并从固定 IR 生成 SPIR-V 与 reflection。
+- 验证 IR 不保存 AST 节点指针，IR pass 不依赖 DSL、RHI 或 Vulkan。
 - 验证 stage IO、descriptor binding、push layout 和 artifact key 稳定。
 - 使用 SPIR-V validation 检查产物。
 
@@ -393,8 +413,9 @@ GPU 层在 pipeline 创建或首次绑定时完成以下验证：
 
 ### 12.5 自动依赖检查
 
-- `src/dsl` 中禁止包含 `rhi/`、`gpu/` 和 Vulkan 头文件。
-- `src/rhi` 与 Vulkan 实现中禁止包含 `dsl/`、`ast/` 和 compiler/generator 头文件。
+- `src/dsl` 中禁止包含 `rhi/`、`runtime/` 和 Vulkan 头文件。
+- `src/ir` 中禁止包含 `ast/`、`dsl/`、`rhi/`、`runtime/` 和 Vulkan 头文件。
+- `src/rhi` 与 Vulkan 实现中禁止包含 `dsl/`、`ast/`、`ir/` 和 compiler/generator 头文件。
 - CMake target 必须准确声明所有公开和私有依赖，不依赖全局 include path 掩盖反向边。
 
 ## 13. 迁移原则
@@ -403,10 +424,10 @@ GPU 层在 pipeline 创建或首次绑定时完成以下验证：
 
 1. 从旧 RHI 资源中识别纯物理资源职责，迁入新 RHI/Vulkan 实现。
 2. 将 `expression()`、`var()`、`trace_*()`、shader 侧 `read/write/sample` 等逻辑迁入 DSL resource ref。
-3. 将 AST 到 SPIR-V 的逻辑迁入 shader compiler，禁止新 RHI 链接 generator。
-4. 将 `Device::compile(Kernel)`、typed `Shader<T>` 和参数打包迁入 GPU facade。
-5. 将旧 DSL diagnostics、managed resource 等需要 device 的设施迁入 GPU 或更上层工具模块。
-6. 先让 DSL、compiler、RHI 分别独立构建，再接入 GPU 集成层。
+3. 将独立 IR 数据模型迁入 `src/ir`，将 AST → IR 与 IR → SPIR-V 迁入 shader compiler，禁止新 RHI 链接 generator。
+4. 将 `Device::compile(Kernel)`、typed `Shader<T>` 和参数打包迁入 Runtime facade。
+5. 将旧 DSL diagnostics、managed resource 等需要 device 的设施迁入 Runtime 或更上层工具模块。
+6. 先让 DSL、IR、compiler、RHI 分别独立构建，再接入 Runtime 集成层。
 7. 新 `src/` 调用点迁移完成后删除旧 `modules/ocarina`，不维持两套长期并行实现。
 
 ## 14. 不采用的方案
@@ -434,7 +455,7 @@ GPU 层在 pipeline 创建或首次绑定时完成以下验证：
 1. 删除 `horizon-dsl` 后，RHI/Vulkan 仍可使用预编译 SPIR-V 完成 Compute、光栅化和光追测试。
 2. 删除 Vulkan/RHI 后，DSL 与 AST 测试仍可构造所有目标 shader stage。
 3. shader compiler 输入只有 AST 与编译选项，输出只有 artifact 与 diagnostics。
-4. GPU 集成层是依赖图中唯一同时接触 DSL/compiler 和 RHI 的模块。
+4. Runtime 集成层是依赖图中唯一同时接触 DSL/compiler 和 RHI 的模块。
 5. host 资源实例不会改变 kernel AST 或编译缓存 key。
 6. RHI 公共头文件中不存在 DSL/AST 类型，DSL 公共头文件中不存在 RHI/Vulkan 类型。
 
