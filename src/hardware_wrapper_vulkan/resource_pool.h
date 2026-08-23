@@ -380,16 +380,11 @@ namespace Corona::Horizon
         VmaAllocation buffer_alloc { VK_NULL_HANDLE };
         VmaAllocationInfo buffer_alloc_info {};
 
-        bool host_imported_manual_bind { false };
-        bool imported { false };
 
         std::int32_t bindless_index { -1 };
 
         DeviceManager* device_manager { nullptr };
         ResourceManager* resource_manager { nullptr };
-#if defined(_WIN32) || defined(_WIN64)
-        void* exported_win32_handle { nullptr };
-#endif
 
         [[nodiscard]] bool valid() const noexcept
         {
@@ -422,14 +417,9 @@ namespace Corona::Horizon
             buffer_alloc_info = {};
             allocation_size = 0;
             buffer_usage = 0;
-            host_imported_manual_bind = false;
-            imported = false;
             bindless_index = -1;
             device_manager = nullptr;
             resource_manager = nullptr;
-#if defined(_WIN32) || defined(_WIN64)
-            exported_win32_handle = nullptr;
-#endif
         }
     };
 
@@ -451,7 +441,6 @@ namespace Corona::Horizon
         VmaAllocation image_alloc { VK_NULL_HANDLE };
         VmaAllocationInfo image_alloc_info {};
 
-        bool imported { false };
         bool owns_native_image { true };
 
         std::int32_t sampled_bindless_index { -1 };
@@ -460,9 +449,6 @@ namespace Corona::Horizon
 
         DeviceManager* device_manager { nullptr };
         ResourceManager* resource_manager { nullptr };
-#if defined(_WIN32) || defined(_WIN64)
-        void* exported_win32_handle { nullptr };
-#endif
 
         [[nodiscard]] bool valid() const noexcept
         {
@@ -494,16 +480,12 @@ namespace Corona::Horizon
             image_alloc = VK_NULL_HANDLE;
             image_alloc_info = {};
             allocation_size = 0;
-            imported = false;
             owns_native_image = true;
             sampled_bindless_index = -1;
             storage_bindless_index = -1;
             clear_value = {};
             device_manager = nullptr;
             resource_manager = nullptr;
-#if defined(_WIN32) || defined(_WIN64)
-            exported_win32_handle = nullptr;
-#endif
         }
     };
 

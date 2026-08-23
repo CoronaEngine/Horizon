@@ -1,6 +1,7 @@
 #include "hardware_wrapper_vulkan/hardware/command.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "horizon.h"
+#include "horizon_resource_bridge.h"
 #include "image_format_layout.h"
 #include "validation/hardware_validation.h"
 
@@ -336,33 +337,6 @@ namespace Corona::Horizon
             throw std::invalid_argument("HardwareImage::store_descriptor requires a valid image.");
 
         return resource_manager().store_descriptor(*image);
-    }
-
-    HardwareImage HardwareImage::import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size)
-    {
-        if (!handle)
-            throw std::invalid_argument("HardwareImage::import_external requires a valid external memory handle.");
-
-        if (!validate_image_desc(desc))
-            return {};
-
-        HardwareImage image;
-        auto resource = resource_pool().images.create(
-            [&handle, &desc, allocation_size] {
-                return resource_manager().import_image(handle, desc, allocation_size);
-            });
-
-        ResourceBridge::set(image, make_token<ResourceStore<ImageWrap, ImageReleaser>>(std::move(resource)));
-        return image;
-    }
-
-    ExternalMemoryHandle HardwareImage::export_external() const
-    {
-        auto image = write_image(*this);
-        if (!image)
-            throw std::invalid_argument("HardwareImage::export_external requires a valid image.");
-
-        return resource_manager().export_image(*image);
     }
 
     // 以下四个工厂从 horizon.h 移出（原为类内内联定义）。默认实参只在声明处给，

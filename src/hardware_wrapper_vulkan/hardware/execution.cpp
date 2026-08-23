@@ -1,6 +1,7 @@
 #include "execution.h"
 
 #include "horizon_profiling.h"
+#include "horizon_resource_bridge.h"
 
 #include "device_manager.h"
 #include "frame_hash.h"

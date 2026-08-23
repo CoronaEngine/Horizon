@@ -321,9 +321,6 @@ namespace Corona::Horizon
         if ((desc.usage & BufferUsage_Index) && !is_index_element_size(desc.element_size))
             return validation_error("HardwareBufferDesc index element_size must be 2 or 4 bytes.");
 
-        if (desc.exportable && !desc.dedicated)
-            validation_warning("Exportable HardwareBuffer will force dedicated allocation.");
-
         return true;
     }
 
@@ -392,9 +389,6 @@ namespace Corona::Horizon
 
         if (desc.cpu_access != CpuAccessMode::None && desc.sample_count > 1)
             return validation_error("Host-visible HardwareImage resources must not be multisampled.");
-
-        if (desc.exportable && !desc.dedicated)
-            validation_warning("Exportable HardwareImage will force dedicated allocation.");
 
         return true;
     }
@@ -474,37 +468,4 @@ namespace Corona::Horizon
         return true;
     }
 
-    bool validate_rasterizer_pipeline_record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params)
-    {
-        if (!optional_validation_enabled())
-            return true;
-
-        if (!index_buffer || !vertex_buffer)
-            return validation_error("RasterizerPipeline::record requires valid index and vertex buffers.");
-
-        const uint64_t index_element_size = index_buffer.get_element_size();
-        if (!is_index_element_size(static_cast<uint32_t>(index_element_size)))
-            return validation_error("RasterizerPipeline::record index buffer element size must be 2 or 4 bytes.");
-
-        const uint64_t index_count = index_buffer.get_element_count();
-        if (index_count == 0)
-            return validation_error("RasterizerPipeline::record index buffer must contain at least one element.");
-
-        if (params.first_index > index_count)
-            return validation_error("RasterizerPipeline::record first_index exceeds the index buffer element count.");
-
-        const uint64_t requested_count = params.index_count == 0
-                                             ? index_count - params.first_index
-                                             : params.index_count;
-        if (requested_count == 0)
-            return validation_error("RasterizerPipeline::record index_count resolves to zero.");
-
-        if (requested_count > index_count - params.first_index)
-            return validation_error("RasterizerPipeline::record index range exceeds the index buffer element count.");
-
-        if (vertex_buffer.get_element_count() == 0 || vertex_buffer.get_element_size() == 0)
-            return validation_error("RasterizerPipeline::record vertex buffer must contain typed vertex elements.");
-
-        return true;
-    }
 }

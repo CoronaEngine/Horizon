@@ -1,5 +1,7 @@
 #include "vulkan_compute_pipeline.h"
 
+#include "horizon_resource_bridge.h"
+
 #include "hardware_wrapper_vulkan/frame_ring.h"
 #include "hardware_wrapper_vulkan/hardware_context.h"
 #include "hardware_wrapper_vulkan/hardware/execution_profile.h"

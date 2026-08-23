@@ -8,6 +8,7 @@
 #include "display_manager.h"
 
 #include "horizon_profiling.h"
+#include "horizon_resource_bridge.h"
 
 #include "hardware_wrapper/diagnostics.h"
 #include "hardware_wrapper_vulkan/frame_ring.h"
