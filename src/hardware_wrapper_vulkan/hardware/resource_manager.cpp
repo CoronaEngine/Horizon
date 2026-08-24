@@ -271,6 +271,44 @@ namespace Corona::Horizon
             return range;
         }
 
+        [[nodiscard]] VkExternalMemoryHandleTypeFlags external_memory_handle_type() noexcept
+        {
+#if defined(_WIN32) || defined(_WIN64)
+            return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#elif defined(__linux__)
+#if VMA_EXTERNAL_MEMORY
+            return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+            return 0;
+#endif
+#else
+            return 0;
+#endif
+        }
+
+        [[nodiscard]] VkExternalMemoryHandleTypeFlagBits to_vk_external_memory_handle_type(ExternalMemoryHandleType type) noexcept
+        {
+            switch (type)
+            {
+            case ExternalMemoryHandleType::OpaqueWin32:
+#if defined(_WIN32) || defined(_WIN64)
+                return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+                return static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
+#endif
+            case ExternalMemoryHandleType::OpaqueFd:
+#if defined(__linux__) && VMA_EXTERNAL_MEMORY
+                return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+                return static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
+#endif
+            case ExternalMemoryHandleType::None:
+                break;
+            }
+
+            return static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
+        }
+
         void throw_if_failed(VkResult result, const char* operation)
         {
             if (result != VK_SUCCESS)
@@ -279,6 +317,87 @@ namespace Corona::Horizon
                                    "VK_ERROR",
                                    std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
                 throw std::runtime_error(std::string(operation) + " failed. VkResult=" + std::to_string(static_cast<int>(result)));
+            }
+        }
+
+#if defined(_WIN32) || defined(_WIN64)
+        void close_win32_handle(void*& handle) noexcept
+        {
+            HANDLE native = static_cast<HANDLE>(handle);
+            if (native != nullptr && native != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(native);
+            }
+            handle = nullptr;
+        }
+
+        [[nodiscard]] HANDLE duplicate_win32_handle(HANDLE source)
+        {
+            HANDLE duplicate = nullptr;
+            HANDLE current_process = GetCurrentProcess();
+            if (!DuplicateHandle(current_process, source, current_process, &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS))
+            {
+                throw std::runtime_error("DuplicateHandle failed. GetLastError=" + std::to_string(GetLastError()));
+            }
+
+            return duplicate;
+        }
+#endif
+
+        void require_external_buffer_feature(VkPhysicalDevice physical_device,
+                                             const VkBufferCreateInfo& create_info,
+                                             VkExternalMemoryHandleTypeFlagBits handle_type,
+                                             VkExternalMemoryFeatureFlagBits feature,
+                                             const char* operation)
+        {
+            VkPhysicalDeviceExternalBufferInfo external_info {};
+            external_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO;
+            external_info.flags = create_info.flags;
+            external_info.usage = create_info.usage;
+            external_info.handleType = handle_type;
+
+            VkExternalBufferProperties external_properties {};
+            external_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES;
+            vkGetPhysicalDeviceExternalBufferProperties(physical_device, &external_info, &external_properties);
+
+            if ((external_properties.externalMemoryProperties.externalMemoryFeatures & feature) == 0)
+            {
+                throw std::runtime_error(std::string(operation) + " is not supported for this HardwareBuffer usage.");
+            }
+        }
+
+        void require_external_image_feature(VkPhysicalDevice physical_device,
+                                            const VkImageCreateInfo& create_info,
+                                            VkExternalMemoryHandleTypeFlagBits handle_type,
+                                            VkExternalMemoryFeatureFlagBits feature,
+                                            const char* operation)
+        {
+            VkPhysicalDeviceExternalImageFormatInfo external_info {};
+            external_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+            external_info.handleType = handle_type;
+
+            VkPhysicalDeviceImageFormatInfo2 format_info {};
+            format_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+            format_info.pNext = &external_info;
+            format_info.format = create_info.format;
+            format_info.type = create_info.imageType;
+            format_info.tiling = create_info.tiling;
+            format_info.usage = create_info.usage;
+            format_info.flags = create_info.flags;
+
+            VkExternalImageFormatProperties external_properties {};
+            external_properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+
+            VkImageFormatProperties2 image_properties {};
+            image_properties.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+            image_properties.pNext = &external_properties;
+
+            const VkResult result = vkGetPhysicalDeviceImageFormatProperties2(physical_device, &format_info, &image_properties);
+            throw_if_failed(result, operation);
+
+            if ((external_properties.externalMemoryProperties.externalMemoryFeatures & feature) == 0)
+            {
+                throw std::runtime_error(std::string(operation) + " is not supported for this HardwareImage usage.");
             }
         }
 
@@ -519,7 +638,7 @@ namespace Corona::Horizon
             break;
         }
 
-        if (desc.dedicated)
+        if (desc.dedicated || desc.exportable)
         {
             alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
         }
@@ -550,7 +669,7 @@ namespace Corona::Horizon
             break;
         }
 
-        if (desc.dedicated)
+        if (desc.dedicated || desc.exportable)
         {
             alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
         }
@@ -1074,19 +1193,231 @@ namespace Corona::Horizon
         std::vector<uint32_t> queue_family_indices;
         VkBufferCreateInfo create_info = buffer_info(desc, queue_family_indices);
 
+        VkExternalMemoryBufferCreateInfo external_buffer {};
+        if (desc.exportable)
+        {
+            const VkExternalMemoryHandleTypeFlags handle_type = external_memory_handle_type();
+            if (handle_type == 0)
+            {
+                throw std::runtime_error("Exportable HardwareBuffer is not supported on this platform.");
+            }
+
+            external_buffer.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+            external_buffer.handleTypes = handle_type;
+            create_info.pNext = &external_buffer;
+            require_external_buffer_feature(device_manager_->physical_device(),
+                                            create_info,
+                                            static_cast<VkExternalMemoryHandleTypeFlagBits>(handle_type),
+                                            VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT,
+                                            "Exportable HardwareBuffer");
+        }
+
         VmaAllocationCreateInfo alloc_info = allocation_info(desc);
-        const VkResult result = vmaCreateBuffer(allocator_,
-                                                &create_info,
-                                                &alloc_info,
-                                                &buffer.buffer_handle,
-                                                &buffer.buffer_alloc,
-                                                &buffer.buffer_alloc_info);
+        VkResult result = VK_SUCCESS;
+
+        if (desc.dedicated || desc.exportable)
+        {
+            VkExportMemoryAllocateInfo export_info {};
+            void* memory_next = nullptr;
+
+            if (desc.exportable)
+            {
+                export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+                export_info.handleTypes = external_memory_handle_type();
+                memory_next = &export_info;
+            }
+
+            result = vmaCreateDedicatedBuffer(allocator_,
+                                              &create_info,
+                                              &alloc_info,
+                                              memory_next,
+                                              &buffer.buffer_handle,
+                                              &buffer.buffer_alloc,
+                                              &buffer.buffer_alloc_info);
+        }
+        else
+        {
+            result = vmaCreateBuffer(allocator_,
+                                     &create_info,
+                                     &alloc_info,
+                                     &buffer.buffer_handle,
+                                     &buffer.buffer_alloc,
+                                     &buffer.buffer_alloc_info);
+        }
 
         throw_if_failed(result, "vmaCreateBuffer");
 
         buffer.allocation_size = buffer.buffer_alloc_info.size != 0 ? static_cast<uint64_t>(buffer.buffer_alloc_info.size) : logical_size;
+        buffer.imported = false;
         name_buffer(device_manager_->logical_device(), allocator_, buffer);
         return buffer;
+    }
+
+    BufferWrap ResourceManager::import_buffer(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::import_buffer called before initialize().");
+        }
+
+        if (!handle)
+        {
+            throw std::invalid_argument("ResourceManager::import_buffer requires a valid external memory handle.");
+        }
+
+        const uint64_t logical_size = desc.byte_size();
+        if (logical_size == 0)
+        {
+            return {};
+        }
+
+        const VkExternalMemoryHandleTypeFlagBits handle_type = to_vk_external_memory_handle_type(handle.type);
+        if (handle_type == 0)
+        {
+            throw std::runtime_error("External memory handle type is not supported on this platform.");
+        }
+
+        const uint64_t allocation_size = handle.allocation_size != 0 ? handle.allocation_size : logical_size;
+        const BufferRange memory_range = handle.memory_range.resolve(allocation_size);
+        if (memory_range.byte_offset != 0)
+        {
+            throw std::invalid_argument("HardwareBuffer external import only supports zero-offset dedicated memory.");
+        }
+
+        if (memory_range.byte_size < logical_size)
+        {
+            throw std::invalid_argument("HardwareBuffer external memory range is smaller than the requested buffer.");
+        }
+
+        BufferWrap buffer;
+        buffer.desc = desc;
+        buffer.buffer_usage = to_vk_buffer_usage(desc.usage);
+        buffer.device_manager = device_manager_;
+        buffer.resource_manager = this;
+
+        std::vector<uint32_t> queue_family_indices;
+        VkBufferCreateInfo create_info = buffer_info(desc, queue_family_indices);
+        create_info.size = memory_range.byte_size;
+
+        VkExternalMemoryBufferCreateInfo external_buffer {};
+        external_buffer.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+        external_buffer.handleTypes = handle_type;
+        create_info.pNext = &external_buffer;
+
+        require_external_buffer_feature(device_manager_->physical_device(),
+                                        create_info,
+                                        handle_type,
+                                        VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
+                                        "Imported HardwareBuffer");
+
+        VmaAllocationCreateInfo alloc_info = allocation_info(desc);
+        alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+#if defined(_WIN32) || defined(_WIN64)
+        VkImportMemoryWin32HandleInfoKHR import_info {};
+        import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+        import_info.handleType = handle_type;
+        import_info.handle = static_cast<HANDLE>(handle.handle);
+        void* import_next = &import_info;
+#elif defined(__linux__) && VMA_EXTERNAL_MEMORY
+        VkImportMemoryFdInfoKHR import_info {};
+        import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+        import_info.handleType = handle_type;
+        import_info.fd = handle.fd;
+        void* import_next = &import_info;
+#else
+        void* import_next = nullptr;
+#endif
+
+        if (import_next == nullptr)
+        {
+            throw std::runtime_error("External memory import is not supported on this platform.");
+        }
+
+        const VkResult result = vmaCreateDedicatedBuffer(allocator_,
+                                                         &create_info,
+                                                         &alloc_info,
+                                                         import_next,
+                                                         &buffer.buffer_handle,
+                                                         &buffer.buffer_alloc,
+                                                         &buffer.buffer_alloc_info);
+        throw_if_failed(result, "vmaCreateDedicatedBuffer(import)");
+
+        buffer.allocation_size = allocation_size;
+        buffer.imported = true;
+        buffer.host_imported_manual_bind = false;
+        name_buffer(device_manager_->logical_device(), allocator_, buffer);
+        return buffer;
+    }
+
+    ExternalMemoryHandle ResourceManager::export_buffer(BufferWrap& buffer)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::export_buffer called before initialize().");
+        }
+
+        if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE)
+        {
+            throw std::invalid_argument("ResourceManager::export_buffer requires a valid HardwareBuffer allocation.");
+        }
+
+        if (!buffer.desc.exportable)
+        {
+            throw std::logic_error("HardwareBuffer was not created with exportable=true.");
+        }
+
+        const uint64_t allocation_size = buffer.allocation_size != 0
+            ? buffer.allocation_size
+            : static_cast<uint64_t>(buffer.buffer_alloc_info.size);
+        const BufferRange memory_range { 0, buffer.logical_size() };
+
+#if defined(_WIN32) || defined(_WIN64)
+        if (buffer.exported_win32_handle == nullptr)
+        {
+            VmaAllocationInfo allocation_info {};
+            vmaGetAllocationInfo(allocator_, buffer.buffer_alloc, &allocation_info);
+
+            auto get_memory_win32_handle =
+                reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(vkGetDeviceProcAddr(device_manager_->logical_device(), "vkGetMemoryWin32HandleKHR"));
+            if (get_memory_win32_handle == nullptr)
+            {
+                throw std::runtime_error("vkGetMemoryWin32HandleKHR is not available on this Vulkan device.");
+            }
+
+            VkMemoryGetWin32HandleInfoKHR handle_info {};
+            handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+            handle_info.memory = allocation_info.deviceMemory;
+            handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+            HANDLE exported_handle = nullptr;
+            const VkResult result = get_memory_win32_handle(device_manager_->logical_device(), &handle_info, &exported_handle);
+            throw_if_failed(result, "vkGetMemoryWin32HandleKHR");
+            buffer.exported_win32_handle = exported_handle;
+        }
+
+        HANDLE duplicate = duplicate_win32_handle(static_cast<HANDLE>(buffer.exported_win32_handle));
+        return ExternalMemoryHandle::win32(duplicate, allocation_size, memory_range);
+#elif defined(__linux__) && VMA_EXTERNAL_MEMORY
+        VmaAllocationInfo allocation_info {};
+        vmaGetAllocationInfo(allocator_, buffer.buffer_alloc, &allocation_info);
+
+        VkMemoryGetFdInfoKHR fd_info {};
+        fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+        fd_info.memory = allocation_info.deviceMemory;
+        fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        int fd = -1;
+        const VkResult result = vkGetMemoryFdKHR(device_manager_->logical_device(), &fd_info, &fd);
+        throw_if_failed(result, "vkGetMemoryFdKHR");
+        return ExternalMemoryHandle::opaque_fd(fd, allocation_size, memory_range);
+#else
+        throw std::runtime_error("External memory export is not supported on this platform.");
+#endif
     }
 
     uint32_t ResourceManager::store_descriptor(BufferWrap& buffer)
@@ -1210,21 +1541,184 @@ namespace Corona::Horizon
 
         VkImageCreateInfo create_info = image_info(desc);
 
+        VkExternalMemoryImageCreateInfo external_image {};
+        if (desc.exportable)
+        {
+            const VkExternalMemoryHandleTypeFlags handle_type = external_memory_handle_type();
+            if (handle_type == 0)
+            {
+                throw std::runtime_error("Exportable HardwareImage is not supported on this platform.");
+            }
+
+            external_image.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+            external_image.handleTypes = handle_type;
+            create_info.pNext = &external_image;
+            require_external_image_feature(device_manager_->physical_device(),
+                                           create_info,
+                                           static_cast<VkExternalMemoryHandleTypeFlagBits>(handle_type),
+                                           VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT,
+                                           "Exportable HardwareImage");
+        }
+
         require_image_format_support(device_manager_->physical_device(), create_info, desc, "HardwareImage");
 
         VmaAllocationCreateInfo alloc_info = allocation_info(desc);
-        const VkResult result = vmaCreateImage(allocator_,
-                                               &create_info,
-                                               &alloc_info,
-                                               &image.image_handle,
-                                               &image.image_alloc,
-                                               &image.image_alloc_info);
+        VkResult result = VK_SUCCESS;
+
+        if (desc.dedicated || desc.exportable)
+        {
+            VkExportMemoryAllocateInfo export_info {};
+            void* memory_next = nullptr;
+
+            if (desc.exportable)
+            {
+                export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+                export_info.handleTypes = external_memory_handle_type();
+                memory_next = &export_info;
+            }
+
+            result = vmaCreateDedicatedImage(allocator_,
+                                             &create_info,
+                                             &alloc_info,
+                                             memory_next,
+                                             &image.image_handle,
+                                             &image.image_alloc,
+                                             &image.image_alloc_info);
+        }
+        else
+        {
+            result = vmaCreateImage(allocator_,
+                                    &create_info,
+                                    &alloc_info,
+                                    &image.image_handle,
+                                    &image.image_alloc,
+                                    &image.image_alloc_info);
+        }
 
         throw_if_failed(result, "vmaCreateImage");
 
         try
         {
             image.allocation_size = image.image_alloc_info.size != 0 ? static_cast<uint64_t>(image.image_alloc_info.size) : 0;
+            image.imported = false;
+            image.owns_native_image = true;
+            image.image_view = create_image_view(image, ImageSubresourceRange::whole());
+            name_image(device_manager_->logical_device(), allocator_, image);
+        }
+        catch (...)
+        {
+            if (image.image_view != VK_NULL_HANDLE)
+            {
+                vkDestroyImageView(device_manager_->logical_device(), image.image_view, nullptr);
+            }
+            if (image.image_handle != VK_NULL_HANDLE && image.image_alloc != VK_NULL_HANDLE)
+            {
+                vmaDestroyImage(allocator_, image.image_handle, image.image_alloc);
+            }
+            image.clear_handles();
+            throw;
+        }
+
+        return image;
+    }
+
+    ImageWrap ResourceManager::import_image(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::import_image called before initialize().");
+        }
+
+        if (!handle)
+        {
+            throw std::invalid_argument("ResourceManager::import_image requires a valid external memory handle.");
+        }
+
+        if (desc.extent.width == 0 || desc.extent.height == 0 || desc.extent.depth == 0 ||
+            desc.array_layers == 0 || desc.mip_levels == 0 || to_vk_format(desc.format) == VK_FORMAT_UNDEFINED)
+        {
+            return {};
+        }
+
+        const VkExternalMemoryHandleTypeFlagBits handle_type = to_vk_external_memory_handle_type(handle.type);
+        if (handle_type == 0)
+        {
+            throw std::runtime_error("External image memory handle type is not supported on this platform.");
+        }
+
+        const uint64_t imported_allocation_size = allocation_size != 0
+            ? allocation_size
+            : handle.allocation_size;
+        const BufferRange memory_range = handle.memory_range.resolve(imported_allocation_size);
+        if (memory_range.byte_offset != 0)
+        {
+            throw std::invalid_argument("HardwareImage external import only supports zero-offset dedicated memory.");
+        }
+
+        ImageWrap image;
+        image.desc = desc;
+        image.range = ImageSubresourceRange::whole();
+        image.image_usage = to_vk_image_usage(desc.usage);
+        image.image_format = to_vk_format(desc.format);
+        image.aspect_mask = aspect_mask(desc.format);
+        image.device_manager = device_manager_;
+        image.resource_manager = this;
+
+        VkImageCreateInfo create_info = image_info(desc);
+
+        VkExternalMemoryImageCreateInfo external_image {};
+        external_image.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+        external_image.handleTypes = handle_type;
+        create_info.pNext = &external_image;
+
+        require_external_image_feature(device_manager_->physical_device(),
+                                       create_info,
+                                       handle_type,
+                                       VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
+                                       "Imported HardwareImage");
+        require_image_format_support(device_manager_->physical_device(), create_info, desc, "Imported HardwareImage");
+
+        VmaAllocationCreateInfo alloc_info = allocation_info(desc);
+        alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+#if defined(_WIN32) || defined(_WIN64)
+        VkImportMemoryWin32HandleInfoKHR import_info {};
+        import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+        import_info.handleType = handle_type;
+        import_info.handle = static_cast<HANDLE>(handle.handle);
+        void* import_next = &import_info;
+#elif defined(__linux__) && VMA_EXTERNAL_MEMORY
+        VkImportMemoryFdInfoKHR import_info {};
+        import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+        import_info.handleType = handle_type;
+        import_info.fd = handle.fd;
+        void* import_next = &import_info;
+#else
+        void* import_next = nullptr;
+#endif
+
+        if (import_next == nullptr)
+        {
+            throw std::runtime_error("External image memory import is not supported on this platform.");
+        }
+
+        const VkResult result = vmaCreateDedicatedImage(allocator_,
+                                                        &create_info,
+                                                        &alloc_info,
+                                                        import_next,
+                                                        &image.image_handle,
+                                                        &image.image_alloc,
+                                                        &image.image_alloc_info);
+        throw_if_failed(result, "vmaCreateDedicatedImage(import)");
+
+        try
+        {
+            image.allocation_size = imported_allocation_size != 0
+                ? imported_allocation_size
+                : static_cast<uint64_t>(image.image_alloc_info.size);
+            image.imported = true;
             image.owns_native_image = true;
             image.image_view = create_image_view(image, ImageSubresourceRange::whole());
             name_image(device_manager_->logical_device(), allocator_, image);
@@ -1278,6 +1772,7 @@ namespace Corona::Horizon
         image.device_manager = device_manager_;
         image.resource_manager = this;
         image.owns_native_image = false;
+        image.imported = false;
 
         try
         {
@@ -1295,6 +1790,74 @@ namespace Corona::Horizon
         }
 
         return image;
+    }
+
+    ExternalMemoryHandle ResourceManager::export_image(ImageWrap& image)
+    {
+        std::lock_guard lock(mutex_);
+
+        if (device_manager_ == nullptr || allocator_ == VK_NULL_HANDLE)
+        {
+            throw std::runtime_error("ResourceManager::export_image called before initialize().");
+        }
+
+        if (!image.valid() || image.image_alloc == VK_NULL_HANDLE)
+        {
+            throw std::invalid_argument("ResourceManager::export_image requires a valid HardwareImage allocation.");
+        }
+
+        if (!image.desc.exportable)
+        {
+            throw std::logic_error("HardwareImage was not created with exportable=true.");
+        }
+
+        const uint64_t allocation_size = image.allocation_size != 0
+            ? image.allocation_size
+            : static_cast<uint64_t>(image.image_alloc_info.size);
+        const BufferRange memory_range { 0, allocation_size };
+
+#if defined(_WIN32) || defined(_WIN64)
+        if (image.exported_win32_handle == nullptr)
+        {
+            VmaAllocationInfo allocation_info {};
+            vmaGetAllocationInfo(allocator_, image.image_alloc, &allocation_info);
+
+            auto get_memory_win32_handle =
+                reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(vkGetDeviceProcAddr(device_manager_->logical_device(), "vkGetMemoryWin32HandleKHR"));
+            if (get_memory_win32_handle == nullptr)
+            {
+                throw std::runtime_error("vkGetMemoryWin32HandleKHR is not available on this Vulkan device.");
+            }
+
+            VkMemoryGetWin32HandleInfoKHR handle_info {};
+            handle_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+            handle_info.memory = allocation_info.deviceMemory;
+            handle_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+            HANDLE exported_handle = nullptr;
+            const VkResult result = get_memory_win32_handle(device_manager_->logical_device(), &handle_info, &exported_handle);
+            throw_if_failed(result, "vkGetMemoryWin32HandleKHR");
+            image.exported_win32_handle = exported_handle;
+        }
+
+        HANDLE duplicate = duplicate_win32_handle(static_cast<HANDLE>(image.exported_win32_handle));
+        return ExternalMemoryHandle::win32(duplicate, allocation_size, memory_range);
+#elif defined(__linux__) && VMA_EXTERNAL_MEMORY
+        VmaAllocationInfo allocation_info {};
+        vmaGetAllocationInfo(allocator_, image.image_alloc, &allocation_info);
+
+        VkMemoryGetFdInfoKHR fd_info {};
+        fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+        fd_info.memory = allocation_info.deviceMemory;
+        fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        int fd = -1;
+        const VkResult result = vkGetMemoryFdKHR(device_manager_->logical_device(), &fd_info, &fd);
+        throw_if_failed(result, "vkGetMemoryFdKHR");
+        return ExternalMemoryHandle::opaque_fd(fd, allocation_size, memory_range);
+#else
+        throw std::runtime_error("External image memory export is not supported on this platform.");
+#endif
     }
 
     uint32_t ResourceManager::store_descriptor(ImageWrap& image)
@@ -1568,6 +2131,13 @@ namespace Corona::Horizon
             storage_buffer_descriptors_.release(static_cast<uint32_t>(buffer.bindless_index));
         }
 
+#if defined(_WIN32) || defined(_WIN64)
+        if (buffer.desc.exportable)
+        {
+            close_win32_handle(buffer.exported_win32_handle);
+        }
+#endif
+
         if (buffer.buffer_handle == VK_NULL_HANDLE)
         {
             buffer.clear_handles();
@@ -1576,7 +2146,18 @@ namespace Corona::Horizon
 
         if (allocator_ != VK_NULL_HANDLE && buffer.buffer_alloc != VK_NULL_HANDLE)
         {
-            vmaDestroyBuffer(allocator_, buffer.buffer_handle, buffer.buffer_alloc);
+            if (buffer.host_imported_manual_bind)
+            {
+                if (device_manager_ != nullptr && device_manager_->logical_device() != VK_NULL_HANDLE)
+                {
+                    vkDestroyBuffer(device_manager_->logical_device(), buffer.buffer_handle, nullptr);
+                }
+                vmaFreeMemory(allocator_, buffer.buffer_alloc);
+            }
+            else
+            {
+                vmaDestroyBuffer(allocator_, buffer.buffer_handle, buffer.buffer_alloc);
+            }
         }
         else if (device_manager_ != nullptr && device_manager_->logical_device() != VK_NULL_HANDLE)
         {
@@ -1601,6 +2182,13 @@ namespace Corona::Horizon
         {
             storage_image_descriptors_.release(static_cast<uint32_t>(image.storage_bindless_index));
         }
+
+#if defined(_WIN32) || defined(_WIN64)
+        if (image.desc.exportable)
+        {
+            close_win32_handle(image.exported_win32_handle);
+        }
+#endif
 
         if (device_manager_ != nullptr && device_manager_->logical_device() != VK_NULL_HANDLE)
         {

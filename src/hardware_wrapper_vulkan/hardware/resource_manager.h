@@ -37,12 +37,16 @@ namespace Corona::Horizon
         [[nodiscard]] bool initialized() const noexcept;
 
         [[nodiscard]] BufferWrap create_buffer(const HardwareBufferDesc& desc);
+        [[nodiscard]] BufferWrap import_buffer(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
+        [[nodiscard]] ExternalMemoryHandle export_buffer(BufferWrap& buffer);
         [[nodiscard]] uint32_t store_descriptor(BufferWrap& buffer);
         void flush_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size);
         void destroy_buffer(BufferWrap& buffer) noexcept;
 
         [[nodiscard]] ImageWrap create_image(const HardwareImageDesc& desc);
+        [[nodiscard]] ImageWrap import_image(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
         [[nodiscard]] ImageWrap wrap_swapchain_image(VkImage image, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, std::string debug_name = {});
+        [[nodiscard]] ExternalMemoryHandle export_image(ImageWrap& image);
         [[nodiscard]] uint32_t store_descriptor(ImageWrap& image);
         [[nodiscard]] uint32_t store_sampled_descriptor(ImageWrap& image);
         [[nodiscard]] uint32_t store_storage_descriptor(ImageWrap& image);

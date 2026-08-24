@@ -321,6 +321,9 @@ namespace Corona::Horizon
         if ((desc.usage & BufferUsage_Index) && !is_index_element_size(desc.element_size))
             return validation_error("HardwareBufferDesc index element_size must be 2 or 4 bytes.");
 
+        if (desc.exportable && !desc.dedicated)
+            validation_warning("Exportable HardwareBuffer will force dedicated allocation.");
+
         return true;
     }
 
@@ -389,6 +392,9 @@ namespace Corona::Horizon
 
         if (desc.cpu_access != CpuAccessMode::None && desc.sample_count > 1)
             return validation_error("Host-visible HardwareImage resources must not be multisampled.");
+
+        if (desc.exportable && !desc.dedicated)
+            validation_warning("Exportable HardwareImage will force dedicated allocation.");
 
         return true;
     }

@@ -10,6 +10,7 @@ namespace Corona::Horizon
     class HardwareBuffer;
     struct HardwareBufferDesc;
     struct HardwareImageDesc;
+    struct BufferRange;
     struct ImageSubresourceRange;
     struct RasterizerPipelineDesc;
     struct RasterizerPipelineShaders;

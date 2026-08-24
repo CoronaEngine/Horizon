@@ -152,6 +152,33 @@ namespace Corona::Horizon
         return resource_manager().store_descriptor(*buffer);
     }
 
+    HardwareBuffer HardwareBuffer::import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc)
+    {
+        if (!handle)
+            throw std::invalid_argument("HardwareBuffer::import_external requires a valid external memory handle.");
+
+        if (!validate_buffer_desc(desc))
+            return {};
+
+        HardwareBuffer buffer;
+        auto resource = resource_pool().buffers.create(
+            [&handle, &desc] {
+                return resource_manager().import_buffer(handle, desc);
+            });
+
+        ResourceBridge::set(buffer, make_token<ResourceStore<BufferWrap, BufferReleaser>>(std::move(resource)));
+        return buffer;
+    }
+
+    ExternalMemoryHandle HardwareBuffer::export_external() const
+    {
+        auto buffer = write_buffer(*this);
+        if (!buffer)
+            throw std::invalid_argument("HardwareBuffer::export_external requires a valid buffer.");
+
+        return resource_manager().export_buffer(*buffer);
+    }
+
     // 以下两个从 horizon.h 移出（原为 inline）。只为压缩公共头，语义未变。
     uint64_t HardwareBufferDesc::byte_size() const
     {

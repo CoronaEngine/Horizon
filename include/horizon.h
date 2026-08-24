@@ -164,6 +164,50 @@ namespace Corona::Horizon
         BufferUsage_Indirect = 1 << 6,
     };
 
+    struct BufferRange
+    {
+        static constexpr uint64_t whole_size = ~uint64_t { 0 };
+
+        uint64_t byte_offset = 0;
+        uint64_t byte_size = whole_size;
+
+        static constexpr BufferRange entire() noexcept { return {}; }
+
+        [[nodiscard]] constexpr BufferRange resolve(uint64_t total_size) const noexcept
+        {
+            BufferRange result = *this;
+            if (result.byte_size == whole_size)
+                result.byte_size = result.byte_offset <= total_size ? total_size - result.byte_offset : 0;
+            return result;
+        }
+    };
+
+    enum class ExternalMemoryHandleType : uint8_t
+    {
+        None,
+        OpaqueFd,
+        OpaqueWin32,
+    };
+
+    struct ExternalMemoryHandle
+    {
+        ExternalMemoryHandleType type = ExternalMemoryHandleType::None;
+
+        void* handle = nullptr;
+        int fd = -1;
+
+        uint64_t allocation_size = 0;
+        BufferRange memory_range = BufferRange::entire();
+
+        [[nodiscard]] static constexpr ExternalMemoryHandle win32(void* value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept { return { ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range }; }
+
+        [[nodiscard]] static constexpr ExternalMemoryHandle opaque_fd(int value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept { return { ExternalMemoryHandleType::OpaqueFd, nullptr, value, size, range }; }
+
+        [[nodiscard]] constexpr bool valid() const noexcept { return type == ExternalMemoryHandleType::OpaqueWin32 ? handle != nullptr : type == ExternalMemoryHandleType::OpaqueFd ? fd >= 0 : false; }
+
+        [[nodiscard]] explicit constexpr operator bool() const noexcept { return valid(); }
+    };
+
     enum class ImageDimension : uint8_t
     {
         Image1D,
@@ -454,6 +498,7 @@ namespace Corona::Horizon
         BufferUsageFlags usage = BufferUsage_None;
         CpuAccessMode cpu_access = CpuAccessMode::Write;
         bool dedicated = false;
+        bool exportable = false;
         std::string debug_name;
 
         [[nodiscard]] uint64_t byte_size() const;
@@ -536,6 +581,8 @@ namespace Corona::Horizon
         }
 
         [[nodiscard]] uint32_t store_descriptor() const;
+        [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
+        [[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
         friend class HardwareImage;
@@ -552,6 +599,7 @@ namespace Corona::Horizon
         uint32_t mip_levels = 1;
         uint32_t sample_count = 1;
         bool dedicated = false;
+        bool exportable = false;
         std::string debug_name;
 
         static HardwareImageDesc texture_2d(uint32_t width,
@@ -600,6 +648,8 @@ namespace Corona::Horizon
 
         [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer& src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
+        static HardwareImage import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
+        [[nodiscard]] ExternalMemoryHandle export_external() const;
 
     private:
         ImageSubresourceRange range_ = ImageSubresourceRange::whole();
