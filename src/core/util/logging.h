@@ -5,34 +5,40 @@
 #pragma once
 
 #include "core/util/string_util.h"
-#include <exception>
-#include <iostream>
-#include <filesystem>
 
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/spdlog.h>
+#include <cstdlib>
+#include <exception>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace horizon::core {
-OC_CORE_API spdlog::logger &logger() noexcept;
+namespace detail {
+OC_CORE_API void log_debug_message(std::string message) noexcept;
+OC_CORE_API void log_info_message(std::string message) noexcept;
+OC_CORE_API void log_warning_message(std::string message) noexcept;
+OC_CORE_API void log_error_message(std::string message) noexcept;
+}// namespace detail
 
 OC_CORE_API void log_level_debug() noexcept;
 OC_CORE_API void log_level_info() noexcept;
 OC_CORE_API void log_level_warning() noexcept;
 OC_CORE_API void log_level_error() noexcept;
+OC_CORE_API void log_flush() noexcept;
 
 template<typename... Args>
 inline void debug(Args &&...args) noexcept {
-    logger().debug(serialize(std::forward<Args>(args)...));
+    detail::log_debug_message(serialize(std::forward<Args>(args)...));
 }
 
 template<typename... Args>
 inline void info(Args &&...args) noexcept {
-    logger().info(serialize(std::forward<Args>(args)...));
+    detail::log_info_message(serialize(std::forward<Args>(args)...));
 }
 
 template<typename... Args>
 inline void warning(Args &&...args) noexcept {
-    logger().warn(serialize(std::forward<Args>(args)...));
+    detail::log_warning_message(serialize(std::forward<Args>(args)...));
 }
 
 template<typename... Args>
@@ -62,9 +68,10 @@ inline void exception_if_not(bool predicate, Args &&...args) {
 
 template<typename... Args>
 [[noreturn]] inline void error(Args &&...args) {
-    logger().error(serialize(std::forward<Args>(args)...));
+    detail::log_error_message(serialize(std::forward<Args>(args)...));
+    log_flush();
     OC_ASSERT(0);
-    exit(-1);
+    std::exit(-1);
 }
 
 template<typename... Args>

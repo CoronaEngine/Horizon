@@ -4,26 +4,53 @@
 
 #include "core/util/logging.h"
 
+#include <quill/Backend.h>
+#include <quill/Frontend.h>
+#include <quill/LogMacros.h>
+#include <quill/Logger.h>
+#include <quill/sinks/ConsoleSink.h>
+
 namespace horizon::core {
-spdlog::logger &logger() noexcept {
-    static auto logger = [] {
-        auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        spdlog::logger l{"console", sink};
-        l.flush_on(spdlog::level::err);
+namespace {
+quill::Logger *quill_logger() noexcept {
+    static quill::Logger *instance = [] {
+        quill::Backend::start();
+        auto sink = quill::Frontend::create_or_get_sink<quill::ConsoleSink>(
+            "horizon_core_console");
+        auto *result = quill::Frontend::create_or_get_logger("horizon_core", std::move(sink));
 #ifndef NDEBUG
-        l.set_level(spdlog::level::debug);
+        result->set_log_level(quill::LogLevel::Debug);
 #else
-        l.set_level(spdlog::level::info);
+        result->set_log_level(quill::LogLevel::Info);
 #endif
-        return l;
+        return result;
     }();
-    return logger;
+    return instance;
+}
+}// namespace
+
+namespace detail {
+void log_debug_message(std::string message) noexcept {
+    LOG_DEBUG(quill_logger(), "{}", message);
 }
 
-void log_level_debug() noexcept { logger().set_level(spdlog::level::debug); }
-void log_level_info() noexcept { logger().set_level(spdlog::level::info); }
-void log_level_warning() noexcept { logger().set_level(spdlog::level::warn); }
-void log_level_error() noexcept { logger().set_level(spdlog::level::err); }
+void log_info_message(std::string message) noexcept {
+    LOG_INFO(quill_logger(), "{}", message);
+}
 
-void log_flush() noexcept { logger().flush(); }
+void log_warning_message(std::string message) noexcept {
+    LOG_WARNING(quill_logger(), "{}", message);
+}
+
+void log_error_message(std::string message) noexcept {
+    LOG_ERROR(quill_logger(), "{}", message);
+}
+}// namespace detail
+
+void log_level_debug() noexcept { quill_logger()->set_log_level(quill::LogLevel::Debug); }
+void log_level_info() noexcept { quill_logger()->set_log_level(quill::LogLevel::Info); }
+void log_level_warning() noexcept { quill_logger()->set_log_level(quill::LogLevel::Warning); }
+void log_level_error() noexcept { quill_logger()->set_log_level(quill::LogLevel::Error); }
+
+void log_flush() noexcept { quill_logger()->flush_log(); }
 }// namespace horizon::core

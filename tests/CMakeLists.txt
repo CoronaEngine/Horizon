@@ -35,3 +35,19 @@ add_test(
             -DRUNTIME_SOURCE_DIR=${PROJECT_SOURCE_DIR}/src/runtime
             -P ${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_dsl_runtime_boundary.cmake
 )
+
+set(_quill_logging_boundary_build_dir
+    "${CMAKE_CURRENT_BINARY_DIR}/quill-logging-boundary")
+add_test(
+    NAME horizon.architecture.quill_logging_boundary
+    COMMAND ${CMAKE_COMMAND} -E env CORONA_DEV_BOOTSTRAP_ACTIVE=1
+            ${CMAKE_COMMAND}
+            -S ${PROJECT_SOURCE_DIR}
+            -B ${_quill_logging_boundary_build_dir}
+            -G "${CMAKE_GENERATOR}"
+            -DHORIZON_DEV_CONFIGURATION=${HORIZON_DEV_CONFIGURATION}
+            -DHORIZON_DEV_TARGET_FAMILY=core
+            -DHORIZON_BUILD_ENGINE=OFF
+            -DHORIZON_BUILD_TESTS=OFF
+            -DCMAKE_DISABLE_FIND_PACKAGE_spdlog=TRUE
+)

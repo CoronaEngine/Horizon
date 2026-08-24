@@ -16,12 +16,11 @@ target_include_directories(horizon-core
     "${PROJECT_SOURCE_DIR}/src"
 )
 target_link_libraries(horizon-core PUBLIC
-    quill::quill
     $<$<TARGET_EXISTS:horizon::fmt>:horizon::fmt>
-    $<$<TARGET_EXISTS:horizon::spdlog>:horizon::spdlog>
     $<$<TARGET_EXISTS:horizon::xxhash>:horizon::xxhash>
 )
 target_link_libraries(horizon-core PRIVATE
+    quill::quill
     ${CMAKE_DL_LIBS}
     $<$<PLATFORM_ID:Windows>:dbghelp>
 )

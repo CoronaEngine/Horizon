@@ -25,3 +25,11 @@ add_test(
     NAME horizon.core.platform
     COMMAND horizon-test-core-platform $<TARGET_FILE:horizon-test-dynamic-module>
 )
+
+add_executable(horizon-test-core-logging test_logging.cpp)
+target_link_libraries(horizon-test-core-logging PRIVATE horizon-core)
+target_compile_features(horizon-test-core-logging PRIVATE cxx_std_20)
+
+add_dependencies(horizon-tests horizon-test-core-logging)
+
+add_test(NAME horizon.core.logging COMMAND horizon-test-core-logging)
