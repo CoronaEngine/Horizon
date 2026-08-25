@@ -115,9 +115,10 @@ template<typename T, typename... A>
 template<typename Var, typename... RestVar, typename Tag, typename... RestTag>
 [[nodiscard]] auto create_argument_definition_impl(horizon::dsl::tuple<Var, RestVar...> *var_tuple,
                                                    horizon::dsl::tuple<Tag, RestTag...> *tag_tuple) {
-    return tuple_insert(create_argument_definition_impl(static_cast<tuple<RestVar...> *>(nullptr),
-                                                        static_cast<tuple<RestTag...> *>(nullptr)),
-                        Var{Tag{}});
+    auto first = Var{Tag{}};
+    auto rest = create_argument_definition_impl(static_cast<tuple<RestVar...> *>(nullptr),
+                                                static_cast<tuple<RestTag...> *>(nullptr));
+    return tuple_insert(std::move(rest), std::move(first));
 }
 
 }// namespace detail
