@@ -535,6 +535,8 @@ public:
         TEXTURE2D,
         BINDLESS_ARRAY,
         ACCEL,
+        RW_TEXTURE3D,
+        RW_TEXTURE2D,
 
         NONE
     };
@@ -626,7 +628,13 @@ public:
     [[nodiscard]] constexpr bool is_structure() const noexcept { return tag_ == Tag::STRUCTURE; }
     [[nodiscard]] constexpr bool is_buffer() const noexcept { return tag_ == Tag::BUFFER; }
     [[nodiscard]] constexpr bool is_byte_buffer() const noexcept { return tag_ == Tag::BYTE_BUFFER; }
-    [[nodiscard]] constexpr bool is_texture() const noexcept { return tag_ == Tag::TEXTURE3D || tag_ == Tag::TEXTURE2D; }
+    [[nodiscard]] constexpr bool is_texture() const noexcept {
+        return tag_ == Tag::TEXTURE3D || tag_ == Tag::TEXTURE2D ||
+               tag_ == Tag::RW_TEXTURE3D || tag_ == Tag::RW_TEXTURE2D;
+    }
+    [[nodiscard]] constexpr bool is_read_write_texture() const noexcept {
+        return tag_ == Tag::RW_TEXTURE3D || tag_ == Tag::RW_TEXTURE2D;
+    }
     [[nodiscard]] constexpr bool is_bindless_array() const noexcept { return tag_ == Tag::BINDLESS_ARRAY; }
     [[nodiscard]] constexpr bool is_accel() const noexcept { return tag_ == Tag::ACCEL; }
     [[nodiscard]] constexpr bool is_resource() const noexcept {

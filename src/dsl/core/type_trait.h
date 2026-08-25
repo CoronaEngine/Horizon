@@ -591,10 +591,16 @@ template<typename T>
 struct is_texture_impl : std::false_type {};
 
 template<typename T>
-struct is_texture_impl<Texture3D<T>> : std::true_type {};
+struct is_texture_impl<Texture3DView<T>> : std::true_type {};
 
 template<typename T>
-struct is_texture_impl<Texture2D<T>> : std::true_type {};
+struct is_texture_impl<Texture2DView<T>> : std::true_type {};
+
+template<typename T>
+struct is_texture_impl<RWTexture3DView<T>> : std::true_type {};
+
+template<typename T>
+struct is_texture_impl<RWTexture2DView<T>> : std::true_type {};
 
 }// namespace detail
 
@@ -608,7 +614,10 @@ template<typename T>
 struct is_texture2d_impl : std::false_type {};
 
 template<typename T>
-struct is_texture2d_impl<Texture2D<T>> : std::true_type {};
+struct is_texture2d_impl<Texture2DView<T>> : std::true_type {};
+
+template<typename T>
+struct is_texture2d_impl<RWTexture2DView<T>> : std::true_type {};
 
 }// namespace detail
 
@@ -622,7 +631,10 @@ template<typename T>
 struct is_texture3d_impl : std::false_type {};
 
 template<typename T>
-struct is_texture3d_impl<Texture3D<T>> : std::true_type {};
+struct is_texture3d_impl<Texture3DView<T>> : std::true_type {};
+
+template<typename T>
+struct is_texture3d_impl<RWTexture3DView<T>> : std::true_type {};
 
 }// namespace detail
 

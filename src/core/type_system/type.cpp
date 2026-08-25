@@ -36,6 +36,8 @@ struct TypeParser {
     static void parse_buffer_locked(Type *type, horizon::core::string_view desc) noexcept;
     static void parse_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept;
     static void parse_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept;
+    static void parse_rw_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept;
+    static void parse_rw_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept;
     static void parse_accel_locked(Type *type, horizon::core::string_view desc) noexcept;
     static void parse_byte_buffer_locked(Type *type, horizon::core::string_view desc) noexcept;
     static void parse_array_locked(Type *type, horizon::core::string_view desc) noexcept;
@@ -112,6 +114,8 @@ struct TypeParser {
         ret == "buffer"sv ||
         ret == "texture3d"sv ||
         ret == "texture2d"sv ||
+        ret == "rwtexture3d"sv ||
+        ret == "rwtexture2d"sv ||
         ret == "array"sv) {
         auto [start, end] = bracket_matching_near(str);
         ret = str.substr(0, end + 1);
@@ -247,6 +251,28 @@ void TypeParser::parse_texture2d_locked(Type *type, horizon::core::string_view d
     type->size_ = sizeof(TextureDesc);
 }
 
+void TypeParser::parse_rw_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept {
+    type->tag_ = Type::Tag::RW_TEXTURE3D;
+    auto elements = find_content(desc);
+    OC_ERROR_IF_NOT(elements.size() == 1u,
+                    "rwtexture3d requires exactly one element type: ",
+                    desc);
+    type->members_.push_back(parse_type_locked(elements.front()));
+    type->alignment_ = alignof(TextureDesc);
+    type->size_ = sizeof(TextureDesc);
+}
+
+void TypeParser::parse_rw_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept {
+    type->tag_ = Type::Tag::RW_TEXTURE2D;
+    auto elements = find_content(desc);
+    OC_ERROR_IF_NOT(elements.size() == 1u,
+                    "rwtexture2d requires exactly one element type: ",
+                    desc);
+    type->members_.push_back(parse_type_locked(elements.front()));
+    type->alignment_ = alignof(TextureDesc);
+    type->size_ = sizeof(TextureDesc);
+}
+
 void TypeParser::parse_accel_locked(Type *type, horizon::core::string_view desc) noexcept {
     type->tag_ = Type::Tag::ACCEL;
 }
@@ -364,6 +390,10 @@ const Type *TypeParser::parse_type_locked(horizon::core::string_view desc) noexc
             parse_texture3d_locked(type.get(), desc);
         } else if (desc.starts_with("texture2d")) {
             parse_texture2d_locked(type.get(), desc);
+        } else if (desc.starts_with("rwtexture3d")) {
+            parse_rw_texture3d_locked(type.get(), desc);
+        } else if (desc.starts_with("rwtexture2d")) {
+            parse_rw_texture2d_locked(type.get(), desc);
         } else if (desc.starts_with("accel")) {
             parse_accel_locked(type.get(), desc);
         } else if (desc.starts_with("bindlessArray")) {
@@ -409,6 +439,10 @@ bool Type::is_dynamic() const noexcept {
         case Tag::VECTOR:
         case Tag::MATRIX:
         case Tag::BUFFER:
+        case Tag::TEXTURE3D:
+        case Tag::TEXTURE2D:
+        case Tag::RW_TEXTURE3D:
+        case Tag::RW_TEXTURE2D:
         case Tag::STRUCTURE: {
             return std::ranges::any_of(members_, [](const Type *member) {
                 return member->is_dynamic();

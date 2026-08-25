@@ -93,6 +93,21 @@ namespace {
         const auto *elem = type_registry().resolve_type(type->element(), policy);
         return elem == nullptr ? string{} : horizon::core::format("buffer<{}>", elem->description());
     }
+    if (type->is_texture()) {
+        const auto *elem = type_registry().resolve_type(type->element(), policy);
+        if (elem == nullptr) {
+            return {};
+        }
+        string_view prefix;
+        switch (type->tag()) {
+            case Type::Tag::TEXTURE3D: prefix = "texture3d"; break;
+            case Type::Tag::TEXTURE2D: prefix = "texture2d"; break;
+            case Type::Tag::RW_TEXTURE3D: prefix = "rwtexture3d"; break;
+            case Type::Tag::RW_TEXTURE2D: prefix = "rwtexture2d"; break;
+            default: OC_ASSERT(false); return {};
+        }
+        return horizon::core::format("{}<{}>", prefix, elem->description());
+    }
     if (type->is_structure()) {
         string ret = horizon::core::format("struct<{},{},{},{}",
                                      type->cname(),
@@ -109,7 +124,7 @@ namespace {
         ret.push_back('>');
         return ret;
     }
-    if (type->is_byte_buffer() || type->is_texture() || type->is_bindless_array() || type->is_accel()) {
+    if (type->is_byte_buffer() || type->is_bindless_array() || type->is_accel()) {
         return string(type->description());
     }
     OC_ASSERT(false);

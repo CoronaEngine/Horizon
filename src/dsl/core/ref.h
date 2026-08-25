@@ -248,17 +248,27 @@ public:
 };
 
 template<typename T>
-struct Ref<Texture3D<T>>
-    : detail::EnableTextureSample<Ref<Texture3D<T>>, 3>,
-      detail::EnableTextureReadAndWrite<Ref<Texture3D<T>>, 3> {
-    OC_REF_COMMON(Ref<Texture3D<T>>)
+struct Ref<Texture3DView<T>>
+    : detail::EnableTextureSample<Ref<Texture3DView<T>>, 3> {
+    OC_REF_COMMON(Ref<Texture3DView<T>>)
 };
 
 template<typename T>
-struct Ref<Texture2D<T>>
-    : detail::EnableTextureSample<Ref<Texture2D<T>>, 2>,
-      detail::EnableTextureReadAndWrite<Ref<Texture2D<T>>, 2> {
-    OC_REF_COMMON(Ref<Texture2D<T>>)
+struct Ref<Texture2DView<T>>
+    : detail::EnableTextureSample<Ref<Texture2DView<T>>, 2> {
+    OC_REF_COMMON(Ref<Texture2DView<T>>)
+};
+
+template<typename T>
+struct Ref<RWTexture3DView<T>>
+    : detail::EnableTextureReadAndWrite<Ref<RWTexture3DView<T>>, 3> {
+    OC_REF_COMMON(Ref<RWTexture3DView<T>>)
+};
+
+template<typename T>
+struct Ref<RWTexture2DView<T>>
+    : detail::EnableTextureReadAndWrite<Ref<RWTexture2DView<T>>, 2> {
+    OC_REF_COMMON(Ref<RWTexture2DView<T>>)
 };
 
 template<>

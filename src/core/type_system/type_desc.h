@@ -18,9 +18,18 @@ template<typename T>
 class BufferView;
 
 template<typename T>
-class Texture3D;
+class Texture3DView;
 template<typename T>
-class Texture2D;
+class Texture2DView;
+template<typename T>
+class RWTexture3DView;
+template<typename T>
+class RWTexture2DView;
+
+template<typename T>
+using Texture3D = Texture3DView<T>;
+template<typename T>
+using Texture2D = Texture2DView<T>;
 class ByteBuffer;
 
 class Accel;
@@ -132,7 +141,7 @@ template<>
 struct TypeDesc<BufferDesc<>> : public TypeDesc<ByteBuffer> {};
 
 template<typename T>
-struct TypeDesc<Texture3D<T>> {
+struct TypeDesc<Texture3DView<T>> {
     static horizon::core::string &description() noexcept {
         static thread_local string str = horizon::core::format(
             "texture3d<{}>", TypeDesc<T>::description());
@@ -144,10 +153,34 @@ struct TypeDesc<Texture3D<T>> {
 };
 
 template<typename T>
-struct TypeDesc<Texture2D<T>> {
+struct TypeDesc<Texture2DView<T>> {
     static horizon::core::string &description() noexcept {
         static thread_local string str = horizon::core::format(
             "texture2d<{}>", TypeDesc<T>::description());
+        return str;
+    }
+    static horizon::core::string_view name() noexcept {
+        return description();
+    }
+};
+
+template<typename T>
+struct TypeDesc<RWTexture3DView<T>> {
+    static horizon::core::string &description() noexcept {
+        static thread_local string str = horizon::core::format(
+            "rwtexture3d<{}>", TypeDesc<T>::description());
+        return str;
+    }
+    static horizon::core::string_view name() noexcept {
+        return description();
+    }
+};
+
+template<typename T>
+struct TypeDesc<RWTexture2DView<T>> {
+    static horizon::core::string &description() noexcept {
+        static thread_local string str = horizon::core::format(
+            "rwtexture2d<{}>", TypeDesc<T>::description());
         return str;
     }
     static horizon::core::string_view name() noexcept {

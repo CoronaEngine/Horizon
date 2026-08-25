@@ -16,6 +16,21 @@ void expect(bool condition, const char *message) {
     }
 }
 
+template<typename T>
+concept can_sample_2d = requires(const T &texture) {
+    texture.sample(4u, 0.25f, 0.75f);
+};
+
+template<typename T>
+concept can_read_2d = requires(const T &texture) {
+    texture.template read<float>(1, 2);
+};
+
+template<typename T>
+concept can_write_2d = requires(T &texture) {
+    texture.write(1.0f, 1, 2);
+};
+
 std::vector<const horizon::ast::CallExpr *> top_level_calls(
     const horizon::ast::Function &function) {
     using horizon::ast::AssignStmt;
@@ -52,28 +67,53 @@ void expect_call(const horizon::ast::CallExpr *call,
 
 void test_texture_types_are_core_resources() {
     using horizon::core::Type;
+    using horizon::core::PrecisionPolicy;
+    using horizon::core::StoragePrecisionPolicy;
     using horizon::dsl::BindlessArray;
-    using horizon::dsl::Texture2D;
-    using horizon::dsl::Texture2DVar;
-    using horizon::dsl::Texture3D;
-    using horizon::dsl::Texture3DVar;
+    using horizon::dsl::RWTexture2DView;
+    using horizon::dsl::RWTexture2DViewVar;
+    using horizon::dsl::RWTexture3DView;
+    using horizon::dsl::RWTexture3DViewVar;
+    using horizon::dsl::Texture2DView;
+    using horizon::dsl::Texture2DViewVar;
+    using horizon::dsl::Texture3DView;
+    using horizon::dsl::Texture3DViewVar;
     using horizon::dsl::Var;
     using horizon::math::float2;
     using horizon::math::float4;
+    using horizon::math::real4;
 
     static_assert(std::is_same_v<BindlessArray, horizon::core::BindlessArray>);
-    static_assert(std::is_same_v<Texture2D<float4>, horizon::core::Texture2D<float4>>);
-    static_assert(std::is_same_v<Texture3D<float2>, horizon::core::Texture3D<float2>>);
-    static_assert(std::is_same_v<Texture2DVar<float4>, Var<Texture2D<float4>>>);
-    static_assert(std::is_same_v<Texture3DVar<float2>, Var<Texture3D<float2>>>);
-    static_assert(horizon::dsl::is_texture_v<Texture2D<float4>>);
-    static_assert(horizon::dsl::is_texture2d_v<Texture2D<float4>>);
-    static_assert(horizon::dsl::is_texture3d_v<Texture3D<float2>>);
+    static_assert(std::is_same_v<Texture2DView<float4>, horizon::core::Texture2DView<float4>>);
+    static_assert(std::is_same_v<Texture3DView<float2>, horizon::core::Texture3DView<float2>>);
+    static_assert(std::is_same_v<RWTexture2DView<float4>, horizon::core::RWTexture2DView<float4>>);
+    static_assert(std::is_same_v<RWTexture3DView<float2>, horizon::core::RWTexture3DView<float2>>);
+    static_assert(std::is_same_v<Texture2DViewVar<float4>, Var<Texture2DView<float4>>>);
+    static_assert(std::is_same_v<Texture3DViewVar<float2>, Var<Texture3DView<float2>>>);
+    static_assert(std::is_same_v<RWTexture2DViewVar<float4>, Var<RWTexture2DView<float4>>>);
+    static_assert(std::is_same_v<RWTexture3DViewVar<float2>, Var<RWTexture3DView<float2>>>);
+    static_assert(std::is_same_v<horizon::dsl::Texture2D<float4>, Texture2DView<float4>>);
+    static_assert(std::is_same_v<horizon::dsl::Texture3D<float2>, Texture3DView<float2>>);
+    static_assert(std::is_same_v<horizon::dsl::Texture2DVar<float4>, Texture2DViewVar<float4>>);
+    static_assert(std::is_same_v<horizon::dsl::Texture3DVar<float2>, Texture3DViewVar<float2>>);
+    static_assert(horizon::dsl::is_texture_v<Texture2DView<float4>>);
+    static_assert(horizon::dsl::is_texture_v<RWTexture2DView<float4>>);
+    static_assert(horizon::dsl::is_texture2d_v<Texture2DView<float4>>);
+    static_assert(horizon::dsl::is_texture2d_v<RWTexture2DView<float4>>);
+    static_assert(horizon::dsl::is_texture3d_v<Texture3DView<float2>>);
+    static_assert(horizon::dsl::is_texture3d_v<RWTexture3DView<float2>>);
+    static_assert(can_sample_2d<Texture2DViewVar<float4>>);
+    static_assert(!can_read_2d<Texture2DViewVar<float4>>);
+    static_assert(!can_write_2d<Texture2DViewVar<float4>>);
+    static_assert(!can_sample_2d<RWTexture2DViewVar<float4>>);
+    static_assert(can_read_2d<RWTexture2DViewVar<float4>>);
+    static_assert(can_write_2d<RWTexture2DViewVar<float4>>);
 
     const Type *bindless_array = Type::of<BindlessArray>();
-    const Type *texture2d = Type::of<Texture2D<float4>>();
-    const Type *texture3d = Type::of<Texture3D<float2>>();
-    const Type *scalar_texture2d = Type::of<Texture2D<float>>();
+    const Type *texture2d = Type::of<Texture2DView<float4>>();
+    const Type *texture3d = Type::of<Texture3DView<float2>>();
+    const Type *rw_texture2d = Type::of<RWTexture2DView<float4>>();
+    const Type *rw_texture3d = Type::of<RWTexture3DView<float2>>();
     expect(bindless_array->is_bindless_array() && bindless_array->is_resource(),
            "BindlessArray is represented as a Core resource");
     expect(texture2d->tag() == Type::Tag::TEXTURE2D && texture2d->is_texture() &&
@@ -84,8 +124,35 @@ void test_texture_types_are_core_resources() {
                texture3d->is_resource() && texture3d->element() == Type::of<float2>() &&
                texture3d->description() == "texture3d<vector<float,2>>",
            "Texture3D preserves its element type in the Core resource type");
-    expect(texture2d != scalar_texture2d && texture2d->hash() != scalar_texture2d->hash(),
-           "textures with different element types have distinct Core type identities");
+    expect(rw_texture2d->tag() == Type::Tag::RW_TEXTURE2D && rw_texture2d->is_texture() &&
+               rw_texture2d->is_resource() && rw_texture2d->element() == Type::of<float4>() &&
+               rw_texture2d->description() == "rwtexture2d<vector<float,4>>",
+           "RWTexture2D preserves its element type in the Core resource type");
+    expect(rw_texture3d->tag() == Type::Tag::RW_TEXTURE3D && rw_texture3d->is_texture() &&
+               rw_texture3d->is_resource() && rw_texture3d->element() == Type::of<float2>() &&
+               rw_texture3d->description() == "rwtexture3d<vector<float,2>>",
+           "RWTexture3D preserves its element type in the Core resource type");
+    expect(texture2d != rw_texture2d && texture2d->hash() != rw_texture2d->hash(),
+           "sampled and read-write texture views have distinct Core type identities");
+    expect(!texture2d->is_read_write_texture() && rw_texture2d->is_read_write_texture() &&
+               rw_texture3d->is_read_write_texture(),
+           "only RW texture views are classified as read-write textures");
+    expect(Type::from(texture2d->description()) == texture2d &&
+               Type::from(rw_texture2d->description()) == rw_texture2d,
+           "sampled and read-write texture views round-trip through the Core registry");
+
+    const StoragePrecisionPolicy f16{
+        .policy = PrecisionPolicy::force_f16,
+        .allow_real_in_storage = true};
+    const StoragePrecisionPolicy f32{
+        .policy = PrecisionPolicy::force_f32,
+        .allow_real_in_storage = true};
+    expect(Type::resolve(Type::of<Texture2DView<real4>>(), f16)->description() ==
+               "texture2d<vector<half,4>>",
+           "sampled texture views resolve dynamic element precision");
+    expect(Type::resolve(Type::of<RWTexture3DView<real4>>(), f32)->description() ==
+               "rwtexture3d<vector<float,4>>",
+           "read-write texture views resolve dynamic element precision");
 }
 
 void test_direct_texture_operations_build_expected_ast() {
@@ -95,17 +162,22 @@ void test_direct_texture_operations_build_expected_ast() {
     using horizon::ast::Variable;
     using horizon::core::Type;
     using horizon::dsl::Kernel;
-    using horizon::dsl::Texture2DVar;
-    using horizon::dsl::Texture3DVar;
+    using horizon::dsl::RWTexture2DViewVar;
+    using horizon::dsl::RWTexture3DViewVar;
+    using horizon::dsl::Texture2DViewVar;
+    using horizon::dsl::Texture3DViewVar;
     using horizon::math::float4;
 
-    Kernel kernel{[](Texture2DVar<float4> texture2d, Texture3DVar<float4> texture3d) {
+    Kernel kernel{[](Texture2DViewVar<float4> texture2d,
+                     Texture3DViewVar<float4> texture3d,
+                     RWTexture2DViewVar<float4> rw_texture2d,
+                     RWTexture3DViewVar<float4> rw_texture3d) {
         auto sampled2d = texture2d.sample(4u, 0.25f, 0.75f);
         auto sampled3d = texture3d.sample(4u, 0.25f, 0.5f, 0.75f);
-        auto read2d = texture2d.read<float>(1, 2);
-        auto read3d = texture3d.read<float>(1, 2, 3);
-        texture2d.write(1.0f, 1, 2);
-        texture3d.write(1.0f, 1, 2, 3);
+        auto read2d = rw_texture2d.read<float>(1, 2);
+        auto read3d = rw_texture3d.read<float>(1, 2, 3);
+        rw_texture2d.write(1.0f, 1, 2);
+        rw_texture3d.write(1.0f, 1, 2, 3);
         (void)sampled2d;
         (void)sampled3d;
         (void)read2d;
@@ -118,19 +190,29 @@ void test_direct_texture_operations_build_expected_ast() {
     if (function == nullptr) {
         return;
     }
-    expect(function->arguments().size() == 2u,
-           "direct texture kernel records both texture arguments");
-    if (function->arguments().size() == 2u) {
+    expect(function->arguments().size() == 4u,
+           "direct texture kernel records sampled and read-write texture arguments");
+    if (function->arguments().size() == 4u) {
         expect(function->arguments()[0].tag() == Variable::Tag::TEXTURE2D &&
-                   function->arguments()[0].type() == Type::of<horizon::core::Texture2D<float4>>(),
-               "Texture2D argument keeps its resource type and variable tag");
+                   function->arguments()[0].type() == Type::of<horizon::core::Texture2DView<float4>>(),
+               "Texture2DView argument keeps its resource type and variable tag");
         expect(function->arguments()[1].tag() == Variable::Tag::TEXTURE3D &&
-                   function->arguments()[1].type() == Type::of<horizon::core::Texture3D<float4>>(),
-               "Texture3D argument keeps its resource type and variable tag");
-        expect(function->arguments()[0].usage() == Usage::READ_WRITE,
-               "Texture2D sample, read, and write propagate read-write usage");
-        expect(function->arguments()[1].usage() == Usage::READ_WRITE,
-               "Texture3D sample, read, and write propagate read-write usage");
+                   function->arguments()[1].type() == Type::of<horizon::core::Texture3DView<float4>>(),
+               "Texture3DView argument keeps its resource type and variable tag");
+        expect(function->arguments()[2].tag() == Variable::Tag::TEXTURE2D &&
+                   function->arguments()[2].type() == Type::of<horizon::core::RWTexture2DView<float4>>(),
+               "RWTexture2DView argument keeps its resource type and variable tag");
+        expect(function->arguments()[3].tag() == Variable::Tag::TEXTURE3D &&
+                   function->arguments()[3].type() == Type::of<horizon::core::RWTexture3DView<float4>>(),
+               "RWTexture3DView argument keeps its resource type and variable tag");
+        expect(function->arguments()[0].usage() == Usage::READ,
+               "Texture2DView sample propagates read usage");
+        expect(function->arguments()[1].usage() == Usage::READ,
+               "Texture3DView sample propagates read usage");
+        expect(function->arguments()[2].usage() == Usage::READ_WRITE,
+               "RWTexture2DView read and write propagate read-write usage");
+        expect(function->arguments()[3].usage() == Usage::READ_WRITE,
+               "RWTexture3DView read and write propagate read-write usage");
     }
 
     const std::vector<const CallExpr *> calls = top_level_calls(*function);

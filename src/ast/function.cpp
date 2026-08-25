@@ -342,9 +342,11 @@ const RefExpr *Function::argument(const Type *type) noexcept {
             tag = Variable::Tag::BYTE_BUFFER;
             break;
         case Type::Tag::TEXTURE3D:
+        case Type::Tag::RW_TEXTURE3D:
             tag = Variable::Tag::TEXTURE3D;
             break;
         case Type::Tag::TEXTURE2D:
+        case Type::Tag::RW_TEXTURE2D:
             tag = Variable::Tag::TEXTURE2D;
             break;
         case Type::Tag::BINDLESS_ARRAY:

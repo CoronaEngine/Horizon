@@ -248,9 +248,18 @@ using BufferVar = Var<Buffer<T>>;
 using ByteBufferVar = Var<ByteBuffer>;
 
 template<typename T>
-using Texture3DVar = Var<Texture3D<T>>;
+using Texture3DViewVar = Var<Texture3DView<T>>;
 template<typename T>
-using Texture2DVar = Var<Texture2D<T>>;
+using Texture2DViewVar = Var<Texture2DView<T>>;
+template<typename T>
+using RWTexture3DViewVar = Var<RWTexture3DView<T>>;
+template<typename T>
+using RWTexture2DViewVar = Var<RWTexture2DView<T>>;
+
+template<typename T>
+using Texture3DVar = Texture3DViewVar<T>;
+template<typename T>
+using Texture2DVar = Texture2DViewVar<T>;
 
 using BindlessArrayVar = Var<BindlessArray>;
 
