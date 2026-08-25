@@ -17,7 +17,9 @@ class BufferDesc;
 template<typename T>
 class BufferView;
 
+template<typename T>
 class Texture3D;
+template<typename T>
 class Texture2D;
 class ByteBuffer;
 
@@ -129,20 +131,24 @@ struct TypeDesc<ByteBuffer> {
 template<>
 struct TypeDesc<BufferDesc<>> : public TypeDesc<ByteBuffer> {};
 
-template<>
-struct TypeDesc<Texture3D> {
-    static horizon::core::string_view description() noexcept {
-        return "texture3d";
+template<typename T>
+struct TypeDesc<Texture3D<T>> {
+    static horizon::core::string &description() noexcept {
+        static thread_local string str = horizon::core::format(
+            "texture3d<{}>", TypeDesc<T>::description());
+        return str;
     }
     static horizon::core::string_view name() noexcept {
         return description();
     }
 };
 
-template<>
-struct TypeDesc<Texture2D> {
-    static horizon::core::string_view description() noexcept {
-        return "texture2d";
+template<typename T>
+struct TypeDesc<Texture2D<T>> {
+    static horizon::core::string &description() noexcept {
+        static thread_local string str = horizon::core::format(
+            "texture2d<{}>", TypeDesc<T>::description());
+        return str;
     }
     static horizon::core::string_view name() noexcept {
         return description();

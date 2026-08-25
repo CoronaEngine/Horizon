@@ -247,8 +247,10 @@ using BufferVar = Var<Buffer<T>>;
 
 using ByteBufferVar = Var<ByteBuffer>;
 
-using Texture3DVar = Var<Texture3D>;
-using Texture2DVar = Var<Texture2D>;
+template<typename T>
+using Texture3DVar = Var<Texture3D<T>>;
+template<typename T>
+using Texture2DVar = Var<Texture2D<T>>;
 
 using BindlessArrayVar = Var<BindlessArray>;
 

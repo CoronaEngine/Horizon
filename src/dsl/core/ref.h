@@ -247,18 +247,18 @@ public:
     }
 };
 
-template<>
-struct Ref<Texture3D>
-    : detail::EnableTextureSample<Ref<Texture3D>, 3>,
-      detail::EnableTextureReadAndWrite<Ref<Texture3D>, 3> {
-    OC_REF_COMMON(Ref<Texture3D>)
+template<typename T>
+struct Ref<Texture3D<T>>
+    : detail::EnableTextureSample<Ref<Texture3D<T>>, 3>,
+      detail::EnableTextureReadAndWrite<Ref<Texture3D<T>>, 3> {
+    OC_REF_COMMON(Ref<Texture3D<T>>)
 };
 
-template<>
-struct Ref<Texture2D>
-    : detail::EnableTextureSample<Ref<Texture2D>, 2>,
-      detail::EnableTextureReadAndWrite<Ref<Texture2D>, 2> {
-    OC_REF_COMMON(Ref<Texture2D>)
+template<typename T>
+struct Ref<Texture2D<T>>
+    : detail::EnableTextureSample<Ref<Texture2D<T>>, 2>,
+      detail::EnableTextureReadAndWrite<Ref<Texture2D<T>>, 2> {
+    OC_REF_COMMON(Ref<Texture2D<T>>)
 };
 
 template<>

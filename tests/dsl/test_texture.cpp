@@ -54,26 +54,38 @@ void test_texture_types_are_core_resources() {
     using horizon::core::Type;
     using horizon::dsl::BindlessArray;
     using horizon::dsl::Texture2D;
+    using horizon::dsl::Texture2DVar;
     using horizon::dsl::Texture3D;
+    using horizon::dsl::Texture3DVar;
+    using horizon::dsl::Var;
+    using horizon::math::float2;
+    using horizon::math::float4;
 
     static_assert(std::is_same_v<BindlessArray, horizon::core::BindlessArray>);
-    static_assert(std::is_same_v<Texture2D, horizon::core::Texture2D>);
-    static_assert(std::is_same_v<Texture3D, horizon::core::Texture3D>);
-    static_assert(horizon::dsl::is_texture_v<Texture2D>);
-    static_assert(horizon::dsl::is_texture2d_v<Texture2D>);
-    static_assert(horizon::dsl::is_texture3d_v<Texture3D>);
+    static_assert(std::is_same_v<Texture2D<float4>, horizon::core::Texture2D<float4>>);
+    static_assert(std::is_same_v<Texture3D<float2>, horizon::core::Texture3D<float2>>);
+    static_assert(std::is_same_v<Texture2DVar<float4>, Var<Texture2D<float4>>>);
+    static_assert(std::is_same_v<Texture3DVar<float2>, Var<Texture3D<float2>>>);
+    static_assert(horizon::dsl::is_texture_v<Texture2D<float4>>);
+    static_assert(horizon::dsl::is_texture2d_v<Texture2D<float4>>);
+    static_assert(horizon::dsl::is_texture3d_v<Texture3D<float2>>);
 
     const Type *bindless_array = Type::of<BindlessArray>();
-    const Type *texture2d = Type::of<Texture2D>();
-    const Type *texture3d = Type::of<Texture3D>();
+    const Type *texture2d = Type::of<Texture2D<float4>>();
+    const Type *texture3d = Type::of<Texture3D<float2>>();
+    const Type *scalar_texture2d = Type::of<Texture2D<float>>();
     expect(bindless_array->is_bindless_array() && bindless_array->is_resource(),
            "BindlessArray is represented as a Core resource");
     expect(texture2d->tag() == Type::Tag::TEXTURE2D && texture2d->is_texture() &&
-               texture2d->is_resource(),
-           "Texture2D is represented as a Core texture resource");
+               texture2d->is_resource() && texture2d->element() == Type::of<float4>() &&
+               texture2d->description() == "texture2d<vector<float,4>>",
+           "Texture2D preserves its element type in the Core resource type");
     expect(texture3d->tag() == Type::Tag::TEXTURE3D && texture3d->is_texture() &&
-               texture3d->is_resource(),
-           "Texture3D is represented as a Core texture resource");
+               texture3d->is_resource() && texture3d->element() == Type::of<float2>() &&
+               texture3d->description() == "texture3d<vector<float,2>>",
+           "Texture3D preserves its element type in the Core resource type");
+    expect(texture2d != scalar_texture2d && texture2d->hash() != scalar_texture2d->hash(),
+           "textures with different element types have distinct Core type identities");
 }
 
 void test_direct_texture_operations_build_expected_ast() {
@@ -85,8 +97,9 @@ void test_direct_texture_operations_build_expected_ast() {
     using horizon::dsl::Kernel;
     using horizon::dsl::Texture2DVar;
     using horizon::dsl::Texture3DVar;
+    using horizon::math::float4;
 
-    Kernel kernel{[](Texture2DVar texture2d, Texture3DVar texture3d) {
+    Kernel kernel{[](Texture2DVar<float4> texture2d, Texture3DVar<float4> texture3d) {
         auto sampled2d = texture2d.sample(4u, 0.25f, 0.75f);
         auto sampled3d = texture3d.sample(4u, 0.25f, 0.5f, 0.75f);
         auto read2d = texture2d.read<float>(1, 2);
@@ -109,10 +122,10 @@ void test_direct_texture_operations_build_expected_ast() {
            "direct texture kernel records both texture arguments");
     if (function->arguments().size() == 2u) {
         expect(function->arguments()[0].tag() == Variable::Tag::TEXTURE2D &&
-                   function->arguments()[0].type() == Type::of<horizon::core::Texture2D>(),
+                   function->arguments()[0].type() == Type::of<horizon::core::Texture2D<float4>>(),
                "Texture2D argument keeps its resource type and variable tag");
         expect(function->arguments()[1].tag() == Variable::Tag::TEXTURE3D &&
-                   function->arguments()[1].type() == Type::of<horizon::core::Texture3D>(),
+                   function->arguments()[1].type() == Type::of<horizon::core::Texture3D<float4>>(),
                "Texture3D argument keeps its resource type and variable tag");
         expect(function->arguments()[0].usage() == Usage::READ_WRITE,
                "Texture2D sample, read, and write propagate read-write usage");

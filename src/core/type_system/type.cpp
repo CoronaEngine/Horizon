@@ -111,6 +111,7 @@ struct TypeParser {
         ret == "struct"sv ||
         ret == "buffer"sv ||
         ret == "texture3d"sv ||
+        ret == "texture2d"sv ||
         ret == "array"sv) {
         auto [start, end] = bracket_matching_near(str);
         ret = str.substr(0, end + 1);
@@ -226,12 +227,22 @@ void TypeParser::parse_buffer_locked(Type *type, horizon::core::string_view desc
 
 void TypeParser::parse_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept {
     type->tag_ = Type::Tag::TEXTURE3D;
+    auto elements = find_content(desc);
+    OC_ERROR_IF_NOT(elements.size() == 1u,
+                    "texture3d requires exactly one element type: ",
+                    desc);
+    type->members_.push_back(parse_type_locked(elements.front()));
     type->alignment_ = alignof(TextureDesc);
     type->size_ = sizeof(TextureDesc);
 }
 
 void TypeParser::parse_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept {
     type->tag_ = Type::Tag::TEXTURE2D;
+    auto elements = find_content(desc);
+    OC_ERROR_IF_NOT(elements.size() == 1u,
+                    "texture2d requires exactly one element type: ",
+                    desc);
+    type->members_.push_back(parse_type_locked(elements.front()));
     type->alignment_ = alignof(TextureDesc);
     type->size_ = sizeof(TextureDesc);
 }
