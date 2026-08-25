@@ -76,8 +76,8 @@ public:
 };
 
 enum AccessMode {
-    AOS,
-    SOA
+    Aos,
+    Soa
 };
 
 template<typename T, typename TBuffer>
@@ -120,7 +120,7 @@ template<typename T>
     public:                                                                                    \
         static_assert(is_valid_buffer_element_v<TypeName>);                                    \
         using atomic_type = TypeName;                                                          \
-        static constexpr AccessMode access_mode = SOA;                                         \
+        static constexpr AccessMode access_mode = Soa;                                         \
                                                                                                \
     private:                                                                                   \
         horizon::dsl::BufferStorage<TBuffer> buffer_var_{};                                         \
@@ -181,7 +181,7 @@ template<typename T>
     public:                                                                                             \
         static_assert(is_valid_buffer_element_v<TypeName>);                                             \
         using atomic_type = TypeName;                                                                   \
-        static constexpr AccessMode access_mode = SOA;                                                  \
+        static constexpr AccessMode access_mode = Soa;                                                  \
         static constexpr bool is_atomic = true;                                                         \
                                                                                                         \
     private:                                                                                            \
@@ -246,7 +246,7 @@ OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA horizon::dsl::uint N OC_COM
     public:                                                                             \
         using struct_type = S;                                                          \
         static_assert(horizon::dsl::is_valid_buffer_element_v<struct_type>);                 \
-        static constexpr AccessMode access_mode = SOA;                                  \
+        static constexpr AccessMode access_mode = Soa;                                  \
                                                                                         \
     public:                                                                             \
         MAP(OC_MAKE_SOA_VAR_MEMBER, ##__VA_ARGS__)                                      \
@@ -311,7 +311,7 @@ OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA horizon::dsl::uint N OC_COM
     public:                                                                            \
         using struct_type = S;                                                         \
         static_assert(is_valid_buffer_element_v<struct_type>);                         \
-        static constexpr AccessMode access_mode = SOA;                                 \
+        static constexpr AccessMode access_mode = Soa;                                 \
         static constexpr bool is_atomic = false;                                       \
                                                                                        \
     public:                                                                            \
@@ -343,7 +343,7 @@ OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA horizon::dsl::uint N OC_COM
     public:                                                                  \
         using struct_type = TypeName;                                        \
         static_assert(is_valid_buffer_element_v<struct_type>);               \
-        static constexpr AccessMode access_mode = SOA;                       \
+        static constexpr AccessMode access_mode = Soa;                       \
         using element_type = ElementType;                                    \
         static constexpr bool is_atomic = false;                             \
                                                                              \
@@ -391,7 +391,7 @@ struct SOAViewVar<Matrix<T, N, M>, TBuffer> {
 public:
     using struct_type = Matrix<T, N, M>;
     using column_type = Vector<T, N>;
-    static constexpr AccessMode access_mode = SOA;
+    static constexpr AccessMode access_mode = Soa;
 
 private:
     array<SOAViewVar<column_type, TBuffer>, M> array_{};
@@ -464,7 +464,7 @@ struct SOAView<Matrix<T, N, M>, TBuffer> {
 public:
     using struct_type = Matrix<T, N, M>;
     using column_type = Vector<T, N>;
-    static constexpr AccessMode access_mode = SOA;
+    static constexpr AccessMode access_mode = Soa;
     static constexpr bool is_atomic = false;
 
 private:
@@ -530,7 +530,7 @@ struct AOSViewVar {
 public:
     using buffer_type = TBuffer;
     using element_type = T;
-    static constexpr AccessMode access_mode = AOS;
+    static constexpr AccessMode access_mode = Aos;
 
 private:
     horizon::dsl::BufferStorage<TBuffer> buffer_var_;

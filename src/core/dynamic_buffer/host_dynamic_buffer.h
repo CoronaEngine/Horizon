@@ -113,7 +113,7 @@ struct HostDynamicBufferUploadView {
     size_t element_count{0u};
     StoragePrecisionPolicy policy{};
     const Type *logical_type{nullptr};
-    DynamicBufferLayout layout{DynamicBufferLayout::AOS};
+    DynamicBufferLayout layout{DynamicBufferLayout::Aos};
     /// Dirty export exposes precise byte segments for incremental uploads.
     span<const ByteRegion> dirty_segments{};
 
@@ -181,7 +181,7 @@ public:
             .element_count = element_count_,
             .policy = layout_plan_.policy(),
             .logical_type = layout_plan_.logical_type(),
-            .layout = DynamicBufferLayout::AOS,
+            .layout = DynamicBufferLayout::Aos,
             .dirty_segments = dirty_segments_.segments()};
     }
 
@@ -294,14 +294,14 @@ T detail::HostDynamicBufferStorage::read(size_t index) const {
     HostByteBuffer encoded_record;
     encoded_record.resize(DynamicBufferLayoutCodec<T>::storage_bytes(1u,
                                                                      layout_plan_.policy(),
-                                                                     DynamicBufferLayout::AOS));
+                                                                     DynamicBufferLayout::Aos));
     const auto segments = layout_plan_.record_segments(index);
     gather_segments(segments, encoded_record);
     DynamicBufferLayoutCodec<T>::decode(encoded_record,
                                         1u,
                                         addressof(value),
                                         layout_plan_.policy(),
-                                        DynamicBufferLayout::AOS);
+                                        DynamicBufferLayout::Aos);
     return value;
 }
 
@@ -314,7 +314,7 @@ void detail::HostDynamicBufferStorage::write(size_t index, const T &value) {
                                         1u,
                                         encoded_record,
                                         layout_plan_.policy(),
-                                        DynamicBufferLayout::AOS);
+                                        DynamicBufferLayout::Aos);
     const auto segments = layout_plan_.record_segments(index);
     scatter_segments(encoded_record, segments);
     generation_++;
@@ -336,7 +336,7 @@ void detail::HostDynamicBufferStorage::append(span<const T> values) {
                                         values.size(),
                                         encoded,
                                         layout_plan_.policy(),
-                                        DynamicBufferLayout::AOS);
+                                        DynamicBufferLayout::Aos);
     auto begin = layout_plan_.record_region(old_count).begin_byte;
     storage_.copy_from(encoded.data(), encoded.size(), begin);
     mark_dirty(ByteRegion{begin, begin + encoded.size()});
@@ -352,7 +352,7 @@ void detail::HostDynamicBufferStorage::write_all(span<const T> values) {
                                         values.size(),
                                         storage_,
                                         layout_plan_.policy(),
-                                        DynamicBufferLayout::AOS);
+                                        DynamicBufferLayout::Aos);
     if (!values.empty()) {
         mark_dirty(ByteRegion{0u, storage_.size()});
         generation_++;
@@ -370,7 +370,7 @@ void detail::HostDynamicBufferStorage::patch(size_t index,
                                              1u,
                                              encoded_field,
                                              layout_plan_.policy(),
-                                             DynamicBufferLayout::AOS);
+                                             DynamicBufferLayout::Aos);
     const auto segments = layout_plan_.field_segments(index, steps);
     scatter_segments(encoded_field, segments);
     generation_++;

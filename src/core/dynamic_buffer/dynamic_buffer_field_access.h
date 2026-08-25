@@ -10,7 +10,7 @@
 namespace horizon::core::detail {
 
 [[nodiscard]] inline StoragePrecisionPolicy runtime_field_policy() noexcept {
-    return StoragePrecisionPolicy{.policy = PrecisionPolicy::force_f32,
+    return StoragePrecisionPolicy{.policy = PrecisionPolicy::ForceF32,
                                   .allow_real_in_storage = true};
 }
 
@@ -33,8 +33,8 @@ namespace horizon::core::detail {
 }
 
 enum class FieldOffsetMode : uint8_t {
-    AOS,
-    SOA,
+    Aos,
+    Soa,
 };
 
 struct RuntimeFieldAccessInfo {
@@ -56,7 +56,7 @@ struct RuntimeFieldAccessInfo {
     size_t offset = 0u;
     for (uint32_t index = 0u; index < member_index; ++index) {
         const auto *member = resolved_type->members()[index];
-        if (mode == FieldOffsetMode::AOS) {
+        if (mode == FieldOffsetMode::Aos) {
             offset = RuntimeTypeLayoutAdapter::align_up(offset,
                                                         resolved_runtime_field_alignment(member));
             offset += resolved_runtime_field_size(member);
@@ -71,7 +71,7 @@ struct RuntimeFieldAccessInfo {
                                                          uint32_t element_index,
                                                          FieldOffsetMode mode,
                                                          size_t element_count) noexcept {
-    if (mode == FieldOffsetMode::AOS) {
+    if (mode == FieldOffsetMode::Aos) {
         return element_index * resolved_runtime_field_size(resolved_elem);
     }
     return element_index * soa_runtime_field_storage_bytes(resolved_elem, element_count);
@@ -91,7 +91,7 @@ struct RuntimeFieldAccessInfo {
         const auto step = steps.front();
         steps = steps.subspan(1u);
         if (logical_type->is_structure()) {
-            if (step.kind != TypedFieldPath::StepKind::member) {
+            if (step.kind != TypedFieldPath::StepKind::Member) {
                 return {};
             }
             const auto logical_members = logical_type->members();
@@ -101,7 +101,7 @@ struct RuntimeFieldAccessInfo {
             }
             current_offset += runtime_field_member_offset(resolved_type, step.value, mode, element_count);
             const auto *resolved_member = resolved_members[step.value];
-            if (mode == FieldOffsetMode::AOS) {
+            if (mode == FieldOffsetMode::Aos) {
                 current_offset = RuntimeTypeLayoutAdapter::align_up(current_offset,
                                                                     resolved_runtime_field_alignment(resolved_member));
             }
@@ -110,7 +110,7 @@ struct RuntimeFieldAccessInfo {
             continue;
         }
         if (logical_type->is_array()) {
-            if (step.kind != TypedFieldPath::StepKind::index || step.value >= logical_type->dimension()) {
+            if (step.kind != TypedFieldPath::StepKind::Index || step.value >= logical_type->dimension()) {
                 return {};
             }
             const auto *resolved_elem = resolved_type->element();
@@ -120,13 +120,13 @@ struct RuntimeFieldAccessInfo {
             continue;
         }
         if (logical_type->is_vector()) {
-            if (step.kind != TypedFieldPath::StepKind::component || step.value >= logical_type->dimension()) {
+            if (step.kind != TypedFieldPath::StepKind::Component || step.value >= logical_type->dimension()) {
                 return {};
             }
             const auto *logical_elem = logical_type->element();
             const auto *resolved_elem = resolved_type->element();
             current_offset += step.value * resolved_runtime_field_size(resolved_elem);
-            if (mode == FieldOffsetMode::SOA && steps.empty()) {
+            if (mode == FieldOffsetMode::Soa && steps.empty()) {
                 record_stride = resolved_runtime_field_size(resolved_type);
             }
             logical_type = logical_elem;
@@ -134,7 +134,7 @@ struct RuntimeFieldAccessInfo {
             continue;
         }
         if (logical_type->is_matrix()) {
-            if ((step.kind != TypedFieldPath::StepKind::index && step.kind != TypedFieldPath::StepKind::component) ||
+            if ((step.kind != TypedFieldPath::StepKind::Index && step.kind != TypedFieldPath::StepKind::Component) ||
                 step.value >= logical_type->dimension()) {
                 return {};
             }

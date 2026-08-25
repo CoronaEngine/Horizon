@@ -9,8 +9,8 @@
 namespace horizon::core {
 
 enum class PrecisionPolicy : uint8_t {
-    force_f32,
-    force_f16,
+    ForceF32,
+    ForceF16,
 };
 
 struct DevicePrecisionCaps {
@@ -25,7 +25,7 @@ struct DevicePrecisionCaps {
 };
 
 struct StoragePrecisionPolicy {
-    PrecisionPolicy policy = PrecisionPolicy::force_f32;
+    PrecisionPolicy policy = PrecisionPolicy::ForceF32;
     bool allow_real_in_storage = false;
 };
 

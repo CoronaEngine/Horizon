@@ -42,32 +42,32 @@ template<typename T>
 [[nodiscard]] inline string_view variable_prefix(Variable::Tag tag) {
     using Tag = Variable::Tag;
     switch (tag) {
-        case Tag::REFERENCE:
-        case Tag::LOCAL:
+        case Tag::Reference:
+        case Tag::Local:
             return "v";
-        case Tag::DISPATCH_IDX:
+        case Tag::DispatchIdx:
             return "d_idx";
-        case Tag::DISPATCH_ID:
+        case Tag::DispatchId:
             return "d_id";
-        case Tag::DISPATCH_DIM:
+        case Tag::DispatchDim:
             return "d_dim";
-        case Tag::THREAD_IDX:
+        case Tag::ThreadIdx:
             return "t_idx";
-        case Tag::THREAD_ID:
+        case Tag::ThreadId:
             return "t_id";
-        case Tag::BLOCK_IDX:
+        case Tag::BlockIdx:
             return "b_idx";
-        case Tag::BUFFER:
+        case Tag::Buffer:
             return "b";
-        case Tag::BYTE_BUFFER:
+        case Tag::ByteBuffer:
             return "bb";
-        case Tag::TEXTURE3D:
+        case Tag::Texture3D:
             return "t3d";
-        case Tag::TEXTURE2D:
+        case Tag::Texture2D:
             return "t2d";
-        case Tag::ACCEL:
+        case Tag::Accel:
             return "acc";
-        case Tag::BINDLESS_ARRAY:
+        case Tag::BindlessArray:
             return "ra";
         default:
             break;

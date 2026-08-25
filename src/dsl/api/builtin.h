@@ -147,63 +147,63 @@ OC_DEFINE_TEMPLATE_TYPE(deduce_var)
         return eval_dynamic_array(DynamicArray<T>(t.size(), expr));                    \
     }
 
-OC_MAKE_DSL_UNARY_FUNC(all, ALL)
-OC_MAKE_DSL_UNARY_FUNC(any, ANY)
-OC_MAKE_DSL_UNARY_FUNC(none, NONE)
-OC_MAKE_DSL_UNARY_FUNC(rcp, RCP)
-OC_MAKE_DSL_UNARY_FUNC(abs, ABS)
-OC_MAKE_DSL_UNARY_FUNC(sign, SIGN)
-OC_MAKE_DSL_UNARY_FUNC(sqr, SQR)
-OC_MAKE_DSL_UNARY_FUNC(normalize, NORMALIZE)
-OC_MAKE_DSL_UNARY_FUNC(length, LENGTH)
-OC_MAKE_DSL_UNARY_FUNC(length_squared, LENGTH_SQUARED)
+OC_MAKE_DSL_UNARY_FUNC(all, All)
+OC_MAKE_DSL_UNARY_FUNC(any, Any)
+OC_MAKE_DSL_UNARY_FUNC(none, None)
+OC_MAKE_DSL_UNARY_FUNC(rcp, Rcp)
+OC_MAKE_DSL_UNARY_FUNC(abs, Abs)
+OC_MAKE_DSL_UNARY_FUNC(sign, Sign)
+OC_MAKE_DSL_UNARY_FUNC(sqr, Sqr)
+OC_MAKE_DSL_UNARY_FUNC(normalize, Normalize)
+OC_MAKE_DSL_UNARY_FUNC(length, Length)
+OC_MAKE_DSL_UNARY_FUNC(length_squared, LengthSquared)
 
-OC_MAKE_DSL_UNARY_FUNC(exp, EXP)
-OC_MAKE_DSL_UNARY_FUNC(exp2, EXP2)
-OC_MAKE_DSL_UNARY_FUNC(exp10, EXP10)
-OC_MAKE_DSL_UNARY_FUNC(log, LOG)
-OC_MAKE_DSL_UNARY_FUNC(log2, LOG2)
-OC_MAKE_DSL_UNARY_FUNC(log10, LOG10)
-OC_MAKE_DSL_UNARY_FUNC(cos, COS)
-OC_MAKE_DSL_UNARY_FUNC(sin, SIN)
-OC_MAKE_DSL_UNARY_FUNC(tan, TAN)
-OC_MAKE_DSL_UNARY_FUNC(cosh, COSH)
-OC_MAKE_DSL_UNARY_FUNC(sinh, SINH)
-OC_MAKE_DSL_UNARY_FUNC(tanh, TANH)
-OC_MAKE_DSL_UNARY_FUNC(acos, ACOS)
-OC_MAKE_DSL_UNARY_FUNC(asin, ASIN)
-OC_MAKE_DSL_UNARY_FUNC(atan, ATAN)
-OC_MAKE_DSL_UNARY_FUNC(asinh, ASINH)
-OC_MAKE_DSL_UNARY_FUNC(acosh, ACOSH)
-OC_MAKE_DSL_UNARY_FUNC(atanh, ATANH)
-OC_MAKE_DSL_UNARY_FUNC(degrees, DEGREES)
-OC_MAKE_DSL_UNARY_FUNC(radians, RADIANS)
-OC_MAKE_DSL_UNARY_FUNC(ceil, CEIL)
-OC_MAKE_DSL_UNARY_FUNC(round, ROUND)
-OC_MAKE_DSL_UNARY_FUNC(floor, FLOOR)
-OC_MAKE_DSL_UNARY_FUNC(sqrt, SQRT)
-OC_MAKE_DSL_UNARY_FUNC(rsqrt, RSQRT)
-OC_MAKE_DSL_UNARY_FUNC(isinf, IS_INF)
-OC_MAKE_DSL_UNARY_FUNC(isnan, IS_NAN)
-OC_MAKE_DSL_UNARY_FUNC(fract, FRACT)
-OC_MAKE_DSL_UNARY_FUNC(saturate, SATURATE)
+OC_MAKE_DSL_UNARY_FUNC(exp, Exp)
+OC_MAKE_DSL_UNARY_FUNC(exp2, Exp2)
+OC_MAKE_DSL_UNARY_FUNC(exp10, Exp10)
+OC_MAKE_DSL_UNARY_FUNC(log, Log)
+OC_MAKE_DSL_UNARY_FUNC(log2, Log2)
+OC_MAKE_DSL_UNARY_FUNC(log10, Log10)
+OC_MAKE_DSL_UNARY_FUNC(cos, Cos)
+OC_MAKE_DSL_UNARY_FUNC(sin, Sin)
+OC_MAKE_DSL_UNARY_FUNC(tan, Tan)
+OC_MAKE_DSL_UNARY_FUNC(cosh, Cosh)
+OC_MAKE_DSL_UNARY_FUNC(sinh, Sinh)
+OC_MAKE_DSL_UNARY_FUNC(tanh, Tanh)
+OC_MAKE_DSL_UNARY_FUNC(acos, Acos)
+OC_MAKE_DSL_UNARY_FUNC(asin, Asin)
+OC_MAKE_DSL_UNARY_FUNC(atan, Atan)
+OC_MAKE_DSL_UNARY_FUNC(asinh, Asinh)
+OC_MAKE_DSL_UNARY_FUNC(acosh, Acosh)
+OC_MAKE_DSL_UNARY_FUNC(atanh, Atanh)
+OC_MAKE_DSL_UNARY_FUNC(degrees, Degrees)
+OC_MAKE_DSL_UNARY_FUNC(radians, Radians)
+OC_MAKE_DSL_UNARY_FUNC(ceil, Ceil)
+OC_MAKE_DSL_UNARY_FUNC(round, Round)
+OC_MAKE_DSL_UNARY_FUNC(floor, Floor)
+OC_MAKE_DSL_UNARY_FUNC(sqrt, Sqrt)
+OC_MAKE_DSL_UNARY_FUNC(rsqrt, Rsqrt)
+OC_MAKE_DSL_UNARY_FUNC(isinf, IsInf)
+OC_MAKE_DSL_UNARY_FUNC(isnan, IsNan)
+OC_MAKE_DSL_UNARY_FUNC(fract, Fract)
+OC_MAKE_DSL_UNARY_FUNC(saturate, Saturate)
 
-OC_MAKE_DSL_UNARY_FUNC(determinant, DETERMINANT)
-OC_MAKE_DSL_UNARY_FUNC(transpose, TRANSPOSE)
-OC_MAKE_DSL_UNARY_FUNC(inverse, INVERSE)
+OC_MAKE_DSL_UNARY_FUNC(determinant, Determinant)
+OC_MAKE_DSL_UNARY_FUNC(transpose, Transpose)
+OC_MAKE_DSL_UNARY_FUNC(inverse, Inverse)
 
 #undef OC_MAKE_DSL_UNARY_FUNC
 
 [[nodiscard]] inline Half float2half(const Float &arg) {
     const CallExpr *expr = Function::current()->call_builtin(Type::of<half>(),
-                                                             CallOp::FLOAT2HALF,
+                                                             CallOp::Float2Half,
                                                              {OC_EXPR(arg)});
     return eval<half>(expr);
 }
 
 [[nodiscard]] inline Float half2float(const Float &arg) {
     const CallExpr *expr = Function::current()->call_builtin(Type::of<half>(),
-                                                             CallOp::HALF2FLOAT,
+                                                             CallOp::Half2Float,
                                                              {OC_EXPR(arg)});
     return eval<float>(expr);
 }
@@ -224,18 +224,18 @@ OC_DEFINE_TEMPLATE_VALUE_MULTI(match_dsl_basic_func)
                                               decay_swizzle(rhs));                \
     }
 
-OC_MAKE_DSL_BINARY_FUNC(max, MAX)
-OC_MAKE_DSL_BINARY_FUNC(min, MIN)
-OC_MAKE_DSL_BINARY_FUNC(pow, POW)
-OC_MAKE_DSL_BINARY_FUNC(fmod, FMOD)
-OC_MAKE_DSL_BINARY_FUNC(mod, MOD)
-OC_MAKE_DSL_BINARY_FUNC(copysign, COPYSIGN)
-OC_MAKE_DSL_BINARY_FUNC(atan2, ATAN2)
+OC_MAKE_DSL_BINARY_FUNC(max, Max)
+OC_MAKE_DSL_BINARY_FUNC(min, Min)
+OC_MAKE_DSL_BINARY_FUNC(pow, Pow)
+OC_MAKE_DSL_BINARY_FUNC(fmod, Fmod)
+OC_MAKE_DSL_BINARY_FUNC(mod, Mod)
+OC_MAKE_DSL_BINARY_FUNC(copysign, Copysign)
+OC_MAKE_DSL_BINARY_FUNC(atan2, Atan2)
 
-OC_MAKE_DSL_BINARY_FUNC(cross, CROSS)
-OC_MAKE_DSL_BINARY_FUNC(dot, DOT)
-OC_MAKE_DSL_BINARY_FUNC(distance, DISTANCE)
-OC_MAKE_DSL_BINARY_FUNC(distance_squared, DISTANCE_SQUARED)
+OC_MAKE_DSL_BINARY_FUNC(cross, Cross)
+OC_MAKE_DSL_BINARY_FUNC(dot, Dot)
+OC_MAKE_DSL_BINARY_FUNC(distance, Distance)
+OC_MAKE_DSL_BINARY_FUNC(distance_squared, DistanceSquared)
 
 #undef OC_MAKE_DSL_BINARY_FUNC
 
@@ -255,10 +255,10 @@ OC_MAKE_DSL_BINARY_FUNC(distance_squared, DISTANCE_SQUARED)
                                               to_general_vector<dimension>(c));             \
     }
 
-OC_MAKE_DSL_TRIPLE_FUNC(clamp, CLAMP)
-OC_MAKE_DSL_TRIPLE_FUNC(lerp, LERP)
-OC_MAKE_DSL_TRIPLE_FUNC(inverse_lerp, INVERSE_LERP)
-OC_MAKE_DSL_TRIPLE_FUNC(fma, FMA)
+OC_MAKE_DSL_TRIPLE_FUNC(clamp, Clamp)
+OC_MAKE_DSL_TRIPLE_FUNC(lerp, Lerp)
+OC_MAKE_DSL_TRIPLE_FUNC(inverse_lerp, InverseLerp)
+OC_MAKE_DSL_TRIPLE_FUNC(fma, Fma)
 
 #undef OC_MAKE_TRIPLE_FUNC
 
@@ -304,7 +304,7 @@ template<typename P, typename T>
                                            const DynamicArray<T> &f) noexcept {
     OC_ASSERT(pred.size() == t.size() && t.size() == f.size());
     auto expr = Function::current()->call_builtin(Type::of<expr_value_t<T>>(),
-                                                  CallOp::SELECT,
+                                                  CallOp::Select,
                                                   {OC_EXPR(pred), OC_EXPR(t), OC_EXPR(f)});
     return detail::eval_dynamic_array<T>(DynamicArray<T>(pred.size(), expr));
 }
@@ -338,7 +338,7 @@ template<typename A>
 requires(is_all_float_vector3_v<expr_value_t<A>>)
 void coordinate_system(const A &a, Var<float3> &b, Var<float3> &c) noexcept {
     auto expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                  CallOp::COORDINATE_SYSTEM, {OC_EXPR(a), OC_EXPR(b), OC_EXPR(c)});
+                                                  CallOp::CoordinateSystem, {OC_EXPR(a), OC_EXPR(b), OC_EXPR(c)});
     Function::current()->expr_statement(expr);
 }
 
@@ -346,7 +346,7 @@ template<typename N, typename T>
 requires(is_all_float_vector3_v<expr_value_t<N>> && is_all_float_vector3_v<expr_value_t<T>>)
 void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b) noexcept {
     auto expr = Function::current()->call_builtin(Type::of<expr_value_t<N>>(),
-                                                  CallOp::MAKE_NORMAL_TANGENT, {OC_EXPR(n), OC_EXPR(t), OC_EXPR(a), OC_EXPR(b)});
+                                                  CallOp::MakeNormalTangent, {OC_EXPR(n), OC_EXPR(t), OC_EXPR(a), OC_EXPR(b)});
     Function::current()->expr_statement(expr);
 }
 
@@ -358,7 +358,7 @@ void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b)
     OC_NODISCARD auto make_##type##dim(const Args &...args) noexcept {             \
         auto impl = [&]<typename... As>(const As &...as) {                         \
             auto expr = Function::current()->call_builtin(Type::of<type##dim>(),   \
-                                                          CallOp::MAKE_##tag##dim, \
+                                                          CallOp::Make##tag##dim, \
                                                           {OC_EXPR(as)...});       \
             return eval<type##dim>(expr);                                          \
         };                                                                         \
@@ -370,13 +370,13 @@ void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b)
     OC_MAKE_VEC_MAKER_DIM(type, tag, 3) \
     OC_MAKE_VEC_MAKER_DIM(type, tag, 4)
 
-OC_MAKE_VEC_MAKER(int, INT)
-OC_MAKE_VEC_MAKER(uint, UINT)
-OC_MAKE_VEC_MAKER(float, FLOAT)
-OC_MAKE_VEC_MAKER(half, HALF)
-OC_MAKE_VEC_MAKER(real, REAL)
-OC_MAKE_VEC_MAKER(bool, BOOL)
-OC_MAKE_VEC_MAKER(uchar, UCHAR)
+OC_MAKE_VEC_MAKER(int, Int)
+OC_MAKE_VEC_MAKER(uint, Uint)
+OC_MAKE_VEC_MAKER(float, Float)
+OC_MAKE_VEC_MAKER(half, Half)
+OC_MAKE_VEC_MAKER(real, Real)
+OC_MAKE_VEC_MAKER(bool, Bool)
+OC_MAKE_VEC_MAKER(uchar, Uchar)
 
 #undef OC_MAKE_VEC_MAKER_DIM
 #undef OC_MAKE_VEC_MAKER
@@ -388,7 +388,7 @@ OC_MAKE_VEC_MAKER(uchar, UCHAR)
     })                                                                                                   \
     OC_NODISCARD auto make_##type##N##x##M(const Args &...args) {                                        \
         auto expr = Function::current()->call_builtin(Type::of<type##N##x##M>(),                         \
-                                                      CallOp::MAKE_##TYPE##N##X##M, {OC_EXPR(args)...}); \
+                                                      CallOp::Make##TYPE##N##x##M, {OC_EXPR(args)...}); \
         return eval<type##N##x##M>(expr);                                                                \
     }
 
@@ -403,8 +403,8 @@ OC_MAKE_VEC_MAKER(uchar, UCHAR)
     OC_MAKE_MATRIX(type, TYPE, 4, 3)        \
     OC_MAKE_MATRIX(type, TYPE, 4, 4)
 
-OC_MAKE_MATRIX_FOR_TYPE(float, FLOAT)
-OC_MAKE_MATRIX_FOR_TYPE(half, HALF)
+OC_MAKE_MATRIX_FOR_TYPE(float, Float)
+OC_MAKE_MATRIX_FOR_TYPE(half, Half)
 
 #undef OC_MAKE_MATRIX_FOR_TYPE
 #undef OC_MAKE_MATRIX
@@ -424,7 +424,7 @@ template<typename A, typename B>
 requires concepts::plus_able<expr_value_t<A>, expr_value_t<B>>
 auto atomic_add(A &&a, B &&b) noexcept {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                               CallOp::ATOMIC_ADD,
+                                                               CallOp::AtomicAdd,
                                                                {OC_EXPR(a), OC_EXPR(b)});
     return eval<expr_value_t<A>>(expr);
 }
@@ -433,7 +433,7 @@ template<typename A, typename B>
 requires concepts::minus_able<expr_value_t<A>, expr_value_t<B>>
 auto atomic_sub(A &&a, B &&b) noexcept {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                               CallOp::ATOMIC_SUB,
+                                                               CallOp::AtomicSub,
                                                                {OC_EXPR(a), OC_EXPR(b)});
     return eval<expr_value_t<A>>(expr);
 }
@@ -442,7 +442,7 @@ template<typename A, typename B>
 requires concepts::assign_able<expr_value_t<A>, expr_value_t<B>>
 auto atomic_exch(A &&a, B &&b) noexcept {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                               CallOp::ATOMIC_EXCH,
+                                                               CallOp::AtomicExch,
                                                                {OC_EXPR(a), OC_EXPR(b)});
     return eval<expr_value_t<A>>(expr);
 }
@@ -452,7 +452,7 @@ requires concepts::assign_able<expr_value_t<T>, expr_value_t<V>> &&
          concepts::assign_able<expr_value_t<T>, expr_value_t<V>>
 auto atomic_CAS(T &ref, U &&compare, V &&val) {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<T>>(),
-                                                               CallOp::ATOMIC_CAS,
+                                                               CallOp::AtomicCas,
                                                                {OC_EXPR(ref), OC_EXPR(compare),
                                                                 OC_EXPR(val)});
     return eval<expr_value_t<T>>(expr);
@@ -471,11 +471,11 @@ requires is_vector_v<expr_value_t<T>> || is_scalar_v<expr_value_t<T>>
 }
 
 inline void unreachable() noexcept {
-    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::UNREACHABLE, {}));
+    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::Unreachable, {}));
 }
 
 inline void synchronize_block() noexcept {
-    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::SYNCHRONIZE_BLOCK, {}));
+    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::SynchronizeBlock, {}));
 }
 
 #define OC_MAKE_WARP_FUNC(func_name, Tag, ret_type)                                                \
@@ -483,18 +483,18 @@ inline void synchronize_block() noexcept {
     requires horizon::dsl::is_boolean_expr_v<T>                                                         \
     [[nodiscard]] auto func_name(const T &pred) {                                                  \
         const Expression *expr = Function::current()->call_builtin(Type::of<ret_type>(),           \
-                                                                   CallOp::WARP_ACTIVE_COUNT_BITS, \
+                                                                   CallOp::WarpActiveCountBits, \
                                                                    {OC_EXPR(pred)});               \
         return eval<ret_type>(expr);                                                               \
     }
 
-OC_MAKE_WARP_FUNC(warp_active_bit_mask, WARP_ACTIVE_BIT_MASK, uint4)
-OC_MAKE_WARP_FUNC(warp_active_count_bits, WARP_ACTIVE_COUNT_BITS, uint)
-OC_MAKE_WARP_FUNC(warp_prefix_count_bits, WARP_PREFIX_COUNT_BITS, uint)
-OC_MAKE_WARP_FUNC(warp_lane_id, WARP_LANE_ID, uint)
-OC_MAKE_WARP_FUNC(warp_size, WARP_SIZE, uint)
-OC_MAKE_WARP_FUNC(warp_first_active_lane, WARP_FIRST_ACTIVE_LANE, uint)
-OC_MAKE_WARP_FUNC(warp_is_first_active_lane, WARP_IS_FIRST_ACTIVE_LANE, uint)
+OC_MAKE_WARP_FUNC(warp_active_bit_mask, WarpActiveBitMask, uint4)
+OC_MAKE_WARP_FUNC(warp_active_count_bits, WarpActiveCountBits, uint)
+OC_MAKE_WARP_FUNC(warp_prefix_count_bits, WarpPrefixCountBits, uint)
+OC_MAKE_WARP_FUNC(warp_lane_id, WarpLaneId, uint)
+OC_MAKE_WARP_FUNC(warp_size, WarpSize, uint)
+OC_MAKE_WARP_FUNC(warp_first_active_lane, WarpFirstActiveLane, uint)
+OC_MAKE_WARP_FUNC(warp_is_first_active_lane, WarpIsFirstActiveLane, uint)
 
 #undef OC_MAKE_WARP_FUNC
 

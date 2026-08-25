@@ -137,21 +137,21 @@ inline float3 offset_ray_origin(const float3 &p_in, const float3 &n_in) noexcept
 template<typename Org, typename Dir>
 requires(is_all_float_vector3_v<expr_value_t<Org>, expr_value_t<Dir>> && any_dsl_v<Org, Dir>)
 OC_NODISCARD Var<Ray> make_ray(const Org &org, const Dir &dir) noexcept {
-    auto expr = Function::current()->call_builtin(Type::of<Ray>(), CallOp::MAKE_RAY, {OC_EXPR(org), OC_EXPR(dir)});
+    auto expr = Function::current()->call_builtin(Type::of<Ray>(), CallOp::MakeRay, {OC_EXPR(org), OC_EXPR(dir)});
     return eval<Ray>(expr);
 }
 
 template<typename Org, typename Dir, typename T>
 requires(is_all_float_vector3_v<expr_value_t<Org>, expr_value_t<Dir>> && is_floating_point_expr_v<T> && any_dsl_v<Org, Dir, T>)
 OC_NODISCARD Var<Ray> make_ray(const Org &org, const Dir &dir, const T &t_max) noexcept {
-    auto expr = Function::current()->call_builtin(Type::of<Ray>(), CallOp::MAKE_RAY, {OC_EXPR(org), OC_EXPR(dir), OC_EXPR(t_max)});
+    auto expr = Function::current()->call_builtin(Type::of<Ray>(), CallOp::MakeRay, {OC_EXPR(org), OC_EXPR(dir), OC_EXPR(t_max)});
     return eval<Ray>(expr);
 }
 
 template<typename Pos, typename Normal>
 requires(is_all_float_vector3_v<expr_value_t<Pos>, expr_value_t<Normal>> && any_dsl_v<Pos, Normal>)
 OC_NODISCARD Var<float3> offset_ray_origin(const Pos &p_in, const Normal &n_in) noexcept {
-    auto expr = Function::current()->call_builtin(Type::of<float3>(), CallOp::RAY_OFFSET_ORIGIN,
+    auto expr = Function::current()->call_builtin(Type::of<float3>(), CallOp::RayOffsetOrigin,
                                                   {OC_EXPR(p_in), OC_EXPR(n_in)});
     return eval<float3>(expr);
 }

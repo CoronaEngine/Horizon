@@ -70,7 +70,7 @@ const RefExpr *Function::mapping_captured_argument(const Expression *outer_expr,
     if (!*contain) {
         uint arg_index = static_cast<uint>(appended_arguments_.size());
         expr_to_argument_index_.insert(make_pair(outer_expr, arg_index));
-        Variable variable = create_variable(outer_expr->type(), Variable::Tag::REFERENCE, "", "outer");
+        Variable variable = create_variable(outer_expr->type(), Variable::Tag::Reference, "", "outer");
         appended_arguments_.push_back(variable);
     }
     uint arg_index = expr_to_argument_index_.at(outer_expr);
@@ -111,7 +111,7 @@ const RefExpr *Function::mapping_output_argument(const Expression *invoked_func_
     }
     if (!expr_to_argument_index_.contains(invoked_func_expr)) {
         uint arg_index = static_cast<uint>(appended_arguments_.size());
-        Variable variable = create_variable(invoked_func_expr->type(), Variable::Tag::REFERENCE, "", "pass");
+        Variable variable = create_variable(invoked_func_expr->type(), Variable::Tag::Reference, "", "pass");
         expr_to_argument_index_.insert(make_pair(invoked_func_expr, arg_index));
         appended_arguments_.push_back(variable);
     }
@@ -126,7 +126,7 @@ void Function::append_output_argument(const Expression *expression, bool *contai
         return;
     }
     expr_to_argument_index_.insert(make_pair(expression, static_cast<uint>(appended_arguments_.size())));
-    Variable variable = create_variable(expression->type(), Variable::Tag::REFERENCE, "", "output");
+    Variable variable = create_variable(expression->type(), Variable::Tag::Reference, "", "output");
     appended_arguments_.push_back(variable);
     const RefExpr *ref_expr = _ref(variable);
     OC_ERROR_IF(expression->type()->is_resource());
@@ -161,7 +161,7 @@ void Function::process_param_struct_member(const Variable &arg, const Type *type
         splitting_param_struct(arg, type, path);
     } else {
         string key = detail::path_key(path);
-        Variable v = create_variable(type, Variable::Tag::LOCAL, "", key);
+        Variable v = create_variable(type, Variable::Tag::Local, "", key);
         argument_map_.insert(make_pair(key, v));
         splitted_arguments_.push_back(v);
     }
@@ -229,7 +229,7 @@ const RefExpr *Function::_ref(const horizon::ast::Variable &variable) noexcept {
 
 uint Function::_next_variable_uid() noexcept {
     auto ret = variable_datas_.size();
-    variable_datas_.push_back(Variable::Data(Usage::NONE));
+    variable_datas_.push_back(Variable::Data(Usage::None));
     return ret;
 }
 
@@ -309,54 +309,54 @@ const Function *Function::add_used_function(SP<const Function> func) noexcept {
 }
 
 const RefExpr *Function::block_idx() noexcept {
-    return _builtin(Variable::Tag::BLOCK_IDX, Type::of<uint3>());
+    return _builtin(Variable::Tag::BlockIdx, Type::of<uint3>());
 }
 
 const RefExpr *Function::thread_idx() noexcept {
-    return _builtin(Variable::Tag::THREAD_IDX, Type::of<uint3>());
+    return _builtin(Variable::Tag::ThreadIdx, Type::of<uint3>());
 }
 
 const RefExpr *Function::dispatch_dim() noexcept {
-    return _builtin(Variable::Tag::DISPATCH_DIM, Type::of<uint3>());
+    return _builtin(Variable::Tag::DispatchDim, Type::of<uint3>());
 }
 
 const RefExpr *Function::dispatch_id() noexcept {
-    return _builtin(Variable::Tag::DISPATCH_ID, Type::of<uint>());
+    return _builtin(Variable::Tag::DispatchId, Type::of<uint>());
 }
 
 const RefExpr *Function::thread_id() noexcept {
-    return _builtin(Variable::Tag::THREAD_ID, Type::of<uint>());
+    return _builtin(Variable::Tag::ThreadId, Type::of<uint>());
 }
 
 const RefExpr *Function::dispatch_idx() noexcept {
-    return _builtin(Variable::Tag::DISPATCH_IDX, Type::of<uint3>());
+    return _builtin(Variable::Tag::DispatchIdx, Type::of<uint3>());
 }
 
 const RefExpr *Function::argument(const Type *type) noexcept {
     Variable::Tag tag;
     switch (type->tag()) {
-        case Type::Tag::BUFFER:
-            tag = Variable::Tag::BUFFER;
+        case Type::Tag::Buffer:
+            tag = Variable::Tag::Buffer;
             break;
-        case Type::Tag::BYTE_BUFFER:
-            tag = Variable::Tag::BYTE_BUFFER;
+        case Type::Tag::ByteBuffer:
+            tag = Variable::Tag::ByteBuffer;
             break;
-        case Type::Tag::TEXTURE3D:
-        case Type::Tag::RW_TEXTURE3D:
-            tag = Variable::Tag::TEXTURE3D;
+        case Type::Tag::Texture3D:
+        case Type::Tag::RwTexture3D:
+            tag = Variable::Tag::Texture3D;
             break;
-        case Type::Tag::TEXTURE2D:
-        case Type::Tag::RW_TEXTURE2D:
-            tag = Variable::Tag::TEXTURE2D;
+        case Type::Tag::Texture2D:
+        case Type::Tag::RwTexture2D:
+            tag = Variable::Tag::Texture2D;
             break;
-        case Type::Tag::BINDLESS_ARRAY:
-            tag = Variable::Tag::BINDLESS_ARRAY;
+        case Type::Tag::BindlessArray:
+            tag = Variable::Tag::BindlessArray;
             break;
-        case Type::Tag::ACCEL:
-            tag = Variable::Tag::ACCEL;
+        case Type::Tag::Accel:
+            tag = Variable::Tag::Accel;
             break;
         default:
-            tag = Variable::Tag::LOCAL;
+            tag = Variable::Tag::Local;
             break;
     }
     Variable variable = create_variable(type, tag);
@@ -365,13 +365,13 @@ const RefExpr *Function::argument(const Type *type) noexcept {
 }
 
 const RefExpr *Function::reference_argument(const Type *type) noexcept {
-    Variable variable = create_variable(type, Variable::Tag::REFERENCE, "", "ref");
+    Variable variable = create_variable(type, Variable::Tag::Reference, "", "ref");
     arguments_.push_back(variable);
     return _ref(variable);
 }
 
 const RefExpr *Function::local(const Type *type, std::source_location location) noexcept {
-    auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::LOCAL));
+    auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::Local));
     ret->variable().set_src_location(location);
     current_scope()->add_var(ret->variable());
     return ret;
@@ -414,12 +414,12 @@ const SubscriptExpr *Function::subscript(const Type *type, const Expression *ran
 const MemberExpr *Function::swizzle(const Type *type, const Expression *obj, uint16_t mask,
                                     uint16_t swizzle_size) noexcept {
     const Type *resolved = resolve_ast_type(type);
-    return create_expression<MemberExpr>(resolved, obj, mask, swizzle_size, create_variable(resolved, Variable::Tag::MEMBER));
+    return create_expression<MemberExpr>(resolved, obj, mask, swizzle_size, create_variable(resolved, Variable::Tag::Member));
 }
 
 const MemberExpr *Function::member(const Type *type, const Expression *obj, int index) noexcept {
     const Type *resolved = resolve_ast_type(type);
-    return create_expression<MemberExpr>(resolved, obj, index, 0, create_variable(resolved, Variable::Tag::MEMBER));
+    return create_expression<MemberExpr>(resolved, obj, index, 0, create_variable(resolved, Variable::Tag::Member));
 }
 
 const CallExpr *Function::call(const Type *type, SP<const Function> func,
@@ -437,7 +437,7 @@ const CallExpr *Function::call(const horizon::ast::Type *type, string_view func_
 const CallExpr *Function::call_builtin(const Type *type, CallOp op,
                                        horizon::ast::list<const Expression *> args,
                                        horizon::ast::list<CallExpr::Template> t_args) noexcept {
-    if (op == CallOp::TRACE_CLOSEST || op == CallOp::TRACE_OCCLUSION) {
+    if (op == CallOp::TraceClosest || op == CallOp::TraceOcclusion) {
         set_raytracing(true);
     }
     return create_expression<CallExpr>(resolve_ast_type(type), op, std::move(args), resolve_ast_templates(std::move(t_args)));

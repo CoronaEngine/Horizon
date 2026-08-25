@@ -10,7 +10,7 @@ class TypeRegistry {
 private:
     struct ResolvedTypeKey {
         const Type *logical_type{nullptr};
-        PrecisionPolicy policy{PrecisionPolicy::force_f32};
+        PrecisionPolicy policy{PrecisionPolicy::ForceF32};
         bool allow_real_in_storage{false};
 
         [[nodiscard]] bool operator==(const ResolvedTypeKey &rhs) const noexcept {

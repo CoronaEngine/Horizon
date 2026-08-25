@@ -12,8 +12,8 @@
 namespace horizon::core {
 
 enum class DynamicBufferLayout : uint8_t {
-    AOS,
-    SOA,
+    Aos,
+    Soa,
 };
 
 namespace detail {
@@ -21,7 +21,7 @@ namespace detail {
 [[nodiscard]] inline bool store_real_as_f32(StoragePrecisionPolicy policy,
                                             bool direct_array_element = false) noexcept {
     (void)direct_array_element;
-    return policy.policy == PrecisionPolicy::force_f32;
+    return policy.policy == PrecisionPolicy::ForceF32;
 }
 
 template<typename T>
@@ -464,9 +464,9 @@ struct DynamicBufferLayoutCodec {
                                               StoragePrecisionPolicy policy,
                                               DynamicBufferLayout layout) noexcept {
         switch (layout) {
-            case DynamicBufferLayout::AOS:
+            case DynamicBufferLayout::Aos:
                 return count * detail::resolved_size<T>(policy);
-            case DynamicBufferLayout::SOA:
+            case DynamicBufferLayout::Soa:
                 return detail::soa_storage_bytes<T>(count, policy);
             default:
                 return 0u;
@@ -484,14 +484,14 @@ struct DynamicBufferLayoutCodec {
             return;
         }
         switch (layout) {
-            case DynamicBufferLayout::AOS: {
+            case DynamicBufferLayout::Aos: {
                 size_t stride = detail::resolved_size<T>(policy);
                 for (size_t index = 0; index < count; ++index) {
                     detail::encode_aos_value<T>(dst, index * stride, src[index], policy, false);
                 }
                 break;
             }
-            case DynamicBufferLayout::SOA:
+            case DynamicBufferLayout::Soa:
                 (void)detail::encode_soa_from_getter<T>(count, dst, 0u, policy,
                                                         [src](size_t index) -> const T & { return src[index]; });
                 break;
@@ -511,14 +511,14 @@ struct DynamicBufferLayoutCodec {
             return;
         }
         switch (layout) {
-            case DynamicBufferLayout::AOS: {
+            case DynamicBufferLayout::Aos: {
                 size_t stride = detail::resolved_size<T>(policy);
                 for (size_t index = 0; index < count; ++index) {
                     dst[index] = detail::decode_aos_value<T>(src, index * stride, policy, false);
                 }
                 break;
             }
-            case DynamicBufferLayout::SOA:
+            case DynamicBufferLayout::Soa:
                 (void)detail::decode_soa_to_getter<T>(count, src, 0u, policy,
                                                       [dst](size_t index) -> T & { return dst[index]; });
                 break;

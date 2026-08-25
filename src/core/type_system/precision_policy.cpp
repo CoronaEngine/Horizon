@@ -10,7 +10,7 @@ namespace {
 
 StoragePrecisionPolicy &global_storage_policy_impl() noexcept {
     static StoragePrecisionPolicy policy{
-        .policy = PrecisionPolicy::force_f32,
+        .policy = PrecisionPolicy::ForceF32,
         .allow_real_in_storage = true};
     return policy;
 }
@@ -28,16 +28,16 @@ StoragePrecisionPolicy &global_storage_policy_impl() noexcept {
 PrecisionPolicy DevicePrecisionCaps::recommend_policy(
     size_t estimated_scene_vram_bytes) const noexcept {
     if (!has_native_fp16) {
-        return PrecisionPolicy::force_f32;
+        return PrecisionPolicy::ForceF32;
     }
     constexpr size_t vram_tight_threshold = size_t(4) << 30;
     bool vram_pressure = (total_vram_bytes < vram_tight_threshold) ||
         (estimated_scene_vram_bytes > 0 &&
          estimated_scene_vram_bytes > total_vram_bytes * 6 / 10);
     if (has_fast_fp16 && vram_pressure) {
-        return PrecisionPolicy::force_f16;
+        return PrecisionPolicy::ForceF16;
     }
-    return PrecisionPolicy::force_f32;
+    return PrecisionPolicy::ForceF32;
 }
 
 void set_global_storage_policy(StoragePrecisionPolicy policy) noexcept {

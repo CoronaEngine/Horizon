@@ -51,7 +51,7 @@ void test_in_memory_image() {
 
     Image image = Image::from_data(pixels.data(), make_uint2(2u, 2u));
     expect(image.width() == 2u && image.height() == 2u, "in-memory resolution");
-    expect(image.pixel_storage() == PixelStorage::FLOAT4, "in-memory pixel storage");
+    expect(image.pixel_storage() == PixelStorage::Float4, "in-memory pixel storage");
     expect(image.size_in_bytes() == sizeof(pixels), "in-memory byte size");
     expect(image.view().pixel_ptr<float4>() == image.pixel_ptr<float4>(), "view references image pixels");
     expect(std::memcmp(image.pixel_ptr(), pixels.data(), sizeof(pixels)) == 0,
@@ -67,9 +67,9 @@ void test_channel_conversions() {
 
     const std::array<uint8_t, 3> gray_pixels{0u, 127u, 255u};
     auto [gray_format, gray_storage] = Image::convert_to_32bit(
-        PixelStorage::BYTE1, reinterpret_cast<const std::byte *>(gray_pixels.data()),
+        PixelStorage::Byte1, reinterpret_cast<const std::byte *>(gray_pixels.data()),
         make_uint2(3u, 1u));
-    expect(gray_format == PixelStorage::FLOAT1, "BYTE1 converts to FLOAT1");
+    expect(gray_format == PixelStorage::Float1, "BYTE1 converts to FLOAT1");
     const auto *gray_float = reinterpret_cast<const float *>(gray_storage);
     expect_near(gray_float[0], 0.0f, 1e-6f, "BYTE1 zero conversion");
     expect_near(gray_float[1], 127.0f / 255.0f, 1e-6f, "BYTE1 middle conversion");
@@ -78,9 +78,9 @@ void test_channel_conversions() {
 
     const std::array<float2, 2> dual_pixels{{{0.0f, 1.0f}, {0.5f, 0.25f}}};
     auto [byte_format, byte_storage] = Image::convert_to_8bit(
-        PixelStorage::FLOAT2, reinterpret_cast<const std::byte *>(dual_pixels.data()),
+        PixelStorage::Float2, reinterpret_cast<const std::byte *>(dual_pixels.data()),
         make_uint2(2u, 1u));
-    expect(byte_format == PixelStorage::BYTE2, "FLOAT2 converts to BYTE2");
+    expect(byte_format == PixelStorage::Byte2, "FLOAT2 converts to BYTE2");
     const auto *dual_bytes = reinterpret_cast<const uint8_t *>(byte_storage);
     expect(dual_bytes[0] == 0u && dual_bytes[1] == 255u,
            "FLOAT2 first pixel conversion");
@@ -113,7 +113,7 @@ void test_8bit_formats(const std::filesystem::path &directory) {
 
         Image loaded = Image::load(path, ColorSpace::LINEAR);
         expect(loaded.width() == 2u && loaded.height() == 2u, "8-bit round-trip resolution");
-        expect(loaded.pixel_storage() == PixelStorage::BYTE4, "8-bit round-trip storage");
+        expect(loaded.pixel_storage() == PixelStorage::Byte4, "8-bit round-trip storage");
         if (std::string_view{extension} != ".jpg") {
             expect(std::memcmp(loaded.pixel_ptr(), pixels.data(), sizeof(pixels)) == 0,
                    "lossless 8-bit round-trip pixels");
@@ -145,7 +145,7 @@ void test_float_formats(const std::filesystem::path &directory) {
 
         Image loaded = Image::load(path, ColorSpace::LINEAR);
         expect(loaded.width() == 2u && loaded.height() == 2u, "float round-trip resolution");
-        expect(loaded.pixel_storage() == PixelStorage::FLOAT4, "float round-trip storage");
+        expect(loaded.pixel_storage() == PixelStorage::Float4, "float round-trip storage");
         const auto *loaded_pixels = loaded.pixel_ptr<float4>();
         for (size_t pixel_index = 0; pixel_index < pixels.size(); ++pixel_index) {
             for (size_t channel = 0; channel < 4; ++channel) {
@@ -174,7 +174,7 @@ void test_narrow_channel_saves(const std::filesystem::path &directory) {
     gray.save(gray_path);
     Image loaded_gray = Image::load(gray_path, ColorSpace::LINEAR);
     const auto *rgba = loaded_gray.pixel_ptr<uint8_t>();
-    expect(loaded_gray.pixel_storage() == PixelStorage::BYTE4,
+    expect(loaded_gray.pixel_storage() == PixelStorage::Byte4,
            "one-channel PNG loads as RGBA");
     expect(rgba[0] == 0u && rgba[1] == 0u && rgba[2] == 0u && rgba[3] == 255u,
            "one-channel PNG first pixel");
@@ -188,7 +188,7 @@ void test_narrow_channel_saves(const std::filesystem::path &directory) {
     remove_test_file(exr_path);
     dual.save(exr_path);
     Image loaded_dual = Image::load(exr_path, ColorSpace::LINEAR);
-    expect(loaded_dual.pixel_storage() == PixelStorage::FLOAT2,
+    expect(loaded_dual.pixel_storage() == PixelStorage::Float2,
            "two-channel EXR preserves channel count");
     const auto *dual_result = loaded_dual.pixel_ptr<float2>();
     expect_near(dual_result[0].x, dual_pixels[0].x, 1e-5f,
@@ -222,7 +222,7 @@ void test_three_channel_exr(const std::filesystem::path &directory) {
     }
 
     Image loaded = Image::load(path, ColorSpace::LINEAR);
-    expect(loaded.pixel_storage() == PixelStorage::FLOAT4,
+    expect(loaded.pixel_storage() == PixelStorage::Float4,
            "three-channel EXR expands to FLOAT4");
     const auto *pixels = loaded.pixel_ptr<float4>();
     expect_near(pixels[0].x, rgb_pixels[0], 1e-5f, "RGB EXR red channel");
@@ -300,7 +300,7 @@ void test_invalid_save_input_reports_error(const std::filesystem::path &director
     const auto path = directory / "invalid.png";
     remove_test_file(path);
     try {
-        Image::save_image(path, PixelStorage::UNKNOWN, make_uint2(1u, 1u),
+        Image::save_image(path, PixelStorage::Unknown, make_uint2(1u, 1u),
                           pixels.data());
         expect(false, "invalid save format throws");
     } catch (const std::exception &error) {

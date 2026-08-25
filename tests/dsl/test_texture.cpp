@@ -42,12 +42,12 @@ std::vector<const horizon::ast::CallExpr *> top_level_calls(
     std::vector<const CallExpr *> calls;
     for (const Statement *statement : function.body()->statements()) {
         const Expression *expression = nullptr;
-        if (statement->tag() == Statement::Tag::ASSIGN) {
+        if (statement->tag() == Statement::Tag::Assign) {
             expression = static_cast<const AssignStmt *>(statement)->rhs();
-        } else if (statement->tag() == Statement::Tag::EXPR) {
+        } else if (statement->tag() == Statement::Tag::Expr) {
             expression = static_cast<const ExprStmt *>(statement)->expression();
         }
-        if (expression != nullptr && expression->tag() == Expression::Tag::CALL) {
+        if (expression != nullptr && expression->tag() == Expression::Tag::Call) {
             calls.push_back(static_cast<const CallExpr *>(expression));
         }
     }
@@ -116,19 +116,19 @@ void test_texture_types_are_core_resources() {
     const Type *rw_texture3d = Type::of<RWTexture3DView<float2>>();
     expect(bindless_array->is_bindless_array() && bindless_array->is_resource(),
            "BindlessArray is represented as a Core resource");
-    expect(texture2d->tag() == Type::Tag::TEXTURE2D && texture2d->is_texture() &&
+    expect(texture2d->tag() == Type::Tag::Texture2D && texture2d->is_texture() &&
                texture2d->is_resource() && texture2d->element() == Type::of<float4>() &&
                texture2d->description() == "texture2d<vector<float,4>>",
            "Texture2D preserves its element type in the Core resource type");
-    expect(texture3d->tag() == Type::Tag::TEXTURE3D && texture3d->is_texture() &&
+    expect(texture3d->tag() == Type::Tag::Texture3D && texture3d->is_texture() &&
                texture3d->is_resource() && texture3d->element() == Type::of<float2>() &&
                texture3d->description() == "texture3d<vector<float,2>>",
            "Texture3D preserves its element type in the Core resource type");
-    expect(rw_texture2d->tag() == Type::Tag::RW_TEXTURE2D && rw_texture2d->is_texture() &&
+    expect(rw_texture2d->tag() == Type::Tag::RwTexture2D && rw_texture2d->is_texture() &&
                rw_texture2d->is_resource() && rw_texture2d->element() == Type::of<float4>() &&
                rw_texture2d->description() == "rwtexture2d<vector<float,4>>",
            "RWTexture2D preserves its element type in the Core resource type");
-    expect(rw_texture3d->tag() == Type::Tag::RW_TEXTURE3D && rw_texture3d->is_texture() &&
+    expect(rw_texture3d->tag() == Type::Tag::RwTexture3D && rw_texture3d->is_texture() &&
                rw_texture3d->is_resource() && rw_texture3d->element() == Type::of<float2>() &&
                rw_texture3d->description() == "rwtexture3d<vector<float,2>>",
            "RWTexture3D preserves its element type in the Core resource type");
@@ -142,10 +142,10 @@ void test_texture_types_are_core_resources() {
            "sampled and read-write texture views round-trip through the Core registry");
 
     const StoragePrecisionPolicy f16{
-        .policy = PrecisionPolicy::force_f16,
+        .policy = PrecisionPolicy::ForceF16,
         .allow_real_in_storage = true};
     const StoragePrecisionPolicy f32{
-        .policy = PrecisionPolicy::force_f32,
+        .policy = PrecisionPolicy::ForceF32,
         .allow_real_in_storage = true};
     expect(Type::resolve(Type::of<Texture2DView<real4>>(), f16)->description() ==
                "texture2d<vector<half,4>>",
@@ -193,25 +193,25 @@ void test_direct_texture_operations_build_expected_ast() {
     expect(function->arguments().size() == 4u,
            "direct texture kernel records sampled and read-write texture arguments");
     if (function->arguments().size() == 4u) {
-        expect(function->arguments()[0].tag() == Variable::Tag::TEXTURE2D &&
+        expect(function->arguments()[0].tag() == Variable::Tag::Texture2D &&
                    function->arguments()[0].type() == Type::of<horizon::core::Texture2DView<float4>>(),
                "Texture2DView argument keeps its resource type and variable tag");
-        expect(function->arguments()[1].tag() == Variable::Tag::TEXTURE3D &&
+        expect(function->arguments()[1].tag() == Variable::Tag::Texture3D &&
                    function->arguments()[1].type() == Type::of<horizon::core::Texture3DView<float4>>(),
                "Texture3DView argument keeps its resource type and variable tag");
-        expect(function->arguments()[2].tag() == Variable::Tag::TEXTURE2D &&
+        expect(function->arguments()[2].tag() == Variable::Tag::Texture2D &&
                    function->arguments()[2].type() == Type::of<horizon::core::RWTexture2DView<float4>>(),
                "RWTexture2DView argument keeps its resource type and variable tag");
-        expect(function->arguments()[3].tag() == Variable::Tag::TEXTURE3D &&
+        expect(function->arguments()[3].tag() == Variable::Tag::Texture3D &&
                    function->arguments()[3].type() == Type::of<horizon::core::RWTexture3DView<float4>>(),
                "RWTexture3DView argument keeps its resource type and variable tag");
-        expect(function->arguments()[0].usage() == Usage::READ,
+        expect(function->arguments()[0].usage() == Usage::Read,
                "Texture2DView sample propagates read usage");
-        expect(function->arguments()[1].usage() == Usage::READ,
+        expect(function->arguments()[1].usage() == Usage::Read,
                "Texture3DView sample propagates read usage");
-        expect(function->arguments()[2].usage() == Usage::READ_WRITE,
+        expect(function->arguments()[2].usage() == Usage::ReadWrite,
                "RWTexture2DView read and write propagate read-write usage");
-        expect(function->arguments()[3].usage() == Usage::READ_WRITE,
+        expect(function->arguments()[3].usage() == Usage::ReadWrite,
                "RWTexture3DView read and write propagate read-write usage");
     }
 
@@ -222,17 +222,17 @@ void test_direct_texture_operations_build_expected_ast() {
         return;
     }
 
-    expect_call(calls[0], CallOp::TEX2D_SAMPLE, 3u,
+    expect_call(calls[0], CallOp::Tex2DSample, 3u,
                 "Texture2D sample emits TEX2D_SAMPLE with texture and two coordinates");
-    expect_call(calls[1], CallOp::TEX3D_SAMPLE, 4u,
+    expect_call(calls[1], CallOp::Tex3DSample, 4u,
                 "Texture3D sample emits TEX3D_SAMPLE with texture and three coordinates");
-    expect_call(calls[2], CallOp::TEX2D_READ, 3u,
+    expect_call(calls[2], CallOp::Tex2DRead, 3u,
                 "Texture2D read emits TEX2D_READ with integer coordinates");
-    expect_call(calls[3], CallOp::TEX3D_READ, 4u,
+    expect_call(calls[3], CallOp::Tex3DRead, 4u,
                 "Texture3D read emits TEX3D_READ with integer coordinates");
-    expect_call(calls[4], CallOp::TEX2D_WRITE, 4u,
+    expect_call(calls[4], CallOp::Tex2DWrite, 4u,
                 "Texture2D write emits TEX2D_WRITE with value and integer coordinates");
-    expect_call(calls[5], CallOp::TEX3D_WRITE, 5u,
+    expect_call(calls[5], CallOp::Tex3DWrite, 5u,
                 "Texture3D write emits TEX3D_WRITE with value and integer coordinates");
 
     expect(calls[0]->template_args().size() == 1u && calls[1]->template_args().size() == 1u,
@@ -286,11 +286,11 @@ void test_bindless_texture_samples_build_expected_ast() {
     expect(function->arguments().size() == 1u,
            "bindless texture kernel records one resource argument");
     if (function->arguments().size() == 1u) {
-        expect(function->arguments()[0].tag() == Variable::Tag::BINDLESS_ARRAY &&
+        expect(function->arguments()[0].tag() == Variable::Tag::BindlessArray &&
                    function->arguments()[0].type() == Type::of<horizon::core::BindlessArray>() &&
                    function->arguments()[0].type()->is_resource(),
            "bindless texture kernel records a bindless-array resource argument");
-        expect(function->arguments()[0].usage() == Usage::READ,
+        expect(function->arguments()[0].usage() == Usage::Read,
                "bindless texture samples propagate read usage to the bindless array");
     }
 
@@ -300,9 +300,9 @@ void test_bindless_texture_samples_build_expected_ast() {
     if (calls.size() != 2u) {
         return;
     }
-    expect_call(calls[0], CallOp::BINDLESS_ARRAY_TEX2D_SAMPLE, 4u,
+    expect_call(calls[0], CallOp::BindlessArrayTex2DSample, 4u,
                 "bindless Texture2D sample records array, index, and two coordinates");
-    expect_call(calls[1], CallOp::BINDLESS_ARRAY_TEX3D_SAMPLE, 5u,
+    expect_call(calls[1], CallOp::BindlessArrayTex3DSample, 5u,
                 "bindless Texture3D sample records array, index, and three coordinates");
 }
 

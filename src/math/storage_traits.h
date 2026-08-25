@@ -62,11 +62,11 @@ struct scalar_storage_traits<horizon::math::real> {
     using raw_type = horizon::math::real;
 
     [[nodiscard]] static constexpr size_t size(StoragePrecisionPolicy policy) noexcept {
-        return policy.policy == PrecisionPolicy::force_f32 ? sizeof(float) : sizeof(uint16_t);
+        return policy.policy == PrecisionPolicy::ForceF32 ? sizeof(float) : sizeof(uint16_t);
     }
 
     [[nodiscard]] static constexpr size_t alignment(StoragePrecisionPolicy policy) noexcept {
-        return policy.policy == PrecisionPolicy::force_f32 ? alignof(float) : alignof(uint16_t);
+        return policy.policy == PrecisionPolicy::ForceF32 ? alignof(float) : alignof(uint16_t);
     }
 
     template<typename ByteBuffer>
@@ -74,7 +74,7 @@ struct scalar_storage_traits<horizon::math::real> {
                       size_t offset,
                       raw_type value,
                       StoragePrecisionPolicy policy) noexcept {
-        if (policy.policy == PrecisionPolicy::force_f32) {
+        if (policy.policy == PrecisionPolicy::ForceF32) {
             buffer.template store<float>(offset, static_cast<float>(value));
         } else {
             buffer.template store<uint16_t>(offset, horizon::math::float_to_half(static_cast<float>(value)));
@@ -85,7 +85,7 @@ struct scalar_storage_traits<horizon::math::real> {
     [[nodiscard]] static raw_type load(const ByteBuffer &buffer,
                                        size_t offset,
                                        StoragePrecisionPolicy policy) noexcept {
-        if (policy.policy == PrecisionPolicy::force_f32) {
+        if (policy.policy == PrecisionPolicy::ForceF32) {
             return raw_type{buffer.template load<float>(offset)};
         }
         return raw_type{horizon::math::half_to_float(buffer.template load<uint16_t>(offset))};
@@ -166,7 +166,7 @@ template<typename T, typename F>
 }// namespace detail
 
 template<typename T, PrecisionPolicy Policy>
-using resolved_storage_tag_t = std::conditional_t<Policy == PrecisionPolicy::force_f16, half, float>;
+using resolved_storage_tag_t = std::conditional_t<Policy == PrecisionPolicy::ForceF16, half, float>;
 
 template<typename T, typename F>
 using resolved_storage_by_tag_t = detail::resolved_storage_impl_t<T, F>;
@@ -336,9 +336,9 @@ template<typename T, PrecisionPolicy Policy>
             MAP_UD(OC_STORAGE_MEMBER_DECL, storage, ##__VA_ARGS__)          \
             static constexpr PrecisionPolicy storage_policy() noexcept {    \
                 if constexpr (std::same_as<storage, half>) {                \
-                    return PrecisionPolicy::force_f16;                      \
+                    return PrecisionPolicy::ForceF16;                      \
                 } else {                                                    \
-                    return PrecisionPolicy::force_f32;                      \
+                    return PrecisionPolicy::ForceF32;                      \
                 }                                                           \
             }                                                               \
             static constexpr string_view storage_suffix() noexcept {        \

@@ -170,7 +170,7 @@ public:
     }
 };
 
-template<typename T, AccessMode mode = AOS>
+template<typename T, AccessMode mode = Aos>
 class RegistrableCountedBuffer : public CountedBuffer<T, mode, ByteBuffer>,
                                  public Registrable {
 public:

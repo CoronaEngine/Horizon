@@ -44,10 +44,10 @@ eval_dynamic_array(const DynamicArray<T> &array) noexcept;// implement in dynami
         }                                                                                                            \
     }
 
-OC_MAKE_DSL_UNARY_OPERATOR(+, POSITIVE)
-OC_MAKE_DSL_UNARY_OPERATOR(-, NEGATIVE)
-OC_MAKE_DSL_UNARY_OPERATOR(!, NOT)
-OC_MAKE_DSL_UNARY_OPERATOR(~, BIT_NOT)
+OC_MAKE_DSL_UNARY_OPERATOR(+, Positive)
+OC_MAKE_DSL_UNARY_OPERATOR(-, Negative)
+OC_MAKE_DSL_UNARY_OPERATOR(!, Not)
+OC_MAKE_DSL_UNARY_OPERATOR(~, BitNot)
 
 #undef OC_MAKE_DSL_UNARY_OPERATOR
 
@@ -111,24 +111,24 @@ OC_MAKE_DSL_UNARY_OPERATOR(~, BIT_NOT)
         return arr op rhs;                                                                               \
     }
 
-OC_MAKE_DSL_BINARY_OPERATOR(+, ADD, add)
-OC_MAKE_DSL_BINARY_OPERATOR(-, SUB, sub)
-OC_MAKE_DSL_BINARY_OPERATOR(*, MUL, mul)
-OC_MAKE_DSL_BINARY_OPERATOR(/, DIV, div)
-OC_MAKE_DSL_BINARY_OPERATOR(%, MOD, mod)
-OC_MAKE_DSL_BINARY_OPERATOR(&, BIT_AND, bit_and)
-OC_MAKE_DSL_BINARY_OPERATOR(|, BIT_OR, bit_or)
-OC_MAKE_DSL_BINARY_OPERATOR(^, BIT_XOR, bit_xor)
-OC_MAKE_DSL_BINARY_OPERATOR(<<, SHL, shl)
-OC_MAKE_DSL_BINARY_OPERATOR(>>, SHR, shr)
-OC_MAKE_DSL_BINARY_OPERATOR(&&, AND, and_op)
-OC_MAKE_DSL_BINARY_OPERATOR(||, OR, or_op)
-OC_MAKE_DSL_BINARY_OPERATOR(==, EQUAL, equal)
-OC_MAKE_DSL_BINARY_OPERATOR(!=, NOT_EQUAL, not_equal)
-OC_MAKE_DSL_BINARY_OPERATOR(<, LESS, less)
-OC_MAKE_DSL_BINARY_OPERATOR(<=, LESS_EQUAL, less_eq)
-OC_MAKE_DSL_BINARY_OPERATOR(>, GREATER, greater)
-OC_MAKE_DSL_BINARY_OPERATOR(>=, GREATER_EQUAL, greater_equal)
+OC_MAKE_DSL_BINARY_OPERATOR(+, Add, add)
+OC_MAKE_DSL_BINARY_OPERATOR(-, Sub, sub)
+OC_MAKE_DSL_BINARY_OPERATOR(*, Mul, mul)
+OC_MAKE_DSL_BINARY_OPERATOR(/, Div, div)
+OC_MAKE_DSL_BINARY_OPERATOR(%, Mod, mod)
+OC_MAKE_DSL_BINARY_OPERATOR(&, BitAnd, bit_and)
+OC_MAKE_DSL_BINARY_OPERATOR(|, BitOr, bit_or)
+OC_MAKE_DSL_BINARY_OPERATOR(^, BitXor, bit_xor)
+OC_MAKE_DSL_BINARY_OPERATOR(<<, Shl, shl)
+OC_MAKE_DSL_BINARY_OPERATOR(>>, Shr, shr)
+OC_MAKE_DSL_BINARY_OPERATOR(&&, And, and_op)
+OC_MAKE_DSL_BINARY_OPERATOR(||, Or, or_op)
+OC_MAKE_DSL_BINARY_OPERATOR(==, Equal, equal)
+OC_MAKE_DSL_BINARY_OPERATOR(!=, NotEqual, not_equal)
+OC_MAKE_DSL_BINARY_OPERATOR(<, Less, less)
+OC_MAKE_DSL_BINARY_OPERATOR(<=, LessEqual, less_eq)
+OC_MAKE_DSL_BINARY_OPERATOR(>, Greater, greater)
+OC_MAKE_DSL_BINARY_OPERATOR(>=, GreaterEqual, greater_equal)
 
 #undef OC_MAKE_DSL_BINARY_OPERATOR
 

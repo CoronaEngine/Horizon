@@ -39,17 +39,17 @@ struct OC_AST_API ExprVisitor {
 class OC_AST_API Expression : public ASTNode, public concepts::Noncopyable, public Hashable {
 public:
     enum struct Tag : uint32_t {
-        UNARY,
-        BINARY,
-        MEMBER,
-        SUBSCRIPT,
-        LITERAL,
-        REF,
-        CONSTANT,
-        CALL,
-        CAST,
-        CONDITIONAL,
-        SAMPLE
+        Unary,
+        Binary,
+        Member,
+        Subscript,
+        Literal,
+        Ref,
+        Constant,
+        Call,
+        Cast,
+        Conditional,
+        Sample
     };
 
 private:
@@ -64,13 +64,13 @@ public:
     virtual ~Expression() noexcept = default;
     [[nodiscard]] auto type() const noexcept { return type_; }
     [[nodiscard]] auto tag() const noexcept { return tag_; }
-    [[nodiscard]] bool is_ref() const noexcept { return tag() == Tag::REF; }
-    [[nodiscard]] bool is_member() const noexcept { return tag() == Tag::MEMBER; }
+    [[nodiscard]] bool is_ref() const noexcept { return tag() == Tag::Ref; }
+    [[nodiscard]] bool is_member() const noexcept { return tag() == Tag::Member; }
     [[nodiscard]] bool is_arithmetic() const noexcept {
-        return tag() == Tag::BINARY || tag() == Tag::UNARY;
+        return tag() == Tag::Binary || tag() == Tag::Unary;
     }
     virtual void accept(ExprVisitor &) const = 0;
-    [[nodiscard]] virtual Usage usage() const noexcept { return Usage::NONE; }
+    [[nodiscard]] virtual Usage usage() const noexcept { return Usage::None; }
     void mark(Usage usage) const noexcept {
         _mark(usage);
     }
@@ -90,7 +90,7 @@ private:
 
 public:
     UnaryExpr(const Type *type, UnaryOp op, const Expression *expression)
-        : Expression(Tag::UNARY, type), op_(op), operand_(expression) {}
+        : Expression(Tag::Unary, type), op_(op), operand_(expression) {}
     OC_MAKE_CHECK_CONTEXT(Expression, operand_)
     [[nodiscard]] auto operand() const noexcept { return operand_; }
     [[nodiscard]] auto op() const noexcept { return op_; }
@@ -109,9 +109,9 @@ private:
 
 public:
     BinaryExpr(const Type *type, BinaryOp op, const Expression *lhs, const Expression *rhs) noexcept
-        : Expression{Tag::BINARY, type}, lhs_{lhs}, rhs_{rhs}, op_{op} {
-        lhs_->mark(Usage::READ);
-        rhs_->mark(Usage::READ);
+        : Expression{Tag::Binary, type}, lhs_{lhs}, rhs_{rhs}, op_{op} {
+        lhs_->mark(Usage::Read);
+        rhs_->mark(Usage::Read);
     }
     OC_MAKE_CHECK_CONTEXT(Expression, lhs_, rhs_)
     [[nodiscard]] auto lhs() const noexcept { return lhs_; }
@@ -132,11 +132,11 @@ private:
 public:
     ConditionalExpr(const Type *type, const Expression *pred,
                     const Expression *t, const Expression *f)
-        : Expression(Tag::CONDITIONAL, type),
+        : Expression(Tag::Conditional, type),
           pred_(pred), True_(t), False_(f) {
-        pred_->mark(Usage::READ);
-        True_->mark(Usage::READ);
-        False_->mark(Usage::READ);
+        pred_->mark(Usage::Read);
+        True_->mark(Usage::Read);
+        False_->mark(Usage::Read);
     }
     OC_MAKE_CHECK_CONTEXT(Expression, pred_, True_, False_)
     [[nodiscard]] const Expression *pred() const noexcept { return pred_; }
@@ -161,14 +161,14 @@ private:
 
 public:
     SubscriptExpr(const Type *type, const Expression *range, const Expression *index)
-        : Expression(Tag::SUBSCRIPT, type), range_(range) {
+        : Expression(Tag::Subscript, type), range_(range) {
         indexes_.push_back(index);
     }
     bool check_context(const Function *ctx) const noexcept override {
         return detail::check_context((range_), ctx) && detail::check_context((indexes_), ctx);
     }
     SubscriptExpr(const Type *type, const Expression *range, IndexVector indexes)
-        : Expression(Tag::SUBSCRIPT, type), range_(range), indexes_(horizon::ast::move(indexes)) {
+        : Expression(Tag::Subscript, type), range_(range), indexes_(horizon::ast::move(indexes)) {
     }
 
     template<typename Func>
@@ -195,7 +195,7 @@ private:
 
 public:
     LiteralExpr(const Type *type, value_type value)
-        : Expression(Tag::LITERAL, type), value_(value) {}
+        : Expression(Tag::Literal, type), value_(value) {}
     [[nodiscard]] decltype(auto) value() const noexcept { return value_; }
     bool check_context(const Function *ctx) const noexcept override { return true; }
     OC_MAKE_EXPRESSION_COMMON
@@ -214,8 +214,8 @@ private:
 
 public:
     CastExpr(const Type *type, CastOp op, const Expression *expression) noexcept
-        : Expression(Tag::CAST, type), cast_op_(op), expression_(expression) {
-        expression_->mark(Usage::READ);
+        : Expression(Tag::Cast, type), cast_op_(op), expression_(expression) {
+        expression_->mark(Usage::Read);
     }
     OC_MAKE_CHECK_CONTEXT(Expression, expression_)
     [[nodiscard]] CastOp cast_op() const noexcept { return cast_op_; }
@@ -242,7 +242,7 @@ public:
 class OC_AST_API RefExpr : public VariableExpr {
 public:
     explicit RefExpr(const Variable &v) noexcept
-        : VariableExpr(Tag::REF, v.type(), v) {}
+        : VariableExpr(Tag::Ref, v.type(), v) {}
     OC_MAKE_EXPRESSION_COMMON
 };
 
@@ -274,7 +274,7 @@ public:
 private:
     horizon::ast::list<const Expression *> arguments_;
     const Function *function_{};
-    CallOp call_op_{CallOp::CUSTOM};
+    CallOp call_op_{CallOp::Custom};
     string_view function_name_{};
     horizon::ast::list<Template> template_args_;
 
@@ -288,11 +288,11 @@ public:
     CallExpr(const Type *type, CallOp op,
              horizon::ast::list<const Expression *> &&args,
              horizon::ast::list<Template> &&t_args = {})
-        : Expression(Tag::CALL, type), call_op_(op),
+        : Expression(Tag::Call, type), call_op_(op),
           arguments_(std::move(args)), template_args_(horizon::ast::move(t_args)) {}
     CallExpr(const Type *type, string_view func_name,
              horizon::ast::list<const Expression *> &&args)
-        : Expression(Tag::CALL, type), function_name_(horizon::ast::move(func_name)),
+        : Expression(Tag::Call, type), function_name_(horizon::ast::move(func_name)),
           arguments_(horizon::ast::move(args)) {}
     OC_MAKE_CHECK_CONTEXT(Expression, arguments_)
     [[nodiscard]] auto arguments() const noexcept { return arguments_; }

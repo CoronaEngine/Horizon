@@ -74,7 +74,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::READ);
+        expr->mark(Usage::Read);
         return eval<element_type>(expr);
     }
 
@@ -85,7 +85,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::READ);
+        expr->mark(Usage::Read);
         return eval<element_type>(expr);
     }
 
@@ -96,7 +96,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::WRITE);
+        expr->mark(Usage::Write);
         Var<element_type> *ret = f->template create_temp_obj<Var<element_type>>(expr);
         return *ret;
     }
@@ -108,7 +108,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::WRITE);
+        expr->mark(Usage::Write);
         Var<element_type> *ret = f->template create_temp_obj<Var<element_type>>(expr);
         return *ret;
     }
@@ -127,7 +127,7 @@ struct EnableReadAndWrite {
         const SubscriptExpr *expr = Function::current()->subscript(Type::of<element_type>(),
                                                                    self()->expression(),
                                                                    {OC_EXPR(index)...});
-        expr->mark(Usage::READ);
+        expr->mark(Usage::Read);
         return eval<element_type>(expr);
     }
 
@@ -143,7 +143,7 @@ struct EnableReadAndWrite {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  {OC_EXPR(new_index)});
-        expr->mark(Usage::READ);
+        expr->mark(Usage::Read);
         return eval<element_type>(expr);
     }
 
@@ -162,7 +162,7 @@ struct EnableReadAndWrite {
             const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                      self()->expression(),
                                                      OC_EXPR(new_index));
-            expr->mark(Usage::WRITE);
+            expr->mark(Usage::Write);
             assign(expr, OC_FORWARD(elm));
         }
     }
@@ -195,17 +195,17 @@ struct EnableByteLoadAndStore {
             new_offset = detail::correct_index(new_offset, self()->template size<expr_value_t<Offset>>(),
                                                typeid(*this).name(), traceback_string());
         }
-        self()->expression()->mark(Usage::READ);
+        self()->expression()->mark(Usage::Read);
         if constexpr (N == 1) {
             const CallExpr *expr = Function::current()->call_builtin(Type::of<Elm>(),
-                                                                     CallOp::BYTE_BUFFER_READ,
+                                                                     CallOp::ByteBufferRead,
                                                                      {self()->expression(),
                                                                       OC_EXPR(new_offset)},
                                                                      {N});
             return eval<Elm>(expr);
         } else {
             const CallExpr *expr = Function::current()->call_builtin(Type::of<Vector<Elm, N>>(),
-                                                                     CallOp::BYTE_BUFFER_READ,
+                                                                     CallOp::ByteBufferRead,
                                                                      {self()->expression(),
                                                                       OC_EXPR(new_offset)},
                                                                      {N});
@@ -222,9 +222,9 @@ struct EnableByteLoadAndStore {
                                                typeid(*this).name(), traceback_string());
         }
         const Type *ret_type = Type::of<Target>();
-        self()->expression()->mark(Usage::READ);
+        self()->expression()->mark(Usage::Read);
         const CallExpr *expr = Function::current()->call_builtin(ret_type,
-                                                                 CallOp::BYTE_BUFFER_READ,
+                                                                 CallOp::ByteBufferRead,
                                                                  {self()->expression(),
                                                                   OC_EXPR(new_offset)},
                                                                  {ret_type});
@@ -240,9 +240,9 @@ struct EnableByteLoadAndStore {
                                                typeid(*this).name(), traceback_string());
         }
         const Type *ret_type = Type::of<Target>();
-        self()->expression()->mark(Usage::WRITE);
+        self()->expression()->mark(Usage::Write);
         const CallExpr *expr = Function::current()->call_builtin(ret_type,
-                                                                 CallOp::BYTE_BUFFER_READ,
+                                                                 CallOp::ByteBufferRead,
                                                                  {self()->expression(),
                                                                   OC_EXPR(new_offset)},
                                                                  {ret_type});
@@ -276,10 +276,10 @@ struct EnableByteLoadAndStore {
             new_offset = detail::correct_index(new_offset, self()->template size<expr_value_t<Offset>>(),
                                                typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BYTE_BUFFER_WRITE,
+        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::ByteBufferWrite,
                                                                  {self()->expression(),
                                                                   OC_EXPR(new_offset), OC_EXPR(val)});
-        self()->expression()->mark(Usage::WRITE);
+        self()->expression()->mark(Usage::Write);
         Function::current()->expr_statement(expr);
     }
 };
@@ -287,7 +287,7 @@ struct EnableByteLoadAndStore {
 template<typename T, size_t Dim>
 struct EnableTextureSample {
     static_assert(Dim == 2 || Dim == 3, "The dimension of texture must be 2 or 3!");
-    static constexpr CallOp call_op = Dim == 2 ? CallOp::TEX2D_SAMPLE : CallOp::TEX3D_SAMPLE;
+    static constexpr CallOp call_op = Dim == 2 ? CallOp::Tex2DSample : CallOp::Tex3DSample;
     template<typename U, typename V>
     requires(is_all_floating_point_expr_v<U, V>)
     OC_NODISCARD DynamicArray<float> sample(uint channel_num, const U &u, const V &v)
@@ -312,8 +312,8 @@ struct EnableTextureSample {
 template<typename T, size_t Dim>
 struct EnableTextureReadAndWrite {
     static_assert(Dim == 2 || Dim == 3, "The dimension of texture must be 2 or 3!");
-    static constexpr CallOp Read = Dim == 2 ? CallOp::TEX2D_READ : CallOp::TEX3D_READ;
-    static constexpr CallOp Write = Dim == 2 ? CallOp::TEX2D_WRITE : CallOp::TEX3D_WRITE;
+    static constexpr CallOp Read = Dim == 2 ? CallOp::Tex2DRead : CallOp::Tex3DRead;
+    static constexpr CallOp Write = Dim == 2 ? CallOp::Tex2DWrite : CallOp::Tex3DWrite;
     [[nodiscard]] T *self() noexcept { return static_cast<T *>(this); }
     [[nodiscard]] const T *self() const noexcept { return static_cast<const T *>(this); }
 
@@ -323,7 +323,7 @@ struct EnableTextureReadAndWrite {
         const CallExpr *expr = Function::current()->call_builtin(Type::of<Output>(), Read,
                                                                  {self()->expression(), OC_EXPR(x), OC_EXPR(y)},
                                                                  {Type::of<Output>()});
-        self()->expression()->mark(Usage::READ);
+        self()->expression()->mark(Usage::Read);
         return eval<Output>(expr);
     }
 
@@ -334,7 +334,7 @@ struct EnableTextureReadAndWrite {
         const CallExpr *expr = Function::current()->call_builtin(Type::of<Output>(), Read,
                                                                  {self()->expression(), OC_EXPR(x), OC_EXPR(y), OC_EXPR(z)},
                                                                  {Type::of<Output>()});
-        self()->expression()->mark(Usage::READ);
+        self()->expression()->mark(Usage::Read);
         return eval<Output>(expr);
     }
 
@@ -365,7 +365,7 @@ struct EnableTextureReadAndWrite {
         const CallExpr *expr = Function::current()->call_builtin(nullptr, Write,
                                                                  {self()->expression(),
                                                                   OC_EXPR(elm), OC_EXPR(x), OC_EXPR(y)});
-        self()->expression()->mark(Usage::WRITE);
+        self()->expression()->mark(Usage::Write);
         Function::current()->expr_statement(expr);
     }
 
@@ -378,7 +378,7 @@ struct EnableTextureReadAndWrite {
         const CallExpr *expr = Function::current()->call_builtin(nullptr, Write,
                                                                  {self()->expression(),
                                                                   OC_EXPR(elm), OC_EXPR(x), OC_EXPR(y), OC_EXPR(z)});
-        self()->expression()->mark(Usage::WRITE);
+        self()->expression()->mark(Usage::Write);
         Function::current()->expr_statement(expr);
     }
 
@@ -416,25 +416,25 @@ public:
 
     Var<T> exchange(Var<T> value) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::ATOMIC_EXCH,
+                                                                   CallOp::AtomicExch,
                                                                    {range_, index_, OC_EXPR(value)});
-        range_->mark(Usage::READ_WRITE);
+        range_->mark(Usage::ReadWrite);
         return eval<T>(expr);
     }
 
     Var<T> fetch_add(Var<T> value) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::ATOMIC_ADD,
+                                                                   CallOp::AtomicAdd,
                                                                    {range_, index_, OC_EXPR(value)});
-        range_->mark(Usage::READ_WRITE);
+        range_->mark(Usage::ReadWrite);
         return eval<T>(expr);
     }
 
     Var<T> fetch_sub(Var<T> value) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::ATOMIC_SUB,
+                                                                   CallOp::AtomicSub,
                                                                    {range_, index_, OC_EXPR(value)});
-        range_->mark(Usage::READ_WRITE);
+        range_->mark(Usage::ReadWrite);
         return eval<T>(expr);
     }
 };
@@ -480,7 +480,7 @@ struct EnableStaticCast {
     OC_NODISCARD Var<Dest>
     cast()
         const noexcept {
-        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::STATIC,
+        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::Static,
                                                          static_cast<const T *>(this)->expression());
         return eval<Dest>(expr);
     }
@@ -493,7 +493,7 @@ struct EnableBitwiseCast {
     OC_NODISCARD Var<Dest>
     as()
         const noexcept {
-        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::BITWISE,
+        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::Bitwise,
                                                          static_cast<const T *>(this)->expression());
         return eval<Dest>(expr);
     }

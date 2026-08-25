@@ -210,7 +210,7 @@ public:
     }
     template<typename int_type = ulong>
     [[nodiscard]] auto size() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::BUFFER_SIZE, {expression()});
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::BufferSize, {expression()});
         return eval<int_type>(expr);
     }
 };
@@ -227,7 +227,7 @@ public:
     }
     template<typename int_type = uint>
     [[nodiscard]] auto size_in_byte() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::BYTE_BUFFER_SIZE, {expression()});
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::ByteBufferSize, {expression()});
         return eval<int_type>(expr);
     }
 
@@ -332,14 +332,14 @@ public:
         if constexpr (is_dsl_v<Index>) {
             index = detail::correct_index(index, size(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BINDLESS_ARRAY_BUFFER_READ,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BindlessArrayBufferRead,
                                                                  {bindless_array_, index_, OC_EXPR(index)});
         return eval<T>(expr);
     }
 
     template<typename Size = uint>
     [[nodiscard]] Var<Size> size_in_byte() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BINDLESS_ARRAY_BUFFER_SIZE,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BindlessArrayBufferSize,
                                                                  {bindless_array_, index_});
         return eval<Size>(expr);
     }
@@ -356,7 +356,7 @@ public:
         if constexpr (is_dsl_v<Index>) {
             index = detail::correct_index(index, size(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BINDLESS_ARRAY_BUFFER_WRITE,
+        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BindlessArrayBufferWrite,
                                                                  {bindless_array_, index_, OC_EXPR(index), OC_EXPR(elm)});
         Function::current()->expr_statement(expr);
     }
@@ -377,7 +377,7 @@ public:
         if (check_boundary) {
             offset = detail::correct_index(offset, size_in_byte<Size>(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BindlessArrayByteBufferRead,
                                                                  {bindless_array_, index_, OC_EXPR(offset)});
         return eval<T>(expr);
     }
@@ -388,7 +388,7 @@ public:
         if (check_boundary) {
             offset = detail::correct_index(offset, size_in_byte<Size>(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BindlessArrayByteBufferRead,
                                                                  {bindless_array_, index_, OC_EXPR(offset)});
         Var<T> *ret = Function::current()->template create_temp_obj<Var<T>>(expr);
         return *ret;
@@ -400,7 +400,7 @@ public:
         if (check_boundary) {
             offset = detail::correct_index(offset, size_in_byte<Size>(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BINDLESS_ARRAY_BYTE_BUFFER_WRITE,
+        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BindlessArrayByteBufferWrite,
                                                                  {bindless_array_, index_,
                                                                   OC_EXPR(offset), OC_EXPR(val)});
         Function::current()->expr_statement(expr);
@@ -408,7 +408,7 @@ public:
 
     template<typename Size = uint>
     [[nodiscard]] Var<Size> size_in_byte() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BINDLESS_ARRAY_BUFFER_SIZE,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BindlessArrayBufferSize,
                                                                  {bindless_array_, index_});
         return eval<Size>(expr);
     }
@@ -438,8 +438,8 @@ template<size_t Dim>
 class BindlessArrayTexture {
 private:
     static_assert(Dim == 2 || Dim == 3, "The dimension of texture must be 2 or 3!");
-    static constexpr CallOp call_op = Dim == 2 ? CallOp::BINDLESS_ARRAY_TEX2D_SAMPLE :
-                                                 CallOp::BINDLESS_ARRAY_TEX3D_SAMPLE;
+    static constexpr CallOp call_op = Dim == 2 ? CallOp::BindlessArrayTex2DSample :
+                                                 CallOp::BindlessArrayTex3DSample;
     const Expression *bindless_array_{nullptr};
     const Expression *index_{nullptr};
 

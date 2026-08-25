@@ -511,34 +511,34 @@ OC_CORE_API void register_type_system_callbacks(TypeSystemCallbacks callbacks) n
 class Type final : public concepts::Noncopyable, public Hashable {
 public:
     enum struct Tag : uint32_t {
-        BOOL,
-        FLOAT,
-        REAL,
-        HALF,
-        INT,
-        UINT,
-        UCHAR,
-        CHAR,
-        SHORT,
-        USHORT,
-        ULONG,
+        Bool,
+        Float,
+        Real,
+        Half,
+        Int,
+        Uint,
+        Uchar,
+        Char,
+        Short,
+        Ushort,
+        Ulong,
 
-        VECTOR,
-        MATRIX,
+        Vector,
+        Matrix,
 
-        ARRAY,
-        STRUCTURE,
+        Array,
+        Structure,
 
-        BUFFER,
-        BYTE_BUFFER,
-        TEXTURE3D,
-        TEXTURE2D,
-        BINDLESS_ARRAY,
-        ACCEL,
-        RW_TEXTURE3D,
-        RW_TEXTURE2D,
+        Buffer,
+        ByteBuffer,
+        Texture3D,
+        Texture2D,
+        BindlessArray,
+        Accel,
+        RwTexture3D,
+        RwTexture2D,
 
-        NONE
+        None
     };
     friend struct detail::TypeParser;
 
@@ -547,7 +547,7 @@ private:
     size_t index_{0};
     size_t alignment_{0};
     uint32_t dimension_{0};
-    Tag tag_{Tag::NONE};
+    Tag tag_{Tag::None};
     horizon::core::string description_;
     horizon::core::string name_;
     mutable horizon::core::string cname_;
@@ -614,29 +614,29 @@ public:
     [[nodiscard]] const Type *element() const noexcept;
     [[nodiscard]] bool is_valid() const noexcept;
     [[nodiscard]] constexpr bool is_scalar() const noexcept {
-        return tag_ == Tag::BOOL || tag_ == Tag::FLOAT || tag_ == Tag::REAL || tag_ == Tag::INT ||
-               tag_ == Tag::UINT || tag_ == Tag::UCHAR || tag_ == Tag::CHAR ||
-               tag_ == Tag::USHORT || tag_ == Tag::SHORT || tag_ == Tag::HALF || tag_ == Tag::ULONG;
+        return tag_ == Tag::Bool || tag_ == Tag::Float || tag_ == Tag::Real || tag_ == Tag::Int ||
+               tag_ == Tag::Uint || tag_ == Tag::Uchar || tag_ == Tag::Char ||
+               tag_ == Tag::Ushort || tag_ == Tag::Short || tag_ == Tag::Half || tag_ == Tag::Ulong;
     }
     [[nodiscard]] size_t max_member_size() const noexcept;
     [[nodiscard]] constexpr bool is_builtin_struct() const noexcept { return builtin_struct_; }
     [[nodiscard]] constexpr bool is_param_struct() const noexcept { return param_struct_; }
     [[nodiscard]] constexpr bool is_basic() const noexcept { return is_scalar() || is_vector() || is_matrix(); }
-    [[nodiscard]] constexpr bool is_array() const noexcept { return tag_ == Tag::ARRAY; }
-    [[nodiscard]] constexpr bool is_vector() const noexcept { return tag_ == Tag::VECTOR; }
-    [[nodiscard]] constexpr bool is_matrix() const noexcept { return tag_ == Tag::MATRIX; }
-    [[nodiscard]] constexpr bool is_structure() const noexcept { return tag_ == Tag::STRUCTURE; }
-    [[nodiscard]] constexpr bool is_buffer() const noexcept { return tag_ == Tag::BUFFER; }
-    [[nodiscard]] constexpr bool is_byte_buffer() const noexcept { return tag_ == Tag::BYTE_BUFFER; }
+    [[nodiscard]] constexpr bool is_array() const noexcept { return tag_ == Tag::Array; }
+    [[nodiscard]] constexpr bool is_vector() const noexcept { return tag_ == Tag::Vector; }
+    [[nodiscard]] constexpr bool is_matrix() const noexcept { return tag_ == Tag::Matrix; }
+    [[nodiscard]] constexpr bool is_structure() const noexcept { return tag_ == Tag::Structure; }
+    [[nodiscard]] constexpr bool is_buffer() const noexcept { return tag_ == Tag::Buffer; }
+    [[nodiscard]] constexpr bool is_byte_buffer() const noexcept { return tag_ == Tag::ByteBuffer; }
     [[nodiscard]] constexpr bool is_texture() const noexcept {
-        return tag_ == Tag::TEXTURE3D || tag_ == Tag::TEXTURE2D ||
-               tag_ == Tag::RW_TEXTURE3D || tag_ == Tag::RW_TEXTURE2D;
+        return tag_ == Tag::Texture3D || tag_ == Tag::Texture2D ||
+               tag_ == Tag::RwTexture3D || tag_ == Tag::RwTexture2D;
     }
     [[nodiscard]] constexpr bool is_read_write_texture() const noexcept {
-        return tag_ == Tag::RW_TEXTURE3D || tag_ == Tag::RW_TEXTURE2D;
+        return tag_ == Tag::RwTexture3D || tag_ == Tag::RwTexture2D;
     }
-    [[nodiscard]] constexpr bool is_bindless_array() const noexcept { return tag_ == Tag::BINDLESS_ARRAY; }
-    [[nodiscard]] constexpr bool is_accel() const noexcept { return tag_ == Tag::ACCEL; }
+    [[nodiscard]] constexpr bool is_bindless_array() const noexcept { return tag_ == Tag::BindlessArray; }
+    [[nodiscard]] constexpr bool is_accel() const noexcept { return tag_ == Tag::Accel; }
     [[nodiscard]] constexpr bool is_resource() const noexcept {
         return is_buffer() || is_byte_buffer() || is_texture() || is_accel() || is_bindless_array();
     }

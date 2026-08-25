@@ -10,16 +10,16 @@
 namespace horizon::core {
 
 enum struct PixelStorage : uint {
-    BYTE1,
-    BYTE2,
-    BYTE4,
-    UINT1,
-    UINT2,
-    UINT4,
-    FLOAT1,
-    FLOAT2,
-    FLOAT4,
-    UNKNOWN
+    Byte1,
+    Byte2,
+    Byte4,
+    Uint1,
+    Uint2,
+    Uint4,
+    Float1,
+    Float2,
+    Float4,
+    Unknown
 };
 
 }

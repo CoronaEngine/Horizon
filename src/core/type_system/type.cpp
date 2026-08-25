@@ -153,7 +153,7 @@ struct TypeParser {
 }
 
 void TypeParser::parse_vector_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::VECTOR;
+    type->tag_ = Type::Tag::Vector;
     auto [start, end] = bracket_matching_far(desc, '<', '>');
     auto content = desc.substr(start + 1, end - start - 1);
     auto lst = string_split(content, ',');
@@ -172,7 +172,7 @@ void TypeParser::parse_vector_locked(Type *type, horizon::core::string_view desc
 }
 
 void TypeParser::parse_matrix_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::MATRIX;
+    type->tag_ = Type::Tag::Matrix;
     auto [start, end] = bracket_matching_far(desc, '<', '>');
     auto dimension_str = desc.substr(start + 1, end - start - 1);
     auto data = string_split(dimension_str, ',');
@@ -189,7 +189,7 @@ void TypeParser::parse_matrix_locked(Type *type, horizon::core::string_view desc
 }
 
 void TypeParser::parse_struct_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::STRUCTURE;
+    type->tag_ = Type::Tag::Structure;
     auto lst = find_content(desc);
     type->cname_ = lst[0];
     auto alignment_str = lst[1];
@@ -212,12 +212,12 @@ void TypeParser::parse_struct_locked(Type *type, horizon::core::string_view desc
 }
 
 void TypeParser::parse_bindless_array_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::BINDLESS_ARRAY;
+    type->tag_ = Type::Tag::BindlessArray;
     type->alignment_ = alignof(BindlessArrayDesc);
 }
 
 void TypeParser::parse_buffer_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::BUFFER;
+    type->tag_ = Type::Tag::Buffer;
     auto lst = find_content(desc);
     OC_ERROR_IF_NOT(lst.size() == 1u,
                     "multidimensional buffer type is unsupported: ",
@@ -230,7 +230,7 @@ void TypeParser::parse_buffer_locked(Type *type, horizon::core::string_view desc
 }
 
 void TypeParser::parse_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::TEXTURE3D;
+    type->tag_ = Type::Tag::Texture3D;
     auto elements = find_content(desc);
     OC_ERROR_IF_NOT(elements.size() == 1u,
                     "texture3d requires exactly one element type: ",
@@ -241,7 +241,7 @@ void TypeParser::parse_texture3d_locked(Type *type, horizon::core::string_view d
 }
 
 void TypeParser::parse_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::TEXTURE2D;
+    type->tag_ = Type::Tag::Texture2D;
     auto elements = find_content(desc);
     OC_ERROR_IF_NOT(elements.size() == 1u,
                     "texture2d requires exactly one element type: ",
@@ -252,7 +252,7 @@ void TypeParser::parse_texture2d_locked(Type *type, horizon::core::string_view d
 }
 
 void TypeParser::parse_rw_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::RW_TEXTURE3D;
+    type->tag_ = Type::Tag::RwTexture3D;
     auto elements = find_content(desc);
     OC_ERROR_IF_NOT(elements.size() == 1u,
                     "rwtexture3d requires exactly one element type: ",
@@ -263,7 +263,7 @@ void TypeParser::parse_rw_texture3d_locked(Type *type, horizon::core::string_vie
 }
 
 void TypeParser::parse_rw_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::RW_TEXTURE2D;
+    type->tag_ = Type::Tag::RwTexture2D;
     auto elements = find_content(desc);
     OC_ERROR_IF_NOT(elements.size() == 1u,
                     "rwtexture2d requires exactly one element type: ",
@@ -274,16 +274,16 @@ void TypeParser::parse_rw_texture2d_locked(Type *type, horizon::core::string_vie
 }
 
 void TypeParser::parse_accel_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::ACCEL;
+    type->tag_ = Type::Tag::Accel;
 }
 
 void TypeParser::parse_byte_buffer_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::BYTE_BUFFER;
+    type->tag_ = Type::Tag::ByteBuffer;
     type->alignment_ = alignof(BufferDesc<>);
 }
 
 void TypeParser::parse_array_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::ARRAY;
+    type->tag_ = Type::Tag::Array;
     auto lst = find_content(desc);
     auto type_str = lst[0];
     auto len = std::stoi(string(lst[1]));
@@ -318,62 +318,62 @@ const Type *TypeParser::parse_type_locked(horizon::core::string_view desc) noexc
 
     if (desc == "int"sv) {
         type->size_ = sizeof(int);
-        type->tag_ = Type::Tag::INT;
+        type->tag_ = Type::Tag::Int;
         type->alignment_ = alignof(int);
         type->dimension_ = 1;
     } else if (desc == "uint"sv) {
         type->size_ = sizeof(uint);
-        type->tag_ = Type::Tag::UINT;
+        type->tag_ = Type::Tag::Uint;
         type->alignment_ = alignof(uint);
         type->dimension_ = 1;
     } else if (desc == "bool"sv) {
         type->size_ = sizeof(bool);
-        type->tag_ = Type::Tag::BOOL;
+        type->tag_ = Type::Tag::Bool;
         type->alignment_ = alignof(bool);
         type->dimension_ = 1;
     } else if (desc == "float"sv) {
         type->size_ = sizeof(float);
-        type->tag_ = Type::Tag::FLOAT;
+        type->tag_ = Type::Tag::Float;
         type->alignment_ = alignof(float);
         type->dimension_ = 1;
     } else if (desc == "real"sv) {
         type->size_ = sizeof(float);
-        type->tag_ = Type::Tag::REAL;
+        type->tag_ = Type::Tag::Real;
         type->alignment_ = alignof(float);
         type->dimension_ = 1;
     } else if (desc == "half"sv) {
         type->size_ = sizeof(uint16_t);
-        type->tag_ = Type::Tag::HALF;
+        type->tag_ = Type::Tag::Half;
         type->alignment_ = alignof(uint16_t);
         type->dimension_ = 1;
     } else if (desc == "uchar"sv) {
         type->size_ = sizeof(uchar);
-        type->tag_ = Type::Tag::UCHAR;
+        type->tag_ = Type::Tag::Uchar;
         type->alignment_ = alignof(uchar);
         type->dimension_ = 1;
     } else if (desc == "char"sv) {
         type->size_ = sizeof(char);
-        type->tag_ = Type::Tag::CHAR;
+        type->tag_ = Type::Tag::Char;
         type->alignment_ = alignof(char);
         type->dimension_ = 1;
     } else if (desc == "ushort"sv) {
         type->size_ = sizeof(ushort);
-        type->tag_ = Type::Tag::USHORT;
+        type->tag_ = Type::Tag::Ushort;
         type->alignment_ = alignof(ushort);
         type->dimension_ = 1;
     } else if (desc == "ulong"sv) {
         type->size_ = sizeof(ulong);
-        type->tag_ = Type::Tag::ULONG;
+        type->tag_ = Type::Tag::Ulong;
         type->alignment_ = alignof(ulong);
         type->dimension_ = 1;
     } else if (desc == "short"sv) {
         type->size_ = sizeof(short);
-        type->tag_ = Type::Tag::SHORT;
+        type->tag_ = Type::Tag::Short;
         type->alignment_ = alignof(short);
         type->dimension_ = 1;
     }
 
-    if (type->tag_ == Type::Tag::NONE) {
+    if (type->tag_ == Type::Tag::None) {
         if (desc.starts_with("vector")) {
             parse_vector_locked(type.get(), desc);
         } else if (desc.starts_with("matrix")) {
@@ -435,20 +435,20 @@ const Type *Type::at(uint32_t uid) noexcept {
 
 bool Type::is_dynamic() const noexcept {
     switch (tag_) {
-        case Tag::ARRAY:
-        case Tag::VECTOR:
-        case Tag::MATRIX:
-        case Tag::BUFFER:
-        case Tag::TEXTURE3D:
-        case Tag::TEXTURE2D:
-        case Tag::RW_TEXTURE3D:
-        case Tag::RW_TEXTURE2D:
-        case Tag::STRUCTURE: {
+        case Tag::Array:
+        case Tag::Vector:
+        case Tag::Matrix:
+        case Tag::Buffer:
+        case Tag::Texture3D:
+        case Tag::Texture2D:
+        case Tag::RwTexture3D:
+        case Tag::RwTexture2D:
+        case Tag::Structure: {
             return std::ranges::any_of(members_, [](const Type *member) {
                 return member->is_dynamic();
             });
         }
-        case Tag::REAL:
+        case Tag::Real:
             return true;
         default:
             return false;
@@ -481,14 +481,14 @@ horizon::core::string Type::simple_cname() const noexcept {
 
 bool Type::is_valid() const noexcept {
     switch (tag_) {
-        case Tag::STRUCTURE: {
+        case Tag::Structure: {
             bool ret = true;
             for (auto member : members_) {
                 ret = ret && member->is_valid();
             }
             return ret;
         }
-        case Tag::ARRAY: return dimension() > 0;
+        case Tag::Array: return dimension() > 0;
         default: return true;
     }
 }
@@ -504,16 +504,16 @@ const Type *Type::get_member(horizon::core::string_view name) const noexcept {
 
 size_t Type::max_member_size() const noexcept {
     switch (tag_) {
-        case Tag::BOOL:
-        case Tag::FLOAT:
-        case Tag::INT:
-        case Tag::UINT:
-        case Tag::UCHAR:
-        case Tag::CHAR: return size();
-        case Tag::VECTOR:
-        case Tag::MATRIX:
-        case Tag::ARRAY: return element()->max_member_size();
-        case Tag::STRUCTURE: {
+        case Tag::Bool:
+        case Tag::Float:
+        case Tag::Int:
+        case Tag::Uint:
+        case Tag::Uchar:
+        case Tag::Char: return size();
+        case Tag::Vector:
+        case Tag::Matrix:
+        case Tag::Array: return element()->max_member_size();
+        case Tag::Structure: {
             size_t size = 0;
             for (const Type *member : members_) {
                 if (member->max_member_size() > size) {
@@ -552,13 +552,13 @@ void Type::update_member_name(const string_view *names, int num) const noexcept 
 
 void Type::update_name(horizon::core::string_view desc) noexcept {
     switch (tag_) {
-        case Tag::NONE:
+        case Tag::None:
             OC_ASSERT(0);
             break;
-        case Tag::VECTOR:
+        case Tag::Vector:
             name_ = horizon::core::format("{}{}", element()->name(), dimension());
             break;
-        case Tag::MATRIX:
+        case Tag::Matrix:
             name_ = horizon::core::format("{}{}x{}", element()->element()->name(),
                                     element()->dimension(), dimension());
             break;

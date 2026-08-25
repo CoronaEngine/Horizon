@@ -58,7 +58,7 @@ uint64_t ConditionalExpr::compute_hash() const noexcept {
 
 MemberExpr::MemberExpr(const Type *type, const Expression *parent,
                        uint16_t index, uint16_t swizzle_size, Variable variable)
-    : VariableExpr(Tag::MEMBER, variable.type(), variable), parent_(parent),
+    : VariableExpr(Tag::Member, variable.type(), variable), parent_(parent),
       member_index_(index), swizzle_size_(swizzle_size) {}
 
 int MemberExpr::swizzle_index(int idx) const noexcept {
@@ -77,7 +77,7 @@ uint64_t MemberExpr::compute_hash() const noexcept {
 
 CallExpr::CallExpr(const Type *type, const Function *func,
                    list<const Expression *> &&args)
-    : Expression(Tag::CALL, type),
+    : Expression(Tag::Call, type),
       function_(func),
       arguments_(std::move(args)) {
     const_cast<Function *>(function_)->record_call_expression(this);

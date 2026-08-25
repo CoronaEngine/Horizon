@@ -87,50 +87,50 @@ private:
         return eval<ret_type>(expr);                                                \
     }
 
-    OC_MAKE_VAR_UNARY_FUNC(all, ALL)
-    OC_MAKE_VAR_UNARY_FUNC(any, ANY)
-    OC_MAKE_VAR_UNARY_FUNC(none, NONE)
+    OC_MAKE_VAR_UNARY_FUNC(all, All)
+    OC_MAKE_VAR_UNARY_FUNC(any, Any)
+    OC_MAKE_VAR_UNARY_FUNC(none, None)
 
-    OC_MAKE_VAR_UNARY_FUNC(rcp, RCP)
-    OC_MAKE_VAR_UNARY_FUNC(abs, ABS)
-    OC_MAKE_VAR_UNARY_FUNC(sqrt, SQRT)
-    OC_MAKE_VAR_UNARY_FUNC(sqr, SQR)
-    OC_MAKE_VAR_UNARY_FUNC(exp, EXP)
-    OC_MAKE_VAR_UNARY_FUNC(exp2, EXP2)
-    OC_MAKE_VAR_UNARY_FUNC(exp10, EXP10)
-    OC_MAKE_VAR_UNARY_FUNC(log, LOG)
-    OC_MAKE_VAR_UNARY_FUNC(log2, LOG2)
-    OC_MAKE_VAR_UNARY_FUNC(log10, LOG10)
-    OC_MAKE_VAR_UNARY_FUNC(cos, COS)
-    OC_MAKE_VAR_UNARY_FUNC(sin, SIN)
-    OC_MAKE_VAR_UNARY_FUNC(tan, TAN)
-    OC_MAKE_VAR_UNARY_FUNC(cosh, COSH)
-    OC_MAKE_VAR_UNARY_FUNC(sinh, SINH)
-    OC_MAKE_VAR_UNARY_FUNC(tanh, TANH)
-    OC_MAKE_VAR_UNARY_FUNC(acos, ACOS)
-    OC_MAKE_VAR_UNARY_FUNC(asin, ASIN)
-    OC_MAKE_VAR_UNARY_FUNC(atan, ATAN)
-    OC_MAKE_VAR_UNARY_FUNC(asinh, ASINH)
-    OC_MAKE_VAR_UNARY_FUNC(acosh, ACOSH)
-    OC_MAKE_VAR_UNARY_FUNC(atanh, ATANH)
-    OC_MAKE_VAR_UNARY_FUNC(degrees, DEGREES)
-    OC_MAKE_VAR_UNARY_FUNC(radians, RADIANS)
-    OC_MAKE_VAR_UNARY_FUNC(ceil, CEIL)
-    OC_MAKE_VAR_UNARY_FUNC(round, ROUND)
-    OC_MAKE_VAR_UNARY_FUNC(floor, FLOOR)
-    OC_MAKE_VAR_UNARY_FUNC(rsqrt, RSQRT)
-    OC_MAKE_VAR_UNARY_FUNC(isinf, IS_INF)
-    OC_MAKE_VAR_UNARY_FUNC(isnan, IS_NAN)
-    OC_MAKE_VAR_UNARY_FUNC(fract, FRACT)
-    OC_MAKE_VAR_UNARY_FUNC(saturate, SATURATE)
-    OC_MAKE_VAR_UNARY_FUNC(sign, SIGN)
-    OC_MAKE_VAR_UNARY_FUNC(normalize, NORMALIZE)
-    OC_MAKE_VAR_UNARY_FUNC(length, LENGTH)
-    OC_MAKE_VAR_UNARY_FUNC(length_squared, LENGTH_SQUARED)
+    OC_MAKE_VAR_UNARY_FUNC(rcp, Rcp)
+    OC_MAKE_VAR_UNARY_FUNC(abs, Abs)
+    OC_MAKE_VAR_UNARY_FUNC(sqrt, Sqrt)
+    OC_MAKE_VAR_UNARY_FUNC(sqr, Sqr)
+    OC_MAKE_VAR_UNARY_FUNC(exp, Exp)
+    OC_MAKE_VAR_UNARY_FUNC(exp2, Exp2)
+    OC_MAKE_VAR_UNARY_FUNC(exp10, Exp10)
+    OC_MAKE_VAR_UNARY_FUNC(log, Log)
+    OC_MAKE_VAR_UNARY_FUNC(log2, Log2)
+    OC_MAKE_VAR_UNARY_FUNC(log10, Log10)
+    OC_MAKE_VAR_UNARY_FUNC(cos, Cos)
+    OC_MAKE_VAR_UNARY_FUNC(sin, Sin)
+    OC_MAKE_VAR_UNARY_FUNC(tan, Tan)
+    OC_MAKE_VAR_UNARY_FUNC(cosh, Cosh)
+    OC_MAKE_VAR_UNARY_FUNC(sinh, Sinh)
+    OC_MAKE_VAR_UNARY_FUNC(tanh, Tanh)
+    OC_MAKE_VAR_UNARY_FUNC(acos, Acos)
+    OC_MAKE_VAR_UNARY_FUNC(asin, Asin)
+    OC_MAKE_VAR_UNARY_FUNC(atan, Atan)
+    OC_MAKE_VAR_UNARY_FUNC(asinh, Asinh)
+    OC_MAKE_VAR_UNARY_FUNC(acosh, Acosh)
+    OC_MAKE_VAR_UNARY_FUNC(atanh, Atanh)
+    OC_MAKE_VAR_UNARY_FUNC(degrees, Degrees)
+    OC_MAKE_VAR_UNARY_FUNC(radians, Radians)
+    OC_MAKE_VAR_UNARY_FUNC(ceil, Ceil)
+    OC_MAKE_VAR_UNARY_FUNC(round, Round)
+    OC_MAKE_VAR_UNARY_FUNC(floor, Floor)
+    OC_MAKE_VAR_UNARY_FUNC(rsqrt, Rsqrt)
+    OC_MAKE_VAR_UNARY_FUNC(isinf, IsInf)
+    OC_MAKE_VAR_UNARY_FUNC(isnan, IsNan)
+    OC_MAKE_VAR_UNARY_FUNC(fract, Fract)
+    OC_MAKE_VAR_UNARY_FUNC(saturate, Saturate)
+    OC_MAKE_VAR_UNARY_FUNC(sign, Sign)
+    OC_MAKE_VAR_UNARY_FUNC(normalize, Normalize)
+    OC_MAKE_VAR_UNARY_FUNC(length, Length)
+    OC_MAKE_VAR_UNARY_FUNC(length_squared, LengthSquared)
 
-    OC_MAKE_VAR_UNARY_FUNC(determinant, DETERMINANT)
-    OC_MAKE_VAR_UNARY_FUNC(transpose, TRANSPOSE)
-    OC_MAKE_VAR_UNARY_FUNC(inverse, INVERSE)
+    OC_MAKE_VAR_UNARY_FUNC(determinant, Determinant)
+    OC_MAKE_VAR_UNARY_FUNC(transpose, Transpose)
+    OC_MAKE_VAR_UNARY_FUNC(inverse, Inverse)
 
 #undef OC_MAKE_VAR_LOGIC_FUNC
 
@@ -144,18 +144,18 @@ private:
         return eval<ret_type>(expr);                                                 \
     }
 
-    OC_MAKE_VAR_BINARY_FUNC(max, MAX)
-    OC_MAKE_VAR_BINARY_FUNC(min, MIN)
-    OC_MAKE_VAR_BINARY_FUNC(pow, POW)
-    OC_MAKE_VAR_BINARY_FUNC(fmod, FMOD)
-    OC_MAKE_VAR_BINARY_FUNC(mod, MOD)
-    OC_MAKE_VAR_BINARY_FUNC(copysign, COPYSIGN)
-    OC_MAKE_VAR_BINARY_FUNC(atan2, ATAN2)
+    OC_MAKE_VAR_BINARY_FUNC(max, Max)
+    OC_MAKE_VAR_BINARY_FUNC(min, Min)
+    OC_MAKE_VAR_BINARY_FUNC(pow, Pow)
+    OC_MAKE_VAR_BINARY_FUNC(fmod, Fmod)
+    OC_MAKE_VAR_BINARY_FUNC(mod, Mod)
+    OC_MAKE_VAR_BINARY_FUNC(copysign, Copysign)
+    OC_MAKE_VAR_BINARY_FUNC(atan2, Atan2)
 
-    OC_MAKE_VAR_BINARY_FUNC(cross, CROSS)
-    OC_MAKE_VAR_BINARY_FUNC(dot, DOT)
-    OC_MAKE_VAR_BINARY_FUNC(distance, DISTANCE)
-    OC_MAKE_VAR_BINARY_FUNC(distance_squared, DISTANCE_SQUARED)
+    OC_MAKE_VAR_BINARY_FUNC(cross, Cross)
+    OC_MAKE_VAR_BINARY_FUNC(dot, Dot)
+    OC_MAKE_VAR_BINARY_FUNC(distance, Distance)
+    OC_MAKE_VAR_BINARY_FUNC(distance_squared, DistanceSquared)
 
 #undef OC_MAKE_VAR_BINARY_FUNC
 
@@ -174,10 +174,10 @@ private:
         return eval<ret_type>(expr);                                   \
     }
 
-    OC_MAKE_VAR_TRIPLE_FUNC(clamp, CLAMP)
-    OC_MAKE_VAR_TRIPLE_FUNC(lerp, LERP)
-    OC_MAKE_VAR_TRIPLE_FUNC(inverse_lerp, INVERSE_LERP)
-    OC_MAKE_VAR_TRIPLE_FUNC(fma, FMA)
+    OC_MAKE_VAR_TRIPLE_FUNC(clamp, Clamp)
+    OC_MAKE_VAR_TRIPLE_FUNC(lerp, Lerp)
+    OC_MAKE_VAR_TRIPLE_FUNC(inverse_lerp, InverseLerp)
+    OC_MAKE_VAR_TRIPLE_FUNC(fma, Fma)
 
 #undef OC_MAKE_VAR_TRIPLE_FUNC
 
@@ -186,7 +186,7 @@ private:
     OC_NODISCARD static auto call_select(const Var<Vector<bool, N>> &pred,
                                          const dsl_type &t, const dsl_type &f) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::SELECT,
+                                                                   CallOp::Select,
                                                                    {OC_EXPR(pred),
                                                                     OC_EXPR(t),
                                                                     OC_EXPR(f)});
@@ -202,7 +202,7 @@ private:
 
     static auto call_select(const Var<bool> &pred, const dsl_type &t, const dsl_type &f) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::SELECT,
+                                                                   CallOp::Select,
                                                                    {OC_EXPR(pred),
                                                                     OC_EXPR(t),
                                                                     OC_EXPR(f)});
@@ -214,7 +214,7 @@ private:
              is_all_float_vector3_v<remove_device_t<Args>...>)
     static auto call_face_forward(const dsl_type &n, Args &&...args) {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::FACE_FORWARD,
+                                                                   CallOp::FaceForward,
                                                                    {OC_EXPR(n),
                                                                     OC_EXPR(args)...});
         return eval<T>(expr);

@@ -18,9 +18,9 @@ namespace {
         return {};
     }
     switch (policy.policy) {
-        case PrecisionPolicy::force_f16:
+        case PrecisionPolicy::ForceF16:
             return "half";
-        case PrecisionPolicy::force_f32:
+        case PrecisionPolicy::ForceF32:
         default:
             return "float";
     }
@@ -45,7 +45,7 @@ namespace {
     if (type == nullptr) {
         return 0u;
     }
-    if (type->tag() == Type::Tag::REAL) {
+    if (type->tag() == Type::Tag::Real) {
         const auto *resolved = resolve_type_description(type, policy);
         return resolved == nullptr ? 0u : resolved->alignment();
     }
@@ -73,7 +73,7 @@ namespace {
     if (type == nullptr) {
         return {};
     }
-    if (type->tag() == Type::Tag::REAL) {
+    if (type->tag() == Type::Tag::Real) {
         return resolve_real_description(policy);
     }
     if (type->is_scalar()) {
@@ -136,8 +136,8 @@ namespace {
     if (logical == nullptr || resolved == nullptr) {
         return false;
     }
-    if (logical->tag() == Type::Tag::REAL) {
-        return resolved->tag() == Type::Tag::HALF;
+    if (logical->tag() == Type::Tag::Real) {
+        return resolved->tag() == Type::Tag::Half;
     }
     if ((logical->is_vector() || logical->is_matrix() || logical->is_array()) &&
         (resolved->is_vector() || resolved->is_matrix() || resolved->is_array())) {
@@ -181,7 +181,7 @@ struct FieldRegionInfo {
     auto info = detail::resolve_runtime_field_access_info(logical_type,
                                                           resolved_type,
                                                           steps,
-                                                          detail::FieldOffsetMode::AOS,
+                                                          detail::FieldOffsetMode::Aos,
                                                           1u,
                                                           current_offset);
     if (!info.valid()) {
@@ -194,25 +194,25 @@ struct FieldRegionInfo {
 
 TypedFieldPath TypedFieldPath::append_member(uint32_t member_index) const {
     auto copy = *this;
-    copy.steps_.push_back(Step{.kind = StepKind::member, .value = member_index});
+    copy.steps_.push_back(Step{.kind = StepKind::Member, .value = member_index});
     return copy;
 }
 
 TypedFieldPath TypedFieldPath::append_index(uint32_t element_index) const {
     auto copy = *this;
-    copy.steps_.push_back(Step{.kind = StepKind::index, .value = element_index});
+    copy.steps_.push_back(Step{.kind = StepKind::Index, .value = element_index});
     return copy;
 }
 
 TypedFieldPath TypedFieldPath::append_component(uint32_t component_index) const {
     auto copy = *this;
-    copy.steps_.push_back(Step{.kind = StepKind::component, .value = component_index});
+    copy.steps_.push_back(Step{.kind = StepKind::Component, .value = component_index});
     return copy;
 }
 
 TypedFieldPath TypedFieldPath::member(uint32_t member_index) noexcept {
     TypedFieldPath path;
-    path.steps_.push_back(Step{.kind = StepKind::member, .value = member_index});
+    path.steps_.push_back(Step{.kind = StepKind::Member, .value = member_index});
     return path;
 }
 

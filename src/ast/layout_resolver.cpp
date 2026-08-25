@@ -22,7 +22,7 @@ string LayoutResolver::resolve_description(const Type *type) const noexcept {
 	if (type == nullptr) {
 		return {};
 	}
-	if (type->tag() == Type::Tag::REAL) {
+	if (type->tag() == Type::Tag::Real) {
 		return resolve_real_description();
 	}
 	if (type->is_scalar()) {
@@ -54,9 +54,9 @@ string LayoutResolver::resolve_real_description() const noexcept {
 		return {};
 	}
 	switch (policy_.policy) {
-		case PrecisionPolicy::force_f16:
+		case PrecisionPolicy::ForceF16:
 			return string(TypeDesc<half>::description());
-		case PrecisionPolicy::force_f32:
+		case PrecisionPolicy::ForceF32:
 			return string(TypeDesc<float>::description());
 		default:
 			return string(TypeDesc<float>::description());
@@ -116,7 +116,7 @@ size_t LayoutResolver::resolved_alignment(const Type *type) const noexcept {
 	if (type == nullptr) {
 		return 0u;
 	}
-	if (type->tag() == Type::Tag::REAL) {
+	if (type->tag() == Type::Tag::Real) {
 		const auto *resolved = resolve(type);
 		return resolved == nullptr ? 0u : resolved->alignment();
 	}

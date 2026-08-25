@@ -15,14 +15,14 @@ using namespace horizon::core;
 using namespace horizon::math;
 
 enum struct Usage : uint32_t {
-    NONE = 0u,
-    READ = 1 << 0,
-    WRITE = 1 << 1,
-    READ_WRITE = READ | WRITE
+    None = 0u,
+    Read = 1 << 0,
+    Write = 1 << 1,
+    ReadWrite = Read | Write
 };
 
 [[nodiscard]] inline bool is_write(Usage usage) {
-    return (to_underlying(usage) & to_underlying(Usage::WRITE)) == to_underlying(Usage::WRITE);
+    return (to_underlying(usage) & to_underlying(Usage::Write)) == to_underlying(Usage::Write);
 }
 
 class Function;
@@ -31,29 +31,29 @@ class OC_AST_API Variable : public Hashable {
 public:
     enum struct Tag : uint32_t {
         // data
-        LOCAL,
-        SHARED,
-        MEMBER,
-        UNIFORM,
+        Local,
+        Shared,
+        Member,
+        Uniform,
 
         // reference
-        REFERENCE,
+        Reference,
 
         // resources
-        BUFFER,
-        BYTE_BUFFER,
-        TEXTURE3D,
-        TEXTURE2D,
-        BINDLESS_ARRAY,
-        ACCEL,
+        Buffer,
+        ByteBuffer,
+        Texture3D,
+        Texture2D,
+        BindlessArray,
+        Accel,
 
         // builtins
-        THREAD_IDX,
-        BLOCK_IDX,
-        THREAD_ID,
-        DISPATCH_IDX,
-        DISPATCH_ID,
-        DISPATCH_DIM
+        ThreadIdx,
+        BlockIdx,
+        ThreadId,
+        DispatchIdx,
+        DispatchId,
+        DispatchDim
     };
 
     struct Data {
@@ -64,7 +64,7 @@ public:
         string suffix{};
         bool used{false};
         explicit Data(Usage u,
-                      Variable::Tag t = Variable::Tag::LOCAL)
+                      Variable::Tag t = Variable::Tag::Local)
             : usage(u), tag(t) {}
 
         friend class Function;

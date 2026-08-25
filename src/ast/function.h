@@ -53,8 +53,8 @@ public:
 class OC_AST_API Function : public concepts::Noncopyable, public Hashable {
 public:
     enum Tag : uint8_t {
-        KERNEL,
-        CALLABLE,
+        Kernel,
+        Callable,
     };
 
     struct StructureSet {
@@ -99,7 +99,7 @@ private:
     /// use for assignment subscript access
     horizon::ast::vector<horizon::ast::pair<std::byte *, size_t>> temp_memory_;
     ScopeStmt body_{true};
-    Tag tag_{Tag::CALLABLE};
+    Tag tag_{Tag::Callable};
     horizon::ast::vector<SP<const Function>> used_custom_func_;
     StructureSet used_struct_;
     bool allow_dsl_capture_{false};
@@ -248,7 +248,7 @@ public:
     [[nodiscard]] static Function *current() noexcept;
     template<typename Func>
     static auto define_callable(Func &&func) noexcept {
-        return _define(Tag::CALLABLE, std::forward<Func>(func));
+        return _define(Tag::Callable, std::forward<Func>(func));
     }
     [[nodiscard]] const ScopeStmt *current_scope() const noexcept;
     [[nodiscard]] ScopeStmt *current_scope() noexcept;
@@ -259,7 +259,7 @@ public:
     }
     template<typename Func>
     static shared_ptr<Function> define_kernel(Func &&func) noexcept {
-        shared_ptr<Function> function = _define(Tag::KERNEL, std::forward<Func>(func));
+        shared_ptr<Function> function = _define(Tag::Kernel, std::forward<Func>(func));
         function->correct();
         return function;
     }
@@ -333,8 +333,8 @@ public:
     [[nodiscard]] horizon::ast::span<const Variable> appended_arguments() const noexcept;
     [[nodiscard]] horizon::ast::span<const Variable> builtin_vars() const noexcept;
     [[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
-    [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::CALLABLE; }
-    [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::KERNEL; }
+    [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::Callable; }
+    [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::Kernel; }
     [[nodiscard]] constexpr bool is_raytracing_kernel() const noexcept { return is_raytracing() && is_kernel(); }
     [[nodiscard]] constexpr bool is_general_kernel() const noexcept { return !is_raytracing() && is_kernel(); }
     [[nodiscard]] constexpr bool is_raytracing() const noexcept { return raytracing_; }

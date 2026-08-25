@@ -24,9 +24,9 @@ namespace {
 
 [[nodiscard]] string resolve_real_description(StoragePrecisionPolicy policy) noexcept {
     switch (policy.policy) {
-        case PrecisionPolicy::force_f16:
+        case PrecisionPolicy::ForceF16:
             return "half";
-        case PrecisionPolicy::force_f32:
+        case PrecisionPolicy::ForceF32:
         default:
             return "float";
     }
@@ -40,7 +40,7 @@ namespace {
     if (type == nullptr) {
         return 0u;
     }
-    if (type->tag() == Type::Tag::REAL) {
+    if (type->tag() == Type::Tag::Real) {
         const auto *resolved = type_registry().resolve_type(type, policy);
         return resolved == nullptr ? 0u : resolved->alignment();
     }
@@ -67,7 +67,7 @@ namespace {
     if (type == nullptr) {
         return {};
     }
-    if (type->tag() == Type::Tag::REAL) {
+    if (type->tag() == Type::Tag::Real) {
         return resolve_real_description(policy);
     }
     if (type->is_scalar()) {
@@ -100,10 +100,10 @@ namespace {
         }
         string_view prefix;
         switch (type->tag()) {
-            case Type::Tag::TEXTURE3D: prefix = "texture3d"; break;
-            case Type::Tag::TEXTURE2D: prefix = "texture2d"; break;
-            case Type::Tag::RW_TEXTURE3D: prefix = "rwtexture3d"; break;
-            case Type::Tag::RW_TEXTURE2D: prefix = "rwtexture2d"; break;
+            case Type::Tag::Texture3D: prefix = "texture3d"; break;
+            case Type::Tag::Texture2D: prefix = "texture2d"; break;
+            case Type::Tag::RwTexture3D: prefix = "rwtexture3d"; break;
+            case Type::Tag::RwTexture2D: prefix = "rwtexture2d"; break;
             default: OC_ASSERT(false); return {};
         }
         return horizon::core::format("{}<{}>", prefix, elem->description());

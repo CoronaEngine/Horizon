@@ -51,7 +51,7 @@ uint64_t SwitchStmt::compute_hash() const noexcept {
 }
 
 SwitchCaseStmt::SwitchCaseStmt(const horizon::ast::Expression *expression)
-    : Statement(Tag::SWITCH_CASE),
+    : Statement(Tag::SwitchCase),
       expr_(dynamic_cast<const LiteralExpr *>(expression)) {
     OC_ASSERT(expr_ != nullptr);
 }

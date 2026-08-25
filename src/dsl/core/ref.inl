@@ -12,14 +12,14 @@ using namespace horizon::ast;
 
 Var<bool> Ref<Accel>::trace_occlusion(const Var<Ray> &ray) const noexcept {
     const CallExpr *expr = Function::current()->call_builtin(Type::of<bool>(),
-                                                             CallOp::TRACE_OCCLUSION,
+                                                             CallOp::TraceOcclusion,
                                                              {expression(), OC_EXPR(ray)});
     return eval<bool>(expr);
 }
 
 Var<TriangleHit> Ref<Accel>::trace_closest(const Var<Ray> &ray) const noexcept {
     const CallExpr *expr = Function::current()->call_builtin(Type::of<TriangleHit>(),
-                                                             CallOp::TRACE_CLOSEST,
+                                                             CallOp::TraceClosest,
                                                              {expression(), OC_EXPR(ray)});
     return eval<TriangleHit>(expr);
 }

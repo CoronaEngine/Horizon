@@ -46,7 +46,7 @@ void test_layout_resolver_precision_and_composite_types() {
            "real vector storage resolution is rejected when real is disallowed");
 
     const LayoutResolver f16{StoragePrecisionPolicy{
-        .policy = PrecisionPolicy::force_f16,
+        .policy = PrecisionPolicy::ForceF16,
         .allow_real_in_storage = true}};
     expect_description(f16.resolve(Type::of<real>()), "half",
                        "real resolves to half with f16 storage policy");
@@ -60,7 +60,7 @@ void test_layout_resolver_precision_and_composite_types() {
                        "real buffer resolves element precision with f16 storage policy");
 
     const LayoutResolver f32{StoragePrecisionPolicy{
-        .policy = PrecisionPolicy::force_f32,
+        .policy = PrecisionPolicy::ForceF32,
         .allow_real_in_storage = true}};
     expect_description(f32.resolve(Type::of<real3x2>()), "matrix<float,2,3>",
                        "real matrix resolves to float matrix with f32 storage policy");
@@ -88,7 +88,7 @@ void test_function_builds_a_context_consistent_statement_tree() {
         auto *current = Function::current();
         local = current->local(Type::of<float>());
         literal = current->literal(Type::of<float>(), basic_literal_t{1.0f});
-        sum = current->binary(Type::of<float>(), BinaryOp::ADD, local, literal);
+        sum = current->binary(Type::of<float>(), BinaryOp::Add, local, literal);
         current->assign(local, sum);
 
         const auto *condition = current->literal(Type::of<bool>(), basic_literal_t{true});
@@ -106,19 +106,19 @@ void test_function_builds_a_context_consistent_statement_tree() {
     expect(function->return_type() == Type::of<float>(), "return type follows the return expression type");
     expect(function->body()->local_vars().size() == 1u, "local variable is registered in function body scope");
     expect(function->body()->size() == 3u, "assignment, if, and return are appended to function body");
-    expect(function->body()->statements()[0]->tag() == Statement::Tag::ASSIGN,
+    expect(function->body()->statements()[0]->tag() == Statement::Tag::Assign,
            "assignment is the first statement in function body");
-    expect(function->body()->statements()[1]->tag() == Statement::Tag::IF,
+    expect(function->body()->statements()[1]->tag() == Statement::Tag::If,
            "if statement is appended to function body");
-    expect(function->body()->statements()[2]->tag() == Statement::Tag::RETURN,
+    expect(function->body()->statements()[2]->tag() == Statement::Tag::Return,
            "return statement is appended to function body");
     expect(if_statement->true_branch()->size() == 1u,
            "statements created through with() are appended to the selected scope");
-    expect(local->tag() == Expression::Tag::REF, "local variable is represented by a reference expression");
-    expect(literal->tag() == Expression::Tag::LITERAL, "literal builder creates a literal expression");
-    expect(sum->tag() == Expression::Tag::BINARY && sum->lhs() == local && sum->rhs() == literal,
+    expect(local->tag() == Expression::Tag::Ref, "local variable is represented by a reference expression");
+    expect(literal->tag() == Expression::Tag::Literal, "literal builder creates a literal expression");
+    expect(sum->tag() == Expression::Tag::Binary && sum->lhs() == local && sum->rhs() == literal,
            "binary builder preserves operands and expression tag");
-    expect(local->variable().usage() == Usage::READ_WRITE,
+    expect(local->variable().usage() == Usage::ReadWrite,
            "assignment and expression use propagate read-write usage to local variable");
 }
 
@@ -146,8 +146,8 @@ void test_expression_builders_preserve_operands_and_usage() {
         auto *current = Function::current();
         lhs = current->local(Type::of<float>());
         rhs = current->local(Type::of<float>());
-        sum = current->binary(Type::of<float>(), BinaryOp::ADD, lhs, rhs);
-        cast = current->cast(Type::of<int>(), CastOp::STATIC, sum);
+        sum = current->binary(Type::of<float>(), BinaryOp::Add, lhs, rhs);
+        cast = current->cast(Type::of<int>(), CastOp::Static, sum);
 
         vector = current->local(Type::of<horizon::math::float4>());
         const auto *index = current->literal(Type::of<int>(), basic_literal_t{1});
@@ -157,16 +157,16 @@ void test_expression_builders_preserve_operands_and_usage() {
 
     expect(function->body()->check_context(function.get()),
            "callable expression tree keeps a single function context");
-    expect(sum->lhs() == lhs && sum->rhs() == rhs && sum->op() == BinaryOp::ADD,
+    expect(sum->lhs() == lhs && sum->rhs() == rhs && sum->op() == BinaryOp::Add,
            "binary expression exposes the original operands and operator");
-    expect(lhs->variable().usage() == Usage::READ && rhs->variable().usage() == Usage::READ,
+    expect(lhs->variable().usage() == Usage::Read && rhs->variable().usage() == Usage::Read,
            "binary construction marks both variable operands as read");
-    expect(cast->expression() == sum && cast->cast_op() == CastOp::STATIC,
+    expect(cast->expression() == sum && cast->cast_op() == CastOp::Static,
            "cast expression preserves operand and cast operation");
     expect(subscript->range() == vector && subscript->index(0) != nullptr,
            "subscript expression preserves range and index");
-    subscript->mark(Usage::READ);
-    expect(vector->variable().usage() == Usage::READ,
+    subscript->mark(Usage::Read);
+    expect(vector->variable().usage() == Usage::Read,
            "marking a subscript forwards usage to its range expression");
     expect(swizzle->is_swizzle() && swizzle->parent() == vector && swizzle->swizzle_size() == 2,
            "swizzle expression retains parent and swizzle metadata");
@@ -221,21 +221,21 @@ void test_control_flow_builders_keep_nested_scopes_isolated() {
            "nested control-flow nodes retain the callable context");
     expect(function->body()->size() == 3u,
            "control-flow builders append only their root statements to the function body");
-    expect(function->body()->statements()[0]->tag() == Statement::Tag::IF &&
-               function->body()->statements()[1]->tag() == Statement::Tag::LOOP &&
-               function->body()->statements()[2]->tag() == Statement::Tag::FOR,
+    expect(function->body()->statements()[0]->tag() == Statement::Tag::If &&
+               function->body()->statements()[1]->tag() == Statement::Tag::Loop &&
+               function->body()->statements()[2]->tag() == Statement::Tag::For,
            "if, loop, and for statements preserve construction order");
     expect(if_statement->true_branch()->size() == 1u && if_statement->false_branch()->size() == 1u,
            "if branches own statements built through their selected scopes");
-    expect(nested_scope->size() == 1u && nested_scope->statements()[0]->tag() == Statement::Tag::COMMENT,
+    expect(nested_scope->size() == 1u && nested_scope->statements()[0]->tag() == Statement::Tag::Comment,
            "a nested scope keeps its statement out of the enclosing branch");
     expect(loop_statement->body()->size() == 2u &&
-               loop_statement->body()->statements()[0]->tag() == Statement::Tag::CONTINUE &&
-               loop_statement->body()->statements()[1]->tag() == Statement::Tag::BREAK,
+               loop_statement->body()->statements()[0]->tag() == Statement::Tag::Continue &&
+               loop_statement->body()->statements()[1]->tag() == Statement::Tag::Break,
            "continue and break are attached to the loop body in order");
     expect(for_statement->var() == for_statement->step() && for_statement->condition() == if_statement->condition(),
            "for statement preserves initializer, condition, and step expressions");
-    expect(for_statement->body()->size() == 1u && for_statement->body()->statements()[0]->tag() == Statement::Tag::COMMENT,
+    expect(for_statement->body()->size() == 1u && for_statement->body()->statements()[0]->tag() == Statement::Tag::Comment,
            "for body owns statements built through its selected scope");
 }
 
@@ -270,9 +270,9 @@ void test_function_signature_builders_preserve_parameter_categories() {
            "callable return type follows its returned parameter");
     expect(callable->arguments().size() == 3u,
            "callable records every value, resource, and reference parameter");
-    expect(value_argument->variable().tag() == Variable::Tag::LOCAL &&
-               buffer_argument->variable().tag() == Variable::Tag::BUFFER &&
-               reference_argument->variable().tag() == Variable::Tag::REFERENCE,
+    expect(value_argument->variable().tag() == Variable::Tag::Local &&
+               buffer_argument->variable().tag() == Variable::Tag::Buffer &&
+               reference_argument->variable().tag() == Variable::Tag::Reference,
            "function parameters preserve their value, resource, and reference categories");
     expect(callable->arguments()[0].type() == Type::of<float>() &&
                callable->arguments()[1].type() == Type::of<Buffer<float>>() &&
@@ -280,8 +280,8 @@ void test_function_signature_builders_preserve_parameter_categories() {
            "function parameter order and declared types are preserved");
     expect(kernel->is_kernel() && kernel->arguments().size() == 1u,
            "kernel records resource parameters without becoming a callable");
-    expect(kernel_buffer_argument->variable().tag() == Variable::Tag::BUFFER &&
-               thread_index->variable().tag() == Variable::Tag::THREAD_IDX,
+    expect(kernel_buffer_argument->variable().tag() == Variable::Tag::Buffer &&
+               thread_index->variable().tag() == Variable::Tag::ThreadIdx,
            "kernel resource parameters and builtins retain their dedicated categories");
 }
 

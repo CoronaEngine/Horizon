@@ -432,11 +432,11 @@ public:
         : var_(begin),
           end_(end),
           step_(step) {
-        const BinaryExpr *negative_step = Function::current()->binary(Type::of<bool>(), BinaryOp::LESS,
+        const BinaryExpr *negative_step = Function::current()->binary(Type::of<bool>(), BinaryOp::Less,
                                                                       step_.expression(), OC_EXPR(T(0)));
-        const BinaryExpr *condition = Function::current()->binary(Type::of<bool>(), BinaryOp::LESS,
+        const BinaryExpr *condition = Function::current()->binary(Type::of<bool>(), BinaryOp::Less,
                                                                   var_.expression(), end_.expression());
-        const BinaryExpr *reduce_cond = Function::current()->binary(Type::of<bool>(), BinaryOp::GREATER,
+        const BinaryExpr *reduce_cond = Function::current()->binary(Type::of<bool>(), BinaryOp::Greater,
                                                                     var_.expression(), end_.expression());
         const Expression *final_condition = Function::current()->conditional(Type::of<bool>(), negative_step,
                                                                              reduce_cond, condition);

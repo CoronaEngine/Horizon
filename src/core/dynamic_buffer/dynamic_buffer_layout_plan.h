@@ -50,12 +50,12 @@ class TypedFieldPath {
 public:
     /// One navigation step from the current logical node to a child node.
     enum class StepKind : uint8_t {
-        /// Enter the Nth structure member.
-        member,
+        /// Enter the Nth structure Member.
+        Member,
         /// Enter the Nth array element.
-        index,
-        /// Enter the Nth vector or matrix component.
-        component
+        Index,
+        /// Enter the Nth vector or matrix Component.
+        Component
     };
 
     struct Step {
@@ -107,21 +107,21 @@ struct TypedFieldPathStaticStep;
 template<uint32_t Index>
 struct TypedFieldPathStaticStep<FieldMemberStep<Index>> {
     inline static constexpr TypedFieldPath::Step value{
-        .kind = TypedFieldPath::StepKind::member,
+        .kind = TypedFieldPath::StepKind::Member,
         .value = Index};
 };
 
 template<uint32_t Index>
 struct TypedFieldPathStaticStep<FieldIndexStep<Index>> {
     inline static constexpr TypedFieldPath::Step value{
-        .kind = TypedFieldPath::StepKind::index,
+        .kind = TypedFieldPath::StepKind::Index,
         .value = Index};
 };
 
 template<uint32_t Index>
 struct TypedFieldPathStaticStep<FieldComponentStep<Index>> {
     inline static constexpr TypedFieldPath::Step value{
-        .kind = TypedFieldPath::StepKind::component,
+        .kind = TypedFieldPath::StepKind::Component,
         .value = Index};
 };
 

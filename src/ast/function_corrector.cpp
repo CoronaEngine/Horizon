@@ -74,12 +74,12 @@ void FunctionCorrector::visit_expr(const Expression *const &expression, Function
     }
 
     switch (expression->tag()) {
-        case Expression::Tag::REF: {
+        case Expression::Tag::Ref: {
             static_cast<const VariableExpr *>(expression)->variable().mark_used();
             process_capture(const_cast<const Expression *&>(expression), cur_func);
             break;
         }
-        case Expression::Tag::MEMBER: {
+        case Expression::Tag::Member: {
             static_cast<const VariableExpr *>(expression)->variable().mark_used();
             process_member_expr(const_cast<const Expression *&>(expression), cur_func);
             break;
@@ -320,7 +320,7 @@ void FunctionCorrector::visit(const ScopeStmt *scope) {
 void FunctionCorrector::visit(const AssignStmt *stmt) {
     visit_expr(stmt->lhs_);
     OC_ERROR_IF(stmt->lhs()->type()->is_resource());
-    stmt->lhs()->mark(Usage::WRITE);
+    stmt->lhs()->mark(Usage::Write);
     visit_expr(stmt->rhs_);
 }
 
