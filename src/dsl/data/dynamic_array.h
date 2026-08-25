@@ -439,6 +439,7 @@ DynamicArray<float> BindlessArrayTexture<Dim>::sample(uint channel_num, const U 
                                                              call_op,
                                                              {bindless_array_, index_, OC_EXPR(u), OC_EXPR(v)},
                                                              {channel_num});
+    bindless_array_->mark(Usage::READ);
     return detail::eval_dynamic_array(DynamicArray<float>(channel_num, expr));
 }
 
@@ -452,6 +453,7 @@ DynamicArray<float> BindlessArrayTexture<Dim>::sample(uint channel_num, const U 
                                                              call_op,
                                                              {bindless_array_, index_, OC_EXPR(u), OC_EXPR(v), OC_EXPR(w)},
                                                              {channel_num});
+    bindless_array_->mark(Usage::READ);
     return detail::eval_dynamic_array(DynamicArray<float>(channel_num, expr));
 }
 

@@ -347,6 +347,9 @@ const RefExpr *Function::argument(const Type *type) noexcept {
         case Type::Tag::TEXTURE2D:
             tag = Variable::Tag::TEXTURE2D;
             break;
+        case Type::Tag::BINDLESS_ARRAY:
+            tag = Variable::Tag::BINDLESS_ARRAY;
+            break;
         case Type::Tag::ACCEL:
             tag = Variable::Tag::ACCEL;
             break;

@@ -7,6 +7,7 @@
 #include "core/stl.h"
 #include <type_traits>
 #include "core/concepts.h"
+#include "core/type_system/type_desc.h"
 #include "math/storage_traits.h"
 #include "math/basic_traits.h"
 
@@ -470,10 +471,11 @@ class ByteBufferView;
 template<typename T>
 class DynamicBufferView;
 
-class Texture3D;
-class Texture2D;
+using horizon::core::BindlessArray;
+using horizon::core::Texture2D;
+using horizon::core::Texture3D;
+
 class Accel;
-class BindlessArray;
 
 template<typename T>
 using is_valid_buffer_element = std::conjunction<std::negation<is_param_struct<T>>,
