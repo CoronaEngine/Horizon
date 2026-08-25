@@ -173,7 +173,7 @@ Image Image::pure_color(float4 color, ColorSpace color_space, uint2 res) {
             dest[i] = srgb_to_linear(color);
         }
     }
-    Image ret{PixelStorage::FLOAT4, pixel, res};
+    Image ret{PixelStorage::Float4, pixel, res};
     ret.average<4>() = color;
     return ret;
 }
@@ -585,7 +585,7 @@ Image::convert_to_32bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 
     uint pixel_num = res.x * res.y;
     const std::byte *pixel = nullptr;
     switch (pixel_storage) {
-        case PixelStorage::BYTE1: {
+        case PixelStorage::Byte1: {
             using TargetType = float;
             pixel = new_array<std::byte>(pixel_num * sizeof(TargetType));
             auto src = (uint8_t *)ptr;
@@ -593,10 +593,10 @@ Image::convert_to_32bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 
             for (int i = 0; i < pixel_num; ++i, ++dest) {
                 *dest = float(src[i]) / 255.f;
             }
-            pixel_storage = PixelStorage::FLOAT1;
+            pixel_storage = PixelStorage::Float1;
             break;
         }
-        case PixelStorage::BYTE2: {
+        case PixelStorage::Byte2: {
             using TargetType = float2;
             pixel = new_array(pixel_num * sizeof(TargetType));
             auto src = (uint8_t *)ptr;
@@ -604,10 +604,10 @@ Image::convert_to_32bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 
             for (int i = 0; i < pixel_num; ++i, ++dest, src += 2) {
                 *dest = make_float2(float(src[0]) / 255.f, float(src[1]) / 255.f);
             }
-            pixel_storage = PixelStorage::FLOAT2;
+            pixel_storage = PixelStorage::Float2;
             break;
         }
-        case PixelStorage::BYTE4: {
+        case PixelStorage::Byte4: {
             using TargetType = float4;
             pixel = new_array(pixel_num * sizeof(TargetType));
             auto src = (uint8_t *)ptr;
@@ -618,7 +618,7 @@ Image::convert_to_32bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 
                                     float(src[2]) / 255.f,
                                     float(src[3]) / 255.f);
             }
-            pixel_storage = PixelStorage::FLOAT4;
+            pixel_storage = PixelStorage::Float4;
             break;
         }
         default:
@@ -633,7 +633,7 @@ Image::convert_to_8bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 r
     uint pixel_num = res.x * res.y;
     const std::byte *pixel = nullptr;
     switch (pixel_storage) {
-        case PixelStorage::FLOAT1: {
+        case PixelStorage::Float1: {
             using TargetType = uint8_t;
             pixel = new_array(pixel_num * sizeof(TargetType));
             auto dest = (TargetType *)pixel;
@@ -641,10 +641,10 @@ Image::convert_to_8bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 r
             for (int i = 0; i < pixel_num; ++i, ++dest, ++src) {
                 *dest = make_8bit(src[0]);
             }
-            pixel_storage = PixelStorage::BYTE1;
+            pixel_storage = PixelStorage::Byte1;
             break;
         }
-        case PixelStorage::FLOAT2: {
+        case PixelStorage::Float2: {
             using TargetType = uint8_t;
             pixel = new_array(pixel_num * sizeof(TargetType) * 2u);
             auto dest = reinterpret_cast<TargetType *>(const_cast<std::byte *>(pixel));
@@ -653,10 +653,10 @@ Image::convert_to_8bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 r
                 dest[0] = make_8bit(src[0]);
                 dest[1] = make_8bit(src[1]);
             }
-            pixel_storage = PixelStorage::BYTE2;
+            pixel_storage = PixelStorage::Byte2;
             break;
         }
-        case PixelStorage::FLOAT4: {
+        case PixelStorage::Float4: {
             using TargetType = uint32_t;
             pixel = new_array(pixel_num * sizeof(TargetType));
             auto dest = (TargetType *)pixel;
@@ -664,7 +664,7 @@ Image::convert_to_8bit(PixelStorage pixel_storage, const std::byte *ptr, uint2 r
             for (int i = 0; i < pixel_num; ++i, ++dest, ++src) {
                 *dest = make_rgba(*src);
             }
-            pixel_storage = PixelStorage::BYTE4;
+            pixel_storage = PixelStorage::Byte4;
             break;
         }
         default:

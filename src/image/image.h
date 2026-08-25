@@ -19,10 +19,10 @@ public:
     ImageView(PixelStorage pixel_storage, const std::byte *pixel, uint2 res);
 
     ImageView(const float4 *pixel, uint2 res)
-        : ImageView(PixelStorage::FLOAT4,
+        : ImageView(PixelStorage::Float4,
                     reinterpret_cast<const std::byte *>(pixel), res) {}
     ImageView(const uchar4 *pixel, uint2 res)
-        : ImageView(PixelStorage::BYTE4,
+        : ImageView(PixelStorage::Byte4,
                     reinterpret_cast<const std::byte *>(pixel), res) {}
     template<typename T = std::byte>
     const T *pixel_ptr() const { return reinterpret_cast<const T *>(pixel_); }

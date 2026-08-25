@@ -9,12 +9,12 @@
 - 第三方依赖由 Conan 2 管理，推荐通过名为 `horizon-dev` 的 Conda 环境运行开发脚本。
 - 当前主要编译器是 MSVC；使用 VS Code/CMake Tools 时必须启用 Visual Studio Developer Environment。
 - Ocarina、Ocarina 测试和 Vision Hotfix 需要 CUDA；普通 Horizon、Helicon 和工具目标不应无条件依赖 CUDA。
-- 工程包含正在进行的 Helicon/Ocarina 合并与目录迁移。当前 Horizon 代码仅包括 `src/core/`、`src/math/`、`src/ast/`、`src/dsl/` 和 `src/runtime/`；今后围绕 Horizon 的讨论、检索、分析和修改默认都限定在这五个目录，只有用户明确要求时才扩展范围。
+- 工程包含正在进行的 Helicon/Ocarina 合并与目录迁移。当前 Horizon 代码仅包括 `src/core/`、`src/math/`、`src/image/`、`src/ast/`、`src/dsl/` 和 `src/runtime/`；今后围绕 Horizon 的讨论、检索、分析和修改默认都限定在这六个目录，只有用户明确要求时才扩展范围。
 
 ## 2. 目录职责
 
 - `include/`：Horizon 对外公开的头文件。
-- `src/`：Horizon 源代码的唯一修改作用域，当前仅包括 `core`、`math`、`ast`、`dsl` 和 `runtime`。这些目录的详细职责、当前依赖和目标架构以 [`docs/architecture/overview.md`](docs/architecture/overview.md) 为权威来源。
+- `src/`：Horizon 源代码的唯一修改作用域，当前仅包括 `core`、`math`、`image`、`ast`、`dsl` 和 `runtime`。这些目录的详细职责、当前依赖和目标架构以 [`docs/architecture/overview.md`](docs/architecture/overview.md) 为权威来源。
 - `modules/ocarina/`：外部的旧 Ocarina 模块及其 generator、RHI、后端和测试。默认完全忽略，不主动搜索、查阅、修改或将 `src/` 的改动同步到该目录；只有用户明确指定 Ocarina 为任务范围时才可进入。
 - `examples/`：示例程序与示例资源。
 - `tools/`：开发工作流、着色器编译工具及辅助脚本。
@@ -26,12 +26,12 @@
 1. 阅读本文件以及目标目录内更具体的说明文档。
 2. 运行 `git status --short`，确认当前分支和已有未提交修改。
 3. 用户已有的修改必须保留。不要清理、覆盖或顺手格式化与当前任务无关的文件。
-4. 将 Horizon 代码任务限定在 `src/core/`、`src/math/`、`src/ast/`、`src/dsl/` 和 `src/runtime/`；除非用户明确要求，不得扩展到其他目录，也不得为了寻找参考实现而查阅 `modules/ocarina/`。
+4. 将 Horizon 代码任务限定在 `src/core/`、`src/math/`、`src/image/`、`src/ast/`、`src/dsl/` 和 `src/runtime/`；除非用户明确要求，不得扩展到其他目录，也不得为了寻找参考实现而查阅 `modules/ocarina/`。
 5. 修改前检查相关 `CMakeLists.txt`，确认目标文件是否真正参与当前构建。
 
 ## 4. 架构与命名空间
 
-- `src/` 中的新代码使用小写根命名空间 `horizon`，并使用 `horizon::core`、`horizon::math`、`horizon::ast`、`horizon::dsl`、`horizon::runtime` 表达类型的真实模块归属；不得新增 `ocarina` 命名空间。
+- `src/` 中的新代码使用小写根命名空间 `horizon`，并使用 `horizon::core`、`horizon::math`、`horizon::image`、`horizon::ast`、`horizon::dsl`、`horizon::runtime` 表达类型的真实模块归属；不得新增 `ocarina` 命名空间。
 - 新增依赖必须遵守架构概览中定义的目标方向，不得扩大已记录的反向依赖或循环依赖。
 - AST 只维护一套模型，不得创建平行的第二套 AST 类型。
 - 避免在公共头文件的全局作用域使用 `using namespace`。迁移兼容代码若必须使用，应限制在命名空间内部，并在后续重构中逐步替换为明确限定名或窄范围 `using` 声明。
@@ -65,7 +65,7 @@
 ### 判断构建是否覆盖改动
 
 - 构建成功只证明该 target 实际包含的源文件能够构建。
-- 修改 `src/core/`、`src/math/`、`src/ast/`、`src/dsl/`、`src/runtime/` 后，若它们尚未接入当前 CMake target，必须额外进行头文件聚合检查、单文件语法检查，或先完成目标接入。
+- 修改 `src/core/`、`src/math/`、`src/image/`、`src/ast/`、`src/dsl/`、`src/runtime/` 后，若它们尚未接入当前 CMake target，必须额外进行头文件聚合检查、单文件语法检查，或先完成目标接入。
 - `ninja: no work to do` 不是新迁移代码通过编译的证据。
 - 若验证被任务作用域之外的旧模块阻断，应明确报告边界和首个外部错误，不得转而查阅或修改 `modules/ocarina/`。
 
