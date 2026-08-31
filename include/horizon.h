@@ -44,40 +44,15 @@ namespace Corona::Horizon
         ResourceHandle& operator=(const ResourceHandle&) noexcept = default;
         ResourceHandle& operator=(ResourceHandle&&) noexcept = default;
 
-        [[nodiscard]] explicit operator bool() const noexcept
-        {
-
-            return resource_ != nullptr && resource_->valid();
-        }
+        [[nodiscard]] explicit operator bool() const noexcept { return resource_ != nullptr && resource_->valid(); }
 
     protected:
-        [[nodiscard]] std::uintptr_t resource_id() const noexcept
-        {
-            return resource_ ? resource_->id() : 0;
-        }
+        [[nodiscard]] std::uintptr_t resource_id() const noexcept { return resource_ ? resource_->id() : 0; }
 
     private:
         friend struct ResourceBridge;
 
         std::shared_ptr<IResourceRef> resource_{};
-    };
-
-    struct ResourceBridge
-    {
-        static void set(ResourceHandle& owner, std::shared_ptr<IResourceRef> resource) noexcept
-        {
-            owner.resource_ = std::move(resource);
-        }
-
-        [[nodiscard]] static std::shared_ptr<IResourceRef> token(const ResourceHandle& owner) noexcept
-        {
-            return owner.resource_;
-        }
-
-        [[nodiscard]] static std::shared_ptr<const IResourceRef> keep_alive(const ResourceHandle& owner) noexcept
-        {
-            return owner.resource_;
-        }
     };
 
     enum class Format : uint8_t
@@ -191,23 +166,18 @@ namespace Corona::Horizon
 
     struct BufferRange
     {
-        static constexpr uint64_t whole_size = ~uint64_t{0};
+        static constexpr uint64_t whole_size = ~uint64_t { 0 };
 
         uint64_t byte_offset = 0;
         uint64_t byte_size = whole_size;
 
-        static constexpr BufferRange entire() noexcept
-        {
-            return {};
-        }
+        static constexpr BufferRange entire() noexcept { return {}; }
 
         [[nodiscard]] constexpr BufferRange resolve(uint64_t total_size) const noexcept
         {
             BufferRange result = *this;
-
             if (result.byte_size == whole_size)
                 result.byte_size = result.byte_offset <= total_size ? total_size - result.byte_offset : 0;
-
             return result;
         }
     };
@@ -229,25 +199,13 @@ namespace Corona::Horizon
         uint64_t allocation_size = 0;
         BufferRange memory_range = BufferRange::entire();
 
-        [[nodiscard]] static constexpr ExternalMemoryHandle win32(void *value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept
-        {
-            return {ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range};
-        }
+        [[nodiscard]] static constexpr ExternalMemoryHandle win32(void* value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept { return { ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range }; }
 
-        [[nodiscard]] static constexpr ExternalMemoryHandle opaque_fd(int value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept
-        {
-            return {ExternalMemoryHandleType::OpaqueFd, nullptr, value, size, range};
-        }
+        [[nodiscard]] static constexpr ExternalMemoryHandle opaque_fd(int value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept { return { ExternalMemoryHandleType::OpaqueFd, nullptr, value, size, range }; }
 
-        [[nodiscard]] constexpr bool valid() const noexcept
-        {
-            return type == ExternalMemoryHandleType::OpaqueWin32 ? handle != nullptr : type == ExternalMemoryHandleType::OpaqueFd ? fd >= 0 : false;
-        }
+        [[nodiscard]] constexpr bool valid() const noexcept { return type == ExternalMemoryHandleType::OpaqueWin32 ? handle != nullptr : type == ExternalMemoryHandleType::OpaqueFd ? fd >= 0 : false; }
 
-        [[nodiscard]] explicit constexpr operator bool() const noexcept
-        {
-            return valid();
-        }
+        [[nodiscard]] explicit constexpr operator bool() const noexcept { return valid(); }
     };
 
     enum class ImageDimension : uint8_t
@@ -289,10 +247,7 @@ namespace Corona::Horizon
         uint32_t base_mip = 0;
         uint32_t mip_count = remaining;
 
-        [[nodiscard]] static constexpr ImageSubresourceRange whole() noexcept
-        {
-            return {};
-        }
+        [[nodiscard]] static constexpr ImageSubresourceRange whole() noexcept { return {}; }
 
         [[nodiscard]] static constexpr ImageSubresourceRange single(uint32_t layer, uint32_t mip) noexcept
         {
@@ -561,16 +516,10 @@ namespace Corona::Horizon
         }
 
         template <HardwareTransferable T>
-        [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {})
-        {
-            return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Vertex, std::move(name));
-        }
+        [[nodiscard]] static HardwareBufferDesc vertex(uint64_t count, std::string name = {}) { return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Vertex, std::move(name)); }
 
         template <HardwareIndexType T>
-        [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {})
-        {
-            return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Index, std::move(name));
-        }
+        [[nodiscard]] static HardwareBufferDesc index(uint64_t count, std::string name = {}) { return typed<T>(count, BufferUsage_TransferDst | BufferUsage_Index, std::move(name)); }
 
         [[nodiscard]] static HardwareBufferDesc indirect(uint64_t command_count, std::string name = {})
         {
@@ -767,20 +716,7 @@ namespace Corona::Horizon
         EmbeddedShader::SlangModule& module);
 
     template <typename T>
-    concept ReflectedBindingKey = requires(const T& t)
-    {
-        t.location;
-    } && (requires(const T& t)
-    {
-        t.byte_offset;
-        t.type_size;
-        t.bind_type;
-    } || requires(const T& t)
-    {
-        t.byteOffset;
-        t.typeSize;
-        t.bindType;
-    });
+    concept ReflectedBindingKey = requires(const T& t) { t.location; t.byteOffset; t.typeSize; t.bindType; t.set; t.binding; };
 
     struct BindingSlot
     {
@@ -794,74 +730,26 @@ namespace Corona::Horizon
         template <ReflectedBindingKey T>
         static constexpr BindingSlot from(const T& key) noexcept
         {
-            BindingSlot slot;
-            if constexpr (requires { key.byte_offset; key.type_size; key.bind_type; })
-            {
-                slot.byte_offset = key.byte_offset;
-                slot.type_size = key.type_size;
-                slot.bind_type = key.bind_type;
-                slot.location = key.location;
-            }
-            else
-            {
-                slot.byte_offset = key.byteOffset;
-                slot.type_size = key.typeSize;
-                slot.bind_type = key.bindType;
-                slot.location = key.location;
-            }
-
-            if constexpr (requires { key.set; })
-                slot.set = key.set;
-            if constexpr (requires { key.binding; })
-            {
-                slot.binding = key.binding;
-
-                if (slot.set == 0 && slot.binding == 0)
-                    slot.binding = slot.location;
-            }
-            else
-            {
+            BindingSlot slot { key.byteOffset, key.typeSize, key.bindType, key.location, key.set, key.binding };
+            if (slot.set == 0 && slot.binding == 0)
                 slot.binding = slot.location;
-            }
-
             return slot;
         }
     };
 
-    template <typename Pipeline>
-    class ResourceProxy
+    template <typename Pipeline, typename T>
+    void bind_slot(Pipeline& pipeline, const BindingSlot& slot, const T& value)
     {
-    public:
-        ResourceProxy(Pipeline& pipeline, BindingSlot slot) noexcept : pipeline_(pipeline), slot_(slot) {}
-
-        ResourceProxy& operator=(const ResourceProxy&) = delete;
-        ResourceProxy& operator=(ResourceProxy&&) = delete;
-
-        template <typename T>
-            requires(!std::same_as<std::remove_cvref_t<T>, ResourceProxy>)
-        ResourceProxy& operator=(const T& value)
+        if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareBuffer>)
+            pipeline.bind_buffer(slot, value);
+        else if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareImage>)
+            pipeline.bind_image(slot, value);
+        else
         {
-            if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareBuffer>)
-            {
-                pipeline_.bind_buffer(slot_, value);
-            }
-            else if constexpr (std::same_as<std::remove_cvref_t<T>, HardwareImage>)
-            {
-                pipeline_.bind_image(slot_, value);
-            }
-            else
-            {
-                static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
-                pipeline_.bind_push_constant(slot_, &value, sizeof(std::remove_cvref_t<T>));
-            }
-
-            return *this;
+            static_assert(HardwareTransferable<std::remove_cvref_t<T>>, "Pipeline push constants must be trivially copyable non-pointer values.");
+            pipeline.bind_push_constant(slot, &value, sizeof(std::remove_cvref_t<T>));
         }
-
-    private:
-        Pipeline& pipeline_;
-        BindingSlot slot_;
-    };
+    }
 
     class ComputePipelineBase : public ResourceHandle
     {
@@ -888,20 +776,11 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
-        {
-            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
-        }
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) { set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding); }
 
-        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer)
-        {
-            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
-        }
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) { set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding); }
 
-        void bind_image(const BindingSlot& slot, const HardwareImage& image)
-        {
-            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.set, slot.binding);
-        }
+        void bind_image(const BindingSlot& slot, const HardwareImage& image) { set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.set, slot.binding); }
 
     private:
         void record_into(CommandRecorder& recorder);
@@ -948,20 +827,11 @@ namespace Corona::Horizon
         RasterizerPipelineBase& bind_depth_target(HardwareImage& image);
         [[nodiscard]] explicit operator bool() const noexcept;
 
-        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size)
-        {
-            set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding);
-        }
+        void bind_push_constant(const BindingSlot& slot, const void* data, size_t size) { set_push_constant_direct(slot.byte_offset, data, size, slot.bind_type, slot.set, slot.binding); }
 
-        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer)
-        {
-            set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding);
-        }
+        void bind_buffer(const BindingSlot& slot, const HardwareBuffer& buffer) { set_resource_direct(slot.byte_offset, slot.type_size, buffer, slot.bind_type, slot.set, slot.binding); }
 
-        void bind_image(const BindingSlot& slot, const HardwareImage& image)
-        {
-            set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location, slot.set, slot.binding);
-        }
+        void bind_image(const BindingSlot& slot, const HardwareImage& image) { set_resource_direct(slot.byte_offset, slot.type_size, image, slot.bind_type, slot.location, slot.set, slot.binding); }
 
     private:
         void record_into(CommandRecorder& recorder) const;
@@ -1066,10 +936,7 @@ namespace Corona::Horizon
     public:
         using ShaderBindings = typename CS::template Bindings<ComputePipelineBase>;
 
-        static ComputePipelineShaders make_shaders()
-        {
-            return { compile_slang_stage(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule) };
-        }
+        static ComputePipelineShaders make_shaders() { return { compile_slang_stage(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule) }; }
 
         explicit ComputePipeline(CS, ktm::uvec3 numthreads = { 1, 1, 1 },
                                  const std::source_location& source_location = std::source_location::current())
@@ -1294,7 +1161,6 @@ template <typename PipelineType>
 template <typename T>
 EmbeddedShader::BoundField<PipelineType>& EmbeddedShader::BoundField<PipelineType>::operator=(const T& value)
 {
-    Corona::Horizon::ResourceProxy proxy(*pipeline_, Corona::Horizon::BindingSlot::from(*this));
-    proxy = value;
+    Corona::Horizon::bind_slot(*pipeline_, Corona::Horizon::BindingSlot::from(*this), value);
     return *this;
 }

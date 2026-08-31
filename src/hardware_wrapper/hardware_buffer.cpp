@@ -5,6 +5,7 @@
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "hardware_wrapper_vulkan/hardware/command.h"
 #include "horizon.h"
+#include "horizon_resource_bridge.h"
 #include "validation/hardware_validation.h"
 
 namespace Corona::Horizon

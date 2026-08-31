@@ -1,6 +1,7 @@
 #include "hardware_wrapper_vulkan/hardware/command.h"
 #include "hardware_wrapper_vulkan/hardware/resource_manager.h"
 #include "horizon.h"
+#include "horizon_resource_bridge.h"
 #include "image_format_layout.h"
 #include "validation/hardware_validation.h"
 

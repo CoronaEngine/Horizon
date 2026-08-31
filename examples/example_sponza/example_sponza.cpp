@@ -1001,7 +1001,12 @@ void run_example_sponza()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
+    horizon::DrawIndexedIndirectCommand quad_cmd_base;
+    quad_cmd_base.index_count = static_cast<uint32_t>(corner_indices.size());
+    quad_cmd_base.instance_count = 1;
+    quad_cmd_base.first_index = 0;
+    quad_cmd_base.vertex_offset = 0;
+    quad_cmd_base.first_instance = 0;
 
     // Camera starts from the asset view, with a corrected hero shot for Intel
     // Sponza. The converted bounds include side buildings, so their midpoint
@@ -1644,12 +1649,7 @@ void run_example_sponza()
         ssao_rasterizer.fsp.params = glm::vec4(tuning.ssao_radius, tuning.ssao_bias,
                                                tuning.ssao_intensity, 0.0f);
 
-        horizon::DrawIndexedIndirectCommand ssao_cmd;
-        ssao_cmd.index_count = quad_params.index_count;
-        ssao_cmd.first_index = quad_params.first_index;
-        ssao_cmd.vertex_offset = quad_params.vertex_offset;
-        ssao_cmd.instance_count = 1;
-        ssao_cmd.first_instance = 0;
+        horizon::DrawIndexedIndirectCommand ssao_cmd = quad_cmd_base;
 
         horizon::HardwareBuffer ssao_indirect = horizon::HardwareBuffer::from_bytes(
             std::span<const std::byte>(
@@ -1671,12 +1671,7 @@ void run_example_sponza()
                                                      tuning.ssao_blur_depth_sigma, 16.0f);
         ssao_blur_rasterizer.fsp.depth_unpack = ssr_depth_unpack;
 
-        horizon::DrawIndexedIndirectCommand ssao_blur_cmd;
-        ssao_blur_cmd.index_count = quad_params.index_count;
-        ssao_blur_cmd.first_index = quad_params.first_index;
-        ssao_blur_cmd.vertex_offset = quad_params.vertex_offset;
-        ssao_blur_cmd.instance_count = 1;
-        ssao_blur_cmd.first_instance = 0;
+        horizon::DrawIndexedIndirectCommand ssao_blur_cmd = quad_cmd_base;
 
         horizon::HardwareBuffer ssao_blur_indirect = horizon::HardwareBuffer::from_bytes(
             std::span<const std::byte>(
@@ -1718,12 +1713,7 @@ void run_example_sponza()
             glm::vec4(tuning.sun_color * tuning.sun_intensity, 0.0f);
         light_rasterizer.vpc.rect = glm::vec4(-1.0f, -1.0f, 1.0f, 1.0f);
 
-        horizon::DrawIndexedIndirectCommand sun_cmd;
-        sun_cmd.index_count = quad_params.index_count;
-        sun_cmd.first_index = quad_params.first_index;
-        sun_cmd.vertex_offset = quad_params.vertex_offset;
-        sun_cmd.instance_count = 1;
-        sun_cmd.first_instance = 0;
+        horizon::DrawIndexedIndirectCommand sun_cmd = quad_cmd_base;
         light_cmds.push_back(sun_cmd);
         ++visible_lights;
 
@@ -1774,11 +1764,7 @@ void run_example_sponza()
                           tuning.point_inner);
             light_rasterizer.vpc.rect = glm::vec4(rect_min, rect_max);
 
-            horizon::DrawIndexedIndirectCommand cmd;
-            cmd.index_count = quad_params.index_count;
-            cmd.first_index = quad_params.first_index;
-            cmd.vertex_offset = quad_params.vertex_offset;
-            cmd.instance_count = 1;
+            horizon::DrawIndexedIndirectCommand cmd = quad_cmd_base;
             cmd.first_instance = static_cast<uint32_t>(light_cmds.size());
             light_cmds.push_back(cmd);
             ++visible_lights;
@@ -1812,12 +1798,7 @@ void run_example_sponza()
             glm::radians(tuning.env_rotation_deg));
         combine_rasterizer.fpc.ambient = glm::vec4(tuning.ambient_floor, 0.0f);
 
-        horizon::DrawIndexedIndirectCommand combine_cmd;
-        combine_cmd.index_count = quad_params.index_count;
-        combine_cmd.first_index = quad_params.first_index;
-        combine_cmd.vertex_offset = quad_params.vertex_offset;
-        combine_cmd.instance_count = 1;
-        combine_cmd.first_instance = 0;
+        horizon::DrawIndexedIndirectCommand combine_cmd = quad_cmd_base;
 
         horizon::HardwareBuffer combine_indirect = horizon::HardwareBuffer::from_bytes(
             std::span<const std::byte>(

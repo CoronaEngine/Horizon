@@ -1,6 +1,7 @@
 #include "vulkan_rasterizer_pipeline.h"
 
 #include "horizon_profiling.h"
+#include "horizon_resource_bridge.h"
 
 #include "hardware_wrapper/validation/hardware_validation.h"
 #include "hardware_wrapper_vulkan/frame_ring.h"

@@ -1,6 +1,7 @@
 #include "hardware_wrapper_vulkan/pipeline/vulkan_compute_pipeline.h"
 #include "hardware_wrapper_vulkan/resource_pool.h"
 #include "horizon.h"
+#include "horizon_resource_bridge.h"
 
 #include <limits>
 #include <memory>

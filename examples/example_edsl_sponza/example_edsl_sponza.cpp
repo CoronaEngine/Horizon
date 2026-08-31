@@ -1823,7 +1823,12 @@ void run_example_edsl_sponza()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    quad_params.index_count = static_cast<uint32_t>(corner_indices.size());
+    horizon::DrawIndexedIndirectCommand quad_cmd_base;
+    quad_cmd_base.index_count = static_cast<uint32_t>(corner_indices.size());
+    quad_cmd_base.instance_count = 1;
+    quad_cmd_base.first_index = 0;
+    quad_cmd_base.vertex_offset = 0;
+    quad_cmd_base.first_instance = 0;
 
     // ---- 相机 / 太阳 / 场景尺度 ----
     const glm::vec3 scene_min = to_vec3(asset.scene.min);
@@ -2227,12 +2232,7 @@ void run_example_edsl_sponza()
         }
 
         // ---- 全屏 pass 录制 - Convert to indirect ----
-        horizon::DrawIndexedIndirectCommand quad_cmd;
-        quad_cmd.index_count = quad_params.index_count;
-        quad_cmd.first_index = quad_params.first_index;
-        quad_cmd.vertex_offset = quad_params.vertex_offset;
-        quad_cmd.instance_count = 1;
-        quad_cmd.first_instance = 0;
+        horizon::DrawIndexedIndirectCommand quad_cmd = quad_cmd_base;
 
         horizon::HardwareBuffer quad_indirect = horizon::HardwareBuffer::from_bytes(
             std::span<const std::byte>(

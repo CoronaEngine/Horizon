@@ -11,7 +11,6 @@ namespace Corona::Horizon
     struct HardwareBufferDesc;
     struct HardwareImageDesc;
     struct BufferRange;
-    struct DrawIndexedParams;
     struct ImageSubresourceRange;
     struct RasterizerPipelineDesc;
     struct RasterizerPipelineShaders;
@@ -34,5 +33,4 @@ namespace Corona::Horizon
                                    uint64_t row_pitch = 0,
                                    uint64_t slice_pitch = 0);
     bool validate_rasterizer_pipeline_desc(const RasterizerPipelineDesc& desc, const RasterizerPipelineShaders& shaders);
-    bool validate_rasterizer_pipeline_record(const HardwareBuffer& index_buffer, const HardwareBuffer& vertex_buffer, const DrawIndexedParams& params);
 }
