@@ -6,6 +6,8 @@
 
 IR、Shader compiler、RHI、Vulkan 后端与 Runtime 集成层的简明目标设计见
 [Horizon GPU 编程架构](gpu-programming-stack.md)。
+Runtime 集成层的划分原因与取舍见
+[Runtime 模块边界](decisions/0002-runtime-module-boundary.md)。
 
 ## 1. 文档目的
 
@@ -73,11 +75,8 @@ Core 是四个模块的基础层，主要内容包括：
 
 Core 对上层提供稳定的基础类型和公共服务。Core 不应知道 Math 的具体类型，也不应知道 AST 节点、DSL 包装类型或 DSL 的构造过程。
 
-日志已统一由 `horizon-core` 管理。旧 `CoronaLogger` 仅保留兼容转发，文件输出和
-信号处理由应用入口显式选择；原 `src/kernel/core/logger.cpp` 已移除。
-公开的日志、对象存储与堆栈诊断头文件统一位于 `include/horizon/core/`，
-旧 `include/corona/kernel/` 路径已移除，旧类型名称通过兼容转发或别名保留。
-当前接口、默认行为和兼容范围见 [Core 日志说明](../../src/core/README.md)。
+日志策略与兼容依赖的设计原因见
+[Core 日志策略与兼容边界](decisions/0001-core-logging-policy.md)。
 
 Core 直接拥有类型系统和动态 Buffer；Math 只通过 Core 提供的布局 traits 和标量存储扩展点接入自己的向量、矩阵、real 与 half。Core 的公共头文件不能包含 Math。
 
