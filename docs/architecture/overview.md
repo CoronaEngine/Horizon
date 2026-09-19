@@ -181,16 +181,16 @@ DSL 主要包含：
 
 - 公开的 `Var` 及其类型 traits；`Ref` / `Expr` 位于 `detail`，供内部构造使用。
 - 一元、二元及内建函数操作。
-- If、Switch、Loop、For、Return、Print、Comment 等语句构造器。
+- If、Switch、Loop、For、Return、Discard、Comment 等语句构造器。
 - Callable、Kernel 和 Lambda 包装。
 - VertexShader、FragmentShader、RasterShader 及公开的光栅化 builtin；值接口使用 `Var` 或其别名。
 - Dynamic Array、SOA、结构体映射和可编码数据。
 - RTX 相关的纯 shader 侧类型与表达式。
 
-旧 diagnostics 与 Tensor runtime 已从 `src/dsl` 删除。纯 AST 的 `PrintStmt` 与
-`print()` 构造能力仍然保留；需要 GPU buffer、device、command 或下载回读的
-Printer、Debugger 与 Tensor 执行能力将在未来由 Runtime 集成层重新提供；这不表示
-对应的 GPU 功能已经实现。
+旧 diagnostics 与 Tensor runtime 已从 `src/dsl` 删除，AST 的 `PrintStmt`、
+`Statement::Tag::Print` 以及 DSL 的 `print()` / `prints()` 构造入口也已移除。
+需要 GPU buffer、device、command 或下载回读的 Printer、Debugger 与 Tensor
+执行能力属于未来 Runtime 集成层的范围，目前尚未实现。
 
 DSL 的核心职责是“翻译”，而不是拥有另一套语义状态：
 

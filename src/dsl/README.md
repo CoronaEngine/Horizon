@@ -2,6 +2,7 @@
 
 DSL 将 C++ 的 `Var<T>`、运算和语句构造为唯一的 `horizon::ast::Function` AST。
 `horizon::dsl::detail::Expr<T>` 是内部接口，用户无需直接使用。
+DSL 不提供 `print()` / `prints()` 或对应的 AST 打印语句；调试 host 构造过程使用主机日志接口。
 
 ## VS / FS 当前实现
 

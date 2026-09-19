@@ -48,7 +48,6 @@ private:
     void visit(const SwitchCaseStmt *stmt) override;
     void visit(const SwitchStmt *stmt) override;
     void visit(const SwitchDefaultStmt *stmt) override;
-    void visit(const PrintStmt *stmt) override {}
 
     void visit(const BinaryExpr *expr) override;
     void visit(const CallExpr *expr) override;

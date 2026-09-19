@@ -458,49 +458,7 @@ public:
         });
     }
 };
-}// namespace detail
 
-template<typename... Args, EPort p = port_v<Args...>>
-void print(horizon::dsl::string f, Args &&...args) {
-    if constexpr (p == D) {
-        size_t num = sizeof...(Args);
-        OC_ASSERT(num == substr_count(f, "{}"));
-        Function::current()->print(f, vector<const Expression *>{OC_EXPR(args)...});
-    } else {
-        f += "\n";
-        cout << format(f.c_str(), OC_FORWARD(args)...);
-    }
-}
-
-namespace detail {
-template<typename T>
-[[nodiscard]] auto to_tuple(const T &t) {
-    if constexpr (is_vector_expr_v<T>) {
-        using elm_ty = decltype(T::x);
-        static constexpr auto dim = vector_expr_dimension_v<T>;
-        if constexpr (dim == 2) {
-            return std::tuple<elm_ty, elm_ty>(t.x, t.y);
-        } else if constexpr (dim == 3) {
-            return std::tuple<elm_ty, elm_ty, elm_ty>(t.x, t.y, t.z);
-        } else {
-            return std::tuple<elm_ty, elm_ty, elm_ty, elm_ty>(t.x, t.y, t.z, t.w);
-        }
-    } else if constexpr (is_scalar_expr_v<T>) {
-        return std::tuple<T>(t);
-    }
-}
-}// namespace detail
-
-template<typename... Args>
-void prints(horizon::dsl::string f, Args &&...args) {
-    auto all_tuple = std::tuple_cat(detail::to_tuple(args)...);
-    auto func = [&]<typename... A, size_t... i>(std::tuple<A...> &&tp, std::index_sequence<i...>) {
-        print(f, std::get<i>(OC_FORWARD(tp))...);
-    };
-    func(horizon::dsl::move(all_tuple), std::make_index_sequence<std::tuple_size_v<decltype(all_tuple)>>());
-}
-
-namespace detail {
 template<typename Count>
 requires horizon::dsl::is_all_integral_expr_v<Count>
 auto range(Count &&count) noexcept {

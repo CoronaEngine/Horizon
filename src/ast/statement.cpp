@@ -76,12 +76,4 @@ uint64_t LoopStmt::compute_hash() const noexcept {
     return body_.hash();
 }
 
-uint64_t PrintStmt::compute_hash() const noexcept {
-    uint64_t ret = hash64(fmt_);
-    for (const Expression *expr : args_) {
-        ret = hash64(ret, expr->hash());
-    }
-    return ret;
-}
-
 }// namespace horizon::ast

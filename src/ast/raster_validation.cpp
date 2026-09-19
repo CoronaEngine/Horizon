@@ -93,13 +93,6 @@ public:
         expression(stmt->lhs());
         expression(stmt->rhs());
     }
-    void visit(const PrintStmt *stmt) override
-    {
-        for (auto *arg : stmt->args())
-        {
-            expression(arg);
-        }
-    }
     void visit(const BreakStmt *) override {}
     void visit(const ContinueStmt *) override {}
     void visit(const CommentStmt *) override {}

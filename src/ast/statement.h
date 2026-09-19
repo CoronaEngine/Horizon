@@ -23,7 +23,6 @@ class SwitchCaseStmt;
 class SwitchDefaultStmt;
 class LoopStmt;
 class ForStmt;
-class PrintStmt;
 class DiscardStmt;
 
 class Expression;
@@ -44,7 +43,6 @@ struct StmtVisitor {
     virtual void visit(const AssignStmt *) = 0;
     virtual void visit(const ForStmt *) = 0;
     virtual void visit(const CommentStmt *) = 0;
-    virtual void visit(const PrintStmt *) = 0;
     virtual void visit(const DiscardStmt *) = 0;
 };
 
@@ -68,7 +66,6 @@ public:
         Assign,
         Comment,
         For,
-        Print,
         Discard
     };
 
@@ -302,23 +299,6 @@ public:
     OC_MAKE_CHECK_CONTEXT(Statement, body_)
     [[nodiscard]] auto body() const noexcept { return &body_; }
     [[nodiscard]] auto body() noexcept { return &body_; }
-    OC_MAKE_STATEMENT_COMMON
-};
-
-class OC_AST_API PrintStmt : public Statement {
-private:
-    horizon::ast::string fmt_;
-    horizon::ast::vector<const Expression *> args_;
-
-private:
-    [[nodiscard]] uint64_t compute_hash() const noexcept override;
-
-public:
-    explicit PrintStmt(string fmt, const vector<const Expression *> &args)
-        : Statement(Tag::Print), fmt_(fmt), args_(args) {}
-    OC_MAKE_CHECK_CONTEXT(Statement, args_)
-    [[nodiscard]] horizon::ast::string fmt() const noexcept { return fmt_; }
-    [[nodiscard]] span<const Expression *const> args() const noexcept { return args_; }
     OC_MAKE_STATEMENT_COMMON
 };
 

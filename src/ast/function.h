@@ -354,7 +354,6 @@ public:
     [[nodiscard]] ForStmt *for_(const Expression *init, const Expression *cond, const Expression *step) noexcept;
     void continue_() noexcept;
     void comment(const horizon::ast::string &string) noexcept;
-    void print(string fmt, const vector<const Expression *> &args) noexcept;
     [[nodiscard]] const ScopeStmt *body() const noexcept;
     [[nodiscard]] ScopeStmt *body() noexcept;
     [[nodiscard]] horizon::ast::span<const Variable> arguments() const noexcept;
