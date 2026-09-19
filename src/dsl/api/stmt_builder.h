@@ -45,22 +45,22 @@ template<typename T>
 template<typename T>
 [[nodiscard]] inline Var<expr_value_t<T>> eval(const Expression *expr) noexcept {
     using RawType = expr_value_t<T>;
-    return Var<RawType>(Expr<RawType>(expr));
+    return Var<RawType>(detail::Expr<RawType>(expr));
 }
 
 template<typename T>
-[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(T &&x) noexcept {
+[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(T &&x) noexcept {
     if constexpr (is_expr_v<T>) {
         return make_expr<T>(x.expression());
     } else {
-        return Expr<expr_value_t<T>>(std::forward<T>(x));
+        return detail::Expr<expr_value_t<T>>(std::forward<T>(x));
     }
 }
 
 template<typename T>
-[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept {
+[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept {
     using RawType = expr_value_t<T>;
-    return Expr<RawType>(expr);
+    return detail::Expr<RawType>(expr);
 }
 
 template<typename T, typename Arg>

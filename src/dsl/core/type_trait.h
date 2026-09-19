@@ -20,9 +20,6 @@ template<typename T>
 struct Var;
 
 template<typename T>
-struct Expr;
-
-template<typename T>
 class DynamicArray;
 
 template<typename T>
@@ -31,6 +28,9 @@ class Buffer;
 class ByteBuffer;
 
 namespace detail {
+
+template<typename T>
+struct Expr;
 
 template<typename T>
 struct Ref;

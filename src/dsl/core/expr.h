@@ -25,14 +25,13 @@ template<typename T>
     }
 }
 
-}// namespace detail
-
+// Internal typed AST expression wrapper; does not materialize a local variable.
 template<typename T>
-struct Expr : public detail::Ref<T> {
+struct Expr : public Ref<T> {
 public:
     using org_type = T;
     explicit Expr(const Expression *expression) noexcept
-        : detail::Ref<T>(expression) {}
+        : Ref<T>(expression) {}
     Expr() = default;
     template<typename Arg>
     requires concepts::non_pointer<std::remove_cvref_t<Arg>> && concepts::different<Expr<T>, std::remove_cvref_t<Arg>>
@@ -51,5 +50,7 @@ Expr(const Var<T> &) -> Expr<T>;
 
 template<typename T>
 Expr(const Buffer<T> &) -> Expr<Buffer<T>>;
+
+}// namespace detail
 
 }// namespace horizon::dsl

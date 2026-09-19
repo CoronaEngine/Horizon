@@ -39,10 +39,10 @@ template<typename T>
 [[nodiscard]] inline Var<expr_value_t<T>> eval(const Expression *expr) noexcept;// implement in stmt_builder.h
 
 template<typename T>
-[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(T &&x) noexcept;// implement in stmt_builder.h
+[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(T &&x) noexcept;// implement in stmt_builder.h
 
 template<typename T>
-[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept;// implement in stmt_builder.h
+[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept;// implement in stmt_builder.h
 
 class TriangleHit;
 class Ray;
