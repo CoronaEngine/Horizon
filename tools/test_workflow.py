@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import multiprocessing
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,11 +27,186 @@ from workflow import (
 from dev import conan_options, target_family_for_target, target_family_for_targets
 
 
+def _concurrent_install_worker(repo_root, cache, family, hold_stage, entered, release, ready, results):
+    """Exercise the real install transaction with a deliberately non-concurrent cache."""
+    active = cache / "active-export"
+    owns_marker = False
+
+    def hold(stage):
+        if stage == hold_stage:
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError("Timed out waiting for the test to release the install")
+
+    def command(args, **kwargs):
+        nonlocal owns_marker
+        if tuple(args[:3]) == ("conan", "config", "home"):
+            return subprocess.CompletedProcess(args, 0, stdout=str(cache))
+        if tuple(args[:2]) == ("conan", "export"):
+            active.mkdir()  # A second writer must not enter until the whole install finishes.
+            owns_marker = True
+            hold("export")
+        elif tuple(args[:2]) == ("conan", "install"):
+            hold("install")
+            if hold_stage == "failure":
+                raise RuntimeError("Simulated Conan failure")
+        return subprocess.CompletedProcess(args, 0)
+
+    def write_environment(*args):
+        nonlocal owns_marker
+        hold("environment")
+        active.rmdir()
+        owns_marker = False
+
+    try:
+        with (
+            patch.object(workflow_module, "run_command", side_effect=command),
+            patch.object(workflow_module, "write_cmake_build_environment", side_effect=write_environment),
+        ):
+            ready.set()
+            workflow_module.conan_install(
+                repo_root, "Debug", target_family=family, options=(),
+                recipes=("recipe",), recipe_toggle_env="HORIZON_TEST_RECIPES",
+            )
+        results.put(None)
+    except Exception as error:
+        results.put(str(error))
+    finally:
+        if owns_marker:
+            active.rmdir()
+
+
 class WorkflowTests(unittest.TestCase):
+    def test_build_tool_uses_configured_environment_and_preserves_arguments(self) -> None:
+        cmake = shutil.which("cmake")
+        if not cmake:
+            self.skipTest("CMake is required for the build launcher regression")
+        launcher = Path("cmake/horizon_run_build_tool.cmake").resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = root / "build environment.cmake"
+            environment.write_text('set(ENV{LIB} [[configured;libraries]])\n', encoding="utf-8")
+            probe = root / "probe.py"
+            probe.write_text(
+                "import os, sys\n"
+                "assert os.environ['LIB'] == 'configured;libraries'\n"
+                "assert sys.argv[1:] == ['space in argument', 'semi;colon', 'quote\\\"value', 'trailing\\\\', 'close]=]bracket']\n"
+                "print('configured environment reached build tool')\n", encoding="utf-8")
+            result = subprocess.run(
+                [cmake, f"-DHORIZON_BUILD_ENVIRONMENT={environment}", "-P", str(launcher),
+                 "--", sys.executable, str(probe), "space in argument", "semi;colon", 'quote"value',
+                 "trailing\\", "close]=]bracket"],
+                env={**os.environ, "LIB": "stale-ide-libraries"}, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(b"configured environment reached build tool", result.stdout + result.stderr)
+
+    @unittest.skipUnless(sys.platform == "win32", "MSVC output encoding is Windows-specific")
+    def test_build_tool_normalizes_includes_without_hiding_compiler_failure(self) -> None:
+        cmake = shutil.which("cmake")
+        if not cmake:
+            self.skipTest("CMake is required for the build launcher regression")
+        launcher = Path("cmake/horizon_run_build_tool.cmake").resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = root / "environment.cmake"
+            environment.write_text(
+                'set(HORIZON_MSVC_SHOWINCLUDES_PREFIX [[注意: 包含文件:  ]])\n', encoding="utf-8")
+            probe = root / "compiler.py"
+            probe.write_text(
+                "import ctypes, sys\n"
+                "cp = ctypes.windll.kernel32.GetConsoleOutputCP() or ctypes.windll.kernel32.GetACP()\n"
+                "sys.stdout.buffer.write('注意: 包含文件:   D:/project/header.h\\n'.encode(f'cp{cp}'))\n"
+                "print('error C2146: intentional failure', file=sys.stderr)\n"
+                "sys.exit(2)\n", encoding="utf-8")
+            for flags in (0, subprocess.CREATE_NO_WINDOW):
+                with self.subTest(no_console=bool(flags)):
+                    result = subprocess.run(
+                        [cmake, f"-DHORIZON_BUILD_ENVIRONMENT={environment}", "-P", str(launcher),
+                         "--", sys.executable, str(probe)], capture_output=True, creationflags=flags,
+                    )
+                    output = result.stdout + result.stderr
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(b"Note: including file:  D:/project/header.h", output)
+                    self.assertIn(b"error C2146: intentional failure", output)
+
+    def test_concurrent_installs_serialize_the_complete_cache_transaction(self) -> None:
+        context = multiprocessing.get_context("spawn")
+        for stage in ("export", "install", "environment"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                cache = root / "cache"
+                cache.mkdir()
+                processes = []
+                results = context.Queue()
+                release = context.Event()
+                entered = context.Event()
+                try:
+                    for index, family in enumerate(("examples", "core")):
+                        repo = root / f"repo-{index}"
+                        profile = repo / "conan/profiles/windows-msvc-debug"
+                        profile.parent.mkdir(parents=True)
+                        profile.touch()
+                        (repo / "recipe").mkdir()
+                        (repo / "recipe/conanfile.py").touch()
+                        ready = context.Event()
+                        process = context.Process(
+                            target=_concurrent_install_worker,
+                            args=(repo, cache, family, stage if index == 0 else "", entered,
+                                  release, ready, results),
+                        )
+                        processes.append(process)
+                        process.start()
+                        self.assertTrue(ready.wait(10), "Install worker did not start")
+                        if index == 0:
+                            self.assertTrue(entered.wait(10), "First install did not reach the requested stage")
+                    # Give the second process a chance to collide while the first owns the cache.
+                    processes[1].join(0.5)
+                finally:
+                    release.set()
+                    for process in processes:
+                        process.join(10)
+                        if process.is_alive():
+                            process.terminate()
+                            process.join()
+                self.assertEqual([process.exitcode for process in processes], [0, 0])
+                self.assertEqual([results.get(timeout=2) for _ in processes], [None, None])
+                results.close()
+
+    def test_install_failure_releases_the_cache_for_another_process(self) -> None:
+        context = multiprocessing.get_context("spawn")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            profile = root / "conan/profiles/windows-msvc-debug"
+            profile.parent.mkdir(parents=True)
+            profile.touch()
+            (root / "recipe").mkdir()
+            (root / "recipe/conanfile.py").touch()
+            results = context.Queue()
+            for stage, expected in (("failure", "Simulated Conan failure"), ("", None)):
+                process = context.Process(
+                    target=_concurrent_install_worker,
+                    args=(root, cache, "core", stage, context.Event(), context.Event(),
+                          context.Event(), results),
+                )
+                process.start()
+                process.join(10)
+                if process.is_alive():
+                    process.terminate()
+                    process.join()
+                self.assertEqual(process.exitcode, 0)
+                self.assertEqual(results.get(timeout=2), expected)
+            results.close()
+
     def test_posix_conan_install_uses_multi_config_layout(self) -> None:
         with (
+            tempfile.TemporaryDirectory() as cache,
             patch.object(workflow_module.platform, "system", return_value="Linux"),
-            patch.object(workflow_module, "run_command") as run_command,
+            patch.object(workflow_module, "run_command", return_value=subprocess.CompletedProcess(
+                ("conan", "config", "home"), 0, stdout=cache,
+            )) as run_command,
             patch.object(workflow_module, "write_cmake_build_environment"),
         ):
             workflow_module.conan_install(

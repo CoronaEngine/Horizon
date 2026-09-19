@@ -135,6 +135,11 @@ AST 当前包含：
 - `Function`：节点所有者、构建上下文和函数级状态容器。
 - Expression/Statement Visitor。
 - Function Corrector 和 Layout Resolver。
+- Vertex/Fragment 入口、ShaderInterface 逻辑布局与 raster 调用链/阶段/权限校验。
+
+VS/FS 复用同一套 Function、Expression、Statement，使用 `StageInput` 区分只读阶段参数，
+builtin 与普通 location 分开记录。接口布局在阶段构造结束时生成，组合仅作只读校验。
+当前验证覆盖 host AST，尚未接入 shader 编译、pipeline 或 GPU 绘制。
 
 ### 6.1 所有权与 Context
 
@@ -165,6 +170,8 @@ Function
 - [`src/ast/statement.h`](../../src/ast/statement.h)
 - [`src/ast/function.h`](../../src/ast/function.h)
 - [`src/ast/variable.h`](../../src/ast/variable.h)
+- [`src/ast/shader_interface.h`](../../src/ast/shader_interface.h)
+- [`src/ast/raster_validation.h`](../../src/ast/raster_validation.h)
 
 ## 7. DSL
 
@@ -172,10 +179,11 @@ DSL 是用户代码与 AST 之间的构造层。它把 C++ 类型、运算符和
 
 DSL 主要包含：
 
-- `Ref`、`Expr`、`Var` 及其类型 traits。
+- 公开的 `Var` 及其类型 traits；`Ref` / `Expr` 位于 `detail`，供内部构造使用。
 - 一元、二元及内建函数操作。
 - If、Switch、Loop、For、Return、Print、Comment 等语句构造器。
 - Callable、Kernel 和 Lambda 包装。
+- VertexShader、FragmentShader、RasterShader 及公开的光栅化 builtin；值接口使用 `Var` 或其别名。
 - Dynamic Array、SOA、结构体映射和可编码数据。
 - RTX 相关的纯 shader 侧类型与表达式。
 
@@ -198,7 +206,7 @@ sequenceDiagram
     D->>F: 请求创建 Expression / Statement
     F->>N: 创建节点并设置 Context
     F-->>D: 返回非拥有节点引用
-    D-->>U: 返回 Expr / Var / Builder 包装
+    D-->>U: 返回 Var / Builder 包装
 ```
 
 DSL 不应直接 `new` AST 节点，也不应复制 AST 节点或 Function 状态。所有 AST 创建都应经过 Function 或未来统一的 AST Builder 接口。
@@ -206,6 +214,8 @@ DSL 不应直接 `new` AST 节点，也不应复制 AST 节点或 Function 状�
 关键入口包括：
 
 - [`src/dsl/dsl.h`](../../src/dsl/dsl.h)
+- [`src/dsl/README.md`](../../src/dsl/README.md)：当前 VS/FS 用法、权限与首轮限制。
+- [`src/dsl/api/raster.h`](../../src/dsl/api/raster.h)
 - [`src/dsl/core/expr.h`](../../src/dsl/core/expr.h)
 - [`src/dsl/core/ref.h`](../../src/dsl/core/ref.h)
 - [`src/dsl/core/var.h`](../../src/dsl/core/var.h)

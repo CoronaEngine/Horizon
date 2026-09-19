@@ -13,6 +13,7 @@
 #include "statement.h"
 #include "ast_node.h"
 #include "op.h"
+#include "shader_interface.h"
 
 namespace horizon::ast {
 using namespace horizon::core;
@@ -55,6 +56,8 @@ public:
     enum Tag : uint8_t {
         Kernel,
         Callable,
+        Vertex,
+        Fragment,
     };
 
     struct StructureSet {
@@ -94,6 +97,7 @@ private:
 
     horizon::ast::vector<CapturedResource> captured_resources_;
     horizon::ast::vector<Variable> builtin_vars_;
+    horizon::ast::vector<const RefExpr *> builtin_exprs_;
     horizon::ast::vector<Variable::Data> variable_datas_;
     horizon::ast::vector<ScopeStmt *> scope_stack_;
     /// use for assignment subscript access
@@ -107,6 +111,7 @@ private:
     mutable uint3 block_dim_{make_uint3(0)};
     mutable uint3 grid_dim_{make_uint3(0)};
     StoragePrecisionPolicy storage_policy_{};
+    ShaderInterface shader_interface_;
 
     friend class FunctionCorrector;
     friend class Variable;
@@ -128,6 +133,8 @@ private:
     }
 
     void correct() noexcept;
+    [[nodiscard]] static shared_ptr<Function> begin_raster(Tag tag, const Type *return_type);
+    void finalize_raster();
     /// used to capture variable from invoker start
     [[nodiscard]] const RefExpr *mapping_captured_argument(const Expression *outer_expr, bool *contain) noexcept;
     [[nodiscard]] const RefExpr *mapping_local_variable(const Expression *invoked_func_expr, bool *contain) noexcept;
@@ -253,9 +260,23 @@ public:
     [[nodiscard]] const ScopeStmt *current_scope() const noexcept;
     [[nodiscard]] ScopeStmt *current_scope() noexcept;
     template<typename Func>
-    decltype(auto) with(ScopeStmt *scope, Func &&func) noexcept {
+    decltype(auto) with(ScopeStmt *scope, Func &&func) noexcept(std::is_nothrow_invocable_v<Func>) {
         ScopeGuard guard(scope_stack_, scope);
         return func();
+    }
+    template<typename Func>
+    static shared_ptr<Function> define_raster(Tag tag, const Type *return_type, Func &&func) {
+        auto function = begin_raster(tag, return_type);
+        {
+            push(function);
+            struct FunctionGuard {
+                shared_ptr<Function> function;
+                ~FunctionGuard() { Function::pop(function); }
+            } guard{function};
+            function->with(function->body(), std::forward<Func>(func));
+        }
+        function->finalize_raster();
+        return function;
     }
     template<typename Func>
     static shared_ptr<Function> define_kernel(Func &&func) noexcept {
@@ -297,6 +318,13 @@ public:
     [[nodiscard]] const RefExpr *dispatch_idx() noexcept;
     [[nodiscard]] const RefExpr *dispatch_id() noexcept;
     [[nodiscard]] const RefExpr *dispatch_dim() noexcept;
+    [[nodiscard]] const RefExpr *vertex_position() noexcept;
+    [[nodiscard]] const RefExpr *vertex_index() noexcept;
+    [[nodiscard]] const RefExpr *instance_index() noexcept;
+    [[nodiscard]] const RefExpr *draw_index() noexcept;
+    [[nodiscard]] const RefExpr *fragment_coord() noexcept;
+    [[nodiscard]] const RefExpr *front_facing() noexcept;
+    void discard();
     [[nodiscard]] const RefExpr *argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *reference_argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *local(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
@@ -335,6 +363,11 @@ public:
     [[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
     [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::Callable; }
     [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::Kernel; }
+    [[nodiscard]] constexpr bool is_vertex() const noexcept { return tag_ == Tag::Vertex; }
+    [[nodiscard]] constexpr bool is_fragment() const noexcept { return tag_ == Tag::Fragment; }
+    [[nodiscard]] constexpr bool is_raster() const noexcept { return is_vertex() || is_fragment(); }
+    [[nodiscard]] constexpr bool is_entry_point() const noexcept { return is_kernel() || is_raster(); }
+    [[nodiscard]] const ShaderInterface &shader_interface() const noexcept { return shader_interface_; }
     [[nodiscard]] constexpr bool is_raytracing_kernel() const noexcept { return is_raytracing() && is_kernel(); }
     [[nodiscard]] constexpr bool is_general_kernel() const noexcept { return !is_raytracing() && is_kernel(); }
     [[nodiscard]] constexpr bool is_raytracing() const noexcept { return raytracing_; }

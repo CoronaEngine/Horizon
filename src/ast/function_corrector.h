@@ -38,6 +38,7 @@ private:
     void visit(const BreakStmt *stmt) override {}
     void visit(const CommentStmt *stmt) override {}
     void visit(const ContinueStmt *stmt) override {}
+    void visit(const DiscardStmt *stmt) override {}
     void visit(const ExprStmt *stmt) override;
     void visit(const ForStmt *stmt) override;
     void visit(const IfStmt *stmt) override;

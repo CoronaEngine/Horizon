@@ -7,6 +7,7 @@
 #include "core/util/util.h"
 #include "function_corrector.h"
 #include "symbol_name.h"
+#include "raster_validation.h"
 
 namespace horizon::ast {
 using namespace horizon::core;
@@ -48,7 +49,39 @@ horizon::ast::list<CallExpr::Template> Function::resolve_ast_templates(horizon::
 
 void Function::correct() noexcept {
     TIMER(FunctionCorrect)
+    if (is_kernel()) {
+        auto diagnostics = detail::validate_kernel_raster_usage(*this);
+        if (!diagnostics.empty()) {
+            OC_ERROR("InvalidBuiltinStage: {}", diagnostics.front().message);
+        }
+    }
     FunctionCorrector().apply(this);
+}
+
+shared_ptr<Function> Function::begin_raster(Tag tag, const Type *return_type) {
+    if (tag != Tag::Vertex && tag != Tag::Fragment) {
+        throw RasterValidationError({{RasterDiagnosticCode::InvalidStage,
+                                      "Raster entry must be vertex or fragment"}});
+    }
+    auto function = horizon::ast::make_shared<Function>(tag);
+    function->ret_ = function->resolve_ast_type(return_type);
+    return function;
+}
+
+void Function::finalize_raster() {
+    auto graph_diagnostics = detail::validate_raster_call_graph(*this);
+    if (!graph_diagnostics.empty()) {
+        throw RasterValidationError(std::move(graph_diagnostics));
+    }
+    correct();
+    vector<RasterDiagnostic> diagnostics;
+    shader_interface_ = detail::build_shader_interface(*this, diagnostics);
+    auto validation = validate_raster_function(*this);
+    diagnostics.insert(diagnostics.end(), validation.begin(), validation.end());
+    if (!diagnostics.empty()) {
+        throw RasterValidationError(std::move(diagnostics));
+    }
+    detail::reset_raster_hashes(*this);
 }
 
 void Function::mark_variable_usage(horizon::ast::uint uid, horizon::ast::Usage usage) noexcept {
@@ -263,7 +296,7 @@ const Variable::Data &Function::variable_data(horizon::ast::uint uid) const noex
 }
 
 void Function::return_(const Expression *expression) noexcept {
-    if (expression) {
+    if (expression && !is_raster()) {
         ret_ = resolve_ast_type(expression->type());
     }
     create_statement<ReturnStmt>(expression);
@@ -290,17 +323,14 @@ ScopeStmt *Function::body() noexcept {
 }
 
 const RefExpr *Function::_builtin(Variable::Tag tag, const Type *type) noexcept {
-    Variable variable = create_variable(type, tag);
-    if (auto iter = std::find_if(builtin_vars_.begin(),
-                                 builtin_vars_.end(),
-                                 [&](auto v) {
-                                     return v.tag() == tag;
-                                 });
-        iter != builtin_vars_.end()) {
-        return _ref(*iter);
+    for (size_t i = 0; i < builtin_vars_.size(); ++i) {
+        if (builtin_vars_[i].tag() == tag) { return builtin_exprs_[i]; }
     }
+    Variable variable = create_variable(type, tag);
     builtin_vars_.push_back(variable);
-    return _ref(variable);
+    const auto *expression = _ref(variable);
+    builtin_exprs_.push_back(expression);
+    return expression;
 }
 
 const Function *Function::add_used_function(SP<const Function> func) noexcept {
@@ -328,11 +358,24 @@ const RefExpr *Function::thread_id() noexcept {
     return _builtin(Variable::Tag::ThreadId, Type::of<uint>());
 }
 
+const RefExpr *Function::vertex_position() noexcept { return _builtin(Variable::Tag::VertexPosition, Type::of<float4>()); }
+const RefExpr *Function::vertex_index() noexcept { return _builtin(Variable::Tag::VertexIndex, Type::of<uint>()); }
+const RefExpr *Function::instance_index() noexcept { return _builtin(Variable::Tag::InstanceIndex, Type::of<uint>()); }
+const RefExpr *Function::draw_index() noexcept { return _builtin(Variable::Tag::DrawIndex, Type::of<uint>()); }
+const RefExpr *Function::fragment_coord() noexcept { return _builtin(Variable::Tag::FragmentCoord, Type::of<float4>()); }
+const RefExpr *Function::front_facing() noexcept { return _builtin(Variable::Tag::FrontFacing, Type::of<bool>()); }
+void Function::discard() { create_statement<DiscardStmt>(); }
+
 const RefExpr *Function::dispatch_idx() noexcept {
     return _builtin(Variable::Tag::DispatchIdx, Type::of<uint3>());
 }
 
 const RefExpr *Function::argument(const Type *type) noexcept {
+    if (is_raster()) {
+        auto variable = create_variable(type, Variable::Tag::StageInput);
+        arguments_.push_back(variable);
+        return _ref(variable);
+    }
     Variable::Tag tag;
     switch (type->tag()) {
         case Type::Tag::Buffer:
@@ -626,6 +669,16 @@ uint64_t Function::compute_hash() const noexcept {
         ret = hash64(ret, v.hash());
     }
     ret = hash64(ret, body_.hash());
+    if (is_raster()) {
+        for (const auto *slots : {&shader_interface_.inputs, &shader_interface_.outputs}) {
+            ret = hash64(ret, slots->size());
+            for (const auto &slot : *slots) {
+                ret = hash64(ret, slot.type->hash(), slot.root_index, slot.location, slot.interpolation,
+                             slot.member_path.size());
+                for (auto member : slot.member_path) { ret = hash64(ret, member); }
+            }
+        }
+    }
     return ret;
 }
 

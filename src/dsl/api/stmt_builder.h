@@ -112,7 +112,7 @@ private:
 public:
     explicit ScopeStmtBuilder(const string &str) : str_(str) {}
     template<typename Body>
-    void operator+(Body &&body) noexcept {
+    void operator+(Body &&body) {
         comment("start " + str_);
         auto scope = Function::current()->scope();
         Function::current()->with(scope, OC_FORWARD(body));
@@ -143,42 +143,42 @@ public:
     }
 
     template<typename TrueBranch>
-    IfStmtBuilder &operator/(TrueBranch &&true_branch) noexcept {
+    IfStmtBuilder &operator/(TrueBranch &&true_branch) {
         Function::current()->with(if_->true_branch(), std::forward<TrueBranch>(true_branch));
         return *this;
     }
 
     template<typename Func>
-    IfStmtBuilder operator*(Func &&func) noexcept {
+    IfStmtBuilder operator*(Func &&func) {
         return Function::current()->with(if_->false_branch(), std::forward<Func>(func));
     }
 
     template<typename FalseBranch>
-    void operator%(FalseBranch &&false_branch) noexcept {
+    void operator%(FalseBranch &&false_branch) {
         Function::current()->with(if_->false_branch(), std::forward<FalseBranch>(false_branch));
     }
 
     template<typename Condition, typename TrueBranch>
-    IfStmtBuilder elif_(Condition &&condition, TrueBranch &&true_branch) noexcept {
+    IfStmtBuilder elif_(Condition &&condition, TrueBranch &&true_branch) {
         return (*this) * [&] {
             return detail::IfStmtBuilder::create(std::forward<Condition>(condition));
         } / std::forward<TrueBranch>(true_branch);
     }
 
     template<typename Condition, typename TrueBranch>
-    IfStmtBuilder elif_with_source_location(const string &str, Condition &&condition, TrueBranch &&true_branch) noexcept {
+    IfStmtBuilder elif_with_source_location(const string &str, Condition &&condition, TrueBranch &&true_branch) {
         return (*this) * [&] {
             return detail::IfStmtBuilder::create_with_source_location(str, std::forward<Condition>(condition));
         } / std::forward<TrueBranch>(true_branch);
     }
 
     template<typename FalseBranch>
-    void else_(FalseBranch &&false_branch) noexcept {
+    void else_(FalseBranch &&false_branch) {
         (*this) % std::forward<FalseBranch>(false_branch);
     }
 
     template<typename FalseBranch>
-    void else_with_source_location(const string &str, FalseBranch &&false_branch) noexcept {
+    void else_with_source_location(const string &str, FalseBranch &&false_branch) {
         comment(str);
         else_(OC_FORWARD(false_branch));
     }
@@ -187,7 +187,7 @@ public:
 
 template<typename Condition, typename TrueBranch>
 detail::IfStmtBuilder if_(Condition &&condition,
-                          TrueBranch &&true_branch) noexcept {
+                          TrueBranch &&true_branch) {
     return detail::IfStmtBuilder::create(std::forward<Condition>(condition)) / std::forward<TrueBranch>(true_branch);
 }
 
@@ -216,7 +216,7 @@ public:
     }
 
     template<typename Body>
-    void operator*(Body &&body) noexcept {
+    void operator*(Body &&body) {
         Function::current()->with(case_stmt_->body(), [&] {
             body(Break{});
         });
@@ -236,7 +236,7 @@ public:
 
     template<typename CaseExpr, typename Body>
     requires concepts::integral<CaseExpr>
-    void operator()(CaseExpr &&t, Body &&body) noexcept {
+    void operator()(CaseExpr &&t, Body &&body) {
         detail::CaseStmtBuilder::create(std::forward<CaseExpr>(t)) * std::forward<Body>(body);
     }
 };
@@ -256,7 +256,7 @@ public:
     }
 
     template<typename Body>
-    void operator*(Body &&body) noexcept {
+    void operator*(Body &&body) {
         Function::current()->with(default_stmt_->body(), [&] {
             body(Break{});
         });
@@ -274,7 +274,7 @@ public:
 
     template<typename Body>
     requires std::is_invocable_v<Body, Break>
-    void operator()(Body &&body) noexcept {
+    void operator()(Body &&body) {
         detail::DefaultStmtBuilder() * std::forward<Body>(body);
     }
 };
@@ -304,7 +304,7 @@ public:
     }
 
     template<typename CaseExpr, typename Body>
-    SwitchStmtBuilder &case_(CaseExpr &&case_expr, Body &&body) noexcept {
+    SwitchStmtBuilder &case_(CaseExpr &&case_expr, Body &&body) {
         Function::current()->with(switch_stmt_->body(), [&] {
             CaseStmtBuilder::create(std::forward<CaseExpr>(case_expr)) * std::forward<Body>(body);
         });
@@ -312,14 +312,14 @@ public:
     }
 
     template<typename Body>
-    void default_(Body &&body) noexcept {
+    void default_(Body &&body) {
         Function::current()->with(switch_stmt_->body(), [&] {
             DefaultStmtBuilder() * std::forward<Body>(body);
         });
     }
 
     template<typename Body>
-    SwitchStmtBuilder &operator*(Body &&func) && noexcept {
+    SwitchStmtBuilder &operator*(Body &&func) && {
         Function::current()->with(switch_stmt_->body(), [&] {
             func(Case{}, Default{});
         });
@@ -330,7 +330,7 @@ public:
 }// namespace detail
 
 template<typename T, typename Body>
-void switch_(T &&t, Body &&body) noexcept {
+void switch_(T &&t, Body &&body) {
     detail::SwitchStmtBuilder::create(std::forward<T>(t)) * std::forward<Body>(body);
 }
 
@@ -340,12 +340,12 @@ decltype(auto) switch_(T &&t) noexcept {
 }
 
 template<typename T, typename Body>
-void case_(T &&t, Body &&body) noexcept {
+void case_(T &&t, Body &&body) {
     detail::CaseStmtBuilder::create(std::forward<T>(t)) * std::forward<Body>(body);
 }
 
 template<typename Body>
-void default_(Body &&body) noexcept {
+void default_(Body &&body) {
     detail::DefaultStmtBuilder() * std::forward<Body>(body);
 }
 
@@ -383,13 +383,13 @@ public:
     }
 
     template<typename Func>
-    LoopStmtBuilder &operator/(Func &&func) noexcept {
+    LoopStmtBuilder &operator/(Func &&func) {
         Function::current()->with(loop_->body(), std::forward<Func>(func));
         return *this;
     }
 
     template<typename Body>
-    void operator*(Body &&body) noexcept {
+    void operator*(Body &&body) {
         Function::current()->with(loop_->body(), [&] {
             body(Continue{}, Break());
         });
@@ -398,13 +398,13 @@ public:
 }// namespace detail
 
 template<typename Body>
-void loop(Body &&body) noexcept {
+void loop(Body &&body) {
     detail::LoopStmtBuilder::create() * std::forward<Body>(body);
 }
 
 template<typename Condition, typename Body>
-void while_(Condition &&cond, Body &&body) noexcept {
-    detail::LoopStmtBuilder::create() * [&]() noexcept {
+void while_(Condition &&cond, Body &&body) {
+    detail::LoopStmtBuilder::create() / [&]() {
         if constexpr (std::is_invocable_v<Condition>) {
             if_(!cond(), [&] {
                 syntax::break_();
@@ -452,8 +452,8 @@ public:
     }
 
     template<typename Body>
-    void operator/(Body &&body) noexcept {
-        Function::current()->with(for_stmt_->body(), [&]() noexcept {
+    void operator/(Body &&body) {
+        Function::current()->with(for_stmt_->body(), [&]() {
             body(var_, Continue{}, Break());
         });
     }
@@ -535,13 +535,13 @@ auto range_with_source_location(const string &str, Args &&...args) noexcept {
 
 template<typename Count, typename Body>
 requires concepts::integral<expr_value_t<Count>>
-void for_range(Count &&count, Body &&body) noexcept {
+void for_range(Count &&count, Body &&body) {
     detail::range(std::forward<Count>(count)) / std::forward<Body>(body);
 }
 
 template<typename Begin, typename End, typename Body>
 requires horizon::dsl::is_all_integral_expr_v<Begin, End>
-void for_range(Begin &&begin, End &&end, Body &&body) noexcept {
+void for_range(Begin &&begin, End &&end, Body &&body) {
     detail::range(std::forward<Begin>(begin),
                   std::forward<End>(end)) /
         std::forward<Body>(body);
@@ -549,7 +549,7 @@ void for_range(Begin &&begin, End &&end, Body &&body) noexcept {
 
 template<typename Begin, typename End, typename Step, typename Body>
 requires horizon::dsl::is_all_integral_expr_v<Begin, End, Step>
-void for_range(Begin &&begin, End &&end, Step &&step, Body &&body) noexcept {
+void for_range(Begin &&begin, End &&end, Step &&step, Body &&body) {
     detail::range(std::forward<Begin>(begin),
                   std::forward<End>(end),
                   std::forward<Step>(step)) /

@@ -45,6 +45,14 @@ template<typename T>
         case Tag::Reference:
         case Tag::Local:
             return "v";
+        case Tag::StageInput:
+            return "stage_in";
+        case Tag::VertexPosition: return "vertex_position";
+        case Tag::VertexIndex: return "vertex_index";
+        case Tag::InstanceIndex: return "instance_index";
+        case Tag::DrawIndex: return "draw_index";
+        case Tag::FragmentCoord: return "fragment_coord";
+        case Tag::FrontFacing: return "front_facing";
         case Tag::DispatchIdx:
             return "d_idx";
         case Tag::DispatchId:

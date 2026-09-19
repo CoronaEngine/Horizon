@@ -40,7 +40,7 @@ void FunctionCorrector::apply(Function *function, int counter) noexcept {
         traverse(*current_function());
         stage_ = ProcessCapture;
     }
-    if (function->is_kernel()) {
+    if (function->is_entry_point()) {
         bool valid = function->check_context();
         OC_ERROR_IF_NOT(valid, "FunctionCorrector error: invalid function ", function->description().c_str());
     }

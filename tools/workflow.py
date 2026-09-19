@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import platform
@@ -7,8 +8,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
 
 CONFIGURATIONS = ("Debug", "Release", "RelWithDebInfo", "MinSizeRel")
@@ -123,6 +126,51 @@ def export_local_recipes(repo_root: Path, recipes: Iterable[str], *, toggle_env:
         run_command(("conan", "export", recipe_path), cwd=repo_root)
 
 
+@contextmanager
+def conan_cache_lock(repo_root: Path) -> Iterator[None]:
+    """Serialize Horizon dependency preparation across profiles and checkouts sharing Conan home."""
+    result = run_command(("conan", "config", "home"), cwd=repo_root, capture_output=True)
+    home = result.stdout.strip()
+    if not home:
+        raise RuntimeError("Conan did not report its home directory")
+    lock_path = Path(home) / ".horizon-install.lock"
+    if os.name == "nt":
+        import msvcrt
+    else:
+        import fcntl
+
+    # Keep the file: deleting it after unlocking can let waiters lock different files.
+    # The operating system releases the lock when the handle closes, including on errors.
+    with lock_path.open("a+b") as handle:
+        deadline = time.monotonic() + 900
+        waiting = False
+        while True:
+            try:
+                if os.name == "nt":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise
+                if not waiting:
+                    print("[INFO] Waiting for another Horizon process to finish preparing Conan dependencies...", flush=True)
+                    waiting = True
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"Timed out waiting for the Conan cache lock: {lock_path}") from error
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def conan_install(
     repo_root: Path,
     configuration: str,
@@ -133,39 +181,40 @@ def conan_install(
     recipe_toggle_env: str,
     update: bool = False,
 ) -> None:
-    export_local_recipes(repo_root, recipes, toggle_env=recipe_toggle_env)
-    target_family = target_family_slug(target_family)
-    system_name = platform.system()
-    profile = conan_profile(repo_root, configuration, system_name)
-    if system_name == "Windows":
-        if not Path(profile).is_file():
-            raise RuntimeError(f"Conan profile was not found: {profile}")
-    else:
-        run_command(("conan", "profile", "detect", "--force", "--name", profile), cwd=repo_root)
+    with conan_cache_lock(repo_root):
+        export_local_recipes(repo_root, recipes, toggle_env=recipe_toggle_env)
+        target_family = target_family_slug(target_family)
+        system_name = platform.system()
+        profile = conan_profile(repo_root, configuration, system_name)
+        if system_name == "Windows":
+            if not Path(profile).is_file():
+                raise RuntimeError(f"Conan profile was not found: {profile}")
+        else:
+            run_command(("conan", "profile", "detect", "--force", "--name", profile), cwd=repo_root)
 
-    command: list[str | os.PathLike[str]] = [
-        "conan",
-        "install",
-        ".",
-        "-pr:a",
-        profile,
-        "-pr:b",
-        profile,
-        "-c:h",
-        f"user.horizon:target_family={target_family}",
-    ]
-    if system_name != "Windows":
-        command.extend(("-c:a", "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config"))
-        command.extend(("-s:a", f"build_type={configuration}"))
-        command.extend(("-s:b", f"build_type={configuration}"))
-        command.extend(("-s:a", "compiler.cppstd=20"))
-    for option in options:
-        command.extend(("-o", option))
-    command.append("--build=missing")
-    if update:
-        command.append("--update")
-    run_command(command, cwd=repo_root)
-    write_cmake_build_environment(repo_root, configuration, target_family)
+        command: list[str | os.PathLike[str]] = [
+            "conan",
+            "install",
+            ".",
+            "-pr:a",
+            profile,
+            "-pr:b",
+            profile,
+            "-c:h",
+            f"user.horizon:target_family={target_family}",
+        ]
+        if system_name != "Windows":
+            command.extend(("-c:a", "tools.cmake.cmaketoolchain:generator=Ninja Multi-Config"))
+            command.extend(("-s:a", f"build_type={configuration}"))
+            command.extend(("-s:b", f"build_type={configuration}"))
+            command.extend(("-s:a", "compiler.cppstd=20"))
+        for option in options:
+            command.extend(("-o", option))
+        command.append("--build=missing")
+        if update:
+            command.append("--update")
+        run_command(command, cwd=repo_root)
+        write_cmake_build_environment(repo_root, configuration, target_family)
 
 
 def load_conan_build_environment(
@@ -271,7 +320,7 @@ def write_cmake_build_environment(
     environment = load_conan_build_environment(repo_root, configuration, target_family)
     output = generators_dir(repo_root, configuration, target_family) / "dev_build_environment.cmake"
     names = (
-        "PATH", "CC", "CXX", "PKG_CONFIG_PATH",
+        "PATH", "CC", "CXX", "PKG_CONFIG_PATH", "VSLANG",
         "INCLUDE", "LIB", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir",
         "VSINSTALLDIR", "WindowsSdkDir", "WindowsSDKVersion", "UniversalCRTSdkDir", "UCRTVersion",
     )

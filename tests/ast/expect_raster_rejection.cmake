@@ -1,0 +1,11 @@
+execute_process(COMMAND "${PROGRAM}" --kernel-discard
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT 30)
+if("${result}" MATCHES "timeout")
+    message(FATAL_ERROR "Kernel rejection subprocess timed out: ${output}${error}")
+endif()
+if("${result}" STREQUAL "0")
+    message(FATAL_ERROR "Invalid kernel was accepted")
+endif()
+if(NOT "${output}${error}" MATCHES "InvalidBuiltinStage")
+    message(FATAL_ERROR "Expected raster stage diagnostic was not observed: ${result}\n${output}${error}")
+endif()

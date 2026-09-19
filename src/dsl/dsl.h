@@ -13,6 +13,7 @@
 #include "api/syntax.h"
 #include "api/operators.h"
 #include "api/func.h"
+#include "api/raster.h"
 #include "types/soa.h"
 #include "types/struct.h"
 

@@ -35,7 +35,36 @@ function(horizon_dev_bootstrap)
     set(_horizon_build_environment
         "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
 
-    if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE})
+    # IDEs may start without an activated Python environment. Reuse the
+    # project's development venv before falling back to Conda provisioning.
+    if(WIN32)
+        set(_horizon_python "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")
+    else()
+        set(_horizon_python "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
+    endif()
+    set(_horizon_venv_bootstrapped FALSE)
+    if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE} AND EXISTS "${_horizon_python}")
+        get_filename_component(_horizon_python_dir "${_horizon_python}" DIRECTORY)
+        message(STATUS "Running Horizon dependency bootstrap with the project .venv")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E env
+                    --modify "PATH=path_list_prepend:${_horizon_python_dir}"
+                    "${_horizon_python}" tools/dev.py _bootstrap
+                    --configuration "${HORIZON_DEV_CONFIGURATION}"
+                    --target-family "${HORIZON_DEV_TARGET_FAMILY}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE _horizon_bootstrap_result
+            COMMAND_ECHO STDOUT
+        )
+        if(NOT _horizon_bootstrap_result EQUAL 0)
+            message(FATAL_ERROR
+                "Horizon .venv dependency bootstrap failed (exit code ${_horizon_bootstrap_result}). "
+                "Ensure .venv contains Python >=3.11 and Conan >=2.28,<3.")
+        endif()
+        set(_horizon_venv_bootstrapped TRUE)
+    endif()
+
+    if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE} AND NOT _horizon_venv_bootstrapped)
         # Search for conda in multiple locations:
         # - conda.exe in Scripts/ (works in Git Bash)
         # - conda.bat in condabin/ (works in cmd/PowerShell)
@@ -119,6 +148,7 @@ function(horizon_dev_bootstrap)
         message(FATAL_ERROR "Horizon build environment was not generated: ${_horizon_build_environment}")
     endif()
     include("${_horizon_build_environment}")
+    set(HORIZON_DEV_BUILD_ENVIRONMENT "${_horizon_build_environment}" PARENT_SCOPE)
     set(CMAKE_TOOLCHAIN_FILE "${_horizon_toolchain}" CACHE FILEPATH "Conan toolchain" FORCE)
 
     # Conan installs exactly one configuration per build directory, and CMakeDeps

@@ -32,9 +32,22 @@ conda create --yes --name horizon-dev --override-channels --channel conda-forge 
 
 第一次创建环境和配置会下载或编译 Conan 依赖，耗时较长是正常现象。
 
+若仓库根目录已有 `.venv`，CMake 自动配置会优先使用其中的 Python 和 Conan，
+无需先激活环境或安装 Conda。该环境须包含 Python >=3.11 和 Conan >=2.28、<3；
+不存在 `.venv` 时，继续使用上面的 Conda 流程。
+
+CLion 使用 Visual Studio 工具链时，可以直接加载项目的 CMake 配置；依赖准备会识别
+项目 `.venv`。新增源码或修改 CMake 后执行 **Reload CMake Project**，再构建所需 target。
+同时刷新多个配置时，共用 Conan home 的 Horizon 开发脚本会对配方导出、依赖安装和环境
+生成加进程锁；等待中的配置会打印提示，前一个依赖准备流程结束后自动继续。
+Ninja + MSVC 构建会保存本次配置的 Conan 环境，并在每次 C/C++ 编译、链接时加载，
+避免 IDE 缓存的旧版 MSVC 头文件或库路径混入构建。编译输出中的头文件依赖提示会
+统一为固定格式，保证终端与 CLion 使用不同输出编码时仍能正确触发头文件重编译。
+已有构建目录更新到此配置后，先执行 **Reload CMake Project**；编译命令变化会触发重编译。
+
 ### 2. VS Code / CMake Tools 构建
 
-安装 VS Code 的 **CMake Tools** 扩展后，必须手动启用 VS 开发环境：
+安装 VS Code 的 **CMake Tools** 扩展后，建议启用 VS 开发环境，使 IDE 使用正确的工具链：
 
 1. 打开设置，搜索 `CMake: Use VS Developer Environment`，选择 `always`。
 2. 或打开“首选项：打开用户设置(JSON)”，加入：
@@ -43,7 +56,8 @@ conda create --yes --name horizon-dev --override-channels --channel conda-forge 
    "cmake.useVsDeveloperEnvironment": "always"
    ```
 
-这是必做项。CMake Tools 会单独启动构建进程；项目的 Conan/CMake 脚本无法替它补齐 MSVC 和 Windows SDK 环境。没有此设置时，常见现象是 `fatal error C1083`，提示找不到 `stddef.h` 等标准头文件。
+CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ 编译和链接恢复 Conan 环境；
+上面的设置仍能使 IDE 启动的其他开发工具获得一致的 MSVC 和 Windows SDK 环境。
 
 接着打开仓库根目录，按 `Ctrl+Shift+P`：
 

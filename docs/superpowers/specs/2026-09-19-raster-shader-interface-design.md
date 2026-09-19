@@ -1,10 +1,20 @@
 # VS/FS AST 与 DSL 接口设计
 
-> 状态：待实施设计；本文中的新增 API 尚不存在。
+> 状态：2026-09-19 已在当前工作区完成六项实现任务；尚未提交、推送。
+> 当前具备 host AST 构造、布局、校验和阶段组合，未接入 shader 编译或 GPU。
+> 验证：core Debug 的 `horizon-tests` 构建与 CTest 20/20 通过；独立 core Release 构建与
+> AST/DSL/architecture CTest 10/10 通过。新增代码通过 clang-format 21.1.7 检查，`git diff --check` 通过。
+> 实际命令：`.venv/Scripts/python.exe tools/dev.py build horizon-tests --configuration Debug --target-family core`
+> （Release 使用同参数切换配置）；CTest 命令见实施计划。此机器使用现有 `.venv` 的 Conan 2，未使用 Conda。
+> 独立审查的五项发现已加入回归测试：控制流回调异常、循环隐式写入、低层引用输入、构造期 hash 缓存、缺失值返回。
+> 为保证阶段异常传播，最小调整了 `stmt_builder.h` / `syntax.h` 的回调边界；Callable/Kernel 构造器仍保持原合同。
 >
 > 调研基线：`refactor_dsl`，`8d015222a37dc46d8355c0d2ab964758aeb555c0`。
 >
-> 本次交付仅为设计、实施计划及其提交推送；功能代码在另一台机器执行。
+> 接口约定更新：`ff5bfd1fc724a2e9890da752b4d157e8551aa31a` 已将 `Expr<T>` 移入
+> `horizon::dsl::detail`。本文据此调整公开 builtin 类型；此次 VS/FS 实现以该提交为基线。
+>
+> 以下调研和方案保留原始设计脉络；当前接口用法与限制见 [DSL README](../../../src/dsl/README.md)。
 
 配套执行文档：[实施计划](../plans/2026-09-19-raster-shader-interface.md)。
 架构依据：[语言层架构](../../architecture/overview.md)、
@@ -34,6 +44,8 @@
 - 依赖保持 `dsl -> ast -> math -> core`，不新增第三方依赖。
 - AST 只维护一套模型；所有节点由所属 `ast::Function` 创建和持有。
 - 新符号使用 `horizon::ast` / `horizon::dsl`；类型 CamelCase，函数与变量 snake_case。
+- `horizon::dsl::detail::Expr<T>` 仅供内部实现使用；新公开 shader 值接口使用 `Var<T>`
+  及 `Float4`、`Uint`、`Bool` 等别名，不要求用户命名、构造或接收内部表达式类型。
 - 不查阅或修改 `modules/ocarina/`；Helicon 仅作本任务已获授权的只读参考。
 - 不修改 Helicon、RHI、Runtime、Conan 或目标族配置，不把 `Helicon` 链接到 `horizon-dsl`。
 - 所有构建命令从仓库根目录执行，使用独立的 `core` 构建目录。
@@ -61,7 +73,9 @@ varying 返回值与片元颜色输出。所选路线保留 Helicon 的 lambda �
 ## 3. 公开 DSL
 
 新入口：`dsl/api/raster.h`；由 `dsl/dsl.h` 聚合。
-下列代码为实现后的目标用法，并非已验证可编译的当前 API：
+阶段 lambda 的参数、非 void 返回值和 builtin 值沿用公开的 `Var<T>` 体系；也可使用
+相应别名或 `auto`。公开 API 不得通过 `auto` 返回类型间接暴露 `detail::Expr<T>`。
+下列结构体 VS/FS 用法已纳入 `horizon.dsl.raster` 的编译和 host AST 测试：
 
 ```cpp
 #include "dsl/dsl.h"
@@ -204,20 +218,38 @@ vector/pointer 的整个 metadata struct 做原始内存 hash。布局最终确�
 | DSL API | DSL 返回类型 | AST Variable::Tag | 允许入口与权限 |
 | --- | --- | --- | --- |
 | `vertex_position()` | `Var<math::float4>` | VertexPosition | VS，可读写的 builtin 输出 |
-| `vertex_index()` | `Expr<uint>` | VertexIndex | VS，只读 |
-| `instance_index()` | `Expr<uint>` | InstanceIndex | VS，只读 |
-| `draw_index()` | `Expr<uint>` | DrawIndex | VS，只读 |
-| `fragment_coord()` | `Expr<math::float4>` | FragmentCoord | FS，只读 |
-| `front_facing()` | `Expr<bool>` | FrontFacing | FS，只读 |
+| `vertex_index()` | `Var<uint>` | VertexIndex | VS，只读 builtin 输入 |
+| `instance_index()` | `Var<uint>` | InstanceIndex | VS，只读 builtin 输入 |
+| `draw_index()` | `Var<uint>` | DrawIndex | VS，只读 builtin 输入 |
+| `fragment_coord()` | `Var<math::float4>` | FragmentCoord | FS，只读 builtin 输入 |
+| `front_facing()` | `Var<bool>` | FrontFacing | FS，只读 builtin 输入 |
 | `discard()` | void | DiscardStmt | FS |
 
 AST Function 增加对应同名 builtin 工厂，返回 `const RefExpr *`，通过现有 `_builtin()`
 在所属函数内去重。`discard()` 创建无子表达式的 DiscardStmt，补齐 Tag、虚函数 Visitor、
 Context 检查与语义 hash，不能退化成字符串或 ReturnStmt。
 
-position 使用 `Var<float4>{builtin_expr}` 的显式表达式构造器直接引用 builtin；不使用
-`eval()` 生成局部副本。现有 Ref 的表达式构造器为 protected，且没有 Var 的赋值门面，
-因此公开返回 Var 才能沿用示例中的赋值语法。只读输入返回 Expr，其成员别名的权限仍由 AST 校验。
+六个 builtin getter 均使用 `Var<T>{builtin_expr}` 的显式表达式构造器直接引用 builtin，
+不使用 `eval()` 生成局部副本。`Var<math::float4>`、`Var<uint>`、`Var<bool>` 分别可写作
+`Float4`、`Uint`、`Bool`，用户无需使用内部表达式包装类型。
+
+`Var<T>` 提供统一的值操作接口，不保证底层 AST 根变量可写。只读权限由 builtin tag 与
+第 7 节的 AST 校验确定：对只读 builtin 的赋值、`set()`、成员、swizzle 或引用参数间接
+写入均须产生 `ReadOnlyWrite`。position 使用同一公开包装类型，但其 tag 允许写入。
+不以 C++ 包装对象的 const 性代替 AST 权限校验，也不新增另一套公开只读表达式类型。
+
+直接接收 getter 返回的 `Var`，或移动该包装对象，仍引用原 builtin；只有从已有 `Var`
+左值拷贝构造才创建可写 Local。以下是 FS 构造 lambda 内的目标用法：
+
+```cpp
+Float4 coord = fragment_coord(); // 直接引用只读 builtin，不是可写副本
+Float4 local = coord;            // 从左值拷贝，创建 Local 并赋值
+local.x = 0.0f;                  // 合法：修改局部副本
+// coord.x = 0.0f;               // 若启用，阶段构造应报告 ReadOnlyWrite
+```
+
+使用 `auto coord = fragment_coord()` 与上例具有相同的引用语义；不能把从 getter 初始化
+误写成显式值拷贝。该规则沿用当前 `Var` 的直接包装、移动与拷贝构造行为。
 
 无当前 Function 时，新 builtin API 抛 `std::logic_error`。Callable 中记录这些操作时
 暂不要求具体入口阶段；在入口可达调用图上检验。禁止把共享 Callable 永久标成首次调用者
@@ -261,7 +293,8 @@ validate_raster_pair(const Function &vertex, const Function &fragment);
   block 同步，ray tracing 操作保持不在本期 raster 支持范围。
 - 检查 AssignStmt 左值的根变量，包括 MemberExpr、SubscriptExpr、swizzle；StageInput 和
   只读 builtin 不能写。对调用的引用参数逐调用点追踪实际参数及被调用者写入，不能只查直接赋值。
-  `Expr<T>` 的 C++ const 性不是唯一防线。
+  `Var<T>` 的赋值接口是否可调用、包装对象是否 const 均不能代替根变量的 AST 权限检查。
+  从已有输入包装对象拷贝得到的 Local 可写，直接包装或移动得到的别名保持原权限。
 - VS 要有 VertexPosition 输出及至少一次可达 AST 写入；只读取或创建该 builtin 不算写入。
   写入可以位于可达 Callable；阶段语义汇总自调用图，不需要把 Callable 的 builtin 节点复制到入口。
   首轮不做完整 CFG 的所有路径确定赋值证明，后续 compiler 仍需验证这种情况。
@@ -282,7 +315,8 @@ validate_raster_pair(const Function &vertex, const Function &fragment);
 1. 标量/向量/嵌套结构体布局；整数 varying 为 Flat；MRT 与 void 输出。
 2. 签名推导、显式签名、零顶点属性、VS void/FS 无参数、错误签名拒绝。
 3. 不同解析精度产生的实际类型差异；不合法叶子、资源类型、空结构体拒绝。
-4. builtin 去重、Context、输入成员/引用参数间接写入、位置未写入、discard Visitor。
+4. builtin 公开返回类型为对应 `Var<T>`；builtin 去重、Context、输入成员/引用参数间接
+   写入拒绝、直接包装/移动保持权限、左值拷贝后局部可写、位置未写入、discard Visitor。
 5. 同一个 Callable 被多个入口复用时，合法调用保持合法，非法调用仍然拒绝。
 6. 构造失败后的栈恢复、组合对象生命周期、只读接口及最终 hash。
 7. 现有 AST、DSL、纹理 DSL 和模块依赖边界测试。

@@ -24,6 +24,7 @@ class SwitchDefaultStmt;
 class LoopStmt;
 class ForStmt;
 class PrintStmt;
+class DiscardStmt;
 
 class Expression;
 class RefExpr;
@@ -44,6 +45,7 @@ struct StmtVisitor {
     virtual void visit(const ForStmt *) = 0;
     virtual void visit(const CommentStmt *) = 0;
     virtual void visit(const PrintStmt *) = 0;
+    virtual void visit(const DiscardStmt *) = 0;
 };
 
 #define OC_MAKE_STATEMENT_COMMON    \
@@ -67,7 +69,7 @@ public:
         Comment,
         For,
         Print,
-        Warning
+        Discard
     };
 
 private:
@@ -77,7 +79,6 @@ public:
     explicit Statement(Tag tag) noexcept : tag_{tag} {}
     [[nodiscard]] auto tag() const noexcept { return tag_; }
     virtual void accept(StmtVisitor &) const = 0;
-    virtual ~Statement() noexcept = default;
 };
 
 class OC_AST_API ScopeStmt : public Statement {
@@ -124,6 +125,15 @@ private:
 
 public:
     ContinueStmt() noexcept : Statement(Tag::Continue) {}
+    OC_MAKE_STATEMENT_COMMON
+};
+
+class OC_AST_API DiscardStmt : public Statement {
+private:
+    [[nodiscard]] uint64_t compute_hash() const noexcept override { return hash64(Tag::Discard); }
+
+public:
+    DiscardStmt() noexcept : Statement(Tag::Discard) {}
     OC_MAKE_STATEMENT_COMMON
 };
 

@@ -12,6 +12,9 @@ project(
     LANGUAGES C CXX
 )
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_msvc_build_environment.cmake)
+horizon_msvc_build_environment()
+
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(HORIZON_BUILD_ENGINE "Build Helicon and the complete Horizon engine target" ON)
 option(HORIZON_BUILD_TOOLS "Build Horizon tool executables" OFF)

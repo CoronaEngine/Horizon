@@ -53,7 +53,14 @@ public:
         ThreadId,
         DispatchIdx,
         DispatchId,
-        DispatchDim
+        DispatchDim,
+        StageInput,
+        VertexPosition,
+        VertexIndex,
+        InstanceIndex,
+        DrawIndex,
+        FragmentCoord,
+        FrontFacing
     };
 
     struct Data {
