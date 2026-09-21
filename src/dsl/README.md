@@ -4,6 +4,10 @@ DSL 将 C++ 的 `Var<T>`、运算和语句构造为唯一的 `horizon::ast::Func
 `horizon::dsl::detail::Expr<T>` 是内部接口，用户无需直接使用。
 DSL 不提供 `print()` / `prints()` 或对应的 AST 打印语句；调试 host 构造过程使用主机日志接口。
 
+`OC_STRUCT` 的动态尺寸注册宏 `OC_MAKE_STRUCT_IS_DYNAMIC` 统一定义在 `dsl/types/struct.h`，
+为 `horizon::math::is_dynamic_size` 生成特化：任一成员为动态尺寸时，结构体也为动态尺寸，
+支持已注册的嵌套结构体。该宏不再由 Core 的 `type_desc.h` 提供，Core 不依赖 Math trait。
+
 ## VS / FS 当前实现
 
 `dsl/api/raster.h` 可独立包含，也由 `dsl/dsl.h` 聚合。当前可构造、检查和组合 VS/FS，

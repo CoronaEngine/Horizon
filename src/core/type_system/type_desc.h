@@ -249,13 +249,6 @@ struct TypeDesc<BindlessArray> {
     }
 };
 
-#define OC_IS_DYNAMIC_SIZE(member, S) \
-    horizon::core::is_dynamic_size<std::remove_cvref_t<decltype(S::member)>>
-
-#define OC_MAKE_STRUCT_IS_DYNAMIC(S, ...) \
-    template<>                            \
-    struct horizon::core::is_dynamic_size<S> : std::disjunction<MAP_LIST_UD(OC_IS_DYNAMIC_SIZE, S, ##__VA_ARGS__)> {};
-
 template<typename T>
 const Type *Type::of() noexcept {
     using raw_type = std::remove_cvref_t<T>;
