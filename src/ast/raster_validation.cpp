@@ -11,11 +11,7 @@ namespace
 
 string describe(const Function &function)
 {
-    return string(function.is_vertex()     ? "vertex "
-                  : function.is_fragment() ? "fragment "
-                  : function.is_kernel()   ? "kernel "
-                                           : "callable ") +
-           function.description();
+    return horizon::core::format("{} {}", function.tag_name(), function.description());
 }
 
 class RasterWalker : public StmtVisitor, public ExprVisitor

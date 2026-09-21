@@ -49,7 +49,7 @@ ShaderInterface build_shader_interface(const Function &function, vector<RasterDi
 {
     ShaderInterface result;
     vector<uint32_t> path;
-    string context = (function.is_vertex() ? "vertex " : "fragment ") + function.description();
+    const string context = horizon::core::format("{} {}", function.tag_name(), function.description());
     for (uint32_t i = 0; i < function.arguments().size(); ++i)
     {
         flatten(function.arguments()[i].type(), i, path, function.is_fragment(), result.inputs, diagnostics,

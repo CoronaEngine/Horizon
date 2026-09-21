@@ -360,6 +360,22 @@ public:
     [[nodiscard]] horizon::ast::span<const Variable> appended_arguments() const noexcept;
     [[nodiscard]] horizon::ast::span<const Variable> builtin_vars() const noexcept;
     [[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
+    [[nodiscard]] constexpr horizon::core::string_view tag_name() const noexcept
+    {
+        using namespace std::string_view_literals;
+        switch (tag_)
+        {
+            case Tag::Kernel:
+                return "kernel"sv;
+            case Tag::Callable:
+                return "callable"sv;
+            case Tag::Vertex:
+                return "vertex"sv;
+            case Tag::Fragment:
+                return "fragment"sv;
+        }
+        return "unknown"sv;
+    }
     [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::Callable; }
     [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::Kernel; }
     [[nodiscard]] constexpr bool is_vertex() const noexcept { return tag_ == Tag::Vertex; }

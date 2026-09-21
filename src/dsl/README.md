@@ -106,6 +106,9 @@ PhysicalResourceCapture、RecursiveCall。阶段 lambda 及其 if/switch/loop/fo
 现有 Callable/Kernel 构造器的 noexcept 合同保持不变。
 在没有 current Function 时调用上述 builtin 或 discard，会抛出 `std::logic_error`。
 
+诊断中的函数类型名称统一取自 AST 的 `Function::tag_name()`，返回指向静态字符串的
+`string_view`；完整诊断消息仍使用拥有存储的 `string`。
+
 Callable 的阶段限制和引用实参权限按实际入口、每个调用点重新检查。VS/FS 禁止计算阶段
 builtin、线程组同步、光追操作、递归调用和物理 GPU 资源捕获；Kernel 也拒绝光栅化 builtin/discard。
 现有 Kernel 的错误处理仍使用原来的 fatal 路径。
