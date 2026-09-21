@@ -216,19 +216,63 @@ public:
 bool vertex_builtin(Variable::Tag tag)
 {
     return tag == Variable::Tag::VertexPosition || tag == Variable::Tag::VertexIndex ||
-           tag == Variable::Tag::InstanceIndex || tag == Variable::Tag::DrawIndex;
+           tag == Variable::Tag::InstanceIndex || tag == Variable::Tag::DrawIndex ||
+           tag == Variable::Tag::ClipDistance || tag == Variable::Tag::CullDistance ||
+           tag == Variable::Tag::RenderTargetArrayIndex || tag == Variable::Tag::ViewportArrayIndex ||
+           tag == Variable::Tag::ShadingRate;
 }
 
 bool fragment_builtin(Variable::Tag tag)
 {
-    return tag == Variable::Tag::FragmentCoord || tag == Variable::Tag::FrontFacing;
+    switch (tag)
+    {
+        case Variable::Tag::FragmentCoord:
+        case Variable::Tag::FrontFacing:
+        case Variable::Tag::PrimitiveIndex:
+        case Variable::Tag::FragmentDepth:
+        case Variable::Tag::FragmentDepthGreaterEqual:
+        case Variable::Tag::FragmentDepthLessEqual:
+        case Variable::Tag::SampleIndex:
+        case Variable::Tag::SampleMask:
+        case Variable::Tag::SampleMaskOutput:
+        case Variable::Tag::ClipDistance:
+        case Variable::Tag::CullDistance:
+        case Variable::Tag::RenderTargetArrayIndex:
+        case Variable::Tag::ViewportArrayIndex:
+        case Variable::Tag::StencilRef:
+        case Variable::Tag::ShadingRate:
+            return true;
+        default:
+            return false;
+    }
 }
 
-bool readonly_root(Variable::Tag tag)
+bool depth_builtin(Variable::Tag tag)
+{
+    return tag == Variable::Tag::FragmentDepth || tag == Variable::Tag::FragmentDepthGreaterEqual ||
+           tag == Variable::Tag::FragmentDepthLessEqual;
+}
+
+bool output_builtin(Variable::Tag tag, const Function &entry)
+{
+    if (entry.is_vertex())
+    {
+        return tag == Variable::Tag::VertexPosition || tag == Variable::Tag::ClipDistance ||
+               tag == Variable::Tag::CullDistance || tag == Variable::Tag::RenderTargetArrayIndex ||
+               tag == Variable::Tag::ViewportArrayIndex || tag == Variable::Tag::ShadingRate;
+    }
+    return entry.is_fragment() &&
+           (depth_builtin(tag) || tag == Variable::Tag::SampleMaskOutput || tag == Variable::Tag::StencilRef);
+}
+
+bool readonly_root(Variable::Tag tag, const Function &entry)
 {
     return tag == Variable::Tag::StageInput || tag == Variable::Tag::VertexIndex ||
-           tag == Variable::Tag::InstanceIndex || tag == Variable::Tag::DrawIndex || fragment_builtin(tag);
+           tag == Variable::Tag::InstanceIndex || tag == Variable::Tag::DrawIndex ||
+           (fragment_builtin(tag) && !output_builtin(tag, entry));
 }
+
+using BuiltinTypes = std::unordered_map<Variable::Tag, const Type *>;
 
 class FunctionValidator final : public RasterWalker
 {
@@ -246,6 +290,8 @@ private:
     bool position_written_{false};
     vector<Frame> frames_;
     std::unordered_set<const Function *> active_;
+    BuiltinTypes builtin_types_;
+    std::unordered_set<Variable::Tag> written_builtins_;
 
     const Function &current() const
     {
@@ -298,7 +344,7 @@ private:
         if (auto *ref = root(expression))
         {
             auto tag = ref->variable().tag();
-            if (readonly_root(tag))
+            if (readonly_root(tag, entry_))
             {
                 diagnostic(RasterDiagnosticCode::ReadOnlyWrite,
                            "write to readonly root variable " + std::to_string(ref->variable().uid()));
@@ -307,6 +353,7 @@ private:
             {
                 position_written_ = true;
             }
+            written_builtins_.insert(tag);
         }
     }
 
@@ -358,6 +405,24 @@ private:
                 ++actual;
             }
             check(std::move(frame));
+            return;
+        }
+        if (call->call_op() == CallOp::Ddx || call->call_op() == CallOp::Ddy || call->call_op() == CallOp::Fwidth)
+        {
+            if (!entry_.is_fragment())
+            {
+                diagnostic(RasterDiagnosticCode::InvalidBuiltinStage, "derivatives require a fragment entry");
+            }
+            const Type *type = call->arguments().size() == 1 && call->argument(0) ? call->argument(0)->type() : nullptr;
+            const Type *scalar = type && type->is_vector() ? type->element() : type;
+            const bool shape =
+                type && (type->is_scalar() || (type->is_vector() && type->dimension() >= 2 && type->dimension() <= 4));
+            if (!shape || !scalar || (scalar->tag() != Type::Tag::Float && scalar->tag() != Type::Tag::Half) ||
+                call->type() != type || !call->template_args().empty())
+            {
+                diagnostic(RasterDiagnosticCode::InvalidBuiltinType,
+                           "derivative requires one floating scalar/vector operand and the same result type");
+            }
             return;
         }
         if (kernel_only_)
@@ -425,6 +490,15 @@ private:
             {
                 diagnostic(RasterDiagnosticCode::InvalidBuiltinStage, "builtin is not available in this entry stage");
             }
+            if (vertex || fragment)
+            {
+                auto [previous, inserted] = builtin_types_.emplace(tag, builtin.type());
+                if (!inserted && previous->second != builtin.type())
+                {
+                    diagnostic(RasterDiagnosticCode::InvalidBuiltinConfiguration,
+                               "builtin type or array size differs across reachable functions");
+                }
+            }
         }
         visit(function.body());
         if (!kernel_only_ && function.return_type() && !frames_.back().has_value_return && !frames_.back().has_discard)
@@ -448,8 +522,61 @@ public:
             diagnostics_.push_back({RasterDiagnosticCode::MissingVertexPosition,
                                     describe(entry_) + ": no reachable write to vertex position"});
         }
+        if (kernel_only_)
+        {
+            return;
+        }
+        uint depth_modes = 0;
+        uint distance_count = 0;
+        for (const auto &[tag, type] : builtin_types_)
+        {
+            depth_modes += depth_builtin(tag);
+            if (tag == Variable::Tag::ClipDistance || tag == Variable::Tag::CullDistance)
+            {
+                distance_count += type->dimension();
+            }
+            if (tag != Variable::Tag::VertexPosition && output_builtin(tag, entry_) && !written_builtins_.contains(tag))
+            {
+                diagnostics_.push_back({RasterDiagnosticCode::MissingBuiltinWrite,
+                                        describe(entry_) + ": no reachable write to a declared system output"});
+            }
+        }
+        if (depth_modes > 1)
+        {
+            diagnostics_.push_back({RasterDiagnosticCode::InvalidBuiltinConfiguration,
+                                    describe(entry_) + ": fragment depth output modes are mutually exclusive"});
+        }
+        if (distance_count > 8)
+        {
+            diagnostics_.push_back({RasterDiagnosticCode::InvalidBuiltinConfiguration,
+                                    describe(entry_) + ": combined clip/cull distance count exceeds eight"});
+        }
+    }
+    [[nodiscard]] const BuiltinTypes &builtin_types() const noexcept
+    {
+        return builtin_types_;
     }
 };
+
+BuiltinTypes validate_raster_entry(const Function &function, vector<RasterDiagnostic> &diagnostics)
+{
+    if (!function.is_raster())
+    {
+        diagnostics.push_back(
+            {RasterDiagnosticCode::InvalidStage, "Expected a vertex or fragment entry: " + function.description()});
+        return {};
+    }
+    auto graph = detail::validate_raster_call_graph(function);
+    if (!graph.empty())
+    {
+        diagnostics.insert(diagnostics.end(), graph.begin(), graph.end());
+        return {};
+    }
+    (void)detail::build_shader_interface(function, diagnostics);
+    FunctionValidator validator(function, diagnostics, false);
+    validator.run();
+    return validator.builtin_types();
+}
 
 }  // namespace
 
@@ -483,17 +610,8 @@ vector<RasterDiagnostic> validate_kernel_raster_usage(const Function &function)
 
 horizon::core::vector<RasterDiagnostic> validate_raster_function(const Function &function)
 {
-    if (!function.is_raster())
-    {
-        return {{RasterDiagnosticCode::InvalidStage, "Expected a vertex or fragment entry: " + function.description()}};
-    }
-    auto diagnostics = detail::validate_raster_call_graph(function);
-    if (!diagnostics.empty())
-    {
-        return diagnostics;
-    }
-    (void)detail::build_shader_interface(function, diagnostics);
-    FunctionValidator(function, diagnostics).run();
+    vector<RasterDiagnostic> diagnostics;
+    (void)validate_raster_entry(function, diagnostics);
     return diagnostics;
 }
 
@@ -503,9 +621,9 @@ horizon::core::vector<RasterDiagnostic> validate_raster_pair(const Function &ver
     {
         return {{RasterDiagnosticCode::InvalidStage, "Raster pair requires vertex then fragment entries"}};
     }
-    auto diagnostics = validate_raster_function(vertex);
-    auto fragment_diagnostics = validate_raster_function(fragment);
-    diagnostics.insert(diagnostics.end(), fragment_diagnostics.begin(), fragment_diagnostics.end());
+    vector<RasterDiagnostic> diagnostics;
+    auto vertex_builtins = validate_raster_entry(vertex, diagnostics);
+    auto fragment_builtins = validate_raster_entry(fragment, diagnostics);
     const auto &outputs = vertex.shader_interface().outputs;
     const auto &inputs = fragment.shader_interface().inputs;
     auto mismatch = [&](string message)
@@ -513,6 +631,19 @@ horizon::core::vector<RasterDiagnostic> validate_raster_pair(const Function &ver
         diagnostics.push_back({RasterDiagnosticCode::InterfaceMismatch,
                                describe(vertex) + " -> " + describe(fragment) + ": " + std::move(message)});
     };
+    // Distance arrays are builtin interfaces, separate from ordinary varying locations.
+    for (auto tag : {Variable::Tag::ClipDistance, Variable::Tag::CullDistance})
+    {
+        auto input = fragment_builtins.find(tag);
+        if (input != fragment_builtins.end())
+        {
+            auto output = vertex_builtins.find(tag);
+            if (output == vertex_builtins.end() || output->second != input->second)
+            {
+                mismatch("fragment clip/cull distance array requires a vertex output with the same size");
+            }
+        }
+    }
     auto arguments = fragment.arguments();
     if (vertex.return_type() ? (arguments.size() != 1 || arguments[0].type() != vertex.return_type())
                              : !arguments.empty())

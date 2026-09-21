@@ -366,6 +366,89 @@ const RefExpr *Function::fragment_coord() noexcept { return _builtin(Variable::T
 const RefExpr *Function::front_facing() noexcept { return _builtin(Variable::Tag::FrontFacing, Type::of<bool>()); }
 void Function::discard() { create_statement<DiscardStmt>(); }
 
+const RefExpr *Function::primitive_index() noexcept
+{
+    return _builtin(Variable::Tag::PrimitiveIndex, Type::of<uint>());
+}
+const RefExpr *Function::fragment_depth() noexcept
+{
+    return _builtin(Variable::Tag::FragmentDepth, Type::of<float>());
+}
+const RefExpr *Function::fragment_depth_greater_equal() noexcept
+{
+    return _builtin(Variable::Tag::FragmentDepthGreaterEqual, Type::of<float>());
+}
+const RefExpr *Function::fragment_depth_less_equal() noexcept
+{
+    return _builtin(Variable::Tag::FragmentDepthLessEqual, Type::of<float>());
+}
+const RefExpr *Function::sample_index() noexcept
+{
+    return _builtin(Variable::Tag::SampleIndex, Type::of<uint>());
+}
+const RefExpr *Function::sample_mask() noexcept
+{
+    return _builtin(Variable::Tag::SampleMask, Type::of<uint>());
+}
+const RefExpr *Function::sample_mask_output() noexcept
+{
+    return _builtin(Variable::Tag::SampleMaskOutput, Type::of<uint>());
+}
+const RefExpr *Function::render_target_array_index() noexcept
+{
+    return _builtin(Variable::Tag::RenderTargetArrayIndex, Type::of<uint>());
+}
+const RefExpr *Function::viewport_array_index() noexcept
+{
+    return _builtin(Variable::Tag::ViewportArrayIndex, Type::of<uint>());
+}
+const RefExpr *Function::stencil_ref() noexcept
+{
+    return _builtin(Variable::Tag::StencilRef, Type::of<uint>());
+}
+const RefExpr *Function::shading_rate() noexcept
+{
+    return _builtin(Variable::Tag::ShadingRate, Type::of<uint>());
+}
+
+namespace
+{
+void validate_clip_cull_distance_count(uint count)
+{
+    if (count == 0 || count > 8)
+    {
+        throw RasterValidationError(
+            {{RasterDiagnosticCode::InvalidBuiltinConfiguration, "Clip/cull distance count must be between 1 and 8."}});
+    }
+}
+}  // namespace
+
+const RefExpr *Function::array_builtin(Variable::Tag tag, const Type *element_type, uint count)
+{
+    const Type *type =
+        resolve_ast_type(Type::from(horizon::core::format("array<{},{}>", element_type->description(), count)));
+    for (const auto &variable : builtin_vars_)
+    {
+        if (variable.tag() == tag && variable.type() != type)
+        {
+            throw RasterValidationError({{RasterDiagnosticCode::InvalidBuiltinConfiguration,
+                                          "An array builtin must use a consistent element type and size."}});
+        }
+    }
+    return _builtin(tag, type);
+}
+
+const RefExpr *Function::clip_distances(uint count)
+{
+    validate_clip_cull_distance_count(count);
+    return array_builtin(Variable::Tag::ClipDistance, Type::of<float>(), count);
+}
+const RefExpr *Function::cull_distances(uint count)
+{
+    validate_clip_cull_distance_count(count);
+    return array_builtin(Variable::Tag::CullDistance, Type::of<float>(), count);
+}
+
 const RefExpr *Function::dispatch_idx() noexcept {
     return _builtin(Variable::Tag::DispatchIdx, Type::of<uint3>());
 }

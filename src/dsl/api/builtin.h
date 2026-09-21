@@ -12,6 +12,7 @@
 #include "ast/expression.h"
 #include "../core/var.h"
 #include "../data/dynamic_array.h"
+#include <stdexcept>
 
 namespace horizon::dsl {
 using namespace horizon::core;
@@ -190,6 +191,42 @@ OC_MAKE_DSL_UNARY_FUNC(saturate, Saturate)
 
 OC_MAKE_DSL_UNARY_FUNC(determinant, Determinant)
 OC_MAKE_DSL_UNARY_FUNC(transpose, Transpose)
+
+namespace detail
+{
+template <CallOp Op, typename T> [[nodiscard]] auto raster_derivative(const T &value)
+{
+    auto *function = Function::current();
+    if (function == nullptr)
+    {
+        throw std::logic_error("Derivative requires an active Function.");
+    }
+    if constexpr (is_swizzle_v<T>)
+    {
+        return raster_derivative<Op>(decay_swizzle(value));
+    }
+    else
+    {
+        using Value = expr_value_t<T>;
+        return eval<Value>(function->call_builtin(Type::of<Value>(), Op, {extract_expression(value)}));
+    }
+}
+}  // namespace detail
+
+// Derivatives preserve the scalar/vector shape; stage legality is checked at the entry point.
+#define OC_MAKE_DERIVATIVE_FUNC(name, op)                                                                              \
+    template <typename T>                                                                                              \
+    requires(match_dsl_unary_func_v<T> && (is_scalar_expr_v<deduce_var_t<T>> || is_vector_expr_v<deduce_var_t<T>>) &&  \
+             is_floating_point_v<vector_expr_element_t<deduce_var_t<T>>>)                                              \
+    [[nodiscard]] auto name(const T &value)                                                                            \
+    {                                                                                                                  \
+        return detail::raster_derivative<CallOp::op>(value);                                                           \
+    }
+
+OC_MAKE_DERIVATIVE_FUNC(ddx, Ddx)
+OC_MAKE_DERIVATIVE_FUNC(ddy, Ddy)
+OC_MAKE_DERIVATIVE_FUNC(fwidth, Fwidth)
+#undef OC_MAKE_DERIVATIVE_FUNC
 OC_MAKE_DSL_UNARY_FUNC(inverse, Inverse)
 
 #undef OC_MAKE_DSL_UNARY_FUNC

@@ -400,8 +400,316 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    template <typename T>
+    concept HasDerivatives = requires(const T& value) { ddx(value); ddy(value); fwidth(value); };
+
+    template <typename T>
+    concept RejectsDerivatives = !requires(const T& value) { ddx(value); } &&
+                                 !requires(const T& value) { ddy(value); } &&
+                                 !requires(const T& value) { fwidth(value); };
+
+    template <size_t N>
+    concept HasDistanceArrays = requires { clip_distances<N>(); cull_distances<N>(); };
+
+    template <size_t N>
+    concept RejectsDistanceArrays = !requires { clip_distances<N>(); } && !requires { cull_distances<N>(); };
+
+    static_assert(HasDistanceArrays<1> && HasDistanceArrays<8>);
+    static_assert(RejectsDistanceArrays<0> && RejectsDistanceArrays<9>);
+
+    const CallExpr* derivative_initializer(const Expression* result, CallOp op)
+    {
+        for (const auto* statement : Function::current()->body()->statements())
+        {
+            if (statement->tag() != Statement::Tag::Assign)
+            {
+                continue;
+            }
+            const auto* assignment = static_cast<const AssignStmt*>(statement);
+            if (assignment->lhs() == result && assignment->rhs()->tag() == Expression::Tag::Call &&
+                static_cast<const CallExpr*>(assignment->rhs())->call_op() == op)
+            {
+                return static_cast<const CallExpr*>(assignment->rhs());
+            }
+        }
+        return nullptr;
+    }
+
+    bool has_derivative_initializer(const Expression* result, CallOp op)
+    {
+        return derivative_initializer(result, op) != nullptr;
+    }
+
+    template <typename T>
+    void test_vector_swizzle_derivatives()
+    {
+        using Swizzle2 = decltype(std::declval<T>().xy());
+        using Swizzle3 = decltype(std::declval<T>().xyz());
+        expect(HasDerivatives<Swizzle2> && HasDerivatives<Swizzle3>, "derivatives accept vector swizzles");
+        if constexpr (HasDerivatives<Swizzle2> && HasDerivatives<Swizzle3>)
+        {
+            FragmentShader fs { [](T value) {
+                auto dx = ddx(value.xy());
+                auto dy = ddy(value.yx());
+                auto width = fwidth(value.xyz());
+                expect(dx.expression()->type() == Type::of<float2>() && dy.expression()->type() == Type::of<float2>() &&
+                           width.expression()->type() == Type::of<float3>(),
+                       "vector swizzle derivatives preserve their selected shape");
+                return make_float4(dx.x, dy.y, width.x, width.z);
+            } };
+        }
+    }
+
+    void test_derivative_expressions()
+    {
+        expect(HasDerivatives<Float> && HasDerivatives<Float2> && HasDerivatives<Float4>,
+               "floating scalar and vector derivatives are available");
+        static_assert(RejectsDerivatives<Int> && RejectsDerivatives<Uint3> && RejectsDerivatives<Bool>);
+        static_assert(RejectsDerivatives<Var<float4x4>> && RejectsDerivatives<Var<array<float, 2>>>);
+        static_assert(HasDerivatives<Half> && HasDerivatives<Var<real>>);
+        FragmentShader fs { [](Float2 uv) {
+            auto dx = ddx(uv);
+            auto dy = ddy(uv);
+            auto width = fwidth(uv);
+            auto component = ddx(uv.x);
+            expect(dx.expression()->type() == Type::of<float2>() && component.expression()->type() == Type::of<float>(),
+                   "derivatives preserve vector shape and support scalar swizzles");
+            expect(has_derivative_initializer(dx.expression(), CallOp::Ddx) &&
+                       has_derivative_initializer(dy.expression(), CallOp::Ddy) &&
+                       has_derivative_initializer(width.expression(), CallOp::Fwidth),
+                   "each derivative materializes its own AST operation in a local");
+            expect(dx.expression()->tag() == Expression::Tag::Ref && dy.expression()->tag() == Expression::Tag::Ref,
+                   "derivative results can be assigned through variable references");
+            dx = make_float2(0.0f);
+            dy.x = 0.0f;
+            return make_float4(dx.x, dy.y, width.x, width.y);
+        } };
+        expect(fs.function()->shader_interface().outputs.size() == 1, "derivative result can feed a fragment color");
+        FragmentShader snapshot { [](Float2 uv) {
+            Float2 value = uv;
+            auto dx = ddx(value);
+            const auto statement_count = Function::current()->body()->statements().size();
+            expect(has_derivative_initializer(dx.expression(), CallOp::Ddx), "derivative is evaluated before its input changes");
+            value = make_float2(0.0f);
+            expect(Function::current()->body()->statements().size() > statement_count,
+                   "input mutation follows derivative initialization");
+            return make_float4(dx, value);
+        } };
+        Callable derivative { [](Float value) { return ddx(value); } };
+        FragmentShader indirect { [&] { return derivative(Float { 1.0f }); } };
+        expect(indirect.function()->is_fragment(), "derivative callable is valid from a fragment shader");
+        expect_rejection(RasterDiagnosticCode::InvalidBuiltinStage, [&] { VertexShader wrong { [&] {
+                                                                              vertex_position() = make_float4(1.0f);
+                                                                              return derivative(Float { 1.0f });
+                                                                          } }; }, "derivative callable is rejected from a vertex shader");
+        bool rejected = false;
+        try
+        {
+            Float value { static_cast<const Expression*>(nullptr) };
+            (void)ddx(value);
+        }
+        catch (const std::logic_error&)
+        {
+            rejected = true;
+        }
+        expect(rejected, "derivative outside a function reports a construction error");
+    }
+
+    template <typename Value, typename Resolved>
+    void check_derivative_precision()
+    {
+        const Expression* results[3] {};
+        const CallExpr* calls[3] {};
+        const CallOp operations[] { CallOp::Ddx, CallOp::Ddy, CallOp::Fwidth };
+        FragmentShader fs { [&] {
+            Var<Value> value { Value { 1.0f } };
+            auto dx = ddx(value);
+            auto dy = ddy(value);
+            auto width = fwidth(value);
+            results[0] = dx.expression();
+            results[1] = dy.expression();
+            results[2] = width.expression();
+            for (size_t i = 0; i < 3; ++i)
+            {
+                calls[i] = derivative_initializer(results[i], operations[i]);
+            }
+        } };
+        for (size_t i = 0; i < 3; ++i)
+        {
+            expect(results[i]->tag() == Expression::Tag::Ref && results[i]->type() == Type::of<Resolved>(),
+                   "derivative locals preserve the resolved scalar precision and vector shape");
+            const auto* call = calls[i];
+            expect(call != nullptr, "each precision variant materializes its derivative operation");
+            if (call == nullptr)
+            {
+                continue;
+            }
+            expect(call->call_op() == operations[i] && call->type() == Type::of<Resolved>(),
+                   "finalized derivative call has the expected operation and resolved result type");
+            expect(call->arguments().size() == 1 && call->argument(0)->type() == Type::of<Resolved>(),
+                   "finalized derivative operand matches its resolved result type");
+        }
+    }
+
+    void test_derivative_precision()
+    {
+        struct RestorePolicy
+        {
+            StoragePrecisionPolicy saved = global_storage_policy();
+            ~RestorePolicy() { set_global_storage_policy(saved); }
+        } restore;
+        for (auto policy : { PrecisionPolicy::ForceF16, PrecisionPolicy::ForceF32 })
+        {
+            set_global_storage_policy({ policy, true });
+            check_derivative_precision<half, half>();
+            check_derivative_precision<half2, half2>();
+            check_derivative_precision<half3, half3>();
+            check_derivative_precision<half4, half4>();
+            if (policy == PrecisionPolicy::ForceF16)
+            {
+                check_derivative_precision<real, half>();
+                check_derivative_precision<real2, half2>();
+                check_derivative_precision<real3, half3>();
+                check_derivative_precision<real4, half4>();
+            }
+            else
+            {
+                check_derivative_precision<real, float>();
+                check_derivative_precision<real2, float2>();
+                check_derivative_precision<real3, float3>();
+                check_derivative_precision<real4, float4>();
+            }
+        }
+    }
+
+    void test_system_output_construction_errors()
+    {
+        auto check_unwritten = [](auto getter, bool vertex) {
+            expect_rejection(RasterDiagnosticCode::MissingBuiltinWrite, [&] {
+                if (vertex)
+                {
+                    VertexShader shader { [&] {
+                        vertex_position() = make_float4(1.0f);
+                        (void)getter();
+                    } };
+                }
+                else
+                {
+                    FragmentShader shader { [&] { (void)getter(); } };
+                } }, "DSL construction rejects each declared but unwritten system output");
+            expect(Function::current() == nullptr, "missing system output write restores the current function");
+        };
+        for (auto getter : { &fragment_depth, &fragment_depth_greater_equal, &fragment_depth_less_equal })
+        {
+            check_unwritten(getter, false);
+        }
+        for (auto getter : { &sample_mask_output, &stencil_ref })
+        {
+            check_unwritten(getter, false);
+        }
+        for (auto getter : { &render_target_array_index, &viewport_array_index, &shading_rate })
+        {
+            check_unwritten(getter, true);
+        }
+        check_unwritten([] { return clip_distances<2>(); }, true);
+        check_unwritten([] { return cull_distances<2>(); }, true);
+        FragmentShader recovered { [] { return Float4 { 1.0f }; } };
+        expect(recovered.function()->body()->check_context(recovered.function().get()),
+               "valid shader construction succeeds after system output errors");
+    }
+
+    void test_extended_apis_require_function()
+    {
+        auto check_no_function = [](auto getter) {
+            bool rejected = false;
+            try
+            {
+                (void)getter();
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+            expect(rejected && Function::current() == nullptr, "extended API rejects use without an active function");
+        };
+        for (auto getter : { &fragment_depth, &fragment_depth_greater_equal, &fragment_depth_less_equal })
+        {
+            check_no_function(getter);
+        }
+        for (auto getter : { &primitive_index, &sample_index, &sample_mask, &sample_mask_output,
+                             &render_target_array_index, &viewport_array_index, &stencil_ref, &shading_rate })
+        {
+            check_no_function(getter);
+        }
+        check_no_function([] { return clip_distances<2>(); });
+        check_no_function([] { return cull_distances<2>(); });
+        for (auto derivative : { &ddx<Float>, &ddy<Float>, &fwidth<Float> })
+        {
+            check_no_function([=] {
+                Float value { static_cast<const Expression*>(nullptr) };
+                return derivative(value);
+            });
+        }
+    }
+
+    void test_extended_builtin_dsl()
+    {
+        static_assert(std::is_same_v<decltype(primitive_index()), Uint>);
+        static_assert(std::is_same_v<decltype(fragment_depth()), Float>);
+        static_assert(std::is_same_v<decltype(clip_distances<2>()), Var<array<float, 2>>>);
+        VertexShader vs { [] {
+            vertex_position() = make_float4(1.0f);
+            auto clip = clip_distances<2>();
+            clip[0] = 1.0f;
+            clip[1] = 2.0f;
+            cull_distances<1>()[0] = 3.0f;
+            render_target_array_index() = 0u;
+            viewport_array_index() = 0u;
+            shading_rate() = 0u;
+        } };
+        FragmentShader fs { [] {
+            auto primitive = primitive_index();
+            auto sample = sample_index();
+            sample_mask_output() = sample_mask();
+            fragment_depth() = clip_distances<2>()[0] + cull_distances<1>()[0];
+            stencil_ref() = primitive + sample;
+            auto layer = render_target_array_index();
+            auto viewport = viewport_array_index();
+            auto rate = shading_rate();
+        } };
+        RasterShader pair { vs, fs };
+        expect(pair.vertex().function()->shader_interface().outputs.empty() &&
+                   pair.fragment().function()->shader_interface().inputs.empty(),
+               "system values do not allocate ordinary varying locations");
+        FragmentShader greater { [] { fragment_depth_greater_equal() = 0.5f; } };
+        FragmentShader less { [] { fragment_depth_less_equal() = 0.5f; } };
+        expect(greater.function()->hash() != less.function()->hash(), "conservative depth mode affects the shader hash");
+        expect_rejection(RasterDiagnosticCode::ReadOnlyWrite, [] { FragmentShader wrong { [] { sample_index() = 0u; } }; }, "sample index is readonly through its DSL wrapper");
+        expect_rejection(RasterDiagnosticCode::ReadOnlyWrite, [] { FragmentShader wrong { [] { clip_distances<2>()[0] = 1.0f; } }; }, "fragment distance subscript cannot bypass readonly validation");
+        expect_rejection(RasterDiagnosticCode::InvalidBuiltinConfiguration, [] { FragmentShader wrong { [] { fragment_depth() = 0.5f; fragment_depth_less_equal() = 0.5f; } }; }, "DSL rejects conflicting depth modes");
+        bool rejected = false;
+        try
+        {
+            (void)sample_index();
+        }
+        catch (const std::logic_error&)
+        {
+            rejected = true;
+        }
+        expect(rejected, "extended builtin outside a function reports a construction error");
+    }
+}
+
 int main()
 {
+    test_derivative_expressions();
+    test_vector_swizzle_derivatives<Float4>();
+    test_derivative_precision();
+    test_system_output_construction_errors();
+    test_extended_apis_require_function();
+    test_extended_builtin_dsl();
     test_stage_signatures_and_layout();
     test_builtin_aliases_and_local_copies();
     test_failure_recovery_and_no_current();

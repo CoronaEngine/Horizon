@@ -512,8 +512,460 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    template <typename F>
+    concept HasExtendedRasterBuiltins = requires(F& function) {
+        function.primitive_index();
+        function.fragment_depth();
+        function.fragment_depth_greater_equal();
+        function.fragment_depth_less_equal();
+        function.sample_index();
+        function.sample_mask();
+        function.sample_mask_output();
+        function.clip_distances(2u);
+        function.cull_distances(2u);
+        function.render_target_array_index();
+        function.viewport_array_index();
+        function.stencil_ref();
+        function.shading_rate();
+    };
+
+    using namespace horizon::ast;
+
+    bool has_diagnostic(const vector<RasterDiagnostic>& diagnostics, RasterDiagnosticCode code)
+    {
+        return std::any_of(diagnostics.begin(), diagnostics.end(),
+                           [=](const auto& diagnostic) { return diagnostic.code == code; });
+    }
+
+    auto builtin_stage(Function::Tag stage)
+    {
+        auto function = horizon::core::make_shared<Function>(stage);
+        if (stage == Function::Vertex)
+        {
+            function->assign(function->vertex_position(), function->local(Type::of<float4>()));
+        }
+        return function;
+    }
+
+    void test_extended_builtin_permissions()
+    {
+        struct Case
+        {
+            const RefExpr* (Function::*get)() noexcept;
+            bool vertex;
+            bool fragment;
+            bool vertex_write;
+            bool fragment_write;
+        };
+        const Case cases[] = {
+            { &Function::primitive_index, false, true, false, false },
+            { &Function::fragment_depth, false, true, false, true },
+            { &Function::fragment_depth_greater_equal, false, true, false, true },
+            { &Function::fragment_depth_less_equal, false, true, false, true },
+            { &Function::sample_index, false, true, false, false },
+            { &Function::sample_mask, false, true, false, false },
+            { &Function::sample_mask_output, false, true, false, true },
+            { &Function::render_target_array_index, true, true, true, false },
+            { &Function::viewport_array_index, true, true, true, false },
+            { &Function::stencil_ref, false, true, false, true },
+            { &Function::shading_rate, true, true, true, false },
+        };
+        for (const auto& test : cases)
+        {
+            for (auto stage : { Function::Vertex, Function::Fragment, Function::Kernel })
+            {
+                auto function = builtin_stage(stage);
+                const auto* value = ((*function).*test.get)();
+                function->assign(value, function->local(value->type()));
+                auto diagnostics = stage == Function::Kernel
+                                       ? horizon::ast::detail::validate_kernel_raster_usage(*function)
+                                       : validate_raster_function(*function);
+                const bool allowed = stage == Function::Vertex ? test.vertex : stage == Function::Fragment && test.fragment;
+                const bool writable = stage == Function::Vertex ? test.vertex_write : test.fragment_write;
+                if (!allowed)
+                {
+                    expect(has_diagnostic(diagnostics, RasterDiagnosticCode::InvalidBuiltinStage),
+                           "system value is rejected outside its supported stage");
+                }
+                else if (!writable)
+                {
+                    expect(has_diagnostic(diagnostics, RasterDiagnosticCode::ReadOnlyWrite),
+                           "system-provided input cannot be overwritten");
+                }
+                else
+                {
+                    expect(diagnostics.empty(), "system output accepts a reachable write in its supported stage");
+                }
+            }
+        }
+        auto fs = builtin_stage(Function::Fragment);
+        expect(fs->sample_mask() != fs->sample_mask_output(), "coverage input and output have separate identities");
+        expect(fs->sample_mask() == fs->sample_mask(), "repeated builtin access reuses the same expression");
+        fs->expr_statement(fs->primitive_index());
+        fs->expr_statement(fs->sample_index());
+        fs->assign(fs->sample_mask_output(), fs->sample_mask());
+        expect(validate_raster_function(*fs).empty(), "fragment can read system inputs and forward sample coverage");
+        auto unwritten = builtin_stage(Function::Fragment);
+        (void)unwritten->fragment_depth();
+        expect(has_diagnostic(validate_raster_function(*unwritten), RasterDiagnosticCode::MissingBuiltinWrite),
+               "declared system output needs a reachable write");
+    }
+
+    void test_system_output_write_requirements()
+    {
+        auto check_output = [](auto getter, Function::Tag stage) {
+            auto entry = builtin_stage(stage);
+            expect(validate_raster_function(*entry).empty(), "unused optional system outputs need no declaration or write");
+            const auto* output = getter(*entry);
+            auto local = entry->local(output->type());
+            entry->assign(local, output);
+            expect(has_diagnostic(validate_raster_function(*entry), RasterDiagnosticCode::MissingBuiltinWrite),
+                   "reading a system output into a local does not satisfy its write requirement");
+            auto writer = Function::define_callable([&] {
+                auto* function = Function::current();
+                const auto* reference = function->reference_argument(output->type());
+                function->assign(reference, function->local(reference->type()));
+            });
+            auto nested_writer = Function::define_callable([&] {
+                auto* function = Function::current();
+                const auto* reference = function->reference_argument(output->type());
+                function->expr_statement(function->call(nullptr, writer, { reference }));
+            });
+            expect(has_diagnostic(validate_raster_function(*entry), RasterDiagnosticCode::MissingBuiltinWrite),
+                   "an uncalled writer cannot satisfy a system output write requirement");
+            entry->expr_statement(entry->call(nullptr, nested_writer, { output }));
+            expect(validate_raster_function(*entry).empty(), "nested callable reference writes satisfy system outputs");
+
+            auto reader = Function::define_callable([&] {
+                auto* function = Function::current();
+                function->expr_statement(getter(*function));
+            });
+            auto indirect = builtin_stage(stage);
+            indirect->expr_statement(indirect->call(nullptr, reader, {}));
+            expect(has_diagnostic(validate_raster_function(*indirect), RasterDiagnosticCode::MissingBuiltinWrite),
+                   "system outputs declared only in a callable still require a write");
+            auto direct_writer = Function::define_callable([&] {
+                auto* function = Function::current();
+                const auto* value = getter(*function);
+                function->assign(value, function->local(value->type()));
+            });
+            indirect->expr_statement(indirect->call(nullptr, direct_writer, {}));
+            expect(validate_raster_function(*indirect).empty(), "separate reachable callables share system output writes");
+        };
+        for (auto getter : { &Function::fragment_depth, &Function::fragment_depth_greater_equal,
+                             &Function::fragment_depth_less_equal, &Function::sample_mask_output, &Function::stencil_ref })
+        {
+            check_output([=](Function& function) { return (function.*getter)(); }, Function::Fragment);
+        }
+        for (auto getter : { &Function::render_target_array_index, &Function::viewport_array_index, &Function::shading_rate })
+        {
+            check_output([=](Function& function) { return (function.*getter)(); }, Function::Vertex);
+        }
+        for (auto getter : { &Function::clip_distances, &Function::cull_distances })
+        {
+            check_output([=](Function& function) { return (function.*getter)(2); }, Function::Vertex);
+        }
+    }
+
+    void test_depth_modes_and_call_chain_permissions()
+    {
+        auto writer = Function::define_callable([] {
+            auto* f = Function::current();
+            auto* arg = f->reference_argument(Type::of<uint>());
+            f->assign(arg, f->literal(Type::of<uint>(), 1u));
+        });
+        auto fs = builtin_stage(Function::Fragment);
+        fs->expr_statement(fs->call(nullptr, writer, { fs->sample_index() }));
+        expect(has_diagnostic(validate_raster_function(*fs), RasterDiagnosticCode::ReadOnlyWrite),
+               "callable reference writes cannot bypass system input permissions");
+        auto conservative = Function::define_callable([] {
+            auto* f = Function::current();
+            f->assign(f->fragment_depth_greater_equal(), f->literal(Type::of<float>(), 0.5f));
+        });
+        auto depth = builtin_stage(Function::Fragment);
+        depth->assign(depth->fragment_depth_less_equal(), depth->literal(Type::of<float>(), 0.25f));
+        depth->expr_statement(depth->call(nullptr, conservative, {}));
+        expect(has_diagnostic(validate_raster_function(*depth), RasterDiagnosticCode::InvalidBuiltinConfiguration),
+               "depth output modes are exclusive across the reachable call chain");
+        auto vs = builtin_stage(Function::Vertex);
+        vs->expr_statement(vs->call(nullptr, conservative, {}));
+        expect(has_diagnostic(validate_raster_function(*vs), RasterDiagnosticCode::InvalidBuiltinStage),
+               "fragment-only builtin remains illegal through a callable");
+        const auto modes = { &Function::fragment_depth, &Function::fragment_depth_greater_equal,
+                             &Function::fragment_depth_less_equal };
+        for (auto first : modes)
+        {
+            for (auto second : modes)
+            {
+                auto callable = Function::define_callable([&] {
+                    auto* function = Function::current();
+                    function->assign((function->*second)(), function->literal(Type::of<float>(), 0.5f));
+                });
+                auto entry = builtin_stage(Function::Fragment);
+                entry->assign(((*entry).*first)(), entry->literal(Type::of<float>(), 0.5f));
+                expect(validate_raster_function(*entry).empty(), "uncalled depth modes do not affect an entry");
+                entry->expr_statement(entry->call(nullptr, callable, {}));
+                auto diagnostics = validate_raster_function(*entry);
+                expect(first == second ? diagnostics.empty()
+                                       : has_diagnostic(diagnostics, RasterDiagnosticCode::InvalidBuiltinConfiguration),
+                       "all depth mode pairs reject conflicts while repeated use of one mode is legal");
+            }
+        }
+    }
+
+    void test_distance_builtin_layouts()
+    {
+        auto vs = builtin_stage(Function::Vertex);
+        auto fs = builtin_stage(Function::Fragment);
+        const auto* clip = vs->clip_distances(2);
+        const auto* cull = vs->cull_distances(3);
+        vs->assign(clip, vs->local(clip->type()));
+        vs->assign(cull, vs->local(cull->type()));
+        fs->expr_statement(fs->clip_distances(2));
+        fs->expr_statement(fs->cull_distances(3));
+        expect(validate_raster_pair(*vs, *fs).empty(), "matching clip and cull arrays pair independently of ordinary varyings");
+        fs->assign(fs->subscript(Type::of<float>(), fs->clip_distances(2), fs->literal(Type::of<uint>(), 0u)),
+                   fs->literal(Type::of<float>(), 1.0f));
+        expect(has_diagnostic(validate_raster_function(*fs), RasterDiagnosticCode::ReadOnlyWrite),
+               "fragment distance array elements are readonly");
+        auto mismatched = builtin_stage(Function::Fragment);
+        mismatched->expr_statement(mismatched->clip_distances(4));
+        expect(has_diagnostic(validate_raster_pair(*vs, *mismatched), RasterDiagnosticCode::InterfaceMismatch),
+               "distance array lengths must match across stages");
+        auto absent = builtin_stage(Function::Vertex);
+        expect(has_diagnostic(validate_raster_pair(*absent, *mismatched), RasterDiagnosticCode::InterfaceMismatch),
+               "fragment distance input requires a vertex producer");
+        for (uint count : { 0u, 9u })
+        {
+            expect_rejection(RasterDiagnosticCode::InvalidBuiltinConfiguration, [&] { (void)vs->clip_distances(count); }, "invalid distance array size is rejected");
+        }
+        expect_rejection(RasterDiagnosticCode::InvalidBuiltinConfiguration, [&] { (void)vs->clip_distances(3); }, "one function cannot redeclare a distance array with another size");
+        auto over_limit = builtin_stage(Function::Vertex);
+        const auto* large = over_limit->clip_distances(5);
+        const auto* other = over_limit->cull_distances(4);
+        over_limit->assign(large, over_limit->local(large->type()));
+        over_limit->assign(other, over_limit->local(other->type()));
+        expect(has_diagnostic(validate_raster_function(*over_limit), RasterDiagnosticCode::InvalidBuiltinConfiguration),
+               "combined clip and cull distance count cannot exceed eight");
+    }
+
+    void test_distance_builtin_boundaries()
+    {
+        for (auto getter : { &Function::clip_distances, &Function::cull_distances })
+        {
+            for (uint count : { 1u, 8u })
+            {
+                auto vs = builtin_stage(Function::Vertex);
+                const auto* value = ((*vs).*getter)(count);
+                expect(value->type()->is_array() && value->type()->element() == Type::of<float>() &&
+                           value->type()->dimension() == count,
+                       "distance boundary sizes create float arrays with the requested length");
+                expect(value == ((*vs).*getter)(count), "repeated distance access reuses the array expression");
+                const auto builtin_count = vs->builtin_vars().size();
+                expect_rejection(RasterDiagnosticCode::InvalidBuiltinConfiguration, [&] { (void)((*vs).*getter)(count == 1 ? 8 : 1); }, "both distance kinds reject a different length for the same builtin");
+                expect(value == ((*vs).*getter)(count) && vs->builtin_vars().size() == builtin_count,
+                       "a conflicting array declaration leaves the original builtin intact");
+                expect(has_diagnostic(validate_raster_function(*vs), RasterDiagnosticCode::MissingBuiltinWrite),
+                       "a declared distance output requires a write");
+                vs->assign(value, vs->local(value->type()));
+                auto fs = builtin_stage(Function::Fragment);
+                const auto* input = ((*fs).*getter)(count);
+                fs->expr_statement(input);
+                expect(validate_raster_pair(*vs, *fs).empty(), "distance arrays of length one and eight pair successfully");
+                expect(validate_raster_pair(*vs, *builtin_stage(Function::Fragment)).empty(),
+                       "unused vertex distance outputs are allowed");
+                fs->assign(input, fs->local(input->type()));
+                expect(has_diagnostic(validate_raster_function(*fs), RasterDiagnosticCode::ReadOnlyWrite),
+                       "fragment distance arrays cannot be overwritten");
+            }
+            for (uint count : { 0u, 9u })
+            {
+                auto vs = builtin_stage(Function::Vertex);
+                expect_rejection(RasterDiagnosticCode::InvalidBuiltinConfiguration, [&] { (void)((*vs).*getter)(count); }, "both distance kinds reject invalid lengths");
+                expect(vs->builtin_vars().size() == 1, "invalid distance lengths do not register a builtin");
+            }
+            auto kernel = builtin_stage(Function::Kernel);
+            kernel->expr_statement(((*kernel).*getter)(1));
+            expect(has_diagnostic(horizon::ast::detail::validate_kernel_raster_usage(*kernel),
+                                  RasterDiagnosticCode::InvalidBuiltinStage),
+                   "both distance kinds are rejected from a kernel");
+            for (auto policy : { PrecisionPolicy::ForceF16, PrecisionPolicy::ForceF32 })
+            {
+                auto vs = builtin_stage(Function::Vertex);
+                vs->set_storage_policy({ policy, true });
+                const auto* value = ((*vs).*getter)(2);
+                expect(value->type() == Type::of<array<float, 2>>() && value == ((*vs).*getter)(2),
+                       "distance arrays retain explicit float elements and reuse their type under both precision policies");
+            }
+        }
+    }
+
+    void test_distance_builtin_call_chains()
+    {
+        auto make_distance = [](auto getter, uint count, bool write) {
+            return Function::define_callable([&] {
+                auto* function = Function::current();
+                const auto* value = (function->*getter)(count);
+                if (write)
+                {
+                    function->assign(value, function->local(value->type()));
+                }
+                else
+                {
+                    function->expr_statement(value);
+                }
+            });
+        };
+        for (auto stage : { Function::Vertex, Function::Fragment })
+        {
+            for (auto getter : { &Function::clip_distances, &Function::cull_distances })
+            {
+                auto first = make_distance(getter, 2, stage == Function::Vertex);
+                auto same = make_distance(getter, 2, stage == Function::Vertex);
+                auto different = make_distance(getter, 3, stage == Function::Vertex);
+                auto entry = builtin_stage(stage);
+                entry->expr_statement(entry->call(nullptr, first, {}));
+                entry->expr_statement(entry->call(nullptr, same, {}));
+                expect(validate_raster_function(*entry).empty(), "consistent distance arrays can be shared by callables");
+                entry->expr_statement(entry->call(nullptr, different, {}));
+                expect(has_diagnostic(validate_raster_function(*entry), RasterDiagnosticCode::InvalidBuiltinConfiguration),
+                       "distance length conflicts across callables are rejected");
+            }
+            for (uint cull_count : { 4u, 5u })
+            {
+                auto clip = make_distance(&Function::clip_distances, 4, stage == Function::Vertex);
+                auto cull = make_distance(&Function::cull_distances, cull_count, stage == Function::Vertex);
+                auto nested = Function::define_callable([&] {
+                    auto* function = Function::current();
+                    function->expr_statement(function->call(nullptr, clip, {}));
+                    function->expr_statement(function->call(nullptr, clip, {}));
+                    function->expr_statement(function->call(nullptr, cull, {}));
+                });
+                auto entry = builtin_stage(stage);
+                entry->expr_statement(entry->call(nullptr, nested, {}));
+                auto diagnostics = validate_raster_function(*entry);
+                expect(cull_count == 4 ? diagnostics.empty()
+                                       : has_diagnostic(diagnostics, RasterDiagnosticCode::InvalidBuiltinConfiguration),
+                       "nested distance arrays count once per kind and enforce the combined limit of eight");
+            }
+        }
+        auto writer = make_distance(&Function::clip_distances, 8, true);
+        auto reader = make_distance(&Function::clip_distances, 8, false);
+        auto vs = builtin_stage(Function::Vertex);
+        auto fs = builtin_stage(Function::Fragment);
+        vs->expr_statement(vs->call(nullptr, writer, {}));
+        fs->expr_statement(fs->call(nullptr, reader, {}));
+        expect(validate_raster_pair(*vs, *fs).empty(), "distance interfaces declared only in callables pair successfully");
+    }
+
+    void test_derivative_validation()
+    {
+        for (auto op : { CallOp::Ddx, CallOp::Ddy, CallOp::Fwidth })
+        {
+            auto derivative = Function::define_callable([&] {
+                auto* f = Function::current();
+                f->expr_statement(f->call_builtin(Type::of<float2>(), op, { f->local(Type::of<float2>()) }));
+            });
+            for (auto stage : { Function::Vertex, Function::Fragment, Function::Kernel })
+            {
+                auto function = builtin_stage(stage);
+                function->expr_statement(function->call(nullptr, derivative, {}));
+                auto diagnostics = stage == Function::Kernel
+                                       ? horizon::ast::detail::validate_kernel_raster_usage(*function)
+                                       : validate_raster_function(*function);
+                expect(stage == Function::Fragment ? diagnostics.empty()
+                                                   : has_diagnostic(diagnostics, RasterDiagnosticCode::InvalidBuiltinStage),
+                       "derivative callables are legal only from fragment entries");
+            }
+            auto integer = builtin_stage(Function::Fragment);
+            integer->expr_statement(integer->call_builtin(Type::of<int>(), op, { integer->local(Type::of<int>()) }));
+            expect(has_diagnostic(validate_raster_function(*integer), RasterDiagnosticCode::InvalidBuiltinType),
+                   "low-level derivative rejects integer operands");
+            auto shape = builtin_stage(Function::Fragment);
+            shape->expr_statement(shape->call_builtin(Type::of<float>(), op, { shape->local(Type::of<float2>()) }));
+            expect(has_diagnostic(validate_raster_function(*shape), RasterDiagnosticCode::InvalidBuiltinType),
+                   "derivative result preserves the operand shape");
+            auto arity = builtin_stage(Function::Fragment);
+            arity->expr_statement(arity->call_builtin(Type::of<float>(), op, {}));
+            expect(has_diagnostic(validate_raster_function(*arity), RasterDiagnosticCode::InvalidBuiltinType),
+                   "derivative requires exactly one operand");
+        }
+    }
+
+    void test_derivative_invalid_ast_inputs()
+    {
+        for (auto op : { CallOp::Ddx, CallOp::Ddy, CallOp::Fwidth })
+        {
+            for (const auto* type : { Type::of<bool>(), Type::of<uint>(), Type::of<uint2>(), Type::of<bool3>(),
+                                      Type::of<float4x4>(), Type::of<array<float, 2>>(), Type::of<raster_layout_test::Inner>() })
+            {
+                auto function = builtin_stage(Function::Fragment);
+                function->expr_statement(function->call_builtin(type, op, { function->local(type) }));
+                expect(has_diagnostic(validate_raster_function(*function), RasterDiagnosticCode::InvalidBuiltinType),
+                       "low-level derivatives reject nonfloating and aggregate operands");
+            }
+            auto extra_operand = builtin_stage(Function::Fragment);
+            const auto* operand = extra_operand->local(Type::of<float>());
+            extra_operand->expr_statement(extra_operand->call_builtin(Type::of<float>(), op, { operand, operand }));
+            expect(has_diagnostic(validate_raster_function(*extra_operand), RasterDiagnosticCode::InvalidBuiltinType),
+                   "derivatives reject multiple operands even when their types match");
+            auto null_operand = builtin_stage(Function::Fragment);
+            null_operand->expr_statement(null_operand->call_builtin(Type::of<float>(), op, { nullptr }));
+            expect(has_diagnostic(validate_raster_function(*null_operand), RasterDiagnosticCode::InvalidBuiltinType),
+                   "derivatives reject a null operand without dereferencing it");
+            auto void_operand = builtin_stage(Function::Fragment);
+            const auto* void_value = void_operand->call(nullptr, "void_probe", {});
+            void_operand->expr_statement(void_operand->call_builtin(Type::of<float>(), op, { void_value }));
+            expect(has_diagnostic(validate_raster_function(*void_operand), RasterDiagnosticCode::InvalidBuiltinType),
+                   "derivatives reject operands without a value type");
+
+            for (CallExpr::Template argument : { CallExpr::Template { Type::of<float>() }, CallExpr::Template { 1u } })
+            {
+                auto function = builtin_stage(Function::Fragment);
+                function->expr_statement(function->call_builtin(Type::of<float>(), op,
+                                                                { function->local(Type::of<float>()) }, { argument }));
+                expect(has_diagnostic(validate_raster_function(*function), RasterDiagnosticCode::InvalidBuiltinType),
+                       "derivatives reject both type and value template arguments");
+            }
+            struct Types
+            {
+                const Type* operand;
+                const Type* result;
+            };
+            const Types mismatches[] {
+                { Type::of<float>(), Type::of<half>() },
+                { Type::of<half>(), Type::of<float>() },
+                { Type::of<float2>(), Type::of<float3>() },
+                { Type::of<float>(), nullptr },
+            };
+            for (const auto& types : mismatches)
+            {
+                auto function = builtin_stage(Function::Fragment);
+                function->expr_statement(function->call_builtin(types.result, op, { function->local(types.operand) }));
+                expect(has_diagnostic(validate_raster_function(*function), RasterDiagnosticCode::InvalidBuiltinType),
+                       "derivative results must preserve precision, dimensions, and a nonvoid value type");
+            }
+            auto malformed = Function::define_callable([&] {
+                auto* function = Function::current();
+                function->expr_statement(function->call_builtin(Type::of<bool>(), op, { function->local(Type::of<bool>()) }));
+            });
+            auto nested = Function::define_callable([&] {
+                auto* function = Function::current();
+                function->expr_statement(function->call(nullptr, malformed, {}));
+            });
+            auto indirect = builtin_stage(Function::Fragment);
+            indirect->expr_statement(indirect->call(nullptr, nested, {}));
+            expect(has_diagnostic(validate_raster_function(*indirect), RasterDiagnosticCode::InvalidBuiltinType),
+                   "nested callables cannot hide an invalid derivative operand type");
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
+    expect(HasExtendedRasterBuiltins<horizon::ast::Function>, "extended raster builtin expressions are available");
     if (argc > 1 && std::string_view(argv[1]) == "--kernel-discard")
     {
 #ifdef _MSC_VER
@@ -530,6 +982,14 @@ int main(int argc, char** argv)
         return 0;
     }
     test_stage_construction_and_exception_recovery();
+    test_extended_builtin_permissions();
+    test_system_output_write_requirements();
+    test_depth_modes_and_call_chain_permissions();
+    test_distance_builtin_layouts();
+    test_distance_builtin_boundaries();
+    test_distance_builtin_call_chains();
+    test_derivative_validation();
+    test_derivative_invalid_ast_inputs();
     test_invalid_raster_tag_is_diagnosed();
     test_recursive_interface_layout_and_hash();
     test_interface_rejections_and_declared_returns();

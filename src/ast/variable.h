@@ -60,7 +60,20 @@ public:
         InstanceIndex,
         DrawIndex,
         FragmentCoord,
-        FrontFacing
+        FrontFacing,
+        PrimitiveIndex,
+        FragmentDepth,
+        FragmentDepthGreaterEqual,
+        FragmentDepthLessEqual,
+        SampleIndex,
+        SampleMask,
+        SampleMaskOutput,
+        RenderTargetArrayIndex,
+        ViewportArrayIndex,
+        StencilRef,
+        ShadingRate,
+        ClipDistance,
+        CullDistance
     };
 
     struct Data {

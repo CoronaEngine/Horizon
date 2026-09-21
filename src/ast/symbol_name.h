@@ -53,6 +53,32 @@ template<typename T>
         case Tag::DrawIndex: return "draw_index";
         case Tag::FragmentCoord: return "fragment_coord";
         case Tag::FrontFacing: return "front_facing";
+        case Tag::PrimitiveIndex:
+            return "primitive_index";
+        case Tag::FragmentDepth:
+            return "fragment_depth";
+        case Tag::FragmentDepthGreaterEqual:
+            return "fragment_depth_greater_equal";
+        case Tag::FragmentDepthLessEqual:
+            return "fragment_depth_less_equal";
+        case Tag::SampleIndex:
+            return "sample_index";
+        case Tag::SampleMask:
+            return "sample_mask";
+        case Tag::SampleMaskOutput:
+            return "sample_mask_output";
+        case Tag::RenderTargetArrayIndex:
+            return "render_target_array_index";
+        case Tag::ViewportArrayIndex:
+            return "viewport_array_index";
+        case Tag::StencilRef:
+            return "stencil_ref";
+        case Tag::ShadingRate:
+            return "shading_rate";
+        case Tag::ClipDistance:
+            return "clip_distances";
+        case Tag::CullDistance:
+            return "cull_distances";
         case Tag::DispatchIdx:
             return "d_idx";
         case Tag::DispatchId:

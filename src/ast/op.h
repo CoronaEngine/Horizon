@@ -243,7 +243,11 @@ enum struct CallOp : uint32_t {
     WarpFirstActiveLane,
     WarpIsFirstActiveLane,
 
+    Ddx,
+    Ddy,
+    Fwidth,
+
     Count
 };
 
-}// namespace horizon::ast
+}  // namespace horizon::ast

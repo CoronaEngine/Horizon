@@ -166,6 +166,7 @@ private:
     }
     [[nodiscard]] const RefExpr *_ref(const Variable &variable) noexcept;
     [[nodiscard]] const RefExpr *_builtin(Variable::Tag tag, const Type *type) noexcept;
+    [[nodiscard]] const RefExpr *array_builtin(Variable::Tag tag, const Type *element_type, uint count);
     const Function *add_used_function(SP<const Function> func) noexcept;
 
     template<typename Stmt, typename Tuple, size_t... i>
@@ -324,6 +325,19 @@ public:
     [[nodiscard]] const RefExpr *draw_index() noexcept;
     [[nodiscard]] const RefExpr *fragment_coord() noexcept;
     [[nodiscard]] const RefExpr *front_facing() noexcept;
+    [[nodiscard]] const RefExpr *primitive_index() noexcept;
+    [[nodiscard]] const RefExpr *fragment_depth() noexcept;
+    [[nodiscard]] const RefExpr *fragment_depth_greater_equal() noexcept;
+    [[nodiscard]] const RefExpr *fragment_depth_less_equal() noexcept;
+    [[nodiscard]] const RefExpr *sample_index() noexcept;
+    [[nodiscard]] const RefExpr *sample_mask() noexcept;
+    [[nodiscard]] const RefExpr *sample_mask_output() noexcept;
+    [[nodiscard]] const RefExpr *render_target_array_index() noexcept;
+    [[nodiscard]] const RefExpr *viewport_array_index() noexcept;
+    [[nodiscard]] const RefExpr *stencil_ref() noexcept;
+    [[nodiscard]] const RefExpr *shading_rate() noexcept;
+    [[nodiscard]] const RefExpr *clip_distances(uint count);
+    [[nodiscard]] const RefExpr *cull_distances(uint count);
     void discard();
     [[nodiscard]] const RefExpr *argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *reference_argument(const Type *type) noexcept;

@@ -19,7 +19,10 @@ enum class RasterDiagnosticCode : uint8_t
     InvalidReturn,
     MissingVertexPosition,
     PhysicalResourceCapture,
-    RecursiveCall
+    RecursiveCall,
+    InvalidBuiltinType,
+    InvalidBuiltinConfiguration,
+    MissingBuiltinWrite
 };
 
 struct RasterDiagnostic

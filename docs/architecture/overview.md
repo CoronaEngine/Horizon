@@ -139,6 +139,8 @@ AST 当前包含：
 
 VS/FS 复用同一套 Function、Expression、Statement，使用 `StageInput` 区分只读阶段参数，
 builtin 与普通 location 分开记录。接口布局在阶段构造结束时生成，组合仅作只读校验。
+系统值表达已包含深度、采样覆盖、clip/cull 距离、图元编号、目标层、视口、模板参考值和着色速率；
+DSL 也提供片元导数。阶段、权限、深度模式和距离数组兼容性由 AST 校验，设备能力留给后续后端。
 当前验证覆盖 host AST，尚未接入 shader 编译、pipeline 或 GPU 绘制。
 
 ### 6.1 所有权与 Context
