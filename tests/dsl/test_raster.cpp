@@ -462,6 +462,37 @@ namespace
         }
     }
 
+    void test_swizzle_component_index_types()
+    {
+        FragmentShader shader { [] {
+            Float4 value { 1.0f };
+            auto reordered = decay_swizzle(value.yx());
+            value.zw() = reordered;
+        } };
+        size_t index_count = 0;
+        auto check_index = [&](const Expression* expression) {
+            if (expression->tag() != Expression::Tag::Subscript)
+            {
+                return;
+            }
+            static_cast<const SubscriptExpr*>(expression)->for_each_index([&](const Expression* index) {
+                ++index_count;
+                expect(index->type() == Type::of<uint>(), "swizzle component indices use portable uint AST literals");
+            });
+        };
+        for (const auto* statement : shader.function()->body()->statements())
+        {
+            if (statement->tag() != Statement::Tag::Assign)
+            {
+                continue;
+            }
+            const auto* assignment = static_cast<const AssignStmt*>(statement);
+            check_index(assignment->lhs());
+            check_index(assignment->rhs());
+        }
+        expect(index_count == 4, "swizzle reads and writes both exercise component indexing");
+    }
+
     void test_derivative_expressions()
     {
         expect(HasDerivatives<Float> && HasDerivatives<Float2> && HasDerivatives<Float4>,
@@ -706,6 +737,7 @@ int main()
 {
     test_derivative_expressions();
     test_vector_swizzle_derivatives<Float4>();
+    test_swizzle_component_index_types();
     test_derivative_precision();
     test_system_output_construction_errors();
     test_extended_apis_require_function();

@@ -51,12 +51,13 @@ struct Swizzle {
 private:
     template<size_t... index>
     void assign_to(vec_type &vec, std::index_sequence<index...>) const noexcept {
-        ((vec[index] = data_[Indices]), ...);
+        // Component indices fit in uint, avoiding platform-dependent size_t AST literals.
+        ((vec[static_cast<uint>(index)] = data_[Indices]), ...);
     }
 
     template<typename U, size_t... index>
     void assign_from(const U &vec, std::index_sequence<index...>) noexcept {
-        ((data_[Indices] = vec[index]), ...);
+        ((data_[Indices] = vec[static_cast<uint>(index)]), ...);
     }
 
 public:
