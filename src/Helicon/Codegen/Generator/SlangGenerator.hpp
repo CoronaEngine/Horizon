@@ -91,7 +91,9 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getParseOutput(const Ast::MemberAccess* node);
 		static std::string getParseOutput(const Ast::DefineOutputVariate* node);
 		static std::string getParseOutput(      Ast::IfStatement* node);
+		static std::string getParseOutput2(      Ast::IfStatement* node);
 		static std::string getParseOutput(const Ast::ElseStatement* node);
+		static std::string getParseOutput2(const Ast::ElseStatement* node);
 		static std::string getParseOutput(const Ast::InputVariate* node);
 		static std::string getParseOutput(const Ast::OutputVariate* node);
 		static std::string getParseOutput(const Ast::DefineUniversalArray* node);
@@ -113,6 +115,7 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 
 	    static Ast::BranchInfo getBranchInfo( const std::vector<std::shared_ptr<Ast::Statement>>&body);
 	    static std::string getBranchImport(const std::vector<size_t>& refs);
+	    static std::string getBranchExternDeclaration(const std::vector<size_t>& refs);
 
 		static std::shared_ptr<Ast::Variate> getPositionOutput();
 		static std::shared_ptr<Ast::Variate> getIsFrontFaceOutput();

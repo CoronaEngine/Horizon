@@ -255,13 +255,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	return node->variate->type->generate() + " " + node->variate->name + " : SV_TARGET" + std::to_string(node->variate->location) + ";";
 }
 
-std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfStatement* node)
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfStatement *node)
 {
     if (node->conditionDetector.has_value())
     {
         Ast::Parser::setEnabledTypeHeader(true);
         Ast::Parser::getBranchOutputs().emplace_back();
-        auto& branchRefs = Ast::Parser::getBranchReferences();
+        auto &branchRefs = Ast::Parser::getBranchReferences();
         branchRefs.top().push_back(node->index);
         branchRefs.emplace();
         node->branchInfo = getBranchInfo(node->statements);
@@ -276,15 +276,15 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfSta
             auto falseIp = getBranchImport(branchRefs.top());
             branchRefs.pop();
 
-            auto& allVarRefs = node->branchInfo.variateRefs;
+            auto &allVarRefs = node->branchInfo.variateRefs;
 
             std::string name = "branch_" + std::to_string(node->index);
-            //func call
+            // func call
             std::string call = name + "(";
             std::string func = "void " + name + "(";
             if (!allVarRefs.empty())
             {
-                for (auto i = allVarRefs.begin(); i != allVarRefs.end(); )
+                for (auto i = allVarRefs.begin(); i != allVarRefs.end();)
                 {
                     call += (*i)->name;
                     std::string prefix;
@@ -312,7 +312,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfSta
             call += ");";
             func += ")";
 
-            auto& output = Ast::Parser::getBranchOutputs()[node->index];
+            auto &output = Ast::Parser::getBranchOutputs()[node->index];
             output.declareBranch = "import type_header;\n" + func + ";";
             output.trueBranch = node->importPart + func + "\n" + node->branchInfo.body;
             output.falseBranch = falseIp + func + "\n" + falseBranch.body;
@@ -322,15 +322,93 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfSta
 
         return "";
     }
-	auto result = "if (" + node->condition->generate() + ") {\n";
-	nestHierarchy++;
-	for (auto& statement: node->statements)
-	{
-		result += getCodeIndentation() + statement->generate() + "\n";
-	}
-	nestHierarchy--;
-	result += getCodeIndentation() + "}";
-	return result;
+    auto result = "if (" + node->condition->generate() + ") {\n";
+    nestHierarchy++;
+    for (auto &statement : node->statements)
+    {
+        result += getCodeIndentation() + statement->generate() + "\n";
+    }
+    nestHierarchy--;
+    result += getCodeIndentation() + "}";
+    return result;
+}
+
+std::string Generator::SlangGenerator::getParseOutput2(Ast::IfStatement *node)
+{
+    if (node->conditionDetector.has_value())
+    {
+        Ast::Parser::setEnabledTypeHeader(true);
+        Ast::Parser::getBranchOutputs().emplace_back();
+        auto &branchRefs = Ast::Parser::getBranchReferences();
+        branchRefs.top().push_back(node->index);
+        branchRefs.emplace();
+        node->branchInfo = getBranchInfo(node->statements);
+        node->importPart = getBranchExternDeclaration(branchRefs.top());
+        branchRefs.pop();
+
+        if (!node->hasElse)
+        {
+            branchRefs.emplace();
+            Ast::BranchInfo falseBranch{};
+            falseBranch.body = "{}";
+            auto falseIp = getBranchExternDeclaration(branchRefs.top());
+            branchRefs.pop();
+
+            auto &allVarRefs = node->branchInfo.variateRefs;
+
+            std::string name = "branch_" + std::to_string(node->index);
+            // func call
+            std::string call = name + "(";
+            std::string func = "void " + name + "(";
+            if (!allVarRefs.empty())
+            {
+                for (auto i = allVarRefs.begin(); i != allVarRefs.end();)
+                {
+                    call += (*i)->name;
+                    std::string prefix;
+                    if ((*i)->getAccessPermissions() == Ast::AccessPermissions::ReadOnly)
+                    {
+                        prefix = "in ";
+                    }
+                    else if ((*i)->getAccessPermissions() == Ast::AccessPermissions::WriteOnly)
+                    {
+                        prefix = "out ";
+                    }
+                    else if ((*i)->getAccessPermissions() == Ast::AccessPermissions::ReadAndWrite)
+                    {
+                        prefix = "inout ";
+                    }
+                    func += prefix + (*i)->type->generate() + " " + (*i)->name;
+                    ++i;
+                    if (i != allVarRefs.end())
+                    {
+                        call += ",";
+                        func += ",";
+                    }
+                }
+            }
+            call += ");";
+            func += ")";
+
+            auto &output = Ast::Parser::getBranchOutputs()[node->index];
+            output.declareBranch = "extern " + func + ";"; //declare branch先用来存函数签名，后续规范化
+            output.trueBranch = node->importPart + func + "\n" + node->branchInfo.body;
+            output.falseBranch = falseIp + func + "\n" + falseBranch.body;
+            output.conditionDetector = node->conditionDetector.value();
+            return call;
+        }
+
+        return "";
+    }
+    auto result = "if (" + node->condition->generate() + ") {\n";
+    nestHierarchy++;
+    for (auto &statement : node->statements)
+    {
+        result += getCodeIndentation() + statement->generate() + "\n";
+    }
+    nestHierarchy--;
+    result += getCodeIndentation() + "}";
+    return result;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ElseStatement* node)
@@ -615,7 +693,7 @@ EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBr
     branch.variateRefs = std::move(collection.variateRefs);
     return branch;
 }
-std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std::vector<size_t>& refs)
+std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std::vector<size_t> &refs)
 {
     std::string result;
     if (Ast::Parser::isEnabledTypeHeader())
@@ -626,6 +704,22 @@ std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std
     for (size_t ref : refs)
     {
         result += "import branch_" + std::to_string(ref) + ";\n";
+    }
+
+    return result;
+}
+std::string Generator::SlangGenerator::getBranchExternDeclaration(const std::vector<size_t> &refs)
+{
+    std::string result;
+    if (Ast::Parser::isEnabledTypeHeader())
+    {
+        result = "import type_header;\n";
+    }
+
+    for (size_t ref : refs)
+    {
+        auto &output = Ast::Parser::getBranchOutputs()[ref];
+        result += output.declareBranch + "\n";
     }
 
     return result;
