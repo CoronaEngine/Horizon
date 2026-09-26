@@ -157,6 +157,21 @@ namespace EmbeddedShader
         auto fraqSlangModules = compilerOption.slangModules;
         fraqSlangModules.insert(fraqSlangModules.end(),outputs[1].sourceModule.begin(), outputs[1].sourceModule.end());
 
+        for (const auto & output : outputs)
+        {
+            std::cout << "Core: " << output.output << "\n";
+            std::cout << "TypeHeader: " << output.typeHeader << "\n";
+            size_t branch_n = 0;
+            for (const auto& branch : output.branches)
+            {
+                std::cout << "Branch: " << branch_n << "\n";
+                std::cout << "\t""declareBranch: " << branch.declareBranch << "\n";
+                std::cout << "\t""trueBranch: " << branch.trueBranch << "\n";
+                std::cout << "\t""falseBranch: " << branch.falseBranch << "\n";
+                ++branch_n;
+            }
+        }
+
         RasterizedPipelineObject result;
 	    compilerOption.slangModules.swap(vertSlangModules);
 	    compilerOption.branches = outputs[0].branches;

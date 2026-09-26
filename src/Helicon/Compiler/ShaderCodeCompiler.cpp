@@ -211,10 +211,10 @@ namespace EmbeddedShader
         SlangCompileResult result;
         if (!option.branches.empty())
         {
-            std::vector<SlangModule*> pDeclares;
+            //std::vector<SlangModule*> pDeclares;
             auto languageStr = "SlangModule";
 
-            std::vector<SlangModule> declares;
+            //std::vector<SlangModule> declares;
             std::vector<SlangModule> trueBs;
             std::vector<SlangModule> falseBs;
 
@@ -237,10 +237,10 @@ namespace EmbeddedShader
                 auto& branch = *i;
                 compileArgs.moduleName = "branch_" + std::to_string(index);
 
-                compileArgs.shaderCode = branch.declareBranch;
-                compileArgs.deps = option.slangModules;
-                compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
-                auto declare = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+                // compileArgs.shaderCode = branch.declareBranch;
+                // compileArgs.deps = option.slangModules;
+                // compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
+                // auto declare = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
 
                 compileArgs.shaderCode = branch.trueBranch;
                 compileArgs.deps = option.slangModules;
@@ -257,17 +257,17 @@ namespace EmbeddedShader
                 storeCode(trueB, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + "_True"));
                 storeCode(falseB, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + "_False"));
 
-                declares.emplace_back(std::move(declare));
+                //declares.emplace_back(std::move(declare));
                 trueBs.emplace_back(std::move(trueB));
                 falseBs.emplace_back(std::move(falseB));
 
-                pDeclares.resize(declares.size());
+                //pDeclares.resize(declares.size());
                 pTrueBs.resize(trueBs.size());
                 pFalseBs.resize(falseBs.size());
 
-                for (size_t i = 0; i < declares.size(); ++i)
+                for (size_t i = 0; i < trueBs.size(); ++i)
                 {
-                    pDeclares[i] = &declares[i];
+                    //pDeclares[i] = &declares[i];
                     pTrueBs[i] = &trueBs[i];
                     pFalseBs[i] = &falseBs[i];
                 }
@@ -281,7 +281,7 @@ namespace EmbeddedShader
             compileArgs.shaderCode = shaderCode;
             compileArgs.moduleName = "";
             compileArgs.deps = option.slangModules;
-            compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
+            compileArgs.deps.insert(compileArgs.deps.end(),pTrueBs.begin(), pTrueBs.end());
             auto core = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
             storeCode(core, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Branch_Core"));
 
