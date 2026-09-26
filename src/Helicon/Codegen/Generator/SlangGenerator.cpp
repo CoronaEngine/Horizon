@@ -119,7 +119,7 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
     }
 
     //Import Branch
-    output += getBranchImport(Ast::Parser::getBranchReferences().top());
+    output += getBranchExternDeclaration(Ast::Parser::getBranchReferences().top());
 
 
 	std::string entrypoint = "[shader(\"" + stageType + "\")]\n";
@@ -382,7 +382,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
         func += ")";
 
         auto& output = Ast::Parser::getBranchOutputs()[node->followIf->index];
-        output.declareBranch = "import type_header;\n" + func + ";";
+        output.declareBranch = "extern " + func + ";"; //declare branch先用来存函数签名，后续规范化
         output.trueBranch = node->followIf->importPart + func + "\n" + node->followIf->branchInfo.body;
         output.falseBranch = falseIp + func + "\n" + falseBranch.body;
         output.conditionDetector = node->followIf->conditionDetector.value();

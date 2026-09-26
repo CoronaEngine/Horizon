@@ -235,18 +235,20 @@ namespace EmbeddedShader
             for (auto i = option.branches.rbegin(); i != option.branches.rend(); ++i)
             {
                 auto& branch = *i;
-                compileArgs.moduleName = "branch_" + std::to_string(index);
+                auto modPrefix = "branch_" + std::to_string(index);
 
                 // compileArgs.shaderCode = branch.declareBranch;
                 // compileArgs.deps = option.slangModules;
                 // compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
                 // auto declare = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
 
+                compileArgs.moduleName = modPrefix + "_true";
                 compileArgs.shaderCode = branch.trueBranch;
                 compileArgs.deps = option.slangModules;
                 compileArgs.deps.insert(compileArgs.deps.end(),pTrueBs.begin(), pTrueBs.end());
                 auto trueB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
 
+                compileArgs.moduleName = modPrefix + "_false";
                 compileArgs.shaderCode = branch.falseBranch;
                 compileArgs.deps = option.slangModules;
                 compileArgs.deps.insert(compileArgs.deps.end(),pFalseBs.begin(), pFalseBs.end());
