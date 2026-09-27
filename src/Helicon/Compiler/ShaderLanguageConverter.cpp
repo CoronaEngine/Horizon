@@ -1571,6 +1571,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
 
 	    //load modules
+        std::vector<slang::IModule*> deps;
         {
             Slang::ComPtr<slang::IBlob> diagnosticsBlob;
             for (auto module : arg0.deps)
@@ -1581,6 +1582,10 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 if (!mod)
                 {
                     std::cout << "Load Module From IR Blob failed: " << module->name << std::endl;
+                }
+                else
+                {
+                    deps.push_back(mod);
                 }
             }
         }
@@ -1610,13 +1615,12 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    if (!isLibrary)
 	    {
 	        // 5. Compose Modules + Entry Points
-	        std::array<slang::IComponentType *, 2> componentTypes =
-            {
-	            srcModule,
-                entryPoint
-            };
+	        std::vector<slang::IComponentType*> componentTypes;
+            componentTypes.push_back(srcModule);
+            componentTypes.push_back(entryPoint);
+            componentTypes.insert(componentTypes.end(), deps.begin(), deps.end());
 
-	        Slang::ComPtr<slang::IComponentType> composedProgram;
+            Slang::ComPtr<slang::IComponentType> composedProgram;
 	        {
 	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
 	            SlangResult result = session->createCompositeComponentType(

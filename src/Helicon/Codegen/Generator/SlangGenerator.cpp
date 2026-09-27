@@ -314,8 +314,8 @@ std::string Generator::SlangGenerator::getParseOutput(Ast::IfStatement *node)
 
             auto &output = Ast::Parser::getBranchOutputs()[node->index];
             output.declareBranch = "extern " + func + ";"; //declare branch先用来存函数签名，后续规范化
-            output.trueBranch = node->importPart + func + "\n" + node->branchInfo.body;
-            output.falseBranch = falseIp + func + "\n" + falseBranch.body;
+            output.trueBranch = node->importPart + "export " + func + "\n" + node->branchInfo.body;
+            output.falseBranch = falseIp + "export " + func + "\n" + falseBranch.body;
             output.conditionDetector = node->conditionDetector.value();
             return call;
         }
@@ -383,8 +383,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
         auto& output = Ast::Parser::getBranchOutputs()[node->followIf->index];
         output.declareBranch = "extern " + func + ";"; //declare branch先用来存函数签名，后续规范化
-        output.trueBranch = node->followIf->importPart + func + "\n" + node->followIf->branchInfo.body;
-        output.falseBranch = falseIp + func + "\n" + falseBranch.body;
+        output.trueBranch = node->followIf->importPart + "export " + func + "\n" + node->followIf->branchInfo.body;
+        output.falseBranch = falseIp + "export " + func + "\n" + falseBranch.body;
         output.conditionDetector = node->followIf->conditionDetector.value();
         return call;
     }
