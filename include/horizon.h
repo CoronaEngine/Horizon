@@ -626,6 +626,17 @@ namespace Corona::Horizon
                                                   std::string name = {});
     };
 
+    // Owned, tightly packed bytes for one color image subresource. Rows retain
+    // image coordinates (y=0 first); no tone mapping or color conversion occurs.
+    struct ImageReadback
+    {
+        ImageExtent extent {};
+        Format format { Format::UNKNOWN };
+        uint64_t row_pitch { 0 };
+        uint64_t slice_pitch { 0 };
+        std::vector<std::byte> pixels;
+    };
+
     class HardwareImage : public ResourceHandle
     {
     public:
@@ -647,6 +658,11 @@ namespace Corona::Horizon
         void set_clear_depth(float depth, uint32_t stencil = 0);
 
         [[nodiscard]] CopyBufferToImageCommand copy_from(const HardwareBuffer& src, uint64_t buffer_offset = 0, uint32_t image_layer = 0, uint32_t image_mip = 0) const;
+        // Synchronous image-to-host transfer. Requires TransferSrc usage and a
+        // single-sampled, uncompressed color format. Throws on invalid input.
+        // Producers must be submitted before calling; the resource tracker
+        // orders those submissions. The returned bytes are already CPU-visible.
+        [[nodiscard]] ImageReadback readback(HardwareExecutor& executor, uint32_t layer = 0, uint32_t mip = 0) const;
         [[nodiscard]] uint32_t store_descriptor() const;
         static HardwareImage import_external(const ExternalMemoryHandle& handle, const HardwareImageDesc& desc, uint64_t allocation_size = 0);
         [[nodiscard]] ExternalMemoryHandle export_external() const;

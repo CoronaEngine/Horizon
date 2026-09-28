@@ -96,6 +96,7 @@ namespace Corona::Horizon
     {
         CopyBuffer,
         CopyBufferToImage,
+        CopyImageToBuffer,
         Dispatch,
         BeginRendering,
         EndRendering,
@@ -496,6 +497,7 @@ namespace Corona::Horizon
         void copy(BufferRef src, BufferRef dst, CopyRegion region, DeviceMask devices = {});
         void copy_image(ImageRef src, ImageRef dst, ImageCopyRegion region, DeviceMask devices = {});
         void copy_to_image(BufferRef src, ImageRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
+        void copy_from_image(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices = {});
         void dispatch(DispatchDesc desc, DeviceMask devices = {});
         void begin_rendering(RenderingDesc desc, DeviceMask devices = {});
         void end_rendering(DeviceMask devices = {});

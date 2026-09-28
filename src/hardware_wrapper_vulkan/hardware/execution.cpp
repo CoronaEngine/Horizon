@@ -118,6 +118,7 @@ namespace Corona::Horizon
             case CommandOp::CopyBuffer: return "CopyBuffer";
             case CommandOp::CopyImage: return "CopyImage";
             case CommandOp::CopyBufferToImage: return "CopyBufferToImage";
+            case CommandOp::CopyImageToBuffer: return "CopyImageToBuffer";
             case CommandOp::Dispatch: return "Dispatch";
             case CommandOp::BeginRendering: return "BeginRendering";
             case CommandOp::EndRendering: return "EndRendering";
@@ -844,6 +845,24 @@ namespace Corona::Horizon
         command.payload.buffer_image_copy = region;
         command.sequence = next_sequence();
         command.resources.push_back({ src.handle, AccessKind::Read, 0 });
+        command.resources.push_back({ dst.handle, AccessKind::Write, 0 });
+        mark_device_requirements(devices);
+        commands_.push_back(std::move(command));
+    }
+
+    void CommandRecorder::copy_from_image(ImageRef src, BufferRef dst, BufferImageCopyRegion region, DeviceMask devices)
+    {
+        ensure_open();
+        mark_requirement(QueueCapability::Transfer);
+        CommandIR command;
+        command.op = CommandOp::CopyImageToBuffer;
+        command.devices = devices;
+        command.queue = QueueCapability::Transfer;
+        command.payload.buffer_image_copy = region;
+        command.sequence = next_sequence();
+        // Transitioning to TRANSFER_SRC is a layout write. It must wait for
+        // preceding shader readers too, including readers on another queue.
+        command.resources.push_back({ src.handle, AccessKind::ReadWrite, 0 });
         command.resources.push_back({ dst.handle, AccessKind::Write, 0 });
         mark_device_requirements(devices);
         commands_.push_back(std::move(command));
@@ -1873,6 +1892,34 @@ namespace Corona::Horizon
                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                        1,
                                        &copy);
+                break;
+            }
+            case CommandOp::CopyImageToBuffer:
+            {
+                if (command.resources.size() < 2u)
+                    throw std::logic_error("CopyImageToBuffer requires an image and a buffer.");
+                ImageStore::Write src = write_image(command.resources[0].handle);
+                BufferStore::Write dst = write_buffer(command.resources[1].handle);
+                if (!src || !dst || src->image_handle == VK_NULL_HANDLE || dst->buffer_handle == VK_NULL_HANDLE)
+                    throw std::logic_error("CopyImageToBuffer requires valid resources.");
+                const auto copy = buffer_image_region(*src, command.payload.buffer_image_copy);
+                transition_image(command_buffer, *src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+                vkCmdCopyImageToBuffer(command_buffer, src->image_handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                       dst->buffer_handle, 1, &copy);
+                VkBufferMemoryBarrier2 barrier { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+                barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.buffer = dst->buffer_handle;
+                barrier.size = VK_WHOLE_SIZE;
+                VkDependencyInfo dependency { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &barrier;
+                vkCmdPipelineBarrier2(command_buffer, &dependency);
                 break;
             }
             case CommandOp::CopyImage:

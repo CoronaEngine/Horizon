@@ -1,0 +1,4 @@
+add_executable(horizon_image_readback_tests test_image_readback.cpp)
+target_link_libraries(horizon_image_readback_tests PRIVATE Horizon)
+target_include_directories(horizon_image_readback_tests PRIVATE ../../src)
+add_test(NAME HorizonImageReadbackTests COMMAND horizon_image_readback_tests)

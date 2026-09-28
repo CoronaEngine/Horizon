@@ -330,6 +330,47 @@ namespace Corona::Horizon
         return CopyBufferToImageCommand { src, *this, buffer_offset, absolute.layer, absolute.mip, 1 };
     }
 
+    ImageReadback HardwareImage::readback(HardwareExecutor& executor, uint32_t layer, uint32_t mip) const
+    {
+        ImageReadback result;
+        ImageSubresource absolute {};
+        uint64_t byte_count = 0;
+        {
+            const auto image = read_image(*this);
+            if (!image || !resolve_absolute_subresource(image->desc, range_, layer, mip, absolute))
+                throw std::invalid_argument("Image readback requires a valid subresource.");
+            const auto& desc = image->desc;
+            const auto block = detail::format_block_layout(desc.format);
+            if (!(desc.usage & ImageUsage_TransferSrc) || desc.sample_count != 1 ||
+                block.bytes_per_block == 0 || block.block_width != 1 || block.block_height != 1)
+                throw std::invalid_argument("Image readback requires a single-sampled uncompressed color transfer source.");
+            result.extent = detail::mip_extent(desc.extent, absolute.mip);
+            result.format = desc.format;
+            if (!detail::checked_mul(result.extent.width, block.bytes_per_block, result.row_pitch) ||
+                !detail::checked_mul(result.row_pitch, result.extent.height, result.slice_pitch) ||
+                !detail::checked_mul(result.slice_pitch, result.extent.depth, byte_count) ||
+                byte_count > std::numeric_limits<size_t>::max())
+                throw std::overflow_error("Image readback size overflow.");
+        } // Release image access before the command encoder takes its write lock.
+        result.pixels.resize(static_cast<size_t>(byte_count));
+        auto desc = HardwareBufferDesc::typed<std::byte>(byte_count, BufferUsage_TransferDst, "image.readback");
+        desc.cpu_access = CpuAccessMode::Read;
+        HardwareBuffer staging(desc);
+        if (!staging || !staging.get_mapped_data())
+            throw std::runtime_error("Image readback staging allocation failed.");
+        auto stream = executor.stream();
+        stream << StreamCommand([source = *this, staging, absolute](CommandRecorder& recorder) {
+            recorder.copy_from_image(ImageRef{source}, BufferRef{staging}, {0, absolute.layer, absolute.mip});
+        });
+        const auto receipt = stream << commit();
+        // wait() only enqueues a GPU dependency. Host reads require a CPU wait.
+        executor.wait_idle(receipt);
+        const auto buffer = read_buffer(staging);
+        buffer->resource_manager->invalidate_buffer(*buffer);
+        std::memcpy(result.pixels.data(), buffer->mapped_data(), result.pixels.size());
+        return result;
+    }
+
     uint32_t HardwareImage::store_descriptor() const
     {
         const auto image = write_image(*this);

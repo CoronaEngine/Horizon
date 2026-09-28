@@ -41,6 +41,7 @@ namespace Corona::Horizon
         [[nodiscard]] ExternalMemoryHandle export_buffer(BufferWrap& buffer);
         [[nodiscard]] uint32_t store_descriptor(BufferWrap& buffer);
         void flush_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size);
+        void invalidate_buffer(const BufferWrap& buffer);
         void destroy_buffer(BufferWrap& buffer) noexcept;
 
         [[nodiscard]] ImageWrap create_image(const HardwareImageDesc& desc);

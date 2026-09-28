@@ -1493,6 +1493,15 @@ namespace Corona::Horizon
                         "vmaFlushAllocation");
     }
 
+    void ResourceManager::invalidate_buffer(const BufferWrap& buffer)
+    {
+        if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE)
+            throw std::invalid_argument("Readback requires a mapped allocation.");
+        std::lock_guard lock(mutex_);
+        throw_if_failed(vmaInvalidateAllocation(allocator_, buffer.buffer_alloc, 0, VK_WHOLE_SIZE),
+                        "vmaInvalidateAllocation");
+    }
+
     void ResourceManager::flush_image(const ImageWrap& image, uint64_t byte_offset, uint64_t byte_size)
     {
         if (!image.valid() || image.image_alloc == VK_NULL_HANDLE || byte_size == 0)

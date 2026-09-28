@@ -1018,13 +1018,14 @@ namespace Corona::Horizon
                                     descriptor_index,
                                     "ComputePipeline bindless image");
 
-            auto found = std::ranges::find_if(bound_images_, [set, binding](const BoundImage& item) {
-                return item.set == set && item.binding == binding;
+            auto found = std::ranges::find_if(bound_images_, [set, binding, byte_offset](const BoundImage& item) {
+                return item.set == set && item.binding == binding && item.byte_offset == byte_offset;
             });
 
             BoundImage value {
                 .set = set,
                 .binding = binding,
+                .byte_offset = byte_offset,
                 .image = image,
                 .access = AccessKind::ReadWrite,
             };

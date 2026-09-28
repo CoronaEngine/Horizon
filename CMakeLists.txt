@@ -69,6 +69,12 @@ endif()
 
 add_subdirectory(src)
 
+option(HORIZON_BUILD_HARDWARE_TESTS "Build public hardware GPU regression tests" OFF)
+if(HORIZON_BUILD_ENGINE AND HORIZON_BUILD_HARDWARE_TESTS)
+    enable_testing()
+    add_subdirectory(tests/hardware)
+endif()
+
 if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
     add_subdirectory(tools)
 endif()

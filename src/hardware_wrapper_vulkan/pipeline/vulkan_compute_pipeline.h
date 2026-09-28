@@ -30,6 +30,7 @@ namespace Corona::Horizon
         {
             uint32_t set { 0 };
             uint32_t binding { 0 };
+            uint64_t byte_offset { 0 }; // Descriptor-index member within bindless push constants.
             HardwareImage image {};
             AccessKind access { AccessKind::ReadWrite };
         };
