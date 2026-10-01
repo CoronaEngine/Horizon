@@ -44,7 +44,11 @@ void run_example_edsl_compile()
     //         out[dispatchThreadID()->xy()] -= in[dispatchThreadID()->xy()];
     // };
     //
-    // auto cp = ComputePipelineObject::compile(compute);
+    // CompilerOption co;
+    // co.compileGLSL = false;
+    // co.compileSpirV = false;
+    // co.compileHLSL = true;
+    // auto cp = ComputePipelineObject::compile(compute,ktm::uvec3(1),co);
 
     auto core = R"([vk::binding(0, 0)]
 __DynamicResource<__DynamicResourceKind.General> combinedTextureSamplerHandles[];
@@ -92,16 +96,24 @@ struct compute_input {
         uint3 dispatch_thread_id_input : SV_DispatchThreadID;
 }
 )";
+    auto declareBranch = R"(extern void branch_0(in compute_input input,[[vk::push_constant]] ConstantBuffer<global_push_constant_struct> global_push_constant);)";
+
     auto trueBranch = R"(import type_header;
 export void branch_0([[vk::push_constant]] ConstantBuffer<global_push_constant_struct> global_push_constant,in compute_input input)
 {
                 global_push_constant.global_var_1[input.dispatch_thread_id_input.xy] = (global_push_constant.global_var_1[input.dispatch_thread_id_input.xy] + global_push_constant.global_var_0[input.dispatch_thread_id_input.xy]);
 }
 )";
+    auto falseBranch = R"(import type_header;
+export void branch_0(in compute_input input,[[vk::push_constant]] ConstantBuffer<global_push_constant_struct> global_push_constant)
+{
+                global_push_constant.global_var_1[input.dispatch_thread_id_input.xy] = (global_push_constant.global_var_1[input.dispatch_thread_id_input.xy] - global_push_constant.global_var_0[input.dispatch_thread_id_input.xy]);
+})";
     auto globalSession = ShaderLanguageConverter::getGlobalSession();
         std::vector<slang::TargetDesc> compileTargets;
+        auto spirv_1_6 = globalSession->findProfile("spirv_1_6");
         auto sm_6_6 = globalSession->findProfile("sm_6_6");
-        compileTargets.push_back(slang::TargetDesc{.format = SLANG_HLSL, .profile = sm_6_6});
+        compileTargets.push_back(slang::TargetDesc{.format = SLANG_SPIRV_ASM, .profile = spirv_1_6});
         std::array<slang::CompilerOptionEntry, 1> options = {
             {slang::CompilerOptionName::EmitSpirvDirectly,
              {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
@@ -148,4 +160,13 @@ export void branch_0([[vk::push_constant]] ConstantBuffer<global_push_constant_s
     Slang::ComPtr<slang::IBlob> hlslCode = ShaderLanguageConverter::getFinalCode(linkedProgram, 0);
 
     std::cout << static_cast<const char*>(hlslCode->getBufferPointer()) << std::endl;
+
+    // CompilerOption option;
+    // option.enableBindless = true;
+    // option.compileHLSL = true;
+    // option.compileGLSL = false;
+    // option.compileSpirV = false;
+    // option.typeHeader = typeHeader;
+    // option.branches = {Ast::BranchOutput{[]{return false;},trueBranch,falseBranch,declareBranch}};
+    // ShaderCodeCompiler computeCompiler(core, ShaderStage::ComputeShader, ShaderLanguage::Slang,option);
 }
