@@ -1289,16 +1289,48 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         Slang::ComPtr<slang::IBlob> code;
         {
             Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            SlangResult result = linkedProgram->getEntryPointCode(
-                0, // entryPointIndex
-                targetIndex,
-                code.writeRef(),
-                diagnosticsBlob.writeRef());
+            SlangResult result =
+                linkedProgram->getEntryPointCode(0,  // entryPointIndex
+                                                 targetIndex, code.writeRef(), diagnosticsBlob.writeRef());
             diagnoseIfNeeded(diagnosticsBlob);
             if (SLANG_FAILED(result))
                 throw std::runtime_error("Error");
         }
         return code;
+    }
+    Slang::ComPtr<slang::ISession>
+    ShaderLanguageConverter::createSession(const Slang::ComPtr<slang::IGlobalSession> &globalSession,
+                                           std::span<slang::TargetDesc> targetDesc,
+                                           std::span<slang::CompilerOptionEntry> options)
+    {
+        slang::SessionDesc sessionDesc = {};
+        sessionDesc.targets = targetDesc.data();
+        sessionDesc.targetCount = targetDesc.size();
+        sessionDesc.compilerOptionEntries = options.data();
+        sessionDesc.compilerOptionEntryCount = options.size();
+        Slang::ComPtr<slang::ISession> session;
+        globalSession->createSession(sessionDesc, session.writeRef());
+        return session;
+    }
+    Slang::ComPtr<slang::IGlobalSession> ShaderLanguageConverter::getGlobalSession()
+    {
+        initSlangGlobalSession();
+        return slangGlobalSession;
+    }
+    Slang::ComPtr<slang::IEntryPoint> ShaderLanguageConverter::findEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                              std::string_view name)
+    {
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            mod->findEntryPointByName(name.data(), entryPoint.writeRef());
+            if (!entryPoint)
+            {
+                std::cout << "Error getting entry point" << std::endl;
+                throw std::runtime_error("Error");
+            }
+        }
+        return entryPoint;
     }
 
     std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
