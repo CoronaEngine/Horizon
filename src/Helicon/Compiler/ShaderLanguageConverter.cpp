@@ -1356,24 +1356,144 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 
     bool ShaderLanguageConverter::isSpirvValid(const std::vector<uint32_t> &spirvCode)
     {
-	    spv_diagnostic diagnostic = nullptr;
-	    spv_const_binary_t binary = { spirvCode.data(), spirvCode.size() };
+        spv_diagnostic diagnostic = nullptr;
+        spv_const_binary_t binary = {spirvCode.data(), spirvCode.size()};
 
-	    spv_result_t result = spvValidate(spvToolContext.CContext(), &binary, &diagnostic);
-	    if (result == SPV_SUCCESS) {
-	        spvDiagnosticDestroy(diagnostic);
-	        return true;
-	    }
+        spv_result_t result = spvValidate(spvToolContext.CContext(), &binary, &diagnostic);
+        if (result == SPV_SUCCESS)
+        {
+            spvDiagnosticDestroy(diagnostic);
+            return true;
+        }
         std::cerr << "❌ SPIR-V 验证失败 (错误码: " << result << ")\n";
 
-        if (diagnostic) {
-            std::cerr << "位置: 字索引 " << diagnostic->position.index
-                << ", 行 " << diagnostic->position.line
-                << ", 列 " << diagnostic->position.column << "\n";
+        if (diagnostic)
+        {
+            std::cerr << "位置: 字索引 " << diagnostic->position.index << ", 行 " << diagnostic->position.line
+                      << ", 列 " << diagnostic->position.column << "\n";
             std::cerr << "详情: " << diagnostic->error << "\n";
         }
-	    spvDiagnosticDestroy(diagnostic);
-	    return false;
+        spvDiagnosticDestroy(diagnostic);
+        return false;
+    }
+    Slang::ComPtr<slang::IGlobalSession> ShaderLanguageConverter::getGlobalSession()
+    {
+        initSlangGlobalSession();
+        return slangGlobalSession;
+    }
+    Slang::ComPtr<slang::IModule> ShaderLanguageConverter::loadModule(Slang::ComPtr<slang::ISession> session,
+                                                                      std::string_view moduleName,
+                                                                      std::string_view moduleSource)
+    {
+        Slang::ComPtr<slang::IModule> srcModule;
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        srcModule = session->loadModuleFromSourceString(moduleName.data(), moduleName.data(), moduleSource.data(),
+                                                        diagnosticsBlob.writeRef());
+        diagnoseIfNeeded(diagnosticsBlob);
+        if (!srcModule)
+        {
+            throw std::runtime_error("Failed to load Slang module.");
+        }
+        return srcModule;
+    }
+    Slang::ComPtr<slang::IModule> ShaderLanguageConverter::loadModule(Slang::ComPtr<slang::ISession> session,
+                                                                      const SlangModule &slangModule)
+    {
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        auto dataBlob = slang_createBlob(slangModule.binData.data(), slangModule.binData.size());
+        auto mod = session->loadModuleFromIRBlob(slangModule.name.c_str(), slangModule.path.c_str(), dataBlob,
+                                                 diagnosticsBlob.writeRef());
+        diagnoseIfNeeded(diagnosticsBlob);
+        if (!mod)
+        {
+            std::cout << "Load Module From IR Blob failed: " << slangModule.name << std::endl;
+        }
+    }
+    SlangModule ShaderLanguageConverter::convertModule(Slang::ComPtr<slang::IModule> mod)
+    {
+        Slang::ComPtr<slang::IBlob> moduleBlob;
+        {
+            auto result = mod->serialize(moduleBlob.writeRef());
+            if (result != SLANG_OK || !moduleBlob)
+            {
+                throw std::runtime_error("Failed to serialize Slang module.");
+            }
+        }
+        SlangModule module;
+        module.name = mod->getName();
+        module.path = mod->getFilePath();
+        module.binData =
+            std::vector(static_cast<uint8_t const *>(moduleBlob->getBufferPointer()),
+                        static_cast<uint8_t const *>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
+        return module;
+    }
+    Slang::ComPtr<slang::IComponentType>
+    ShaderLanguageConverter::link(Slang::ComPtr<slang::ISession> session,
+                                  std::span<slang::IComponentType *> composeComponents)
+    {
+        Slang::ComPtr<slang::IComponentType> target;
+        Slang::ComPtr<slang::IComponentType> composedProgram;
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result =
+                session->createCompositeComponentType(composeComponents.data(), composeComponents.size(),
+                                                      composedProgram.writeRef(), diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to create composite component type in Slang.");
+        }
+
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result = composedProgram->link(target.writeRef(), diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to link Slang program.");
+        }
+        return target;
+    }
+    Slang::ComPtr<slang::IEntryPoint> ShaderLanguageConverter::findEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                              std::string_view name)
+    {
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+        mod->findEntryPointByName(name.data(), entryPoint.writeRef());
+        diagnoseIfNeeded(diagnosticsBlob);
+        if (!entryPoint)
+        {
+            throw std::runtime_error("Failed to find entry point.");
+        }
+        return entryPoint;
+    }
+    Slang::ComPtr<slang::IEntryPoint> ShaderLanguageConverter::tryFindEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                                 std::string_view name,
+                                                                                 ShaderStage stage)
+    {
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+        mod->findEntryPointByName(name.data(), entryPoint.writeRef());
+
+        if (!entryPoint)
+        {
+            // 针对非shader attr标注的入口点查找
+            mod->findAndCheckEntryPoint(name.data(), toSlangStage(stage), entryPoint.writeRef(),
+                                        diagnosticsBlob.writeRef());
+        }
+        return entryPoint;
+    }
+    Slang::ComPtr<slang::ISession>
+    ShaderLanguageConverter::createSession(const Slang::ComPtr<slang::IGlobalSession> &globalSession,
+                                           std::span<slang::TargetDesc> targetDesc,
+                                           std::span<slang::CompilerOptionEntry> options)
+    {
+        slang::SessionDesc sessionDesc = {};
+        sessionDesc.targets = targetDesc.data();
+        sessionDesc.targetCount = targetDesc.size();
+        sessionDesc.compilerOptionEntries = options.data();
+        sessionDesc.compilerOptionEntryCount = options.size();
+        Slang::ComPtr<slang::ISession> session;
+        globalSession->createSession(sessionDesc, session.writeRef());
+        return session;
     }
 
     void ShaderLanguageConverter::slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath,

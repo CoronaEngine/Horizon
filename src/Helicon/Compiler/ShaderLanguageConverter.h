@@ -5,11 +5,12 @@
 
 #include"ShaderCodeCompiler.h"
 
+#include <Compiler/ShaderCommon.h>
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang.h>
+#include <span>
 #include <variant>
-#include <Compiler/ShaderCommon.h>
 
 namespace EmbeddedShader
 {
@@ -79,6 +80,18 @@ namespace EmbeddedShader
 	    static bool isSpirvValid(const std::vector<uint32_t>& spirvCode);
 
 	    //Slang Compliation Helper API
+	    static Slang::ComPtr<slang::IGlobalSession> getGlobalSession();
+	    static Slang::ComPtr<slang::IModule> loadModule(Slang::ComPtr<slang::ISession> session, std::string_view moduleName, std::string_view moduleSource);
+	    static Slang::ComPtr<slang::IModule> loadModule(Slang::ComPtr<slang::ISession> session, const SlangModule& slangModule);
+	    static SlangModule convertModule(Slang::ComPtr<slang::IModule> mod);
+	    static Slang::ComPtr<slang::IComponentType> link(Slang::ComPtr<slang::ISession> session, std::span<slang::IComponentType*> composeComponents);
+	    static Slang::ComPtr<slang::IEntryPoint> findEntryPoint(Slang::ComPtr<slang::IModule> mod, std::string_view name);
+	    static Slang::ComPtr<slang::IEntryPoint> tryFindEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                   std::string_view name, ShaderStage stage);
+        static Slang::ComPtr<slang::ISession> createSession(
+                                        const Slang::ComPtr<slang::IGlobalSession> &globalSession,
+                                        std::span<slang::TargetDesc> targetDesc,
+                                        std::span<slang::CompilerOptionEntry> options);
 	    //----------------------------
 	private:
 	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};
