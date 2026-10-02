@@ -281,7 +281,7 @@ namespace EmbeddedShader
             info = getCurrentConditionInfo();
 
             compileArgs.shaderCode = shaderCode;
-            compileArgs.moduleName = "core_source";
+            compileArgs.moduleName = "";
             compileArgs.deps = option.slangModules;
             compileArgs.deps.insert(compileArgs.deps.end(),pTrueBs.begin(), pTrueBs.end());
             auto core = ShaderLanguageConverter::slangModuleCompiler(compileArgs);

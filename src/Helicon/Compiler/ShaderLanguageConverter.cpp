@@ -1156,149 +1156,60 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 
     SlangCompileResult ShaderLanguageConverter::slangCompilerWithModules(SlangCompileArgs2 arg)
     {
-        return compileBySlangModule(
-            [&](Slang::ComPtr<slang::ISession> session)
+	    return compileBySlangModule([&](Slang::ComPtr<slang::ISession> session)
+        {
+	        Slang::ComPtr<slang::IModule> srcModule;
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        auto dataBlob = slang_createBlob(arg.module->binData.data(), arg.module->binData.size());
+            srcModule = session->loadModuleFromIRBlob(arg.module->name.c_str(),arg.module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (!srcModule)
             {
-                Slang::ComPtr<slang::IModule> srcModule;
-                Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-                auto dataBlob = slang_createBlob(arg.module->binData.data(), arg.module->binData.size());
-                srcModule = session->loadModuleFromIRBlob(arg.module->name.c_str(), arg.module->path.c_str(), dataBlob,
-                                                          diagnosticsBlob.writeRef());
-                diagnoseIfNeeded(diagnosticsBlob);
-                if (!srcModule)
-                {
-                    std::cout << "Load Module From IR Blob failed: " << arg.module->name << std::endl;
-                }
-                return srcModule;
-            },
-            arg);
+                std::cout << "Load Module From IR Blob failed: " << arg.module->name << std::endl;
+            }
+            return srcModule;
+        },arg);
     }
 
     void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
     {
-        initSlangGlobalSession();
+	    initSlangGlobalSession();
 
-        slang::SessionDesc sessionDesc{};
-        slang::TargetDesc targetDesc{};
-        targetDesc.format = SLANG_CPP_SOURCE;
-        sessionDesc.targets = &targetDesc;
-        sessionDesc.targetCount = 1;
+	    slang::SessionDesc sessionDesc{};
+	    slang::TargetDesc targetDesc{};
+	    targetDesc.format = SLANG_CPP_SOURCE;
+	    sessionDesc.targets = &targetDesc;
+	    sessionDesc.targetCount = 1;
 
-        std::array options = {
-            slang::CompilerOptionEntry{slang::CompilerOptionName::NoMangle,
-                                       {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}},
-            slang::CompilerOptionEntry{slang::CompilerOptionName::IncompleteLibrary,
-                                       {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}},
+	    std::array options =
+        {
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::NoMangle,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::IncompleteLibrary,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
         };
-        sessionDesc.compilerOptionEntries = options.data();
-        sessionDesc.compilerOptionEntryCount = options.size();
-        Slang::ComPtr<slang::ISession> session;
-        slangGlobalSession->createSession(sessionDesc, session.writeRef());
+	    sessionDesc.compilerOptionEntries = options.data();
+	    sessionDesc.compilerOptionEntryCount = options.size();
+	    Slang::ComPtr<slang::ISession> session;
+	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
 
-        Slang::ComPtr irBlob{slang_createBlob(moduleData.data(), moduleData.size())};
-        Slang::ComPtr<slang::IModule> slangModule;
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            slangModule =
-                session->loadModuleFromIRBlob("test-module", "test-module", irBlob, diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (!slangModule)
-            {
-                throw std::runtime_error("Failed to load Slang module.");
-            }
-        }
-        std::cout << "slang-module loaded successfully!" << std::endl;
-    }
-    Slang::ComPtr<slang::IModule> ShaderLanguageConverter::loadModule(const Slang::ComPtr<slang::ISession> &session,
-                                                                      std::string_view name, std::string_view shader)
-    {
-        Slang::ComPtr<slang::IModule> slangModule{};
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            slangModule =
-                session->loadModuleFromSourceString(name.data(), "", shader.data(), diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (!slangModule)
-            {
-                throw std::runtime_error("Failed to load slang module");
-            }
-        }
-        return slangModule;
-    }
-    Slang::ComPtr<slang::IModule> ShaderLanguageConverter::loadModule(const Slang::ComPtr<slang::ISession> &session, const SlangModule &shader)
-    {
-        Slang::ComPtr<slang::IModule> srcModule;
-        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-        auto dataBlob = slang_createBlob(shader.binData.data(), shader.binData.size());
-        srcModule = session->loadModuleFromIRBlob(shader.name.c_str(), shader.path.c_str(), dataBlob,
-                                                  diagnosticsBlob.writeRef());
-        diagnoseIfNeeded(diagnosticsBlob);
-        if (!srcModule)
-        {
-            std::cout << "Load Module From IR Blob failed: " << shader.name << std::endl;
-        }
-        return srcModule;
-    }
-    SlangModule ShaderLanguageConverter::convertSlangModule(Slang::ComPtr<slang::IModule> mod)
-    {
-        Slang::ComPtr<slang::IBlob> moduleBlob;
-        {
-            auto result = mod->serialize(moduleBlob.writeRef());
-            if (result != SLANG_OK || !moduleBlob)
-            {
-                throw std::runtime_error("Failed to serialize Slang module.");
-            }
-        }
-        SlangModule module;
-        module.name = mod->getName();
-        module.path = mod->getFilePath();
-        module.binData =
-            std::vector(static_cast<uint8_t const *>(moduleBlob->getBufferPointer()),
-                        static_cast<uint8_t const *>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
-        return module;
-    }
-    Slang::ComPtr<slang::IComponentType>
-    ShaderLanguageConverter::getLinkedProgram(const Slang::ComPtr<slang::ISession> &session,
-                                              const std::span<slang::IComponentType *> &componentTypes)
-    {
-        Slang::ComPtr<slang::IComponentType> composedProgram;
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            SlangResult result = session->createCompositeComponentType(
-                componentTypes.data(), componentTypes.size(), composedProgram.writeRef(), diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (SLANG_FAILED(result))
-                throw std::runtime_error("Error");
-        }
 
-        Slang::ComPtr<slang::IComponentType> linkedProgram;
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            SlangResult result = composedProgram->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (SLANG_FAILED(result))
-                throw std::runtime_error("Error");
-        }
-
-        return linkedProgram;
-    }
-    Slang::ComPtr<slang::IBlob>
-    ShaderLanguageConverter::getFinalCode(const Slang::ComPtr<slang::IComponentType> &linkedProgram,
-                                          SlangInt targetIndex)
-    {
-        Slang::ComPtr<slang::IBlob> code;
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            SlangResult result = linkedProgram->getEntryPointCode(
-                0, // entryPointIndex
-                targetIndex,
-                code.writeRef(),
-                diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (SLANG_FAILED(result))
-                throw std::runtime_error("Error");
-        }
-        return code;
+	    Slang::ComPtr irBlob{slang_createBlob(moduleData.data(),moduleData.size())};
+	    Slang::ComPtr<slang::IModule> slangModule;
+	    {
+	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+	        slangModule = session->loadModuleFromIRBlob("test-module","test-module",irBlob,diagnosticsBlob.writeRef());
+	        diagnoseIfNeeded(diagnosticsBlob);
+	        if (!slangModule)
+	        {
+	            throw std::runtime_error("Failed to load Slang module.");
+	        }
+	    }
+	    std::cout << "slang-module loaded successfully!" << std::endl;
     }
 
     std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,

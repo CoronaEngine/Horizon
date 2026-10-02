@@ -5,12 +5,11 @@
 
 #include"ShaderCodeCompiler.h"
 
-#include <Compiler/ShaderCommon.h>
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang.h>
-#include <span>
 #include <variant>
+#include <Compiler/ShaderCommon.h>
 
 namespace EmbeddedShader
 {
@@ -72,14 +71,6 @@ namespace EmbeddedShader
 	    static SlangCompileResult slangCompilerWithModules(SlangCompileArgs arg);
 	    static SlangCompileResult slangCompilerWithModules(SlangCompileArgs2 arg);
 	    static void testSlangModule(const std::vector<uint8_t>& moduleData);
-
-	    //test interface
-	    static Slang::ComPtr<slang::IModule> loadModule(const Slang::ComPtr<slang::ISession>& session,std::string_view name, std::string_view shader);
-	    static Slang::ComPtr<slang::IModule> loadModule(const Slang::ComPtr<slang::ISession>& session, const SlangModule& shader);
-	    static SlangModule convertSlangModule(Slang::ComPtr<slang::IModule> mod);
-	    static Slang::ComPtr<slang::IComponentType> getLinkedProgram(const Slang::ComPtr<slang::ISession>& session, const std::span<slang::IComponentType *> & componentTypes);
-	    static Slang::ComPtr<slang::IBlob> getFinalCode(const Slang::ComPtr<slang::IComponentType>& linkedProgram, SlangInt targetIndex);
-	    //
 
 		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
 
