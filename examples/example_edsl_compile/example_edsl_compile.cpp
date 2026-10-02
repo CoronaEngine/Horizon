@@ -30,10 +30,9 @@ auto loadModule(const Slang::ComPtr<slang::ISession>& session,std::string_view n
     return slangModule;
 }
 
-using namespace EmbeddedShader;
-
 void run_example_edsl_compile()
 {
+    using namespace EmbeddedShader;
     // Texture2D<ktm::fvec4> in;
     // Texture2D<ktm::fvec4> out;
     // bool isAdd = true;
@@ -98,31 +97,29 @@ export void branch_0([[vk::push_constant]] ConstantBuffer<global_push_constant_s
                 global_push_constant.global_var_1[input.dispatch_thread_id_input.xy] = (global_push_constant.global_var_1[input.dispatch_thread_id_input.xy] + global_push_constant.global_var_0[input.dispatch_thread_id_input.xy]);
 }
 )";
-    auto globalSession = ShaderLanguageConverter::getGlobalSession();
-        std::vector<slang::TargetDesc> compileTargets;
-        auto sm_6_6 = globalSession->findProfile("sm_6_6");
-        compileTargets.push_back(slang::TargetDesc{.format = SLANG_HLSL, .profile = sm_6_6});
-        std::array<slang::CompilerOptionEntry, 1> options = {
-            {slang::CompilerOptionName::EmitSpirvDirectly,
-             {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
-        auto session = ShaderLanguageConverter::createSession(globalSession, compileTargets, options);
-        std::string_view srcStr = "slang";
-        options = {
-            {slang::CompilerOptionName::Language,
-             {slang::CompilerOptionValueKind::String, 0, 0, srcStr.data(), nullptr}}
-        };
-        compileTargets.clear();
-        compileTargets.push_back(slang::TargetDesc{.format = SLANG_CPP_SOURCE});
+    Slang::ComPtr<slang::IGlobalSession> globalSession;
+    createGlobalSession(globalSession.writeRef());
+    slang::SessionDesc sessionDesc = {};
+    slang::TargetDesc targetDesc = {};
+    targetDesc.format = SLANG_HLSL;
+    targetDesc.profile = globalSession->findProfile("sm_6_6");
 
-        auto modSession = ShaderLanguageConverter::createSession(globalSession, compileTargets, options);
-
-    auto typeHeaderMod2 = ShaderLanguageConverter::convertSlangModule(ShaderLanguageConverter::loadModule(modSession, "type_header",typeHeader));
-    auto trueBranchMod2 = ShaderLanguageConverter::convertSlangModule(ShaderLanguageConverter::loadModule(modSession, "true_branch",trueBranch));
-    auto coreMod2 = ShaderLanguageConverter::convertSlangModule(ShaderLanguageConverter::loadModule(modSession, "source",core));
-
-    auto typeHeaderMod = ShaderLanguageConverter::loadModule(session, typeHeaderMod2);
-    auto trueBranchMod = ShaderLanguageConverter::loadModule(session, trueBranchMod2);
-    auto coreMod = ShaderLanguageConverter::loadModule(session, coreMod2);
+    sessionDesc.targets = &targetDesc;
+    sessionDesc.targetCount = 1;
+    std::array<slang::CompilerOptionEntry, 1> options =
+            {
+        {
+            slang::CompilerOptionName::EmitSpirvDirectly,
+            {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+        }
+            };
+    sessionDesc.compilerOptionEntries = options.data();
+    sessionDesc.compilerOptionEntryCount = options.size();
+    Slang::ComPtr<slang::ISession> session;
+    globalSession->createSession(sessionDesc, session.writeRef());
+    auto typeHeaderMod = ShaderLanguageConverter::loadModule(session, "type_header",typeHeader);
+    auto trueBranchMod = ShaderLanguageConverter::loadModule(session, "true_branch",trueBranch);
+    auto coreMod = ShaderLanguageConverter::loadModule(session, "source",core);
 
     Slang::ComPtr<slang::IEntryPoint> entryPoint;
     {

@@ -79,9 +79,6 @@ namespace EmbeddedShader
 	    static SlangModule convertSlangModule(Slang::ComPtr<slang::IModule> mod);
 	    static Slang::ComPtr<slang::IComponentType> getLinkedProgram(const Slang::ComPtr<slang::ISession>& session, const std::span<slang::IComponentType *> & componentTypes);
 	    static Slang::ComPtr<slang::IBlob> getFinalCode(const Slang::ComPtr<slang::IComponentType>& linkedProgram, SlangInt targetIndex);
-	    static Slang::ComPtr<slang::ISession> createSession(const Slang::ComPtr<slang::IGlobalSession>& globalSession,std::span<slang::TargetDesc> targetDesc,std::span<slang::CompilerOptionEntry> options);
-	    static Slang::ComPtr<slang::IGlobalSession> getGlobalSession();
-	    static Slang::ComPtr<slang::IEntryPoint> findEntryPoint(Slang::ComPtr<slang::IModule> mod, std::string_view name);
 	    //
 
 		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
