@@ -147,7 +147,7 @@ struct ShaderCodeModule
 
     struct CompilerOption
     {
-        bool compileGLSL = true;
+        bool compileGLSL = false;
         bool compileHLSL = true;
         bool compileDXIL = false;
         bool compileDXBC = false;

@@ -19,4 +19,5 @@ void run_example_edsl_compile()
     };
 
     auto cp = ComputePipelineObject::compile(compute);
+    std::cout << std::get<1>(cp.compute->getShaderCode(ShaderLanguage::HLSL, true).shaderCode) << std::endl;
 }

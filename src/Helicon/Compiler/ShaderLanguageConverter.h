@@ -77,6 +77,9 @@ namespace EmbeddedShader
 	    static std::vector<uint32_t> spirvLinker(const std::vector<std::vector<uint32_t>> &binaries);
 		//static ShaderCodeModule::ShaderResources slangReflectedBindInfo(const std::string& shaderCode);
 	    static bool isSpirvValid(const std::vector<uint32_t>& spirvCode);
+
+	    //Slang Compliation Helper API
+	    //----------------------------
 	private:
 	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};
 	    static inline thread_local Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;

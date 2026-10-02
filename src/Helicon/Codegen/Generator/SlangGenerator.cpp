@@ -340,7 +340,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
         auto& branchRefs = Ast::Parser::getBranchReferences();
         branchRefs.emplace();
         Ast::BranchInfo falseBranch = getBranchInfo(node->statements);
-        auto falseIp = getBranchImport(branchRefs.top());
+        auto falseIp = getBranchExternDeclaration(branchRefs.top());
         branchRefs.pop();
 
         std::set<const Ast::Variate*> allVarRefs;
@@ -615,21 +615,7 @@ EmbeddedShader::Ast::BranchInfo EmbeddedShader::Generator::SlangGenerator::getBr
     branch.variateRefs = std::move(collection.variateRefs);
     return branch;
 }
-std::string EmbeddedShader::Generator::SlangGenerator::getBranchImport(const std::vector<size_t> &refs)
-{
-    std::string result;
-    if (Ast::Parser::isEnabledTypeHeader())
-    {
-        result = "import type_header;\n";
-    }
 
-    for (size_t ref : refs)
-    {
-        result += "import branch_" + std::to_string(ref) + ";\n";
-    }
-
-    return result;
-}
 std::string Generator::SlangGenerator::getBranchExternDeclaration(const std::vector<size_t> &refs)
 {
     std::string result;

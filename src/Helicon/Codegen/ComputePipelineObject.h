@@ -143,21 +143,6 @@ namespace EmbeddedShader
 		Ast::Parser::setBindless(false);
 		auto outputs = parse(computeShaderCode);
 
-        // for (const auto & output : outputs)
-        // {
-        //     std::cout << "Core: " << output.output << "\n";
-        //     std::cout << "TypeHeader: " << output.typeHeader << "\n";
-        //     size_t branch_n = 0;
-        //     for (const auto& branch : output.branches)
-        //     {
-        //         std::cout << "Branch: " << branch_n << "\n";
-        //         std::cout << "\t""declareBranch: " << branch.declareBranch << "\n";
-        //         std::cout << "\t""trueBranch: " << branch.trueBranch << "\n";
-        //         std::cout << "\t""falseBranch: " << branch.falseBranch << "\n";
-        //         ++branch_n;
-        //     }
-        // }
-
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
 	    compilerOption.branches.swap(outputs[0].branches);
@@ -172,20 +157,6 @@ namespace EmbeddedShader
 			Generator::SlangGenerator::numthreads = numthreads;
 			Ast::Parser::setBindless(true);
 			outputs = parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
-		    for (const auto & output : outputs)
-		    {
-		        std::cout << "Core: " << output.output << "\n";
-		        std::cout << "TypeHeader: " << output.typeHeader << "\n";
-		        size_t branch_n = 0;
-		        for (const auto& branch : output.branches)
-		        {
-		            std::cout << "Branch: " << branch_n << "\n";
-		            std::cout << "\t""declareBranch: " << branch.declareBranch << "\n";
-		            std::cout << "\t""trueBranch: " << branch.trueBranch << "\n";
-		            std::cout << "\t""falseBranch: " << branch.falseBranch << "\n";
-		            ++branch_n;
-		        }
-		    }
             compilerOption.branches.swap(outputs[0].branches);
             compilerOption.typeHeader = outputs[0].typeHeader;
             result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
