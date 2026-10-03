@@ -84,6 +84,7 @@ namespace EmbeddedShader
 	    static Slang::ComPtr<slang::IModule> loadModule(Slang::ComPtr<slang::ISession> session, std::string_view moduleName, std::string_view moduleSource);
 	    static Slang::ComPtr<slang::IModule> loadModule(Slang::ComPtr<slang::ISession> session, const SlangModule& slangModule);
 	    static SlangModule convertModule(Slang::ComPtr<slang::IModule> mod);
+	    static ShaderLanguage convertShaderLanguage(SlangCompileTarget target);
 	    static Slang::ComPtr<slang::IComponentType> link(Slang::ComPtr<slang::ISession> session, std::span<slang::IComponentType*> composeComponents);
 	    static Slang::ComPtr<slang::IEntryPoint> findEntryPoint(Slang::ComPtr<slang::IModule> mod, std::string_view name);
 	    static Slang::ComPtr<slang::IEntryPoint> tryFindEntryPoint(Slang::ComPtr<slang::IModule> mod,
@@ -92,6 +93,7 @@ namespace EmbeddedShader
                                         const Slang::ComPtr<slang::IGlobalSession> &globalSession,
                                         std::span<slang::TargetDesc> targetDesc,
                                         std::span<slang::CompilerOptionEntry> options);
+	    static Slang::ComPtr<slang::IBlob> getFinalCode(Slang::ComPtr<slang::IComponentType> program, SlangInt targetIndex, bool isLibrary = false);
 	    //----------------------------
 	private:
 	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};
@@ -113,6 +115,7 @@ namespace EmbeddedShader
 	    static void collectSlangReflection(slang::ProgramLayout* programLayout, slang::VariableLayoutReflection* varLayout, ShaderCodeModule::ShaderResources& resources, bool insidePushConstant, bool insideUniformBuffer, uint64_t baseByteOffset);
 	    static void collectSlangParameterBlock(slang::TypeLayoutReflection* typeLayout, uint32_t& binding, ShaderCodeModule::ShaderResources::BindType& bindType, size_t& uboSize);
         static ShaderCodeModule::ShaderResources slangReflectBindInfo(slang::ProgramLayout* programLayout);
+	public:
         static ShaderCodeModule::ShaderResources slangReflection(slang::ProgramLayout* programLayout);
     public:
         static ShaderCodeModule::ShaderResources slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg);

@@ -1427,6 +1427,25 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                         static_cast<uint8_t const *>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
         return module;
     }
+    ShaderLanguage convertShaderLanguage(SlangCompileTarget target)
+    {
+        switch (target)
+        {
+            case SLANG_SPIRV:
+                return ShaderLanguage::SpirV;
+            case SLANG_DXIL:
+                return ShaderLanguage::DXIL;
+            case SLANG_HLSL:
+                return ShaderLanguage::HLSL;
+            case SLANG_GLSL:
+                return ShaderLanguage::GLSL;
+            case SLANG_DXBC:
+                return ShaderLanguage::DXBC;
+            default:
+                return ShaderLanguage::Slang;
+        }
+    }
+
     Slang::ComPtr<slang::IComponentType>
     ShaderLanguageConverter::link(Slang::ComPtr<slang::ISession> session,
                                   std::span<slang::IComponentType *> composeComponents)
@@ -1494,6 +1513,35 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         Slang::ComPtr<slang::ISession> session;
         globalSession->createSession(sessionDesc, session.writeRef());
         return session;
+    }
+
+    Slang::ComPtr<slang::IBlob> ShaderLanguageConverter::getFinalCode(Slang::ComPtr<slang::IComponentType> program, SlangInt targetIndex, bool isLibrary)
+    {
+        Slang::ComPtr<slang::IBlob> finalCode;
+        if (!isLibrary)
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result = program->getEntryPointCode(
+                0,
+                targetIndex,
+                finalCode.writeRef(),
+                diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to get target code from Slang program.");
+        }
+        else
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result = program->getTargetCode(
+                targetIndex,
+                finalCode.writeRef(),
+                diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to get target code from Slang program.");
+        }
+        return finalCode;
     }
 
     void ShaderLanguageConverter::slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath,

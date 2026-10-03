@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <slang-com-ptr.h>
 #include <source_location>
 #include <string>
 #include <unordered_map>
@@ -159,6 +160,12 @@ struct ShaderCodeModule
         std::string typeHeader;
     };
 
+    struct SlangBranchModule
+    {
+        Slang::ComPtr<slang::IModule> branchTrue;
+        Slang::ComPtr<slang::IModule> branchFalse;
+    };
+
     struct ShaderCodeCompiler
     {
     public:
@@ -185,12 +192,20 @@ struct ShaderCodeModule
         SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
         SlangModule* getCoreBranchModule(bool bindless) const;
         SlangModule* getTypeHeaderModule(bool bindless) const;
+
+        std::vector<slang::IComponentType*> getSlangBranchModules(bool bindless, ConditionInfo conditionInfo) const;
         std::string sourceLocationStr;
         std::string stage;
         std::vector<std::function<bool()>> conditions;
         CompilerOption compilerOption;
         ShaderLanguage sourceLanguage;
         ShaderStage sourceStage;
+
+        Slang::ComPtr<slang::ISession> session;
+        Slang::ComPtr<slang::ISession> bindlessSession;
+
+        std::vector<SlangBranchModule> branchModules;
+        std::vector<SlangBranchModule> bindlessBranchModules;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
         using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule>>;
