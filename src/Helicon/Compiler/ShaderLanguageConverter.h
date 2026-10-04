@@ -94,6 +94,7 @@ namespace EmbeddedShader
                                         std::span<slang::TargetDesc> targetDesc,
                                         std::span<slang::CompilerOptionEntry> options);
 	    static Slang::ComPtr<slang::IBlob> getFinalCode(Slang::ComPtr<slang::IComponentType> program, SlangInt targetIndex, bool isLibrary = false);
+	    static void fillCompileResult(SlangCompileResult &result,Slang::ComPtr<slang::IComponentType> program,SlangInt targetIndex, SlangCompileTarget dstLang,bool isNeedReflection,bool isLibrary = false);
 	    //----------------------------
 	private:
 	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};

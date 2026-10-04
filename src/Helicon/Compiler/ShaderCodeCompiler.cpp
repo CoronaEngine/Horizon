@@ -250,6 +250,13 @@ namespace EmbeddedShader
 
         ConditionInfo info;
         SlangCompileResult result;
+
+        //加载额外Slang Module Dependency
+        for (auto dep : option.slangModules)
+        {
+            ShaderLanguageConverter::loadModule(currSession, *dep);
+        }
+
         if (!option.branches.empty())
         {
             auto languageStr = "SlangModule";
@@ -292,83 +299,24 @@ namespace EmbeddedShader
             auto binCore = ShaderLanguageConverter::convertModule(core);
             storeCode(binCore, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Branch_Core"));
 
-            //branches
-            //auto branches = getBranchModules(Ast::Parser::getBindless(), info);
             auto ep = ShaderLanguageConverter::findEntryPoint(core, "main");
             std::vector<slang::IComponentType*> composeComponents = {core, ep ,typeHeaderModule};
             auto branches = getSlangBranchModules(isCompilingBindless, info);
+            composeComponents.insert(composeComponents.end(), branches.begin(), branches.end());
             auto linkedProgram = ShaderLanguageConverter::link(currSession, composeComponents);
 
             for (size_t i = 0; i < targets.size(); ++i)
-            {
-                auto finalCode = ShaderLanguageConverter::getFinalCode(linkedProgram,i);
-                bool isBin = false;
-	            switch (targets[i].format)
-	            {
-	            case SLANG_SPIRV:
-	            case SLANG_DXBC:
-	            case SLANG_DXIL:
-	                isBin = true;
-	                break;
-	            default:
-	                break;
-	            }
-	            auto targetLang = ShaderLanguageConverter::convertShaderLanguage(targets[i].format);
-	            auto resource = ShaderLanguageConverter::slangReflection(linkedProgram->getLayout(static_cast<SlangInt>(i)));
-	            result.reflections.insert({targetLang, std::move(resource)});
-
-	            if (isBin)
-	            {
-	                SlangCompileResult::BinaryTarget target(finalCode->getBufferSize() / sizeof(uint32_t));
-	                memcpy(target.data(), finalCode->getBufferPointer(),
-                           finalCode->getBufferSize());
-
-	                // // SPIR-V compute: 修补被 Slang 往返丢失的 LocalSize（用 layout 真实值）。
-	                // if (targetDescs[i].format == SLANG_SPIRV)
-	                // {
-	                //     uint32_t tgs[3] = { 0, 0, 0 };
-	                //     if (queryComputeThreadGroupSize(slangTarget->getLayout(static_cast<SlangInt>(i)), tgs)
-	                //         && (tgs[0] | tgs[1] | tgs[2]) != 0)
-	                //     {
-	                //         if (patchSpirvLocalSize(target, tgs[0], tgs[1], tgs[2]))
-	                //         {
-	                //             std::cout << "[Helicon] Patched SPIR-V LocalSize -> ("
-	                //                       << tgs[0] << "," << tgs[1] << "," << tgs[2]
-	                //                       << ") for entry '" << arg0.entrypointName << "'" << std::endl;
-	                //         }
-	                //     }
-	                // }
-
-	                result.binaryTargets.insert({targetLang, std::move(target)});
-	                continue;
-	            }
-
-	            SlangCompileResult::StringTarget target;
-	            target.resize(finalCode->getBufferSize() / sizeof(char));
-	            memcpy(target.data(), finalCode->getBufferPointer(), finalCode->getBufferSize());
-	            result.stringTargets.insert({targetLang, std::move(target)});
-            }
+                ShaderLanguageConverter::fillCompileResult(result,linkedProgram,i,targets[i].format,true);
         }
         else
         {
-            SlangCompileArgs compileArgs;
-            compileArgs.source = shaderCode;
-            compileArgs.stage = inputStage;
-            compileArgs.sourceLanguage = language;
-            compileArgs.deps.swap(option.slangModules);
-            compileArgs.enableReflection = true;
-            compileArgs.matrixMajor = option.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
-            if (option.compileGLSL)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::GLSL);
-            if (option.compileHLSL)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::HLSL);
-            if (option.compileSpirV)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::SpirV);
-            if (option.compileDXIL)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::DXIL);
-            if (option.compileDXBC && !Ast::Parser::getBindless())
-                compileArgs.targetLanguages.push_back(ShaderLanguage::DXBC);
-            result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs);
+            auto core = ShaderLanguageConverter::loadModule(currSession, "core_source", shaderCode);
+            auto ep = ShaderLanguageConverter::findEntryPoint(core, "main");
+            std::vector<slang::IComponentType*> composeComponents = {core, ep};
+            auto linkedProgram = ShaderLanguageConverter::link(currSession, composeComponents);
+
+            for (size_t i = 0; i < targets.size(); ++i)
+                ShaderLanguageConverter::fillCompileResult(result,linkedProgram,i,targets[i].format,true);
         }
 
         const std::vector<uint32_t>* spirvTarget = nullptr;

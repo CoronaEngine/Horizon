@@ -1400,14 +1400,16 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                                                                       const SlangModule &slangModule)
     {
         Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        Slang::ComPtr<slang::IModule> mod;
         auto dataBlob = slang_createBlob(slangModule.binData.data(), slangModule.binData.size());
-        auto mod = session->loadModuleFromIRBlob(slangModule.name.c_str(), slangModule.path.c_str(), dataBlob,
+        mod = session->loadModuleFromIRBlob(slangModule.name.c_str(), slangModule.path.c_str(), dataBlob,
                                                  diagnosticsBlob.writeRef());
         diagnoseIfNeeded(diagnosticsBlob);
         if (!mod)
         {
             std::cout << "Load Module From IR Blob failed: " << slangModule.name << std::endl;
         }
+        return mod;
     }
     SlangModule ShaderLanguageConverter::convertModule(Slang::ComPtr<slang::IModule> mod)
     {
@@ -1427,7 +1429,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                         static_cast<uint8_t const *>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
         return module;
     }
-    ShaderLanguage convertShaderLanguage(SlangCompileTarget target)
+    ShaderLanguage ShaderLanguageConverter::convertShaderLanguage(SlangCompileTarget target)
     {
         switch (target)
         {
@@ -1510,6 +1512,7 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
         sessionDesc.targetCount = targetDesc.size();
         sessionDesc.compilerOptionEntries = options.data();
         sessionDesc.compilerOptionEntryCount = options.size();
+        sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
         Slang::ComPtr<slang::ISession> session;
         globalSession->createSession(sessionDesc, session.writeRef());
         return session;
@@ -1542,6 +1545,61 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
                 throw std::runtime_error("Failed to get target code from Slang program.");
         }
         return finalCode;
+    }
+
+    void ShaderLanguageConverter::fillCompileResult(SlangCompileResult &result,
+                                                      Slang::ComPtr<slang::IComponentType> program,
+                                                      SlangInt targetIndex, SlangCompileTarget dstLang,bool isNeedReflection,bool isLibrary)
+    {
+        auto finalCode = getFinalCode(program, targetIndex, isLibrary);
+        bool isBin = false;
+	    switch (dstLang)
+	    {
+	    case SLANG_SPIRV:
+	    case SLANG_DXBC:
+	    case SLANG_DXIL:
+	        isBin = true;
+	        break;
+	    default:
+	        break;
+	    }
+	    auto targetLang = convertShaderLanguage(dstLang);
+        if (isNeedReflection)
+        {
+            auto resource = slangReflection(program->getLayout(targetIndex));
+            result.reflections.insert({targetLang, std::move(resource)});
+        }
+
+	    if (isBin)
+	    {
+	        SlangCompileResult::BinaryTarget target(finalCode->getBufferSize() / sizeof(uint32_t));
+	        memcpy(target.data(), finalCode->getBufferPointer(),
+                   finalCode->getBufferSize());
+
+	        // // SPIR-V compute: 修补被 Slang 往返丢失的 LocalSize（用 layout 真实值）。
+	        // if (targetDescs[i].format == SLANG_SPIRV)
+	        // {
+	        //     uint32_t tgs[3] = { 0, 0, 0 };
+	        //     if (queryComputeThreadGroupSize(slangTarget->getLayout(static_cast<SlangInt>(i)), tgs)
+	        //         && (tgs[0] | tgs[1] | tgs[2]) != 0)
+	        //     {
+	        //         if (patchSpirvLocalSize(target, tgs[0], tgs[1], tgs[2]))
+	        //         {
+	        //             std::cout << "[Helicon] Patched SPIR-V LocalSize -> ("
+	        //                       << tgs[0] << "," << tgs[1] << "," << tgs[2]
+	        //                       << ") for entry '" << arg0.entrypointName << "'" << std::endl;
+	        //         }
+	        //     }
+	        // }
+
+	        result.binaryTargets.insert({targetLang, std::move(target)});
+	        return;
+	    }
+
+	    SlangCompileResult::StringTarget target;
+	    target.resize(finalCode->getBufferSize() / sizeof(char));
+	    memcpy(target.data(), finalCode->getBufferPointer(), finalCode->getBufferSize());
+	    result.stringTargets.insert({targetLang, std::move(target)});
     }
 
     void ShaderLanguageConverter::slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath,
