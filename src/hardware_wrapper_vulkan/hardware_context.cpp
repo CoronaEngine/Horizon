@@ -50,9 +50,8 @@ namespace Corona::Horizon
 
     namespace
     {
-        constexpr std::array<const char*, 6> blocked_overlay_layers = {{
+        constexpr std::array<const char*, 5> blocked_overlay_layers = {{
             "VK_LAYER_OBS_HOOK",
-            "VK_LAYER_RTSS",
             "VK_LAYER_EOS_Overlay",
             "VK_LAYER_VALVE_steam_fossilize",
             "VK_LAYER_VALVE_steam_overlay",
