@@ -43,6 +43,7 @@
 #include <map>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -373,7 +374,18 @@ struct GpuMesh
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
+    // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
+    horizon::HardwareBuffer indirect;
 };
+
+horizon::HardwareBuffer group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
+{
+    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    commands.reserve(groups.size());
+    for (const MeshGroup& group : groups)
+        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
+    return horizon::HardwareBuffer::indirect(commands, name);
+}
 
 void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
 {
@@ -431,6 +443,7 @@ void run_example_edsl_shadowvolumes()
         horizon::HardwareBuffer::index(bunny_mesh.indices, "example_shadowvolumes.bunny.ib"),
         static_cast<uint32_t>(bunny_mesh.indices.size()),
         bunny_mesh.groups,
+        group_indirect(bunny_mesh.groups, "example_shadowvolumes.bunny.indirect"),
     };
 
     const std::vector<SvVertex> plane_vertices = {
@@ -440,11 +453,13 @@ void run_example_edsl_shadowvolumes()
         { { 1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
     };
     const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
+    const std::vector<MeshGroup> plane_groups = { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } };
     GpuMesh floor_plane {
         horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowvolumes.floor.vb"),
         horizon::HardwareBuffer::index(plane_indices, "example_shadowvolumes.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
-        { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } },
+        plane_groups,
+        group_indirect(plane_groups, "example_shadowvolumes.floor.indirect"),
     };
 
     // 阴影体索引：恒等（CPU 生成纯三角形序列）。16-bit 索引下只需一段
@@ -695,38 +710,15 @@ void run_example_edsl_shadowvolumes()
             sp.color = to_edsl_vec4(glm::vec4(1.0f));
             sp.params = to_edsl_vec4(resolution);
 
-            std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+            // model_pc.model 是 push constant，按 record_indirect 调用快照，且一次调用只绑一对
+            // VB/IB：每个物体写完自己的 model 后，用它自己 mesh 的 VB/IB 单独 record 一次。
             for (const DrawItem& item : items)
             {
                 model_pc.model = to_edsl_matrix(item.model);
-                for (const MeshGroup& group : item.mesh->groups)
-                {
-                    horizon::DrawIndexedIndirectCommand cmd;
-                    cmd.index_count = group.index_count;
-                    cmd.first_index = group.first_index;
-                    cmd.vertex_offset = group.base_vertex;
-                    cmd.instance_count = 1;
-                    cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-                    indirect_cmds.push_back(cmd);
-                }
-            }
 
-            if (!indirect_cmds.empty())
-            {
-                horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                    std::span<const std::byte>(
-                        reinterpret_cast<const std::byte*>(indirect_cmds.data()),
-                        indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                    "example_edsl_shadowvolumes.scene_indirect");
-
-                const DrawItem& first_item = items[0];
                 horizon::DrawIndexedIndirectParams indirect_params;
-                indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
-                indirect_params.indirect_offset = 0;
-                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-                pipeline.record_indirect(first_item.mesh->ib, first_item.mesh->vb, indirect_buffer, indirect_params);
+                indirect_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
+                pipeline.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, indirect_params);
             }
         };
 

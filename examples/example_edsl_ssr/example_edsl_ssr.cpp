@@ -133,6 +133,10 @@ void run_example_edsl_ssr()
     const std::vector<EssrVertex> cube_vertices = build_cube_vertices();
     horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_edsl_ssr.cube.vb");
     horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(essr_cube_indices, "example_edsl_ssr.cube.ib");
+    const std::array<horizon::DrawIndexedIndirectCommand, 1> cube_cmd { {
+        { static_cast<uint32_t>(essr_cube_indices.size()), 1, 0, 0, 0 },
+    } };
+    horizon::HardwareBuffer cube_indirect = horizon::HardwareBuffer::indirect(cube_cmd, "example_edsl_ssr.cube_indirect");
 
     const auto rt_usage = horizon::ImageUsage_ColorAttachment |
                           horizon::ImageUsage_Sampled |
@@ -839,39 +843,15 @@ void run_example_edsl_ssr()
         u_disney_b     = ktm::fvec4(mat.subsurface, mat.anisotropic, mat.sheen, mat.sheen_tint);
         u_disney_c     = ktm::fvec4(mat.clearcoat, mat.clearcoat_gloss, 0.0f, 0.0f);
 
-        // Convert instance loop to multi-draw indirect
-        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
-        indirect_cmds.reserve(instances.size());
-
+        // pc_model / pc_material 是 push constant，按 record_indirect 调用快照：每个实例
+        // 写完自己的参数后单独 record 一次（共用同一条 cube 命令）。
+        horizon::DrawIndexedIndirectParams indirect_params;
+        indirect_params.draw_count = 1;
         for (const EssrInstance& inst : instances)
         {
             pc_model    = to_edsl_matrix(inst.model);
             pc_material = ktm::fvec4(inst.albedo.x, inst.albedo.y, inst.albedo.z, 0.0f);
-
-            horizon::DrawIndexedIndirectCommand cmd;
-            cmd.index_count = static_cast<uint32_t>(essr_cube_indices.size());
-            cmd.instance_count = 1;
-            cmd.first_index = 0;
-            cmd.vertex_offset = 0;
-            cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-            indirect_cmds.push_back(cmd);
-        }
-
-        if (!indirect_cmds.empty())
-        {
-            horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(indirect_cmds.data()),
-                    indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_edsl_ssr.geom_indirect");
-
-            horizon::DrawIndexedIndirectParams indirect_params;
-            indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
-            indirect_params.indirect_offset = 0;
-            indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            geom_rasterizer.record_indirect(cube_ib, cube_vb, indirect_buffer, indirect_params);
+            geom_rasterizer.record_indirect(cube_ib, cube_vb, cube_indirect, indirect_params);
         }
 
         // ---- Pass 2：线性深度 ----

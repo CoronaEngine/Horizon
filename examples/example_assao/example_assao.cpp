@@ -220,15 +220,23 @@ struct GpuMesh
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
+    // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
+    horizon::HardwareBuffer indirect;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
+    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    commands.reserve(mesh.groups.size());
+    for (const MeshGroup& group : mesh.groups)
+        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
+
     return GpuMesh {
         horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
         horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
         mesh.groups,
+        horizon::HardwareBuffer::indirect(commands, name + ".indirect"),
     };
 }
 
@@ -419,44 +427,17 @@ void run_example_assao()
             pipeline.vsp.proj_view   = view_proj;
             pipeline.vsp.view_matrix = view;
 
-            // Convert nested loop to multi-draw indirect
-            std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
-
+            // model / color 按 record_indirect 调用快照，且一次调用只绑一对 VB/IB：
+            // 每个物体写完自己的参数后，用它自己 mesh 的 VB/IB 单独 record 一次
+            // （draw_count = 该 mesh 的 group 数）。
             for (const StaticTransform& t : static_transforms)
             {
                 pipeline.vpc.model = t.model;
                 pipeline.vpc.color = t.color;
 
-                for (const MeshGroup& group : t.mesh->groups)
-                {
-                    horizon::DrawIndexedIndirectCommand cmd;
-                    cmd.index_count = group.index_count;
-                    cmd.first_index = group.first_index;
-                    cmd.vertex_offset = group.base_vertex;
-                    cmd.instance_count = 1;
-                    cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-                    indirect_cmds.push_back(cmd);
-                }
-            }
-
-            if (!indirect_cmds.empty())
-            {
-                horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                    std::span<const std::byte>(
-                        reinterpret_cast<const std::byte*>(indirect_cmds.data()),
-                        indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                    "example_assao.scene_indirect");
-
-                // Assume all meshes share the same VB/IB (sponza model)
-                // If not, this needs more complex handling
-                const StaticTransform& first_transform = static_transforms[0];
                 horizon::DrawIndexedIndirectParams indirect_params;
-                indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
-                indirect_params.indirect_offset = 0;
-                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-                pipeline.record_indirect(first_transform.mesh->ib, first_transform.mesh->vb, indirect_buffer, indirect_params);
+                indirect_params.draw_count = static_cast<uint32_t>(t.mesh->groups.size());
+                pipeline.record_indirect(t.mesh->ib, t.mesh->vb, t.mesh->indirect, indirect_params);
             }
         };
         record_scene(gbuffer_rasterizer);

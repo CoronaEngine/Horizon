@@ -226,15 +226,23 @@ struct GpuMesh
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
+    // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
+    horizon::HardwareBuffer indirect;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
+    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    commands.reserve(mesh.groups.size());
+    for (const MeshGroup& group : mesh.groups)
+        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
+
     return GpuMesh {
         horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
         horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
         static_cast<uint32_t>(mesh.indices.size()),
         mesh.groups,
+        horizon::HardwareBuffer::indirect(commands, name + ".indirect"),
     };
 }
 
@@ -267,11 +275,15 @@ void run_example_shadowmaps()
         { { 1.0f, 0.0f, -1.0f }, { 0.0f, 1.0f, 0.0f } },
     };
     const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
+    const std::array<horizon::DrawIndexedIndirectCommand, 1> plane_cmd { {
+        { static_cast<uint32_t>(plane_indices.size()), 1, 0, 0, 0 },
+    } };
     GpuMesh floor_plane {
         horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
         horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
         static_cast<uint32_t>(plane_indices.size()),
         { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } },
+        horizon::HardwareBuffer::indirect(plane_cmd, "example_shadowmaps.floor.indirect"),
     };
 
     // Pass 1 目标：1024x1024 RGBA8 打包深度 + 独立 D32
@@ -422,46 +434,21 @@ void run_example_shadowmaps()
                                   glm::eulerAngleY(-float(i)) * glm::scale(glm::mat4(1.0f), glm::vec3(2.0f)) });
         }
 
-        // Pass 1：光源视角打包深度 - Convert to indirect
+        // Pass 1：光源视角打包深度
+        // mvp 按 record_indirect 调用快照，且一次调用只绑一对 VB/IB：每个物体写完
+        // 自己的 mvp 后，用它自己 mesh 的 VB/IB 单独 record 一次。
         pack_rasterizer.clear_records();
-        std::vector<horizon::DrawIndexedIndirectCommand> pack_indirect_cmds;
-
         for (const DrawItem& item : items)
         {
             pack_rasterizer.model_pc.mvp = light_view_proj * item.model;
-            for (const MeshGroup& group : item.mesh->groups)
-            {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = group.index_count;
-                cmd.first_index = group.first_index;
-                cmd.vertex_offset = group.base_vertex;
-                cmd.instance_count = 1;
-                cmd.first_instance = static_cast<uint32_t>(pack_indirect_cmds.size());
-                pack_indirect_cmds.push_back(cmd);
-            }
-        }
 
-        if (!pack_indirect_cmds.empty())
-        {
-            horizon::HardwareBuffer pack_indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(pack_indirect_cmds.data()),
-                    pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(pack_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_shadowmaps.pack_indirect");
-
-            const DrawItem& first_item = items[0];
             horizon::DrawIndexedIndirectParams pack_params;
-            pack_params.draw_count = static_cast<uint32_t>(pack_indirect_cmds.size());
-            pack_params.indirect_offset = 0;
-            pack_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            pack_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, pack_indirect_buffer, pack_params);
+            pack_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
+            pack_rasterizer.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, pack_params);
         }
 
-        // Pass 2：场景光照 + 硬阴影 - Convert to indirect
+        // Pass 2：场景光照 + 硬阴影
         scene_rasterizer.clear_records();
-        std::vector<horizon::DrawIndexedIndirectCommand> scene_indirect_cmds;
 
         // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
         scene_rasterizer.vsp.proj_view       = view_proj;
@@ -482,34 +469,10 @@ void run_example_shadowmaps()
         for (const DrawItem& item : items)
         {
             scene_rasterizer.model_pc.model = item.model; // per-draw；VS 从中计算 mvp/model_view/light_mtx
-            for (const MeshGroup& group : item.mesh->groups)
-            {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = group.index_count;
-                cmd.first_index = group.first_index;
-                cmd.vertex_offset = group.base_vertex;
-                cmd.instance_count = 1;
-                cmd.first_instance = static_cast<uint32_t>(scene_indirect_cmds.size());
-                scene_indirect_cmds.push_back(cmd);
-            }
-        }
 
-        if (!scene_indirect_cmds.empty())
-        {
-            horizon::HardwareBuffer scene_indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(scene_indirect_cmds.data()),
-                    scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(scene_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_shadowmaps.scene_indirect");
-
-            const DrawItem& first_item = items[0];
             horizon::DrawIndexedIndirectParams scene_params;
-            scene_params.draw_count = static_cast<uint32_t>(scene_indirect_cmds.size());
-            scene_params.indirect_offset = 0;
-            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            scene_rasterizer.record_indirect(first_item.mesh->ib, first_item.mesh->vb, scene_indirect_buffer, scene_params);
+            scene_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
+            scene_rasterizer.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, scene_params);
         }
 
         horizon::SubmitReceipt render_receipt =
