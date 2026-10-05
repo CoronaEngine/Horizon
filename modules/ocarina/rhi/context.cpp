@@ -3,6 +3,7 @@
 //
 
 #include "context.h"
+#include "core/util/switch_profile.h"
 #include "core/runtime/dynamic_module.h"
 #include "rhi/device.h"
 #include "core/runtime/platform.h"
@@ -85,6 +86,7 @@ bool RHIContext::create_directory_if_necessary(const fs::path &path) {
 }
 
 string RHIContext::read_file(const fs::path &fn) {
+    switch_profile::Scope profile{"RHIContext::read_file", "file_io"};
     std::ifstream fst;
     fst.open(fn.c_str());
     std::stringstream buffer;
@@ -100,10 +102,12 @@ void RHIContext::write_file(const fs::path &fn, const std::string &text) {
 }
 
 void RHIContext::write_global_cache(const string &fn, const string &text) const noexcept {
+    switch_profile::Scope profile{"RHIContext::write_global_cache", "cache_io"};
     write_file(cache_directory() / fn, text);
 }
 
 string RHIContext::read_global_cache(const string &fn) const noexcept {
+    switch_profile::Scope profile{"RHIContext::read_global_cache", "cache_io"};
     return read_file(cache_directory() / fn);
 }
 
@@ -114,6 +118,7 @@ void RHIContext::clear_cache() const noexcept {
 }
 
 bool RHIContext::is_exist_cache(const string &fn) const noexcept {
+    switch_profile::Scope profile{"RHIContext::is_exist_cache", "cache_io"};
     if (!impl_->use_cache) {
         return false;
     }

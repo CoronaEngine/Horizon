@@ -231,7 +231,7 @@ public:
     [[nodiscard]] Texture3D create_texture(Image *image_resource, const TextureViewCreation &texture_view, const string &desc = "") const noexcept;
     template<typename T>
     [[nodiscard]] auto compile(const Kernel<T> &kernel, const string &shader_desc = "", ShaderTag tag = CS) const noexcept {
-        OC_INFO_FORMAT("compile shader : {}", shader_desc.c_str());
+        OC_DEBUG_FORMAT("prepare shader: {}", shader_desc.c_str());
         kernel.function()->set_description(shader_desc);
         return create<Shader<T>>(kernel.function(), tag);
     }
