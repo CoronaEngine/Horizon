@@ -3,6 +3,7 @@
 //
 
 #include "cuda_device.h"
+#include "core/util/switch_profile.h"
 #include "cuda_stream.h"
 #include "cuda_texture.h"
 #include "cuda_shader.h"
@@ -239,6 +240,7 @@ handle_ty CUDADevice::create_texture_from_external(ocarina::uint tex_handle) noe
 }
 
 handle_ty CUDADevice::create_shader(const Function &function) noexcept {
+    switch_profile::Scope profile{"CUDADevice::create_shader", "backend"};
     CUDACompiler compiler(this);
     ocarina::string ptx = compiler.compile(function, compute_capability_);
 
