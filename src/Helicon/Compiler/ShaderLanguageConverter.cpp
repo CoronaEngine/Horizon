@@ -1771,9 +1771,9 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	                {
 	                    if (patchSpirvLocalSize(target, tgs[0], tgs[1], tgs[2]))
 	                    {
-	                        std::cout << "[Helicon] Patched SPIR-V LocalSize -> ("
-	                                  << tgs[0] << "," << tgs[1] << "," << tgs[2]
-	                                  << ") for entry '" << arg0.entrypointName << "'" << std::endl;
+	                        // std::cout << "[Helicon] Patched SPIR-V LocalSize -> ("
+	                        //           << tgs[0] << "," << tgs[1] << "," << tgs[2]
+	                        //           << ") for entry '" << arg0.entrypointName << "'" << std::endl;
 	                    }
 	                }
 	            }

@@ -130,7 +130,7 @@ function(helicon_compile_shaders target_name)
     get_target_property(_helicon_target_source_dir ${target_name} SOURCE_DIR)
     
     if(NOT _helicon_target_sources)
-        message(STATUS "[Helicon] ${target_name}: No sources found, skipping shader compilation")
+        #message(STATUS "[Helicon] ${target_name}: No sources found, skipping shader compilation")
         return()
     endif()
     
@@ -153,11 +153,11 @@ function(helicon_compile_shaders target_name)
     list(LENGTH _helicon_shader_paths _helicon_shader_count)
     
     if(_helicon_shader_count EQUAL 0)
-        message(STATUS "[Helicon] ${target_name}: No shader includes found")
+        #message(STATUS "[Helicon] ${target_name}: No shader includes found")
         return()
     endif()
     
-    message(STATUS "[Helicon] ${target_name}: Found ${_helicon_shader_count} shader(s) to compile")
+    #message(STATUS "[Helicon] ${target_name}: Found ${_helicon_shader_count} shader(s) to compile")
     
     set(_helicon_generated_headers "")
     
@@ -171,7 +171,7 @@ function(helicon_compile_shaders target_name)
         
         # 检查 shader 文件是否存在
         if(NOT EXISTS "${_helicon_shader_path}")
-            message(WARNING "[Helicon] Shader file not found: ${_helicon_shader_path}")
+            #message(WARNING "[Helicon] Shader file not found: ${_helicon_shader_path}")
             continue()
         endif()
         
@@ -222,7 +222,7 @@ function(helicon_compile_shaders target_name)
             set(_helicon_shader_last_ext ".h")
         endif()
 
-        message(STATUS "[Helicon]   - ${_helicon_shader_rel_path} (${_helicon_shader_lang}) -> ${_helicon_shader_rel_path}.hpp")
+        #message(STATUS "[Helicon]   - ${_helicon_shader_rel_path} (${_helicon_shader_lang}) -> ${_helicon_shader_rel_path}.hpp")
         
         # 添加自定义命令（增量编译）
         add_custom_command(
@@ -278,6 +278,6 @@ function(helicon_compile_shaders target_name)
         target_include_directories(${target_name} BEFORE PUBLIC
             "$<BUILD_INTERFACE:${_helicon_arg_OUTPUT_DIR}>")
         
-        message(STATUS "[Helicon] ${target_name}: Output directory: ${_helicon_arg_OUTPUT_DIR}")
+        #message(STATUS "[Helicon] ${target_name}: Output directory: ${_helicon_arg_OUTPUT_DIR}")
     endif()
 endfunction()
