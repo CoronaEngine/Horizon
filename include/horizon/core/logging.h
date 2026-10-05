@@ -1,6 +1,45 @@
 #pragma once
-#include "core/util/logging.h"
-#include "core/util/logging_quill.h"
+#include <filesystem>
+#include <quill/Logger.h>
+
+// Public logging declarations must not import Core's generic core/... headers:
+// applications may also include the legacy renderer's headers with those names.
+namespace horizon::core {
+
+enum class LogLevel
+{
+    Trace,
+    Debug,
+    Info,
+    Warning,
+    Error,
+    Critical
+};
+
+struct LoggingOptions
+{
+    bool console = true;
+    // Empty disables file output. A configured file is created/truncated once.
+    std::filesystem::path file_path;
+    bool install_signal_handlers = false;
+    // Enables console colours and, on Windows, UTF-8 and ANSI console setup.
+    bool configure_utf8_console = false;
+#ifndef NDEBUG
+    LogLevel level = LogLevel::Debug;
+#else
+    LogLevel level = LogLevel::Info;
+#endif
+};
+
+// Call at application startup, before any logging or direct Quill startup.
+// The first successful initialization wins; subsequent calls are no-ops.
+// Without an explicit call, the first message uses the console-only defaults.
+void initialize_logging(const LoggingOptions &options = {});
+void set_log_level(LogLevel level) noexcept;
+void log_flush() noexcept;
+quill::Logger *get_quill_logger();
+
+}  // namespace horizon::core
 
 namespace Corona::Kernel
 {

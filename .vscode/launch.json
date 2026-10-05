@@ -6,13 +6,7 @@
             "name": "Launch",
             "program": "${command:cmake.launchTargetPath}",
             "args": [],
-            "cwd": "${command:cmake.buildDirectory}",
-            "env": {
-                "VK_LOADER_LAYERS_DISABLE": "~implicit~",
-                "VK_LOADER_LAYERS_ENABLE": "",
-                "VK_LOADER_LAYERS_ALLOW": "",
-                "VK_INSTANCE_LAYERS": ""
-            }
+            "cwd": "${command:cmake.buildDirectory}"
         }
     ]
 }

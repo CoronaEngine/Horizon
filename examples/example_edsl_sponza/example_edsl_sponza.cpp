@@ -2127,34 +2127,20 @@ void run_example_edsl_sponza()
                                          tuning.output_saturation, tuning.output_temperature));
         u_texel = to_edsl_vec4(glm::vec4(1.0f / spz_width, 1.0f / spz_height, 0.0f, 0.0f));
 
-        // ---- 几何 pass 录制(RSM ×3 + G-buffer ×3) - Convert to indirect ----
+        // ---- 几何 pass 录制(RSM ×3 + G-buffer ×3) ----
+        // 材质纹理与 factor 都是 push constant（纹理是 bindless 索引），而 push constant
+        // 按 record_indirect 调用快照。所以每个 draw range 必须在写完自己的材质之后
+        // 单独 record 一次（draw_count=1 + 偏移），不能把整个场景合成一个多 draw 批次——
+        // 那样所有 submesh 都会用最后一个材质。
         rsm_pipe.clear_records();
         gb_pipe.clear_records();
 
         std::vector<horizon::DrawIndexedIndirectCommand> scene_cmds;
-
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
             const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
             if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
                 continue;
-            const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
-
-            auto& base_tex = texture_or(material.base_color_texture, white_texture);
-            auto& normal_tex = texture_or(material.normal_texture, flat_normal_texture);
-            auto& mr_tex = texture_or(material.metal_rough_texture, white_texture);
-
-            rsm_base_color_tex = base_tex;
-            gb_base_color_tex = base_tex;
-            gb_normal_tex = normal_tex;
-            gb_mr_tex = mr_tex;
-
-            const glm::vec4 factor(material.base_color_factor[0], material.base_color_factor[1],
-                                   material.base_color_factor[2], material.base_color_factor[3]);
-            rsm_albedo_factor = to_edsl_vec4(factor);
-            gb_base_factor = to_edsl_vec4(factor);
-            gb_mr_factor = to_edsl_vec4(glm::vec4(material.metallic, material.roughness, 0.0f, 0.0f));
-
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
             {
                 horizon::DrawIndexedIndirectCommand cmd;
@@ -2162,34 +2148,58 @@ void run_example_edsl_sponza()
                 cmd.first_index = range.first_index;
                 cmd.vertex_offset = range.vertex_offset;
                 cmd.instance_count = 1;
-                cmd.first_instance = static_cast<uint32_t>(scene_cmds.size());
+                cmd.first_instance = 0;
                 scene_cmds.push_back(cmd);
             }
         }
 
         if (!scene_cmds.empty())
         {
-            horizon::HardwareBuffer scene_indirect = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(scene_cmds.data()),
-                    scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_edsl_sponza.scene_indirect");
+            horizon::HardwareBuffer scene_indirect = horizon::HardwareBuffer::indirect(scene_cmds, "example_edsl_sponza.scene_indirect");
 
-            horizon::DrawIndexedIndirectParams scene_params;
-            scene_params.draw_count = static_cast<uint32_t>(scene_cmds.size());
-            scene_params.indirect_offset = 0;
-            scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            rsm_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, scene_params);
-            gb_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, scene_params);
+            uint64_t cmd_index = 0;
+            for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
+            {
+                const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
+                if (submesh.material < 0 || static_cast<size_t>(submesh.material) >= asset.materials.size())
+                    continue;
+                const SponzaMaterial& material = asset.materials[static_cast<size_t>(submesh.material)];
+
+                auto& base_tex = texture_or(material.base_color_texture, white_texture);
+                auto& normal_tex = texture_or(material.normal_texture, flat_normal_texture);
+                auto& mr_tex = texture_or(material.metal_rough_texture, white_texture);
+
+                rsm_base_color_tex = base_tex;
+                gb_base_color_tex = base_tex;
+                gb_normal_tex = normal_tex;
+                gb_mr_tex = mr_tex;
+
+                const glm::vec4 factor(material.base_color_factor[0], material.base_color_factor[1],
+                                       material.base_color_factor[2], material.base_color_factor[3]);
+                rsm_albedo_factor = to_edsl_vec4(factor);
+                gb_base_factor = to_edsl_vec4(factor);
+                gb_mr_factor = to_edsl_vec4(glm::vec4(material.metallic, material.roughness, 0.0f, 0.0f));
+
+                for (size_t range_index = 0; range_index < submesh_ranges[submesh_index].size(); ++range_index)
+                {
+                    horizon::DrawIndexedIndirectParams params;
+                    params.draw_count = 1;
+                    params.indirect_offset = cmd_index++ * sizeof(horizon::DrawIndexedIndirectCommand);
+                    rsm_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, params);
+                    gb_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, params);
+                }
+            }
         }
 
         if (tuning.mirror_enable)
         {
-            std::vector<horizon::DrawIndexedIndirectCommand> mirror_cmds;
+            const std::array<horizon::DrawIndexedIndirectCommand, 2> mirror_cmds = {
+                horizon::DrawIndexedIndirectCommand { mirror_pool_range.count, 1, mirror_pool_range.first, 0, 0 },
+                horizon::DrawIndexedIndirectCommand { mirror_frame_range.count, 1, mirror_frame_range.first, 0, 0 },
+            };
+            horizon::HardwareBuffer mirror_indirect = horizon::HardwareBuffer::indirect(mirror_cmds, "example_edsl_sponza.mirror_indirect");
 
-            const auto record_mirror = [&](const MirrorRange& range, const glm::vec4& color,
+            const auto record_mirror = [&](uint64_t cmd_index, const glm::vec4& color,
                                            float metallic, float roughness, const glm::vec4& rsm_color) {
                 rsm_base_color_tex = white_texture;
                 gb_base_color_tex = white_texture;
@@ -2199,36 +2209,16 @@ void run_example_edsl_sponza()
                 gb_base_factor = to_edsl_vec4(color);
                 gb_mr_factor = to_edsl_vec4(glm::vec4(metallic, roughness, 0.0f, 0.0f));
 
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = range.count;
-                cmd.first_index = range.first;
-                cmd.vertex_offset = 0;
-                cmd.instance_count = 1;
-                cmd.first_instance = static_cast<uint32_t>(mirror_cmds.size());
-                mirror_cmds.push_back(cmd);
+                horizon::DrawIndexedIndirectParams params;
+                params.draw_count = 1;
+                params.indirect_offset = cmd_index * sizeof(horizon::DrawIndexedIndirectCommand);
+                rsm_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, params);
+                gb_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, params);
             };
 
             const glm::vec4 mirror_rsm_dark(0.12f, 0.12f, 0.12f, 1.0f);
-            record_mirror(mirror_pool_range, glm::vec4(0.93f, 0.95f, 0.97f, 1.0f), 1.0f, tuning.mirror_roughness, mirror_rsm_dark);
-            record_mirror(mirror_frame_range, glm::vec4(0.055f, 0.045f, 0.038f, 1.0f), 0.0f, 0.72f, mirror_rsm_dark);
-
-            if (!mirror_cmds.empty())
-            {
-                horizon::HardwareBuffer mirror_indirect = horizon::HardwareBuffer::from_bytes(
-                    std::span<const std::byte>(
-                        reinterpret_cast<const std::byte*>(mirror_cmds.data()),
-                        mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    static_cast<uint32_t>(mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                    "example_edsl_sponza.mirror_indirect");
-
-                horizon::DrawIndexedIndirectParams mirror_params;
-                mirror_params.draw_count = static_cast<uint32_t>(mirror_cmds.size());
-                mirror_params.indirect_offset = 0;
-                mirror_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-                rsm_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, mirror_params);
-                gb_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, mirror_params);
-            }
+            record_mirror(0, glm::vec4(0.93f, 0.95f, 0.97f, 1.0f), 1.0f, tuning.mirror_roughness, mirror_rsm_dark);
+            record_mirror(1, glm::vec4(0.055f, 0.045f, 0.038f, 1.0f), 0.0f, 0.72f, mirror_rsm_dark);
         }
 
         // ---- 全屏 pass 录制 - Convert to indirect ----

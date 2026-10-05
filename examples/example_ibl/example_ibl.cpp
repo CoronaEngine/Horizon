@@ -23,6 +23,7 @@
 #include GLSL(shaders/ibl_frag.glsl)
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -554,31 +555,30 @@ void run_example_ibl()
     horizon::HardwareExecutor display_executor;
     horizon::HardwareDisplayer display(glfwGetWin32Window(window));
 
-    // 每个 bgfx group 一组 indirect command：索引是 group 相对的，base_vertex 走 vertex_offset。
+    // 每个 bgfx group 一条 indirect command：索引是 group 相对的，base_vertex 走 vertex_offset。
+    // 命令不随帧变化，启动时建好、逐帧复用。
     const auto group_commands = [](const IblMesh& mesh) {
         std::vector<horizon::DrawIndexedIndirectCommand> out;
         out.reserve(mesh.groups.size());
         for (const MeshGroup& group : mesh.groups)
-        {
-            horizon::DrawIndexedIndirectCommand cmd;
-            cmd.index_count = group.index_count;
-            cmd.instance_count = 1;
-            cmd.first_index = group.first_index;
-            cmd.vertex_offset = group.base_vertex;
-            cmd.first_instance = 0;
-            out.push_back(cmd);
-        }
+            out.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
         return out;
     };
-    const std::vector<horizon::DrawIndexedIndirectCommand> bunny_commands = group_commands(bunny_mesh);
-    const std::vector<horizon::DrawIndexedIndirectCommand> orb_commands = group_commands(orb_mesh);
+    horizon::HardwareBuffer bunny_indirect =
+        horizon::HardwareBuffer::indirect(group_commands(bunny_mesh), "example_ibl.bunny.indirect");
+    horizon::HardwareBuffer orb_indirect =
+        horizon::HardwareBuffer::indirect(group_commands(orb_mesh), "example_ibl.orb.indirect");
+    const std::array<horizon::DrawIndexedIndirectCommand, 1> sky_cmd { {
+        { static_cast<uint32_t>(sky_indices.size()), 1, 0, 0, 0 },
+    } };
+    horizon::HardwareBuffer sky_indirect = horizon::HardwareBuffer::indirect(sky_cmd, "example_ibl.sky.indirect");
 
-    horizon::DrawIndexedIndirectCommand sky_cmd;
-    sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());
-    sky_cmd.instance_count = 1;
-    sky_cmd.first_index = 0;
-    sky_cmd.vertex_offset = 0;
-    sky_cmd.first_instance = 0;
+    horizon::DrawIndexedIndirectParams bunny_draws;
+    bunny_draws.draw_count = static_cast<uint32_t>(bunny_mesh.groups.size());
+    horizon::DrawIndexedIndirectParams orb_draws;
+    orb_draws.draw_count = static_cast<uint32_t>(orb_mesh.groups.size());
+    horizon::DrawIndexedIndirectParams sky_draw;
+    sky_draw.draw_count = 1;
 
     constexpr float aspect = static_cast<float>(ibl_width) / static_cast<float>(ibl_height);
     // bgfx 是左手系（屏幕右 = 世界 +x），跟随之以保证天空盒方向基与网格反射一致。
@@ -648,7 +648,8 @@ void run_example_ibl()
         rasterizer.vsp.envMtx = env_rot;
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
 
-        std::vector<horizon::DrawIndexedIndirectCommand> indirect_cmds;
+        // per-draw 的 vpc 是 push constant，按 record_indirect 调用快照，且一次调用只绑一对
+        // VB/IB：每个物体写完自己的 vpc 后，用它自己的 VB/IB 单独 record 一次。
 
         // ---- 网格 draw（先画，深度 LessOrEqual 下天空盒只补背景）----
         if (s.mesh_selection == 0)
@@ -659,12 +660,7 @@ void run_example_ibl()
             rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
             rasterizer.vpc.model   = model;
             rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-            for (const horizon::DrawIndexedIndirectCommand& base_cmd : bunny_commands)
-            {
-                horizon::DrawIndexedIndirectCommand cmd = base_cmd;
-                cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-                indirect_cmds.push_back(cmd);
-            }
+            rasterizer.record_indirect(bunny_ib, bunny_vb, bunny_indirect, bunny_draws);
         }
         else
         {
@@ -687,12 +683,7 @@ void run_example_ibl()
                     rasterizer.vpc.model   = model;
                     rasterizer.vpc.params0 =
                         glm::vec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
-                    for (const horizon::DrawIndexedIndirectCommand& base_cmd : orb_commands)
-                    {
-                        horizon::DrawIndexedIndirectCommand cmd = base_cmd;
-                        cmd.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-                        indirect_cmds.push_back(cmd);
-                    }
+                    rasterizer.record_indirect(orb_ib, orb_vb, orb_indirect, orb_draws);
                 }
             }
         }
@@ -701,31 +692,7 @@ void run_example_ibl()
         rasterizer.vpc.misc    = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
         rasterizer.vpc.model   = glm::mat4(1.0f); // identity，skybox 路径不使用 model
         rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-
-        horizon::DrawIndexedIndirectCommand sky_draw = sky_cmd;
-        sky_draw.first_instance = static_cast<uint32_t>(indirect_cmds.size());
-        indirect_cmds.push_back(sky_cmd);
-
-        if (!indirect_cmds.empty())
-        {
-            horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(indirect_cmds.data()),
-                    indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_ibl.indirect");
-
-            // Use first mesh's buffers (bunny or orb depending on selection, sky uses same)
-            const horizon::HardwareBuffer& ib = (s.mesh_selection == 0) ? bunny_ib : orb_ib;
-            const horizon::HardwareBuffer& vb = (s.mesh_selection == 0) ? bunny_vb : orb_vb;
-
-            horizon::DrawIndexedIndirectParams indirect_params;
-            indirect_params.draw_count = static_cast<uint32_t>(indirect_cmds.size());
-            indirect_params.indirect_offset = 0;
-            indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            rasterizer.record_indirect(ib, vb, indirect_buffer, indirect_params);
-        }
+        rasterizer.record_indirect(sky_ib, sky_vb, sky_indirect, sky_draw);
 
         horizon::SubmitReceipt render_receipt =
             render_executor << rasterizer.extent(ibl_width, ibl_height) << horizon::commit();

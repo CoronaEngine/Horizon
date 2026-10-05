@@ -5,6 +5,7 @@
 #pragma once
 
 #include "core/util/string_util.h"
+#include "horizon/core/logging.h"
 
 #include <cstdlib>
 #include <exception>
@@ -14,37 +15,6 @@
 #include <utility>
 
 namespace horizon::core {
-
-enum class LogLevel
-{
-    Trace,
-    Debug,
-    Info,
-    Warning,
-    Error,
-    Critical
-};
-
-struct LoggingOptions
-{
-    bool console = true;
-    // Empty disables file output. A configured file is created/truncated once.
-    std::filesystem::path file_path;
-    bool install_signal_handlers = false;
-    // Enables console colours and, on Windows, UTF-8 and ANSI console setup.
-    bool configure_utf8_console = false;
-#ifndef NDEBUG
-    LogLevel level = LogLevel::Debug;
-#else
-    LogLevel level = LogLevel::Info;
-#endif
-};
-
-// Call at application startup, before any logging or direct Quill startup.
-// The first successful initialization wins; subsequent calls are no-ops.
-// Without an explicit call, the first message uses the console-only defaults.
-OC_CORE_API void initialize_logging(const LoggingOptions &options = {});
-OC_CORE_API void set_log_level(LogLevel level) noexcept;
 
 namespace detail {
 OC_CORE_API void log_debug_message(std::string message) noexcept;
@@ -57,7 +27,6 @@ OC_CORE_API void log_level_debug() noexcept;
 OC_CORE_API void log_level_info() noexcept;
 OC_CORE_API void log_level_warning() noexcept;
 OC_CORE_API void log_level_error() noexcept;
-OC_CORE_API void log_flush() noexcept;
 
 template<typename... Args>
 inline void debug(Args &&...args) noexcept {
