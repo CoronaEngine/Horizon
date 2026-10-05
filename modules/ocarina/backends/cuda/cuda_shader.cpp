@@ -154,13 +154,17 @@ public:
     CUDASimpleShader(Device::Impl *device,
                      const ocarina::string &ptx,
                      const Function &f) : CUDAShader(device, f) {
-        const auto load_result = switch_profile::measure("cuModuleLoadData", "cuda_module", [&] {
-            return cuModuleLoadData(&module_, ptx.c_str());
-        });
+        CUresult load_result;
+        {
+            switch_profile::Scope profile{"cuModuleLoadData", "cuda_module"};
+            load_result = cuModuleLoadData(&module_, ptx.c_str());
+        }
         OC_CU_CHECK(load_result);
-        const auto function_result = switch_profile::measure("cuModuleGetFunction", "cuda_module", [&] {
-            return cuModuleGetFunction(&func_handle_, module_, function_.func_name().c_str());
-        });
+        CUresult function_result;
+        {
+            switch_profile::Scope profile{"cuModuleGetFunction", "cuda_module"};
+            function_result = cuModuleGetFunction(&func_handle_, module_, function_.func_name().c_str());
+        }
         OC_CU_CHECK(function_result);
     }
     ~CUDASimpleShader() override {
@@ -279,14 +283,17 @@ public:
         pipeline_compile_options_.pipelineLaunchParamsVariableName = "params";
         char log[2048];
         size_t log_size = sizeof(log);
-        switch_profile::Scope api_profile{"optixModuleCreate", "optix_module"};
-        OC_OPTIX_CHECK_WITH_LOG(optixModuleCreate(
-                                    device_->optix_device_context(),
-                                    &module_compile_options,
-                                    &pipeline_compile_options_,
-                                    ptx_code.data(), ptx_code.size(),
-                                    log, &log_size, &optix_module_),
-                                log);
+        OptixResult module_result;
+        {
+            switch_profile::Scope api_profile{"optixModuleCreate", "optix_module"};
+            module_result = optixModuleCreate(
+                device_->optix_device_context(),
+                &module_compile_options,
+                &pipeline_compile_options_,
+                ptx_code.data(), ptx_code.size(),
+                log, &log_size, &optix_module_);
+        }
+        OC_OPTIX_CHECK_WITH_LOG(module_result, log);
     }
 
     void build_pipeline(OptixDeviceContext optix_device_context) noexcept {
@@ -299,18 +306,19 @@ public:
         char log[2048];
         size_t sizeof_log = sizeof(log);
 
+        OptixResult pipeline_result;
         {
-        switch_profile::Scope api_profile{"optixPipelineCreate", "optix_pipeline"};
-        OC_OPTIX_CHECK_WITH_LOG(optixPipelineCreate(
-                                    optix_device_context,
-                                    &pipeline_compile_options_,
-                                    &pipeline_link_options,
-                                    (OptixProgramGroup *)&program_group_table_,
-                                    program_group_table_.size(),
-                                    log, &sizeof_log,
-                                    &optix_pipeline_),
-                                log);
+            switch_profile::Scope api_profile{"optixPipelineCreate", "optix_pipeline"};
+            pipeline_result = optixPipelineCreate(
+                optix_device_context,
+                &pipeline_compile_options_,
+                &pipeline_link_options,
+                (OptixProgramGroup *)&program_group_table_,
+                program_group_table_.size(),
+                log, &sizeof_log,
+                &optix_pipeline_);
         }
+        OC_OPTIX_CHECK_WITH_LOG(pipeline_result, log);
 
         // Set shaders stack sizes.
         OptixStackSizes stack_sizes = {};
@@ -369,14 +377,15 @@ public:
             raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
             raygen_prog_group_desc.raygen.module = optix_module_;
             raygen_prog_group_desc.raygen.entryFunctionName = program_name.raygen;
-            const auto raygen_result = switch_profile::measure("optixProgramGroupCreate.raygen", "optix_program_group", [&] { return optixProgramGroupCreate(
-                                        optix_device_context,
-                                        &raygen_prog_group_desc,
-                                        1,// num program groups
-                                        &program_group_options,
-                                        log,
-                                        &sizeof_log,
-                                        &(program_group_table.raygen_group)); });
+            OptixResult raygen_result;
+            {
+                switch_profile::Scope api_profile{"optixProgramGroupCreate.raygen", "optix_program_group"};
+                raygen_result = optixProgramGroupCreate(
+                    optix_device_context, &raygen_prog_group_desc,
+                    1,// num program groups
+                    &program_group_options, log, &sizeof_log,
+                    &(program_group_table.raygen_group));
+            }
             OC_OPTIX_CHECK_WITH_LOG(raygen_result, log);
         }
         {
@@ -386,14 +395,15 @@ public:
             hit_prog_group_desc.hitgroup.entryFunctionNameCH = program_name.closesthit_closest;
             sizeof_log = sizeof(log);
 
-            const auto closest_result = switch_profile::measure("optixProgramGroupCreate.closesthit", "optix_program_group", [&] { return optixProgramGroupCreate(
-                                        optix_device_context,
-                                        &hit_prog_group_desc,
-                                        1,// num program groups
-                                        &program_group_options,
-                                        log,
-                                        &sizeof_log,
-                                        &(program_group_table.hit_closest_group)); });
+            OptixResult closest_result;
+            {
+                switch_profile::Scope api_profile{"optixProgramGroupCreate.closesthit", "optix_program_group"};
+                closest_result = optixProgramGroupCreate(
+                    optix_device_context, &hit_prog_group_desc,
+                    1,// num program groups
+                    &program_group_options, log, &sizeof_log,
+                    &(program_group_table.hit_closest_group));
+            }
             OC_OPTIX_CHECK_WITH_LOG(closest_result, log);
 
             memset(&hit_prog_group_desc, 0, sizeof(OptixProgramGroupDesc));
@@ -402,28 +412,30 @@ public:
             hit_prog_group_desc.hitgroup.entryFunctionNameCH = program_name.closesthit_occlusion;
             sizeof_log = sizeof(log);
 
-            const auto anyhit_result = switch_profile::measure("optixProgramGroupCreate.anyhit", "optix_program_group", [&] { return optixProgramGroupCreate(
-                                        optix_device_context,
-                                        &hit_prog_group_desc,
-                                        1,// num program groups
-                                        &program_group_options,
-                                        log,
-                                        &sizeof_log,
-                                        &(program_group_table.hit_any_group)); });
+            OptixResult anyhit_result;
+            {
+                switch_profile::Scope api_profile{"optixProgramGroupCreate.anyhit", "optix_program_group"};
+                anyhit_result = optixProgramGroupCreate(
+                    optix_device_context, &hit_prog_group_desc,
+                    1,// num program groups
+                    &program_group_options, log, &sizeof_log,
+                    &(program_group_table.hit_any_group));
+            }
             OC_OPTIX_CHECK_WITH_LOG(anyhit_result, log);
         }
         {
             OptixProgramGroupDesc miss_prog_group_desc = {};
             miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
             sizeof_log = sizeof(log);
-            const auto miss_result = switch_profile::measure("optixProgramGroupCreate.miss", "optix_program_group", [&] { return optixProgramGroupCreate(
-                                        optix_device_context,
-                                        &miss_prog_group_desc,
-                                        1,// num program groups
-                                        &program_group_options,
-                                        log,
-                                        &sizeof_log,
-                                        &(program_group_table.miss_closest_group)); });
+            OptixResult miss_result;
+            {
+                switch_profile::Scope api_profile{"optixProgramGroupCreate.miss", "optix_program_group"};
+                miss_result = optixProgramGroupCreate(
+                    optix_device_context, &miss_prog_group_desc,
+                    1,// num program groups
+                    &program_group_options, log, &sizeof_log,
+                    &(program_group_table.miss_closest_group));
+            }
             OC_OPTIX_CHECK_WITH_LOG(miss_result, log);
         }
 

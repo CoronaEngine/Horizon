@@ -6,7 +6,6 @@
 #include <functional>
 #include <string>
 #include <thread>
-#include <utility>
 
 // Opt-in, flushed wall-clock events shared by the renderer and its backend.
 namespace ocarina::switch_profile {
@@ -26,10 +25,12 @@ inline std::string quoted(const char* value) {
     }
     return result + '"';
 }
-class Scope {
+// Keep a named instance in the measured function or block. Destruction closes
+// the event on normal return, early return and exception unwinding.
+class [[nodiscard]] Scope {
     const char* name_;
     const char* category_;
-    bool active_;
+    const bool active_;
     void emit(char phase) const noexcept {
         try {
             const auto time = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -49,16 +50,10 @@ public:
         : name_(name), category_(category), active_(enabled()) {
         if (active_) emit('B');
     }
-    void finish() noexcept {
-        if (active_) { emit('E'); active_ = false; }
+    ~Scope() noexcept {
+        if (active_) emit('E');
     }
-    ~Scope() { finish(); }
     Scope(const Scope&) = delete;
     Scope& operator=(const Scope&) = delete;
 };
-template<typename F>
-decltype(auto) measure(const char* name, const char* category, F&& action) {
-    Scope scope{name, category};
-    return std::forward<F>(action)();
-}
 } // namespace ocarina::switch_profile

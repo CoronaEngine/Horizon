@@ -9,6 +9,7 @@
 #include "core/header.h"
 #include "core/type.h"
 #include "core/type_system/precision_policy.h"
+#include "core/util/switch_profile.h"
 #include "expression.h"
 #include "statement.h"
 #include "ast_node.h"
@@ -257,6 +258,7 @@ public:
     }
     template<typename Func>
     static shared_ptr<Function> define_kernel(Func &&func) noexcept {
+        switch_profile::Scope profile{"Function::define_kernel", "dsl"};
         shared_ptr<Function> function = _define(Tag::KERNEL, std::forward<Func>(func));
         function->correct();
         return function;
