@@ -3,6 +3,7 @@
 //
 
 #include "cuda_compiler.h"
+#include "core/util/switch_profile.h"
 #include "cuda_device.h"
 #include "ast/function.h"
 #include "ast_to_cuda_source.h"
@@ -30,6 +31,7 @@ constexpr unsigned ast_to_cuda_source_cache_version = 1u;
 }
 
 [[nodiscard]] string emit_cuda_source(const Function &function) noexcept {
+    switch_profile::Scope profile{"emit_cuda_source", "codegen"};
     switch (Env::shader_codegen_path()) {
         case ShaderCodegenPath::EAstToSource: {
             AstToCudaSource emitter{Env::code_obfuscation()};
@@ -66,7 +68,8 @@ CUDACompiler::CUDACompiler(CUDADevice *device)
     : device_(device) {}
 
 ocarina::string CUDACompiler::compile(const Function &function, int sm) const noexcept {
-
+    switch_profile::Scope profile{"CUDACompiler::compile", "compiler_setup"};
+    switch_profile::Scope options_profile{"CUDACompiler::compile.headers_options", "compiler_setup"};
     fs::path cuda_path = get_cuda_path();
     cuda_path = cuda_path / "include";
 
@@ -137,18 +140,24 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
         compile_option.push_back(includes.back().c_str());
     }
 
+    options_profile.finish();
+    switch_profile::Scope hash_profile{"CUDACompiler::compile.cache_key", "cache_key"};
     uint64_t ext_hash = hash64(hash64_list(compile_option),
                                hash64_list(header_sources_ptr),
                                ast_to_cuda_source_cache_version,
                                shader_codegen_path_version(Env::shader_codegen_path()));
 
     auto compile = [&](const string &cu, const string &fn, int sm) -> string {
-        TIMER_TAG(compile, "compile " + fn);
+        OC_INFO_FORMAT("compiling shader with NVRTC: {}", fn);
+        TIMER_TAG(compile, "NVRTC compile " + fn);
+        switch_profile::Scope nvrtc_profile{"CUDACompiler::compile.nvrtc", "nvrtc_setup"};
         nvrtcProgram program{};
         OC_NVRTC_CHECK(nvrtcCreateProgram(&program, cu.c_str(), fn.c_str(),
                                           header_names.size(), header_sources_ptr.data(),
                                           header_names.data()));
-        const nvrtcResult compile_res = nvrtcCompileProgram(program, compile_option.size(), compile_option.data());
+        const nvrtcResult compile_res = switch_profile::measure("nvrtcCompileProgram", "nvrtc", [&] {
+            return nvrtcCompileProgram(program, compile_option.size(), compile_option.data());
+        });
         size_t log_size = 0;
         OC_NVRTC_CHECK(nvrtcGetProgramLogSize(program, &log_size));
         string log;
@@ -170,13 +179,14 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
     };
 
     string fn = function.func_name(ext_hash, function.description());
+    hash_profile.finish();
 
     ocarina::string ptx_fn = fn + ".ptx";
     string cu_fn = fn + ".cu";
     ocarina::string ptx;
     RHIContext *context = device_->context();
     if (!context->is_exist_cache(ptx_fn)) {
-        OC_INFO_FORMAT("miss ptx file {}", ptx_fn);
+        OC_INFO_FORMAT("shader PTX cache miss: {}", ptx_fn);
         if (!context->is_exist_cache(cu_fn)) {
             const ocarina::string cu = emit_cuda_source(function);
             context->write_global_cache(cu_fn, cu);
@@ -188,7 +198,7 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
             context->write_global_cache(ptx_fn, ptx);
         }
     } else {
-        OC_INFO_FORMAT("find ptx file {}", ptx_fn);
+        OC_INFO_FORMAT("shader PTX cache hit: {}", ptx_fn);
         ptx = context->read_global_cache(ptx_fn);
     }
     return ptx;

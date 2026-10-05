@@ -3,6 +3,7 @@
 //
 
 #include "function.h"
+#include "core/util/switch_profile.h"
 #include "core/type_system/type_desc.h"
 #include "core/util/util.h"
 #include "generator/source_emitter.h"
@@ -45,6 +46,7 @@ ocarina::list<CallExpr::Template> Function::resolve_ast_templates(ocarina::list<
 }
 
 void Function::correct() noexcept {
+    switch_profile::Scope profile{"Function::correct", "ast_correct"};
     TIMER(FunctionCorrect)
     FunctionCorrector().apply(this);
 }
