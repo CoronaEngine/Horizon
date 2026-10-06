@@ -12,6 +12,9 @@
 namespace ocarina {
 
 class OC_GENERATOR_API AstToCppSource : public SourceEmitter, protected ExprVisitor, protected StmtVisitor, protected TypeVisitor {
+private:
+    bool emit_comments_;
+
 protected:
     ocarina::set<uint64_t> generated_func_;
     ocarina::set<const Type *> generated_struct_;
@@ -63,9 +66,14 @@ protected:
     virtual void _emit_builtin_var(Variable v) noexcept {}
     virtual void _emit_variable_name(Variable v) noexcept;
     virtual void _emit_statements(ocarina::span<const Statement *const> stmts) noexcept;
+    [[nodiscard]] bool _should_emit_statement(const Statement *stmt) const noexcept {
+        return emit_comments_ || stmt->tag() != Statement::Tag::COMMENT;
+    }
 
 public:
-    explicit AstToCppSource(bool obfuscation): SourceEmitter(obfuscation) {}
+    // Compilation can omit diagnostic metadata without obfuscating readable code.
+    explicit AstToCppSource(bool obfuscation, bool emit_comments = true)
+        : SourceEmitter(obfuscation), emit_comments_(emit_comments && !obfuscation) {}
     void emit(const Function &func) noexcept override;
 };
 

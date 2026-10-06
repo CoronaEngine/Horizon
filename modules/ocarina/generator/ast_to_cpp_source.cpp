@@ -95,12 +95,20 @@ void AstToCppSource::visit(const IfStmt *stmt) noexcept {
     current_scratch() << ") ";
     stmt->true_branch()->accept(*this);
     auto false_branch = stmt->false_branch();
-    if (false_branch->empty()) {
+    const Statement *first_statement = nullptr;
+    size_t statement_count = 0u;
+    for (const Statement *statement : false_branch->statements()) {
+        if (_should_emit_statement(statement)) {
+            if (first_statement == nullptr) { first_statement = statement; }
+            ++statement_count;
+        }
+    }
+    if (statement_count == 0u) {
         return;
     }
     current_scratch() << " else ";
-    if (false_branch->size() == 1 && false_branch->statements()[0]->tag() == Statement::Tag::IF) {
-        false_branch->statements()[0]->accept(*this);
+    if (statement_count == 1u && first_statement->tag() == Statement::Tag::IF && false_branch->local_vars().empty()) {
+        first_statement->accept(*this);
     } else {
         false_branch->accept(*this);
     }
@@ -451,6 +459,7 @@ void AstToCppSource::_emit_variable_name(Variable v) noexcept {
 
 void AstToCppSource::_emit_statements(ocarina::span<const Statement *const> stmts) noexcept {
     for (const Statement *stmt : stmts) {
+        if (!_should_emit_statement(stmt)) { continue; }
         _emit_indent();
         stmt->accept(*this);
         current_scratch() << ";";
@@ -463,7 +472,7 @@ void AstToCppSource::_emit_body(const Function &f) noexcept {
 }
 
 void AstToCppSource::_emit_comment(const std::string &content) noexcept {
-    if (obfuscation_) {
+    if (!emit_comments_) {
         return;
     }
     current_scratch() << "/* " << content << " */";

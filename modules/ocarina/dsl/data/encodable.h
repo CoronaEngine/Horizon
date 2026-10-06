@@ -7,6 +7,8 @@
 #include "core/util/util.h"
 #include "../core/type_trait.h"
 #include "dynamic_array.h"
+#include <memory>
+#include <stdexcept>
 
 namespace ocarina {
 
@@ -16,6 +18,36 @@ class RegistrableManaged;
 using buffer_ty = uint;
 
 namespace detail {
+// Captured parameter addresses survive owner moves. Copies remain independent.
+template<typename T>
+struct ParameterValue {
+    std::unique_ptr<T> value;
+    explicit ParameterValue(T initial) : value(std::make_unique<T>(std::move(initial))) {}
+    ParameterValue(const ParameterValue &other)
+        : value(other.value ? std::make_unique<T>(*other.value) : nullptr) {}
+    ParameterValue(ParameterValue &&) = default;
+    ParameterValue &operator=(ParameterValue &&) = default;
+    ParameterValue &operator=(const ParameterValue &other) {
+        if (other.value) {
+            set(*other.value);
+        } else {
+            value.reset();
+        }
+        return *this;
+    }
+    void set(const T &next) {
+        if (value) {
+            *value = next;
+        } else {
+            value = std::make_unique<T>(next);
+        }
+    }
+    [[nodiscard]] T &get() const noexcept {
+        OC_ASSERT(value);
+        return *value;
+    }
+};
+
 template<typename U = buffer_ty>
 requires(sizeof(U) == sizeof(float))
 struct data_accessor_impl {
@@ -78,13 +110,13 @@ requires(is_std_vector_v<value_ty> && is_scalar_v<typename value_ty::value_type>
         (is_array_v<value_ty> && std::is_same_v<array_element_t<value_ty>, float>)
 struct EncodedData final : public Encodable {
 public:
-    using host_ty = std::variant<value_ty, std::function<value_ty()>>;
+    using host_ty = std::variant<value_ty, std::function<value_ty()>, detail::ParameterValue<value_ty>>;
     using buffer_type = T;
     static constexpr size_t max_alignment = alignof(uint);
     static constexpr uint buffer_stride = sizeof(buffer_ty);
 
 private:
-    host_ty host_value_{};
+    mutable host_ty host_value_{};
     optional<dsl_t<value_ty>> device_value_{};
     EncodeType encode_type_{Original};
 
@@ -95,11 +127,38 @@ private:
 public:
     explicit EncodedData(value_ty val = value_ty{}, EncodeType et = Original)
         : host_value_(std::move(val)), encode_type_(et) {}
+    EncodedData(const EncodedData &) = default;
+    EncodedData(EncodedData &&) = default;
+    // Moving replaces the owner, as during hotfix restore; move its shaders too.
+    EncodedData &operator=(EncodedData &&) = default;
+    EncodedData &operator=(const EncodedData &other) {
+        if (this == &other) return *this;
+        if (host_value_.index() == 2) {
+            if (other.host_value_.index() == 1) {
+                throw std::logic_error("Cannot replace a captured parameter with a getter");
+            }
+            std::get<2>(host_value_).set(other.hv());
+        } else {
+            host_value_ = other.host_value_;
+        }
+        device_value_ = other.device_value_;
+        encode_type_ = other.encode_type_;
+        offset_ = other.offset_;
+        data_ = other.data_;
+        return *this;
+    }
     EncodedData &operator=(const value_ty &val) {
-        host_value_ = val;
+        if (host_value_.index() == 2) {
+            std::get<2>(host_value_).set(val);
+        } else {
+            host_value_ = val;
+        }
         return *this;
     }
     EncodedData &operator=(const std::function<value_ty()> &val) {
+        if (host_value_.index() == 2) {
+            throw std::logic_error("Cannot replace a captured parameter with a getter");
+        }
         host_value_ = val;
         return *this;
     }
@@ -112,13 +171,15 @@ public:
     [[nodiscard]] value_ty hv() const noexcept {
         if (host_value_.index() == 0) {
             return std::get<0>(host_value_);
-        } else {
+        } else if (host_value_.index() == 1) {
             return std::get<1>(host_value_)();
+        } else {
+            return std::get<2>(host_value_).get();
         }
     }
     [[nodiscard]] value_ty &hv() noexcept {
-        OC_ASSERT(host_value_.index() == 0);
-        return std::get<0>(host_value_);
+        OC_ASSERT(host_value_.index() != 1);
+        return host_value_.index() == 0 ? std::get<0>(host_value_) : std::get<2>(host_value_).get();
     }
     [[nodiscard]] const dsl_t<value_ty> &dv() const noexcept {
         OC_ASSERT(has_device_value());
@@ -139,6 +200,27 @@ public:
         OC_ASSERT(false);
         return 1;
     }
+    // Binding indices are invocation data, not shader specialization constants.
+    // Storage follows owner moves (including hotfix restore), and must outlive
+    // shaders using it. DSL construction and owner mutation are serialized.
+    // ShaderArgumentPack snapshots each invocation's current parameter bytes.
+    [[nodiscard]] dsl_t<value_ty> as_parameter() const noexcept
+    requires std::is_same_v<value_ty, uint> {
+        if (has_device_value()) {
+            return dv();
+        }
+        OC_ASSERT(host_value_.index() != 1);
+        if (host_value_.index() == 0) {
+            const value_ty initial = std::get<0>(host_value_);
+            host_value_.template emplace<2>(initial);
+        }
+        const auto &value = std::get<2>(host_value_).get();
+        const auto &parameter = Function::current()->get_captured_resource(
+            Type::of<value_ty>(), Variable::Tag::LOCAL,
+            MemoryBlock{std::addressof(value), sizeof(value), alignof(value_ty), sizeof(value_ty)});
+        return dsl_t<value_ty>{parameter.expression()};
+    }
+
     [[nodiscard]] dsl_t<value_ty> operator*() const noexcept {
         if (has_device_value()) {
             return dv();
