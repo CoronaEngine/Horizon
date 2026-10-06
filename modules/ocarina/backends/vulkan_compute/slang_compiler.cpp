@@ -60,6 +60,10 @@ SlangShaderCompiler::~SlangShaderCompiler() noexcept {
         session_->release();
         session_ = nullptr;
     }
+    if (global_session_) {
+        global_session_->release();
+        global_session_ = nullptr;
+    }
 }
 
 // ── ensure_session ────────────────────────────────────────────────────────────
@@ -67,39 +71,37 @@ SlangShaderCompiler::~SlangShaderCompiler() noexcept {
 void SlangShaderCompiler::ensure_session() const noexcept {
     if (session_) return;
 
-    SlangSession *global = spCreateSession(nullptr);
-    OC_ERROR_IF(!global, "Slang: failed to create global session");
+    // Create a global session using the modern C++ API.
+    Slang::ComPtr<slang::IGlobalSession> global_com;
+    SlangResult r = slang::createGlobalSession(global_com.writeRef());
+    OC_ERROR_IF(SLANG_FAILED(r) || !global_com, "Slang: failed to create global session");
 
-    // Target: SPIR-V for Vulkan 1.2
+    // Target: SPIR-V 1.5 for Vulkan 1.2
     slang::TargetDesc target{};
     target.format  = SLANG_SPIRV;
-    target.profile = global->findProfile("spirv_1_5");
+    target.profile = global_com->findProfile("spirv_1_5");
 
-    // Search paths for builtin .slang files
+    // Search paths for builtin .slang files copied next to the backend DLL.
     string builtin_dir = Env::builtin_path() + "/slang";
     const char *search_paths[] = {builtin_dir.c_str()};
 
     slang::SessionDesc session_desc{};
-    session_desc.targets          = &target;
-    session_desc.targetCount      = 1;
-    session_desc.searchPaths      = search_paths;
-    session_desc.searchPathCount  = 1;
+    session_desc.targets                 = &target;
+    session_desc.targetCount             = 1;
+    session_desc.searchPaths             = search_paths;
+    session_desc.searchPathCount         = 1;
     session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
 
     Slang::ComPtr<slang::ISession> session_com;
-    SlangResult r = global->createSession(session_desc, session_com.writeRef());
-    OC_ERROR_IF(SLANG_FAILED(r), "Slang: createSession failed");
+    r = global_com->createSession(session_desc, session_com.writeRef());
+    OC_ERROR_IF(SLANG_FAILED(r) || !session_com, "Slang: createSession failed");
 
-    // session_ is a raw SlangSession; we hold a Slang ISession via ref-count trick.
-    // For simplicity store the global session which owns the compile scope.
-    session_ = global;
-    // Keep session_com alive by detaching into a stored ComPtr; stash in session_
-    // by casting — in practice callers use session_ only to createCompileRequest.
-    // Store the ISession pointer in session_ after bumping its ref count.
-    slang::ISession *raw = session_com.get();
-    raw->addRef();
-    session_ = reinterpret_cast<SlangSession *>(raw);
-    global->release();
+    // Keep both objects alive for the compiler's lifetime.
+    global_com->addRef();
+    global_session_ = global_com.get();
+
+    session_com->addRef();
+    session_ = session_com.get();
 }
 
 // ── compile ───────────────────────────────────────────────────────────────────
@@ -150,11 +152,10 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     source = preamble + source;
 
     // Compile via Slang ISession
-    auto *isession = reinterpret_cast<slang::ISession *>(session_);
     Slang::ComPtr<slang::IBlob> diag;
     Slang::ComPtr<slang::IModule> module;
     {
-        SlangResult r = isession->loadModuleFromSourceString(
+        SlangResult r = session_->loadModuleFromSourceString(
             function.name().c_str(), nullptr,
             source.c_str(), module.writeRef(), diag.writeRef());
         if (diag && diag->getBufferSize() > 0) {

@@ -8,9 +8,8 @@
 #include "core/stl.h"
 #include "ast/function.h"
 
-// Forward declarations: avoid pulling full slang.h into every TU.
-struct SlangSession;
-struct SlangCompileRequest;
+// Forward declarations only — avoids pulling slang.h into every TU.
+namespace slang { struct IGlobalSession; struct ISession; }
 
 namespace ocarina {
 
@@ -18,8 +17,12 @@ class VulkanComputeDevice;
 
 class SlangShaderCompiler {
 private:
-    VulkanComputeDevice *device_;
-    mutable SlangSession *session_{nullptr};
+    VulkanComputeDevice     *device_;
+    // global_session_ owns the Slang context; session_ is a child session scoped
+    // to a single target profile.  Both are ref-counted COM-like objects; we hold
+    // raw pointers and manage AddRef/Release explicitly in the .cpp.
+    mutable slang::IGlobalSession *global_session_{nullptr};
+    mutable slang::ISession       *session_{nullptr};
 
     void ensure_session() const noexcept;
 

@@ -102,7 +102,8 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     qci.pQueuePriorities = &priority;
 
     vector<const char *> exts{
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        // Swapchain is a graphics-only extension; a headless compute device has no
+        // surface, so requesting it would fail on display-less or validation layers.
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
     };
@@ -528,8 +529,6 @@ uint64_t VulkanComputeDevice::export_handle(handle_ty handle_) {
 }
 #endif
 
-}// namespace ocarina
-
 // ── Destructor ────────────────────────────────────────────────────────────────
 
 VulkanComputeDevice::~VulkanComputeDevice() noexcept {
@@ -548,3 +547,4 @@ VulkanComputeDevice::~VulkanComputeDevice() noexcept {
     if (instance_) vkDestroyInstance(instance_, nullptr);
 }
 
+}// namespace ocarina

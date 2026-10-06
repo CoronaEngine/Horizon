@@ -10,6 +10,7 @@ ocarina_add_backend(vulkan-compute SOURCES ${HEADER_FILES} ${SOURCE_FILES})
 target_link_libraries(ocarina-backend-vulkan-compute PRIVATE
     Vulkan::Vulkan
     slang::slang
+    vulkan-memory-allocator::vulkan-memory-allocator
 )
 
 target_include_directories(ocarina-backend-vulkan-compute PRIVATE

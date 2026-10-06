@@ -74,11 +74,13 @@ VkComputeShader::VkComputeShader(VulkanComputeDevice *device,
                                   const vector<uint32_t> &spirv,
                                   const Function &f)
     : VkShaderBase(device, f) {
+    // maxComputeWorkGroupInvocations lives in VkPhysicalDeviceLimits, not in the
+    // ray-tracing pipeline properties struct; query it from physical device props.
+    VkPhysicalDeviceProperties dev_props{};
+    vkGetPhysicalDeviceProperties(device_->physical_device(), &dev_props);
     workgroup_size_ = choose_block_shape(
         f.dispatch_hint().dim.x > 0 ? f.dispatch_hint().dim : make_uint3(64u, 1u, 1u),
-        device_->rt_props().maxComputeWorkGroupInvocations > 0
-            ? device_->rt_props().maxComputeWorkGroupInvocations
-            : 1024u);
+        dev_props.limits.maxComputeWorkGroupInvocations);
     create_pipeline_layout();
     create_pipeline(spirv, workgroup_size_);
 }
