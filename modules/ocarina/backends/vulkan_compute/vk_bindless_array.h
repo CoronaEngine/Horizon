@@ -34,6 +34,8 @@ private:
     Managed<VkBindlessTexSlot>    tex3d_slots_;
     Managed<VkBindlessTexSlot>    tex2d_slots_;
 
+    size_t buffer_count_{}, tex2d_count_{}, tex3d_count_{};
+
     static constexpr size_t c_max_slots = c_max_slot_num;
 
 public:

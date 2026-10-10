@@ -3,6 +3,7 @@
 // Replaces cuda_device.cpp — Vulkan compute-only device, no swapchain.
 //
 
+#define VMA_IMPLEMENTATION
 #include "vk_compute_device.h"
 #include "vk_stream.h"
 #include "vk_texture.h"
@@ -13,8 +14,6 @@
 #include "vk_command_visitor.h"
 #include "rhi/context.h"
 
-#define VMA_IMPLEMENTATION
-#include <vk_mem_alloc.h>
 
 namespace ocarina {
 
@@ -63,21 +62,31 @@ void VulkanComputeDevice::init_physical_device() noexcept {
         vkGetPhysicalDeviceProperties(d, &p);
         if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { phys_device_ = d; break; }
     }
+    VkPhysicalDeviceProperties selected{};
+    vkGetPhysicalDeviceProperties(phys_device_, &selected);
+    OC_INFO_FORMAT("Created Vulkan device: {} (vendor = {}, device = {})",
+            selected.deviceName, selected.vendorID, selected.deviceID);
 
     // RT support probe
     uint32_t ec = 0;
     vkEnumerateDeviceExtensionProperties(phys_device_, nullptr, &ec, nullptr);
     vector<VkExtensionProperties> exts(ec);
     vkEnumerateDeviceExtensionProperties(phys_device_, nullptr, &ec, exts.data());
-    for (const auto &e : exts)
-        if (strcmp(e.extensionName, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) == 0)
-            has_rt_ = true;
-
+    auto supports = [&](const char *name) {
+        return std::any_of(exts.begin(), exts.end(), [&](const auto &e) {
+            return strcmp(e.extensionName, name) == 0;
+        });
+    };
+    has_rt_ = supports(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+              supports(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+              supports(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
     if (has_rt_) {
-        rt_props_ = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
-        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-        p2.pNext = &rt_props_;
-        vkGetPhysicalDeviceProperties2(phys_device_, &p2);
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR as_props{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        props.pNext = &as_props;
+        vkGetPhysicalDeviceProperties2(phys_device_, &props);
+        scratch_alignment_ = as_props.minAccelerationStructureScratchOffsetAlignment;
     }
 
     // Find compute queue
@@ -90,7 +99,6 @@ void VulkanComputeDevice::init_physical_device() noexcept {
         if (qfp[i].queueFlags & VK_QUEUE_COMPUTE_BIT) { compute_queue_family_ = i; break; }
     OC_ERROR_IF(compute_queue_family_ == UINT32_MAX, "No compute queue family");
 }
-// PLACEHOLDER_DEV_1
 
 // ── init_logical_device ───────────────────────────────────────────────────────
 
@@ -101,50 +109,31 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     qci.queueCount       = 1u;
     qci.pQueuePriorities = &priority;
 
-    vector<const char *> exts{
-        // Swapchain is a graphics-only extension; a headless compute device has no
-        // surface, so requesting it would fail on display-less or validation layers.
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-    };
+    vector<const char *> exts;
     if (has_rt_) {
         exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-        exts.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
         exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-        exts.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-        exts.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+        exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
     }
 
-    VkPhysicalDeviceBufferDeviceAddressFeatures bda_feat{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
-    bda_feat.bufferDeviceAddress = VK_TRUE;
-
-    VkPhysicalDeviceDescriptorIndexingFeatures idx_feat{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
-    idx_feat.pNext = &bda_feat;
-    idx_feat.descriptorBindingPartiallyBound            = VK_TRUE;
-    idx_feat.runtimeDescriptorArray                     = VK_TRUE;
-    idx_feat.descriptorBindingVariableDescriptorCount   = VK_TRUE;
-    idx_feat.descriptorBindingSampledImageUpdateAfterBind  = VK_TRUE;
-    idx_feat.descriptorBindingStorageImageUpdateAfterBind  = VK_TRUE;
-
+    VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceVulkan11Features f11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+    f11.pNext = &f12;
+    VkPhysicalDeviceRayQueryFeaturesKHR query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    if (has_rt_) { f12.pNext = &accel; accel.pNext = &query; }
     VkPhysicalDeviceFeatures2 feats2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    feats2.pNext = &idx_feat;
-    feats2.features.shaderInt64 = VK_TRUE;
-
-    void *rt_feat_ptr = nullptr;
-    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_feat{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
-    VkPhysicalDeviceAccelerationStructureFeaturesKHR as_feat{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
-    if (has_rt_) {
-        rt_feat.rayTracingPipeline    = VK_TRUE;
-        as_feat.accelerationStructure = VK_TRUE;
-        rt_feat.pNext = bda_feat.pNext;
-        bda_feat.pNext = &as_feat;
-        as_feat.pNext  = &rt_feat;
-        rt_feat_ptr    = &rt_feat;
-        (void)rt_feat_ptr;
+    feats2.pNext = &f11;
+    vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    OC_ERROR_IF(!f12.bufferDeviceAddress || !f12.runtimeDescriptorArray || !f12.scalarBlockLayout || !f12.timelineSemaphore ||
+                    !f12.descriptorBindingPartiallyBound || !f12.descriptorBindingSampledImageUpdateAfterBind ||
+                    !f12.descriptorBindingStorageImageUpdateAfterBind ||
+                    !f12.shaderSampledImageArrayNonUniformIndexing || !f12.shaderStorageImageArrayNonUniformIndexing,
+        "Vulkan backend requires buffer device addresses, descriptor indexing and scalar block layout");
+    if (has_rt_ && (!accel.accelerationStructure || !query.rayQuery)) {
+        has_rt_ = false;
+        f12.pNext = nullptr;
+        exts.clear();
     }
 
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
@@ -156,7 +145,6 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     OC_VK_CHECK(vkCreateDevice(phys_device_, &dci, nullptr, &device_));
     vkGetDeviceQueue(device_, compute_queue_family_, 0u, &compute_queue_);
 }
-// PLACEHOLDER_DEV_2
 
 // ── init_vma ──────────────────────────────────────────────────────────────────
 
@@ -173,95 +161,90 @@ void VulkanComputeDevice::init_vma() noexcept {
 // ── init_descriptor_pool ──────────────────────────────────────────────────────
 
 void VulkanComputeDevice::init_descriptor_pool() noexcept {
-    constexpr uint32_t c_max_descriptors = 65536u;
-
-    VkDescriptorPoolSize pool_sizes[2]{};
-    pool_sizes[0].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_sizes[0].descriptorCount = c_max_descriptors;
-    pool_sizes[1].type            = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    pool_sizes[1].descriptorCount = c_max_descriptors;
-
+    VkDescriptorPoolSize sizes[] = {
+        {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, max_texture_slots * 2},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, max_texture_slots * 4},
+        {VK_DESCRIPTOR_TYPE_SAMPLER, c_sampler_count}};
     VkDescriptorPoolCreateInfo pci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pci.flags         = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT |
-                        VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pci.maxSets       = 1u;
-    pci.poolSizeCount = 2u;
-    pci.pPoolSizes    = pool_sizes;
+    pci.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    pci.maxSets = 1; pci.poolSizeCount = 3; pci.pPoolSizes = sizes;
     OC_VK_CHECK(vkCreateDescriptorPool(device_, &pci, nullptr, &desc_pool_));
-
-    // Binding 0: combined image sampler array (for sampling)
-    // Binding 1: storage image array (for read/write)
-    VkDescriptorSetLayoutBinding bindings[2]{};
-    bindings[0].binding         = 0u;
-    bindings[0].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[0].descriptorCount = c_max_descriptors;
-    bindings[0].stageFlags      = VK_SHADER_STAGE_ALL;
-    bindings[1].binding         = 1u;
-    bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[1].descriptorCount = c_max_descriptors;
-    bindings[1].stageFlags      = VK_SHADER_STAGE_ALL;
-
-    VkDescriptorBindingFlags binding_flags[2]{
-        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
-        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT};
-    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_ci{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
-    flags_ci.bindingCount  = 2u;
-    flags_ci.pBindingFlags = binding_flags;
-
+    VkDescriptorSetLayoutBinding bindings[7]{};
+    VkDescriptorBindingFlags flags[7]{};
+    for (uint32_t i = 0; i < 7; ++i) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = i == 4 ? VK_DESCRIPTOR_TYPE_SAMPLER :
+            (i == 0 || i == 2 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+        bindings[i].descriptorCount = i == 4 ? c_sampler_count : max_texture_slots;
+        bindings[i].stageFlags = VK_SHADER_STAGE_ALL;
+        if (i != 4) flags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    }
+    VkDescriptorSetLayoutBindingFlagsCreateInfo f{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+    f.bindingCount = 7; f.pBindingFlags = flags;
     VkDescriptorSetLayoutCreateInfo lci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    lci.pNext        = &flags_ci;
-    lci.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-    lci.bindingCount = 2u;
-    lci.pBindings    = bindings;
+    lci.pNext = &f; lci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    lci.bindingCount = 7; lci.pBindings = bindings;
     OC_VK_CHECK(vkCreateDescriptorSetLayout(device_, &lci, nullptr, &global_layout_));
-
-    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    alloc.descriptorPool     = desc_pool_;
-    alloc.descriptorSetCount = 1u;
-    alloc.pSetLayouts        = &global_layout_;
-    OC_VK_CHECK(vkAllocateDescriptorSets(device_, &alloc, &global_set_));
+    VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    ai.descriptorPool = desc_pool_; ai.descriptorSetCount = 1; ai.pSetLayouts = &global_layout_;
+    OC_VK_CHECK(vkAllocateDescriptorSets(device_, &ai, &global_set_));
 }
-// PLACEHOLDER_DEV_3
+uint32_t VulkanComputeDevice::allocate_texture_slot() noexcept {
+    auto guard = buffer_map_guard_.lock();
+    if (!free_texture_slots_.empty()) {
+        auto slot = free_texture_slots_.back(); free_texture_slots_.pop_back(); return slot;
+    }
+    OC_ERROR_IF(next_texture_slot_ >= max_texture_slots, "Vulkan texture slots exhausted");
+    return next_texture_slot_++;
+}
+void VulkanComputeDevice::release_texture_slot(uint32_t slot) noexcept {
+    auto guard = buffer_map_guard_.lock();
+    if (slot) free_texture_slots_.push_back(slot);
+}
 
 // ── init_samplers ─────────────────────────────────────────────────────────────
 
 void VulkanComputeDevice::init_samplers() noexcept {
-    static constexpr VkSamplerAddressMode addr_modes[4] = {
-        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT,
-        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
-    };
     for (uint32_t i = 0; i < c_sampler_count; ++i) {
         VkSamplerCreateInfo sci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        sci.magFilter    = (i & 1u) ? VK_FILTER_LINEAR   : VK_FILTER_NEAREST;
+        sci.magFilter    = VK_FILTER_LINEAR;
         sci.minFilter    = sci.magFilter;
         sci.mipmapMode   = (i & 2u) ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        sci.addressModeU = addr_modes[(i >> 2u) & 3u];
+        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         sci.addressModeV = sci.addressModeU;
         sci.addressModeW = sci.addressModeU;
         sci.maxLod       = VK_LOD_CLAMP_NONE;
         OC_VK_CHECK(vkCreateSampler(device_, &sci, nullptr, &samplers_[i]));
     }
+    VkDescriptorImageInfo images[c_sampler_count]{};
+    for (uint32_t i = 0; i < c_sampler_count; ++i) images[i].sampler = samplers_[i];
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = global_set_; write.dstBinding = 4;
+    write.descriptorCount = c_sampler_count; write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    write.pImageInfo = images;
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+
 }
-// PLACEHOLDER_DEV_4
 
 // ── Buffer allocation ─────────────────────────────────────────────────────────
 
 VkBufferAllocation VulkanComputeDevice::allocate_buffer(size_t size,
                                                         VkBufferUsageFlags usage,
                                                         bool host_visible,
-                                                        const string &) noexcept {
+                                                        const string &, VkDeviceSize alignment) noexcept {
     VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bci.size        = size > 0 ? size : 4;
     bci.usage       = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    if (has_rt_) bci.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     VmaAllocationCreateInfo aci{};
     aci.usage = host_visible ? VMA_MEMORY_USAGE_CPU_TO_GPU : VMA_MEMORY_USAGE_GPU_ONLY;
+    if (host_visible) aci.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     if (host_visible) aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
     VkBufferAllocation result{};
-    OC_VK_CHECK(vmaCreateBuffer(allocator_, &bci, &aci, &result.buffer, &result.alloc, nullptr));
+    OC_VK_CHECK(vmaCreateBufferWithAlignment(allocator_, &bci, &aci, alignment,
+        &result.buffer, &result.alloc, nullptr));
+    result.size = bci.size;
     VkBufferDeviceAddressInfo ai{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     ai.buffer    = result.buffer;
     result.address = vkGetBufferDeviceAddress(device_, &ai);
@@ -282,19 +265,23 @@ void VulkanComputeDevice::free_buffer(VkBufferAllocation &alloc) noexcept {
     alloc = {};
 }
 
-VkBuffer VulkanComputeDevice::get_vk_buffer(handle_ty addr) noexcept {
+VkBuffer VulkanComputeDevice::get_vk_buffer(handle_ty addr, VkDeviceSize *offset) noexcept {
     auto g = buffer_map_guard_.lock();
-    auto it = buffer_map_.find(addr);
-    return it != buffer_map_.end() ? it->second.buffer : VK_NULL_HANDLE;
+    auto it = buffer_map_.upper_bound(addr);
+    OC_ERROR_IF(it == buffer_map_.begin(), "Unknown Vulkan buffer address");
+    --it;
+    auto delta = addr - it->first;
+    OC_ERROR_IF(delta >= it->second.size, "Vulkan buffer address is outside its allocation");
+    if (offset) *offset = delta;
+    return it->second.buffer;
 }
-// PLACEHOLDER_DEV_5
 
 VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt,
                                                        uint32_t levels,
                                                        VkImageUsageFlags usage,
-                                                       const string &) noexcept {
+                                                       const string &, bool is_3d) noexcept {
     VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    ici.imageType   = extent.z > 1u ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    ici.imageType   = is_3d ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     ici.format      = fmt;
     ici.extent      = {extent.x, extent.y, std::max(extent.z, 1u)};
     ici.mipLevels   = levels;
@@ -310,12 +297,24 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     OC_VK_CHECK(vmaCreateImage(allocator_, &ici, &aci, &result.image, &result.alloc, nullptr));
     VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     vci.image    = result.image;
-    vci.viewType = extent.z > 1u ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
+    vci.viewType = is_3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
     vci.format   = fmt;
     vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
     OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.view));
-    // storage view (same, for non-depth/stencil formats storage access is the same view)
-    result.storage_view = result.view;
+    immediate_submit([&](VkCommandBuffer cb) {
+        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        barrier.image = result.image;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
+        barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    });
+    // Storage image descriptors address only the base mip.
+    vci.subresourceRange.levelCount = 1;
+    OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.storage_view));
     {
         auto g = buffer_map_guard_.lock();
         image_map_[reinterpret_cast<handle_ty>(result.image)] = result;
@@ -329,6 +328,7 @@ void VulkanComputeDevice::free_image(VkImageAllocation &alloc) noexcept {
         auto g = buffer_map_guard_.lock();
         image_map_.erase(reinterpret_cast<handle_ty>(alloc.image));
     }
+    if (alloc.storage_view != VK_NULL_HANDLE) vkDestroyImageView(device_, alloc.storage_view, nullptr);
     if (alloc.view != VK_NULL_HANDLE) vkDestroyImageView(device_, alloc.view, nullptr);
     vmaDestroyImage(allocator_, alloc.image, alloc.alloc);
     alloc = {};
@@ -340,6 +340,7 @@ VkImageAllocation &VulkanComputeDevice::get_vk_image(handle_ty handle) noexcept 
 }
 
 void VulkanComputeDevice::immediate_submit(std::function<void(VkCommandBuffer)> &&fn) noexcept {
+    std::lock_guard lock(submission_mutex_);
     VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pci.queueFamilyIndex = compute_queue_family_;
     pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -352,7 +353,16 @@ void VulkanComputeDevice::immediate_submit(std::function<void(VkCommandBuffer)> 
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     OC_VK_CHECK(vkBeginCommandBuffer(cb, &bi));
+    VkMemoryBarrier memory_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    memory_barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    memory_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    auto barrier = [&] {
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 1, &memory_barrier, 0, nullptr, 0, nullptr);
+    };
+    barrier();
     fn(cb);
+    barrier();
     OC_VK_CHECK(vkEndCommandBuffer(cb));
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence fence = VK_NULL_HANDLE;
@@ -364,12 +374,53 @@ void VulkanComputeDevice::immediate_submit(std::function<void(VkCommandBuffer)> 
     vkDestroyFence(device_, fence, nullptr);
     vkDestroyCommandPool(device_, pool, nullptr);
 }
-// PLACEHOLDER_DEV_6
+
+void VulkanComputeDevice::submit(VkCommandBuffer cb, VkFence fence,
+                                 VkSemaphore timeline, uint64_t wait_value) noexcept {
+    std::lock_guard lock(submission_mutex_);
+    VkTimelineSemaphoreSubmitInfo values{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
+    values.waitSemaphoreValueCount = 1;
+    values.pWaitSemaphoreValues = &wait_value;
+    VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    if (wait_value) {
+        submit.pNext = &values;
+        submit.waitSemaphoreCount = 1;
+        submit.pWaitSemaphores = &timeline;
+        submit.pWaitDstStageMask = &stage;
+    }
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cb;
+    OC_VK_CHECK(vkQueueSubmit(compute_queue_, 1, &submit, fence));
+}
+void VulkanComputeDevice::register_stream(VkComputeStream *stream) noexcept {
+    std::lock_guard lock(streams_mutex_);
+    streams_.push_back(stream);
+}
+void VulkanComputeDevice::unregister_stream(VkComputeStream *stream) noexcept {
+    std::lock_guard lock(streams_mutex_);
+    auto it = std::find(streams_.begin(), streams_.end(), stream);
+    if (it != streams_.end()) streams_.erase(it);
+}
+void VulkanComputeDevice::synchronize_streams() noexcept {
+    // keep_alive may release its final resource reference on a completion
+    // thread. Its GPU batch has finished and later work is still blocked by
+    // the timeline; waiting here would wait for this same callback to return.
+    // As with CUDA, resources used by another stream must be retained there.
+    if (VkComputeStream::is_completion_thread(this)) return;
+    std::lock_guard lock(streams_mutex_);
+    for (auto *stream : streams_) stream->wait_idle();
+}
+void VulkanComputeDevice::run_commit_callback(const std::function<void(void *)> &callback) noexcept {
+    std::lock_guard lock(submission_mutex_);
+    callback(reinterpret_cast<void *>(compute_queue_));
+}
 
 // ── Device::Impl create/destroy ───────────────────────────────────────────────
 
 handle_ty VulkanComputeDevice::create_buffer(size_t size, const string &desc,
                                               bool) noexcept {
+    if (size == 0) return 0;
     auto alloc = allocate_buffer(size,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, desc);
@@ -377,6 +428,7 @@ handle_ty VulkanComputeDevice::create_buffer(size_t size, const string &desc,
 }
 
 void VulkanComputeDevice::destroy_buffer(handle_ty handle) noexcept {
+    synchronize_streams();
     auto g = buffer_map_guard_.lock();
     auto it = buffer_map_.find(handle);
     if (it == buffer_map_.end()) return;
@@ -407,17 +459,31 @@ handle_ty VulkanComputeDevice::create_texture2d_from_external(uint handle,
 }
 
 void VulkanComputeDevice::destroy_texture3d(handle_ty handle) noexcept {
+    synchronize_streams();
     delete reinterpret_cast<VkTexture3D *>(handle);
 }
 
 void VulkanComputeDevice::destroy_texture2d(handle_ty handle) noexcept {
+    synchronize_streams();
     delete reinterpret_cast<VkTexture2D *>(handle);
 }
 
+uint3 VulkanComputeDevice::workgroup_size(const Function &function) const noexcept {
+    uint3 dim = function.block_dim();
+    if (!dim.x || !dim.y || !dim.z) dim = make_uint3(64u, 1u, 1u);
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(phys_device_, &props);
+    const auto &limits = props.limits;
+    OC_ERROR_IF(dim.x > limits.maxComputeWorkGroupSize[0] ||
+                dim.y > limits.maxComputeWorkGroupSize[1] ||
+                dim.z > limits.maxComputeWorkGroupSize[2] ||
+                uint64_t(dim.x) * dim.y * dim.z > limits.maxComputeWorkGroupInvocations,
+                "Vulkan workgroup exceeds device limits");
+    return dim;
+}
+
 handle_ty VulkanComputeDevice::create_shader(const Function &function) noexcept {
-    uint3 wg = choose_block_shape(
-        function.dispatch_hint().dim.x > 0 ? function.dispatch_hint().dim : make_uint3(64u,1u,1u),
-        1024u);
+    uint3 wg = workgroup_size(function);
     auto spirv = compiler_->compile(function, wg);
     if (spirv.empty()) return InvalidUI64;
     auto *shader = VkShaderFactory::create(this, spirv, function);
@@ -425,16 +491,18 @@ handle_ty VulkanComputeDevice::create_shader(const Function &function) noexcept 
 }
 
 void VulkanComputeDevice::destroy_shader(handle_ty handle) noexcept {
+    synchronize_streams();
     delete reinterpret_cast<VkShaderBase *>(handle);
 }
-// PLACEHOLDER_DEV_7
 
 handle_ty VulkanComputeDevice::create_accel(AccelUsageTag usage_tag) noexcept {
+    OC_ERROR_IF(!has_rt_, "Vulkan device does not support ray queries");
     auto *accel = new VkAccel(this, usage_tag);
     return reinterpret_cast<handle_ty>(accel);
 }
 
 void VulkanComputeDevice::destroy_accel(handle_ty handle) noexcept {
+    synchronize_streams();
     delete reinterpret_cast<VkAccel *>(handle);
 }
 
@@ -453,6 +521,7 @@ handle_ty VulkanComputeDevice::create_mesh(const MeshParams &params) noexcept {
 }
 
 void VulkanComputeDevice::destroy_mesh(handle_ty handle) noexcept {
+    synchronize_streams();
     delete reinterpret_cast<VkMesh *>(handle);
 }
 
@@ -462,6 +531,7 @@ handle_ty VulkanComputeDevice::create_bindless_array() noexcept {
 }
 
 void VulkanComputeDevice::destroy_bindless_array(handle_ty handle) noexcept {
+    synchronize_streams();
     delete reinterpret_cast<VkBindlessArray *>(handle);
 }
 
@@ -481,9 +551,9 @@ void VulkanComputeDevice::init_rtx() noexcept {
 CommandVisitor *VulkanComputeDevice::command_visitor() noexcept {
     return cmd_visitor_.get();
 }
-// PLACEHOLDER_DEV_8
 
 void VulkanComputeDevice::memory_allocate(handle_ty *handle, size_t size, bool exported) {
+    if (size == 0) { *handle = 0; return; }
     auto alloc = allocate_buffer(size,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, "managed");
@@ -500,11 +570,18 @@ DevicePrecisionCaps VulkanComputeDevice::precision_caps() const noexcept {
     VkPhysicalDeviceFeatures feats{};
     vkGetPhysicalDeviceFeatures(phys_device_, &feats);
     DevicePrecisionCaps caps{};
-    caps.support_float16 = true;   // Vulkan 1.2 + SPIR-V always supports float16 in shaders
-    caps.support_float64 = feats.shaderFloat64 == VK_TRUE;
-    caps.support_int8     = true;
-    caps.support_int16    = true;
-    caps.support_int64    = feats.shaderInt64 == VK_TRUE;
+    VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    f2.pNext = &f12;
+    vkGetPhysicalDeviceFeatures2(phys_device_, &f2);
+    caps.has_native_fp16 = f12.shaderFloat16 == VK_TRUE;
+    caps.has_fast_fp16 = caps.has_native_fp16;
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(phys_device_, &memory);
+    for (uint32_t i = 0; i < memory.memoryHeapCount; ++i) {
+        if (memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            caps.total_vram_bytes += memory.memoryHeaps[i].size;
+    }
     return caps;
 }
 
@@ -548,3 +625,12 @@ VulkanComputeDevice::~VulkanComputeDevice() noexcept {
 }
 
 }// namespace ocarina
+
+OC_EXPORT_API ocarina::VulkanComputeDevice *create_device(ocarina::RHIContext *context) {
+    return ocarina::new_with_allocator<ocarina::VulkanComputeDevice>(context);
+}
+
+OC_EXPORT_API void destroy(ocarina::VulkanComputeDevice *device) {
+    device->run_cleanup_callbacks();
+    ocarina::delete_with_allocator(device);
+}

@@ -5,14 +5,14 @@
 
 // ── Wave / warp intrinsic wrappers ────────────────────────────────────────────
 
-uint4 oc_warp_active_bit_mask()       { return WaveActiveBallot(true); }
-uint  oc_warp_active_count_bits()     { return WaveActiveCountBits(true); }
-uint  oc_warp_prefix_count_bits()     { return WavePrefixCountBits(true); }
+uint4 oc_warp_active_bit_mask(bool pred)       { return WaveActiveBallot(pred); }
+uint  oc_warp_active_count_bits(bool pred)     { return WaveActiveCountBits(pred); }
+uint  oc_warp_prefix_count_bits(bool pred)     { return WavePrefixCountBits(pred); }
 uint  oc_warp_lane_id()               { return WaveGetLaneIndex(); }
 uint  oc_warp_size()                  { return WaveGetLaneCount(); }
 uint  oc_warp_first_active_lane()     { return WaveReadLaneFirst(WaveGetLaneIndex()); }
 bool  oc_warp_is_first_active_lane()  { return WaveIsFirstLane(); }
-void  oc_synchronize_block()          { GroupMemoryBarrierWithGroupSync(); }
+void  oc_synchronize_block()          { AllMemoryBarrierWithGroupSync(); }
 
 // ── Half conversion ───────────────────────────────────────────────────────────
 
@@ -21,13 +21,12 @@ float     oc_half2float(float16_t x) { return (float)x; }
 
 // ── Ray helpers ───────────────────────────────────────────────────────────────
 
-RayDesc oc_make_ray(float3 origin, float tmin, float3 direction, float tmax) {
-    RayDesc r;
-    r.Origin    = origin;
-    r.TMin      = tmin;
-    r.Direction = direction;
-    r.TMax      = tmax;
-    return r;
+Ray oc_make_ray(float3 origin, float3 direction, float tmax = 1e16f) {
+    Ray r; r.org_min = float4(origin, 0); r.dir_max = float4(direction, tmax); return r;
+}
+RayDesc oc_native_ray(Ray r) {
+    RayDesc d; d.Origin=r.org_min.xyz; d.TMin=r.org_min.w;
+    d.Direction=r.dir_max.xyz; d.TMax=r.dir_max.w; return d;
 }
 
 // Offset ray origin to prevent self-intersection (Wächter/Binder 2019).
@@ -48,63 +47,66 @@ float3 oc_offset_ray_origin(float3 p, float3 n) {
 
 // ── Buffer helpers ────────────────────────────────────────────────────────────
 
-bool oc_is_null_buffer<T>(OCBuffer<T> buf)  { return uint64_t(buf.handle) == 0; }
-bool oc_is_null_texture(OCTextureDesc desc) { return desc.tex_index == 0xFFFFFFFFu; }
+bool oc_is_null_buffer<T>(OCBuffer<T> buf)  { return buf.handle == 0; }
+bool oc_is_null_texture(OCTextureDesc desc) { return desc.tex_index == 0; }
 
-uint64_t oc_buffer_size<T>(OCBuffer<T> buf) { return buf.size / sizeof(T); }
+uint64_t oc_buffer_size<T>(OCBuffer<T> buf) { return buf.size; }
 
-T oc_buffer_read<T>(OCBuffer<T> buf, uint index) {
-    T* ptr = (T*)((uint8_t*)buf.handle + buf.offset);
+T oc_buffer_read<T>(OCBuffer<T> buf, uint64_t index) {
+    T* ptr = (T*)(buf.handle + uint64_t(buf.offset) * sizeof(T));
     return ptr[index];
 }
 
-void oc_buffer_write<T>(OCBuffer<T> buf, uint index, T val) {
-    T* ptr = (T*)((uint8_t*)buf.handle + buf.offset);
+void oc_buffer_write<T>(OCBuffer<T> buf, uint64_t index, T val) {
+    T* ptr = (T*)(buf.handle + uint64_t(buf.offset) * sizeof(T));
     ptr[index] = val;
 }
 
 // ── Bindless buffer read / write ──────────────────────────────────────────────
 
-T oc_bindless_array_buffer_read<T>(OCBindlessArrayDesc arr, uint slot, uint index) {
+uint64_t oc_bindless_buffer_address(OCBindlessArrayDesc arr, uint slot, uint64_t index, uint stride) {
+    OCBuffer<uint8_t> buf = *((OCBuffer<uint8_t>*)(arr.buffer_slot + slot * 24u));
+    return buf.handle + buf.offset + uint64_t(index) * stride;
+}
+
+T oc_bindless_array_buffer_read<T, uint Stride>(OCBindlessArrayDesc arr, uint slot, uint64_t index) {
     OCBuffer<T>* slot_ptr = (OCBuffer<T>*)(arr.buffer_slot + slot * sizeof(OCBuffer<T>));
     OCBuffer<T>  buf      = *slot_ptr;
-    T*           data     = (T*)((uint8_t*)buf.handle + buf.offset);
-    return data[index];
+    return *(T*)(buf.handle + buf.offset + uint64_t(index) * Stride);
 }
 
-void oc_bindless_array_buffer_write<T>(OCBindlessArrayDesc arr, uint slot, uint index, T val) {
+void oc_bindless_array_buffer_write<T, uint Stride>(OCBindlessArrayDesc arr, uint slot, uint64_t index, T val) {
     OCBuffer<T>* slot_ptr = (OCBuffer<T>*)(arr.buffer_slot + slot * sizeof(OCBuffer<T>));
     OCBuffer<T>  buf      = *slot_ptr;
-    T*           data     = (T*)((uint8_t*)buf.handle + buf.offset);
-    data[index] = val;
+    *(T*)(buf.handle + buf.offset + uint64_t(index) * Stride) = val;
 }
 
-uint64_t oc_bindless_array_buffer_size<T>(OCBindlessArrayDesc arr, uint slot) {
-    OCBuffer<T>* slot_ptr = (OCBuffer<T>*)(arr.buffer_slot + slot * sizeof(OCBuffer<T>));
-    return (*slot_ptr).size / sizeof(T);
+uint oc_bindless_array_buffer_size(OCBindlessArrayDesc arr, uint slot) {
+    OCBuffer<uint8_t>* slot_ptr = (OCBuffer<uint8_t>*)(arr.buffer_slot + slot * 24u);
+    return uint((*slot_ptr).size);
 }
 
-T oc_bindless_array_byte_buffer_read<T>(OCBindlessArrayDesc arr, uint slot, uint byte_offset) {
+T oc_bindless_array_byte_buffer_read<T>(OCBindlessArrayDesc arr, uint slot, uint64_t byte_offset) {
     OCBuffer<uint8_t>* slot_ptr = (OCBuffer<uint8_t>*)(arr.buffer_slot + slot * sizeof(OCBuffer<uint8_t>));
     OCBuffer<uint8_t>  buf      = *slot_ptr;
-    T*                 data     = (T*)((uint8_t*)buf.handle + buf.offset + byte_offset);
+    T*                 data     = (T*)(buf.handle + uint64_t(buf.offset) + byte_offset);
     return *data;
 }
 
-void oc_bindless_array_byte_buffer_write<T>(OCBindlessArrayDesc arr, uint slot, uint byte_offset, T val) {
+void oc_bindless_array_byte_buffer_write<T>(OCBindlessArrayDesc arr, uint slot, uint64_t byte_offset, T val) {
     OCBuffer<uint8_t>* slot_ptr = (OCBuffer<uint8_t>*)(arr.buffer_slot + slot * sizeof(OCBuffer<uint8_t>));
     OCBuffer<uint8_t>  buf      = *slot_ptr;
-    T*                 data     = (T*)((uint8_t*)buf.handle + buf.offset + byte_offset);
+    T*                 data     = (T*)(buf.handle + uint64_t(buf.offset) + byte_offset);
     *data = val;
 }
 
-void oc_byte_buffer_write<T>(OCBuffer<uint8_t> buf, uint byte_offset, T val) {
-    T* ptr = (T*)((uint8_t*)buf.handle + buf.offset + byte_offset);
+void oc_byte_buffer_write<T>(OCBuffer<uint8_t> buf, uint64_t byte_offset, T val) {
+    T* ptr = (T*)(buf.handle + uint64_t(buf.offset) + byte_offset);
     *ptr = val;
 }
 
-T oc_byte_buffer_read<T>(OCBuffer<uint8_t> buf, uint byte_offset) {
-    T* ptr = (T*)((uint8_t*)buf.handle + buf.offset + byte_offset);
+T oc_byte_buffer_read<T>(OCBuffer<uint8_t> buf, uint64_t byte_offset) {
+    T* ptr = (T*)(buf.handle + uint64_t(buf.offset) + byte_offset);
     return *ptr;
 }
 
@@ -115,12 +117,149 @@ bool  oc_none(bool2 v) { return !any(v); }
 bool  oc_none(bool3 v) { return !any(v); }
 bool  oc_none(bool4 v) { return !any(v); }
 
-T  oc_sqr<T>(T x)           { return x * x; }
-T  oc_copysign<T>(T mag, T sgn)      { return abs(mag) * sign(sgn); }
-T  oc_exp10<T>(T x)          { return pow((T)10, x); }
-T  oc_log10<T>(T x)          { return log2(x) * (T)0.30102999566; }
-T  oc_length_squared<T>(T v) { return dot(v, v); }
-T  oc_distance_squared<T>(T a, T b) { T d = a - b; return dot(d, d); }
+float oc_sqr(float x) { return x*x; }
+float oc_copysign(float a, float b) { return bit_cast<float>((bit_cast<vector<uint, 1>>(float(a)) & 0x7fffffffu) | (bit_cast<vector<uint, 1>>(float(b)) & 0x80000000u)); }
+float oc_exp10(float x) { return pow(float(10),x); }
+float oc_length_squared(float x) { return dot(x,x); }
+float oc_distance_squared(float a, float b) { return dot(a-b,a-b); }
+vector<float, 2> oc_sqr(vector<float, 2> x) { return x*x; }
+vector<float, 2> oc_copysign(vector<float, 2> a, vector<float, 2> b) { return bit_cast<vector<float, 2>>((bit_cast<vector<uint, 2>>(float2(a)) & 0x7fffffffu) | (bit_cast<vector<uint, 2>>(float2(b)) & 0x80000000u)); }
+vector<float, 2> oc_exp10(vector<float, 2> x) { return pow(vector<float, 2>(10),x); }
+float oc_length_squared(vector<float, 2> x) { return dot(x,x); }
+float oc_distance_squared(vector<float, 2> a, vector<float, 2> b) { return dot(a-b,a-b); }
+vector<float, 3> oc_sqr(vector<float, 3> x) { return x*x; }
+vector<float, 3> oc_copysign(vector<float, 3> a, vector<float, 3> b) { return bit_cast<vector<float, 3>>((bit_cast<vector<uint, 3>>(float3(a)) & 0x7fffffffu) | (bit_cast<vector<uint, 3>>(float3(b)) & 0x80000000u)); }
+vector<float, 3> oc_exp10(vector<float, 3> x) { return pow(vector<float, 3>(10),x); }
+float oc_length_squared(vector<float, 3> x) { return dot(x,x); }
+float oc_distance_squared(vector<float, 3> a, vector<float, 3> b) { return dot(a-b,a-b); }
+vector<float, 4> oc_sqr(vector<float, 4> x) { return x*x; }
+vector<float, 4> oc_copysign(vector<float, 4> a, vector<float, 4> b) { return bit_cast<vector<float, 4>>((bit_cast<vector<uint, 4>>(float4(a)) & 0x7fffffffu) | (bit_cast<vector<uint, 4>>(float4(b)) & 0x80000000u)); }
+vector<float, 4> oc_exp10(vector<float, 4> x) { return pow(vector<float, 4>(10),x); }
+float oc_length_squared(vector<float, 4> x) { return dot(x,x); }
+float oc_distance_squared(vector<float, 4> a, vector<float, 4> b) { return dot(a-b,a-b); }
+float16_t oc_sqr(float16_t x) { return x*x; }
+float16_t oc_copysign(float16_t a, float16_t b) { return float16_t(oc_copysign(float(a), float(b))); }
+float16_t oc_exp10(float16_t x) { return pow(float16_t(10),x); }
+float16_t oc_length_squared(float16_t x) { return dot(x,x); }
+float16_t oc_distance_squared(float16_t a, float16_t b) { return dot(a-b,a-b); }
+vector<float16_t, 2> oc_sqr(vector<float16_t, 2> x) { return x*x; }
+vector<float16_t, 2> oc_copysign(vector<float16_t, 2> a, vector<float16_t, 2> b) { return vector<float16_t, 2>(oc_copysign(float2(a), float2(b))); }
+vector<float16_t, 2> oc_exp10(vector<float16_t, 2> x) { return pow(vector<float16_t, 2>(10),x); }
+float16_t oc_length_squared(vector<float16_t, 2> x) { return dot(x,x); }
+float16_t oc_distance_squared(vector<float16_t, 2> a, vector<float16_t, 2> b) { return dot(a-b,a-b); }
+vector<float16_t, 3> oc_sqr(vector<float16_t, 3> x) { return x*x; }
+vector<float16_t, 3> oc_copysign(vector<float16_t, 3> a, vector<float16_t, 3> b) { return vector<float16_t, 3>(oc_copysign(float3(a), float3(b))); }
+vector<float16_t, 3> oc_exp10(vector<float16_t, 3> x) { return pow(vector<float16_t, 3>(10),x); }
+float16_t oc_length_squared(vector<float16_t, 3> x) { return dot(x,x); }
+float16_t oc_distance_squared(vector<float16_t, 3> a, vector<float16_t, 3> b) { return dot(a-b,a-b); }
+vector<float16_t, 4> oc_sqr(vector<float16_t, 4> x) { return x*x; }
+vector<float16_t, 4> oc_copysign(vector<float16_t, 4> a, vector<float16_t, 4> b) { return vector<float16_t, 4>(oc_copysign(float4(a), float4(b))); }
+vector<float16_t, 4> oc_exp10(vector<float16_t, 4> x) { return pow(vector<float16_t, 4>(10),x); }
+float16_t oc_length_squared(vector<float16_t, 4> x) { return dot(x,x); }
+float16_t oc_distance_squared(vector<float16_t, 4> a, vector<float16_t, 4> b) { return dot(a-b,a-b); }
+// Preserve integer arithmetic for integer square; converting to float loses low bits.
+int oc_sqr(int x) { return x*x; }
+vector<int, 2> oc_sqr(vector<int, 2> x) { return x*x; }
+vector<int, 3> oc_sqr(vector<int, 3> x) { return x*x; }
+vector<int, 4> oc_sqr(vector<int, 4> x) { return x*x; }
+int[N] oc_sqr<uint N>(int x[N]) { int result[N]; for(uint i=0;i<N;++i) result[i]=oc_sqr(x[i]); return result; }
+uint oc_sqr(uint x) { return x*x; }
+vector<uint, 2> oc_sqr(vector<uint, 2> x) { return x*x; }
+vector<uint, 3> oc_sqr(vector<uint, 3> x) { return x*x; }
+vector<uint, 4> oc_sqr(vector<uint, 4> x) { return x*x; }
+uint[N] oc_sqr<uint N>(uint x[N]) { uint result[N]; for(uint i=0;i<N;++i) result[i]=oc_sqr(x[i]); return result; }
+
+// CUDA sign returns +1 for both signed zero values. CUDA round rounds ties away
+// from zero, whereas the Slang native round operation uses ties-to-even.
+float oc_round(float x) {
+    float magnitude = abs(x);
+    float integral = floor(magnitude);
+    return oc_copysign(integral + (magnitude - integral >= 0.5f ? 1.0f : 0.0f), x);
+}
+float16_t oc_round(float16_t x) { return float16_t(oc_round(float(x))); }
+int oc_sign(int x) { return x >= int(0) ? int(1) : int(-1); }
+vector<int, 2> oc_sign(vector<int, 2> x) { return vector<int, 2>(oc_sign(x[0]), oc_sign(x[1])); }
+vector<int, 3> oc_sign(vector<int, 3> x) { return vector<int, 3>(oc_sign(x[0]), oc_sign(x[1]), oc_sign(x[2])); }
+vector<int, 4> oc_sign(vector<int, 4> x) { return vector<int, 4>(oc_sign(x[0]), oc_sign(x[1]), oc_sign(x[2]), oc_sign(x[3])); }
+int[N] oc_sign<uint N>(int x[N]) { int result[N]; for(uint i=0;i<N;++i) result[i]=oc_sign(x[i]); return result; }
+float oc_sign(float x) { return x >= float(0) ? float(1) : float(-1); }
+vector<float, 2> oc_sign(vector<float, 2> x) { return vector<float, 2>(oc_sign(x[0]), oc_sign(x[1])); }
+vector<float, 3> oc_sign(vector<float, 3> x) { return vector<float, 3>(oc_sign(x[0]), oc_sign(x[1]), oc_sign(x[2])); }
+vector<float, 4> oc_sign(vector<float, 4> x) { return vector<float, 4>(oc_sign(x[0]), oc_sign(x[1]), oc_sign(x[2]), oc_sign(x[3])); }
+float[N] oc_sign<uint N>(float x[N]) { float result[N]; for(uint i=0;i<N;++i) result[i]=oc_sign(x[i]); return result; }
+float16_t oc_sign(float16_t x) { return x >= float16_t(0) ? float16_t(1) : float16_t(-1); }
+vector<float16_t, 2> oc_sign(vector<float16_t, 2> x) { return vector<float16_t, 2>(oc_sign(x[0]), oc_sign(x[1])); }
+vector<float16_t, 3> oc_sign(vector<float16_t, 3> x) { return vector<float16_t, 3>(oc_sign(x[0]), oc_sign(x[1]), oc_sign(x[2])); }
+vector<float16_t, 4> oc_sign(vector<float16_t, 4> x) { return vector<float16_t, 4>(oc_sign(x[0]), oc_sign(x[1]), oc_sign(x[2]), oc_sign(x[3])); }
+float16_t[N] oc_sign<uint N>(float16_t x[N]) { float16_t result[N]; for(uint i=0;i<N;++i) result[i]=oc_sign(x[i]); return result; }
+vector<float, 2> oc_round(vector<float, 2> x) { return vector<float, 2>(oc_round(x[0]), oc_round(x[1])); }
+vector<float, 3> oc_round(vector<float, 3> x) { return vector<float, 3>(oc_round(x[0]), oc_round(x[1]), oc_round(x[2])); }
+vector<float, 4> oc_round(vector<float, 4> x) { return vector<float, 4>(oc_round(x[0]), oc_round(x[1]), oc_round(x[2]), oc_round(x[3])); }
+float[N] oc_round<uint N>(float x[N]) { float result[N]; for(uint i=0;i<N;++i) result[i]=oc_round(x[i]); return result; }
+vector<float16_t, 2> oc_round(vector<float16_t, 2> x) { return vector<float16_t, 2>(oc_round(x[0]), oc_round(x[1])); }
+vector<float16_t, 3> oc_round(vector<float16_t, 3> x) { return vector<float16_t, 3>(oc_round(x[0]), oc_round(x[1]), oc_round(x[2])); }
+vector<float16_t, 4> oc_round(vector<float16_t, 4> x) { return vector<float16_t, 4>(oc_round(x[0]), oc_round(x[1]), oc_round(x[2]), oc_round(x[3])); }
+float16_t[N] oc_round<uint N>(float16_t x[N]) { float16_t result[N]; for(uint i=0;i<N;++i) result[i]=oc_round(x[i]); return result; }
+
+uint oc_atomicAdd(inout uint dest, uint val) { uint old; InterlockedAdd(dest, val, old); return old; }
+uint oc_atomicAdd(OCBuffer<uint> buf, uint64_t index, uint val) { return oc_atomicAdd(*(uint*)(buf.handle + uint64_t(index + buf.offset) * sizeof(uint)), val); }
+uint oc_atomicAdd(OCBuffer<uint8_t> buf, uint64_t offset, uint val) { return oc_atomicAdd(*(uint*)(buf.handle + buf.offset + offset), val); }
+uint oc_atomicSub(inout uint dest, uint val) { uint old; InterlockedAdd(dest, -val, old); return old; }
+uint oc_atomicSub(OCBuffer<uint> buf, uint64_t index, uint val) { return oc_atomicSub(*(uint*)(buf.handle + uint64_t(index + buf.offset) * sizeof(uint)), val); }
+uint oc_atomicSub(OCBuffer<uint8_t> buf, uint64_t offset, uint val) { return oc_atomicSub(*(uint*)(buf.handle + buf.offset + offset), val); }
+uint oc_atomicExch(inout uint dest, uint val) { uint old; InterlockedExchange(dest, val, old); return old; }
+uint oc_atomicExch(OCBuffer<uint> buf, uint64_t index, uint val) { return oc_atomicExch(*(uint*)(buf.handle + uint64_t(index + buf.offset) * sizeof(uint)), val); }
+uint oc_atomicExch(OCBuffer<uint8_t> buf, uint64_t offset, uint val) { return oc_atomicExch(*(uint*)(buf.handle + buf.offset + offset), val); }
+uint oc_atomicCAS(inout uint dest, uint compare, uint val) { uint old; InterlockedCompareExchange(dest, compare, val, old); return old; }
+int oc_atomicAdd(inout int dest, int val) { int old; InterlockedAdd(dest, val, old); return old; }
+int oc_atomicAdd(OCBuffer<int> buf, uint64_t index, int val) { return oc_atomicAdd(*(int*)(buf.handle + uint64_t(index + buf.offset) * sizeof(int)), val); }
+int oc_atomicAdd(OCBuffer<uint8_t> buf, uint64_t offset, int val) { return oc_atomicAdd(*(int*)(buf.handle + buf.offset + offset), val); }
+int oc_atomicSub(inout int dest, int val) { int old; InterlockedAdd(dest, -val, old); return old; }
+int oc_atomicSub(OCBuffer<int> buf, uint64_t index, int val) { return oc_atomicSub(*(int*)(buf.handle + uint64_t(index + buf.offset) * sizeof(int)), val); }
+int oc_atomicSub(OCBuffer<uint8_t> buf, uint64_t offset, int val) { return oc_atomicSub(*(int*)(buf.handle + buf.offset + offset), val); }
+int oc_atomicExch(inout int dest, int val) { int old; InterlockedExchange(dest, val, old); return old; }
+int oc_atomicExch(OCBuffer<int> buf, uint64_t index, int val) { return oc_atomicExch(*(int*)(buf.handle + uint64_t(index + buf.offset) * sizeof(int)), val); }
+int oc_atomicExch(OCBuffer<uint8_t> buf, uint64_t offset, int val) { return oc_atomicExch(*(int*)(buf.handle + buf.offset + offset), val); }
+int oc_atomicCAS(inout int dest, int compare, int val) { int old; InterlockedCompareExchange(dest, compare, val, old); return old; }
+uint64_t oc_atomicAdd(inout uint64_t dest, uint64_t val) { uint64_t old; InterlockedAdd(dest, val, old); return old; }
+uint64_t oc_atomicAdd(OCBuffer<uint64_t> buf, uint64_t index, uint64_t val) { return oc_atomicAdd(*(uint64_t*)(buf.handle + uint64_t(index + buf.offset) * sizeof(uint64_t)), val); }
+uint64_t oc_atomicAdd(OCBuffer<uint8_t> buf, uint64_t offset, uint64_t val) { return oc_atomicAdd(*(uint64_t*)(buf.handle + buf.offset + offset), val); }
+uint64_t oc_atomicSub(inout uint64_t dest, uint64_t val) { uint64_t old; InterlockedAdd(dest, -val, old); return old; }
+uint64_t oc_atomicSub(OCBuffer<uint64_t> buf, uint64_t index, uint64_t val) { return oc_atomicSub(*(uint64_t*)(buf.handle + uint64_t(index + buf.offset) * sizeof(uint64_t)), val); }
+uint64_t oc_atomicSub(OCBuffer<uint8_t> buf, uint64_t offset, uint64_t val) { return oc_atomicSub(*(uint64_t*)(buf.handle + buf.offset + offset), val); }
+uint64_t oc_atomicExch(inout uint64_t dest, uint64_t val) { uint64_t old; InterlockedExchange(dest, val, old); return old; }
+uint64_t oc_atomicExch(OCBuffer<uint64_t> buf, uint64_t index, uint64_t val) { return oc_atomicExch(*(uint64_t*)(buf.handle + uint64_t(index + buf.offset) * sizeof(uint64_t)), val); }
+uint64_t oc_atomicExch(OCBuffer<uint8_t> buf, uint64_t offset, uint64_t val) { return oc_atomicExch(*(uint64_t*)(buf.handle + buf.offset + offset), val); }
+uint64_t oc_atomicCAS(inout uint64_t dest, uint64_t compare, uint64_t val) { uint64_t old; InterlockedCompareExchange(dest, compare, val, old); return old; }
+int64_t oc_atomicAdd(inout int64_t dest, int64_t val) { int64_t old; InterlockedAdd(dest, val, old); return old; }
+int64_t oc_atomicAdd(OCBuffer<int64_t> buf, uint64_t index, int64_t val) { return oc_atomicAdd(*(int64_t*)(buf.handle + uint64_t(index + buf.offset) * sizeof(int64_t)), val); }
+int64_t oc_atomicAdd(OCBuffer<uint8_t> buf, uint64_t offset, int64_t val) { return oc_atomicAdd(*(int64_t*)(buf.handle + buf.offset + offset), val); }
+int64_t oc_atomicSub(inout int64_t dest, int64_t val) { int64_t old; InterlockedAdd(dest, -val, old); return old; }
+int64_t oc_atomicSub(OCBuffer<int64_t> buf, uint64_t index, int64_t val) { return oc_atomicSub(*(int64_t*)(buf.handle + uint64_t(index + buf.offset) * sizeof(int64_t)), val); }
+int64_t oc_atomicSub(OCBuffer<uint8_t> buf, uint64_t offset, int64_t val) { return oc_atomicSub(*(int64_t*)(buf.handle + buf.offset + offset), val); }
+int64_t oc_atomicExch(inout int64_t dest, int64_t val) { int64_t old; InterlockedExchange(dest, val, old); return old; }
+int64_t oc_atomicExch(OCBuffer<int64_t> buf, uint64_t index, int64_t val) { return oc_atomicExch(*(int64_t*)(buf.handle + uint64_t(index + buf.offset) * sizeof(int64_t)), val); }
+int64_t oc_atomicExch(OCBuffer<uint8_t> buf, uint64_t offset, int64_t val) { return oc_atomicExch(*(int64_t*)(buf.handle + buf.offset + offset), val); }
+int64_t oc_atomicCAS(inout int64_t dest, int64_t compare, int64_t val) { int64_t old; InterlockedCompareExchange(dest, compare, val, old); return old; }
+float oc_atomicAdd(inout float dest, float val) {
+    uint* bits = (uint*)&dest;
+    uint expected;
+    InterlockedCompareExchange(*bits, 0u, 0u, expected);
+    for (;;) {
+        uint old;
+        InterlockedCompareExchange(*bits, expected, asuint(asfloat(expected) + val), old);
+        if (old == expected) return asfloat(old);
+        expected = old;
+    }
+}
+float oc_atomicAdd(OCBuffer<float> buf, uint64_t index, float val) { return oc_atomicAdd(*(float*)(buf.handle + uint64_t(index + buf.offset) * sizeof(float)), val); }
+float oc_atomicAdd(OCBuffer<uint8_t> buf, uint64_t offset, float val) { return oc_atomicAdd(*(float*)(buf.handle + buf.offset + offset), val); }
+float oc_atomicSub(inout float dest, float val) { return oc_atomicAdd(dest, -val); }
+float oc_atomicSub(OCBuffer<float> buf, uint64_t index, float val) { return oc_atomicSub(*(float*)(buf.handle + uint64_t(index + buf.offset) * sizeof(float)), val); }
+float oc_atomicSub(OCBuffer<uint8_t> buf, uint64_t offset, float val) { return oc_atomicSub(*(float*)(buf.handle + buf.offset + offset), val); }
+float oc_atomicExch(inout float dest, float val) { uint old; InterlockedExchange(*(uint*)&dest, asuint(val), old); return asfloat(old); }
+float oc_atomicExch(OCBuffer<float> buf, uint64_t index, float val) { return oc_atomicExch(*(float*)(buf.handle + uint64_t(index + buf.offset) * sizeof(float)), val); }
+float oc_atomicExch(OCBuffer<uint8_t> buf, uint64_t offset, float val) { return oc_atomicExch(*(float*)(buf.handle + buf.offset + offset), val); }
 
 // ocarina lerp / inverse_lerp are pbrt-style: the parameter comes first
 // (CUDA oc_lerp(t, a, b) = a + t * (b - a)), whereas Slang lerp is (a, b, t).
@@ -213,84 +352,236 @@ float4x4 oc_inverse(float4x4 m) {
 
 // ── Atomic wrappers (returns old value, matching CUDA semantics) ──────────────
 
-T oc_atomicAdd<T>(T* dest, T val) {
-    T old; InterlockedAdd(*dest, val, old); return old;
-}
-T oc_atomicSub<T>(T* dest, T val) {
-    T old; InterlockedAdd(*dest, (T)(-(int)val), old); return old;
-}
-T oc_atomicExch<T>(T* dest, T val) {
-    T old; InterlockedExchange(*dest, val, old); return old;
-}
-T oc_atomicCAS<T>(T* dest, T compare, T val) {
-    T old; InterlockedCompareExchange(*dest, compare, val, old); return old;
-}
-
 // ── Texture helpers (bindless descriptor-array indices) ───────────────────────
 
 [[vk::binding(0, 0)]] Texture2D<float4>      g_bindless_tex2d[];
 [[vk::binding(1, 0)]] RWTexture2D<float4>    g_bindless_surf2d[];
 [[vk::binding(2, 0)]] Texture3D<float4>      g_bindless_tex3d[];
 [[vk::binding(3, 0)]] RWTexture3D<float4>    g_bindless_surf3d[];
-[[vk::binding(0, 1)]] SamplerState           g_samplers[16];
+[[vk::binding(5, 0)]] RWTexture2D<uint4> g_bindless_uint_surf2d[];
+[[vk::binding(6, 0)]] RWTexture3D<uint4> g_bindless_uint_surf3d[];
+[[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 
-float4 oc_tex2d_sample<uint N>(OCTextureDesc desc, float2 uv) {
-    return g_bindless_tex2d[desc.tex_index].Sample(g_samplers[N], uv);
-}
-float4 oc_tex2d_read(OCTextureDesc desc, uint2 coord) {
-    return g_bindless_surf2d[desc.surf_index].Load(int3(coord, 0));
-}
-void oc_tex2d_write(OCTextureDesc desc, uint2 coord, float4 val) {
-    g_bindless_surf2d[desc.surf_index][coord] = val;
+float[N] oc_tex2d_sample_float<uint N>(OCTextureDesc desc, float u, float v) {
+    float4 value=g_bindless_tex2d[NonUniformResourceIndex(uint(desc.tex_index))].SampleLevel(g_samplers[0], float2(u,v), 0);
+    float result[N]; for(uint i=0;i<N;++i) result[i]=value[i]; return result;
 }
 
-float4 oc_tex3d_sample<uint N>(OCTextureDesc desc, float3 uvw) {
-    return g_bindless_tex3d[desc.tex_index].Sample(g_samplers[N], uvw);
-}
-float4 oc_tex3d_read(OCTextureDesc desc, uint3 coord) {
-    return g_bindless_surf3d[desc.surf_index].Load(int4(coord, 0));
-}
-void oc_tex3d_write(OCTextureDesc desc, uint3 coord, float4 val) {
-    g_bindless_surf3d[desc.surf_index][coord] = val;
+float[N] oc_bindless_array_tex2d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float u, float v) {
+    uint index=*((uint*)(arr.tex2d_slot + slot*4u));
+    OCTextureDesc desc={uint64_t(index),uint64_t(index),0,0};
+    return oc_tex2d_sample_float<N>(desc, u,v);
 }
 
-float4 oc_bindless_array_tex2d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float2 uv) {
-    OCTextureDesc* slot_ptr = (OCTextureDesc*)(arr.tex2d_slot + slot * sizeof(OCTextureDesc));
-    return oc_tex2d_sample<N>(*slot_ptr, uv);
+float oc_tex2d_read_float(OCTextureDesc desc, uint x, uint y) {
+    float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
+    return float(value.x);
 }
-float4 oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float3 uvw) {
-    OCTextureDesc* slot_ptr = (OCTextureDesc*)(arr.tex3d_slot + slot * sizeof(OCTextureDesc));
-    return oc_tex3d_sample<N>(*slot_ptr, uvw);
+
+void oc_tex2d_write(OCTextureDesc desc, float value, uint x, uint y) {
+    float4 packed=float4(float(value),0,0,0);
+    if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
+    g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
 }
+
+vector<float, 2> oc_tex2d_read_float2(OCTextureDesc desc, uint x, uint y) {
+    float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
+    return vector<float, 2>(value.xy);
+}
+
+void oc_tex2d_write(OCTextureDesc desc, vector<float, 2> value, uint x, uint y) {
+    float4 packed=float4(float2(value),0,0);
+    if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
+    g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
+}
+
+vector<float, 4> oc_tex2d_read_float4(OCTextureDesc desc, uint x, uint y) {
+    float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
+    return vector<float, 4>(value);
+}
+
+void oc_tex2d_write(OCTextureDesc desc, vector<float, 4> value, uint x, uint y) {
+    float4 packed=float4(value);
+    if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
+    g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
+}
+
+uint8_t oc_tex2d_read_uchar(OCTextureDesc desc, uint x, uint y) {
+    float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
+    value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
+    return uint8_t(value.x);
+}
+
+void oc_tex2d_write(OCTextureDesc desc, uint8_t value, uint x, uint y) {
+    float4 packed=float4(float(value),0,0,0);
+    packed /= 255.0f;
+    g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
+}
+
+vector<uint8_t, 2> oc_tex2d_read_uchar2(OCTextureDesc desc, uint x, uint y) {
+    float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
+    value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
+    return vector<uint8_t, 2>(value.xy);
+}
+
+void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 2> value, uint x, uint y) {
+    float4 packed=float4(float2(value),0,0);
+    packed /= 255.0f;
+    g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
+}
+
+vector<uint8_t, 4> oc_tex2d_read_uchar4(OCTextureDesc desc, uint x, uint y) {
+    float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
+    value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
+    return vector<uint8_t, 4>(value);
+}
+
+void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y) {
+    float4 packed=float4(value);
+    packed /= 255.0f;
+    g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
+}
+
+
+float[N] oc_tex3d_sample_float<uint N>(OCTextureDesc desc, float u, float v, float w) {
+    float4 value=g_bindless_tex3d[NonUniformResourceIndex(uint(desc.tex_index))].SampleLevel(g_samplers[0], float3(u,v,w), 0);
+    float result[N]; for(uint i=0;i<N;++i) result[i]=value[i]; return result;
+}
+
+float[N] oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float u, float v, float w) {
+    uint index=*((uint*)(arr.tex3d_slot + slot*4u));
+    OCTextureDesc desc={uint64_t(index),uint64_t(index),0,0};
+    return oc_tex3d_sample_float<N>(desc, u,v,w);
+}
+
+float oc_tex3d_read_float(OCTextureDesc desc, uint x, uint y, uint z) {
+    float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
+    return float(value.x);
+}
+
+void oc_tex3d_write(OCTextureDesc desc, float value, uint x, uint y, uint z) {
+    float4 packed=float4(float(value),0,0,0);
+    if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
+    g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
+}
+
+vector<float, 2> oc_tex3d_read_float2(OCTextureDesc desc, uint x, uint y, uint z) {
+    float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
+    return vector<float, 2>(value.xy);
+}
+
+void oc_tex3d_write(OCTextureDesc desc, vector<float, 2> value, uint x, uint y, uint z) {
+    float4 packed=float4(float2(value),0,0);
+    if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
+    g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
+}
+
+vector<float, 4> oc_tex3d_read_float4(OCTextureDesc desc, uint x, uint y, uint z) {
+    float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
+    return vector<float, 4>(value);
+}
+
+void oc_tex3d_write(OCTextureDesc desc, vector<float, 4> value, uint x, uint y, uint z) {
+    float4 packed=float4(value);
+    if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
+    g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
+}
+
+uint8_t oc_tex3d_read_uchar(OCTextureDesc desc, uint x, uint y, uint z) {
+    float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
+    value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
+    return uint8_t(value.x);
+}
+
+void oc_tex3d_write(OCTextureDesc desc, uint8_t value, uint x, uint y, uint z) {
+    float4 packed=float4(float(value),0,0,0);
+    packed /= 255.0f;
+    g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
+}
+
+vector<uint8_t, 2> oc_tex3d_read_uchar2(OCTextureDesc desc, uint x, uint y, uint z) {
+    float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
+    value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
+    return vector<uint8_t, 2>(value.xy);
+}
+
+void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 2> value, uint x, uint y, uint z) {
+    float4 packed=float4(float2(value),0,0);
+    packed /= 255.0f;
+    g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
+}
+
+vector<uint8_t, 4> oc_tex3d_read_uchar4(OCTextureDesc desc, uint x, uint y, uint z) {
+    float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
+    value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
+    return vector<uint8_t, 4>(value);
+}
+
+void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y, uint z) {
+    float4 packed=float4(value);
+    packed /= 255.0f;
+    g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
+}
+
 
 // ── Ray tracing helpers ───────────────────────────────────────────────────────
 
 struct OcHitInfo { uint inst_id; uint prim_id; float2 bary; float t; };
 
-bool oc_trace_occlusion(RaytracingAccelerationStructure accel, RayDesc ray) {
-    return TraceRayInline(accel,
-        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-        0xFF, ray).Proceed();
+bool oc_trace_occlusion(RaytracingAccelerationStructure accel, Ray ray) {
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
+    q.TraceRayInline(accel, RAY_FLAG_NONE, 0xff, oc_native_ray(ray));
+    while(q.Proceed()) { if(q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) q.CommitNonOpaqueTriangleHit(); }
+    return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
-OcHitInfo oc_trace_closest(RaytracingAccelerationStructure accel, RayDesc ray) {
+TriangleHit oc_trace_closest(RaytracingAccelerationStructure accel, Ray ray) {
     RayQuery<RAY_FLAG_NONE> q;
-    q.TraceRayInline(accel, RAY_FLAG_NONE, 0xFF, ray);
+    q.TraceRayInline(accel, RAY_FLAG_NONE, 0xFF, oc_native_ray(ray));
     while (q.Proceed()) {
         if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
             q.CommitNonOpaqueTriangleHit();
     }
-    OcHitInfo h;
+    TriangleHit h;
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
         h.inst_id = q.CommittedInstanceID();
         h.prim_id = q.CommittedPrimitiveIndex();
-        h.bary    = q.CommittedTriangleBarycentrics();
-        h.t       = q.CommittedRayT();
+        float2 uv = q.CommittedTriangleBarycentrics();
+        h.bary = float2(1.0f - uv.x - uv.y, uv.x);
     } else {
         h.inst_id = 0xFFFFFFFFu;
         h.prim_id = 0xFFFFFFFFu;
         h.bary    = float2(0, 0);
-        h.t       = -1.0f;
     }
     return h;
 }
+
+// GEMM DSL markers match the CUDA placeholder; gemm_commands emits arithmetic.
+void oc_tensor_gemm<uint Id>() {}
+
+uint oc_tex2d_read_uint(OCTextureDesc desc, uint x, uint y) { return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].x; }
+void oc_tex2d_write(OCTextureDesc desc, uint value, uint x, uint y) { g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0,0); }
+
+uint2 oc_tex2d_read_uint2(OCTextureDesc desc, uint x, uint y) { return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].xy; }
+void oc_tex2d_write(OCTextureDesc desc, uint2 value, uint x, uint y) { g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0); }
+
+uint4 oc_tex2d_read_uint4(OCTextureDesc desc, uint x, uint y) { return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]; }
+void oc_tex2d_write(OCTextureDesc desc, uint4 value, uint x, uint y) { g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = value; }
+
+uint oc_tex3d_read_uint(OCTextureDesc desc, uint x, uint y, uint z) { return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].x; }
+void oc_tex3d_write(OCTextureDesc desc, uint value, uint x, uint y, uint z) { g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0,0); }
+
+uint2 oc_tex3d_read_uint2(OCTextureDesc desc, uint x, uint y, uint z) { return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].xy; }
+void oc_tex3d_write(OCTextureDesc desc, uint2 value, uint x, uint y, uint z) { g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0); }
+
+uint4 oc_tex3d_read_uint4(OCTextureDesc desc, uint x, uint y, uint z) { return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]; }
+void oc_tex3d_write(OCTextureDesc desc, uint4 value, uint x, uint y, uint z) { g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = value; }
+
+float2x2 oc_inverse(float2x2 m) { return float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) / determinant(m); }
+matrix<float16_t,2,2> oc_inverse(matrix<float16_t,2,2> m) { return matrix<float16_t,2,2>(oc_inverse(float2x2(m))); }
+matrix<float16_t,3,3> oc_inverse(matrix<float16_t,3,3> m) { return matrix<float16_t,3,3>(oc_inverse(float3x3(m))); }
+matrix<float16_t,4,4> oc_inverse(matrix<float16_t,4,4> m) { return matrix<float16_t,4,4>(oc_inverse(float4x4(m))); }
+float16_t oc_inverse_lerp(float16_t x, float16_t a, float16_t b) { return (x-a)/(b-a); }
+vector<float16_t,2> oc_inverse_lerp(vector<float16_t,2> x, vector<float16_t,2> a, vector<float16_t,2> b) { return (x-a)/(b-a); }
+vector<float16_t,3> oc_inverse_lerp(vector<float16_t,3> x, vector<float16_t,3> a, vector<float16_t,3> b) { return (x-a)/(b-a); }
+vector<float16_t,4> oc_inverse_lerp(vector<float16_t,4> x, vector<float16_t,4> a, vector<float16_t,4> b) { return (x-a)/(b-a); }

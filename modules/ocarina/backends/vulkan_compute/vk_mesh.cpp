@@ -11,6 +11,10 @@
 namespace ocarina {
 
 VkMesh::~VkMesh() noexcept {
+    clear();
+}
+
+void VkMesh::clear() noexcept {
     if (blas_ != VK_NULL_HANDLE) {
         auto vkDestroyAccelerationStructureKHR =
             (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(
@@ -19,6 +23,9 @@ VkMesh::~VkMesh() noexcept {
             vkDestroyAccelerationStructureKHR(device_->logical_device(), blas_, nullptr);
     }
     device_->free_buffer(blas_buf_);
+    device_->free_buffer(packed_indices_);
+    blas_ = VK_NULL_HANDLE;
+    blas_address_ = 0;
 }
 
 void VkMesh::init_build_input() noexcept {
@@ -31,9 +38,7 @@ void VkMesh::init_build_input() noexcept {
     geom_.geometry.triangles.vertexData.deviceAddress = params_.vert_handle + params_.vert_offset;
     geom_.geometry.triangles.vertexStride        = params_.vert_stride;
     geom_.geometry.triangles.maxVertex           = params_.vert_num > 0u ? params_.vert_num - 1u : 0u;
-    geom_.geometry.triangles.indexType           = params_.tri_stride == 2u
-                                                       ? VK_INDEX_TYPE_UINT16
-                                                       : VK_INDEX_TYPE_UINT32;
+    geom_.geometry.triangles.indexType           = VK_INDEX_TYPE_UINT32;
     geom_.geometry.triangles.indexData.deviceAddress = params_.tri_handle + params_.tri_offset;
 
     build_info_ = {};
@@ -45,7 +50,25 @@ void VkMesh::init_build_input() noexcept {
 }
 
 void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
+    clear();
     init_build_input();
+    // OptiX accepts a stride per uint32 index triplet; Vulkan requires tightly
+    // packed indices, so remove any padding in the shared mesh representation.
+    constexpr VkDeviceSize index_bytes = 3 * sizeof(uint32_t);
+    OC_ERROR_IF(params_.tri_stride < index_bytes, "Triangle indices require three uint32 values");
+    if (params_.tri_stride != index_bytes && params_.tri_num != 0) {
+        packed_indices_ = device_->allocate_buffer(params_.tri_num * index_bytes,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT, false, "packed_blas_indices");
+        VkDeviceSize offset = 0;
+        auto src = device_->get_vk_buffer(params_.tri_handle, &offset);
+        vector<VkBufferCopy> regions(params_.tri_num);
+        for (uint i = 0; i < params_.tri_num; ++i)
+            regions[i] = {offset + params_.tri_offset + i * params_.tri_stride, i * index_bytes, index_bytes};
+        device_->immediate_submit([&](VkCommandBuffer cb) {
+            vkCmdCopyBuffer(cb, src, packed_indices_.buffer, regions.size(), regions.data());
+        });
+        geom_.geometry.triangles.indexData.deviceAddress = packed_indices_.address;
+    }
 
     auto vkGetAccelerationStructureBuildSizesKHR =
         (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
@@ -89,7 +112,7 @@ void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
     VkBufferAllocation scratch = device_->allocate_buffer(
         size_info.buildScratchSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        false, "blas_scratch");
+        false, "blas_scratch", device_->scratch_alignment());
 
     build_info_.mode                    = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     build_info_.dstAccelerationStructure = blas_;

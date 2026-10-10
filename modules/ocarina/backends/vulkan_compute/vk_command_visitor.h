@@ -6,23 +6,29 @@
 #pragma once
 
 #include "rhi/command.h"
+#include "util.h"
 #include <vulkan/vulkan.h>
 
 namespace ocarina {
 
 class VulkanComputeDevice;
+class VkComputeStream;
 
 class VkComputeCommandVisitor final : public CommandVisitor {
 private:
     VulkanComputeDevice *device_{};
-    VkCommandBuffer      cmd_buf_{VK_NULL_HANDLE};
+    VkComputeStream *stream_{};
+    void record(const std::function<void(VkCommandBuffer)> &fn) noexcept;
+    void retire(VkBufferAllocation allocation) noexcept;
+    void complete(std::function<void()> fn) noexcept;
+    void finish(const Command *cmd) noexcept;
+    VkBufferAllocation make_staging(size_t size, const void *source, bool ordered = true) noexcept;
+    void upload_image(VkImage image, const void *source, size_t size,
+                      uint32_t width, uint32_t height, uint32_t depth) noexcept;
 
 public:
-    explicit VkComputeCommandVisitor(VulkanComputeDevice *device,
-                                     VkCommandBuffer cmd_buf = VK_NULL_HANDLE) noexcept
-        : device_(device), cmd_buf_(cmd_buf) {}
-
-    void set_cmd_buf(VkCommandBuffer cb) noexcept { cmd_buf_ = cb; }
+    explicit VkComputeCommandVisitor(VulkanComputeDevice *device, VkComputeStream *stream = nullptr) noexcept
+        : device_(device), stream_(stream) {}
 
     void visit(const BufferUploadCommand *cmd)       noexcept override;
     void visit(const BufferDownloadCommand *cmd)     noexcept override;

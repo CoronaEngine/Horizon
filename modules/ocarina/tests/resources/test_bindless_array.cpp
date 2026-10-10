@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -738,7 +739,7 @@ int test_bindless_texture3d_sampling(Device &device, Stream &stream) {
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
     Env::printer().init(device);
 

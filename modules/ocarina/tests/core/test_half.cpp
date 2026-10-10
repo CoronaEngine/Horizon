@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 //
 // Created by z on 21/01/2026.
 //
@@ -85,7 +86,7 @@ static_assert(std::is_same_v<decltype(float{} + half{}), float>);
 
 [[nodiscard]] bool test_device_half() {
         RHIContext &context = RHIContext::instance();
-        Device device = context.create_device("cuda");
+        Device device = context.create_device(test_backend_name());
         device.init_rtx();
         Stream stream = device.create_stream();
 

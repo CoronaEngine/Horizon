@@ -15,18 +15,32 @@ namespace ocarina {
 class AstToSlangSource : public AstToCppSource {
 protected:
     // Set once an emitted function uses THREAD_ID; the oc_thread_id helper is
-    // only emitted then, because it relies on WorkgroupSize().
+    // only emitted then, with the compiled workgroup dimensions.
     bool uses_thread_id_{false};
+    bool inline_parameters_{false};
+    Scratch storage_functions_;
+    set<const Type *> storage_types_;
+    void _emit_function_body(const Function &f) noexcept;
+    void _emit_storage_functions(const Type *type) noexcept;
+    void _emit_storage_fields(const Type *type, size_t offset, const string &value, bool load) noexcept;
+    void _emit_buffer_address(const SubscriptExpr *expr) noexcept;
+    [[nodiscard]] bool _is_storage_reference(const Expression *expr) const noexcept;
+    void _emit_storage_address(const Expression *expr) noexcept;
+    void _emit_storage_load(const Expression *expr) noexcept;
 
     // Emit the push-constant block, argument-blob accessors and workgroup
     // statics for one kernel. Called once per kernel from _emit_function().
     void _emit_kernel_params(const Function &f) noexcept;
     // Declare every kernel argument as a local loaded from the argument blob.
     void _emit_kernel_argument_loads(const Function &f) noexcept;
+    void _emit_parameter_load(const Type *type, size_t offset) noexcept;
 
     // ── AstToCppSource virtual overrides ──────────────────────────────────
     using AstToCppSource::visit;
     void visit(const BinaryExpr *expr) noexcept override;
+    void visit(const SubscriptExpr *expr) noexcept override;
+    void visit(const MemberExpr *expr) noexcept override;
+    void visit(const AssignStmt *stmt) noexcept override;
     void visit(const CallExpr *expr) noexcept override;
     void visit(const CastExpr *expr) noexcept override;
     void visit(const LiteralExpr *expr) noexcept override;

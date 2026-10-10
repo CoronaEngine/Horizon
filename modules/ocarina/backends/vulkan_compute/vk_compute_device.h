@@ -16,6 +16,7 @@
 namespace ocarina {
 
 class VkComputeCommandVisitor;
+class VkComputeStream;
 
 class VulkanComputeDevice : public Device::Impl {
 public:
@@ -68,12 +69,17 @@ private:
 
     // ── RT extension support ─────────────────────────────────────────────────
     bool has_rt_{false};
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_props_{};
+    VkDeviceSize scratch_alignment_{1};
+    std::recursive_mutex submission_mutex_;
+    std::mutex streams_mutex_;
+    vector<VkComputeStream *> streams_;
 
     // ── Descriptor pool for global bindless sets ─────────────────────────────
     VkDescriptorPool      desc_pool_{VK_NULL_HANDLE};
     VkDescriptorSetLayout global_layout_{VK_NULL_HANDLE};
     VkDescriptorSet       global_set_{VK_NULL_HANDLE};
+    uint32_t next_texture_slot_{1u};
+    vector<uint32_t> free_texture_slots_;
 
     // ── Sampler cache ────────────────────────────────────────────────────────
     static constexpr uint32_t c_sampler_count = 16u;
@@ -81,7 +87,7 @@ private:
 
     // ── Buffer address map (handle_ty → VkBuffer for barrier bookkeeping) ────
     thread_safety<std::mutex>                          buffer_map_guard_;
-    std::unordered_map<handle_ty, VkBufferAllocation>  buffer_map_;
+    std::map<handle_ty, VkBufferAllocation>  buffer_map_;
     std::unordered_map<handle_ty, VkImageAllocation>   image_map_;
 
     std::unique_ptr<VkComputeCommandVisitor> cmd_visitor_;
@@ -96,6 +102,9 @@ private:
     void init_samplers() noexcept;
 
 public:
+    static constexpr uint32_t max_texture_slots = 4096u;
+    uint32_t allocate_texture_slot() noexcept;
+    void release_texture_slot(uint32_t slot) noexcept;
     explicit VulkanComputeDevice(RHIContext *context);
     ~VulkanComputeDevice() noexcept;
 
@@ -106,7 +115,8 @@ public:
     [[nodiscard]] VkQueue          compute_queue()    const noexcept { return compute_queue_; }
     [[nodiscard]] uint32_t         queue_family()     const noexcept { return compute_queue_family_; }
     [[nodiscard]] bool             has_rt()           const noexcept { return has_rt_; }
-    [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR &rt_props() const noexcept { return rt_props_; }
+    [[nodiscard]] VkDeviceSize scratch_alignment() const noexcept { return scratch_alignment_; }
+    [[nodiscard]] uint3 workgroup_size(const Function &function) const noexcept;
     [[nodiscard]] VkDescriptorSetLayout global_desc_layout() const noexcept { return global_layout_; }
     [[nodiscard]] VkDescriptorSet       global_desc_set()    const noexcept { return global_set_; }
     [[nodiscard]] VkSampler             sampler(uint32_t idx) const noexcept { return samplers_[idx % c_sampler_count]; }
@@ -115,19 +125,24 @@ public:
     // Buffer allocation helpers
     [[nodiscard]] VkBufferAllocation allocate_buffer(size_t size, VkBufferUsageFlags usage,
                                                      bool host_visible = false,
-                                                     const string &debug_name = "") noexcept;
+                                                     const string &debug_name = "", VkDeviceSize alignment = 1) noexcept;
     void free_buffer(VkBufferAllocation &alloc) noexcept;
     [[nodiscard]] VkImageAllocation allocate_image(uint3 extent, VkFormat fmt,
                                                    uint32_t levels,
                                                    VkImageUsageFlags usage,
-                                                   const string &debug_name = "") noexcept;
+                                                   const string &debug_name = "", bool is_3d = false) noexcept;
     void free_image(VkImageAllocation &alloc) noexcept;
 
     // Submit one-shot command
     void immediate_submit(std::function<void(VkCommandBuffer)> &&fn) noexcept;
+    void submit(VkCommandBuffer cb, VkFence fence, VkSemaphore timeline, uint64_t wait_value) noexcept;
+    void synchronize_streams() noexcept;
+    void register_stream(VkComputeStream *stream) noexcept;
+    void unregister_stream(VkComputeStream *stream) noexcept;
+    void run_commit_callback(const std::function<void(void *)> &callback) noexcept;
 
     // Buffer/image lookup by device address / pointer handle
-    [[nodiscard]] VkBuffer           get_vk_buffer(handle_ty addr) noexcept;
+    [[nodiscard]] VkBuffer get_vk_buffer(handle_ty addr, VkDeviceSize *offset = nullptr) noexcept;
     [[nodiscard]] VkImageAllocation &get_vk_image(handle_ty handle) noexcept;
 
     // ── Device::Impl interface ───────────────────────────────────────────────

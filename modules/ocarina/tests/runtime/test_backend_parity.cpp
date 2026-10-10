@@ -20,6 +20,14 @@ struct NestedRecord {
 };
 OC_STRUCT(, NestedRecord, tag, points, transform) {};
 
+struct LargeParameterRecord {
+    array<float4, 7> values;
+    float3 point;
+    float3x3 transform;
+    uint tag;
+};
+OC_STRUCT(, LargeParameterRecord, values, point, transform, tag) {};
+
 namespace {
 void require(bool condition, const char *message) {
     if (!condition) {
@@ -28,6 +36,33 @@ void require(bool condition, const char *message) {
     }
 }
 bool close(float a, float b) { return std::abs(a - b) < 1e-4f; }
+
+class ScopedParameterValidationDisabled {
+    bool previous_{Env::valid_check()};
+
+public:
+    ScopedParameterValidationDisabled() { Env::set_valid_check(false); }
+    ~ScopedParameterValidationDisabled() { Env::set_valid_check(previous_); }
+    ScopedParameterValidationDisabled(const ScopedParameterValidationDisabled &) = delete;
+    ScopedParameterValidationDisabled &operator=(const ScopedParameterValidationDisabled &) = delete;
+};
+
+size_t parameter_extent(const Function &function) {
+    size_t extent = 0u;
+    for (const Variable &arg : function.arguments()) {
+        const Type *type = arg.type();
+        bool buffer = type->tag() == Type::Tag::BUFFER || type->tag() == Type::Tag::BYTE_BUFFER;
+        size_t alignment = buffer ? alignof(BufferDesc<>) : type->alignment();
+        size_t size = buffer ? sizeof(BufferDesc<>) : type->size();
+        require(alignment != 0u, "parameter extent encountered an unsupported resource type");
+        extent = mem_offset(extent, alignment) + size;
+    }
+    function.for_each_captured_resource([&](const CapturedResource &resource) {
+        const auto &block = resource.block();
+        extent = mem_offset(extent, block.alignment) + block.size;
+    });
+    return extent;
+}
 
 void test_command_order_and_byte_fill(Device &device) {
     auto empty = device.create_buffer<uint>(0u, "empty-buffer");
@@ -180,6 +215,141 @@ void test_matrix_algebra(Device &device) {
             require(close(host[i][j], expected[i][j]), "matrix algebra differs from the host");
 }
 
+void test_small_parameter_snapshot(Device &device) {
+    ScopedParameterValidationDisabled validation_scope;
+    constexpr uint dispatches = 3u;
+    constexpr uint rows = 5u;
+    auto output = device.create_buffer<uint4>(dispatches * rows);
+    // The explicit arguments occupy 64 bytes, followed by the 24-byte captured
+    // buffer descriptor. Narrow values share words; float3 retains host padding.
+    Kernel kernel = [&output](Uint row, Bool flag, Half h, Int signed_value,
+                              Float scalar, Ulong wide, Bool3 flags, Half3 halves, Float3 point) {
+        Uint base = row * rows;
+        output.write(base, make_uint4(cast<uint>(flag), as<uint>(cast<float>(h)),
+                                     as<uint>(scalar), as<uint>(signed_value)));
+        output.write(base + 1u, make_uint4(cast<uint>(wide), cast<uint>(wide >> ulong(32u)), row, 0x2468ace0u));
+        output.write(base + 2u, make_uint4(cast<uint>(flags.x), cast<uint>(flags.y),
+                                          cast<uint>(flags.z), 0x13579bdfu));
+        output.write(base + 3u, make_uint4(as<uint>(cast<float>(halves.x)),
+                                          as<uint>(cast<float>(halves.y)),
+                                          as<uint>(cast<float>(halves.z)), 0u));
+        output.write(base + 4u, make_uint4(as<uint>(point.x), as<uint>(point.y), as<uint>(point.z), 1u));
+    };
+    auto shader = device.compile(kernel, "backend-parity-small-parameter-snapshot");
+    require(kernel.function()->captured_resources().size() == 1u && parameter_extent(*kernel.function()) == 88u,
+            "small parameter test must use the 88-byte inline ABI including its captured output");
+    array<uint4, dispatches * rows> host{}, expected{};
+    Stream stream = device.create_stream();
+    for (uint i = 0; i < dispatches; ++i) {
+        bool flag = i % 2u != 0u;
+        half h = half(float(i) - 1.5f);
+        int signed_value = -1234567 - int(i);
+        float scalar = float(i) + 0.25f;
+        ulong wide = 0xfedcba9876543210ull + ulong(i) * 0x100000001ull;
+        bool3 flags = make_bool3(flag, !flag, i == 2u);
+        half3 halves = make_half3(half(-2.5f - float(i)), half(0.125f + float(i)), half(6.75f + float(i)));
+        float3 point = make_float3(-3.25f - float(i), 0.5f + float(i), 17.25f + float(i));
+        uint base = i * rows;
+        expected[base] = make_uint4(uint(flag), as<uint>(float(h)), as<uint>(scalar), as<uint>(signed_value));
+        expected[base + 1u] = make_uint4(uint(wide), uint(wide >> 32u), i, 0x2468ace0u);
+        expected[base + 2u] = make_uint4(uint(flags.x), uint(flags.y), uint(flags.z), 0x13579bdfu);
+        expected[base + 3u] = make_uint4(as<uint>(float(halves.x)), as<uint>(float(halves.y)),
+                                        as<uint>(float(halves.z)), 0u);
+        expected[base + 4u] = make_uint4(as<uint>(point.x), as<uint>(point.y), as<uint>(point.z), 1u);
+        stream << shader(i, flag, h, signed_value, scalar, wide, flags, halves, point).dispatch(1u);
+    }
+    // All host parameter temporaries have expired before this one submission.
+    stream << output.download(host.data()) << synchronize() << commit();
+    for (uint i = 0; i < host.size(); ++i)
+        for (uint j = 0; j < 4u; ++j)
+            require(host[i][j] == expected[i][j], "small parameter ABI or captured-resource snapshot differs");
+}
+
+void test_parameter_inline_boundary(Device &device) {
+    ScopedParameterValidationDisabled validation_scope;
+    constexpr uint dispatches = 3u;
+    constexpr uint rows = 5u;
+    // Buffer: [0,24), matrix: [32,80), float3: [80,96), three
+    // scalars: [96,108). The trailing dispatch slot is not an argument.
+    static_assert(mem_offset(sizeof(BufferDesc<float4>), alignof(float3x3)) +
+                      sizeof(float3x3) + sizeof(float3) + 3u * sizeof(uint) == 108u);
+    auto output = device.create_buffer<float4>(dispatches * rows);
+    Kernel kernel = [](BufferVar<float4> out, Var<float3x3> matrix, Float3 point,
+                       Uint row, Float bias, Uint tag) {
+        Uint base = row * rows;
+        out.write(base, make_float4(matrix[0], bias));
+        out.write(base + 1u, make_float4(matrix[1], cast<float>(tag)));
+        out.write(base + 2u, make_float4(matrix[2], cast<float>(row)));
+        out.write(base + 3u, make_float4(point, 1.f));
+        out.write(base + 4u, make_float4(matrix * point + bias, cast<float>(tag)));
+    };
+    auto shader = device.compile(kernel, "backend-parity-108-byte-parameters");
+    require(kernel.function()->captured_resources().empty() && parameter_extent(*kernel.function()) == 108u,
+            "parameter boundary test must use exactly 108 bytes without diagnostic captures");
+    array<float4, dispatches * rows> host{}, expected{};
+    Stream stream = device.create_stream();
+    for (uint i = 0; i < dispatches; ++i) {
+        float f = float(i);
+        float3x3 matrix(make_float3(2.f + f, -1.f, 0.5f), make_float3(0.25f, 3.f + f, 1.f),
+                       make_float3(-2.f, 0.75f, 4.f + f));
+        float3 point = make_float3(1.5f + f, -2.f - f, 0.25f + f);
+        float bias = f + 0.125f;
+        uint tag = 701u + i;
+        uint base = i * rows;
+        expected[base] = make_float4(matrix[0], bias);
+        expected[base + 1u] = make_float4(matrix[1], float(tag));
+        expected[base + 2u] = make_float4(matrix[2], f);
+        expected[base + 3u] = make_float4(point, 1.f);
+        expected[base + 4u] = make_float4(matrix * point + bias, float(tag));
+        stream << shader(output, matrix, point, i, bias, tag).dispatch(1u);
+    }
+    stream << output.download(host.data()) << synchronize() << commit();
+    for (uint i = 0; i < host.size(); ++i)
+        for (uint j = 0; j < 4u; ++j)
+            require(close(host[i][j], expected[i][j]), "108-byte parameter boundary or padded matrix snapshot differs");
+}
+
+void test_large_parameter_snapshot(Device &device) {
+    ScopedParameterValidationDisabled validation_scope;
+    constexpr uint dispatches = 3u;
+    constexpr uint rows = 11u;
+    static_assert(sizeof(LargeParameterRecord) > 108u);
+    auto output = device.create_buffer<float4>(dispatches * rows);
+    Kernel kernel = [](Var<LargeParameterRecord> record, Uint row, BufferVar<float4> out) {
+        Uint base = row * rows;
+        for (uint i = 0; i < 7u; ++i) out.write(base + i, record.values[i]);
+        for (uint i = 0; i < 3u; ++i) out.write(base + 7u + i, make_float4(record.transform[i], cast<float>(row)));
+        out.write(base + 10u, make_float4(record.point, cast<float>(record.tag)));
+    };
+    auto shader = device.compile(kernel, "backend-parity-large-parameter-snapshot");
+    require(kernel.function()->captured_resources().empty() && parameter_extent(*kernel.function()) > 108u,
+            "large parameter test must exceed the inline ABI without diagnostic captures");
+    array<float4, dispatches * rows> host{}, expected{};
+    Stream stream = device.create_stream();
+    for (uint i = 0; i < dispatches; ++i) {
+        LargeParameterRecord record{};
+        uint base = i * rows;
+        for (uint j = 0; j < 7u; ++j) {
+            float f = float(100u * i + 4u * j);
+            record.values[j] = make_float4(f + 0.25f, -f - 1.5f, f + 2.75f, -f - 3.125f);
+            expected[base + j] = record.values[j];
+        }
+        record.point = make_float3(float(i) + 1.25f, float(i) - 2.5f, float(i) + 3.75f);
+        record.transform = float3x3(make_float3(1.f + float(i), 2.f, 3.f),
+                                    make_float3(4.f, 5.f + float(i), 6.f),
+                                    make_float3(7.f, 8.f, 9.f + float(i)));
+        record.tag = 901u + i;
+        for (uint j = 0; j < 3u; ++j)
+            expected[base + 7u + j] = make_float4(record.transform[j], float(i));
+        expected[base + 10u] = make_float4(record.point, float(record.tag));
+        stream << shader(record, i, output).dispatch(1u);
+    }
+    stream << output.download(host.data()) << synchronize() << commit();
+    for (uint i = 0; i < host.size(); ++i)
+        for (uint j = 0; j < 4u; ++j)
+            require(close(host[i][j], expected[i][j]), "large parameter fallback or array/matrix snapshot differs");
+}
+
 void test_float_atomics(Device &device) {
     auto counter = device.create_buffer<float>(2u);
     array<float, 2> host{17.f, 0.f};
@@ -224,6 +394,60 @@ void test_texture_formats(Device &device) {
                     uint_read[i].z == uint_pixels[i].z && uint_read[i].w == uint_pixels[i].w,
                 "integer surface read differs from host download");
     }
+}
+
+void test_texture_transfer_order(Device &device, Texture &first, Texture &second) {
+    auto resolution = first.resolution();
+    uint count = resolution.x * resolution.y * resolution.z;
+    vector<uint4> a(count), b(count), first_host(count), second_host(count);
+    vector<uint4> overwritten(count, make_uint4(0x5a5a5a5au, 0x5a5a5a5au, 0x5a5a5a5au, 0x5a5a5a5au));
+    for (uint i = 0; i < count; ++i) {
+        a[i] = make_uint4(0x12340000u + i, i * 3u + 7u, 0xf0000000u - i, i ^ 0x13579bdfu);
+        b[i] = make_uint4(~a[i].x, ~a[i].y, ~a[i].z, ~a[i].w);
+    }
+    auto require_pixels = [&](const vector<uint4> &actual, const vector<uint4> &expected, const char *message) {
+        for (uint i = 0; i < count; ++i)
+            for (uint channel = 0; channel < 4u; ++channel)
+                require(actual[i][channel] == expected[i][channel], message);
+    };
+    Stream stream = device.create_stream();
+
+    // Both writes share one commit and must retain their submission order.
+    stream << first.upload(a.data()) << first.upload(b.data())
+           << first.download(first_host.data()) << synchronize() << commit();
+    require_pixels(first_host, b, "consecutive texture uploads were reordered");
+
+    auto source_a = device.create_buffer<uint4>(count);
+    auto source_b = device.create_buffer<uint4>(count);
+    stream << source_a.upload(a.data()) << source_b.upload(b.data())
+           << first.copy_from_buffer(source_a, 0u) << first.copy_from_buffer(source_b, 0u)
+           << first.download(first_host.data()) << synchronize() << commit();
+    require_pixels(first_host, b, "consecutive buffer-to-texture writes were reordered");
+
+    // The first transfer must finish reading source_a before the byte fill.
+    // No readback or host callback separates these GPU transfer commands.
+    stream << first.copy_from_buffer(source_a, 0u) << source_a.byte_set(0x5au)
+           << second.copy_from_buffer(source_a, 0u)
+           << first.download(first_host.data()) << second.download(second_host.data())
+           << synchronize() << commit();
+    require_pixels(first_host, a, "buffer-to-texture read was overtaken by a source-buffer overwrite");
+    require_pixels(second_host, overwritten, "buffer-to-texture read missed the preceding source-buffer overwrite");
+
+    // Copying an image also reads a source that a later upload may overwrite.
+    stream << first.upload(a.data()) << second.copy_from(first) << first.upload(b.data())
+           << first.download(first_host.data()) << second.download(second_host.data())
+           << synchronize() << commit();
+    require_pixels(first_host, b, "texture upload after an image copy lost its result");
+    require_pixels(second_host, a, "image copy was overtaken by a source-image overwrite");
+}
+
+void test_texture_transfer_order(Device &device) {
+    auto first_2d = device.create_texture2d(make_uint2(33u, 17u), PixelStorage::UINT4);
+    auto second_2d = device.create_texture2d(make_uint2(33u, 17u), PixelStorage::UINT4);
+    test_texture_transfer_order(device, first_2d, second_2d);
+    auto first_3d = device.create_texture3d(make_uint3(17u, 9u, 3u), PixelStorage::UINT4);
+    auto second_3d = device.create_texture3d(make_uint3(17u, 9u, 3u), PixelStorage::UINT4);
+    test_texture_transfer_order(device, first_3d, second_3d);
 }
 
 void test_nonuniform_bindless_textures(Device &device) {
@@ -271,8 +495,12 @@ int main() {
     test_configured_dispatch(device);
     test_nested_storage_layout(device);
     test_matrix_algebra(device);
+    test_small_parameter_snapshot(device);
+    test_parameter_inline_boundary(device);
+    test_large_parameter_snapshot(device);
     test_float_atomics(device);
     test_texture_formats(device);
+    test_texture_transfer_order(device);
     test_nonuniform_bindless_textures(device);
     test_diagnostics_lifetime();
     std::cout << "backend parity regression checks passed" << std::endl;

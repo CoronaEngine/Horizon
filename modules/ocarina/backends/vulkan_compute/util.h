@@ -6,6 +6,7 @@
 
 #include "core/stl.h"
 #include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 
 namespace ocarina {
 
@@ -32,16 +33,13 @@ namespace ocarina {
                                     #expr, __FILE__));                             \
     } while (false)
 
-// ── VMA forward declaration ──────────────────────────────────────────────────
-struct VmaAllocator_T;
-using VmaAllocator = VmaAllocator_T *;
-struct VmaAllocation_T;
-using VmaAllocation = VmaAllocation_T *;
+// ── Resource allocations ─────────────────────────────────────────────────────
 
 struct VkBufferAllocation {
     VkBuffer    buffer{VK_NULL_HANDLE};
     VmaAllocation alloc{};
     VkDeviceAddress address{0};  // valid only when SHADER_DEVICE_ADDRESS was requested
+    VkDeviceSize size{0};
 };
 
 struct VkImageAllocation {

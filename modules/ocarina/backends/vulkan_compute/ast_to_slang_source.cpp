@@ -9,11 +9,18 @@
 #include "core/type_system/precision_policy.h"
 #include "core/type_system/type_desc.h"
 #include "vk_compute_device.h"
+#include "vk_shader_parameters.h"
 #include <cmath>
 
 namespace ocarina {
 
 namespace {
+
+bool requires_storage_helper(const Type *type) noexcept {
+    return type->is_structure() || type->is_array() || type->is_matrix() ||
+           type->tag() == Type::Tag::BOOL ||
+           (type->is_vector() && type->element()->tag() == Type::Tag::BOOL);
+}
 
 [[nodiscard]] string_view precision_policy_name(PrecisionPolicy policy) noexcept {
     switch (policy) {
@@ -62,7 +69,7 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
             return ocarina::format("vector<{}, {}>", entry.slang, shape);
         }
         return ocarina::format("matrix<{}, {}, {}>", entry.slang,
-                               shape.substr(0, x), shape.substr(x + 1));
+                               shape.substr(x + 1), shape.substr(0, x));
     }
     return string(name);
 }
@@ -123,6 +130,46 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         return;
     }
 
+    const auto op = expr->call_op();
+    const bool bindless_read = op == CallOp::BINDLESS_ARRAY_BUFFER_READ ||
+                               op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ;
+    const bool bindless_write = op == CallOp::BINDLESS_ARRAY_BUFFER_WRITE ||
+                                op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_WRITE;
+    const bool byte_read = op == CallOp::BYTE_BUFFER_READ;
+    const bool byte_write = op == CallOp::BYTE_BUFFER_WRITE;
+    if (bindless_read || bindless_write || byte_read || byte_write) {
+        const bool store = bindless_write || byte_write;
+        const Type *type = store ? expr->arguments().back()->type() : expr->type();
+        if (requires_storage_helper(type)) {
+            _emit_storage_functions(type);
+            current_scratch() << ocarina::format("oc_storage_{}_{}(", store ? "store" : "load", type->hash());
+            if (bindless_read || bindless_write) {
+                current_scratch() << "oc_bindless_buffer_address(";
+                for (uint i = 0; i < 3; ++i) {
+                    expr->argument(i)->accept(*this);
+                    current_scratch() << ", ";
+                }
+                const bool bytes = op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ ||
+                                   op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_WRITE;
+                current_scratch() << ocarina::format("{}u)", bytes ? 1u : type->size());
+            } else {
+                current_scratch() << "(";
+                expr->argument(0)->accept(*this);
+                current_scratch() << ".handle + ";
+                expr->argument(0)->accept(*this);
+                current_scratch() << ".offset + ";
+                expr->argument(1)->accept(*this);
+                current_scratch() << ")";
+            }
+            if (store) {
+                current_scratch() << ", ";
+                expr->arguments().back()->accept(*this);
+            }
+            current_scratch() << ")";
+            return;
+        }
+    }
+
 // Slang native builtins keep their name; oc_ wrappers live in slang_device_math.slang.
 // Constructors are emitted from the resolved result type, so MAKE_REAL* follows the
 // storage precision policy (float16_t under force_f16) instead of a fixed spelling.
@@ -169,8 +216,8 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::RSQRT:            OC_SLANG_FUNC(rsqrt);           break;
         case CallOp::CEIL:             OC_SLANG_FUNC(ceil);            break;
         case CallOp::FLOOR:            OC_SLANG_FUNC(floor);           break;
-        case CallOp::ROUND:            OC_SLANG_FUNC(round);           break;
-        case CallOp::FMA:              OC_SLANG_FUNC(mad);             break;
+        case CallOp::ROUND:            OC_SLANG_WRAP(round);           break;
+        case CallOp::FMA:              OC_SLANG_FUNC(fma);             break;
         case CallOp::CROSS:            OC_SLANG_FUNC(cross);           break;
         case CallOp::DOT:              OC_SLANG_FUNC(dot);             break;
         case CallOp::LENGTH:           OC_SLANG_FUNC(length);          break;
@@ -187,7 +234,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::INVERSE:          OC_SLANG_WRAP(inverse);         break;
         case CallOp::SQR:              OC_SLANG_WRAP(sqr);             break;
         case CallOp::RCP:              OC_SLANG_FUNC(rcp);             break;
-        case CallOp::SIGN:             OC_SLANG_FUNC(sign);            break;
+        case CallOp::SIGN:             OC_SLANG_WRAP(sign);            break;
         case CallOp::FRACT:            OC_SLANG_FUNC(frac);            break;
         case CallOp::DEGREES:          OC_SLANG_FUNC(degrees);         break;
         case CallOp::RADIANS:          OC_SLANG_FUNC(radians);         break;
@@ -264,7 +311,13 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::ATOMIC_ADD:  OC_SLANG_WRAP(atomicAdd);  break;
         case CallOp::ATOMIC_SUB:  OC_SLANG_WRAP(atomicSub);  break;
         case CallOp::ATOMIC_CAS:  OC_SLANG_WRAP(atomicCAS);  break;
-        case CallOp::BINDLESS_ARRAY_BUFFER_WRITE:      OC_SLANG_WRAP(bindless_array_buffer_write);      break;
+        case CallOp::BINDLESS_ARRAY_BUFFER_WRITE: {
+            const Type *value = expr->arguments().back()->type();
+            current_scratch() << "oc_bindless_array_buffer_write<";
+            _emit_type_name(value);
+            current_scratch() << ocarina::format(", {}u>", value->size());
+            break;
+        }
         case CallOp::BINDLESS_ARRAY_BYTE_BUFFER_WRITE: OC_SLANG_WRAP(bindless_array_byte_buffer_write); break;
         case CallOp::BINDLESS_ARRAY_BUFFER_SIZE:       OC_SLANG_WRAP(bindless_array_buffer_size);       break;
         case CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ: {
@@ -276,7 +329,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::BINDLESS_ARRAY_BUFFER_READ: {
             current_scratch() << "oc_bindless_array_buffer_read<";
             _emit_type_name(expr->type());
-            current_scratch() << ">";
+            current_scratch() << ocarina::format(", {}u>", expr->type()->size());
             break;
         }
         case CallOp::BYTE_BUFFER_WRITE: OC_SLANG_WRAP(byte_buffer_write); break;
@@ -321,9 +374,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             break;
         }
         case CallOp::TEX3D_READ: {
-            current_scratch() << "oc_tex3d_read<";
-            _emit_type_name(std::get<const Type *>(expr->template_arg(0)));
-            current_scratch() << ">";
+            current_scratch() << "oc_tex3d_read_" << expr->type()->name();
             break;
         }
         case CallOp::TEX3D_WRITE: OC_SLANG_WRAP(tex3d_write); break;
@@ -339,9 +390,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             break;
         }
         case CallOp::TEX2D_READ: {
-            current_scratch() << "oc_tex2d_read<";
-            _emit_type_name(std::get<const Type *>(expr->template_arg(0)));
-            current_scratch() << ">";
+            current_scratch() << "oc_tex2d_read_" << expr->type()->name();
             break;
         }
         case CallOp::TEX2D_WRITE: OC_SLANG_WRAP(tex2d_write); break;
@@ -355,6 +404,218 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 }
 
 // ── Expressions ──────────────────────────────────────────────────────────────
+
+void AstToSlangSource::visit(const SubscriptExpr *expr) noexcept {
+    if (!_is_storage_reference(expr)) {
+        AstToCppSource::visit(expr);
+        return;
+    }
+    _emit_storage_load(expr);
+}
+
+void AstToSlangSource::visit(const MemberExpr *expr) noexcept {
+    if (!_is_storage_reference(expr)) {
+        AstToCppSource::visit(expr);
+        return;
+    }
+    _emit_storage_load(expr);
+}
+
+void AstToSlangSource::_emit_storage_load(const Expression *expr) noexcept {
+    const Type *type = expr->type();
+    if (requires_storage_helper(type)) {
+        _emit_storage_functions(type);
+        current_scratch() << ocarina::format("oc_storage_load_{}(", type->hash());
+        _emit_storage_address(expr);
+        current_scratch() << ")";
+    } else {
+        current_scratch() << "(*(";
+        _emit_type_name(type);
+        current_scratch() << "*)(";
+        _emit_storage_address(expr);
+        current_scratch() << "))";
+    }
+}
+
+bool AstToSlangSource::_is_storage_reference(const Expression *expr) const noexcept {
+    switch (expr->tag()) {
+        case Expression::Tag::SUBSCRIPT: {
+            const auto *subscript = static_cast<const SubscriptExpr *>(expr);
+            return subscript->range()->type()->is_buffer() || _is_storage_reference(subscript->range());
+        }
+        case Expression::Tag::MEMBER: {
+            const auto *member = static_cast<const MemberExpr *>(expr);
+            // A multi-component swizzle is not necessarily contiguous in storage.
+            return (!member->is_swizzle() || member->swizzle_size() == 1) &&
+                   _is_storage_reference(member->parent());
+        }
+        case Expression::Tag::CALL: {
+            const auto op = static_cast<const CallExpr *>(expr)->call_op();
+            return op == CallOp::BYTE_BUFFER_READ || op == CallOp::BINDLESS_ARRAY_BUFFER_READ ||
+                   op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ;
+        }
+        default: return false;
+    }
+}
+
+void AstToSlangSource::_emit_storage_address(const Expression *expr) noexcept {
+    if (expr->tag() == Expression::Tag::SUBSCRIPT) {
+        const auto *subscript = static_cast<const SubscriptExpr *>(expr);
+        if (subscript->range()->type()->is_buffer()) {
+            _emit_buffer_address(subscript);
+            return;
+        }
+        current_scratch() << "(";
+        _emit_storage_address(subscript->range());
+        const Type *range_type = subscript->range()->type();
+        subscript->for_each_index([&](const Expression *index) {
+            current_scratch() << " + uint64_t(";
+            index->accept(*this);
+            current_scratch() << ocarina::format(") * {}u", range_type->element()->size());
+            range_type = range_type->element();
+        });
+        current_scratch() << ")";
+    } else if (expr->tag() == Expression::Tag::MEMBER) {
+        const auto *member = static_cast<const MemberExpr *>(expr);
+        size_t offset = 0;
+        if (member->is_swizzle()) {
+            offset = member->swizzle_index(0) * member->parent()->type()->element()->size();
+        } else {
+            const auto members = member->parent()->type()->members();
+            for (uint i = 0; i <= member->member_index(); ++i) {
+                offset = mem_offset(offset, members[i]->alignment());
+                if (i != member->member_index()) offset += members[i]->size();
+            }
+        }
+        current_scratch() << "(";
+        _emit_storage_address(member->parent());
+        current_scratch() << ocarina::format(" + {}u)", offset);
+    } else {
+        const auto *call = static_cast<const CallExpr *>(expr);
+        if (call->call_op() == CallOp::BYTE_BUFFER_READ) {
+            current_scratch() << "(";
+            call->argument(0)->accept(*this);
+            current_scratch() << ".handle + ";
+            call->argument(0)->accept(*this);
+            current_scratch() << ".offset + uint64_t(";
+            call->argument(1)->accept(*this);
+            current_scratch() << "))";
+        } else {
+            current_scratch() << "oc_bindless_buffer_address(";
+            for (uint i = 0; i < 3; ++i) {
+                call->argument(i)->accept(*this);
+                current_scratch() << ", ";
+            }
+            current_scratch() << ocarina::format("{}u)",
+                call->call_op() == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ ? 1u : call->type()->size());
+        }
+    }
+}
+
+void AstToSlangSource::_emit_buffer_address(const SubscriptExpr *expr) noexcept {
+    current_scratch() << "(";
+    expr->range()->accept(*this);
+    current_scratch() << ".handle + uint64_t(";
+    expr->range()->accept(*this);
+    current_scratch() << ocarina::format(".offset) * {}u", expr->range()->type()->element()->size());
+    const Type *range_type = expr->range()->type();
+    expr->for_each_index([&](const Expression *index) {
+        current_scratch() << " + uint64_t(";
+        index->accept(*this);
+        current_scratch() << ocarina::format(") * {}u", range_type->element()->size());
+        range_type = range_type->element();
+    });
+    current_scratch() << ")";
+}
+
+void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
+    const auto *lhs = stmt->lhs();
+    if (_is_storage_reference(lhs)) {
+        const Type *type = lhs->type();
+        _emit_storage_functions(type);
+        current_scratch() << ocarina::format("oc_storage_store_{}(", type->hash());
+        _emit_storage_address(lhs);
+        current_scratch() << ", ";
+        stmt->rhs()->accept(*this);
+        current_scratch() << ")";
+        return;
+    }
+    if (lhs->tag() == Expression::Tag::MEMBER) {
+        const auto *member = static_cast<const MemberExpr *>(lhs);
+        if (member->is_swizzle() && _is_storage_reference(member->parent())) {
+            // Evaluate the RHS once before updating any component (e.g. xy = yx).
+            current_scratch() << "{ uint64_t oc_storage_base = ";
+            _emit_storage_address(member->parent());
+            current_scratch() << "; ";
+            _emit_type_name(lhs->type());
+            current_scratch() << " oc_storage_value = ";
+            stmt->rhs()->accept(*this);
+            current_scratch() << "; ";
+            const Type *type = member->parent()->type()->element();
+            _emit_storage_functions(type);
+            for (int i = 0; i < member->swizzle_size(); ++i) {
+                current_scratch() << ocarina::format("oc_storage_store_{}(oc_storage_base + {}u, oc_storage_value[{}]); ",
+                    type->hash(), member->swizzle_index(i) * type->size(), i);
+            }
+            current_scratch() << "}";
+            return;
+        }
+    }
+    AstToCppSource::visit(stmt);
+}
+
+void AstToSlangSource::_emit_storage_fields(const Type *type, size_t offset,
+                                           const string &value, bool load) noexcept {
+    if (type->is_structure()) {
+        size_t member_offset = 0;
+        for (uint i = 0; i < type->members().size(); ++i) {
+            const Type *member = type->members()[i];
+            member_offset = mem_offset(member_offset, member->alignment());
+            Scratch name;
+            { SCRATCH_GUARD(name) _emit_member_name(type, i); }
+            _emit_storage_fields(member, offset + member_offset, value + "." + name.c_str(), load);
+            member_offset += member->size();
+        }
+    } else if (type->is_array() || type->is_vector() || type->is_matrix()) {
+        for (uint i = 0; i < type->dimension(); ++i)
+            _emit_storage_fields(type->element(), offset + i * type->element()->size(),
+                                 value + ocarina::format("[{}]", i), load);
+    } else {
+        const bool boolean = type->tag() == Type::Tag::BOOL;
+        _emit_indent();
+        if (load) current_scratch() << value << " = ";
+        current_scratch() << "*(";
+        if (boolean) current_scratch() << "uint8_t";
+        else _emit_type_name(type);
+        current_scratch() << ocarina::format("*)(address + {}u)", offset);
+        if (load) {
+            if (boolean) current_scratch() << " != 0";
+        } else {
+            current_scratch() << " = ";
+            if (boolean) current_scratch() << "uint8_t(";
+            current_scratch() << value;
+            if (boolean) current_scratch() << ")";
+        }
+        current_scratch() << ";";
+        _emit_newline();
+    }
+}
+
+void AstToSlangSource::_emit_storage_functions(const Type *type) noexcept {
+    if (!storage_types_.insert(type).second) return;
+    SCRATCH_GUARD(storage_functions_)
+    _emit_type_name(type);
+    current_scratch() << ocarina::format(" oc_storage_load_{}(uint64_t address) {{\n", type->hash());
+    _emit_type_name(type);
+    current_scratch() << " value;\n";
+    _emit_storage_fields(type, 0, "value", true);
+    current_scratch() << "return value;\n}\n";
+    current_scratch() << ocarina::format("void oc_storage_store_{}(uint64_t address, ", type->hash());
+    _emit_type_name(type);
+    current_scratch() << " value) {\n";
+    _emit_storage_fields(type, 0, "value", false);
+    current_scratch() << "}\n";
+}
 
 void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
     // Slang `*` on matrices is component-wise. ocarina matrices are column-major
@@ -469,9 +730,14 @@ void AstToSlangSource::visit(const Type *type) noexcept {
     current_scratch() << " {";
     _emit_newline();
     indent_inc();
+    size_t offset = 0;
     for (int i = 0; i < static_cast<int>(type->members().size()); ++i) {
+        const Type *member = type->members()[i];
+        offset = mem_offset(offset, member->alignment());
         _emit_indent();
-        _emit_type_name(type->members()[i]);
+        current_scratch() << ocarina::format("[[vk::offset({})]] ", offset);
+        _emit_type_name(member);
+        offset += member->size();
         _emit_space();
         _emit_member_name(type, i);
         current_scratch() << ";";
@@ -566,12 +832,14 @@ void AstToSlangSource::_emit_struct_name(const Type *type) noexcept {
 }
 
 // ── Kernel interface ─────────────────────────────────────────────────────────
-// Push constants (VkShaderBase::c_pc_*): 8-byte device address of the packed
-// argument blob + 12-byte dispatch size. Kernel arguments are read from the blob
-// at the offsets the host packs them at (mem_offset over VulkanComputeDevice
-// size/alignment), so correctness never depends on Slang's struct layout rules.
+// The 20-byte BDA/dispatch prefix is followed by packed argument words when the
+// true argument extent fits in 128 bytes. Larger argument lists retain BDA.
+// Both paths reconstruct values at host ABI offsets, independently of Slang's
+// aggregate layout rules.
 
 void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
+    const VkShaderParameterLayout layout{f};
+    inline_parameters_ = layout.is_inline();
     current_scratch() << "struct OCPushConstants {";
     _emit_newline();
     indent_inc();
@@ -588,22 +856,38 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
     _emit_indent();
     current_scratch() << "uint dim_z;";
     _emit_newline();
+    if (inline_parameters_ && layout.inline_word_count()) {
+        _emit_indent();
+        // Push constants use std430: a scalar uint array has a 4-byte stride.
+        current_scratch() << "uint words[" << layout.inline_word_count() << "];";
+        _emit_newline();
+    }
     indent_dec();
     current_scratch() << "};";
     _emit_newline();
     current_scratch() << "[[vk::push_constant]] OCPushConstants oc_push;";
     _emit_newline();
-    current_scratch() << "T oc_param<T>(uint offset) { return *(T *)(oc_push.params + offset); }";
-    _emit_newline();
-    current_scratch() << "uint oc_param_bits(uint word_offset, uint shift) { return oc_param<uint>(word_offset) >> shift; }";
-    _emit_newline();
+    if (inline_parameters_) {
+        if (layout.inline_word_count()) {
+            current_scratch() << "uint oc_param_word(uint offset) { return oc_push.words[offset / 4u]; }";
+            _emit_newline();
+            current_scratch() << "uint64_t oc_param_u64(uint offset) { return uint64_t(oc_param_word(offset)) | (uint64_t(oc_param_word(offset + 4u)) << 32u); }";
+            _emit_newline();
+            current_scratch() << "uint oc_param_bits(uint word_offset, uint shift) { return oc_param_word(word_offset) >> shift; }";
+            _emit_newline();
+        }
+    } else {
+        current_scratch() << "T oc_param<T>(uint offset) { return *(T *)(oc_push.params + offset); }";
+        _emit_newline();
+        current_scratch() << "uint oc_param_bits(uint word_offset, uint shift) { return oc_param<uint>(word_offset) >> shift; }";
+        _emit_newline();
+    }
     // CUDA blockIdx/threadIdx are visible in callables too; mirror them as statics.
     current_scratch() << "static uint3 oc_group_id;";
     _emit_newline();
     current_scratch() << "static uint3 oc_group_thread_id;";
     _emit_newline();
-    // WorkgroupSize() is only referenced when THREAD_ID is used, so other kernels
-    // do not depend on it.
+    // Emit the block-linear thread index only when a kernel or callable uses it.
     bool thread_id_used = uses_thread_id_;
     for (const Variable &v : f.builtin_vars()) {
         thread_id_used |= v.tag() == Variable::Tag::THREAD_ID;
@@ -613,10 +897,14 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         _emit_newline();
         indent_inc();
         _emit_indent();
-        current_scratch() << "uint3 block = uint3(WorkgroupSize());";
+        current_scratch() << "uint3 block = uint3(OC_WORKGROUP_X, OC_WORKGROUP_Y, OC_WORKGROUP_Z);";
         _emit_newline();
         _emit_indent();
-        current_scratch() << "uint3 grid = (d_dim + block - 1u) / block;";
+        auto grid = f.grid_dim();
+        if (grid.x && grid.y && grid.z)
+            current_scratch() << ocarina::format("uint3 grid = uint3({}u, {}u, {}u);", grid.x, grid.y, grid.z);
+        else
+            current_scratch() << "uint3 grid = (d_dim + block - 1u) / block;";
         _emit_newline();
         _emit_indent();
         current_scratch() << "return (oc_group_id.x + oc_group_id.y * grid.x + grid.x * grid.y * oc_group_id.z)"
@@ -636,6 +924,15 @@ void AstToSlangSource::_emit_raytracing_param(const Function &) noexcept {
 }
 
 void AstToSlangSource::_emit_function(const Function &f) noexcept {
+    if (has_generated(&f)) return;
+    Scratch function_source;
+    { SCRATCH_GUARD(function_source) _emit_function_body(f); }
+    current_scratch() << storage_functions_;
+    storage_functions_.clear();
+    current_scratch() << function_source;
+}
+
+void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
     if (has_generated(&f)) {
         return;
     }
@@ -652,9 +949,7 @@ void AstToSlangSource::_emit_function(const Function &f) noexcept {
                                   precision_policy_name(policy.policy),
                                   policy.allow_real_in_storage ? "true" : "false"));
     _emit_newline();
-    if (f.is_raytracing_kernel()) {
-        current_scratch() << "[shader(\"raygeneration\")]";
-    } else {
+    {
         // SlangShaderCompiler::compile() patches this exact string with the real
         // workgroup size.
         current_scratch() << "[shader(\"compute\")] [numthreads(1, 1, 1)]";
@@ -670,7 +965,7 @@ void AstToSlangSource::_emit_function(const Function &f) noexcept {
 
 void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
     current_scratch() << "(";
-    if (f.is_general_kernel()) {
+    if (f.is_kernel()) {
         // Kernel arguments come from the push-constant blob, not entry parameters.
         current_scratch() << "uint3 oc_dispatch_thread_id : SV_DispatchThreadID, "
                              "uint3 oc_group_id_in : SV_GroupID, "
@@ -688,7 +983,7 @@ void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
 }
 
 void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
-    if (f.is_general_kernel()) {
+    if (f.is_kernel()) {
         _emit_indent();
         current_scratch() << "oc_group_id = oc_group_id_in;";
         _emit_newline();
@@ -720,6 +1015,81 @@ void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
     AstToCppSource::_emit_builtin_vars_define(f);
 }
 
+void AstToSlangSource::_emit_parameter_load(const Type *type, size_t offset) noexcept {
+    if (type->tag() == Type::Tag::ACCEL) {
+        current_scratch() << "RaytracingAccelerationStructure(";
+        _emit_parameter_load(Type::of<uint64_t>(), offset);
+        current_scratch() << ")";
+    } else if (type->is_structure() || type->is_array()) {
+        // Reconstruct aggregates using the RHI layout, rather than the shader
+        // compiler's storage layout (which may pad arrays and nested records).
+        current_scratch() << "{";
+        size_t member_offset = 0;
+        uint count = type->is_array() ? type->dimension() : static_cast<uint>(type->members().size());
+        for (uint i = 0; i < count; ++i) {
+            const Type *member = type->is_array() ? type->element() : type->members()[i];
+            member_offset = mem_offset(member_offset, member->alignment());
+            if (i) current_scratch() << ", ";
+            _emit_parameter_load(member, offset + member_offset);
+            member_offset += member->size();
+        }
+        current_scratch() << "}";
+    } else if (type->is_vector() || type->is_matrix()) {
+        _emit_type_name(type);
+        current_scratch() << "(";
+        const Type *element = type->element();
+        for (uint i = 0; i < type->dimension(); ++i) {
+            if (i) current_scratch() << ", ";
+            _emit_parameter_load(element, offset + i * element->size());
+        }
+        current_scratch() << ")";
+    } else if (auto scalar = narrow_scalar_load(type, offset); !scalar.empty()) {
+        current_scratch() << scalar;
+    } else if (inline_parameters_) {
+        // Resource descriptors have a host ABI distinct from Type::size().
+        // Decode their fields explicitly; a push-constant pointer cannot be
+        // converted into a PhysicalStorageBuffer pointer.
+        auto fields = [&](std::initializer_list<size_t> widths) {
+            current_scratch() << "{";
+            bool first = true;
+            for (size_t width : widths) {
+                if (!first) current_scratch() << ", ";
+                first = false;
+                _emit_parameter_load(width == 8u ? Type::of<uint64_t>() : Type::of<uint>(), offset);
+                offset += width;
+            }
+            current_scratch() << "}";
+        };
+        switch (type->tag()) {
+            case Type::Tag::BUFFER:
+            case Type::Tag::BYTE_BUFFER: fields({8u, 4u, 4u, 8u}); break;
+            case Type::Tag::TEXTURE2D:
+            case Type::Tag::TEXTURE3D: fields({8u, 8u, 4u, 4u}); break;
+            case Type::Tag::BINDLESS_ARRAY: fields({8u, 8u, 8u}); break;
+            case Type::Tag::ULONG:
+                current_scratch() << ocarina::format("oc_param_u64({}u)", offset);
+                break;
+            case Type::Tag::INT:
+                current_scratch() << ocarina::format("asint(oc_param_word({}u))", offset);
+                break;
+            case Type::Tag::FLOAT:
+            case Type::Tag::REAL:
+                current_scratch() << ocarina::format("asfloat(oc_param_word({}u))", offset);
+                break;
+            case Type::Tag::UINT:
+                current_scratch() << ocarina::format("oc_param_word({}u)", offset);
+                break;
+            default:
+                OC_ERROR("Unsupported inline Vulkan parameter type '{}'", type->name());
+                break;
+        }
+    } else {
+        current_scratch() << "oc_param<";
+        _emit_type_name(type);
+        current_scratch() << " >(" << ocarina::format("{}u", offset) << ")";
+    }
+}
+
 void AstToSlangSource::_emit_kernel_argument_loads(const Function &f) noexcept {
     // Same order as the host argument blob: arguments, then captured resources.
     size_t offset = 0;
@@ -732,25 +1102,7 @@ void AstToSlangSource::_emit_kernel_argument_loads(const Function &f) noexcept {
         _emit_space();
         _emit_variable_name(arg);
         current_scratch() << " = ";
-        const Type *element = type->is_vector() ? type->element() : type;
-        bool narrow = !narrow_scalar_load(element, 0).empty();
-        if (type->tag() == Type::Tag::ACCEL) {
-            current_scratch() << ocarina::format("RaytracingAccelerationStructure(oc_param<uint64_t>({}u))", offset);
-        } else if (narrow && type->is_vector()) {
-            _emit_type_name(type);
-            current_scratch() << "(";
-            for (uint i = 0; i < type->dimension(); ++i) {
-                current_scratch() << narrow_scalar_load(element, offset + i * element->size());
-                if (i + 1 < type->dimension()) current_scratch() << ", ";
-            }
-            current_scratch() << ")";
-        } else if (narrow) {
-            current_scratch() << narrow_scalar_load(type, offset);
-        } else {
-            current_scratch() << "oc_param<";
-            _emit_type_name(type);
-            current_scratch() << " >(" << ocarina::format("{}u", offset) << ")";
-        }
+        _emit_parameter_load(type, offset);
         current_scratch() << ";";
         _emit_comment(ocarina::format("{} bytes at offset {}", size, offset));
         _emit_newline();

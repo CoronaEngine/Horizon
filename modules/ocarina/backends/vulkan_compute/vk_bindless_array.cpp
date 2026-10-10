@@ -19,9 +19,13 @@ VkBindlessArray::VkBindlessArray(VulkanComputeDevice *device)
     tex2d_slots_ = Managed<VkBindlessTexSlot>(
         device, c_max_slots, "bindless_tex2d_slots");
 
+    buffer_slots_.host_buffer().resize(c_max_slots);
+    tex3d_slots_.host_buffer().resize(c_max_slots);
+    tex2d_slots_.host_buffer().resize(c_max_slots);
+
     // Initialize all slots to null sentinel
-    std::fill(tex3d_slots_.begin(), tex3d_slots_.end(), 0xFFFFFFFFu);
-    std::fill(tex2d_slots_.begin(), tex2d_slots_.end(), 0xFFFFFFFFu);
+    std::fill(tex3d_slots_.begin(), tex3d_slots_.end(), 0u);
+    std::fill(tex2d_slots_.begin(), tex2d_slots_.end(), 0u);
 
     slot_soa_.buffer_slot = buffer_slots_.handle();
     slot_soa_.tex3d_slot  = tex3d_slots_.handle();
@@ -40,53 +44,41 @@ CommandBatch VkBindlessArray::update_slotSOA(bool async) noexcept {
 
 size_t VkBindlessArray::emplace_buffer(handle_ty handle, uint offset,
                                         size_t size) noexcept {
-    for (size_t i = 0; i < c_max_slots; ++i) {
-        if (buffer_slots_[i].device_address == 0) {
-            buffer_slots_[i] = {handle, offset, (uint64_t)size};
-            return i;
-        }
-    }
-    OC_ERROR("VkBindlessArray: buffer slots exhausted");
-    return 0;
+    OC_ERROR_IF(buffer_count_ >= c_max_slots, "Vulkan bindless buffer slots exhausted");
+    size_t slot = buffer_count_++;
+    buffer_slots_[slot] = {handle, offset, static_cast<uint64_t>(size)};
+    return slot;
 }
 
 void VkBindlessArray::remove_buffer(handle_ty index) noexcept {
-    buffer_slots_[index] = {};
+    if (index >= buffer_count_) return;
+    for (size_t i = index; i + 1 < buffer_count_; ++i) buffer_slots_[i] = buffer_slots_[i + 1];
+    buffer_slots_[--buffer_count_] = {};
 }
 
 void VkBindlessArray::set_buffer(handle_ty index, handle_ty handle,
                                   uint offset, size_t size) noexcept {
+    OC_ASSERT(index < buffer_count_);
     buffer_slots_[index] = {handle, offset, (uint64_t)size};
 }
 
-size_t VkBindlessArray::buffer_num() const noexcept {
-    size_t n = 0;
-    for (size_t i = 0; i < c_max_slots; ++i)
-        if (buffer_slots_[i].device_address) ++n;
-    return n;
-}
+size_t VkBindlessArray::buffer_num() const noexcept { return buffer_count_; }
 
 size_t VkBindlessArray::buffer_slot_size() const noexcept {
-    return sizeof(VkBindlessBufferSlot);
+    return sizeof(VkBindlessBufferSlot) * c_max_slots;
 }
 
 BufferUploadCommand *VkBindlessArray::upload_buffer_handles(bool async) const noexcept {
-    return BufferUploadCommand::create(
-        slot_soa_.buffer_slot, 0,
-        buffer_slots_.host_ptr(), buffer_slots_.size_in_bytes(), async);
+    return buffer_slots_.upload(async);
 }
 
 // ── Tex3D slots ───────────────────────────────────────────────────────────────
 
 size_t VkBindlessArray::emplace_texture3d(handle_ty handle) noexcept {
-    for (size_t i = 0; i < c_max_slots; ++i) {
-        if (tex3d_slots_[i] == 0xFFFFFFFFu) {
-            tex3d_slots_[i] = static_cast<uint32_t>(handle);
-            return i;
-        }
-    }
-    OC_ERROR("VkBindlessArray: tex3d slots exhausted");
-    return 0;
+    OC_ERROR_IF(tex3d_count_ >= c_max_slots, "Vulkan bindless texture slots exhausted");
+    size_t slot = tex3d_count_++;
+    tex3d_slots_[slot] = static_cast<uint32_t>(handle);
+    return slot;
 }
 
 size_t VkBindlessArray::emplace_texture3d(TextureDesc desc) noexcept {
@@ -94,45 +86,37 @@ size_t VkBindlessArray::emplace_texture3d(TextureDesc desc) noexcept {
 }
 
 void VkBindlessArray::remove_texture3d(handle_ty index) noexcept {
-    tex3d_slots_[index] = 0xFFFFFFFFu;
+    if (index >= tex3d_count_) return;
+    for (size_t i = index; i + 1 < tex3d_count_; ++i) tex3d_slots_[i] = tex3d_slots_[i + 1];
+    tex3d_slots_[--tex3d_count_] = 0u;
 }
 
 void VkBindlessArray::set_texture3d(handle_ty index, handle_ty handle) noexcept {
+    OC_ASSERT(index < tex3d_count_);
     tex3d_slots_[index] = static_cast<uint32_t>(handle);
 }
 
 void VkBindlessArray::set_texture3d(handle_ty index, TextureDesc desc) noexcept {
-    tex3d_slots_[index] = static_cast<uint32_t>(desc.texture);
+    set_texture3d(index, desc.texture);
 }
 
-size_t VkBindlessArray::texture3d_num() const noexcept {
-    size_t n = 0;
-    for (size_t i = 0; i < c_max_slots; ++i)
-        if (tex3d_slots_[i] != 0xFFFFFFFFu) ++n;
-    return n;
-}
+size_t VkBindlessArray::texture3d_num() const noexcept { return tex3d_count_; }
 
 size_t VkBindlessArray::tex3d_slot_size() const noexcept {
-    return sizeof(VkBindlessTexSlot);
+    return sizeof(VkBindlessTexSlot) * c_max_slots;
 }
 
 BufferUploadCommand *VkBindlessArray::upload_texture3d_handles(bool async) const noexcept {
-    return BufferUploadCommand::create(
-        slot_soa_.tex3d_slot, 0,
-        tex3d_slots_.host_ptr(), tex3d_slots_.size_in_bytes(), async);
+    return tex3d_slots_.upload(async);
 }
 
 // ── Tex2D slots ───────────────────────────────────────────────────────────────
 
 size_t VkBindlessArray::emplace_texture2d(handle_ty handle) noexcept {
-    for (size_t i = 0; i < c_max_slots; ++i) {
-        if (tex2d_slots_[i] == 0xFFFFFFFFu) {
-            tex2d_slots_[i] = static_cast<uint32_t>(handle);
-            return i;
-        }
-    }
-    OC_ERROR("VkBindlessArray: tex2d slots exhausted");
-    return 0;
+    OC_ERROR_IF(tex2d_count_ >= c_max_slots, "Vulkan bindless texture slots exhausted");
+    size_t slot = tex2d_count_++;
+    tex2d_slots_[slot] = static_cast<uint32_t>(handle);
+    return slot;
 }
 
 size_t VkBindlessArray::emplace_texture2d(TextureDesc desc) noexcept {
@@ -140,32 +124,28 @@ size_t VkBindlessArray::emplace_texture2d(TextureDesc desc) noexcept {
 }
 
 void VkBindlessArray::remove_texture2d(handle_ty index) noexcept {
-    tex2d_slots_[index] = 0xFFFFFFFFu;
+    if (index >= tex2d_count_) return;
+    for (size_t i = index; i + 1 < tex2d_count_; ++i) tex2d_slots_[i] = tex2d_slots_[i + 1];
+    tex2d_slots_[--tex2d_count_] = 0u;
 }
 
 void VkBindlessArray::set_texture2d(handle_ty index, handle_ty handle) noexcept {
+    OC_ASSERT(index < tex2d_count_);
     tex2d_slots_[index] = static_cast<uint32_t>(handle);
 }
 
 void VkBindlessArray::set_texture2d(handle_ty index, TextureDesc desc) noexcept {
-    tex2d_slots_[index] = static_cast<uint32_t>(desc.texture);
+    set_texture2d(index, desc.texture);
 }
 
-size_t VkBindlessArray::texture2d_num() const noexcept {
-    size_t n = 0;
-    for (size_t i = 0; i < c_max_slots; ++i)
-        if (tex2d_slots_[i] != 0xFFFFFFFFu) ++n;
-    return n;
-}
+size_t VkBindlessArray::texture2d_num() const noexcept { return tex2d_count_; }
 
 size_t VkBindlessArray::tex2d_slot_size() const noexcept {
-    return sizeof(VkBindlessTexSlot);
+    return sizeof(VkBindlessTexSlot) * c_max_slots;
 }
 
 BufferUploadCommand *VkBindlessArray::upload_texture2d_handles(bool async) const noexcept {
-    return BufferUploadCommand::create(
-        slot_soa_.tex2d_slot, 0,
-        tex2d_slots_.host_ptr(), tex2d_slots_.size_in_bytes(), async);
+    return tex2d_slots_.upload(async);
 }
 
 // ── buffer_view ───────────────────────────────────────────────────────────────
@@ -173,7 +153,7 @@ BufferUploadCommand *VkBindlessArray::upload_texture2d_handles(bool async) const
 ByteBufferDesc VkBindlessArray::buffer_view(uint index) const noexcept {
     const auto &slot = buffer_slots_[index];
     ByteBufferDesc desc{};
-    desc.handle = slot.device_address;
+    desc.handle = reinterpret_cast<std::byte *>(slot.device_address);
     desc.offset = slot.offset;
     desc.size   = slot.size;
     return desc;

@@ -211,6 +211,78 @@ void test_keep_alive_releases_shader_on_completion_thread(Device &device) {
             "retained shader destruction did not exercise the asynchronous completion thread");
 }
 
+void test_many_commits_and_gpu_batch_reuse(Device &device) {
+    constexpr uint dispatch_count = 320u;
+    constexpr uint callback_count = 3u;
+    constexpr array<uint, callback_count> callback_points{95u, 223u, 319u};
+    auto output = device.create_buffer<uint>(dispatch_count + callback_count, "stream-order-many-commits");
+    auto input = device.create_buffer<uint>(1u, "stream-order-callback-upload");
+    Kernel write_kernel = [](BufferVar<uint> output, Uint index, Uint value) {
+        output.write(index, value);
+    };
+    Kernel copy_kernel = [](BufferVar<uint> input, BufferVar<uint> output, Uint index) {
+        output.write(index, input.read(0u));
+    };
+    auto write_shader = device.compile(write_kernel, "stream-order-many-commit-parameters");
+    auto copy_shader = device.compile(copy_kernel, "stream-order-many-commit-host-upload");
+    auto stream = device.create_stream();
+    array<uint, callback_count> snapshots{};
+    array<uint, callback_count> upload_sources{};
+    array<std::atomic<uint>, callback_count> callback_hits{};
+    std::atomic<uint> next_callback = 0u;
+    std::atomic<bool> ordered = true;
+    uint callback_index = 0u;
+
+    for (uint i = 0u; i < dispatch_count; ++i) {
+        // Runs of 96/128/96 separate commits exceed the stream's 64 batch
+        // capacity, so pure GPU work must make progress without a host task.
+        stream << write_shader(output, i, 0x12000000u + i * 17u).dispatch(1u) << commit();
+        if (callback_index < callback_count && i == callback_points[callback_index]) {
+            const auto index = callback_index++;
+            stream << output.view(i, 1u).download(&snapshots[index])
+                   << [&, index, i] {
+                          if (next_callback.fetch_add(1u) != index ||
+                              snapshots[index] != 0x12000000u + i * 17u)
+                              ordered = false;
+                          callback_hits[index].fetch_add(1u);
+                          upload_sources[index] = 0xa5000000u + index * 23u;
+                      }
+                   << input.upload(&upload_sources[index])
+                   << copy_shader(input, output, dispatch_count + index).dispatch(1u)
+                   << commit();
+        }
+    }
+    array<uint, dispatch_count + callback_count> results{};
+    stream << output.download(results.data()) << synchronize() << commit();
+    require(ordered.load() && next_callback.load() == callback_count,
+            "batch retirement lost or reordered host callbacks");
+    for (uint i = 0u; i < dispatch_count; ++i)
+        require(results[i] == 0x12000000u + i * 17u,
+                "many asynchronous commits reused in-flight dispatch parameters");
+    for (uint i = 0u; i < callback_count; ++i) {
+        require(callback_hits[i].load() == 1u, "a retirement callback did not execute exactly once");
+        require(results[dispatch_count + i] == 0xa5000000u + i * 23u,
+                "retirement did not order callback output before the following upload");
+    }
+
+    auto reused = device.create_buffer<uint>(4u, "stream-order-reused-synchronous-batch");
+    array<uint, 4> expected{};
+    for (uint i = 0u; i < 96u; ++i) {
+        uint index = i % 4u;
+        expected[index] = 0xbeef0000u + i;
+        stream << write_shader(reused, index, expected[index]).dispatch(1u);
+        // Alternate an inline synchronization and a later synchronization of
+        // already committed GPU-only work. Both paths must safely reuse fences,
+        // command pools and argument storage without entering the host worker.
+        if ((i & 1u) != 0u) stream << commit();
+        stream << synchronize() << commit();
+    }
+    array<uint, 4> reused_results{};
+    stream << reused.download(reused_results.data()) << synchronize() << commit();
+    for (uint i = 0u; i < expected.size(); ++i)
+        require(reused_results[i] == expected[i], "synchronous batch reuse corrupted GPU output");
+}
+
 } // namespace
 
 int main() {
@@ -219,5 +291,6 @@ int main() {
     test_transfers_callbacks_and_repeated_parameters(device);
     test_synchronize_before_resource_release(device);
     test_keep_alive_releases_shader_on_completion_thread(device);
+    test_many_commits_and_gpu_batch_reuse(device);
     std::cout << "stream order regression checks passed" << std::endl;
 }

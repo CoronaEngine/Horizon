@@ -9,6 +9,11 @@
 namespace ocarina {
 
 void IRToSlangSource::emit(const IRModule &module) noexcept {
+    const Function &entry = module.entry_function();
+    FUNCTION_GUARD(entry)
+    entry.for_each_header([&](string_view header) {
+        current_scratch() << "#include \"" << header << "\"\n";
+    });
     // Emit structure types first so that callable/kernel bodies can reference them.
     for (const auto *type : module.structures()) {
         visit(type);
@@ -17,7 +22,6 @@ void IRToSlangSource::emit(const IRModule &module) noexcept {
     for (const auto &ir_func : module.functions()) {
         _emit_function(ir_func.ast_function());
     }
-    _emit_function(module.entry_function());
 }
 
 }// namespace ocarina

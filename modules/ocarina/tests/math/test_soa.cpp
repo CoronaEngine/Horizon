@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 //
 // Created by Zero on 2025/03/25.
 //
@@ -637,7 +638,7 @@ int main(int argc, char *argv[]) {
     total_failures += test_policy_aware_soa_layout();
 
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
     Env::printer().init(device);
     Env::debugger().init(device);

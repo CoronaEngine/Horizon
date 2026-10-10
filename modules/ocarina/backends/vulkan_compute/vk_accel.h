@@ -6,6 +6,7 @@
 #pragma once
 
 #include "core/stl.h"
+#include "util.h"
 #include "rhi/rtx/accel.h"
 #include <vulkan/vulkan.h>
 
@@ -28,6 +29,7 @@ private:
     VkAccelerationStructureGeometryKHR            tlas_geom_{};
 
     bool built_{false};
+    vector<handle_ty> built_blas_;
 
     [[nodiscard]] VkBuildAccelerationStructureFlagsKHR vk_build_flags() const noexcept;
     void reallocate_tlas(uint32_t instance_count) noexcept;

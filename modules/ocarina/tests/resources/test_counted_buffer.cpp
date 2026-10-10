@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 //
 // Created by Zero on 2024/9/26.
 //
@@ -127,7 +128,7 @@ int main(int argc, char *argv[]) {
      * stream used for process some command,e.g buffer upload and download, dispatch shader
      * default is asynchronous operation
      */
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
     Env::printer().init(device);
     Env::debugger().init(device);

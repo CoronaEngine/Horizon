@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -197,7 +198,7 @@ int test_bindless_buffer_param(Device &device, Stream &stream) {
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
 
     int total_failures = 0;

@@ -1,29 +1,20 @@
-// Ocarina Slang device-side resource types.
-// Replaces cuda_device_resource.h — mirrors host BufferDesc<>/TextureDesc/BindlessArrayDesc layouts.
-
-// ── Buffer: physical-storage-buffer reference (VkDeviceAddress) ──────────────
-
-[[vk::buffer_reference, vk::buffer_reference_align(4)]]
-struct OCRawBuffer { uint8_t data[]; };
-
+// Layout matches host BufferDesc (24 bytes), TextureDesc (24 bytes), and BindlessArrayDesc.
 struct OCBuffer<T> {
-    OCRawBuffer handle;  // VkDeviceAddress stored as buffer_reference
-    uint        offset;
-    uint64_t    size;
+    uint64_t handle;
+    uint offset;
+    uint padding;
+    uint64_t size;
 };
-
-// ── Texture descriptor: holds global descriptor-array indices ─────────────────
-
 struct OCTextureDesc {
-    uint tex_index;      // index into g_bindless_textures[]
-    uint surf_index;     // index into g_bindless_storage_images[]
+    uint64_t tex_index;
+    uint64_t surf_index;
     uint pixel_storage;
+    uint padding;
 };
-
-// ── Bindless-array descriptor: device addresses of per-type slot SSBOs ────────
-
 struct OCBindlessArrayDesc {
     uint64_t buffer_slot;
     uint64_t tex3d_slot;
     uint64_t tex2d_slot;
 };
+struct Ray { float4 org_min; float4 dir_max; };
+struct TriangleHit { uint inst_id; uint prim_id; float2 bary; };

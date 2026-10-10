@@ -6,6 +6,7 @@
 #pragma once
 
 #include "core/stl.h"
+#include "util.h"
 #include "rhi/rtx/mesh.h"
 #include <vulkan/vulkan.h>
 
@@ -21,6 +22,7 @@ private:
     VkAccelerationStructureKHR  blas_{VK_NULL_HANDLE};
     VkBufferAllocation          blas_buf_{};
     VkDeviceAddress             blas_address_{0};
+    VkBufferAllocation          packed_indices_{};
 
     VkAccelerationStructureGeometryKHR            geom_{};
     VkAccelerationStructureBuildGeometryInfoKHR   build_info_{};
@@ -31,6 +33,7 @@ public:
     ~VkMesh() noexcept override;
 
     void init_build_input() noexcept;
+    void clear() noexcept;
     void build_bvh(const BLASBuildCommand *cmd) noexcept;
 
     [[nodiscard]] handle_ty blas_handle() const noexcept override { return blas_address_; }

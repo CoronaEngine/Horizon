@@ -4,6 +4,11 @@ cmake_minimum_required(VERSION 4.0)
 # captured by Conan instead of inheriting an unrelated MSVC installation.
 include("${HORIZON_BUILD_ENVIRONMENT}")
 
+# Ninja's dependency parser expects ASCII /showIncludes prefixes. A localized
+# compiler and a different build-process code page can otherwise drop every
+# header dependency after an incremental compilation.
+set(ENV{VSLANG} 1033)
+
 set(_command "execute_process(COMMAND")
 set(_has_command FALSE)
 set(_after_separator FALSE)
@@ -26,10 +31,10 @@ if(NOT _has_command)
     message(FATAL_ERROR "No build tool was passed to the Horizon launcher")
 endif()
 
-# CMake decodes the console code page (or the ANSI code page without a
-# console). Ninja otherwise compares /showIncludes output as raw bytes.
+# Horizon invokes MSVC with /utf-8. Decode the compiler's UTF-8 diagnostics
+# explicitly; AUTO can choose the ANSI code page in a headless IDE process.
 string(APPEND _command
-    " ENCODING AUTO OUTPUT_VARIABLE _output ERROR_VARIABLE _output RESULT_VARIABLE _result)")
+    " ENCODING UTF-8 OUTPUT_VARIABLE _output ERROR_VARIABLE _output RESULT_VARIABLE _result)")
 cmake_language(EVAL CODE "${_command}")
 if(HORIZON_MSVC_SHOWINCLUDES_PREFIX)
     set(_output "\n${_output}")

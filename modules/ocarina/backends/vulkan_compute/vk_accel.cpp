@@ -40,6 +40,8 @@ void VkAccel::clear() noexcept {
     device_->free_buffer(tlas_buf_);
     tlas_address_ = 0;
     built_        = false;
+    built_blas_.clear();
+    device_->free_buffer(instances_buf_);
     Accel::Impl::clear();
 }
 
@@ -104,10 +106,11 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
         device_->logical_device(), "vkCmdBuildAccelerationStructuresKHR");
 
     uint32_t instance_count = static_cast<uint32_t>(meshes_.size());
+    if (instance_count == 0) { clear(); return; }
 
     // (Re)allocate instance buffer if needed
     if (instances_buf_.buffer == VK_NULL_HANDLE ||
-        instances_buf_.address == 0) {
+        built_blas_.size() != instance_count) {
         device_->free_buffer(instances_buf_);
         instances_buf_ = device_->allocate_buffer(
             instance_count * sizeof(VkAccelerationStructureInstanceKHR),
@@ -151,7 +154,7 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     VkBufferAllocation scratch = device_->allocate_buffer(
         size_info.buildScratchSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        false, "tlas_scratch");
+        false, "tlas_scratch", device_->scratch_alignment());
 
     build_info_.mode                     = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     build_info_.dstAccelerationStructure = tlas_;
@@ -166,13 +169,21 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
 
     device_->free_buffer(scratch);
     built_ = true;
+    built_blas_.clear();
+    for (const auto &mesh : meshes_) built_blas_.push_back(mesh.impl()->blas_handle());
     mark_build();
 }
 
 // ── update_tlas ───────────────────────────────────────────────────────────────
 
 void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
-    if (!built_) {
+    if (meshes_.empty()) { clear(); return; }
+    bool topology_changed = built_blas_.size() != meshes_.size();
+    if (!topology_changed) {
+        for (size_t i = 0; i < meshes_.size(); ++i)
+            topology_changed |= built_blas_[i] != meshes_[i].impl()->blas_handle();
+    }
+    if (!built_ || usage_tag_ != FAST_UPDATE || topology_changed) {
         build_tlas(visitor);
         return;
     }
@@ -205,7 +216,7 @@ void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
     VkBufferAllocation scratch = device_->allocate_buffer(
         size_info.updateScratchSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        false, "tlas_update_scratch");
+        false, "tlas_update_scratch", device_->scratch_alignment());
 
     build_info_.mode                      = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
     build_info_.srcAccelerationStructure  = tlas_;
