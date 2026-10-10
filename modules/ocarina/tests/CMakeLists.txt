@@ -1,5 +1,5 @@
 function(ocarina_add_test name)
-    cmake_parse_arguments(_ocarina_test "" "CATEGORY" "SOURCES" ${ARGN})
+    cmake_parse_arguments(_ocarina_test "GPU" "CATEGORY" "SOURCES" ${ARGN})
     set(_test_target ${name})
     if (_ocarina_test_CATEGORY)
         if (${name} MATCHES "^test-")
@@ -20,6 +20,17 @@ function(ocarina_add_test name)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
             WINDOWS_EXPORT_ALL_SYMBOLS ON
             FOLDER "${_test_folder}")
+    if(_ocarina_test_GPU AND TARGET ocarina-backend-cuda)
+        foreach(_codegen ast ir)
+            set(_test_name "ocarina.${_test_target}.cuda.${_codegen}")
+            add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}>)
+            set_tests_properties(${_test_name} PROPERTIES
+                WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
+                ENVIRONMENT "OCARINA_TEST_BACKEND=cuda;OCARINA_TEST_CODEGEN=${_codegen}"
+                LABELS "ocarina;cuda;${_codegen}"
+                RUN_SERIAL TRUE TIMEOUT 120)
+        endforeach()
+    endif()
 endfunction()
 
 # Core type and utility tests.
@@ -54,6 +65,10 @@ ocarina_add_test(test-matrix-inverse CATEGORY math SOURCES math/test_matrix_inve
 ocarina_add_test(test-swizzle CATEGORY math SOURCES math/test_swizzle.cpp)
 
 # Runtime and backend-facing tests.
+ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
+ocarina_add_test(test-storage-parity GPU CATEGORY runtime SOURCES runtime/test_storage_parity.cpp)
+ocarina_add_test(test-stream-order GPU CATEGORY runtime SOURCES runtime/test_stream_order.cpp)
+ocarina_add_test(test-host-transfer-order GPU CATEGORY runtime SOURCES runtime/test_host_transfer_order.cpp)
 ocarina_add_test(test-accel-update CATEGORY runtime SOURCES runtime/test_accel_update.cpp)
 ocarina_add_test(test-launch-latency CATEGORY runtime SOURCES runtime/test_launch_latency.cpp)
 ocarina_add_test(test-atomic CATEGORY runtime SOURCES runtime/test_atomic.cpp)

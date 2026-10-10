@@ -53,6 +53,10 @@ void CUDATexture::init_by_array(CUarray array) {
     tex_desc.maxMipmapLevelClamp = 9;
     tex_desc.filterMode = CU_TR_FILTER_MODE_LINEAR;
     tex_desc.flags = CU_TRSF_NORMALIZED_COORDINATES;
+    if (descriptor_.pixel_storage >= PixelStorage::UINT1 && descriptor_.pixel_storage <= PixelStorage::UINT4) {
+        tex_desc.flags |= CU_TRSF_READ_AS_INTEGER;
+        tex_desc.filterMode = CU_TR_FILTER_MODE_POINT;
+    }
 
     OC_CU_CHECK(cuSurfObjectCreate(&descriptor_.surface, &res_desc));
     OC_CU_CHECK(cuTexObjectCreate(&descriptor_.texture, &res_desc, &tex_desc, nullptr));
@@ -79,6 +83,18 @@ void CUDATexture2D::init() noexcept {
             array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT8;
             array_desc.NumChannels = 4;
             break;
+        case PixelStorage::UINT1:
+            array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT32;
+            array_desc.NumChannels = 1;
+            break;
+        case PixelStorage::UINT2:
+            array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT32;
+            array_desc.NumChannels = 2;
+            break;
+        case PixelStorage::UINT4:
+            array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT32;
+            array_desc.NumChannels = 4;
+            break;
         case PixelStorage::FLOAT1:
             array_desc.Format = CU_AD_FORMAT_FLOAT;
             array_desc.NumChannels = 1;
@@ -103,6 +119,7 @@ void CUDATexture3D::init() noexcept {
     array_desc.Width = res_.x;
     array_desc.Height = res_.y;
     array_desc.Depth = res_.z;
+    array_desc.Flags = CUDA_ARRAY3D_SURFACE_LDST;
     switch (descriptor_.pixel_storage) {
         case PixelStorage::BYTE1:
             array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT8;
@@ -114,6 +131,18 @@ void CUDATexture3D::init() noexcept {
             break;
         case PixelStorage::BYTE4:
             array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT8;
+            array_desc.NumChannels = 4;
+            break;
+        case PixelStorage::UINT1:
+            array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT32;
+            array_desc.NumChannels = 1;
+            break;
+        case PixelStorage::UINT2:
+            array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT32;
+            array_desc.NumChannels = 2;
+            break;
+        case PixelStorage::UINT4:
+            array_desc.Format = CU_AD_FORMAT_UNSIGNED_INT32;
             array_desc.NumChannels = 4;
             break;
         case PixelStorage::FLOAT1:

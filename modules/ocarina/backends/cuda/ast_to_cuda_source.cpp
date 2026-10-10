@@ -342,6 +342,7 @@ void AstToCudaSource::_emit_function(const Function &f) noexcept {
     if (has_generated(&f)) {
         return;
     }
+    FUNCTION_GUARD(f)
     if (f.is_kernel()) {
         const auto policy = f.storage_policy();
         _emit_comment(ocarina::format("compile policy: policy={}, allow_real_in_storage={}",

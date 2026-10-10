@@ -40,7 +40,7 @@ public:
           size_(size) {}
 
     ByteBuffer(ByteBufferView buffer_view)
-        : RHIResource(nullptr, Tag::BUFFER, buffer_view.handle()),
+        : RHIResource(nullptr, Tag::BUFFER, buffer_view.handle() + buffer_view.offset_in_byte()),
           size_(buffer_view.size()) {}
 
     /// head of the buffer

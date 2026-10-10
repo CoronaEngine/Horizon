@@ -91,10 +91,7 @@ size_t CUDABindlessArray::emplace_texture3d(handle_ty handle) noexcept {
 }
 
 size_t CUDABindlessArray::emplace_texture3d(ocarina::TextureDesc desc) noexcept {
-    auto ret = tex3ds_.host_buffer().size();
-//    tex3ds_.push_back(handle);
-    OC_ERROR_IF(ret >= c_max_slot_num, ocarina::format("slot_size is {}, tex_num is {}", c_max_slot_num, ret));
-    return ret;
+    return emplace_texture3d(desc.texture);
 }
 
 void CUDABindlessArray::remove_texture3d(handle_ty index) noexcept {
@@ -107,7 +104,7 @@ void CUDABindlessArray::set_texture3d(ocarina::handle_ty index, ocarina::handle_
 }
 
 void CUDABindlessArray::set_texture3d(ocarina::handle_ty index, ocarina::TextureDesc desc) noexcept {
-    OC_ASSERT(index < tex3ds_.host_buffer().size());
+    set_texture3d(index, desc.texture);
 }
 
 size_t CUDABindlessArray::texture3d_num() const noexcept {
@@ -135,10 +132,7 @@ size_t CUDABindlessArray::emplace_texture2d(handle_ty handle) noexcept {
 }
 
 size_t CUDABindlessArray::emplace_texture2d(ocarina::TextureDesc desc) noexcept {
-    auto ret = tex2ds_.host_buffer().size();
-//    tex2ds_.push_back(handle);
-//    OC_ERROR_IF(ret >= c_max_slot_num, ocarina::format("slot_size is {}, tex_num is {}", c_max_slot_num, ret));
-    return ret;
+    return emplace_texture2d(desc.texture);
 }
 
 void CUDABindlessArray::remove_texture2d(handle_ty index) noexcept {
@@ -151,7 +145,7 @@ void CUDABindlessArray::set_texture2d(ocarina::handle_ty index, ocarina::handle_
 }
 
 void CUDABindlessArray::set_texture2d(ocarina::handle_ty index, ocarina::TextureDesc desc) noexcept {
-    OC_ASSERT(index < tex2ds_.host_buffer().size());
+    set_texture2d(index, desc.texture);
 }
 
 size_t CUDABindlessArray::tex2d_slot_size() const noexcept {

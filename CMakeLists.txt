@@ -73,6 +73,10 @@ if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
     add_subdirectory(tools)
 endif()
 
+if(HORIZON_BUILD_OCARINA_TESTS)
+    enable_testing()
+endif()
+
 if(HORIZON_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
     enable_testing()
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/horizon_testing.cmake)

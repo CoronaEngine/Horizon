@@ -140,7 +140,7 @@ public:
         ByteBufferDesc buffer_desc = impl()->buffer_view(index);
         auto size = buffer_desc.size_in_byte() / sizeof(T);
         auto offset = 0 / sizeof(T);
-        return BufferView<T>(buffer_desc.head(), offset, size, offset + size);
+        return BufferView<T>(buffer_desc.head() + buffer_desc.offset_in_byte(), offset, size, offset + size);
     }
 
     [[nodiscard]] ByteBufferView byte_buffer_view(uint index) const noexcept;

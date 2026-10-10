@@ -71,9 +71,28 @@ public:
         RHIContext *context_{};
         friend class Device;
 
+    private:
+        vector<std::pair<const void *, std::function<void()>>> cleanup_callbacks_;
+
     public:
         explicit Impl(RHIContext *ctx) : context_(ctx) {}
         explicit Impl(RHIContext *ctx, const InstanceCreation &instance_creation) : context_(ctx) {}
+        // Global diagnostics can own resources beyond the Device wrapper's scope.
+        // Release them while the backend and its allocator are still alive.
+        void register_cleanup_callback(const void *owner, std::function<void()> callback) {
+            for (auto &item : cleanup_callbacks_) {
+                if (item.first == owner) {
+                    item.second = std::move(callback);
+                    return;
+                }
+            }
+            cleanup_callbacks_.emplace_back(owner, std::move(callback));
+        }
+        void run_cleanup_callbacks() noexcept {
+            auto callbacks = std::move(cleanup_callbacks_);
+            cleanup_callbacks_.clear();
+            for (auto &item : callbacks) item.second();
+        }
         [[nodiscard]] virtual handle_ty create_buffer(size_t size, const string &desc, bool exported = false) noexcept = 0;
         virtual void destroy_buffer(handle_ty handle) noexcept = 0;
         [[nodiscard]] virtual handle_ty create_texture3d(uint3 res, PixelStorage pixel_storage,

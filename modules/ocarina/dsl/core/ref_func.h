@@ -337,7 +337,7 @@ struct EnableTextureReadAndWrite {
 
     template<typename Target, typename XY>
     requires((is_general_integer_vector2_v<remove_device_t<XY>>) &&
-             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target>))
+             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target> || is_uint_element_expr_v<Target>))
     OC_NODISCARD auto read(const XY &xy) const noexcept {
         return [&]<typename Arg>(const Arg &arg) {
             return read<Target>(arg.x, arg.y);
@@ -346,7 +346,7 @@ struct EnableTextureReadAndWrite {
 
     template<typename Target, typename XYZ>
     requires((is_general_int_vector3_v<remove_device_t<XYZ>> || is_general_uint_vector3_v<remove_device_t<XYZ>>) &&
-             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target>))
+             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target> || is_uint_element_expr_v<Target>))
     OC_NODISCARD auto read(const XYZ &xyz) const noexcept {
         return [&]<typename Arg>(const Arg &arg) {
             return read<Target>(arg.x, arg.y, arg.z);
@@ -356,7 +356,7 @@ struct EnableTextureReadAndWrite {
     template<typename X, typename Y, typename Val>
     requires(is_all_integral_expr_v<X, Y> &&
              (is_uchar_element_expr_v<Val> ||
-              is_float_element_expr_v<Val>))
+              is_float_element_expr_v<Val> || is_uint_element_expr_v<Val>))
     void write(const Val &elm, const X &x, const Y &y) noexcept {
         const T *texture = static_cast<const T *>(this);
         const CallExpr *expr = Function::current()->call_builtin(nullptr, Write,
@@ -369,7 +369,7 @@ struct EnableTextureReadAndWrite {
     template<typename X, typename Y, typename Z, typename Val>
     requires(is_all_integral_expr_v<X, Y, Z> &&
              (is_uchar_element_expr_v<Val> ||
-              is_float_element_expr_v<Val>))
+              is_float_element_expr_v<Val> || is_uint_element_expr_v<Val>))
     void write(const Val &elm, const X &x, const Y &y, const Z &z) noexcept {
         static_assert(Dim == 3,"This method only available on 3D tex");
         const CallExpr *expr = Function::current()->call_builtin(nullptr, Write,

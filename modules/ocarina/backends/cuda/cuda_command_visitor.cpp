@@ -5,6 +5,7 @@
 #include "cuda_command_visitor.h"
 #include "util.h"
 #include "cuda_device.h"
+#include "cuda_stream.h"
 #include "cuda_shader.h"
 #include "cuda_mesh.h"
 #include "core/stl.h"
@@ -12,6 +13,8 @@
 
 namespace ocarina {
 void CUDACommandVisitor::visit(const BufferUploadCommand *cmd) noexcept {
+    if (cmd->size_in_bytes() == 0) return;
+    if (owner_) owner_->prepare_host_upload();
     OC_ASSERT((cmd->device_handle() == 0) == (cmd->host_ptr() == 0));
     if (cmd->async() && stream_) {
         OC_CU_CHECK(cuMemcpyHtoDAsync(cmd->device_handle() + cmd->device_offset(),
@@ -28,6 +31,7 @@ void CUDACommandVisitor::visit(const BufferUploadCommand *cmd) noexcept {
 }
 
 void CUDACommandVisitor::visit(const BufferByteSetCommand *cmd) noexcept {
+    if (cmd->size_in_bytes() == 0) return;
     device_->use_context([&] {
         if (cmd->async() && stream_) {
             OC_CU_CHECK(cuMemsetD8Async(cmd->device_handle(), cmd->value(),
@@ -40,6 +44,7 @@ void CUDACommandVisitor::visit(const BufferByteSetCommand *cmd) noexcept {
 }
 
 void CUDACommandVisitor::visit(const BufferCopyCommand *cmd) noexcept {
+    if (cmd->size() == 0) return;
     auto src_buffer = cmd->src() + cmd->src_offset();
     auto dst_buffer = cmd->dst() + cmd->dst_offset();
     OC_ASSERT((cmd->src() == 0) == (cmd->dst() == 0));
@@ -91,12 +96,14 @@ void CUDACommandVisitor::visit(const BufferReallocateCommand *cmd) noexcept {
 }
 
 void CUDACommandVisitor::visit(const BufferDownloadCommand *cmd) noexcept {
+    if (cmd->size_in_bytes() == 0) return;
     OC_ASSERT((cmd->device_handle() == 0) == (cmd->host_ptr() == 0));
     if (cmd->async() && stream_) {
         OC_CU_CHECK(cuMemcpyDtoHAsync(cmd->host_ptr<void *>(),
                                       cmd->device_handle() + cmd->device_offset(),
                                       cmd->size_in_bytes(),
                                       stream_));
+        if (owner_) owner_->mark_host_work_pending();
     } else {
         device_->use_context([&] {
             OC_CU_CHECK(cuMemcpyDtoH(cmd->host_ptr<void *>(),
@@ -107,7 +114,8 @@ void CUDACommandVisitor::visit(const BufferDownloadCommand *cmd) noexcept {
 }
 
 void CUDACommandVisitor::visit(const SynchronizeCommand *cmd) noexcept {
-    OC_CU_CHECK(cuStreamSynchronize(stream_));
+    if (owner_) owner_->synchronize();
+    else device_->use_context([&] { OC_CU_CHECK(cuStreamSynchronize(stream_)); });
 }
 
 void CUDACommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
@@ -116,16 +124,14 @@ void CUDACommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
 }
 
 void CUDACommandVisitor::visit(const ocarina::HostFunctionCommand *cmd) noexcept {
-    if (cmd->async()) {
-        std::function<void()> *ptr = new_with_allocator<std::function<void()>>(ocarina::move(cmd->function()));
-        OC_CU_CHECK(cuLaunchHostFunc(
-            stream_, [](void *ptr) {
-                auto func = reinterpret_cast<std::function<void()> *>(ptr);
-                (*func)();
-                delete_with_allocator(func);
-            },
-            ptr));
+    if (cmd->async() && owner_) {
+        owner_->host_function(cmd->function());
     } else {
+        // Synchronous host commands observe all preceding stream work. The
+        // device's immediate visitor has no stream-owned reaper, so its host
+        // commands also run here after completing default-stream work.
+        if (owner_) owner_->synchronize();
+        else device_->use_context([&] { OC_CU_CHECK(cuStreamSynchronize(stream_)); });
         cmd->function()();
     }
 }
@@ -162,6 +168,7 @@ namespace detail {
 }// namespace detail
 
 void CUDACommandVisitor::visit(const Texture3DUploadCommand *cmd) noexcept {
+    if (owner_) owner_->prepare_host_upload();
     device_->use_context([&] {
         CUDA_MEMCPY3D desc = detail::memcpy3d_desc(cmd);
         desc.srcMemoryType = CU_MEMORYTYPE_HOST;
@@ -177,6 +184,7 @@ void CUDACommandVisitor::visit(const Texture3DUploadCommand *cmd) noexcept {
 }
 
 void CUDACommandVisitor::visit(const ocarina::Texture2DUploadCommand *cmd) noexcept {
+    if (owner_) owner_->prepare_host_upload();
     device_->use_context([&] {
         CUDA_MEMCPY2D desc = detail::memcpy2d_desc(cmd);
         desc.srcMemoryType = CU_MEMORYTYPE_HOST;
@@ -200,6 +208,7 @@ void CUDACommandVisitor::visit(const Texture3DDownloadCommand *cmd) noexcept {
         desc.dstHost = reinterpret_cast<void *>(cmd->host_ptr());
         if (cmd->async() && stream_) {
             OC_CU_CHECK(cuMemcpy3DAsync(&desc, stream_));
+            if (owner_) owner_->mark_host_work_pending();
         } else {
             OC_CU_CHECK(cuMemcpy3D(&desc));
         }
@@ -215,6 +224,7 @@ void CUDACommandVisitor::visit(const Texture2DDownloadCommand *cmd) noexcept {
         desc.dstHost = reinterpret_cast<void *>(cmd->host_ptr());
         if (cmd->async() && stream_) {
             OC_CU_CHECK(cuMemcpy2DAsync(&desc, stream_));
+            if (owner_) owner_->mark_host_work_pending();
         } else {
             OC_CU_CHECK(cuMemcpy2D(&desc));
         }

@@ -18,7 +18,7 @@
 namespace ocarina {
 
 namespace {
-constexpr unsigned ast_to_cuda_source_cache_version = 1u;
+constexpr unsigned ast_to_cuda_source_cache_version = 2u;
 
 [[nodiscard]] unsigned shader_codegen_path_version(ShaderCodegenPath path) noexcept {
     switch (path) {

@@ -102,7 +102,7 @@ public:
     }
 
     [[nodiscard]] BufferByteSetCommand *byte_set(uchar value, bool async = true) const noexcept {
-        return BufferByteSetCommand::create(handle(), size_in_byte(), value, async);
+        return BufferByteSetCommand::create(handle() + offset_in_byte(), size_in_byte(), value, async);
     }
 
     [[nodiscard]] BufferByteSetCommand *reset(bool async = true) const noexcept {

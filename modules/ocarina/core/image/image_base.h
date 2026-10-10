@@ -65,6 +65,9 @@ struct PixelStorageImpl {
 MAKE_PIXEL_FORMAT_OF_TYPE(uchar, BYTE1)
 MAKE_PIXEL_FORMAT_OF_TYPE(uchar2, BYTE2)
 MAKE_PIXEL_FORMAT_OF_TYPE(uchar4, BYTE4)
+MAKE_PIXEL_FORMAT_OF_TYPE(uint, UINT1)
+MAKE_PIXEL_FORMAT_OF_TYPE(uint2, UINT2)
+MAKE_PIXEL_FORMAT_OF_TYPE(uint4, UINT4)
 MAKE_PIXEL_FORMAT_OF_TYPE(float, FLOAT1)
 MAKE_PIXEL_FORMAT_OF_TYPE(float2, FLOAT2)
 MAKE_PIXEL_FORMAT_OF_TYPE(float4, FLOAT4)
@@ -83,9 +86,9 @@ OC_NDSC_INLINE size_t pixel_size(PixelStorage pixel_storage) noexcept {
         case PixelStorage::FLOAT1: return sizeof(float);
         case PixelStorage::FLOAT2: return sizeof(float2);
         case PixelStorage::FLOAT4: return sizeof(float4);
-        case PixelStorage::UINT1: break;
-        case PixelStorage::UINT2: break;
-        case PixelStorage::UINT4: break;
+        case PixelStorage::UINT1: return sizeof(uint);
+        case PixelStorage::UINT2: return sizeof(uint2);
+        case PixelStorage::UINT4: return sizeof(uint4);
         case PixelStorage::UNKNOWN: break;
     }
     OC_ASSERT(0);
@@ -97,12 +100,13 @@ OC_NDSC_INLINE bool is_8bit(PixelStorage pixel_format) noexcept {
 }
 
 OC_NDSC_INLINE bool is_32bit(PixelStorage pixel_format) noexcept {
-    return pixel_format == PixelStorage::FLOAT1 || pixel_format == PixelStorage::FLOAT2 || pixel_format == PixelStorage::FLOAT4;
+    return pixel_format == PixelStorage::FLOAT1 || pixel_format == PixelStorage::FLOAT2 || pixel_format == PixelStorage::FLOAT4 ||
+           pixel_format == PixelStorage::UINT1 || pixel_format == PixelStorage::UINT2 || pixel_format == PixelStorage::UINT4;
 }
 
 OC_NDSC_INLINE size_t channel_num(PixelStorage pixel_storage) {
-    if (pixel_storage == PixelStorage::BYTE1 || pixel_storage == PixelStorage::FLOAT1) { return 1u; }
-    if (pixel_storage == PixelStorage::BYTE2 || pixel_storage == PixelStorage::FLOAT2) { return 2u; }
+    if (pixel_storage == PixelStorage::BYTE1 || pixel_storage == PixelStorage::FLOAT1 || pixel_storage == PixelStorage::UINT1) { return 1u; }
+    if (pixel_storage == PixelStorage::BYTE2 || pixel_storage == PixelStorage::FLOAT2 || pixel_storage == PixelStorage::UINT2) { return 2u; }
     return 4u;
 }
 

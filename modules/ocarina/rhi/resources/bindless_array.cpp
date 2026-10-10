@@ -34,7 +34,7 @@ void BindlessArray::set_texture2d(ocarina::handle_ty index,
 
 ByteBufferView BindlessArray::byte_buffer_view(ocarina::uint index) const noexcept {
     ByteBufferDesc buffer_desc = impl()->buffer_view(index);
-    return {buffer_desc.head(), buffer_desc.size_in_byte()};
+    return {buffer_desc.head() + buffer_desc.offset_in_byte(), buffer_desc.size_in_byte()};
 }
 
 CommandBatch BindlessArray::upload_handles(bool async) noexcept {
