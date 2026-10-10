@@ -34,14 +34,14 @@ constexpr unsigned ast_to_cuda_source_cache_version = 2u;
     switch_profile::Scope profile{"emit_cuda_source", "codegen"};
     switch (Env::shader_codegen_path()) {
         case ShaderCodegenPath::EAstToSource: {
-            AstToCudaSource emitter{Env::code_obfuscation()};
+            AstToCudaSource emitter{Env::code_obfuscation(), false};
             emitter.emit(function);
             return emitter.scratch().c_str();
         }
         case ShaderCodegenPath::EAstToIR: {
             AstToIR lowering;
             IRModule module = lowering.lower(function);
-            IRToCudaSource emitter{Env::code_obfuscation()};
+            IRToCudaSource emitter{Env::code_obfuscation(), false};
             emitter.emit(module);
             return emitter.scratch().c_str();
         }

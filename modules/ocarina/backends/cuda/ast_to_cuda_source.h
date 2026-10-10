@@ -20,6 +20,7 @@ protected:
     void _emit_builtin_vars_define(const Function &f) noexcept override;
 
 public:
-    explicit AstToCudaSource(bool obfuscation) : AstToCppSource(obfuscation) {}
+    explicit AstToCudaSource(bool obfuscation, bool emit_comments = true)
+        : AstToCppSource(obfuscation, emit_comments) {}
 };
 }// namespace ocarina

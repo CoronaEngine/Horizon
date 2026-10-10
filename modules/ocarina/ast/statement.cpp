@@ -10,7 +10,11 @@ namespace ocarina {
 uint64_t ScopeStmt::compute_hash() const noexcept {
     auto h = Hash64::default_seed;
     for (auto &v : local_vars_) { h = hash64(v.hash(), h); }
-    for (auto &&s : statements_) { h = hash64(s->hash(), h); }
+    for (auto &&s : statements_) {
+        // Comments carry diagnostic metadata, not executable shader semantics.
+        // Skip the node entirely so adding/removing comments is also neutral.
+        if (s->tag() != Statement::Tag::COMMENT) { h = hash64(s->hash(), h); }
+    }
     return h;
 }
 

@@ -31,13 +31,14 @@ public:
     }
     [[nodiscard]] bool has_registered() const noexcept { return index_.hv() != InvalidUI32; }
     [[nodiscard]] const EncodedData<uint> &index() const noexcept { return index_; }
+    [[nodiscard]] Uint index_var() const noexcept { return index_.as_parameter(); }
     [[nodiscard]] const EncodedData<uint> &length() const noexcept { return length_; }
 
 protected:
     template<typename T, typename Index>
     requires concepts::all_integral<expr_value_t<Index>>
     OC_NODISCARD auto _read(Index &&index) const noexcept {
-        Uint buffer_index = *index_;
+        Uint buffer_index = index_var();
         Uint access_index = OC_FORWARD(index);
         return bindless_array_->buffer_var<T>(buffer_index).read(access_index);
     }
@@ -101,7 +102,7 @@ public:
         if (!has_registered()) {
             Super::write(OC_FORWARD(index), OC_FORWARD(elm));
         } else {
-            bindless_array_->buffer_var<T>(*index_).write(OC_FORWARD(index), OC_FORWARD(elm));
+            bindless_array_->buffer_var<T>(index_var()).write(OC_FORWARD(index), OC_FORWARD(elm));
         }
     }
 };
@@ -151,7 +152,7 @@ public:
         if (!has_registered()) {
             return Super::load_as<Target>(OC_FORWARD(offset));
         }
-        Uint buffer_index = *index_;
+        Uint buffer_index = index_var();
         return bindless_array_->byte_buffer_var(buffer_index).template load_as<Target>(OC_FORWARD(offset));
     }
 
@@ -161,7 +162,7 @@ public:
         if (!has_registered()) {
             Super::store(OC_FORWARD(offset), val);
         } else {
-            Uint buffer_index = *index_;
+            Uint buffer_index = index_var();
             bindless_array_->byte_buffer_var(buffer_index).store(OC_FORWARD(offset), val);
         }
     }
@@ -217,7 +218,7 @@ public:
     template<typename Size = uint>
     [[nodiscard]] Var<Size> size_in_byte() const noexcept {
         if (has_registered()) {
-            Uint buffer_index = *index_;
+            Uint buffer_index = index_var();
             return bindless_array_->byte_buffer_var(buffer_index).size_in_byte();
         }
         return Super::buffer().expr().size_in_byte();
@@ -229,7 +230,7 @@ public:
     }
 
     [[nodiscard]] auto bindless_buffer() const noexcept {
-        Uint buffer_index = *index_;
+        Uint buffer_index = index_var();
         BindlessArrayByteBuffer buffer = bindless_array_->byte_buffer_var(buffer_index);
         return buffer;
     }
@@ -359,14 +360,14 @@ public:
     requires is_integral_expr_v<Offset>
     OC_NODISCARD auto byte_read(Offset &&offset) const noexcept {
         OC_ASSERT(has_registered());
-        return bindless_array_->byte_buffer_var(*index_).template read<Target>(OC_FORWARD(offset));
+        return bindless_array_->byte_buffer_var(index_var()).template read<Target>(OC_FORWARD(offset));
     }
 
     template<typename Elm, typename Offset>
     requires is_integral_expr_v<Offset>
     [[nodiscard]] DynamicArray<Elm> load_dynamic_array(uint size, Offset &&offset) const noexcept {
         OC_ASSERT(has_registered());
-        return bindless_array_->byte_buffer_var(*index_).template load_dynamic_array<Elm>(size, OC_FORWARD(offset));
+        return bindless_array_->byte_buffer_var(index_var()).template load_dynamic_array<Elm>(size, OC_FORWARD(offset));
     }
 
     template<typename Index, typename Val>
@@ -375,7 +376,7 @@ public:
         if (!has_registered()) {
             Super::write(OC_FORWARD(index), OC_FORWARD(elm));
         } else {
-            bindless_array_->buffer_var<T>(*index_).write(OC_FORWARD(index), OC_FORWARD(elm));
+            bindless_array_->buffer_var<T>(index_var()).write(OC_FORWARD(index), OC_FORWARD(elm));
         }
     }
 };
@@ -403,7 +404,7 @@ public:
     template<typename... Args>
     OC_NODISCARD auto sample(uint channel_num, Args &&...args) const noexcept {
         if (has_registered()) {
-            return bindless_array_->tex3d_var(*index_).sample(channel_num, OC_FORWARD(args)...);
+            return bindless_array_->tex3d_var(index_var()).sample(channel_num, OC_FORWARD(args)...);
         } else {
             return Texture3D::sample(channel_num, OC_FORWARD(args)...);
         }

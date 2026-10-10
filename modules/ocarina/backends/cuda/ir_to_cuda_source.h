@@ -11,8 +11,8 @@ namespace ocarina {
 
 class IRToCudaSource final : public AstToCudaSource {
 public:
-    explicit IRToCudaSource(bool obfuscation) noexcept
-        : AstToCudaSource(obfuscation) {}
+    explicit IRToCudaSource(bool obfuscation, bool emit_comments = true) noexcept
+        : AstToCudaSource(obfuscation, emit_comments) {}
 
     void emit(const IRModule &module) noexcept;
 };
