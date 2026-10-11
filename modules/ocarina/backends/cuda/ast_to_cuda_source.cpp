@@ -77,6 +77,8 @@ void AstToCudaSource::visit(const CallExpr *expr) noexcept {
         case CallOp::LOG2: OC_GEN_FUNC_NAME(log2); break;
         case CallOp::LOG10: OC_GEN_FUNC_NAME(log10); break;
         case CallOp::POW: OC_GEN_FUNC_NAME(pow); break;
+        case CallOp::FMOD: OC_GEN_FUNC_NAME(fmod); break;
+        case CallOp::MOD: OC_GEN_FUNC_NAME(mod); break;
         case CallOp::SQRT: OC_GEN_FUNC_NAME(sqrt); break;
         case CallOp::RSQRT: OC_GEN_FUNC_NAME(rsqrt); break;
         case CallOp::CEIL: OC_GEN_FUNC_NAME(ceil); break;
@@ -93,7 +95,7 @@ void AstToCudaSource::visit(const CallExpr *expr) noexcept {
         case CallOp::FACE_FORWARD: OC_GEN_FUNC_NAME(face_forward); break;
         case CallOp::COORDINATE_SYSTEM: OC_GEN_FUNC_NAME(coordinate_system); break;
         case CallOp::MAKE_NORMAL_TANGENT: OC_GEN_FUNC_NAME(make_normal_tangent); break;
-        case CallOp::DETERMINANT: OC_GEN_FUNC_NAME(det); break;
+        case CallOp::DETERMINANT: OC_GEN_FUNC_NAME(determinant); break;
         case CallOp::TRANSPOSE: OC_GEN_FUNC_NAME(transpose); break;
         case CallOp::INVERSE: OC_GEN_FUNC_NAME(inverse); break;
         case CallOp::SQR: OC_GEN_FUNC_NAME(sqr); break;
@@ -124,6 +126,9 @@ void AstToCudaSource::visit(const CallExpr *expr) noexcept {
         case CallOp::MAKE_UINT2: OC_GEN_FUNC_NAME(make_uint2); break;
         case CallOp::MAKE_UINT3: OC_GEN_FUNC_NAME(make_uint3); break;
         case CallOp::MAKE_UINT4: OC_GEN_FUNC_NAME(make_uint4); break;
+        case CallOp::MAKE_ULONG2: OC_GEN_FUNC_NAME(make_ulong2); break;
+        case CallOp::MAKE_ULONG3: OC_GEN_FUNC_NAME(make_ulong3); break;
+        case CallOp::MAKE_ULONG4: OC_GEN_FUNC_NAME(make_ulong4); break;
 
         case CallOp::MAKE_UCHAR2: OC_GEN_FUNC_NAME(make_uchar2); break;
         case CallOp::MAKE_UCHAR3: OC_GEN_FUNC_NAME(make_uchar3); break;
@@ -342,6 +347,7 @@ void AstToCudaSource::_emit_function(const Function &f) noexcept {
     if (has_generated(&f)) {
         return;
     }
+    FUNCTION_GUARD(f)
     if (f.is_kernel()) {
         const auto policy = f.storage_policy();
         _emit_comment(ocarina::format("compile policy: policy={}, allow_real_in_storage={}",

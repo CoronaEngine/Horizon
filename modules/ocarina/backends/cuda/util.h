@@ -22,8 +22,8 @@
     [&] {                                                                                 \
         CUresult result = EXPR;                                                           \
         if (result != CUDA_SUCCESS) {                                                     \
-            const char *str;                                                              \
-            assert(CUDA_SUCCESS == cuGetErrorString(result, &str));                       \
+            const char *str = "unknown CUDA driver error";                               \
+            (void)cuGetErrorString(result, &str);                                         \
             OC_WARNING_FORMAT("CUDA driver error: {} at {}:{}", str, __FILE__, __LINE__); \
             assert(0);                                                                    \
             std::abort();                                                                 \

@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 //
 // Created by Z on 2026/4/13.
 //
@@ -909,7 +910,7 @@ template<PrecisionPolicy precision>
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     constexpr auto kernel_precisions = std::array{PrecisionPolicy::force_f16, PrecisionPolicy::force_f32};
 
     bool passed = true;

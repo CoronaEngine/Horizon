@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include "core/stl.h"
 #include "dsl/dsl.h"
 #include "math/base.h"
@@ -210,7 +211,7 @@ int test_device_swizzle(Device &device, Stream &stream) {
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
 
     int total_failures = 0;

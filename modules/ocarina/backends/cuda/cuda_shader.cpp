@@ -9,6 +9,7 @@
 #include <optix_stack_size.h>
 #include <optix_stubs.h>
 #include "cuda_command_visitor.h"
+#include <mutex>
 
 namespace ocarina {
 
@@ -19,7 +20,7 @@ namespace {
 }
 
 [[nodiscard]] uint ceil_div(uint num, uint den) noexcept {
-    return (num + den - 1u) / den;
+    return num / den + uint(num % den != 0u);
 }
 
 [[nodiscard]] uint3 ceil_div(uint3 num, uint3 den) noexcept {
@@ -172,6 +173,7 @@ public:
     }
     void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept override {
         uint3 dispatch_dim = cmd->dispatch_dim();
+        if (!valid_dim(dispatch_dim)) return;
         // User-provided launch dimensions win. Otherwise we derive a block shape
         // from the occupancy budget and compute the matching grid dimensions.
         uint3 block_dim = valid_dim(function_.block_dim()) ? function_.block_dim() : auto_block_dim(dispatch_dim);
@@ -233,7 +235,13 @@ private:
     ProgramGroupTable program_group_table_;
     Buffer<SBTRecord> sbt_records_{};
     OptixShaderBindingTable sbt_{};
-    Buffer<std::byte> params_;
+    std::mutex params_mutex_;
+    struct StreamLaunchState {
+        Buffer<std::byte> params;
+        OptixPipeline pipeline{};
+        CUevent completed{};
+    };
+    ocarina::map<handle_ty, StreamLaunchState> stream_params_;
     std::array<OptixPayloadType, 1> payload_types_{};
 
 public:
@@ -296,9 +304,10 @@ public:
         OC_OPTIX_CHECK_WITH_LOG(module_result, log);
     }
 
-    void build_pipeline(OptixDeviceContext optix_device_context) noexcept {
+    [[nodiscard]] OptixPipeline build_pipeline(OptixDeviceContext optix_device_context) noexcept {
         switch_profile::Scope profile{"OptixShader::build_pipeline", "optix_pipeline"};
         constexpr int max_trace_depth = 1;
+        OptixPipeline pipeline{};
 
         OptixPipelineLinkOptions pipeline_link_options = {};
         pipeline_link_options.maxTraceDepth = max_trace_depth;
@@ -316,16 +325,16 @@ public:
                 (OptixProgramGroup *)&program_group_table_,
                 program_group_table_.size(),
                 log, &sizeof_log,
-                &optix_pipeline_);
+                &pipeline);
         }
         OC_OPTIX_CHECK_WITH_LOG(pipeline_result, log);
 
         // Set shaders stack sizes.
         OptixStackSizes stack_sizes = {};
-        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.raygen_group, &stack_sizes,optix_pipeline_));
-        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.miss_closest_group, &stack_sizes,optix_pipeline_));
-        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.hit_closest_group, &stack_sizes,optix_pipeline_));
-        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.hit_any_group, &stack_sizes,optix_pipeline_));
+        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.raygen_group, &stack_sizes, pipeline));
+        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.miss_closest_group, &stack_sizes, pipeline));
+        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.hit_closest_group, &stack_sizes, pipeline));
+        OC_OPTIX_CHECK(optixUtilAccumulateStackSizes(program_group_table_.hit_any_group, &stack_sizes, pipeline));
 
         uint32_t direct_callable_stack_size_from_traversal;
         uint32_t direct_callable_stack_size_from_state;
@@ -337,12 +346,13 @@ public:
                                                   &direct_callable_stack_size_from_traversal,
                                                   &direct_callable_stack_size_from_state,
                                                   &continuation_stack_size));
-        OC_OPTIX_CHECK(optixPipelineSetStackSize(optix_pipeline_,
+        OC_OPTIX_CHECK(optixPipelineSetStackSize(pipeline,
                                                  direct_callable_stack_size_from_traversal,
                                                  direct_callable_stack_size_from_state,
                                                  continuation_stack_size,
                                                  2// maxTraversableDepth
                                                  ));
+        return pipeline;
     }
 
     void build_sbt(ProgramGroupTable program_group_table) {
@@ -454,50 +464,74 @@ public:
             "__closesthit__occlusion"};
         program_group_table_ = create_program_groups(device_->optix_device_context(), entries);
         build_sbt(program_group_table_);
-        build_pipeline(device_->optix_device_context());
+        optix_pipeline_ = build_pipeline(device_->optix_device_context());
     }
 
     void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept override {
+        // Stream handles can identify their context for some CUDA APIs, but
+        // event creation and lazy OptiX pipeline creation require it current.
+        device_->use_context([&] { launch_on_current_context(stream, cmd); });
+    }
+
+    void launch_on_current_context(handle_ty stream, ShaderDispatchCommand *cmd) noexcept {
         auto dim = cmd->dispatch_dim();
+        if (!valid_dim(dim)) return;
         uint x = dim.x;
         uint y = dim.y;
         uint z = dim.z;
         auto cu_stream = reinterpret_cast<CUstream>(stream);
-        size_t total_size = cmd->params_size();
-        if (!params_.valid() || params_.size() < total_size) {
-
-            OC_CU_CHECK(cuMemFreeAsync(params_.handle(), cu_stream));
-            OC_CU_CHECK(cuMemAllocAsync(reinterpret_cast<CUdeviceptr *>(params_.handle_ptr()), total_size, cu_stream));
-
-            std::function<void()> func = [this, total_size]() {
-                params_.set_size(total_size);
-                params_.set_device(device_);
-            };
-            auto ptr = new_with_allocator<std::function<void()>>(ocarina::move(func));
-            OC_CU_CHECK(cuLaunchHostFunc(
-                cu_stream, [](void *ptr) {
-                    auto func = reinterpret_cast<std::function<void()> *>(ptr);
-                    (*func)();
-                    delete_with_allocator(func);
-                },
-                ptr));
-            OC_CU_CHECK(cuStreamSynchronize(cu_stream));
-        }
         auto arguments = cmd->argument_data();
-        OC_CU_CHECK(cuMemcpyHtoDAsync(params_.handle(), arguments.data(),
+        CUdeviceptr params = 0;
+        OptixPipeline pipeline{};
+        CUevent completed{};
+        {
+            // Upload and launch are ordered within each stream, but different
+            // streams must never overwrite the same launch-parameter storage.
+            // Cache ordinary allocations to avoid async-allocation requirements
+            // and allocator/host-callback overhead on steady-state launches.
+            std::lock_guard lock(params_mutex_);
+            const bool first_stream = stream_params_.empty();
+            auto &state = stream_params_[stream];
+            if (!state.pipeline) {
+                // Concurrent OptiX launches require distinct pipelines, while
+                // compiled modules, program groups and immutable SBT can share.
+                state.pipeline = first_stream ? optix_pipeline_ : build_pipeline(device_->optix_device_context());
+                OC_CU_CHECK(cuEventCreate(&state.completed, CU_EVENT_DISABLE_TIMING));
+            }
+            auto &storage = state.params;
+            if (!storage.valid() || storage.size() < arguments.size()) {
+                storage = Buffer<std::byte>(device_, arguments.size(), "OptixShader::stream_params");
+            }
+            params = storage.handle();
+            pipeline = state.pipeline;
+            completed = state.completed;
+        }
+        OC_CU_CHECK(cuMemcpyHtoDAsync(params, arguments.data(),
                                       arguments.size(), cu_stream));
 
-        OC_OPTIX_CHECK(optixLaunch(optix_pipeline_,
+        OC_OPTIX_CHECK(optixLaunch(pipeline,
                                    cu_stream,
-                                   params_.handle(),
+                                   params,
                                    arguments.size(),
                                    &sbt_,
                                    x, y, z));
+        OC_CU_CHECK(cuEventRecord(completed, cu_stream));
     }
     ~OptixShader() override {
-        program_group_table_.clear();
-        optixModuleDestroy(optix_module_);
-        optixPipelineDestroy(optix_pipeline_);
+        device_->use_context([&] {
+            // Native pipelines and launch parameters remain live until their
+            // last GPU use, including when the public shader is released first.
+            for (auto &[stream, state] : stream_params_) {
+                OC_CU_CHECK(cuEventSynchronize(state.completed));
+                OC_CU_CHECK(cuEventDestroy(state.completed));
+                if (state.pipeline != optix_pipeline_) OC_OPTIX_CHECK(optixPipelineDestroy(state.pipeline));
+            }
+            OC_OPTIX_CHECK(optixPipelineDestroy(optix_pipeline_));
+            program_group_table_.clear();
+            OC_OPTIX_CHECK(optixModuleDestroy(optix_module_));
+            stream_params_.clear();
+            sbt_records_.destroy();
+        });
     }
 };
 

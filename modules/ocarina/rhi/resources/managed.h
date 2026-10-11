@@ -55,7 +55,11 @@ public:
 
     template<typename Index>
     requires concepts::integral<Index>
-    [[nodiscard]] auto operator[](Index &&i) { return host_ty::operator[](OC_FORWARD(i)); }
+    [[nodiscard]] decltype(auto) operator[](Index &&i) { return host_ty::operator[](OC_FORWARD(i)); }
+
+    template<typename Index>
+    requires concepts::integral<Index>
+    [[nodiscard]] decltype(auto) operator[](Index &&i) const { return host_ty::operator[](OC_FORWARD(i)); }
 
     template<typename V>
     requires concepts::iterable<V>
@@ -200,7 +204,11 @@ public:
 
     template<typename Index>
     requires concepts::integral<Index>
-    [[nodiscard]] auto operator[](Index &&i) { return host_ty::operator[](OC_FORWARD(i)); }
+    [[nodiscard]] decltype(auto) operator[](Index &&i) { return host_ty::operator[](OC_FORWARD(i)); }
+
+    template<typename Index>
+    requires concepts::integral<Index>
+    [[nodiscard]] decltype(auto) operator[](Index &&i) const { return host_ty::operator[](OC_FORWARD(i)); }
 };
 
 }// namespace ocarina

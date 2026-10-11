@@ -49,6 +49,7 @@ public:
     };
 
 private:
+    std::shared_ptr<int> cleanup_lifetime_{std::make_shared<int>(0)};
     Managed<uint> buffer_;
     spdlog::logger logger_{logger()};
     vector<Item> items_;
@@ -76,6 +77,13 @@ public:
     void init(Device &device, size_t capacity = 16_mb) {
         capacity /= sizeof(uint);
         buffer_.reset_all(device, capacity, "Printer::buffer_");
+        auto *owner = buffer_.device();
+        owner->register_cleanup_callback(this, [this, owner, lifetime = std::weak_ptr<int>{cleanup_lifetime_}] {
+            if (!lifetime.expired() && buffer_.device() == owner) {
+                buffer_.clear_all();
+                buffer_.set_device(nullptr);
+            }
+        });
         reset();
     }
 

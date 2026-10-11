@@ -33,7 +33,7 @@ public:
         OptixAccelBuildOptions accel_options = {};
         switch (usage_tag_) {
             case FAST_BUILD:
-                accel_options.buildFlags = OPTIX_BUILD_FLAG_PREFER_FAST_BUILD;
+                accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_BUILD;
                 break;
             case FAST_UPDATE:
                 accel_options.buildFlags = (OPTIX_BUILD_FLAG_ALLOW_UPDATE | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE);

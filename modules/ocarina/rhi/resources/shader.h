@@ -91,6 +91,11 @@ private:
     size_t cursor_{};
     ocarina::vector<MemoryBlock> blocks_;
     ocarina::vector<std::byte> argument_data_;
+    struct AccelArgument {
+        size_t block_index;
+        size_t offset{};
+    };
+    ocarina::vector<AccelArgument> accel_arguments_;
 
 private:
     template<typename T>
@@ -147,17 +152,19 @@ private:
     void _encode_texture2d(const Texture2D &texture) noexcept;
     void _encode_bindless_array(const BindlessArray &bindless_array) noexcept;
     void _encode_accel(const Accel &accel) noexcept {
-        push_memory_block(accel.memory_block());
+        push_memory_block(accel.memory_block(), true);
     }
 
 public:
     explicit ShaderArgumentPack(const Function *f = nullptr) : function_(f) {}
     [[nodiscard]] span<void *> ptr() noexcept { return args_; }
+    [[nodiscard]] bool has_accel_arguments() const noexcept { return !accel_arguments_.empty(); }
     [[nodiscard]] size_t num() const noexcept { return args_.size(); }
     void clear() noexcept {
         cursor_ = 0;
         args_.clear();
         blocks_.clear();
+        accel_arguments_.clear();
         dynamic_pod_data_.clear();
     }
 
@@ -165,7 +172,8 @@ public:
         return *function_;
     }
 
-    void push_memory_block(const MemoryBlock &block) noexcept {
+    void push_memory_block(const MemoryBlock &block, bool accel = false) noexcept {
+        if (accel) accel_arguments_.push_back({blocks_.size()});
         if (!function_->is_raytracing()) {
             args_.push_back(const_cast<void *>(block.address));
         }
@@ -184,10 +192,16 @@ public:
         }
         argument_data_.resize(size);
         size_t offset = 0;
+        size_t block_index = 0;
+        size_t accel_index = 0;
         args_.clear();
         auto head = reinterpret_cast<std::byte *>(argument_data_.data());
         for (const MemoryBlock &block : blocks_) {
             offset = mem_offset(offset, block.alignment);
+            if (accel_index < accel_arguments_.size() &&
+                accel_arguments_[accel_index].block_index == block_index) {
+                accel_arguments_[accel_index++].offset = offset;
+            }
 
             oc_memcpy(head + offset,
                       block.address, block.size);
@@ -195,6 +209,19 @@ public:
                 args_.push_back(reinterpret_cast<void *>(head + offset));
             }
             offset += block.size;
+            ++block_index;
+        }
+    }
+
+    // AS builds/rebuilds can replace their native handle earlier in this command
+    // batch. Resolve only those handles into the command's private snapshot:
+    // a reusable ShaderInvoke may be submitted on different host threads.
+    // The shared snapshot remains immutable, including its ordinary arguments.
+    // The caller keeps the referenced AS alive, as for other dispatch resources.
+    void refresh_accel_arguments(span<std::byte> data) const noexcept {
+        for (const auto &argument : accel_arguments_) {
+            const auto &block = blocks_[argument.block_index];
+            oc_memcpy(data.data() + argument.offset, block.address, block.size);
         }
     }
 
@@ -251,9 +278,6 @@ public:
     }
     [[nodiscard]] const Function &function() const noexcept { return argument_list_->function(); }
     [[nodiscard]] ShaderDispatchCommand *dispatch(uint x, uint y = 1, uint z = 1) const noexcept {
-        if (!function().is_raytracing()) {
-            *argument_list_ << make_uint3(x, y, z);
-        }
         return ShaderDispatchCommand::create(shader_entry_, argument_list_, make_uint3(x, y, z));
     }
     [[nodiscard]] ShaderDispatchCommand *dispatch(uint2 dim) const noexcept { return dispatch(dim.x, dim.y, 1); }
@@ -311,7 +335,7 @@ public:
         auto argument_list = make_shared<ShaderArgumentPack>(function_.get());
         ((void)(*argument_list << OC_FORWARD(args)), ...);
         for (const auto &var : function_->captured_resources()) {
-            argument_list->push_memory_block(var.block());
+            argument_list->push_memory_block(var.block(), var.type()->is_accel());
         }
         argument_list->move_argument_data();
         ShaderInvoke shader_invoke{handle(), ocarina::move(argument_list)};

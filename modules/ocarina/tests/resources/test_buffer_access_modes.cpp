@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -193,11 +194,29 @@ int test_bindless_buffer_param(Device &device, Stream &stream) {
     return failures;
 }
 
+int test_buffer_from_subview(Device &device, Stream &stream) {
+    const array<uint, 8> input{11u, 17u, 23u, 31u, 43u, 59u, 71u, 89u};
+    auto owner = device.create_buffer<uint>(input.size(), "subview-owner");
+    Buffer<uint> alias(owner.view(3u, 3u));
+    auto output = device.create_buffer<uint>(3u, "subview-result");
+    Kernel kernel = [](BufferVar<uint> in, BufferVar<uint> out) {
+        Uint i = dispatch_id();
+        out.write(i, in.read(i));
+    };
+    auto shader = device.compile(kernel, "buffer-from-subview");
+    array<uint, 3> downloaded{}, actual{};
+    stream << owner.upload(input.data()) << alias.download(downloaded.data())
+           << shader(alias, output).dispatch(3u) << output.download(actual.data()) << synchronize() << commit();
+    int failures = 0;
+    for (uint i = 0; i < 3u; ++i) failures += downloaded[i] != input[3u + i] || actual[i] != input[3u + i];
+    return failures;
+}
+
 }// namespace
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
 
     int total_failures = 0;
@@ -205,6 +224,7 @@ int main() {
     total_failures += test_buffer_capture(device, stream);
     total_failures += test_bindless_buffer_capture(device, stream);
     total_failures += test_bindless_buffer_param(device, stream);
+    total_failures += test_buffer_from_subview(device, stream);
 
     if (total_failures != 0) {
         std::cerr << "[test-buffer-access-modes] failed with " << total_failures << " mismatches" << std::endl;

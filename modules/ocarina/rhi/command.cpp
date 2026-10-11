@@ -21,11 +21,32 @@ BufferReallocateCommand::BufferReallocateCommand(RHIResource *rhi_resource,
       rhi_resource_(rhi_resource) {}
 
 span<void *> ShaderDispatchCommand::args() noexcept {
-    return argument_list_->ptr();
+    // A reusable ShaderInvoke shares its immutable user-argument snapshot, but
+    // each command owns its launch dimensions and the CUDA argument-pointer list.
+    auto arguments = argument_list_->ptr();
+    args_.assign(arguments.begin(), arguments.end());
+    if (argument_list_->has_accel_arguments()) {
+        auto original = argument_list_->argument_data();
+        auto patched = argument_data();
+        for (auto &arg : args_) {
+            const auto offset = static_cast<const std::byte *>(arg) - original.data();
+            arg = const_cast<std::byte *>(patched.data()) + offset;
+        }
+    }
+    if (!argument_list_->function().is_raytracing()) {
+        args_.push_back(&dispatch_dim_);
+    }
+    return args_;
 }
 
 span<const std::byte> ShaderDispatchCommand::argument_data() noexcept {
-    return argument_list_->argument_data();
+    auto original = argument_list_->argument_data();
+    if (!argument_list_->has_accel_arguments()) return original;
+    if (patched_argument_data_.empty()) {
+        patched_argument_data_.assign(original.begin(), original.end());
+    }
+    argument_list_->refresh_accel_arguments(patched_argument_data_);
+    return patched_argument_data_;
 }
 
 size_t ShaderDispatchCommand::params_size() noexcept {

@@ -22,6 +22,11 @@ public:
         std::lock_guard lock{mutex_};
         return std::invoke(std::forward<F>(f));
     }
+    // Returns a unique_lock for callers that need to manage the lock lifetime
+    // manually (e.g. acquire, mutate, then release before a slow operation).
+    [[nodiscard]] std::unique_lock<Mutex> lock() const noexcept {
+        return std::unique_lock<Mutex>{mutex_};
+    }
 };
 
 template<>

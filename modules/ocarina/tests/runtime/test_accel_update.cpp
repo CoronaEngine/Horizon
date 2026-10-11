@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 //
 // Created by GitHub Copilot.
 //
@@ -180,6 +181,9 @@ void test_fast_trace_update_command_falls_back_to_build(Device &device) {
     expect_miss(trace_hit(device, accel, sample_ray_origin(0.f), sample_ray_direction()),
                 "FAST_TRACE accel should miss at the stale world-space sample after rebuild");
     expect_front_face_sample(device, accel, 10.f);
+    expect(accel.last_build_action() == Accel::BuildAction::BUILD &&
+               accel.build_count() == 2u && accel.update_count() == 0u,
+           "FAST_TRACE update must report a rebuild");
 }
 
 void test_fast_update_transform_refit(Device &device) {
@@ -207,6 +211,39 @@ void test_fast_update_transform_refit(Device &device) {
     expect_miss(trace_hit(device, accel, sample_ray_origin(10.f), sample_ray_direction()),
                 "FAST_UPDATE accel should miss at the translated sample after restoring the transform");
     expect_front_face_sample(device, accel, 0.f);
+    expect(accel.last_build_action() == Accel::BuildAction::UPDATE &&
+               accel.build_count() == 1u && accel.update_count() == 2u,
+           "FAST_UPDATE transform changes must report refits");
+}
+
+void test_padded_indices_and_instance_growth(Device &device) {
+    Stream stream = device.create_stream();
+    array<float3, 5> vertices{make_float3(100.f), make_float3(-0.5f, -0.5f, 0.5f),
+                            make_float3(0.5f, -0.5f, 0.5f), make_float3(-0.5f, 0.5f, 0.5f),
+                            make_float3(0.5f, 0.5f, 0.5f)};
+    array<uint4, 3> triangles{make_uint4(0u), make_uint4(0u, 1u, 3u, 999u),
+                             make_uint4(0u, 3u, 2u, 999u)};
+    auto vb = device.create_buffer<float3>(vertices.size(), "padded-index-vertices");
+    auto ib = device.create_buffer<uint4>(triangles.size(), "padded-index-triangles");
+    stream << vb.upload(vertices.data()) << ib.upload(triangles.data()) << synchronize() << commit();
+    auto make_mesh = [&] {
+        return device.create_mesh(vb.view(1u, 4u), ib.view(1u, 2u), FAST_TRACE, DISABLE_ANYHIT);
+    };
+    auto mesh = make_mesh();
+    stream << mesh.build_bvh() << mesh.build_bvh() << synchronize() << commit();
+    auto accel = device.create_accel(FAST_UPDATE);
+    accel.add_instance(ocarina::move(mesh), make_float4x4(1.f));
+    stream << accel.build_bvh() << synchronize() << commit();
+    expect_front_face_sample(device, accel, 0.f);
+
+    auto second = make_mesh();
+    stream << second.build_bvh() << synchronize() << commit();
+    accel.add_instance(ocarina::move(second), transform::translation<H>(10.f, 0.f, 0.f));
+    stream << accel.update_bvh() << synchronize() << commit();
+    expect(accel.last_build_action() == Accel::BuildAction::BUILD && accel.build_count() == 2u,
+           "adding an instance requires a TLAS rebuild");
+    expect_hit(trace_hit(device, accel, sample_ray_origin(10.f), sample_ray_direction()),
+               1u, 0u, make_float2(0.3f, 0.3f), "new instance should be visible after rebuild");
 }
 
 }// namespace
@@ -214,11 +251,12 @@ void test_fast_update_transform_refit(Device &device) {
 int main(int argc, char *argv[]) {
     RHIContext &context = RHIContext::instance();
     context.clear_cache();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     device.init_rtx();
 
     test_fast_trace_build(device);
     test_fast_trace_update_command_falls_back_to_build(device);
     test_fast_update_transform_refit(device);
+    test_padded_indices_and_instance_growth(device);
     return 0;
 }

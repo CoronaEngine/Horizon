@@ -198,8 +198,8 @@ OC_MAKE_DSL_UNARY_FUNC(inverse, INVERSE)
     return eval<half>(expr);
 }
 
-[[nodiscard]] inline Float half2float(const Float &arg) {
-    const CallExpr *expr = Function::current()->call_builtin(Type::of<half>(),
+[[nodiscard]] inline Float half2float(const Half &arg) {
+    const CallExpr *expr = Function::current()->call_builtin(Type::of<float>(),
                                                              CallOp::HALF2FLOAT,
                                                              {OC_EXPR(arg)});
     return eval<float>(expr);
@@ -369,6 +369,7 @@ void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b)
 
 OC_MAKE_VEC_MAKER(int, INT)
 OC_MAKE_VEC_MAKER(uint, UINT)
+OC_MAKE_VEC_MAKER(ulong, ULONG)
 OC_MAKE_VEC_MAKER(float, FLOAT)
 OC_MAKE_VEC_MAKER(half, HALF)
 OC_MAKE_VEC_MAKER(real, REAL)
@@ -480,7 +481,7 @@ inline void synchronize_block() noexcept {
     requires ocarina::is_boolean_expr_v<T>                                                         \
     [[nodiscard]] auto func_name(const T &pred) {                                                  \
         const Expression *expr = Function::current()->call_builtin(Type::of<ret_type>(),           \
-                                                                   CallOp::WARP_ACTIVE_COUNT_BITS, \
+                                                                   CallOp::Tag,                    \
                                                                    {OC_EXPR(pred)});               \
         return eval<ret_type>(expr);                                                               \
     }
@@ -488,12 +489,20 @@ inline void synchronize_block() noexcept {
 OC_MAKE_WARP_FUNC(warp_active_bit_mask, WARP_ACTIVE_BIT_MASK, uint4)
 OC_MAKE_WARP_FUNC(warp_active_count_bits, WARP_ACTIVE_COUNT_BITS, uint)
 OC_MAKE_WARP_FUNC(warp_prefix_count_bits, WARP_PREFIX_COUNT_BITS, uint)
-OC_MAKE_WARP_FUNC(warp_lane_id, WARP_LANE_ID, uint)
-OC_MAKE_WARP_FUNC(warp_size, WARP_SIZE, uint)
-OC_MAKE_WARP_FUNC(warp_first_active_lane, WARP_FIRST_ACTIVE_LANE, uint)
-OC_MAKE_WARP_FUNC(warp_is_first_active_lane, WARP_IS_FIRST_ACTIVE_LANE, uint)
-
 #undef OC_MAKE_WARP_FUNC
+
+#define OC_MAKE_WARP_QUERY(func_name, Tag, ret_type)                         \
+    [[nodiscard]] inline auto func_name() {                                \
+        return eval<ret_type>(Function::current()->call_builtin(           \
+            Type::of<ret_type>(), CallOp::Tag, {}));                        \
+    }
+
+OC_MAKE_WARP_QUERY(warp_lane_id, WARP_LANE_ID, uint)
+OC_MAKE_WARP_QUERY(warp_size, WARP_SIZE, uint)
+OC_MAKE_WARP_QUERY(warp_first_active_lane, WARP_FIRST_ACTIVE_LANE, uint)
+OC_MAKE_WARP_QUERY(warp_is_first_active_lane, WARP_IS_FIRST_ACTIVE_LANE, bool)
+
+#undef OC_MAKE_WARP_QUERY
 
 template<typename T>
 void DynamicArray<T>::sanitize() noexcept {

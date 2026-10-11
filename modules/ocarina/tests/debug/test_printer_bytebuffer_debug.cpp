@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include <cstdlib>
 #include <iostream>
 
@@ -158,7 +159,7 @@ template<typename Shader, typename... Args>
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     Stream stream = device.create_stream();
     Env::printer().init(device);
 

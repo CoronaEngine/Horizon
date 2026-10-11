@@ -27,6 +27,7 @@ namespace ocarina {
 
 class Debugger {
 private:
+    std::shared_ptr<int> cleanup_lifetime_{std::make_shared<int>(0)};
     Managed<DebugData> data_;
     mutable string desc_{};
 
@@ -40,7 +41,16 @@ private:
 
 public:
     void reset() noexcept { data_[0] = DebugData{}; }
-    void init(Device &device) noexcept { data_.reset_all(device, 1, "DebugData::data_"); }
+    void init(Device &device) noexcept {
+        data_.reset_all(device, 1, "DebugData::data_");
+        auto *owner = data_.device();
+        owner->register_cleanup_callback(this, [this, owner, lifetime = std::weak_ptr<int>{cleanup_lifetime_}] {
+            if (!lifetime.expired() && data_.device() == owner) {
+                data_.clear_all();
+                data_.set_device(nullptr);
+            }
+        });
+    }
     [[nodiscard]] auto &host_data() const noexcept { return data_.host_buffer()[0]; }
     [[nodiscard]] auto &host_data() noexcept { return data_.host_buffer()[0]; }
     [[nodiscard]] Command *upload(bool async = true) const noexcept { return data_.upload(async); }

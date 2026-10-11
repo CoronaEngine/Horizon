@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include <cmath>
 #include <iostream>
 
@@ -140,7 +141,7 @@ template<bool Raytracing>
 int main(int argc, char *argv[]) {
     fs::path path(argv[0]);
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     device.init_rtx();
 
     bool passed = true;

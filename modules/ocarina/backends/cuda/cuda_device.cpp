@@ -38,9 +38,11 @@ void CUDADevice::init_hardware_info() {
     OC_CU_CHECK(cuDeviceGetAttribute(&compute_cap_minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cu_device_));
     size_t total_mem = 0;
     OC_CU_CHECK(cuDeviceTotalMem(&total_mem, cu_device_));
+    char device_name[256]{};
+    OC_CU_CHECK(cuDeviceGetName(device_name, sizeof(device_name), cu_device_));
     OC_INFO_FORMAT(
-        "Created CUDA device : (capability = {}.{}, VRAM = {} MB).",
-        compute_cap_major, compute_cap_minor,
+        "Created CUDA device: {} (capability = {}.{}, VRAM = {} MB).",
+        device_name, compute_cap_major, compute_cap_minor,
         total_mem / (1024u * 1024u));
     compute_capability_ = 10u * compute_cap_major + compute_cap_minor;
 }
@@ -58,6 +60,7 @@ DevicePrecisionCaps CUDADevice::precision_caps() const noexcept {
 }
 
 void CUDADevice::memory_allocate(handle_ty *handle, size_t size, bool exported) {
+    if (size == 0) { *handle = 0; return; }
     if (!exported) {
         OC_CU_CHECK(cuMemAlloc(handle, size));
     } else {
@@ -143,7 +146,7 @@ uint64_t CUDADevice::get_aligned_memory_size(handle_ty handle) const {
 }
 
 handle_ty CUDADevice::create_buffer(size_t size, const string &desc, bool exported) noexcept {
-    OC_ASSERT(size > 0);
+    if (size == 0) return 0;
     if (desc == "") {
         OC_WARNING("buffer is no description");
     }
@@ -275,8 +278,8 @@ handle_ty CUDADevice::create_buffer_from_external(ocarina::uint buffer_handle) n
     CUgraphicsResource shared_handle;
     size_t size;
     return use_context([&] {
-        OC_CU_CHECK(cuGraphicsGLRegisterImage(addressof(shared_handle), buffer_handle, GL_TEXTURE_2D,
-                                              CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD));
+        OC_CU_CHECK(cuGraphicsGLRegisterBuffer(addressof(shared_handle), buffer_handle,
+                                               CU_GRAPHICS_REGISTER_FLAGS_NONE));
         OC_CU_CHECK(cuGraphicsMapResources(1, addressof(shared_handle), 0));
 
         OC_CU_CHECK(cuGraphicsResourceGetMappedPointer(&handle, &size, shared_handle));
@@ -502,6 +505,7 @@ OC_EXPORT_API ocarina::CUDADevice *create_device(ocarina::RHIContext *context) {
 }
 
 OC_EXPORT_API void destroy(ocarina::CUDADevice *device) {
+    device->run_cleanup_callbacks();
     ocarina::delete_with_allocator(device);
     OC_INFO("cuda device is destroy!");
 }

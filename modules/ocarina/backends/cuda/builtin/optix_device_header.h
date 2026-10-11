@@ -89,9 +89,17 @@ OC_DEVICE_FLAG inline oc_float2 getTriangleBarycentric() {
 
 #define TRAVERSE_ONLY 1
 
+OC_DEVICE_FLAG inline TriangleHit oc_miss_triangle_hit() {
+    TriangleHit hit;
+    hit.inst_id = ~0u;
+    hit.prim_id = ~0u;
+    hit.bary = oc_make_float2(0.f, 0.f);
+    return hit;
+}
+
 OC_DEVICE_FLAG inline TriangleHit trace_closest_impl(OptixTraversableHandle handle,
                                              Ray ray) {
-    TriangleHit hit;
+    TriangleHit hit = oc_miss_triangle_hit();
     trace(handle, ray, OPTIX_RAY_FLAG_DISABLE_ANYHIT,
           0,// SBT offset
           0,// SBT stride
@@ -116,8 +124,10 @@ OC_DEVICE_FLAG inline TriangleHit trace_closest_impl(OptixTraversableHandle hand
 // }
 
 TriangleHit getHitObjectInfo() {
+    // Primitive index and attributes are undefined for a miss hit object.
+    if (!optixHitObjectIsHit()) return oc_miss_triangle_hit();
     TriangleHit hit;
-    hit.inst_id = optixHitObjectIsHit() ? optixHitObjectGetInstanceId() : ~0u;
+    hit.inst_id = optixHitObjectGetInstanceId();
     hit.prim_id = optixHitObjectGetPrimitiveIndex();
     unsigned int attr0 = optixHitObjectGetAttribute_0();
     unsigned int attr1 = optixHitObjectGetAttribute_1();
@@ -139,6 +149,7 @@ OC_DEVICE_FLAG inline TriangleHit traverse_closest_impl(OptixTraversableHandle h
 
 OC_DEVICE_FLAG inline TriangleHit oc_trace_closest(OptixTraversableHandle handle,
                                                Ray ray) {
+    if (handle == 0) return oc_miss_triangle_hit();
 #if TRAVERSE_ONLY
     return traverse_closest_impl(handle, ray);
 #else
@@ -166,6 +177,7 @@ OC_DEVICE_FLAG inline bool trace_occlusion_impl(OptixTraversableHandle handle, R
 }
 
 OC_DEVICE_FLAG inline bool oc_trace_occlusion(OptixTraversableHandle handle, Ray ray) {
+    if (handle == 0) return false;
 #if TRAVERSE_ONLY
     return traverse_occlusion_impl(handle, ray);
 #else

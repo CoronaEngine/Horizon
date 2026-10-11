@@ -1,3 +1,4 @@
+#include "tests/backend_test.h"
 #include "core/stl.h"
 #include "dsl/dsl.h"
 #include "math/base.h"
@@ -65,7 +66,7 @@ auto make_linear_write_kernel(uint width) {
 int main(int argc, char *argv[]) {
     fs::path path(argv[0]);
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device("cuda");
+    Device device = context.create_device(test_backend_name());
     device.init_rtx();
     Stream stream = device.create_stream();
 

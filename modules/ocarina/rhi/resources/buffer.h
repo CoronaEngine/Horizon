@@ -102,7 +102,7 @@ public:
     }
 
     [[nodiscard]] BufferByteSetCommand *byte_set(uchar value, bool async = true) const noexcept {
-        return BufferByteSetCommand::create(handle(), size_in_byte(), value, async);
+        return BufferByteSetCommand::create(handle() + offset_in_byte(), size_in_byte(), value, async);
     }
 
     [[nodiscard]] BufferByteSetCommand *reset(bool async = true) const noexcept {
@@ -138,7 +138,7 @@ public:
     OC_MAKE_MEMBER_GETTER_SETTER(name, )
 
         Buffer(BufferView<T> buffer_view)
-        : Super(nullptr, Tag::BUFFER, buffer_view.handle()),
+        : Super(nullptr, Tag::BUFFER, buffer_view.handle() + buffer_view.offset_in_byte()),
           size_(buffer_view.size()) {
         descriptor_ptr();
     }

@@ -11,7 +11,7 @@ if (CUDAToolkit_FOUND)
         COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:ocarina-backend-cuda>/cuda
         COMMAND ${PYTHON_PATH} ${BUILTIN_SRC}/copy_cuda_files.py $<TARGET_FILE_DIR:ocarina-backend-cuda>/cuda
         COMMAND ${CMAKE_COMMAND} -E echo "Complete copy!"
-        DEPENDS ocarina-backend-cuda ${backend_headers}
+        DEPENDS ${backend_headers}
     )
 
     include_directories(${CUDA_INCLUDE_DIRS})
@@ -19,8 +19,8 @@ if (CUDAToolkit_FOUND)
     file(GLOB_RECURSE HEADER_FILES *.h*)
     file(GLOB_RECURSE SOURCE_FILES *.c*)
     ocarina_add_backend(cuda SOURCES ${HEADER_FILES} ${SOURCE_FILES})
+    add_dependencies(ocarina-backend-cuda copy_cuda_headers)
     target_link_libraries(ocarina-backend-cuda PRIVATE CUDA::cuda_driver CUDA::nvrtc CUDA::cudart)
 else ()
     message(STATUS "CUDAToolkit not found, skipping CUDA backend build.")
 endif ()
-
