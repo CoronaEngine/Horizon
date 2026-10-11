@@ -122,6 +122,20 @@ void EmbeddedShader::Ast::AST::endElse()
 	getLocalStatementStack().pop();
 }
 
+void EmbeddedShader::Ast::AST::beginWhile(std::shared_ptr<Value> condition)
+{
+	condition->access(AccessPermissions::ReadOnly);
+	auto statement = std::make_shared<WhileStatement>();
+	statement->condition = std::move(condition);
+	addLocalStatement(statement);
+	getLocalStatementStack().push(&statement->statements);
+}
+
+void EmbeddedShader::Ast::AST::endWhile()
+{
+	getLocalStatementStack().pop();
+}
+
 void EmbeddedShader::Ast::AST::discard()
 {
     thread_local auto discardStatement = [] {

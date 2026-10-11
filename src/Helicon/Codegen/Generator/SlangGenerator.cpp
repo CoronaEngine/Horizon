@@ -333,6 +333,17 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(Ast::IfSta
 	return result;
 }
 
+std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::WhileStatement* node)
+{
+	auto result = "while (" + node->condition->generate() + ") {\n";
+	++nestHierarchy;
+	for (const auto& statement : node->statements)
+		result += getCodeIndentation() + statement->generate() + "\n";
+	--nestHierarchy;
+	result += getCodeIndentation() + "}";
+	return result;
+}
+
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ElseStatement* node)
 {
     if (node->followIf->conditionDetector.has_value())

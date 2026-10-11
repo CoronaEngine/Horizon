@@ -181,6 +181,11 @@ std::string EmbeddedShader::Ast::ElseStatement::parse()
 	return Generator::SlangGenerator::getParseOutput(this);
 }
 
+std::string EmbeddedShader::Ast::WhileStatement::parse()
+{
+	return Generator::SlangGenerator::getParseOutput(this);
+}
+
 std::string EmbeddedShader::Ast::StringStatement::parse()
 {
     return content + ";";
