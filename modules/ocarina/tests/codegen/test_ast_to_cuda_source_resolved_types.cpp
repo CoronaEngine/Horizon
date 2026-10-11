@@ -58,6 +58,18 @@ namespace {
     return source.find(needle) != std::string_view::npos;
 }
 
+[[nodiscard]] bool expect_function_identity(std::string_view source, const Function &function,
+                                             bool expect_call = false) {
+    // Descriptions are diagnostic metadata and CUDA compilation omits comments.
+    // Check the emitted symbol, and for callables both its definition and use.
+    std::string symbol = function.func_name() + "(";
+    CHECK(contains(source, symbol));
+    if (expect_call) {
+        CHECK(source.find(symbol) != source.rfind(symbol));
+    }
+    return true;
+}
+
 [[nodiscard]] std::string trim_trailing_space(std::string_view source) {
     size_t end = source.size();
     while (end > 0u) {
@@ -133,7 +145,11 @@ template<typename T>
         std::cerr << "FAILED: generated cuda source not found for " << shader_desc << std::endl;
         return {};
     }
-    return RHIContext::read_file(*cached_source);
+    std::string source = RHIContext::read_file(*cached_source);
+    if (!expect_function_identity(source, *kernel.function())) {
+        return {};
+    }
+    return source;
 }
 
 template<PrecisionPolicy precision>
@@ -185,6 +201,9 @@ template<PrecisionPolicy precision>
     string shader_desc = "test_ast_to_cuda_source_callable_" + string(precision_suffix(precision));
     std::string source = compile_and_read_cuda_source(device, context, kernel, shader_desc, path);
     set_global_storage_policy(previous_policy);
+    if (!expect_function_identity(source, *callable.function(), true)) {
+        return {};
+    }
     return source;
 }
 
@@ -275,7 +294,7 @@ template<PrecisionPolicy precision>
 [[nodiscard]] bool test_callable_cpp_source() {
     auto function = make_callable_function<precision>();
     std::string cpp_source = emit_cpp_source(*function);
-    CHECK(contains(cpp_source, precision == PrecisionPolicy::force_f16 ? "callable_f16" : "callable_f32"));
+    CHECK(expect_function_identity(cpp_source, *function));
     CHECK(expect_cpp_markers(cpp_source, precision));
     return true;
 }
@@ -294,7 +313,7 @@ template<PrecisionPolicy precision>
 [[nodiscard]] bool test_kernel_cpp_source() {
     auto function = make_kernel_function<precision>();
     std::string cpp_source = emit_cpp_source(*function);
-    CHECK(contains(cpp_source, precision == PrecisionPolicy::force_f16 ? "kernel_f16" : "kernel_f32"));
+    CHECK(expect_function_identity(cpp_source, *function));
     CHECK(expect_cpp_markers(cpp_source, precision));
     return true;
 }
@@ -304,8 +323,7 @@ template<PrecisionPolicy precision>
     std::string cuda_source = compile_callable_kernel_cuda_source<precision>(device,
                                                                              context,
                                                                              ShaderCodegenPath::EAstToSource);
-    CHECK(contains(cuda_source, "test_ast_to_cuda_source_callable_" + string(precision_suffix(precision))));
-    CHECK(contains(cuda_source, precision == PrecisionPolicy::force_f16 ? "callable_f16" : "callable_f32"));
+    CHECK(!cuda_source.empty());
     CHECK(contains(cuda_source, "__device__"));
     CHECK(contains(cuda_source, "extern \"C\" __global__"));
     CHECK(expect_cuda_markers(cuda_source, precision));
@@ -317,7 +335,7 @@ template<PrecisionPolicy precision>
     std::string cuda_source = compile_kernel_cuda_source<precision>(device,
                                                                     context,
                                                                     ShaderCodegenPath::EAstToSource);
-    CHECK(contains(cuda_source, "test_ast_to_cuda_source_kernel_" + string(precision_suffix(precision))));
+    CHECK(!cuda_source.empty());
     CHECK(contains(cuda_source, "extern \"C\" __global__"));
     CHECK(expect_cuda_markers(cuda_source, precision));
     return true;
@@ -369,7 +387,7 @@ template<PrecisionPolicy precision>
     CHECK(saw_inner);
 
     std::string cpp_source = emit_cpp_source(*function);
-    CHECK(contains(cpp_source, precision == PrecisionPolicy::force_f16 ? "nested_kernel_f16" : "nested_kernel_f32"));
+    CHECK(expect_function_identity(cpp_source, *function));
     CHECK(expect_cpp_markers(cpp_source, precision));
     return true;
 }
@@ -379,7 +397,7 @@ template<PrecisionPolicy precision>
     std::string cuda_source = compile_nested_kernel_cuda_source<precision>(device,
                                                                            context,
                                                                            ShaderCodegenPath::EAstToSource);
-    CHECK(contains(cuda_source, "test_ast_to_cuda_source_nested_kernel_" + string(precision_suffix(precision))));
+    CHECK(!cuda_source.empty());
     CHECK(contains(cuda_source, "extern \"C\" __global__"));
     CHECK(expect_cuda_markers(cuda_source, precision));
     return true;

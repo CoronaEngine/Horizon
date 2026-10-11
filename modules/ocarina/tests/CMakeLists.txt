@@ -69,6 +69,7 @@ ocarina_add_test(test-buffer-access-modes GPU CATEGORY resources SOURCES resourc
 ocarina_add_test(test-bytebuffer-access-modes GPU CATEGORY resources SOURCES resources/test_bytebuffer_access_modes.cpp)
 ocarina_add_test(test-texture-access-modes GPU CATEGORY resources SOURCES resources/test_texture_access_modes.cpp)
 ocarina_add_test(test-texture-readwrite GPU CATEGORY resources SOURCES resources/test_texture_readwrite.cpp)
+ocarina_add_test(test-texture-parity-extended GPU CATEGORY resources SOURCES resources/test_texture_parity_extended.cpp)
 
 # Math layout and algebra tests.
 ocarina_add_test(test-soa GPU CATEGORY math SOURCES math/test_soa.cpp)
@@ -77,6 +78,9 @@ ocarina_add_test(test-swizzle GPU CATEGORY math SOURCES math/test_swizzle.cpp)
 
 # Runtime and backend-facing tests.
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
+ocarina_add_test(test-render-parity GPU CATEGORY runtime SOURCES runtime/test_render_parity.cpp)
+ocarina_add_test(test-codegen-parity-extended GPU CATEGORY runtime SOURCES runtime/test_codegen_parity_extended.cpp)
+ocarina_add_test(test-runtime-parity-extended GPU CATEGORY runtime SOURCES runtime/test_runtime_parity_extended.cpp)
 ocarina_add_test(test-storage-parity GPU CATEGORY runtime SOURCES runtime/test_storage_parity.cpp)
 ocarina_add_test(test-stream-order GPU CATEGORY runtime SOURCES runtime/test_stream_order.cpp)
 ocarina_add_test(test-host-transfer-order GPU CATEGORY runtime SOURCES runtime/test_host_transfer_order.cpp)

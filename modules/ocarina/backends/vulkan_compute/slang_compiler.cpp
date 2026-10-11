@@ -20,7 +20,7 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 4u;
+constexpr unsigned slang_source_cache_version = 5u;
 
 void normalize_ray_query_extensions(vector<uint32_t> &spirv) noexcept {
     // Slang also declares SPV_KHR_ray_tracing when constructing an acceleration

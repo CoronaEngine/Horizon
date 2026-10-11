@@ -20,6 +20,11 @@ protected:
     bool inline_parameters_{false};
     Scratch storage_functions_;
     set<const Type *> storage_types_;
+    set<string> value_helpers_;
+    void _emit_matrix_constructor(const CallExpr *expr) noexcept;
+    void _emit_default_value(const Type *type) noexcept;
+    void _emit_array_operation(const Type *result, const list<const Expression *> &arguments,
+                               string_view operation, bool infix = false, bool prefix = false) noexcept;
     void _emit_function_body(const Function &f) noexcept;
     void _emit_storage_functions(const Type *type) noexcept;
     void _emit_storage_fields(const Type *type, size_t offset, const string &value, bool load) noexcept;
@@ -37,6 +42,7 @@ protected:
 
     // ── AstToCppSource virtual overrides ──────────────────────────────────
     using AstToCppSource::visit;
+    void visit(const UnaryExpr *expr) noexcept override;
     void visit(const BinaryExpr *expr) noexcept override;
     void visit(const SubscriptExpr *expr) noexcept override;
     void visit(const MemberExpr *expr) noexcept override;

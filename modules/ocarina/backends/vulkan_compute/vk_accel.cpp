@@ -31,6 +31,10 @@ VkAccel::~VkAccel() noexcept {
 }
 
 void VkAccel::clear() noexcept {
+    // Accel::clear calls the implementation directly, bypassing the device's
+    // destroy_accel wait. Submitted ray queries must finish before TLAS/BLAS
+    // storage is released, just as when the public resource is destroyed.
+    device_->synchronize_streams();
     if (tlas_ != VK_NULL_HANDLE) {
         auto fn = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(
             device_->logical_device(), "vkDestroyAccelerationStructureKHR");
@@ -132,7 +136,7 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
             for (int c = 0; c < 4; ++c)
                 inst.transform.matrix[r][c] = t[c][r];
         inst.instanceCustomIndex                    = i;
-        inst.mask                                   = 0xFFu;
+        inst.mask                                   = 1u;
         inst.instanceShaderBindingTableRecordOffset = 0u;
         inst.flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
         inst.accelerationStructureReference        = mesh_impl->blas_handle();

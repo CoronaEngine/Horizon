@@ -287,15 +287,17 @@ vector<float16_t, 3> oc_face_forward(vector<float16_t, 3> v1, vector<float16_t, 
 void oc_unreachable() {}
 
 void oc_coordinate_system(float3 n, out float3 b1, out float3 b2) {
-    float sign_n = n.z >= 0.0f ? 1.0f : -1.0f;
-    float a = -1.0f / (sign_n + n.z);
-    float b = n.x * n.y * a;
-    b1 = float3(1.0f + sign_n * n.x * n.x * a, sign_n * b, -sign_n * n.x);
-    b2 = float3(b, sign_n + n.y * n.y * a, -n.y);
+    // The orientation must match CUDA, not just form an orthonormal basis:
+    // rotating this frame changes every world-space sample for a fixed seed.
+    b1 = abs(n.x) > abs(n.y)
+        ? float3(-n.z, 0.0f, n.x) / sqrt(n.x * n.x + n.z * n.z)
+        : float3(0.0f, n.z, -n.y) / sqrt(n.y * n.y + n.z * n.z);
+    b2 = cross(n, b1);
 }
 
-void oc_make_normal_tangent(float3 n, out float3 b1, out float3 b2) {
-    oc_coordinate_system(n, b1, b2);
+void oc_make_normal_tangent(float3 n, float3 tangent, out float3 b1, out float3 b2) {
+    b2 = normalize(cross(n, tangent));
+    b1 = cross(b2, n);
 }
 
 // 3×3 matrix inverse via cofactors
@@ -362,6 +364,25 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(6, 0)]] RWTexture3D<uint4> g_bindless_uint_surf3d[];
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 
+// Match CUDA's cudaBoundaryModeZero for surface loads and stores.
+bool oc_tex2d_in_bounds(OCTextureDesc desc, uint x, uint y) {
+    uint width, height;
+    if (desc.pixel_storage >= 3 && desc.pixel_storage <= 5)
+        g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
+    else
+        g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
+    return x < width && y < height;
+}
+
+bool oc_tex3d_in_bounds(OCTextureDesc desc, uint x, uint y, uint z) {
+    uint width, height, depth;
+    if (desc.pixel_storage >= 3 && desc.pixel_storage <= 5)
+        g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height, depth);
+    else
+        g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height, depth);
+    return x < width && y < height && z < depth;
+}
+
 float[N] oc_tex2d_sample_float<uint N>(OCTextureDesc desc, float u, float v) {
     float4 value=g_bindless_tex2d[NonUniformResourceIndex(uint(desc.tex_index))].SampleLevel(g_samplers[0], float2(u,v), 0);
     float result[N]; for(uint i=0;i<N;++i) result[i]=value[i]; return result;
@@ -374,69 +395,81 @@ float[N] oc_bindless_array_tex2d_sample<uint N>(OCBindlessArrayDesc arr, uint sl
 }
 
 float oc_tex2d_read_float(OCTextureDesc desc, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return float(0);
     float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
     return float(value.x);
 }
 
 void oc_tex2d_write(OCTextureDesc desc, float value, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return;
     float4 packed=float4(float(value),0,0,0);
     if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
     g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
 }
 
 vector<float, 2> oc_tex2d_read_float2(OCTextureDesc desc, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return vector<float, 2>(0);
     float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
     return vector<float, 2>(value.xy);
 }
 
 void oc_tex2d_write(OCTextureDesc desc, vector<float, 2> value, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return;
     float4 packed=float4(float2(value),0,0);
     if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
     g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
 }
 
 vector<float, 4> oc_tex2d_read_float4(OCTextureDesc desc, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return vector<float, 4>(0);
     float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
     return vector<float, 4>(value);
 }
 
 void oc_tex2d_write(OCTextureDesc desc, vector<float, 4> value, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return;
     float4 packed=float4(value);
     if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
     g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
 }
 
 uint8_t oc_tex2d_read_uchar(OCTextureDesc desc, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return uint8_t(0);
     float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
     value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
     return uint8_t(value.x);
 }
 
 void oc_tex2d_write(OCTextureDesc desc, uint8_t value, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return;
     float4 packed=float4(float(value),0,0,0);
     packed /= 255.0f;
     g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
 }
 
 vector<uint8_t, 2> oc_tex2d_read_uchar2(OCTextureDesc desc, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return vector<uint8_t, 2>(0);
     float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
     value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
     return vector<uint8_t, 2>(value.xy);
 }
 
 void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 2> value, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return;
     float4 packed=float4(float2(value),0,0);
     packed /= 255.0f;
     g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
 }
 
 vector<uint8_t, 4> oc_tex2d_read_uchar4(OCTextureDesc desc, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return vector<uint8_t, 4>(0);
     float4 value=g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)];
     value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
     return vector<uint8_t, 4>(value);
 }
 
 void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y) {
+    if (!oc_tex2d_in_bounds(desc, x, y)) return;
     float4 packed=float4(value);
     packed /= 255.0f;
     g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]=packed;
@@ -455,69 +488,81 @@ float[N] oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint sl
 }
 
 float oc_tex3d_read_float(OCTextureDesc desc, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return float(0);
     float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
     return float(value.x);
 }
 
 void oc_tex3d_write(OCTextureDesc desc, float value, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return;
     float4 packed=float4(float(value),0,0,0);
     if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
     g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
 }
 
 vector<float, 2> oc_tex3d_read_float2(OCTextureDesc desc, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return vector<float, 2>(0);
     float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
     return vector<float, 2>(value.xy);
 }
 
 void oc_tex3d_write(OCTextureDesc desc, vector<float, 2> value, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return;
     float4 packed=float4(float2(value),0,0);
     if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
     g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
 }
 
 vector<float, 4> oc_tex3d_read_float4(OCTextureDesc desc, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return vector<float, 4>(0);
     float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
     return vector<float, 4>(value);
 }
 
 void oc_tex3d_write(OCTextureDesc desc, vector<float, 4> value, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return;
     float4 packed=float4(value);
     if(desc.pixel_storage<3) packed=trunc(clamp(packed,0.0f,1.0f)*255.0f)/255.0f;
     g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
 }
 
 uint8_t oc_tex3d_read_uchar(OCTextureDesc desc, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint8_t(0);
     float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
     value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
     return uint8_t(value.x);
 }
 
 void oc_tex3d_write(OCTextureDesc desc, uint8_t value, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return;
     float4 packed=float4(float(value),0,0,0);
     packed /= 255.0f;
     g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
 }
 
 vector<uint8_t, 2> oc_tex3d_read_uchar2(OCTextureDesc desc, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return vector<uint8_t, 2>(0);
     float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
     value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
     return vector<uint8_t, 2>(value.xy);
 }
 
 void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 2> value, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return;
     float4 packed=float4(float2(value),0,0);
     packed /= 255.0f;
     g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
 }
 
 vector<uint8_t, 4> oc_tex3d_read_uchar4(OCTextureDesc desc, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return vector<uint8_t, 4>(0);
     float4 value=g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)];
     value = desc.pixel_storage < 3 ? round(value * 255.0f) : trunc(value * 255.0f);
     return vector<uint8_t, 4>(value);
 }
 
 void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y, uint z) {
+    if (!oc_tex3d_in_bounds(desc, x, y, z)) return;
     float4 packed=float4(value);
     packed /= 255.0f;
     g_bindless_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]=packed;
@@ -530,14 +575,14 @@ struct OcHitInfo { uint inst_id; uint prim_id; float2 bary; float t; };
 
 bool oc_trace_occlusion(RaytracingAccelerationStructure accel, Ray ray) {
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
-    q.TraceRayInline(accel, RAY_FLAG_NONE, 0xff, oc_native_ray(ray));
+    q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
     while(q.Proceed()) { if(q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) q.CommitNonOpaqueTriangleHit(); }
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
 TriangleHit oc_trace_closest(RaytracingAccelerationStructure accel, Ray ray) {
     RayQuery<RAY_FLAG_NONE> q;
-    q.TraceRayInline(accel, RAY_FLAG_NONE, 0xFF, oc_native_ray(ray));
+    q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
     while (q.Proceed()) {
         if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
             q.CommitNonOpaqueTriangleHit();
@@ -559,23 +604,23 @@ TriangleHit oc_trace_closest(RaytracingAccelerationStructure accel, Ray ray) {
 // GEMM DSL markers match the CUDA placeholder; gemm_commands emits arithmetic.
 void oc_tensor_gemm<uint Id>() {}
 
-uint oc_tex2d_read_uint(OCTextureDesc desc, uint x, uint y) { return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].x; }
-void oc_tex2d_write(OCTextureDesc desc, uint value, uint x, uint y) { g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0,0); }
+uint oc_tex2d_read_uint(OCTextureDesc desc, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return uint(0); return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].x; }
+void oc_tex2d_write(OCTextureDesc desc, uint value, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return; g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0,0); }
 
-uint2 oc_tex2d_read_uint2(OCTextureDesc desc, uint x, uint y) { return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].xy; }
-void oc_tex2d_write(OCTextureDesc desc, uint2 value, uint x, uint y) { g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0); }
+uint2 oc_tex2d_read_uint2(OCTextureDesc desc, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return uint2(0); return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].xy; }
+void oc_tex2d_write(OCTextureDesc desc, uint2 value, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return; g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0); }
 
-uint4 oc_tex2d_read_uint4(OCTextureDesc desc, uint x, uint y) { return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]; }
-void oc_tex2d_write(OCTextureDesc desc, uint4 value, uint x, uint y) { g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = value; }
+uint4 oc_tex2d_read_uint4(OCTextureDesc desc, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return uint4(0); return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]; }
+void oc_tex2d_write(OCTextureDesc desc, uint4 value, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return; g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = value; }
 
-uint oc_tex3d_read_uint(OCTextureDesc desc, uint x, uint y, uint z) { return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].x; }
-void oc_tex3d_write(OCTextureDesc desc, uint value, uint x, uint y, uint z) { g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0,0); }
+uint oc_tex3d_read_uint(OCTextureDesc desc, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint(0); return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].x; }
+void oc_tex3d_write(OCTextureDesc desc, uint value, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return; g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0,0); }
 
-uint2 oc_tex3d_read_uint2(OCTextureDesc desc, uint x, uint y, uint z) { return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].xy; }
-void oc_tex3d_write(OCTextureDesc desc, uint2 value, uint x, uint y, uint z) { g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0); }
+uint2 oc_tex3d_read_uint2(OCTextureDesc desc, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint2(0); return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].xy; }
+void oc_tex3d_write(OCTextureDesc desc, uint2 value, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return; g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0); }
 
-uint4 oc_tex3d_read_uint4(OCTextureDesc desc, uint x, uint y, uint z) { return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]; }
-void oc_tex3d_write(OCTextureDesc desc, uint4 value, uint x, uint y, uint z) { g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = value; }
+uint4 oc_tex3d_read_uint4(OCTextureDesc desc, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint4(0); return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]; }
+void oc_tex3d_write(OCTextureDesc desc, uint4 value, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return; g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = value; }
 
 float2x2 oc_inverse(float2x2 m) { return float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) / determinant(m); }
 matrix<float16_t,2,2> oc_inverse(matrix<float16_t,2,2> m) { return matrix<float16_t,2,2>(oc_inverse(float2x2(m))); }

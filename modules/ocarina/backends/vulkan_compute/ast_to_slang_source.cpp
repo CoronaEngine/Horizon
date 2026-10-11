@@ -53,23 +53,23 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
 }};
 
 // Map an ocarina scalar/vector/matrix type name to its Slang spelling.
-// bool/int/uint/float keep the HLSL shorthand (float3, float4x4); every other
-// scalar uses vector<T, N> / matrix<T, R, C> so no non-standard alias is needed.
+// Matrices store host columns as Slang rows; swap dimensions for every scalar
+// type, including float. Scalar/vector shorthand is only used where available.
 [[nodiscard]] string slang_type_name(string_view name) noexcept {
     for (const auto &entry : slang_scalar_names) {
         if (!name.starts_with(entry.ocarina)) continue;
         string_view shape = name.substr(entry.ocarina.size());
         if (shape.empty()) return string(entry.slang);
+        auto x = shape.find('x');
+        if (x != string_view::npos) {
+            return ocarina::format("matrix<{}, {}, {}>", entry.slang,
+                                   shape.substr(x + 1), shape.substr(0, x));
+        }
         if (entry.slang == "bool" || entry.slang == "int" ||
             entry.slang == "uint" || entry.slang == "float") {
             return string(entry.slang) + string(shape);
         }
-        auto x = shape.find('x');
-        if (x == string_view::npos) {
-            return ocarina::format("vector<{}, {}>", entry.slang, shape);
-        }
-        return ocarina::format("matrix<{}, {}, {}>", entry.slang,
-                               shape.substr(x + 1), shape.substr(0, x));
+        return ocarina::format("vector<{}, {}>", entry.slang, shape);
     }
     return string(name);
 }
@@ -131,6 +131,16 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
     }
 
     const auto op = expr->call_op();
+    if (op == CallOp::CUSTOM) {
+        AstToCppSource::visit(expr);
+        return;
+    }
+    if (op >= CallOp::MAKE_FLOAT2X2 && op <= CallOp::MAKE_HALF4X4 &&
+        expr->arguments().size() == 1 &&
+        (expr->argument(0)->type()->is_scalar() || expr->argument(0)->type()->is_matrix())) {
+        _emit_matrix_constructor(expr);
+        return;
+    }
     const bool bindless_read = op == CallOp::BINDLESS_ARRAY_BUFFER_READ ||
                                op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ;
     const bool bindless_write = op == CallOp::BINDLESS_ARRAY_BUFFER_WRITE ||
@@ -173,6 +183,9 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 // Slang native builtins keep their name; oc_ wrappers live in slang_device_math.slang.
 // Constructors are emitted from the resolved result type, so MAKE_REAL* follows the
 // storage precision policy (float16_t under force_f16) instead of a fixed spelling.
+    Scratch callable_name;
+    {
+    SCRATCH_GUARD(callable_name)
 #define OC_SLANG_FUNC(name) current_scratch() << #name
 #define OC_SLANG_WRAP(name) current_scratch() << "oc_" #name
 #define OC_SLANG_CTOR       _emit_type_name(expr->type())
@@ -400,10 +413,157 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 #undef OC_SLANG_CTOR
 #undef OC_SLANG_WRAP
 #undef OC_SLANG_FUNC
+    }
+    if (op >= CallOp::ALL && op <= CallOp::NORMALIZE &&
+        !expr->arguments().empty() && expr->argument(0)->type()->is_array()) {
+        // DynamicArray builtins share the scalar/vector implementation. Slang's
+        // native math and operators do not accept fixed arrays. SELECT's DSL
+        // CallExpr currently carries its scalar element type, so obtain its
+        // array result from the selected values instead.
+        const Type *result = op == CallOp::SELECT ? expr->argument(1)->type() : expr->type();
+        if (result && result->is_array()) {
+            _emit_array_operation(result, expr->arguments(), callable_name.view());
+            return;
+        }
+    }
+    current_scratch() << callable_name;
     emit_args(expr);
 }
 
 // ── Expressions ──────────────────────────────────────────────────────────────
+
+void AstToSlangSource::_emit_array_operation(const Type *result,
+                                            const list<const Expression *> &arguments,
+                                            string_view operation, bool infix, bool prefix) noexcept {
+    auto key = hash64(operation, result->hash(), infix, prefix);
+    for (const Expression *arg : arguments) key = hash64(key, arg->type()->hash());
+    const string name = ocarina::format("oc_array_op_{}", key);
+    if (value_helpers_.insert(name).second) {
+        SCRATCH_GUARD(storage_functions_)
+        _emit_type_name(result);
+        current_scratch() << " " << name << "(";
+        uint arg_index = 0;
+        for (const Expression *arg : arguments) {
+            if (arg_index) current_scratch() << ", ";
+            _emit_type_name(arg->type());
+            current_scratch() << ocarina::format(" a{}", arg_index++);
+        }
+        current_scratch() << ") {\n";
+        _emit_type_name(result);
+        current_scratch() << " result;\n";
+        current_scratch() << ocarina::format("for (uint i = 0; i < {}u; ++i) {{ result[i] = ", result->dimension());
+        auto emit_arg = [&](const Expression *arg, uint index) {
+            current_scratch() << ocarina::format("a{}", index);
+            if (arg->type()->is_array()) {
+                OC_ASSERT(arg->type()->dimension() == 1u || arg->type()->dimension() == result->dimension());
+                current_scratch() << (arg->type()->dimension() == 1u ? "[0]" : "[i]");
+            }
+        };
+        auto element_type = [](const Expression *arg) {
+            return arg->type()->is_array() ? arg->type()->element() : arg->type();
+        };
+        const bool matrix_product = infix && operation == "*" && arguments.size() == 2u &&
+                                    (element_type(arguments.front())->is_matrix() || element_type(arguments.back())->is_matrix()) &&
+                                    !element_type(arguments.front())->is_scalar() && !element_type(arguments.back())->is_scalar();
+        if (matrix_product) {
+            // Array elements follow the same transposed matrix convention as
+            // standalone expressions; Slang's * would multiply component-wise.
+            current_scratch() << "mul(";
+            emit_arg(arguments.back(), 1u);
+            current_scratch() << ", ";
+            emit_arg(arguments.front(), 0u);
+        } else {
+            if (!infix) current_scratch() << operation;
+            current_scratch() << "(";
+            arg_index = 0;
+            for (const Expression *arg : arguments) {
+                if (arg_index) current_scratch() << (infix ? operation : string_view{", "});
+                emit_arg(arg, arg_index++);
+            }
+        }
+        current_scratch() << "); }\nreturn result;\n}\n";
+    }
+    current_scratch() << name << "(";
+    bool first = true;
+    for (const Expression *arg : arguments) {
+        if (!first) current_scratch() << ", ";
+        first = false;
+        arg->accept(*this);
+    }
+    current_scratch() << ")";
+}
+
+void AstToSlangSource::visit(const UnaryExpr *expr) noexcept {
+    if (!expr->type()->is_array()) {
+        AstToCppSource::visit(expr);
+        return;
+    }
+    constexpr string_view operators[]{"+", "-", "!", "~"};
+    _emit_array_operation(expr->type(), {expr->operand()}, operators[uint(expr->op())], false, true);
+}
+
+void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
+    const Type *dst = expr->type();
+    const Type *src = expr->argument(0)->type();
+    const string name = ocarina::format("oc_matrix_construct_{}_{}", dst->hash(), src->hash());
+    if (value_helpers_.insert(name).second) {
+        SCRATCH_GUARD(storage_functions_)
+        _emit_type_name(dst);
+        current_scratch() << " " << name << "(";
+        _emit_type_name(src);
+        current_scratch() << " value) { return ";
+        _emit_type_name(dst);
+        current_scratch() << "(";
+        const uint columns = dst->dimension(), rows = dst->element()->dimension();
+        for (uint c = 0; c < columns; ++c) {
+            for (uint r = 0; r < rows; ++r) {
+                if (c || r) current_scratch() << ", ";
+                _emit_type_name(dst->element()->element());
+                current_scratch() << "(";
+                if (src->is_scalar()) {
+                    // CUDA's scalar matrix constructor initializes the diagonal
+                    // of square matrices; rectangular matrices are all zero.
+                    current_scratch() << (columns == rows && c == r ? "value" : "0");
+                } else if (c < src->dimension() && r < src->element()->dimension()) {
+                    current_scratch() << ocarina::format("value[{}][{}]", c, r);
+                } else {
+                    // CUDA's widening constructors embed the source in identity.
+                    current_scratch() << (c == r ? "1" : "0");
+                }
+                current_scratch() << ")";
+            }
+        }
+        current_scratch() << "); }\n";
+    }
+    current_scratch() << name << "(";
+    expr->argument(0)->accept(*this);
+    current_scratch() << ")";
+}
+
+void AstToSlangSource::_emit_default_value(const Type *type) noexcept {
+    if (type->is_matrix()) {
+        const uint columns = type->dimension(), rows = type->element()->dimension();
+        _emit_type_name(type);
+        current_scratch() << "(";
+        for (uint c = 0; c < columns; ++c) {
+            for (uint r = 0; r < rows; ++r) {
+                if (c || r) current_scratch() << ", ";
+                current_scratch() << (columns == rows && c == r ? "1" : "0");
+            }
+        }
+        current_scratch() << ")";
+    } else if (type->is_array() || type->is_structure()) {
+        current_scratch() << "{";
+        const uint count = type->is_array() ? type->dimension() : uint(type->members().size());
+        for (uint i = 0; i < count; ++i) {
+            if (i) current_scratch() << ", ";
+            _emit_default_value(type->is_array() ? type->element() : type->members()[i]);
+        }
+        current_scratch() << "}";
+    } else {
+        current_scratch() << "{}";
+    }
+}
 
 void AstToSlangSource::visit(const SubscriptExpr *expr) noexcept {
     if (!_is_storage_reference(expr)) {
@@ -618,6 +778,12 @@ void AstToSlangSource::_emit_storage_functions(const Type *type) noexcept {
 }
 
 void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
+    if (expr->type()->is_array()) {
+        constexpr string_view operators[]{"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>",
+                                           "&&", "||", "<", ">", "<=", ">=", "==", "!="};
+        _emit_array_operation(expr->type(), {expr->lhs(), expr->rhs()}, operators[uint(expr->op())], true);
+        return;
+    }
     // Slang `*` on matrices is component-wise. ocarina matrices are column-major
     // (m[i] is column i) while Slang indexes rows, so the emitted matrix is the
     // transpose of the ocarina one and every matrix product swaps its operands.
@@ -763,8 +929,13 @@ void AstToSlangSource::_emit_local_var_define(const ScopeStmt *scope) noexcept {
     for (const auto &var : scope->local_vars()) {
         _emit_indent();
         _emit_variable_define(var);
-        // `= {}` zero-initializes like C++ `T v{}`; opaque handles cannot be.
-        current_scratch() << (var.type()->tag() == Type::Tag::ACCEL ? ";" : " = {};");
+        // CUDA matrix default constructors produce identity, including matrices
+        // nested in aggregates. Slang's empty initializer would zero them.
+        if (var.type()->tag() != Type::Tag::ACCEL) {
+            current_scratch() << " = ";
+            _emit_default_value(var.type());
+        }
+        current_scratch() << ";";
         _emit_newline();
     }
 }
