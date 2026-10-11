@@ -22,6 +22,9 @@ namespace Corona::Horizon
         {
             uint32_t set { 0 };
             uint32_t binding { 0 };
+            // Bindless resources are distinct push-constant handles, even when
+            // reflection gives them the same descriptor-table location.
+            uint64_t handle_byte_offset { 0 };
             HardwareBuffer buffer {};
             AccessKind access { AccessKind::ReadWrite };
         };

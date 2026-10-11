@@ -75,6 +75,8 @@ namespace EmbeddedShader::Ast
 		static void endIf();
 		static void beginElse(std::shared_ptr<Ast::IfStatement> followIf);
 		static void endElse();
+		static void beginWhile(std::shared_ptr<Value> condition);
+		static void endWhile();
 		static void discard();
 
 		static std::shared_ptr<UniversalArray> defineUniversalArray(std::shared_ptr<Type> elementType);

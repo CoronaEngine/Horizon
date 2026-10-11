@@ -181,6 +181,13 @@ namespace EmbeddedShader::Ast
 		std::string parse() override;
 	};
 
+	struct WhileStatement : Statement
+	{
+		std::shared_ptr<Value> condition;
+		std::vector<std::shared_ptr<Statement>> statements;
+		std::string parse() override;
+	};
+
     struct StringStatement : Statement
     {
         std::string content;

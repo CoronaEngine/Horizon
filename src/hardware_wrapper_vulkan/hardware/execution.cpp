@@ -744,6 +744,28 @@ namespace Corona::Horizon
             recorder_(recorder);
     }
 
+    void CopyBufferCommand::record(CommandRecorder& recorder) const
+    {
+        if (size == 0)
+            return;
+        if (!src || !dst)
+            throw std::invalid_argument("CopyBuffer requires valid source and destination buffers.");
+        const uint64_t src_size = src.get_byte_size();
+        const uint64_t dst_size = dst.get_byte_size();
+        if (src_offset > src_size || size > src_size - src_offset ||
+            dst_offset > dst_size || size > dst_size - dst_offset)
+            throw std::out_of_range("CopyBuffer range exceeds source or destination buffer.");
+        if ((src_offset | dst_offset | size) % 4 != 0)
+            throw std::invalid_argument("CopyBuffer offsets and size must be multiples of four bytes.");
+        if (resource_id(src) == resource_id(dst) &&
+            src_offset < dst_offset + size && dst_offset < src_offset + size)
+            throw std::invalid_argument("CopyBuffer source and destination ranges overlap.");
+
+        recorder.copy(BufferRef{ static_cast<const ResourceHandle&>(src) },
+                      BufferRef{ static_cast<const ResourceHandle&>(dst) },
+                      { src_offset, dst_offset, size }, DeviceMask{ device_mask_bits });
+    }
+
     void CopyBufferToImageCommand::record(CommandRecorder& recorder) const
     {
         recorder.copy_to_image(BufferRef{ static_cast<const ResourceHandle&>(src) },
@@ -1832,18 +1854,50 @@ namespace Corona::Horizon
                 if (region.size == 0)
                     break;
 
-                BufferStore::Read src = read_buffer(command.resources[0].handle);
+                VkBuffer source_buffer = VK_NULL_HANDLE;
+                {
+                    BufferStore::Read src = read_buffer(command.resources[0].handle);
+                    if (!src || src->buffer_handle == VK_NULL_HANDLE)
+                        throw std::logic_error("CopyBuffer requires a valid source HardwareBuffer.");
+                    if ((src->desc.usage & BufferUsage_TransferSrc) == 0)
+                        throw std::invalid_argument("CopyBuffer requires TransferSrc buffer usage.");
+                    source_buffer = src->buffer_handle;
+                }
                 BufferStore::Write dst = write_buffer(command.resources[1].handle);
-                if (!src || src->buffer_handle == VK_NULL_HANDLE)
-                    throw std::logic_error("CopyBuffer requires a valid source HardwareBuffer.");
                 if (!dst || dst->buffer_handle == VK_NULL_HANDLE)
                     throw std::logic_error("CopyBuffer requires a valid destination HardwareBuffer.");
+                if ((dst->desc.usage & BufferUsage_TransferDst) == 0)
+                    throw std::invalid_argument("CopyBuffer requires TransferDst buffer usage.");
+
+                // Copies can follow compute writes on the same queue, including
+                // in an earlier submission. Cross-queue hazards are also tracked
+                // by ExecutionCompiler/ResourceSubmissionTracker.
+                VkMemoryBarrier2 memory_barrier {};
+                memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+                memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                memory_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+                memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                memory_barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                VkDependencyInfo dependency {};
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.memoryBarrierCount = 1;
+                dependency.pMemoryBarriers = &memory_barrier;
+                vkCmdPipelineBarrier2(command_buffer, &dependency);
 
                 VkBufferCopy copy {};
                 copy.srcOffset = region.src_offset;
                 copy.dstOffset = region.dst_offset;
                 copy.size = region.size;
-                vkCmdCopyBuffer(command_buffer, src->buffer_handle, dst->buffer_handle, 1, &copy);
+                vkCmdCopyBuffer(command_buffer, source_buffer, dst->buffer_handle, 1, &copy);
+                if (dst->desc.cpu_access == CpuAccessMode::Read ||
+                    dst->desc.cpu_access == CpuAccessMode::ReadWrite)
+                {
+                    memory_barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                    memory_barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                    memory_barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+                    memory_barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+                    vkCmdPipelineBarrier2(command_buffer, &dependency);
+                }
                 break;
             }
             case CommandOp::CopyBufferToImage:
@@ -2062,10 +2116,13 @@ namespace Corona::Horizon
                         VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
                     memory_barrier.dstStageMask =
                         VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
+                        VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT |
                         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
                     memory_barrier.dstAccessMask =
                         VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT |
+                        VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT |
+                        VK_ACCESS_2_INDEX_READ_BIT |
                         VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                         VK_ACCESS_2_SHADER_READ_BIT;
 
@@ -2749,6 +2806,32 @@ namespace Corona::Horizon
         std::lock_guard lock(mutex_);
         for (const SubmissionToken& token : data->tokens)
             pending_waits_.push_back(std::make_shared<SubmissionToken>(token));
+        return *this;
+    }
+
+    HardwareExecutor& HardwareExecutor::wait_completed(const SubmitReceipt& receipt)
+    {
+        const auto* data = static_cast<const SubmitReceiptData*>(receipt.data.get());
+        if (data == nullptr)
+            return *this;
+        for (const SubmissionToken& token : data->tokens)
+        {
+            if (token.value == 0)
+                continue;
+            Queue* queue = nullptr;
+            if (queue_resolver_)
+                queue = &queue_resolver_(token.device, token.queue.capability);
+            else
+            {
+                if (token.device.value != 0)
+                    throw std::logic_error("Default HardwareExecutor currently waits only on the main device.");
+                queue = main_device_context().device_manager.queue_by_id(token.queue);
+            }
+            if (queue == nullptr)
+                throw std::runtime_error("HardwareExecutor could not resolve a queue for receipt completion.");
+            queue->wait_for(token);
+            queue->retire_completed();
+        }
         return *this;
     }
 

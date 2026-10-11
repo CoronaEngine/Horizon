@@ -136,7 +136,24 @@ GPU_PUSH_VARIATE(GPU_IF_BRANCH gpuIfBranchJ6hF4rT9mK2zV8cX5bN1pQ3{TheIfElseState
 	};
 
 #define $DO do GPU_PUSH_VARIATE(GPU_DO_WHILE gpuDoWhileL8kM3qW5xG1vY7dR4nP9tS2,gpuDoWhileL8kM3qW5xG1vY7dR4nP9tS2)
-#define $WHILE(condition) while (GPU_WHILE::conditionProcess(condition))
+	// Record the body exactly once on the host. The condition is retained as an
+	// AST expression and re-evaluated on every device iteration. Scope lifetime
+	// balances nested loops and branches without global loop bookkeeping.
+	struct GPU_RUNTIME_WHILE
+	{
+		explicit GPU_RUNTIME_WHILE(const VariateProxy<bool>& condition)
+		{
+			Ast::AST::beginWhile(condition.node);
+		}
+		explicit GPU_RUNTIME_WHILE(bool condition)
+		{
+			Ast::AST::beginWhile(Ast::AST::createValue(condition));
+		}
+		GPU_RUNTIME_WHILE(const GPU_RUNTIME_WHILE&) = delete;
+		~GPU_RUNTIME_WHILE() { Ast::AST::endWhile(); }
+		int8_t index = 0;
+	};
+#define $WHILE(condition) GPU_PUSH_VARIATE(GPU_RUNTIME_WHILE gpuRuntimeWhileScope{condition},gpuRuntimeWhileScope)
 
 	struct GPU_FOR
 	{
