@@ -468,6 +468,8 @@ namespace Corona::Horizon
         [[nodiscard]] HardwareStream operator<<(ComputePipelineBase& pipeline);
         [[nodiscard]] SubmitReceipt commit(RecordedTask task);
         HardwareExecutor& wait(const SubmitReceipt& receipt);
+        // Host wait for this submission's timeline values, without draining its queues.
+        HardwareExecutor& wait_completed(const SubmitReceipt& receipt);
         HardwareExecutor& wait_idle(const SubmitReceipt& receipt);
 
     private:
@@ -550,6 +552,9 @@ namespace Corona::Horizon
         [[nodiscard]] void* get_mapped_data() const;
 
         [[nodiscard]] bool write_bytes(std::span<const std::byte> data, uint64_t byte_offset = 0) const;
+        // The caller must complete GPU writes first (e.g. wait_completed). Invalidates
+        // non-coherent host memory before copying into data.
+        [[nodiscard]] bool read_bytes(std::span<std::byte> data, uint64_t byte_offset = 0) const;
 
         [[nodiscard]] static HardwareBuffer from_bytes(std::span<const std::byte> data, uint32_t element_size, BufferUsageFlags usage, std::string name = {});
 
@@ -1123,6 +1128,18 @@ namespace Corona::Horizon
     template <typename VS, typename FS>
         requires PipelineDetail::EdslRasterizerShaderCode<VS, FS>
     RasterizerPipeline(VS, FS, RasterizerPipelineDesc, const std::source_location&) -> RasterizerPipeline<>;
+
+    struct CopyBufferCommand
+    {
+        HardwareBuffer src {};
+        HardwareBuffer dst {};
+        uint64_t src_offset { 0 };
+        uint64_t dst_offset { 0 };
+        uint64_t size { 0 };
+        uint32_t device_mask_bits { 1 };
+
+        void record(CommandRecorder& recorder) const;
+    };
 
     struct CopyBufferToImageCommand
     {

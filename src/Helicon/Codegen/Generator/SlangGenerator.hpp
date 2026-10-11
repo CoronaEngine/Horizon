@@ -4,6 +4,10 @@
 #include <Codegen/AST/Struct.hpp>
 #include <Codegen/ParseHelper.h>
 #include <boost/pfr/core_name.hpp>
+#include <charconv>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace EmbeddedShader
 {
@@ -47,7 +51,30 @@ template<> constexpr std::string_view variateBasicTypeNameMap<type> = #name
 		static std::string getVariateTypeName();
 
 		template<typename T> requires std::is_arithmetic_v<T>
-		static std::string getValueOutput(T value) {return std::to_string(value);}
+		static std::string getValueOutput(T value)
+		{
+			if constexpr (std::is_floating_point_v<T>)
+			{
+				// std::to_string uses six fractional digits: a threshold such
+				// as 1e-8 becomes zero before Slang ever sees it. General-format
+				// to_chars is locale-independent; max_digits10 preserves every
+				// finite value through a decimal round trip, including subnormals.
+				if (!std::isfinite(value))
+					throw std::invalid_argument("Helicon floating-point literals must be finite");
+				char buffer[128];
+				const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value,
+					std::chars_format::general, std::numeric_limits<T>::max_digits10);
+				if (result.ec != std::errc{})
+					throw std::runtime_error("Helicon floating-point literal formatting failed");
+				std::string output(buffer, result.ptr);
+				// Keep 0, -0 and whole numbers floating-point tokens instead of
+				// integer tokens; this also preserves the sign of negative zero.
+				if (output.find_first_of(".eE") == std::string::npos)
+					output += ".0";
+				return output;
+			}
+			else return std::to_string(value);
+		}
 		static std::string getValueOutput(bool value) {return value? "true" : "false";}
 
 		template<typename T> requires ktm::is_vector_v<T>

@@ -954,13 +954,14 @@ namespace Corona::Horizon
                                     descriptor_index,
                                     "ComputePipeline bindless storage buffer");
 
-            auto found = std::ranges::find_if(bound_buffers_, [set, binding](const BoundBuffer& item) {
-                return item.set == set && item.binding == binding;
+            auto found = std::ranges::find_if(bound_buffers_, [byte_offset](const BoundBuffer& item) {
+                return item.handle_byte_offset == byte_offset;
             });
 
             BoundBuffer value {
                 .set = set,
                 .binding = binding,
+                .handle_byte_offset = byte_offset,
                 .buffer = buffer,
                 .access = AccessKind::ReadWrite,
             };

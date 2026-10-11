@@ -1471,6 +1471,23 @@ namespace Corona::Horizon
         return descriptor_index;
     }
 
+    void ResourceManager::invalidate_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size)
+    {
+        if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE || byte_size == 0)
+            return;
+        if (byte_offset > std::numeric_limits<VkDeviceSize>::max() ||
+            byte_size > std::numeric_limits<VkDeviceSize>::max() - byte_offset)
+            throw std::overflow_error("HardwareBuffer invalidate range exceeds VkDeviceSize.");
+
+        std::lock_guard lock(mutex_);
+        if (allocator_ == VK_NULL_HANDLE)
+            return;
+        throw_if_failed(vmaInvalidateAllocation(allocator_, buffer.buffer_alloc,
+                                                static_cast<VkDeviceSize>(byte_offset),
+                                                static_cast<VkDeviceSize>(byte_size)),
+                        "vmaInvalidateAllocation");
+    }
+
     void ResourceManager::flush_buffer(const BufferWrap& buffer, uint64_t byte_offset, uint64_t byte_size)
     {
         if (!buffer.valid() || buffer.buffer_alloc == VK_NULL_HANDLE || byte_size == 0)
