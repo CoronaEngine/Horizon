@@ -16,7 +16,42 @@ void  oc_synchronize_block()          { AllMemoryBarrierWithGroupSync(); }
 
 // ── Half conversion ───────────────────────────────────────────────────────────
 
-float16_t oc_float2half(float x)     { return (float16_t)x; }
+// Enforce binary16 round-to-nearest-even using float32 bits. Native half casts
+// and a pack/unpack pair both retained float32 precision on the tested GPU.
+// Integer rounding also preserves binary16 subnormals without relying on the
+// implementation-dependent denormal handling of UnpackHalf2x16.
+float oc_half_value(float value) {
+    uint bits = asuint(value);
+    uint sign = bits & 0x80000000u;
+    uint magnitude = bits & 0x7fffffffu;
+    if (magnitude >= 0x7f800000u) return value; // Infinity or NaN.
+    if (magnitude >= 0x477ff000u) return asfloat(sign | 0x7f800000u); // >= 65520.
+    if (magnitude < 0x38800000u) { // Below the minimum normal half, 2^-14.
+        if (magnitude <= 0x33000000u) return asfloat(sign); // <= 2^-25, ties to zero.
+        uint exponent = magnitude >> 23;
+        uint significand = (magnitude & 0x7fffffu) | 0x800000u;
+        uint shift = 126u - exponent; // 14..24 fractional bits in 2^-24 units.
+        uint units = significand >> shift;
+        uint remainder = significand & ((1u << shift) - 1u);
+        uint halfway = 1u << (shift - 1u);
+        if (remainder > halfway || (remainder == halfway && (units & 1u) != 0u)) ++units;
+        return asfloat(sign | asuint(float(units) * 5.9604644775390625e-8f));
+    }
+    uint rounded = (magnitude + 0xfffu + ((magnitude >> 13) & 1u)) & 0xffffe000u;
+    return asfloat(sign | rounded);
+}
+vector<float, N> oc_half_value<uint N>(vector<float, N> value) {
+    vector<float, N> result;
+    for (uint i = 0; i < N; ++i) result[i] = oc_half_value(value[i]);
+    return result;
+}
+matrix<float, R, C> oc_half_value<uint R, uint C>(matrix<float, R, C> value) {
+    matrix<float, R, C> result;
+    for (uint r = 0; r < R; ++r)
+        for (uint c = 0; c < C; ++c) result[r][c] = oc_half_value(value[r][c]);
+    return result;
+}
+float16_t oc_float2half(float x)     { return float16_t(oc_half_value(x)); }
 float     oc_half2float(float16_t x) { return (float)x; }
 
 // ── Ray helpers ───────────────────────────────────────────────────────────────
@@ -111,6 +146,18 @@ T oc_byte_buffer_read<T>(OCBuffer<uint8_t> buf, uint64_t byte_offset) {
 }
 
 // ── Scalar/vector helpers not in Slang stdlib ─────────────────────────────────
+
+// Preserve C++ remainder for negative divisors. The tested RTX 2080 path returned
+// the dividend for OpSRem with a negative divisor. Signed division retains the
+// required truncation toward zero; value arguments evaluate each operand once.
+int oc_srem(int a, int b) { return a - (a / b) * b; }
+int8_t oc_srem(int8_t a, int8_t b) { return int8_t(oc_srem(int(a), int(b))); }
+int16_t oc_srem(int16_t a, int16_t b) { return int16_t(oc_srem(int(a), int(b))); }
+int64_t oc_srem(int64_t a, int64_t b) { return a - (a / b) * b; }
+vector<int, N> oc_srem<uint N>(vector<int, N> a, vector<int, N> b) { return a - (a / b) * b; }
+vector<int8_t, N> oc_srem<uint N>(vector<int8_t, N> a, vector<int8_t, N> b) { return vector<int8_t, N>(oc_srem(vector<int, N>(a), vector<int, N>(b))); }
+vector<int16_t, N> oc_srem<uint N>(vector<int16_t, N> a, vector<int16_t, N> b) { return vector<int16_t, N>(oc_srem(vector<int, N>(a), vector<int, N>(b))); }
+vector<int64_t, N> oc_srem<uint N>(vector<int64_t, N> a, vector<int64_t, N> b) { return a - (a / b) * b; }
 
 bool  oc_none(bool  v) { return !v; }
 bool  oc_none(bool2 v) { return !any(v); }

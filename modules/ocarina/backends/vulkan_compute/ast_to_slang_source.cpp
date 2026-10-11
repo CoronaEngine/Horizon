@@ -10,6 +10,7 @@
 #include "core/type_system/type_desc.h"
 #include "vk_compute_device.h"
 #include "vk_shader_parameters.h"
+#include <algorithm>
 #include <cmath>
 
 namespace ocarina {
@@ -74,6 +75,50 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
     return string(name);
 }
 
+[[nodiscard]] bool is_half_value(const Type *type) noexcept {
+    if (type == nullptr) return false;
+    while (type->is_vector() || type->is_matrix()) type = type->element();
+    return type->tag() == Type::Tag::HALF;
+}
+
+// Round using float32 bits before the final half cast, retaining the rounded
+// value even if a later use immediately converts back to float.
+[[nodiscard]] string half_conversion_prefix(const Type *type) noexcept {
+    string source = "float";
+    if (type->is_vector()) source = ocarina::format("float{}", type->dimension());
+    if (type->is_matrix())
+        source = ocarina::format("matrix<float, {}, {}>", type->dimension(), type->element()->dimension());
+    return ocarina::format("{}(oc_half_value({}(", slang_type_name(type->name()), source);
+}
+
+[[nodiscard]] bool is_half_constructor(CallOp op) noexcept {
+    return (op >= CallOp::MAKE_REAL2 && op <= CallOp::MAKE_HALF4) ||
+           (op >= CallOp::MAKE_FLOAT2X2 && op <= CallOp::MAKE_HALF4X4);
+}
+
+[[nodiscard]] bool needs_half_assignment_rounding(const Type *target, const Expression *value) noexcept {
+    if (!is_half_value(target)) return false;
+    if (!is_half_value(value->type())) return true;
+    switch (value->tag()) {
+        // These values already have binary16 precision. In particular, do not
+        // canonicalize NaN payloads during bit casts, storage loads, or copies.
+        case Expression::Tag::REF:
+        case Expression::Tag::MEMBER:
+        case Expression::Tag::SUBSCRIPT:
+        case Expression::Tag::LITERAL:
+        case Expression::Tag::CONSTANT:
+        case Expression::Tag::CAST: return false;
+        case Expression::Tag::CALL: {
+            const auto op = static_cast<const CallExpr *>(value)->call_op();
+            return !(is_half_constructor(op) || op == CallOp::FLOAT2HALF ||
+                     op == CallOp::CUSTOM || op == CallOp::SELECT ||
+                     op == CallOp::BYTE_BUFFER_READ ||
+                     op == CallOp::BINDLESS_ARRAY_BUFFER_READ || op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ);
+        }
+        default: return true;
+    }
+}
+
 // Host packs bool/8-bit/16-bit kernel arguments at byte granularity, which a
 // typed physical-storage pointer cannot address portably (Slang bool is 4 bytes,
 // 8/16-bit storage is optional). Such scalars are extracted from the enclosing
@@ -114,9 +159,21 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
 
 void AstToSlangSource::visit(const CallExpr *expr) noexcept {
     auto emit_args = [this](const CallExpr *e) {
+        const auto op = e->call_op();
+        const bool atomic = op == CallOp::ATOMIC_ADD || op == CallOp::ATOMIC_SUB ||
+                            op == CallOp::ATOMIC_EXCH || op == CallOp::ATOMIC_CAS;
         current_scratch() << "(";
+        uint index = 0;
         for (const auto &arg : e->arguments()) {
-            arg->accept(*this);
+            // Free atomics take a resource l-value. In particular, byte-buffer
+            // reads normally emit value-returning helpers, which cannot be
+            // passed to Slang's inout atomic parameter or written back.
+            if (atomic && index == 0u && arg->type()->is_scalar() && _is_storage_reference(arg)) {
+                _emit_storage_load(arg);
+            } else {
+                arg->accept(*this);
+            }
+            ++index;
             current_scratch() << ",";
         }
         if (!e->arguments().empty()) current_scratch().pop_back();
@@ -139,6 +196,19 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         expr->arguments().size() == 1 &&
         (expr->argument(0)->type()->is_scalar() || expr->argument(0)->type()->is_matrix())) {
         _emit_matrix_constructor(expr);
+        return;
+    }
+    const auto constructor_arguments = expr->arguments();
+    const bool half_constructor = is_half_value(expr->type()) && is_half_constructor(op) &&
+        std::any_of(constructor_arguments.begin(), constructor_arguments.end(),
+                    [](const Expression *arg) { return !is_half_value(arg->type()); });
+    if (half_constructor) {
+        current_scratch() << half_conversion_prefix(expr->type());
+        for (uint i = 0; i < expr->arguments().size(); ++i) {
+            if (i) current_scratch() << ", ";
+            expr->argument(i)->accept(*this);
+        }
+        current_scratch() << ")))";
         return;
     }
     const bool bindless_read = op == CallOp::BINDLESS_ARRAY_BUFFER_READ ||
@@ -515,11 +585,16 @@ void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
         _emit_type_name(dst);
         current_scratch() << "(";
         const uint columns = dst->dimension(), rows = dst->element()->dimension();
+        const bool round_half = is_half_value(dst) && !is_half_value(src);
         for (uint c = 0; c < columns; ++c) {
             for (uint r = 0; r < rows; ++r) {
                 if (c || r) current_scratch() << ", ";
-                _emit_type_name(dst->element()->element());
-                current_scratch() << "(";
+                const auto *scalar = dst->element()->element();
+                if (round_half) current_scratch() << half_conversion_prefix(scalar);
+                else {
+                    _emit_type_name(scalar);
+                    current_scratch() << "(";
+                }
                 if (src->is_scalar()) {
                     // CUDA's scalar matrix constructor initializes the diagonal
                     // of square matrices; rectangular matrices are all zero.
@@ -530,7 +605,7 @@ void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
                     // CUDA's widening constructors embed the source in identity.
                     current_scratch() << (c == r ? "1" : "0");
                 }
-                current_scratch() << ")";
+                current_scratch() << (round_half ? ")))" : ")");
             }
         }
         current_scratch() << "); }\n";
@@ -690,13 +765,19 @@ void AstToSlangSource::_emit_buffer_address(const SubscriptExpr *expr) noexcept 
 
 void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
     const auto *lhs = stmt->lhs();
+    auto emit_rhs = [&] {
+        const bool half = needs_half_assignment_rounding(lhs->type(), stmt->rhs());
+        if (half) current_scratch() << half_conversion_prefix(lhs->type());
+        stmt->rhs()->accept(*this);
+        if (half) current_scratch() << ")))";
+    };
     if (_is_storage_reference(lhs)) {
         const Type *type = lhs->type();
         _emit_storage_functions(type);
         current_scratch() << ocarina::format("oc_storage_store_{}(", type->hash());
         _emit_storage_address(lhs);
         current_scratch() << ", ";
-        stmt->rhs()->accept(*this);
+        emit_rhs();
         current_scratch() << ")";
         return;
     }
@@ -709,7 +790,7 @@ void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
             current_scratch() << "; ";
             _emit_type_name(lhs->type());
             current_scratch() << " oc_storage_value = ";
-            stmt->rhs()->accept(*this);
+            emit_rhs();
             current_scratch() << "; ";
             const Type *type = member->parent()->type()->element();
             _emit_storage_functions(type);
@@ -721,7 +802,11 @@ void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
             return;
         }
     }
-    AstToCppSource::visit(stmt);
+    if (is_half_value(lhs->type())) {
+        lhs->accept(*this);
+        current_scratch() << " = ";
+        emit_rhs();
+    } else AstToCppSource::visit(stmt);
 }
 
 void AstToSlangSource::_emit_storage_fields(const Type *type, size_t offset,
@@ -778,10 +863,24 @@ void AstToSlangSource::_emit_storage_functions(const Type *type) noexcept {
 }
 
 void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
+    const Type *element = expr->type();
+    while (element->is_array() || element->is_vector()) element = element->element();
+    const bool signed_remainder = expr->op() == BinaryOp::MOD &&
+                                  (element->tag() == Type::Tag::INT || element->tag() == Type::Tag::SHORT ||
+                                   element->tag() == Type::Tag::CHAR);
     if (expr->type()->is_array()) {
         constexpr string_view operators[]{"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>",
                                            "&&", "||", "<", ">", "<=", ">=", "==", "!="};
-        _emit_array_operation(expr->type(), {expr->lhs(), expr->rhs()}, operators[uint(expr->op())], true);
+        _emit_array_operation(expr->type(), {expr->lhs(), expr->rhs()},
+                              signed_remainder ? "oc_srem" : operators[uint(expr->op())], !signed_remainder);
+        return;
+    }
+    if (signed_remainder) {
+        current_scratch() << "oc_srem(";
+        expr->lhs()->accept(*this);
+        current_scratch() << ", ";
+        expr->rhs()->accept(*this);
+        current_scratch() << ")";
         return;
     }
     // Slang `*` on matrices is component-wise. ocarina matrices are column-major
@@ -804,6 +903,12 @@ void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
 }
 
 void AstToSlangSource::visit(const CastExpr *expr) noexcept {
+    if (expr->cast_op() == CastOp::STATIC && is_half_value(expr->type()) && !is_half_value(expr->expression()->type())) {
+        current_scratch() << half_conversion_prefix(expr->type());
+        expr->expression()->accept(*this);
+        current_scratch() << ")))";
+        return;
+    }
     switch (expr->cast_op()) {
         case CastOp::STATIC:
             _emit_type_name(expr->type());
