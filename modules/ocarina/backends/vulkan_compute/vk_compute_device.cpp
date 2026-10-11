@@ -67,6 +67,15 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     OC_INFO_FORMAT("Created Vulkan device: {} (vendor = {}, device = {})",
             selected.deviceName, selected.vendorID, selected.deviceID);
 
+    VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    VkPhysicalDeviceProperties2 subgroup_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    subgroup_properties.pNext = &subgroup;
+    vkGetPhysicalDeviceProperties2(phys_device_, &subgroup_properties);
+    OC_ERROR_IF(subgroup.subgroupSize < 32u || subgroup.subgroupSize > 128u || subgroup.subgroupSize % 32u != 0u ||
+                !(subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) ||
+                !(subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT),
+        "Vulkan backend requires compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve CUDA warp32 semantics");
+
     // RT support probe
     uint32_t ec = 0;
     vkEnumerateDeviceExtensionProperties(phys_device_, nullptr, &ec, nullptr);
@@ -161,45 +170,80 @@ void VulkanComputeDevice::init_vma() noexcept {
 // ── init_descriptor_pool ──────────────────────────────────────────────────────
 
 void VulkanComputeDevice::init_descriptor_pool() noexcept {
+    VkPhysicalDeviceDescriptorIndexingProperties indexing{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    properties.pNext = &indexing;
+    vkGetPhysicalDeviceProperties2(phys_device_, &properties);
+    constexpr uint32_t sampled_count = max_texture_slots * 2u;
+    constexpr uint32_t storage_count = max_texture_slots * 4u;
+    constexpr uint32_t resource_count = sampled_count + storage_count + c_sampler_count + 1u;
+    OC_ERROR_IF(indexing.maxPerStageDescriptorUpdateAfterBindSampledImages < sampled_count ||
+                indexing.maxDescriptorSetUpdateAfterBindSampledImages < sampled_count ||
+                indexing.maxPerStageDescriptorUpdateAfterBindStorageImages < storage_count ||
+                indexing.maxDescriptorSetUpdateAfterBindStorageImages < storage_count ||
+                indexing.maxPerStageUpdateAfterBindResources < resource_count ||
+                indexing.maxUpdateAfterBindDescriptorsInAllPools < resource_count,
+        "Vulkan device cannot support the public 50000-texture capacity: requires 100002 sampled and 200004 storage update-after-bind image descriptors");
     VkDescriptorPoolSize sizes[] = {
         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, max_texture_slots * 2},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, max_texture_slots * 4},
-        {VK_DESCRIPTOR_TYPE_SAMPLER, c_sampler_count}};
+        {VK_DESCRIPTOR_TYPE_SAMPLER, c_sampler_count},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}};
     VkDescriptorPoolCreateInfo pci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pci.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pci.maxSets = 1; pci.poolSizeCount = 3; pci.pPoolSizes = sizes;
+    pci.maxSets = 1; pci.poolSizeCount = 4; pci.pPoolSizes = sizes;
     OC_VK_CHECK(vkCreateDescriptorPool(device_, &pci, nullptr, &desc_pool_));
-    VkDescriptorSetLayoutBinding bindings[7]{};
-    VkDescriptorBindingFlags flags[7]{};
-    for (uint32_t i = 0; i < 7; ++i) {
+    VkDescriptorSetLayoutBinding bindings[8]{};
+    VkDescriptorBindingFlags flags[8]{};
+    for (uint32_t i = 0; i < 8; ++i) {
         bindings[i].binding = i;
-        bindings[i].descriptorType = i == 4 ? VK_DESCRIPTOR_TYPE_SAMPLER :
+        bindings[i].descriptorType = i == 7 ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER :
+            i == 4 ? VK_DESCRIPTOR_TYPE_SAMPLER :
             (i == 0 || i == 2 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
-        bindings[i].descriptorCount = i == 4 ? c_sampler_count : max_texture_slots;
+        bindings[i].descriptorCount = i == 7 ? 1u : i == 4 ? c_sampler_count : max_texture_slots;
         bindings[i].stageFlags = VK_SHADER_STAGE_ALL;
-        if (i != 4) flags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+        if (i != 4 && i != 7) flags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
     }
     VkDescriptorSetLayoutBindingFlagsCreateInfo f{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
-    f.bindingCount = 7; f.pBindingFlags = flags;
+    f.bindingCount = 8; f.pBindingFlags = flags;
     VkDescriptorSetLayoutCreateInfo lci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     lci.pNext = &f; lci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
-    lci.bindingCount = 7; lci.pBindings = bindings;
+    lci.bindingCount = 8; lci.pBindings = bindings;
     OC_VK_CHECK(vkCreateDescriptorSetLayout(device_, &lci, nullptr, &global_layout_));
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     ai.descriptorPool = desc_pool_; ai.descriptorSetCount = 1; ai.pSetLayouts = &global_layout_;
     OC_VK_CHECK(vkAllocateDescriptorSets(device_, &ai, &global_set_));
+    // Component-sized CUDA surface writes require a read/modify/write on Vulkan
+    // images. Hash texture/texel pairs into a shared lock table to preserve independent
+    // component writes without serializing ordinary full-texel stores.
+    texture_write_locks_ = allocate_buffer(65536u * sizeof(uint32_t),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        false, "texture-write-locks");
+    immediate_submit([&](VkCommandBuffer cb) {
+        vkCmdFillBuffer(cb, texture_write_locks_.buffer, 0, texture_write_locks_.size, 0);
+    });
+    VkDescriptorBufferInfo locks{texture_write_locks_.buffer, 0, texture_write_locks_.size};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = global_set_;
+    write.dstBinding = 7;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.pBufferInfo = &locks;
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
 }
-uint32_t VulkanComputeDevice::allocate_texture_slot() noexcept {
+uint32_t VulkanComputeDevice::allocate_texture_slot(bool is_3d) noexcept {
     auto guard = buffer_map_guard_.lock();
-    if (!free_texture_slots_.empty()) {
-        auto slot = free_texture_slots_.back(); free_texture_slots_.pop_back(); return slot;
+    auto &free_slots = free_texture_slots_[is_3d];
+    auto &next_slot = next_texture_slot_[is_3d];
+    if (!free_slots.empty()) {
+        auto slot = free_slots.back(); free_slots.pop_back(); return slot;
     }
-    OC_ERROR_IF(next_texture_slot_ >= max_texture_slots, "Vulkan texture slots exhausted");
-    return next_texture_slot_++;
+    OC_ERROR_IF(next_slot >= max_texture_slots, "Vulkan texture slots exhausted for this dimension");
+    return next_slot++;
 }
-void VulkanComputeDevice::release_texture_slot(uint32_t slot) noexcept {
+void VulkanComputeDevice::release_texture_slot(uint32_t slot, bool is_3d) noexcept {
     auto guard = buffer_map_guard_.lock();
-    if (slot) free_texture_slots_.push_back(slot);
+    if (slot) free_texture_slots_[is_3d].push_back(slot);
 }
 
 // ── init_samplers ─────────────────────────────────────────────────────────────
@@ -283,6 +327,12 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ici.imageType   = is_3d ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     ici.format      = fmt;
+    // CUDA surface uint loads/stores reinterpret FLOAT image bits. A compatible
+    // integer view preserves them without a floating-point load/conversion.
+    if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM ||
+        fmt == VK_FORMAT_R8G8B8A8_UNORM || fmt == VK_FORMAT_R32_SFLOAT ||
+        fmt == VK_FORMAT_R32G32_SFLOAT || fmt == VK_FORMAT_R32G32B32A32_SFLOAT)
+        ici.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
     ici.extent      = {extent.x, extent.y, std::max(extent.z, 1u)};
     ici.mipLevels   = levels;
     ici.arrayLayers = 1u;
@@ -299,6 +349,11 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     vci.image    = result.image;
     vci.viewType = is_3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
     vci.format   = fmt;
+    // CUDA fills every absent sampled channel with zero, including alpha.
+    // Apply this only to the sampled view: storage views require identity.
+    if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM ||
+        fmt == VK_FORMAT_R32_SFLOAT || fmt == VK_FORMAT_R32G32_SFLOAT)
+        vci.components.a = VK_COMPONENT_SWIZZLE_ZERO;
     vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
     OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.view));
     immediate_submit([&](VkCommandBuffer cb) {
@@ -313,6 +368,7 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
             0, 0, nullptr, 0, nullptr, 1, &barrier);
     });
     // Storage image descriptors address only the base mip.
+    vci.components = {};
     vci.subresourceRange.levelCount = 1;
     OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.storage_view));
     {
@@ -619,6 +675,7 @@ VulkanComputeDevice::~VulkanComputeDevice() noexcept {
         vkDestroyDescriptorSetLayout(device_, global_layout_, nullptr);
     if (desc_pool_ != VK_NULL_HANDLE)
         vkDestroyDescriptorPool(device_, desc_pool_, nullptr);
+    free_buffer(texture_write_locks_);
     if (allocator_) vmaDestroyAllocator(allocator_);
     if (device_)   vkDestroyDevice(device_, nullptr);
     if (instance_) vkDestroyInstance(instance_, nullptr);

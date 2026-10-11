@@ -16,6 +16,10 @@ VkComputeShader::VkComputeShader(VulkanComputeDevice *device,
                                   const Function &f)
     : VkShaderBase(device, f) {
     workgroup_size_ = device_->workgroup_size(f);
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(device_->physical_device(), &properties);
+    const auto &counts = properties.limits.maxComputeWorkGroupCount;
+    max_group_count_ = make_uint3(counts[0], counts[1], counts[2]);
     create_pipeline_layout();
     create_pipeline(spirv);
 }
@@ -75,6 +79,8 @@ void VkComputeShader::launch(handle_ty stream, ShaderDispatchCommand *cmd) noexc
 
 void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, VkDeviceAddress params,
                                bool bind_pipeline) noexcept {
+    const uint3 dim = cmd->dispatch_dim();
+    if (!dim.x || !dim.y || !dim.z) return;
     auto data = cmd->argument_data();
     OC_ERROR_IF(data.size_bytes() < parameter_layout_.extent,
                 "Vulkan shader argument data is smaller than its parameter layout");
@@ -105,9 +111,7 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
         uint64_t addr = params ? params : params_buf_.address;
         memcpy(pc + VkShaderParameterLayout::params_offset, &addr, sizeof(addr));
     }
-    uint3 dim = cmd->dispatch_dim();
     memcpy(pc + VkShaderParameterLayout::dim_offset, &dim, 12);
-    vkCmdPushConstants(cb, layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, parameter_layout_.push_bytes(), pc);
 
     uint3 wgs = workgroup_size_;
     uint3 grid = function_.grid_dim();
@@ -115,10 +119,20 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
     // configuration. Ray queries run in a compute pipeline here, so derive
     // enough groups to cover that same raygen domain even for a configured grid.
     if (function_.is_raytracing_kernel() || !grid.x || !grid.y || !grid.z)
-        grid = make_uint3((dim.x + wgs.x - 1) / wgs.x,
-                          (dim.y + wgs.y - 1) / wgs.y,
-                          (dim.z + wgs.z - 1) / wgs.z);
-    vkCmdDispatch(cb, grid.x, grid.y, grid.z);
+        grid = make_uint3(dim.x / wgs.x + uint(dim.x % wgs.x != 0u),
+                          dim.y / wgs.y + uint(dim.y % wgs.y != 0u),
+                          dim.z / wgs.z + uint(dim.z % wgs.z != 0u));
+    for (uint64_t z = 0; z < grid.z; z += max_group_count_.z)
+        for (uint64_t y = 0; y < grid.y; y += max_group_count_.y)
+            for (uint64_t x = 0; x < grid.x; x += max_group_count_.x) {
+                const uint3 base = make_uint3(uint(x), uint(y), uint(z));
+                const uint3 count = make_uint3(std::min(grid.x - base.x, max_group_count_.x),
+                                              std::min(grid.y - base.y, max_group_count_.y),
+                                              std::min(grid.z - base.z, max_group_count_.z));
+                memcpy(pc + VkShaderParameterLayout::group_base_offset, &base, 12);
+                vkCmdPushConstants(cb, layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, parameter_layout_.push_bytes(), pc);
+                vkCmdDispatch(cb, count.x, count.y, count.z);
+            }
 }
 
 // ── VkShaderFactory ───────────────────────────────────────────────────────────

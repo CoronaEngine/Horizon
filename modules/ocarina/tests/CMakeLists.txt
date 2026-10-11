@@ -1,5 +1,5 @@
 function(ocarina_add_test name)
-    cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK" "CATEGORY" "SOURCES" ${ARGN})
+    cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK" "CATEGORY" "SOURCES;CASES" ${ARGN})
     set(_test_target ${name})
     if (_ocarina_test_CATEGORY)
         if (${name} MATCHES "^test-")
@@ -25,13 +25,24 @@ function(ocarina_add_test name)
             foreach(_backend cuda vulkan-compute)
                 if(TARGET ocarina-backend-${_backend})
                     foreach(_codegen ast ir)
+                      set(_cases ${_ocarina_test_CASES})
+                      if(NOT _cases)
+                          set(_cases default)
+                      endif()
+                      foreach(_case ${_cases})
                         set(_test_name "ocarina.${_test_target}.${_backend}.${_codegen}")
-                        add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}>)
+                        if(_case STREQUAL "default")
+                            add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}>)
+                        else()
+                            string(APPEND _test_name ".${_case}")
+                            add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}> --case ${_case})
+                        endif()
                         set_tests_properties(${_test_name} PROPERTIES
                             WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
                             ENVIRONMENT "OCARINA_TEST_BACKEND=${_backend};OCARINA_TEST_CODEGEN=${_codegen}"
                             LABELS "ocarina;${_backend};${_codegen}"
-                            RUN_SERIAL TRUE TIMEOUT 120)
+                            RUN_SERIAL TRUE TIMEOUT 300)
+                      endforeach()
                     endforeach()
                 endif()
             endforeach()
@@ -90,6 +101,24 @@ ocarina_add_test(test-host-transfer-order GPU CATEGORY runtime SOURCES runtime/t
 ocarina_add_test(test-accel-update GPU CATEGORY runtime SOURCES runtime/test_accel_update.cpp)
 ocarina_add_test(test-launch-latency BENCHMARK CATEGORY runtime SOURCES runtime/test_launch_latency.cpp)
 ocarina_add_test(test-backend-performance BENCHMARK CATEGORY runtime SOURCES runtime/test_backend_performance.cpp)
+# Isolate capability regressions so one failure cannot hide later scenarios.
+ocarina_add_test(test-codegen-capability-probe GPU CATEGORY runtime SOURCES runtime/test_codegen_capability_probe.cpp
+    CASES inverse2 determinant2 callable-storage callable-alias fmod-mod ulong-makers)
+ocarina_add_test(test-backend-capability-probe GPU CATEGORY runtime SOURCES runtime/test_backend_capability_probe.cpp
+    CASES empty-accel fast-build mesh-rebuild same-batch-accel multistream-ray-params)
+ocarina_add_test(test-resource-capability-probe GPU CATEGORY resources SOURCES resources/test_resource_capability_probe.cpp
+    CASES texture-buffer-view-offset texture-narrow-channels texture-linear-fraction texture-uint-reinterpret)
+ocarina_add_test(test-float32-policy-probe GPU CATEGORY runtime SOURCES runtime/test_float32_policy_probe.cpp
+    CASES float32-subnormal hyperbolic-stability half-intermediate half-inverse)
+if(TARGET ocarina-backend-cuda AND TARGET ocarina-backend-vulkan-compute)
+    find_package(Python COMPONENTS Interpreter REQUIRED)
+    add_test(NAME ocarina.capability-cross-backend
+        COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_capability_audit.py"
+            --runtime "$<TARGET_FILE_DIR:test-runtime-codegen-capability-probe>"
+            --output "${CMAKE_CURRENT_BINARY_DIR}/capability-comparison/$<CONFIG>")
+    set_tests_properties(ocarina.capability-cross-backend PROPERTIES
+        LABELS "ocarina;cuda;vulkan-compute;parity" RUN_SERIAL TRUE TIMEOUT 1200)
+endif()
 ocarina_add_test(test-atomic GPU CATEGORY runtime SOURCES runtime/test_atomic.cpp)
 ocarina_add_test(test-tensor-gemm GPU CATEGORY runtime SOURCES runtime/test_tensor_gemm.cpp)
 

@@ -307,14 +307,20 @@ void CUDACommandVisitor::visit(const ocarina::BufferToTexture2DCommand *cmd) noe
 }
 
 void CUDACommandVisitor::visit(const BLASBuildCommand *cmd) noexcept {
+    if (owner_) owner_->synchronize();
+    else device_->use_context([&] { OC_CU_CHECK(cuStreamSynchronize(stream_)); });
     cmd->mesh<CUDAMesh>()->build_bvh(cmd);
 }
 
 void CUDACommandVisitor::visit(const TLASBuildCommand *cmd) noexcept {
+    if (owner_) owner_->synchronize();
+    else device_->use_context([&] { OC_CU_CHECK(cuStreamSynchronize(stream_)); });
     cmd->accel<OptixAccel>()->build_bvh(this);
 }
 
 void CUDACommandVisitor::visit(const ocarina::TLASUpdateCommand *cmd) noexcept {
+    if (owner_) owner_->synchronize();
+    else device_->use_context([&] { OC_CU_CHECK(cuStreamSynchronize(stream_)); });
     cmd->accel<OptixAccel>()->update_bvh(this);
 }
 

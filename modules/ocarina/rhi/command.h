@@ -392,6 +392,8 @@ class ShaderArgumentPack;
 class OC_RHI_API ShaderDispatchCommand final : public Command {
 private:
     SP<ShaderArgumentPack> argument_list_;
+    ocarina::vector<void *> args_;
+    ocarina::vector<std::byte> patched_argument_data_;
     uint3 dispatch_dim_;
     handle_ty entry_{};
 

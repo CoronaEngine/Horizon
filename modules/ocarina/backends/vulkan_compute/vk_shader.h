@@ -44,6 +44,7 @@ private:
     // Immediate launches are synchronous; stream launches own their parameter storage.
     VkBufferAllocation params_buf_{};
     uint3              workgroup_size_{1u, 1u, 1u};
+    uint3              max_group_count_{1u, 1u, 1u};
 
     void create_pipeline_layout() noexcept;
     void create_pipeline(const vector<uint32_t> &spirv) noexcept;

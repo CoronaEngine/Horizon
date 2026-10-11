@@ -254,14 +254,8 @@ void test_bindless_byte_atomics(Device &device) {
     std::cout << "bindless byte atomics / offsets / next dispatch passed" << std::endl;
 }
 
-// Keep this separate from the supported-path regression. The shared C++
-// emitter currently writes an ulong literal as "2ul". On Windows CUDA this is
-// unsigned long (32 bits), while oc_ulong is unsigned long long (64 bits).
-// oc_atomicSub<T, U> negates U before widening, adding 2^32 - 2 instead of
-// subtracting 2. The normal tests pass real Var<T> kernel parameters so they
-// can verify atomic support independently of this known literal-type defect.
-// This diagnostic retains the correct CPU oracle and intentionally fails on
-// affected CUDA builds; it must not be counted as a passing parity case.
+// A 64-bit literal must remain 64-bit before atomicSub negates it, including
+// on Windows where unsigned long is only 32 bits.
 void test_wide_literal_diagnostic(Device &device) {
     auto counter = device.create_buffer<ulong>(1u);
     auto bytes = device.create_byte_buffer(sizeof(ulong));
@@ -305,5 +299,6 @@ int main() {
     test_contended_cas<uint>(device, "uint");
     test_contended_cas<ulong>(device, "ulong");
     test_bindless_byte_atomics(device);
+    test_wide_literal_diagnostic(device);
     std::cout << "compute atomic parity checks passed" << std::endl;
 }

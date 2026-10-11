@@ -27,10 +27,12 @@ protected:
     uint32_t            level_num_{1u};
     uint3               res_{};
     VkImageAllocation   image_{};
+    VkImageView uint_storage_view_{};
 
     // Descriptor-array slot indices written into TextureDesc.
     uint32_t sample_slot_{0u};
     uint32_t storage_slot_{0u};
+    bool is_3d_{};
 
     explicit VkTexture(VulkanComputeDevice *device) : device_(device) {}
     VkTexture(VulkanComputeDevice *device, uint3 res, PixelStorage ps, uint level_num);

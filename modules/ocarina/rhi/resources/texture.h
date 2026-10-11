@@ -184,7 +184,7 @@ public:
     template<typename Arg>
     requires is_buffer_or_view_v<Arg>
     [[nodiscard]] BufferToTextureCommand *copy_from_buffer(const Arg &buffer, size_t buffer_offset, bool async = true) const noexcept {
-        return copy_from_buffer_impl(buffer.handle(), buffer_offset * buffer.element_size(), async);
+        return copy_from_buffer_impl(buffer.handle(), buffer.offset_in_byte() + buffer_offset * buffer.element_size(), async);
     }
 
     [[nodiscard]] uint3 resolution() const noexcept { return impl()->resolution(); }

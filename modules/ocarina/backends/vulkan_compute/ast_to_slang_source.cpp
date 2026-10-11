@@ -81,14 +81,14 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
     return type->tag() == Type::Tag::HALF;
 }
 
-// Round using float32 bits before the final half cast, retaining the rounded
-// value even if a later use immediately converts back to float.
+// Encode binary16 through integer bits: a final native float-to-half cast may
+// flush half subnormals even when the preceding float value was rounded.
 [[nodiscard]] string half_conversion_prefix(const Type *type) noexcept {
     string source = "float";
     if (type->is_vector()) source = ocarina::format("float{}", type->dimension());
     if (type->is_matrix())
         source = ocarina::format("matrix<float, {}, {}>", type->dimension(), type->element()->dimension());
-    return ocarina::format("{}(oc_half_value({}(", slang_type_name(type->name()), source);
+    return ocarina::format("oc_float2half(({}(", source);
 }
 
 [[nodiscard]] bool is_half_constructor(CallOp op) noexcept {
@@ -148,7 +148,7 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
         case Type::Tag::SHORT:
             return ocarina::format("int16_t((int({}) << {}) >> {})", bits, 32 - width, 32 - width);
         case Type::Tag::HALF:
-            return ocarina::format("float16_t(f16tof32({} & 0x{:x}u))", bits, mask);
+            return ocarina::format("bit_cast<float16_t>(uint16_t({} & 0x{:x}u))", bits, mask);
         default: return {};
     }
 }
@@ -171,7 +171,11 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             if (atomic && index == 0u && arg->type()->is_scalar() && _is_storage_reference(arg)) {
                 _emit_storage_load(arg);
             } else {
+                const bool widen_half = op >= CallOp::MAKE_BOOL2 && op <= CallOp::MAKE_HALF4X4 &&
+                                        !is_half_value(e->type()) && is_half_value(arg->type());
+                if (widen_half) current_scratch() << "oc_half2float(";
                 arg->accept(*this);
+                if (widen_half) current_scratch() << ")";
             }
             ++index;
             current_scratch() << ",";
@@ -189,7 +193,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 
     const auto op = expr->call_op();
     if (op == CallOp::CUSTOM) {
-        AstToCppSource::visit(expr);
+        _emit_custom_call(expr);
         return;
     }
     if (op >= CallOp::MAKE_FLOAT2X2 && op <= CallOp::MAKE_HALF4X4 &&
@@ -206,7 +210,10 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         current_scratch() << half_conversion_prefix(expr->type());
         for (uint i = 0; i < expr->arguments().size(); ++i) {
             if (i) current_scratch() << ", ";
+            const bool half_argument = is_half_value(expr->argument(i)->type());
+            if (half_argument) current_scratch() << "oc_half2float(";
             expr->argument(i)->accept(*this);
+            if (half_argument) current_scratch() << ")";
         }
         current_scratch() << ")))";
         return;
@@ -295,6 +302,8 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::LOG2:             OC_SLANG_FUNC(log2);            break;
         case CallOp::LOG10:            OC_SLANG_FUNC(log10);           break;
         case CallOp::POW:              OC_SLANG_FUNC(pow);             break;
+        case CallOp::FMOD:             OC_SLANG_WRAP(fmod);            break;
+        case CallOp::MOD:              OC_SLANG_WRAP(mod);             break;
         case CallOp::SQRT:             OC_SLANG_FUNC(sqrt);            break;
         case CallOp::RSQRT:            OC_SLANG_FUNC(rsqrt);           break;
         case CallOp::CEIL:             OC_SLANG_FUNC(ceil);            break;
@@ -341,6 +350,9 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::MAKE_UINT2:
         case CallOp::MAKE_UINT3:
         case CallOp::MAKE_UINT4:
+        case CallOp::MAKE_ULONG2:
+        case CallOp::MAKE_ULONG3:
+        case CallOp::MAKE_ULONG4:
         case CallOp::MAKE_UCHAR2:
         case CallOp::MAKE_UCHAR3:
         case CallOp::MAKE_UCHAR4:
@@ -502,6 +514,55 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 
 // ── Expressions ──────────────────────────────────────────────────────────────
 
+void AstToSlangSource::_emit_custom_call(const CallExpr *expr) noexcept {
+    const Function &function = *expr->function();
+    const auto parameters = function.all_arguments();
+    const auto argument_list = expr->arguments();
+    const vector<const Expression *> arguments(argument_list.begin(), argument_list.end());
+    vector<uint> storage_indices;
+    for (uint i = 0; i < arguments.size() && i < parameters.size(); ++i) {
+        if (parameters[i].tag() == Variable::Tag::REFERENCE && _is_storage_reference(arguments[i]))
+            storage_indices.push_back(i);
+    }
+    if (storage_indices.empty()) {
+        AstToCppSource::visit(expr);
+        return;
+    }
+
+    // Specialize only the argument representation, never the body semantics.
+    // Passing actual addresses preserves overlapping references, read-after-write
+    // through other buffers, and nested callable references without copy-back.
+    string name = function.func_name() + "_storage";
+    for (uint index : storage_indices) name += ocarina::format("_{}", index);
+    if (value_helpers_.insert(name).second) {
+        auto previous_references = std::move(storage_reference_arguments_);
+        storage_reference_arguments_.clear();
+        for (uint index : storage_indices) storage_reference_arguments_.insert(parameters[index].uid());
+        Scratch specialized_body;
+        {
+            SCRATCH_GUARD(specialized_body)
+            FUNCTION_GUARD(function)
+            _emit_type_name(function.return_type());
+            current_scratch() << " " << name;
+            _emit_arguments(function);
+            _emit_body(function);
+            current_scratch() << "\n";
+        }
+        storage_reference_arguments_ = std::move(previous_references);
+        // Storage access helpers and nested variants generated while emitting
+        // the body precede this definition; the caller is emitted after both.
+        storage_functions_ << specialized_body;
+    }
+    current_scratch() << name << "(";
+    for (uint i = 0; i < arguments.size(); ++i) {
+        if (std::find(storage_indices.begin(), storage_indices.end(), i) != storage_indices.end())
+            _emit_storage_address(arguments[i]);
+        else arguments[i]->accept(*this);
+        current_scratch() << ", ";
+    }
+    current_scratch() << "d_dim, d_idx)";
+}
+
 void AstToSlangSource::_emit_array_operation(const Type *result,
                                             const list<const Expression *> &arguments,
                                             string_view operation, bool infix, bool prefix) noexcept {
@@ -586,6 +647,7 @@ void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
         current_scratch() << "(";
         const uint columns = dst->dimension(), rows = dst->element()->dimension();
         const bool round_half = is_half_value(dst) && !is_half_value(src);
+        const bool widen_half = !is_half_value(dst) && is_half_value(src);
         for (uint c = 0; c < columns; ++c) {
             for (uint r = 0; r < rows; ++r) {
                 if (c || r) current_scratch() << ", ";
@@ -595,6 +657,7 @@ void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
                     _emit_type_name(scalar);
                     current_scratch() << "(";
                 }
+                if (widen_half) current_scratch() << "oc_half2float(";
                 if (src->is_scalar()) {
                     // CUDA's scalar matrix constructor initializes the diagonal
                     // of square matrices; rectangular matrices are all zero.
@@ -605,6 +668,7 @@ void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
                     // CUDA's widening constructors embed the source in identity.
                     current_scratch() << (c == r ? "1" : "0");
                 }
+                if (widen_half) current_scratch() << ")";
                 current_scratch() << (round_half ? ")))" : ")");
             }
         }
@@ -656,6 +720,11 @@ void AstToSlangSource::visit(const MemberExpr *expr) noexcept {
     _emit_storage_load(expr);
 }
 
+void AstToSlangSource::visit(const RefExpr *expr) noexcept {
+    if (_is_storage_reference(expr)) _emit_storage_load(expr);
+    else AstToCppSource::visit(expr);
+}
+
 void AstToSlangSource::_emit_storage_load(const Expression *expr) noexcept {
     const Type *type = expr->type();
     if (requires_storage_helper(type)) {
@@ -674,6 +743,8 @@ void AstToSlangSource::_emit_storage_load(const Expression *expr) noexcept {
 
 bool AstToSlangSource::_is_storage_reference(const Expression *expr) const noexcept {
     switch (expr->tag()) {
+        case Expression::Tag::REF:
+            return storage_reference_arguments_.contains(static_cast<const RefExpr *>(expr)->variable().uid());
         case Expression::Tag::SUBSCRIPT: {
             const auto *subscript = static_cast<const SubscriptExpr *>(expr);
             return subscript->range()->type()->is_buffer() || _is_storage_reference(subscript->range());
@@ -694,7 +765,11 @@ bool AstToSlangSource::_is_storage_reference(const Expression *expr) const noexc
 }
 
 void AstToSlangSource::_emit_storage_address(const Expression *expr) noexcept {
-    if (expr->tag() == Expression::Tag::SUBSCRIPT) {
+    if (expr->tag() == Expression::Tag::REF) {
+        const auto &variable = static_cast<const RefExpr *>(expr)->variable();
+        OC_ASSERT(storage_reference_arguments_.contains(variable.uid()));
+        current_scratch() << "oc_ref_address_" << variable.final_name();
+    } else if (expr->tag() == Expression::Tag::SUBSCRIPT) {
         const auto *subscript = static_cast<const SubscriptExpr *>(expr);
         if (subscript->range()->type()->is_buffer()) {
             _emit_buffer_address(subscript);
@@ -767,8 +842,11 @@ void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
     const auto *lhs = stmt->lhs();
     auto emit_rhs = [&] {
         const bool half = needs_half_assignment_rounding(lhs->type(), stmt->rhs());
+        const bool widen_half = !is_half_value(lhs->type()) && is_half_value(stmt->rhs()->type());
         if (half) current_scratch() << half_conversion_prefix(lhs->type());
+        if (widen_half) current_scratch() << "oc_half2float(";
         stmt->rhs()->accept(*this);
+        if (widen_half) current_scratch() << ")";
         if (half) current_scratch() << ")))";
     };
     if (_is_storage_reference(lhs)) {
@@ -802,7 +880,7 @@ void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
             return;
         }
     }
-    if (is_half_value(lhs->type())) {
+    if (is_half_value(lhs->type()) || is_half_value(stmt->rhs()->type())) {
         lhs->accept(*this);
         current_scratch() << " = ";
         emit_rhs();
@@ -913,6 +991,12 @@ void AstToSlangSource::visit(const CastExpr *expr) noexcept {
         case CastOp::STATIC:
             _emit_type_name(expr->type());
             current_scratch() << "(";
+            if (!is_half_value(expr->type()) && is_half_value(expr->expression()->type())) {
+                current_scratch() << "oc_half2float(";
+                expr->expression()->accept(*this);
+                current_scratch() << "))";
+                return;
+            }
             break;
         case CastOp::BITWISE:
             current_scratch() << "bit_cast<";
@@ -1021,9 +1105,14 @@ void AstToSlangSource::visit(const Type *type) noexcept {
 }
 
 void AstToSlangSource::_emit_variable_define(const Variable &v) noexcept {
-    // Slang has no references; by-reference callable parameters become inout.
+    if (storage_reference_arguments_.contains(v.uid())) {
+        current_scratch() << "uint64_t oc_ref_address_" << v.final_name();
+        return;
+    }
+    // inout has copy-in/copy-out semantics and may assume non-aliasing. __ref
+    // preserves CUDA reference semantics for overlapping local arguments.
     if (v.tag() == Variable::Tag::REFERENCE && !v.type()->is_buffer()) {
-        current_scratch() << "inout ";
+        current_scratch() << "__ref ";
     }
     _emit_type_name(v.type());
     _emit_space();
@@ -1091,7 +1180,7 @@ void AstToSlangSource::_emit_type_name(const Type *type) noexcept {
             current_scratch() << "OCBindlessArrayDesc";
             break;
         case Type::Tag::ACCEL:
-            current_scratch() << "RaytracingAccelerationStructure";
+            current_scratch() << "uint64_t";
             break;
         case Type::Tag::NONE:
             break;
@@ -1108,7 +1197,7 @@ void AstToSlangSource::_emit_struct_name(const Type *type) noexcept {
 }
 
 // ── Kernel interface ─────────────────────────────────────────────────────────
-// The 20-byte BDA/dispatch prefix is followed by packed argument words when the
+// The 32-byte BDA/dispatch/group-base prefix is followed by packed argument words when the
 // true argument extent fits in 128 bytes. Larger argument lists retain BDA.
 // Both paths reconstruct values at host ABI offsets, independently of Slang's
 // aggregate layout rules.
@@ -1131,6 +1220,15 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
     _emit_newline();
     _emit_indent();
     current_scratch() << "uint dim_z;";
+    _emit_newline();
+    _emit_indent();
+    current_scratch() << "uint group_base_x;";
+    _emit_newline();
+    _emit_indent();
+    current_scratch() << "uint group_base_y;";
+    _emit_newline();
+    _emit_indent();
+    current_scratch() << "uint group_base_z;";
     _emit_newline();
     if (inline_parameters_ && layout.inline_word_count()) {
         _emit_indent();
@@ -1180,7 +1278,7 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         if (grid.x && grid.y && grid.z)
             current_scratch() << ocarina::format("uint3 grid = uint3({}u, {}u, {}u);", grid.x, grid.y, grid.z);
         else
-            current_scratch() << "uint3 grid = (d_dim + block - 1u) / block;";
+            current_scratch() << "uint3 grid = d_dim / block + uint3(d_dim % block != uint3(0u));";
         _emit_newline();
         _emit_indent();
         current_scratch() << "return (oc_group_id.x + oc_group_id.y * grid.x + grid.x * grid.y * oc_group_id.z)"
@@ -1261,7 +1359,10 @@ void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
 void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
     if (f.is_kernel()) {
         _emit_indent();
-        current_scratch() << "oc_group_id = oc_group_id_in;";
+        current_scratch() << "uint3 oc_group_base = uint3(oc_push.group_base_x, oc_push.group_base_y, oc_push.group_base_z);";
+        _emit_newline();
+        _emit_indent();
+        current_scratch() << "oc_group_id = oc_group_id_in + oc_group_base;";
         _emit_newline();
         _emit_indent();
         current_scratch() << "oc_group_thread_id = oc_group_thread_id_in;";
@@ -1270,7 +1371,7 @@ void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
         current_scratch() << "uint3 d_dim = uint3(oc_push.dim_x, oc_push.dim_y, oc_push.dim_z);";
         _emit_newline();
         _emit_indent();
-        current_scratch() << "uint3 d_idx = oc_dispatch_thread_id;";
+        current_scratch() << "uint3 d_idx = oc_dispatch_thread_id + oc_group_base * uint3(OC_WORKGROUP_X, OC_WORKGROUP_Y, OC_WORKGROUP_Z);";
         _emit_newline();
         _emit_indent();
         current_scratch() << "if (any(d_idx >= d_dim)) { return; }";
@@ -1293,9 +1394,7 @@ void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
 
 void AstToSlangSource::_emit_parameter_load(const Type *type, size_t offset) noexcept {
     if (type->tag() == Type::Tag::ACCEL) {
-        current_scratch() << "RaytracingAccelerationStructure(";
         _emit_parameter_load(Type::of<uint64_t>(), offset);
-        current_scratch() << ")";
     } else if (type->is_structure() || type->is_array()) {
         // Reconstruct aggregates using the RHI layout, rather than the shader
         // compiler's storage layout (which may pad arrays and nested records).

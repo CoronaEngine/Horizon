@@ -14,7 +14,9 @@ void CUDAMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
     device_->use_context([&] {
         init_build_input();
         OptixAccelBuildOptions accel_options = {};
-        accel_options.buildFlags = (OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE);
+        const bool compact = params_.usage_tag != FAST_UPDATE;
+        accel_options.buildFlags = params_.usage_tag == FAST_BUILD ? OPTIX_BUILD_FLAG_PREFER_FAST_BUILD : OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+        accel_options.buildFlags |= compact ? OPTIX_BUILD_FLAG_ALLOW_COMPACTION : OPTIX_BUILD_FLAG_ALLOW_UPDATE;
         accel_options.motionOptions.numKeys = 1;
         accel_options.operation = OPTIX_BUILD_OPERATION_BUILD;
 
@@ -42,9 +44,9 @@ void CUDAMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
                                        &accel_options, &build_input_, 1,
                                        temp_buffer.handle(), gas_buffer_sizes.tempSizeInBytes,
                                        blas_buffer_.handle(), gas_buffer_sizes.outputSizeInBytes,
-                                       &blas_handle_, &emit_desc, 1));
+                                       &blas_handle_, compact ? &emit_desc : nullptr, compact ? 1u : 0u));
 
-        size_t compacted_gas_size = device_->download<size_t>(emit_desc.result);
+        size_t compacted_gas_size = compact ? device_->download<size_t>(emit_desc.result) : gas_buffer_sizes.outputSizeInBytes;
 
         OC_INFO_FORMAT("blas : compacted_gas_size is {} byte", compacted_gas_size);
 
@@ -78,8 +80,9 @@ void CUDAMesh::init_build_input() noexcept {
         build_input_.triangleArray.indexBuffer = params_.tri_handle + params_.tri_offset;
     }
     {
-        static constexpr uint32_t geom_flags = OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT;
-        build_input_.triangleArray.flags = &geom_flags;
+        geom_flags_ = (params_.geom_tag & DISABLE_ANYHIT ? OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT : 0u) |
+                      (params_.geom_tag & SINGLE_ANYHIT_CALL ? OPTIX_GEOMETRY_FLAG_REQUIRE_SINGLE_ANYHIT_CALL : 0u);
+        build_input_.triangleArray.flags = &geom_flags_;
         build_input_.triangleArray.numSbtRecords = 1;
         build_input_.triangleArray.sbtIndexOffsetBuffer = reinterpret_cast<CUdeviceptr>(nullptr);
         build_input_.triangleArray.sbtIndexOffsetSizeInBytes = sizeof(uint32_t);

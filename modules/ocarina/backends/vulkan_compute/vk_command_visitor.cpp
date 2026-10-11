@@ -382,6 +382,8 @@ void VkComputeCommandVisitor::visit(const SynchronizeCommand *) noexcept {
 void VkComputeCommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
     auto *shader = cmd->entry<VkShaderBase *>();
     if (!shader) return;
+    const auto dim = cmd->dispatch_dim();
+    if (!dim.x || !dim.y || !dim.z) return;
     auto data = const_cast<ShaderDispatchCommand *>(cmd)->argument_data();
     auto address = stream_ && !shader->parameters_inline() ?
         stream_->stage_parameters(data.data(), data.size_bytes()) : 0;

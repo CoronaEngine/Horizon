@@ -18,6 +18,7 @@ private:
     OptixTraversableHandle blas_handle_{};
     Buffer<std::byte> blas_buffer_{};
     OptixBuildInput build_input_{};
+    uint32_t geom_flags_{};
 
 public:
     CUDAMesh(CUDADevice *device, const MeshParams &params)
@@ -27,6 +28,7 @@ public:
     [[nodiscard]] handle_ty blas_handle() const noexcept override { return blas_handle_; }
     [[nodiscard]] uint vertex_num() const noexcept override { return params_.vert_num; }
     [[nodiscard]] uint triangle_num() const noexcept override { return params_.tri_num; }
+    [[nodiscard]] AccelGeomTag geom_tag() const noexcept { return params_.geom_tag; }
     void build_bvh(const BLASBuildCommand *cmd) noexcept;
 };
 }// namespace ocarina

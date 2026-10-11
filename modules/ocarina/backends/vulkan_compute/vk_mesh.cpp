@@ -10,6 +10,60 @@
 
 namespace ocarina {
 
+void compact_acceleration_structure(VulkanComputeDevice *device, VkAccelerationStructureTypeKHR type,
+                                    VkAccelerationStructureKHR &accel, VkBufferAllocation &storage,
+                                    VkDeviceAddress &address) noexcept {
+    auto logical = device->logical_device();
+    auto write_properties = reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
+        vkGetDeviceProcAddr(logical, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
+    auto create_as = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(logical, "vkCreateAccelerationStructureKHR"));
+    auto copy_as = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(logical, "vkCmdCopyAccelerationStructureKHR"));
+    auto destroy_as = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+        vkGetDeviceProcAddr(logical, "vkDestroyAccelerationStructureKHR"));
+    auto get_address = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+        vkGetDeviceProcAddr(logical, "vkGetAccelerationStructureDeviceAddressKHR"));
+
+    VkQueryPoolCreateInfo query_info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    query_info.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+    query_info.queryCount = 1u;
+    VkQueryPool query = VK_NULL_HANDLE;
+    OC_VK_CHECK(vkCreateQueryPool(logical, &query_info, nullptr, &query));
+    device->immediate_submit([&](VkCommandBuffer cb) {
+        vkCmdResetQueryPool(cb, query, 0u, 1u);
+        write_properties(cb, 1u, &accel, query_info.queryType, query, 0u);
+    });
+    VkDeviceSize compacted_size = 0;
+    OC_VK_CHECK(vkGetQueryPoolResults(logical, query, 0u, 1u, sizeof(compacted_size),
+        &compacted_size, sizeof(compacted_size), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+    vkDestroyQueryPool(logical, query, nullptr);
+    OC_INFO_FORMAT("Vulkan AS type {}: storage={} bytes, compacted={} bytes", uint(type), storage.size, compacted_size);
+    if (!compacted_size || compacted_size >= storage.size) return;
+
+    auto compacted_storage = device->allocate_buffer(compacted_size,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        false, "compacted_acceleration_structure");
+    VkAccelerationStructureCreateInfoKHR create_info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    create_info.type = type;
+    create_info.buffer = compacted_storage.buffer;
+    create_info.size = compacted_size;
+    VkAccelerationStructureKHR compacted = VK_NULL_HANDLE;
+    OC_VK_CHECK(create_as(logical, &create_info, nullptr, &compacted));
+    VkCopyAccelerationStructureInfoKHR copy_info{VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR};
+    copy_info.src = accel;
+    copy_info.dst = compacted;
+    copy_info.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+    device->immediate_submit([&](VkCommandBuffer cb) { copy_as(cb, &copy_info); });
+    destroy_as(logical, accel, nullptr);
+    device->free_buffer(storage);
+    accel = compacted;
+    storage = compacted_storage;
+    VkAccelerationStructureDeviceAddressInfoKHR address_info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+    address_info.accelerationStructure = accel;
+    address = get_address(logical, &address_info);
+}
+
 VkMesh::~VkMesh() noexcept {
     clear();
 }
@@ -32,7 +86,8 @@ void VkMesh::init_build_input() noexcept {
     geom_ = {};
     geom_.sType                                  = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     geom_.geometryType                           = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geom_.flags                                  = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geom_.flags = (params_.geom_tag & DISABLE_ANYHIT ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0u) |
+                  (params_.geom_tag & SINGLE_ANYHIT_CALL ? VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR : 0u);
     geom_.geometry.triangles.sType               = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     geom_.geometry.triangles.vertexFormat        = VK_FORMAT_R32G32B32_SFLOAT;
     geom_.geometry.triangles.vertexData.deviceAddress = params_.vert_handle + params_.vert_offset;
@@ -44,7 +99,10 @@ void VkMesh::init_build_input() noexcept {
     build_info_ = {};
     build_info_.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
     build_info_.type          = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    build_info_.flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build_info_.flags = params_.usage_tag == FAST_BUILD ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR :
+                                                        VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    build_info_.flags |= params_.usage_tag == FAST_UPDATE ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR :
+                                                          VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
     build_info_.geometryCount = 1u;
     build_info_.pGeometries   = &geom_;
 }
@@ -126,6 +184,11 @@ void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
     });
 
     device_->free_buffer(scratch);
+    if (params_.usage_tag != FAST_UPDATE) {
+        compact_acceleration_structure(device_, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                                       blas_, blas_buf_, blas_address_);
+        build_info_.dstAccelerationStructure = blas_;
+    }
 }
 
 }// namespace ocarina

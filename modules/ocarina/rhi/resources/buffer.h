@@ -138,7 +138,7 @@ public:
     OC_MAKE_MEMBER_GETTER_SETTER(name, )
 
         Buffer(BufferView<T> buffer_view)
-        : Super(nullptr, Tag::BUFFER, buffer_view.handle()),
+        : Super(nullptr, Tag::BUFFER, buffer_view.handle() + buffer_view.offset_in_byte()),
           size_(buffer_view.size()) {
         descriptor_ptr();
     }

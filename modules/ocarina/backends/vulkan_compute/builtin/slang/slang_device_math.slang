@@ -5,13 +5,18 @@
 
 // ── Wave / warp intrinsic wrappers ────────────────────────────────────────────
 
-uint4 oc_warp_active_bit_mask(bool pred)       { return WaveActiveBallot(pred); }
-uint  oc_warp_active_count_bits(bool pred)     { return WaveActiveCountBits(pred); }
-uint  oc_warp_prefix_count_bits(bool pred)     { return WavePrefixCountBits(pred); }
-uint  oc_warp_lane_id()               { return WaveGetLaneIndex(); }
-uint  oc_warp_size()                  { return WaveGetLaneCount(); }
-uint  oc_warp_first_active_lane()     { return WaveReadLaneFirst(WaveGetLaneIndex()); }
-bool  oc_warp_is_first_active_lane()  { return WaveIsFirstLane(); }
+// The public warp contract is CUDA's 32 lanes, also on native 64/128-lane waves.
+uint oc_warp_ballot_word(bool pred) { return WaveActiveBallot(pred)[WaveGetLaneIndex() / 32u]; }
+uint4 oc_warp_active_bit_mask(bool pred) { return uint4(oc_warp_ballot_word(pred), 0, 0, 0); }
+uint oc_warp_active_count_bits(bool pred) { return countbits(oc_warp_ballot_word(pred)); }
+uint oc_warp_lane_id() { return WaveGetLaneIndex() % 32u; }
+uint oc_warp_size() { return 32u; }
+uint oc_warp_prefix_count_bits(bool pred) {
+    uint preceding = (1u << oc_warp_lane_id()) - 1u;
+    return countbits(oc_warp_ballot_word(pred) & preceding);
+}
+uint oc_warp_first_active_lane() { return firstbitlow(oc_warp_ballot_word(true)); }
+bool oc_warp_is_first_active_lane() { return oc_warp_lane_id() == oc_warp_first_active_lane(); }
 void  oc_synchronize_block()          { AllMemoryBarrierWithGroupSync(); }
 
 // ── Half conversion ───────────────────────────────────────────────────────────
@@ -51,8 +56,154 @@ matrix<float, R, C> oc_half_value<uint R, uint C>(matrix<float, R, C> value) {
         for (uint c = 0; c < C; ++c) result[r][c] = oc_half_value(value[r][c]);
     return result;
 }
-float16_t oc_float2half(float x)     { return float16_t(oc_half_value(x)); }
-float     oc_half2float(float16_t x) { return (float)x; }
+// Numeric OpFConvert may flush binary16 subnormals even after oc_half_value
+// rounded them correctly. Transfer the half bit pattern instead, and decode
+// through integer fields so the public conversion APIs preserve gradual underflow.
+float16_t oc_float2half(float value) {
+    uint bits = asuint(value);
+    uint sign = (bits >> 16u) & 0x8000u;
+    uint exponent = (bits >> 23u) & 0xffu;
+    uint mantissa = bits & 0x7fffffu;
+    uint encoded;
+    if (exponent == 0xffu) {
+        encoded = sign | 0x7c00u | (mantissa != 0u ? ((mantissa >> 13u) | 0x200u) : 0u);
+    } else if (exponent >= 143u) {
+        encoded = sign | 0x7c00u;
+    } else if (exponent <= 112u) {
+        if (exponent < 102u) {
+            encoded = sign;
+        } else {
+            uint shift = 126u - exponent;
+            uint significand = mantissa | 0x800000u;
+            uint truncated = significand >> shift;
+            uint remainder = significand & ((1u << shift) - 1u);
+            uint halfway = 1u << (shift - 1u);
+            uint rounded = truncated + uint(remainder > halfway ||
+                (remainder == halfway && (truncated & 1u) != 0u));
+            encoded = sign | rounded;
+        }
+    } else {
+        uint rounded = (mantissa + 0xfffu + ((mantissa >> 13u) & 1u)) >> 13u;
+        encoded = sign | (((exponent - 112u) << 10u) + rounded);
+    }
+    return bit_cast<float16_t>(uint16_t(encoded));
+}
+float oc_half2float(float16_t value) {
+    uint bits = uint(bit_cast<uint16_t>(value));
+    uint sign = (bits & 0x8000u) << 16u;
+    uint exponent = (bits >> 10u) & 31u;
+    uint mantissa = bits & 1023u;
+    if (exponent == 31u) return asfloat(sign | 0x7f800000u | (mantissa << 13u));
+    if (exponent == 0u) {
+        if (mantissa == 0u) return asfloat(sign);
+        uint normalized_exponent = 113u;
+        while ((mantissa & 0x400u) == 0u) {
+            mantissa <<= 1u;
+            --normalized_exponent;
+        }
+        return asfloat(sign | (normalized_exponent << 23u) | ((mantissa & 0x3ffu) << 13u));
+    }
+    return asfloat(sign | ((exponent + 112u) << 23u) | (mantissa << 13u));
+}
+vector<float16_t, N> oc_float2half<uint N>(vector<float, N> value) {
+    vector<float16_t, N> result;
+    for (uint i = 0u; i < N; ++i) result[i] = oc_float2half(value[i]);
+    return result;
+}
+matrix<float16_t, R, C> oc_float2half<uint R, uint C>(matrix<float, R, C> value) {
+    matrix<float16_t, R, C> result;
+    for (uint r = 0u; r < R; ++r)
+        for (uint c = 0u; c < C; ++c) result[r][c] = oc_float2half(value[r][c]);
+    return result;
+}
+vector<float, N> oc_half2float<uint N>(vector<float16_t, N> value) {
+    vector<float, N> result;
+    for (uint i = 0u; i < N; ++i) result[i] = oc_half2float(value[i]);
+    return result;
+}
+matrix<float, R, C> oc_half2float<uint R, uint C>(matrix<float16_t, R, C> value) {
+    matrix<float, R, C> result;
+    for (uint r = 0u; r < R; ++r)
+        for (uint c = 0u; c < C; ++c) result[r][c] = oc_half2float(value[r][c]);
+    return result;
+}
+
+float oc_half_add(float a, float b) { return oc_half_value(a + b); }
+float oc_half_sub(float a, float b) { return oc_half_value(a - b); }
+float oc_half_mul(float a, float b) { return oc_half_value(a * b); }
+// Every input is already a binary16 value, so its product is exact in float32.
+// TwoSum retains the low bits discarded by the following addition. Correct an
+// exact half midpoint before rounding, avoiding float32 -> binary16 double
+// rounding while retaining CUDA HFMA's single binary16 rounding.
+float oc_half_fma(float a, float b, float c) {
+    // Slang 2026.10 ignores local precise on SPIR-V. Explicit decorations
+    // preserve TwoSum's operation order without changing other shader math.
+    float2 sum_residual = spirv_asm {
+        %product : $$float = OpFMul $a $b;
+        OpDecorate %product NoContraction;
+        %sum : $$float = OpFAdd %product $c;
+        OpDecorate %sum NoContraction;
+        %carried : $$float = OpFSub %sum %product;
+        OpDecorate %carried NoContraction;
+        %rounded_product : $$float = OpFSub %sum %carried;
+        OpDecorate %rounded_product NoContraction;
+        %error_product : $$float = OpFSub %product %rounded_product;
+        OpDecorate %error_product NoContraction;
+        %error_c : $$float = OpFSub $c %carried;
+        OpDecorate %error_c NoContraction;
+        %residual : $$float = OpFAdd %error_product %error_c;
+        OpDecorate %residual NoContraction;
+        result : $$float2 = OpCompositeConstruct %sum %residual
+    };
+    float sum = sum_residual.x;
+    float residual = sum_residual.y;
+    uint bits = asuint(sum);
+    uint magnitude = bits & 0x7fffffffu;
+    if (magnitude >= 0x33000000u && magnitude <= 0x477ff000u) {
+        uint shift = magnitude >= 0x38800000u ? 13u : 126u - (magnitude >> 23u);
+        uint remainder = (magnitude | 0x800000u) & ((1u << shift) - 1u);
+        if (remainder == (1u << (shift - 1u)) && residual != 0.0f) {
+            bool increase_magnitude = (sum > 0.0f) == (residual > 0.0f);
+            sum = asfloat(bits + (increase_magnitude ? 1u : 0xffffffffu));
+        }
+    }
+    return oc_half_value(sum);
+}
+vector<float, N> oc_half_fma<uint N>(vector<float, N> a, vector<float, N> b, vector<float, N> c) {
+    vector<float, N> result;
+    for (uint i = 0u; i < N; ++i) result[i] = oc_half_fma(a[i], b[i], c[i]);
+    return result;
+}
+// CUDA's __hmul/__hsub (as opposed to their _rn variants) contract the first
+// product of a minor into the subtraction. Round the second product, then
+// perform that multiply/subtract with one final binary16 rounding.
+float oc_half_minor(float a, float b, float c, float d) {
+    return oc_half_fma(a, b, -oc_half_mul(c, d));
+}
+
+float oc_fmod(float a, float b) { return fmod(a, b); }
+float oc_mod(float a, float b) { return a - b * floor(a / b); }
+float16_t oc_fmod(float16_t a, float16_t b) {
+    return oc_float2half(fmod(oc_half2float(a), oc_half2float(b)));
+}
+float16_t oc_mod(float16_t a, float16_t b) {
+    float x = oc_half2float(a), y = oc_half2float(b);
+    float quotient = oc_half_value(x / y);
+    float integral = oc_half_value(floor(quotient));
+    return oc_float2half(oc_half_sub(x, oc_half_mul(y, integral)));
+}
+vector<float, N> oc_fmod<uint N>(vector<float, N> a, vector<float, N> b) { return fmod(a, b); }
+vector<float, N> oc_mod<uint N>(vector<float, N> a, vector<float, N> b) { return a - b * floor(a / b); }
+vector<float16_t, N> oc_fmod<uint N>(vector<float16_t, N> a, vector<float16_t, N> b) {
+    vector<float16_t, N> result;
+    for (uint i = 0; i < N; ++i) result[i] = oc_fmod(a[i], b[i]);
+    return result;
+}
+vector<float16_t, N> oc_mod<uint N>(vector<float16_t, N> a, vector<float16_t, N> b) {
+    vector<float16_t, N> result;
+    for (uint i = 0; i < N; ++i) result[i] = oc_mod(a[i], b[i]);
+    return result;
+}
 
 // ── Ray helpers ───────────────────────────────────────────────────────────────
 
@@ -407,9 +558,10 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(1, 0)]] RWTexture2D<float4>    g_bindless_surf2d[];
 [[vk::binding(2, 0)]] Texture3D<float4>      g_bindless_tex3d[];
 [[vk::binding(3, 0)]] RWTexture3D<float4>    g_bindless_surf3d[];
-[[vk::binding(5, 0)]] RWTexture2D<uint4> g_bindless_uint_surf2d[];
-[[vk::binding(6, 0)]] RWTexture3D<uint4> g_bindless_uint_surf3d[];
+[[vk::binding(5, 0)]] globallycoherent RWTexture2D<uint4> g_bindless_uint_surf2d[];
+[[vk::binding(6, 0)]] globallycoherent RWTexture3D<uint4> g_bindless_uint_surf3d[];
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
+[[vk::binding(7, 0)]] globallycoherent RWStructuredBuffer<uint> g_texture_write_locks;
 
 // Match CUDA's cudaBoundaryModeZero for surface loads and stores.
 bool oc_tex2d_in_bounds(OCTextureDesc desc, uint x, uint y) {
@@ -620,14 +772,24 @@ void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y
 
 struct OcHitInfo { uint inst_id; uint prim_id; float2 bary; float t; };
 
-bool oc_trace_occlusion(RaytracingAccelerationStructure accel, Ray ray) {
+bool oc_trace_occlusion(uint64_t handle, Ray ray) {
+    if (handle == 0) return false;
+    RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
     while(q.Proceed()) { if(q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) q.CommitNonOpaqueTriangleHit(); }
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
-TriangleHit oc_trace_closest(RaytracingAccelerationStructure accel, Ray ray) {
+TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
+    if (handle == 0) {
+        TriangleHit miss;
+        miss.inst_id = 0xffffffffu;
+        miss.prim_id = 0xffffffffu;
+        miss.bary = float2(0, 0);
+        return miss;
+    }
+    RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
     RayQuery<RAY_FLAG_NONE> q;
     q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
     while (q.Proceed()) {
@@ -651,28 +813,230 @@ TriangleHit oc_trace_closest(RaytracingAccelerationStructure accel, Ray ray) {
 // GEMM DSL markers match the CUDA placeholder; gemm_commands emits arithmetic.
 void oc_tensor_gemm<uint Id>() {}
 
-uint oc_tex2d_read_uint(OCTextureDesc desc, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return uint(0); return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].x; }
-void oc_tex2d_write(OCTextureDesc desc, uint value, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return; g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0,0); }
+// CUDA surface x is measured in sizeof(the requested type), not storage texels.
+// Integer alias views expose each native channel's unconverted bits. BYTE
+// channels are packed/unpacked in little-endian groups of four per uint.
+uint oc_texture_write_lock(OCTextureDesc desc, uint3 p) {
+    return (uint(desc.surf_index) * 0x9e3779b9u ^ p.x * 0x85ebca6bu ^
+            p.y * 0xc2b2ae35u ^ p.z * 0x27d4eb2fu) & 65535u;
+}
 
-uint2 oc_tex2d_read_uint2(OCTextureDesc desc, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return uint2(0); return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)].xy; }
-void oc_tex2d_write(OCTextureDesc desc, uint2 value, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return; g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = uint4(value,0,0); }
+uint4 oc_tex2d_read_words<uint N>(OCTextureDesc desc, uint2 p) {
+    uint width, height;
+    g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
+    uint channels = 1u << (desc.pixel_storage % 3u);
+    uint units = desc.pixel_storage < 3u ? 4u : 1u;
+    if (p.x >= width * channels / (N * units) || p.y >= height) return uint4(0);
+    if (units == 1u && N == channels) return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][p];
+    uint start = p.x * N * units;
+    uint4 result = uint4(0);
+    for (uint word = 0u; word < N; ++word) {
+        for (uint byte = 0u; byte < units; ++byte) {
+            uint component = start + word * units + byte;
+            uint2 pixel = p;
+            pixel.x = component / channels;
+            uint4 loaded = g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][pixel];
+            result[word] |= loaded[component % channels] << (byte * 8u);
+        }
+    }
+    return result;
+}
 
-uint4 oc_tex2d_read_uint4(OCTextureDesc desc, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return uint4(0); return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)]; }
-void oc_tex2d_write(OCTextureDesc desc, uint4 value, uint x, uint y) { if (!oc_tex2d_in_bounds(desc, x, y)) return; g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][uint2(x,y)] = value; }
+void oc_tex2d_write_words<uint N>(OCTextureDesc desc, uint4 value, uint2 p) {
+    uint width, height;
+    g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
+    uint channels = 1u << (desc.pixel_storage % 3u);
+    uint units = desc.pixel_storage < 3u ? 4u : 1u;
+    if (p.x >= width * channels / (N * units) || p.y >= height) return;
+    uint start = p.x * N * units;
+    if (units == 1u && N < channels) {
+        uint2 pixel = p;
+        pixel.x = start / channels;
+        uint lock = oc_texture_write_lock(desc, uint3(pixel, 0u));
+        bool stored = false;
+        [loop] while (!stored) {
+            uint previous;
+            InterlockedCompareExchange(g_texture_write_locks[lock], 0u, 1u, previous);
+            if (previous == 0u) {
+                // Complete and release inside the successful branch, before
+                // reconverging with lanes that are still trying to acquire.
+                DeviceMemoryBarrier();
+                uint4 packed = g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][pixel];
+                for (uint c = 0u; c < N; ++c) packed[start % channels + c] = value[c];
+                g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][pixel] = packed;
+                DeviceMemoryBarrier();
+                InterlockedExchange(g_texture_write_locks[lock], 0u);
+                stored = true;
+            }
+        }
+        return;
+    }
+    // This access covers whole texels; no read/modify/write or lock is needed.
+    for (uint texel = 0u; texel < N * units / channels; ++texel) {
+        uint4 packed = uint4(0);
+        for (uint c = 0u; c < channels; ++c) {
+            uint component = texel * channels + c;
+            packed[c] = value[component / units] >> ((component % units) * 8u);
+            if (units == 4u) packed[c] &= 255u;
+        }
+        uint2 pixel = p;
+        pixel.x = start / channels + texel;
+        g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][pixel] = packed;
+    }
+}
+uint oc_tex2d_read_uint(OCTextureDesc desc, uint x, uint y) { return oc_tex2d_read_words<1>(desc, uint2(x,y)).x; }
+void oc_tex2d_write(OCTextureDesc desc, uint value, uint x, uint y) { oc_tex2d_write_words<1>(desc, uint4(value,0,0,0), uint2(x,y)); }
+uint2 oc_tex2d_read_uint2(OCTextureDesc desc, uint x, uint y) { return oc_tex2d_read_words<2>(desc, uint2(x,y)).xy; }
+void oc_tex2d_write(OCTextureDesc desc, uint2 value, uint x, uint y) { oc_tex2d_write_words<2>(desc, uint4(value,0,0), uint2(x,y)); }
+uint4 oc_tex2d_read_uint4(OCTextureDesc desc, uint x, uint y) { return oc_tex2d_read_words<4>(desc, uint2(x,y)); }
+void oc_tex2d_write(OCTextureDesc desc, uint4 value, uint x, uint y) { oc_tex2d_write_words<4>(desc, value, uint2(x,y)); }
 
-uint oc_tex3d_read_uint(OCTextureDesc desc, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint(0); return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].x; }
-void oc_tex3d_write(OCTextureDesc desc, uint value, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return; g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0,0); }
+uint4 oc_tex3d_read_words<uint N>(OCTextureDesc desc, uint3 p) {
+    uint width, height, depth;
+    g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height, depth);
+    uint channels = 1u << (desc.pixel_storage % 3u);
+    uint units = desc.pixel_storage < 3u ? 4u : 1u;
+    if (p.x >= width * channels / (N * units) || p.y >= height || p.z >= depth) return uint4(0);
+    if (units == 1u && N == channels) return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][p];
+    uint start = p.x * N * units;
+    uint4 result = uint4(0);
+    for (uint word = 0u; word < N; ++word) {
+        for (uint byte = 0u; byte < units; ++byte) {
+            uint component = start + word * units + byte;
+            uint3 pixel = p;
+            pixel.x = component / channels;
+            uint4 loaded = g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][pixel];
+            result[word] |= loaded[component % channels] << (byte * 8u);
+        }
+    }
+    return result;
+}
 
-uint2 oc_tex3d_read_uint2(OCTextureDesc desc, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint2(0); return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)].xy; }
-void oc_tex3d_write(OCTextureDesc desc, uint2 value, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return; g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = uint4(value,0,0); }
+void oc_tex3d_write_words<uint N>(OCTextureDesc desc, uint4 value, uint3 p) {
+    uint width, height, depth;
+    g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height, depth);
+    uint channels = 1u << (desc.pixel_storage % 3u);
+    uint units = desc.pixel_storage < 3u ? 4u : 1u;
+    if (p.x >= width * channels / (N * units) || p.y >= height || p.z >= depth) return;
+    uint start = p.x * N * units;
+    if (units == 1u && N < channels) {
+        uint3 pixel = p;
+        pixel.x = start / channels;
+        uint lock = oc_texture_write_lock(desc, pixel);
+        bool stored = false;
+        [loop] while (!stored) {
+            uint previous;
+            InterlockedCompareExchange(g_texture_write_locks[lock], 0u, 1u, previous);
+            if (previous == 0u) {
+                // Complete and release inside the successful branch, before
+                // reconverging with lanes that are still trying to acquire.
+                DeviceMemoryBarrier();
+                uint4 packed = g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][pixel];
+                for (uint c = 0u; c < N; ++c) packed[start % channels + c] = value[c];
+                g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][pixel] = packed;
+                DeviceMemoryBarrier();
+                InterlockedExchange(g_texture_write_locks[lock], 0u);
+                stored = true;
+            }
+        }
+        return;
+    }
+    // This access covers whole texels; no read/modify/write or lock is needed.
+    for (uint texel = 0u; texel < N * units / channels; ++texel) {
+        uint4 packed = uint4(0);
+        for (uint c = 0u; c < channels; ++c) {
+            uint component = texel * channels + c;
+            packed[c] = value[component / units] >> ((component % units) * 8u);
+            if (units == 4u) packed[c] &= 255u;
+        }
+        uint3 pixel = p;
+        pixel.x = start / channels + texel;
+        g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][pixel] = packed;
+    }
+}
+uint oc_tex3d_read_uint(OCTextureDesc desc, uint x, uint y, uint z) { return oc_tex3d_read_words<1>(desc, uint3(x,y,z)).x; }
+void oc_tex3d_write(OCTextureDesc desc, uint value, uint x, uint y, uint z) { oc_tex3d_write_words<1>(desc, uint4(value,0,0,0), uint3(x,y,z)); }
+uint2 oc_tex3d_read_uint2(OCTextureDesc desc, uint x, uint y, uint z) { return oc_tex3d_read_words<2>(desc, uint3(x,y,z)).xy; }
+void oc_tex3d_write(OCTextureDesc desc, uint2 value, uint x, uint y, uint z) { oc_tex3d_write_words<2>(desc, uint4(value,0,0), uint3(x,y,z)); }
+uint4 oc_tex3d_read_uint4(OCTextureDesc desc, uint x, uint y, uint z) { return oc_tex3d_read_words<4>(desc, uint3(x,y,z)); }
+void oc_tex3d_write(OCTextureDesc desc, uint4 value, uint x, uint y, uint z) { oc_tex3d_write_words<4>(desc, value, uint3(x,y,z)); }
 
-uint4 oc_tex3d_read_uint4(OCTextureDesc desc, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return uint4(0); return g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)]; }
-void oc_tex3d_write(OCTextureDesc desc, uint4 value, uint x, uint y, uint z) { if (!oc_tex3d_in_bounds(desc, x, y, z)) return; g_bindless_uint_surf3d[NonUniformResourceIndex(uint(desc.surf_index))][uint3(x,y,z)] = value; }
 
 float2x2 oc_inverse(float2x2 m) { return float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) / determinant(m); }
-matrix<float16_t,2,2> oc_inverse(matrix<float16_t,2,2> m) { return matrix<float16_t,2,2>(oc_inverse(float2x2(m))); }
-matrix<float16_t,3,3> oc_inverse(matrix<float16_t,3,3> m) { return matrix<float16_t,3,3>(oc_inverse(float3x3(m))); }
-matrix<float16_t,4,4> oc_inverse(matrix<float16_t,4,4> m) { return matrix<float16_t,4,4>(oc_inverse(float4x4(m))); }
+// Keep CUDA's half-precision operation order. Widening the entire inverse to
+// float loses the rounding of minors, determinant and cofactor products.
+matrix<float16_t,2,2> oc_inverse(matrix<float16_t,2,2> input) {
+    float2x2 m = oc_half2float(input);
+    float d = oc_half_minor(m[0][0], m[1][1], m[1][0], m[0][1]);
+    // CUDA's 1.0f / half and half * float are float operations, rounded by
+    // construction of the final half matrix (not by the reciprocal itself).
+    float reciprocal = 1.0f / d;
+    float2x2 result = float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) * reciprocal;
+    return oc_float2half(result);
+}
+matrix<float16_t,3,3> oc_inverse(matrix<float16_t,3,3> input) {
+    float3x3 m = oc_half2float(input);
+    float3x3 c;
+    c[0][0] = oc_half_minor(m[1][1], m[2][2], m[2][1], m[1][2]);
+    c[0][1] = oc_half_minor(m[2][1], m[0][2], m[0][1], m[2][2]);
+    c[0][2] = oc_half_minor(m[0][1], m[1][2], m[1][1], m[0][2]);
+    c[1][0] = oc_half_minor(m[2][0], m[1][2], m[1][0], m[2][2]);
+    c[1][1] = oc_half_minor(m[0][0], m[2][2], m[2][0], m[0][2]);
+    c[1][2] = oc_half_minor(m[1][0], m[0][2], m[0][0], m[1][2]);
+    c[2][0] = oc_half_minor(m[1][0], m[2][1], m[2][0], m[1][1]);
+    c[2][1] = oc_half_minor(m[2][0], m[0][1], m[0][0], m[2][1]);
+    c[2][2] = oc_half_minor(m[0][0], m[1][1], m[1][0], m[0][1]);
+    float d1 = oc_half_mul(m[1][0], oc_half_minor(m[0][1], m[2][2], m[2][1], m[0][2]));
+    // Match CUDA's two outer HFMA steps as well as the fused minors.
+    float partial = oc_half_fma(m[0][0], c[0][0], -d1);
+    float determinant = oc_half_fma(m[2][0], c[0][2], partial);
+    float reciprocal = oc_half_value(1.0f / determinant);
+    return oc_float2half(c * reciprocal);
+}
+matrix<float16_t,4,4> oc_inverse(matrix<float16_t,4,4> input) {
+    float4x4 m = oc_half2float(input);
+    float coef00 = oc_half_minor(m[2].z, m[3].w, m[3].z, m[2].w);
+    float coef02 = oc_half_minor(m[1].z, m[3].w, m[3].z, m[1].w);
+    float coef03 = oc_half_minor(m[1].z, m[2].w, m[2].z, m[1].w);
+    float coef04 = oc_half_minor(m[2].y, m[3].w, m[3].y, m[2].w);
+    float coef06 = oc_half_minor(m[1].y, m[3].w, m[3].y, m[1].w);
+    float coef07 = oc_half_minor(m[1].y, m[2].w, m[2].y, m[1].w);
+    float coef08 = oc_half_minor(m[2].y, m[3].z, m[3].y, m[2].z);
+    float coef10 = oc_half_minor(m[1].y, m[3].z, m[3].y, m[1].z);
+    float coef11 = oc_half_minor(m[1].y, m[2].z, m[2].y, m[1].z);
+    float coef12 = oc_half_minor(m[2].x, m[3].w, m[3].x, m[2].w);
+    float coef14 = oc_half_minor(m[1].x, m[3].w, m[3].x, m[1].w);
+    float coef15 = oc_half_minor(m[1].x, m[2].w, m[2].x, m[1].w);
+    float coef16 = oc_half_minor(m[2].x, m[3].z, m[3].x, m[2].z);
+    float coef18 = oc_half_minor(m[1].x, m[3].z, m[3].x, m[1].z);
+    float coef19 = oc_half_minor(m[1].x, m[2].z, m[2].x, m[1].z);
+    float coef20 = oc_half_minor(m[2].x, m[3].y, m[3].x, m[2].y);
+    float coef22 = oc_half_minor(m[1].x, m[3].y, m[3].x, m[1].y);
+    float coef23 = oc_half_minor(m[1].x, m[2].y, m[2].x, m[1].y);
+    float4 fac0 = float4(coef00, coef00, coef02, coef03);
+    float4 fac1 = float4(coef04, coef04, coef06, coef07);
+    float4 fac2 = float4(coef08, coef08, coef10, coef11);
+    float4 fac3 = float4(coef12, coef12, coef14, coef15);
+    float4 fac4 = float4(coef16, coef16, coef18, coef19);
+    float4 fac5 = float4(coef20, coef20, coef22, coef23);
+    float4 v0 = float4(m[1].x, m[0].x, m[0].x, m[0].x);
+    float4 v1 = float4(m[1].y, m[0].y, m[0].y, m[0].y);
+    float4 v2 = float4(m[1].z, m[0].z, m[0].z, m[0].z);
+    float4 v3 = float4(m[1].w, m[0].w, m[0].w, m[0].w);
+    float4 inv0 = oc_half_fma(v3, fac2, oc_half_fma(v1, fac0, -oc_half_value(v2 * fac1)));
+    float4 inv1 = oc_half_fma(v3, fac4, oc_half_fma(v0, fac0, -oc_half_value(v2 * fac3)));
+    float4 inv2 = oc_half_fma(v3, fac5, oc_half_fma(v0, fac1, -oc_half_value(v1 * fac3)));
+    float4 inv3 = oc_half_fma(v2, fac5, oc_half_fma(v0, fac2, -oc_half_value(v1 * fac4)));
+    inv0 *= float4(1, -1, 1, -1);
+    inv1 *= float4(-1, 1, -1, 1);
+    inv2 *= float4(1, -1, 1, -1);
+    inv3 *= float4(-1, 1, -1, 1);
+    float dot1 = oc_half_fma(m[0].x, inv0.x, oc_half_mul(m[0].y, inv1.x));
+    dot1 = oc_half_fma(m[0].z, inv2.x, dot1);
+    dot1 = oc_half_fma(m[0].w, inv3.x, dot1);
+    float reciprocal = 1.0f / dot1;
+    return oc_float2half(float4x4(inv0, inv1, inv2, inv3) * reciprocal);
+}
 float16_t oc_inverse_lerp(float16_t x, float16_t a, float16_t b) { return (x-a)/(b-a); }
 vector<float16_t,2> oc_inverse_lerp(vector<float16_t,2> x, vector<float16_t,2> a, vector<float16_t,2> b) { return (x-a)/(b-a); }
 vector<float16_t,3> oc_inverse_lerp(vector<float16_t,3> x, vector<float16_t,3> a, vector<float16_t,3> b) { return (x-a)/(b-a); }

@@ -49,7 +49,8 @@ VkTexture::VkTexture(VulkanComputeDevice *device, uint3 res,
 }
 
 void VkTexture::register_descriptors(bool is_3d) noexcept {
-    sample_slot_ = device_->allocate_texture_slot();
+    is_3d_ = is_3d;
+    sample_slot_ = device_->allocate_texture_slot(is_3d);
     storage_slot_ = sample_slot_;
     descriptor_.texture = sample_slot_;
     descriptor_.surface = storage_slot_;
@@ -64,7 +65,7 @@ void VkTexture::register_descriptors(bool is_3d) noexcept {
     storage_info.imageView   = image_.storage_view != VK_NULL_HANDLE
                                    ? image_.storage_view : image_.view;
 
-    VkWriteDescriptorSet writes[2]{};
+    VkWriteDescriptorSet writes[3]{};
     writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet          = device_->global_desc_set();
     writes[0].dstBinding      = is_3d ? 2 : 0;
@@ -83,11 +84,37 @@ void VkTexture::register_descriptors(bool is_3d) noexcept {
     writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     writes[1].pImageInfo      = &storage_info;
 
-    vkUpdateDescriptorSets(device_->logical_device(), 2, writes, 0, nullptr);
+    uint32_t write_count = 2;
+    VkDescriptorImageInfo uint_storage_info{};
+    if (!unsigned_format) {
+        VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        view.image = image_.image;
+        view.viewType = is_3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
+        switch (descriptor_.pixel_storage) {
+            case PixelStorage::BYTE1: view.format = VK_FORMAT_R8_UINT; break;
+            case PixelStorage::BYTE2: view.format = VK_FORMAT_R8G8_UINT; break;
+            case PixelStorage::BYTE4: view.format = VK_FORMAT_R8G8B8A8_UINT; break;
+            case PixelStorage::FLOAT1: view.format = VK_FORMAT_R32_UINT; break;
+            case PixelStorage::FLOAT2: view.format = VK_FORMAT_R32G32_UINT; break;
+            case PixelStorage::FLOAT4: view.format = VK_FORMAT_R32G32B32A32_UINT; break;
+            default: OC_ERROR("Unsupported Vulkan integer surface view format"); break;
+        }
+        view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        OC_VK_CHECK(vkCreateImageView(device_->logical_device(), &view, nullptr, &uint_storage_view_));
+        uint_storage_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        uint_storage_info.imageView = uint_storage_view_;
+        writes[2] = writes[1];
+        writes[2].dstBinding = is_3d ? 6 : 5;
+        writes[2].pImageInfo = &uint_storage_info;
+        write_count = 3;
+    }
+    vkUpdateDescriptorSets(device_->logical_device(), write_count, writes, 0, nullptr);
 }
 
 VkTexture::~VkTexture() {
-    device_->release_texture_slot(sample_slot_);
+    device_->release_texture_slot(sample_slot_, is_3d_);
+    if (uint_storage_view_ != VK_NULL_HANDLE)
+        vkDestroyImageView(device_->logical_device(), uint_storage_view_, nullptr);
     device_->free_image(image_);
 }
 

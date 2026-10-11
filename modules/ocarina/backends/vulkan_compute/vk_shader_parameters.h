@@ -12,7 +12,10 @@ namespace ocarina {
 struct VkShaderParameterLayout {
     static constexpr uint32_t params_offset = 0u;
     static constexpr uint32_t dim_offset = 8u;
-    static constexpr uint32_t inline_offset = 20u;
+    // Dispatches larger than a native group-count limit are tiled. The shader
+    // sees the original group coordinates, including from nested callables.
+    static constexpr uint32_t group_base_offset = 20u;
+    static constexpr uint32_t inline_offset = 32u;
     static constexpr uint32_t max_push_bytes = 128u;
 
     size_t extent{};

@@ -14,7 +14,8 @@ namespace ocarina {
 VkBuildAccelerationStructureFlagsKHR VkAccel::vk_build_flags() const noexcept {
     switch (usage_tag_) {
         case FAST_BUILD:
-            return VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+            return VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR |
+                   VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
         case FAST_UPDATE:
             return VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR |
                    VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
@@ -138,10 +139,12 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
         inst.instanceCustomIndex                    = i;
         inst.mask                                   = 1u;
         inst.instanceShaderBindingTableRecordOffset = 0u;
-        inst.flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+        inst.flags = mesh_impl->geom_tag() & DISABLE_FACE_CULLING ?
+                         VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : 0u;
         inst.accelerationStructureReference        = mesh_impl->blas_handle();
         inst_ptr[i] = inst;
     }
+    OC_VK_CHECK(vmaFlushAllocation(device_->vma_allocator(), instances_buf_.alloc, 0, VK_WHOLE_SIZE));
     vmaUnmapMemory(device_->vma_allocator(), instances_buf_.alloc);
 
     reallocate_tlas(instance_count);
@@ -172,6 +175,11 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     });
 
     device_->free_buffer(scratch);
+    if (usage_tag_ != FAST_UPDATE) {
+        compact_acceleration_structure(device_, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+                                       tlas_, tlas_buf_, tlas_address_);
+        build_info_.dstAccelerationStructure = tlas_;
+    }
     built_ = true;
     built_blas_.clear();
     for (const auto &mesh : meshes_) built_blas_.push_back(mesh.impl()->blas_handle());
@@ -207,6 +215,7 @@ void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
             for (int c = 0; c < 4; ++c)
                 inst_ptr[i].transform.matrix[r][c] = t[c][r];
     }
+    OC_VK_CHECK(vmaFlushAllocation(device_->vma_allocator(), instances_buf_.alloc, 0, VK_WHOLE_SIZE));
     vmaUnmapMemory(device_->vma_allocator(), instances_buf_.alloc);
 
     VkAccelerationStructureBuildSizesInfoKHR size_info{

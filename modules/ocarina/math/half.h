@@ -45,69 +45,44 @@ template<typename T>
 using binary_op_half_target_t = typename detail::binary_op_half_target<std::remove_cvref_t<T>>::type;
 
 static constexpr uint16_t float_to_half(float f) {
-    uint32_t bits_ = bit_cast<uint32_t>(f);
-    uint16_t sign = (bits_ >> 31) & 0x1;
-    uint16_t exp = (bits_ >> 23) & 0xFF;
-    uint32_t mantissa = bits_ & 0x7FFFFF;
-
-    if (exp == 0xFF) {
-        // inf or nan
-        return (sign << 15) | 0x7C00 | (mantissa ? 0x200 : 0);
+    const uint32_t bits = bit_cast<uint32_t>(f);
+    const uint32_t sign = (bits >> 16u) & 0x8000u;
+    const uint32_t exponent = (bits >> 23u) & 0xffu;
+    const uint32_t mantissa = bits & 0x7fffffu;
+    if (exponent == 0xffu)
+        return uint16_t(sign | 0x7c00u | (mantissa ? ((mantissa >> 13u) | 0x200u) : 0u));
+    if (exponent >= 143u) return uint16_t(sign | 0x7c00u);
+    // Round to nearest, ties to even, including gradual underflow. Keeping
+    // the float exponent unsigned is safe because it is checked before biasing.
+    if (exponent <= 112u) {
+        if (exponent < 102u) return uint16_t(sign);
+        const uint32_t shift = 126u - exponent;
+        const uint32_t significand = mantissa | 0x800000u;
+        const uint32_t truncated = significand >> shift;
+        const uint32_t remainder = significand & ((1u << shift) - 1u);
+        const uint32_t halfway = 1u << (shift - 1u);
+        const uint32_t rounded = truncated + uint32_t(remainder > halfway ||
+            (remainder == halfway && (truncated & 1u)));
+        return uint16_t(sign | rounded);
     }
-
-    if (exp == 0) {
-        if (mantissa == 0) {
-            return sign << 15;
-        }
-        int shift = 0;
-        while ((mantissa & 0x400000) == 0) {
-            mantissa <<= 1;
-            shift++;
-        }
-        mantissa &= 0x7FFFFF;
-        exp = 1 - shift;
-    }
-
-    exp = exp - 127 + 15;
-
-    if (exp >= 31) {
-        return (sign << 15) | 0x7C00;
-    } else if (exp <= 0) {
-        uint32_t shifted = (mantissa | 0x800000) >> (1 - exp);
-        return (sign << 15) | (shifted >> 13);
-    }
-
-    uint16_t half_exp = exp & 0x1F;
-    uint16_t half_mantissa = (mantissa >> 13) & 0x3FF;
-    return (sign << 15) | (half_exp << 10) | half_mantissa;
+    const uint32_t rounded = (mantissa + 0xfffu + ((mantissa >> 13u) & 1u)) >> 13u;
+    return uint16_t(sign | (((exponent - 112u) << 10u) + rounded));
 }
 static constexpr float half_to_float(uint16_t h) {
-    uint16_t sign = (h >> 15) & 0x1;
-    uint16_t exp = (h >> 10) & 0x1F;
-    uint16_t mantissa = h & 0x3FF;
-
-    if (exp == 0x1F) {
-        // inf or nan
-        uint32_t result = (sign << 31) | 0x7F800000 | (mantissa ? 0x00400000 : 0);
-        return *reinterpret_cast<float *>(&result);
-    }
-
-    if (exp == 0) {
-        if (mantissa == 0) {
-            uint32_t result = sign << 31;
-            return *reinterpret_cast<float *>(&result);
+    const uint32_t sign = uint32_t(h & 0x8000u) << 16u;
+    const uint32_t exponent = (h >> 10u) & 0x1fu;
+    uint32_t mantissa = h & 0x3ffu;
+    if (exponent == 31u) return bit_cast<float>(sign | 0x7f800000u | (mantissa << 13u));
+    if (exponent == 0u) {
+        if (mantissa == 0u) return bit_cast<float>(sign);
+        uint32_t normalized_exponent = 113u;
+        while ((mantissa & 0x400u) == 0u) {
+            mantissa <<= 1u;
+            --normalized_exponent;
         }
-        uint32_t result = (sign << 31) | 0x00800000;
-        while ((mantissa & 0x400) == 0) {
-            mantissa <<= 1;
-            result -= 0x00800000;
-        }
-        result |= (mantissa & 0x3FF) << 13;
-        return *reinterpret_cast<float *>(&result);
+        return bit_cast<float>(sign | (normalized_exponent << 23u) | ((mantissa & 0x3ffu) << 13u));
     }
-
-    uint32_t result = (sign << 31) | ((exp - 15 + 127) << 23) | (mantissa << 13);
-    return *reinterpret_cast<float *>(&result);
+    return bit_cast<float>(sign | ((exponent + 112u) << 23u) | (mantissa << 13u));
 }
 
 template<typename T>
@@ -188,7 +163,7 @@ public:
         if (is_nan() || other.is_nan()) {                 \
             return bool_nan;                              \
         }                                                 \
-        return bits_ op other.bits_;                      \
+        return half_to_float(bits_) op half_to_float(other.bits_); \
     }                                                     \
                                                           \
     template<typename T>                                  \

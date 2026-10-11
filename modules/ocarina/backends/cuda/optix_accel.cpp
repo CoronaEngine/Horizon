@@ -64,10 +64,11 @@ vector<OptixInstance> OptixAccel::construct_optix_instances() const noexcept {
     optix_instances.reserve(instance_num);
     for (int i = 0; i < instance_num; ++i) {
         float4x4 transform = transforms_[i];
-        OptixInstance optix_instance;
+        OptixInstance optix_instance{};
         const auto *cuda_mesh = dynamic_cast<const CUDAMesh *>(meshes_[i].impl());
         optix_instance.traversableHandle = cuda_mesh->blas_handle();
-        optix_instance.flags = OPTIX_INSTANCE_FLAG_NONE;
+        optix_instance.flags = cuda_mesh->geom_tag() & DISABLE_FACE_CULLING ?
+                                   OPTIX_INSTANCE_FLAG_DISABLE_TRIANGLE_FACE_CULLING : OPTIX_INSTANCE_FLAG_NONE;
         optix_instance.instanceId = i;
         optix_instance.visibilityMask = 1;
         optix_instance.sbtOffset = 0;

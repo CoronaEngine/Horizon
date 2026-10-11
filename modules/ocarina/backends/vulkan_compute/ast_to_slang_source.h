@@ -21,6 +21,10 @@ protected:
     Scratch storage_functions_;
     set<const Type *> storage_types_;
     set<string> value_helpers_;
+    // In a storage-reference callable variant, these argument variables hold
+    // physical addresses. Each access uses the host ABI instead of copy-in/out.
+    set<uint> storage_reference_arguments_;
+    void _emit_custom_call(const CallExpr *expr) noexcept;
     void _emit_matrix_constructor(const CallExpr *expr) noexcept;
     void _emit_default_value(const Type *type) noexcept;
     void _emit_array_operation(const Type *result, const list<const Expression *> &arguments,
@@ -46,6 +50,7 @@ protected:
     void visit(const BinaryExpr *expr) noexcept override;
     void visit(const SubscriptExpr *expr) noexcept override;
     void visit(const MemberExpr *expr) noexcept override;
+    void visit(const RefExpr *expr) noexcept override;
     void visit(const AssignStmt *stmt) noexcept override;
     void visit(const CallExpr *expr) noexcept override;
     void visit(const CastExpr *expr) noexcept override;

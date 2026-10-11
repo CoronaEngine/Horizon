@@ -187,8 +187,8 @@ void test_warp_active_count(Device &device, const char *backend, uint block_size
     expect_sentinel(host.front());
     expect_sentinel(host.back());
     // For this 1D launch, verify contiguous subgroup partitions using the
-    // observed full subgroup's active count; do not call the unsupported
-    // public warp_size wrapper or assume both devices select 32 lanes.
+    // observed full subgroup's active count. Public lane/size queries are
+    // checked separately, including divergent lanes.
     const uint observed_width = host[1u].x;
     require(observed_width != 0u && observed_width <= block_size && block_size % observed_width == 0u,
             "warp active count reported an invalid full subgroup size");
@@ -213,15 +213,106 @@ void probe_zero_dispatch(Device &device, const char *backend) {
     auto stream = device.create_stream();
     uint result = sentinel;
     stream << output.byte_set(0xcdu) << synchronize() << commit();
-    // This isolated diagnostic exercises automatic sizing of an empty grid.
-    // A backend may fail before or during its native launch and terminate;
-    // callers must run the probe separately with a timeout and retain its
-    // exit status. It is never part of the normal regression path.
+    // Empty automatic dispatches must be harmless, including on CUDA.
     std::cout << "COMPUTE_ZERO_DISPATCH backend=" << backend << " phase=attempt" << std::endl;
     stream << shader(output).dispatch(0u) << output.download(&result) << synchronize() << commit();
     require(result == sentinel, "automatic zero dispatch wrote outside its empty domain");
+    // An empty dispatch must not poison the pipeline-binding cache used by
+    // the next nonempty invocation in the same command buffer.
+    stream << shader(output).dispatch(make_uint3(1u, 0u, 1u))
+           << shader(output).dispatch(1u) << output.download(&result) << synchronize() << commit();
+    require(result == 123u, "zero dispatch broke the following pipeline binding");
     std::cout << "COMPUTE_ZERO_DISPATCH backend=" << backend
               << " result=no-op sentinel_unchanged=1" << std::endl;
+}
+
+void test_invoke_reuse(Device &device) {
+    constexpr uint capacity = 16u;
+    constexpr uint saved_stamp = 7123u;
+    auto output = device.create_buffer<uint4>(capacity + 2u);
+    Kernel kernel = [](BufferVar<uint4> out, Uint stamp) {
+        Uint i = dispatch_id();
+        out.write(i, make_uint4(dispatch_dim().x, dispatch_dim().y, i, stamp));
+    };
+    kernel.function()->set_block_dim(8u);
+    auto shader = device.compile(kernel, "compute-reused-invocation");
+    uint stamp = saved_stamp;
+    auto invoke = shader(output.view(1u, capacity), stamp);
+    stamp = 999u;
+    const uint sizes[]{8u, 16u, 3u};
+    ShaderDispatchCommand *commands[]{invoke.dispatch(sizes[0]), invoke.dispatch(sizes[1]), invoke.dispatch(sizes[2])};
+    vector<uint4> actual[3];
+    auto stream = device.create_stream();
+    for (uint pass = 0u; pass < 3u; ++pass) {
+        actual[pass].resize(capacity + 2u, make_uint4(sentinel));
+        // Preserve a separate result for every launch so a later write cannot
+        // conceal the wrong domain or stamp from an earlier command.
+        stream << output.byte_set(0xcdu) << commands[pass] << output.download(actual[pass].data());
+    }
+    stream << synchronize() << commit();
+    for (uint pass = 0u; pass < 3u; ++pass) {
+        expect_sentinel(actual[pass].front());
+        expect_sentinel(actual[pass].back());
+        for (uint i = 0u; i < capacity; ++i) {
+            if (i < sizes[pass])
+                require(all(actual[pass][i + 1u] == make_uint4(sizes[pass], 1u, i, saved_stamp)),
+                        "reused invocation lost command dimensions or its parameter snapshot");
+            else
+                expect_sentinel(actual[pass][i + 1u]);
+        }
+    }
+}
+
+void test_warp_queries(Device &device) {
+    constexpr uint block = 64u, count = 141u, records = 4u;
+    auto output = device.create_buffer<uint4>(count * records);
+    Kernel kernel = [](BufferVar<uint4> out) {
+        Uint i = dispatch_id();
+        Bool selected = i % 3u == 1u;
+        out.write(i * records, make_uint4(warp_lane_id(), warp_size(), warp_first_active_lane(),
+                                          cast<uint>(warp_is_first_active_lane())));
+        out.write(i * records + 1u, make_uint4(warp_prefix_count_bits(selected), warp_active_count_bits(selected),
+                                               warp_prefix_count_bits(Bool(true)), warp_active_count_bits(Bool(true))));
+        out.write(i * records + 2u, warp_active_bit_mask(selected));
+        $if(i % 2u == 1u) {
+            out.write(i * records + 3u, make_uint4(warp_first_active_lane(), cast<uint>(warp_is_first_active_lane()),
+                                                  warp_active_count_bits(Bool(true)), warp_prefix_count_bits(Bool(true))));
+        };
+    };
+    kernel.function()->set_block_dim(block);
+    auto shader = device.compile(kernel, "compute-warp-queries-divergence");
+    vector<uint4> actual(count * records);
+    auto stream = device.create_stream();
+    stream << output.byte_set(0xcdu) << shader(output).dispatch(count)
+           << output.download(actual.data()) << synchronize() << commit();
+    for (uint i = 0; i < count; ++i) {
+        const uint width = actual[i * records].y;
+        require(width == 32u, "public warp width must match CUDA's 32 lanes");
+        const uint first = (i / block) * block + ((i % block) / width) * width;
+        const uint last = std::min(first + width, count);
+        const uint lane = i - first;
+        require(all(actual[i * records] == make_uint4(lane, width, 0u, uint(lane == 0u))), "warp query semantics differ");
+        uint selected_count = 0u, prefix = 0u, odd_count = 0u, odd_prefix = 0u, odd_first = UINT32_MAX;
+        uint4 ballot = make_uint4(0u);
+        for (uint j = first; j < last; ++j) {
+            if (j % 3u == 1u) {
+                ++selected_count;
+                prefix += uint(j < i);
+                ballot[(j - first) / 32u] |= 1u << ((j - first) % 32u);
+            }
+            if (j % 2u == 1u) {
+                ++odd_count;
+                odd_prefix += uint(j < i);
+                odd_first = std::min(odd_first, j - first);
+            }
+        }
+        require(all(actual[i * records + 1u] == make_uint4(prefix, selected_count, lane, last - first)), "warp prefix/count mismatch");
+        require(all(actual[i * records + 2u] == ballot), "warp ballot mismatch");
+        if (i % 2u == 1u)
+            require(all(actual[i * records + 3u] == make_uint4(odd_first, uint(lane == odd_first), odd_count, odd_prefix)),
+                    "divergent active-lane query mismatch");
+        else expect_sentinel(actual[i * records + 3u]);
+    }
 }
 }
 
@@ -239,6 +330,8 @@ int main(int argc, char **argv) {
                        make_uint3(13u, 7u, 1u), make_uint3(9u, 5u, 3u)});
     test_layout_cases(device, backend, "automatic-fit", make_uint3(0u), make_uint3(0u),
                       {make_uint3(65u, 1u, 1u), make_uint3(13u, 7u, 1u), make_uint3(9u, 5u, 3u)}, true);
+    test_layout_cases(device, backend, "large-yz-domain", make_uint3(0u), make_uint3(0u),
+                      {make_uint3(2u, 65537u, 1u), make_uint3(1u, 1u, 65537u)});
     test_layout_cases(device, backend, "explicit-1d-tail", make_uint3(0u), make_uint3(8u, 1u, 1u),
                       {make_uint3(7u, 1u, 1u), make_uint3(8u, 1u, 1u), make_uint3(9u, 1u, 1u),
                        make_uint3(64u, 1u, 1u), make_uint3(65u, 1u, 1u)});
@@ -252,12 +345,13 @@ int main(int argc, char **argv) {
                       {make_uint3(9u, 7u, 5u)});
     // A nonzero native launch with an empty logical domain is defined on both
     // backends: the generated bounds guard returns before every user write.
-    // Automatic zero dispatch is separate: CUDA's current automatic sizing
-    // produces a zero block width, then divides by it while deriving the grid.
     test_layout_cases(device, backend, "zero-domain-explicit-grid", make_uint3(1u), make_uint3(4u, 3u, 2u),
                       {make_uint3(0u, 7u, 5u), make_uint3(5u, 0u, 3u), make_uint3(5u, 3u, 0u), make_uint3(0u)});
     test_full_group_barriers(device);
     test_warp_active_count(device, backend, 32u);
     test_warp_active_count(device, backend, 64u);
+    test_warp_queries(device);
+    test_invoke_reuse(device);
+    probe_zero_dispatch(device, backend);
     std::cout << "compute dispatch parity checks passed" << std::endl;
 }

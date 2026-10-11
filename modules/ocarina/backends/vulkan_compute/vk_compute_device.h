@@ -78,8 +78,9 @@ private:
     VkDescriptorPool      desc_pool_{VK_NULL_HANDLE};
     VkDescriptorSetLayout global_layout_{VK_NULL_HANDLE};
     VkDescriptorSet       global_set_{VK_NULL_HANDLE};
-    uint32_t next_texture_slot_{1u};
-    vector<uint32_t> free_texture_slots_;
+    VkBufferAllocation texture_write_locks_{};
+    uint32_t next_texture_slot_[2]{1u, 1u};
+    vector<uint32_t> free_texture_slots_[2];
 
     // ── Sampler cache ────────────────────────────────────────────────────────
     static constexpr uint32_t c_sampler_count = 16u;
@@ -102,9 +103,9 @@ private:
     void init_samplers() noexcept;
 
 public:
-    static constexpr uint32_t max_texture_slots = 4096u;
-    uint32_t allocate_texture_slot() noexcept;
-    void release_texture_slot(uint32_t slot) noexcept;
+    static constexpr uint32_t max_texture_slots = 50001u; // Public bindless capacity + null.
+    uint32_t allocate_texture_slot(bool is_3d) noexcept;
+    void release_texture_slot(uint32_t slot, bool is_3d) noexcept;
     explicit VulkanComputeDevice(RHIContext *context);
     ~VulkanComputeDevice() noexcept;
 
