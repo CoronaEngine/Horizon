@@ -46,6 +46,12 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept { return resource_ != nullptr && resource_->valid(); }
 
+        // Compare retained resource identity without mapping or creating a descriptor.
+        [[nodiscard]] bool same_resource(const ResourceHandle& other) const noexcept
+        {
+            return resource_ == other.resource_;
+        }
+
     protected:
         [[nodiscard]] std::uintptr_t resource_id() const noexcept { return resource_ ? resource_->id() : 0; }
 
