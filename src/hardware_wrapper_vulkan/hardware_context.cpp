@@ -529,13 +529,7 @@ namespace Corona::Horizon
 
         std::vector<FeatureStatus> status;
         add_required_feature(status, "Vulkan 1.0", "samplerAnisotropy", features.features.samplerAnisotropy);
-#if defined(_WIN32)
-        add_required_feature(status, "Vulkan 1.0", "geometryShader", features.features.geometryShader);
-#endif
         add_required_feature(status, "Vulkan 1.0", "shaderInt16", features.features.shaderInt16);
-#if defined(_WIN32)
-        add_required_feature(status, "Vulkan 1.0", "wideLines", features.features.wideLines);
-#endif
         add_required_feature(status, "Vulkan 1.0", "fragmentStoresAndAtomics", features.features.fragmentStoresAndAtomics);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageExtendedFormats", features.features.shaderStorageImageExtendedFormats);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageReadWithoutFormat", features.features.shaderStorageImageReadWithoutFormat);
@@ -1148,13 +1142,7 @@ namespace Corona::Horizon
         create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice&) {
             VkPhysicalDeviceFeatures features {};
             features.samplerAnisotropy = VK_TRUE;
-#if defined(_WIN32)
-            features.geometryShader = VK_TRUE;
-#endif
             features.shaderInt16 = VK_TRUE;
-#if defined(_WIN32)
-            features.wideLines = VK_TRUE;
-#endif
             features.fragmentStoresAndAtomics = VK_TRUE;
             features.shaderStorageImageExtendedFormats = VK_TRUE;
             features.shaderStorageImageReadWithoutFormat = VK_TRUE;
