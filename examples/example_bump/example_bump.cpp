@@ -4,7 +4,13 @@
 // fieldstone-rgba.dds(DXT3/BC2) + fieldstone-n.dds(ATI2/BC5) 按压缩格式
 // 直接上传（含全 mip 链），切线用与 原版 calcTangents 相同的 Lengyel 算法计算。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -279,7 +285,7 @@ void run_example_bump()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
 
     constexpr float aspect = static_cast<float>(bump_width) / static_cast<float>(bump_height);

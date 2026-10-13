@@ -10,7 +10,13 @@
 // - VNDF 采样现已升级为各向异性 GGX（aniso 参数生效）。
 // - clearcoat lobe 已加入 trace 的三路 lobe 选择。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -706,7 +712,7 @@ void run_example_edsl_ssr()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     // ---- 相机（与 GLSL 版一致）----
     constexpr float aspect = static_cast<float>(essr_width) / static_cast<float>(essr_height);

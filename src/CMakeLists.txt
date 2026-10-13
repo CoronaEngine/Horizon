@@ -17,6 +17,15 @@ if(HORIZON_BUILD_ENGINE)
         "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
     )
 
+    if(APPLE)
+        enable_language(OBJCXX)
+        # display_manager.cpp 中创建 MacOS 的 VkSurface 时使用了 Objc API
+        set_source_files_properties(
+            "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/display/display_manager.cpp"
+            PROPERTIES LANGUAGE OBJCXX
+        )
+    endif()
+
     set(PUBLIC_HEADERS
         "${PROJECT_SOURCE_DIR}/include/horizon.h"
         "${PROJECT_SOURCE_DIR}/include/corona/pal/cfw_platform.h"
@@ -52,6 +61,15 @@ if(HORIZON_BUILD_ENGINE)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(Horizon PRIVATE
             -Wno-nullability-completeness
+        )
+    endif()
+
+    # MacOS 依赖 Metal 系统库
+    if(APPLE)
+        target_link_libraries(Horizon PRIVATE
+            "-framework AppKit"
+            "-framework QuartzCore"
+            "-framework Metal"
         )
     endif()
 endif()

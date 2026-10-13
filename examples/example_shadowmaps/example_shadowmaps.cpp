@@ -7,7 +7,13 @@
 // 变体不在本移植范围）、相机固定 (0,60,-105) 俯视、不画光源 billboard、
 // 原版的 tree.bin 是 meshopt 压缩 chunk（VBC）加载器不支持，用 column.bin 替代。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -328,7 +334,7 @@ void run_example_shadowmaps()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     constexpr float aspect = static_cast<float>(smx_width) / static_cast<float>(smx_height);
     // 原版 相机 (0,60,-105)、垂直角 -0.45 rad（俯视）
