@@ -9,7 +9,13 @@
 // 材质参数升级：完整 Disney Principled BRDF（对齐 example_disney_pbr）。
 // 所有非 albedo 参数通过 imgui 实时可调，批次共享（每帧统一一套材质）。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -208,7 +214,7 @@ void run_example_ssr()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
 
     // ---- 相机 ----

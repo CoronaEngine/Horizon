@@ -23,6 +23,14 @@ class SlangConan(ConanFile):
             "windows-aarch64",
             "54b88155e5d94ddf63ef5013a59a8a49f35a7b415048fc57078d9eecdf2ccc7d",
         ),
+        ("Macos", "x86_64"): (
+            "macos-x86_64",
+            "3195d5811f64ab0b95b9c27da36ac3f3f4f49429225ce5c4ffa14ab5962882ce",
+        ),
+        ("Macos", "armv8"): (
+            "macos-aarch64",
+            "70c63b66448d1d4d3ae770f3cdacdb00674e0f81ee44b52bd0dde6f2f49273db",
+        ),
     }
 
     def _asset(self):
@@ -31,8 +39,25 @@ class SlangConan(ConanFile):
     def validate(self):
         if not self._asset():
             raise ConanInvalidConfiguration(
-                f"slang/{self.version} binary SDK is only configured for Windows x86_64 and armv8"
+                f"slang/{self.version} binary SDK is only configured for Windows/Macos x86_64 and armv8"
             )
+
+    def _repair_package(self):
+        # zipfile 解包不还原 symlink 与执行位：给库添加可执行权限，
+        for sub in ("lib", "bin"):
+            for dirpath, _, filenames in os.walk(os.path.join(self.package_folder, sub)):
+                for filename in filenames:
+                    path = os.path.join(dirpath, filename)
+                    if sub == "bin":
+                        os.chmod(path, 0o755)
+                    try:
+                        with open(path, "rb") as f:
+                            target = f.read(4096).decode("utf-8").strip()
+                        if target and os.path.exists(os.path.normpath(os.path.join(dirpath, target))):
+                            os.remove(path)
+                            os.symlink(target, path)
+                    except (OSError, UnicodeDecodeError, ValueError):
+                        continue
 
     def package(self):
         asset_suffix, sha256 = self._asset()
@@ -50,6 +75,8 @@ class SlangConan(ConanFile):
         copy(self, "*", src=os.path.join(sdk_dir, "include"), dst=os.path.join(self.package_folder, "include"), keep_path=True)
         copy(self, "*", src=os.path.join(sdk_dir, "lib"), dst=os.path.join(self.package_folder, "lib"), keep_path=True)
         copy(self, "*", src=os.path.join(sdk_dir, "bin"), dst=os.path.join(self.package_folder, "bin"), keep_path=True)
+
+        self._repair_package()
 
     def package_info(self):
         self.cpp_info.set_property("cmake_file_name", "slang")

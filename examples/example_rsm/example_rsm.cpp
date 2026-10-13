@@ -11,7 +11,13 @@
 // 每个物体带 albedo（push constant），相机固定 (0,60,-105) 俯视。
 // imgui 可调：间接光强度 / 采样半径 / 光强 / debug 视图（Final|Direct|Indirect）。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -366,7 +372,7 @@ void run_example_rsm()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     constexpr float aspect = static_cast<float>(rsm_width) / static_cast<float>(rsm_height);
     // 与 shadowmaps 相同的固定俯视相机

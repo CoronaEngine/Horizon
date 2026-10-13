@@ -18,7 +18,13 @@
 // 交互:RMB 拖动视角,WASD/QE 移动,G 循环 debug 视图;imgui 全参数可调
 // (太阳方位/仰角、Disney 材质、RSM、SSR、IBL、SSAO、曝光)。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <limits>
 #include <GLFW/glfw3native.h>
@@ -999,7 +1005,7 @@ void run_example_sponza()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     horizon::DrawIndexedIndirectCommand quad_cmd_base;
     quad_cmd_base.index_count = static_cast<uint32_t>(corner_indices.size());

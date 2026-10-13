@@ -1,7 +1,13 @@
 // Port of bgfx examples/36-sky (Perez dynamic sky + lightmapped landscape).
 // GLSL path via Helicon offline compile (include GLSL macro).
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -579,7 +585,7 @@ void run_example_sky()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     horizon::DrawIndexedIndirectCommand sky_cmd;
     sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());

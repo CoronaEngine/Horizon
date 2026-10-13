@@ -281,6 +281,4 @@ namespace EmbeddedShader
 	        static constexpr bool value = true;
 	    };
 	};
-
-	inline thread_local ParseHelper ParseHelper::instance;
 }

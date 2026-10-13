@@ -3,6 +3,10 @@
 #define NOMINMAX
 #endif
 #define VK_USE_PLATFORM_WIN32_KHR
+#elif defined(__APPLE__)
+#define VK_USE_PLATFORM_METAL_EXT
+#include <AppKit/AppKit.h>
+#include <QuartzCore/CAMetalLayer.h>
 #endif
 
 #include "display_manager.h"
@@ -169,6 +173,14 @@ namespace Corona::Horizon
                 extent.width = static_cast<uint32_t>(std::max<LONG>(1, rect.right - rect.left));
                 extent.height = static_cast<uint32_t>(std::max<LONG>(1, rect.bottom - rect.top));
             }
+#elif defined(__APPLE__)
+            NSView* view = static_cast<NSView*>(native_window);
+            if (view != nil)
+            {
+                CGSize backing = [view convertSizeToBacking:view.bounds.size];
+                extent.width = static_cast<uint32_t>(std::max<CGFloat>(1, backing.width));
+                extent.height = static_cast<uint32_t>(std::max<CGFloat>(1, backing.height));
+            }
 #else
             (void)native_window;
 #endif
@@ -192,6 +204,21 @@ namespace Corona::Horizon
             }
 
             return rect.right > rect.left && rect.bottom > rect.top;
+#elif defined(__APPLE__)
+            NSView* view = static_cast<NSView*>(native_window);
+            if (view == nil)
+            {
+                return false;
+            }
+
+            NSWindow* window = view.window;
+            if (window == nil || ![window isVisible] || [window isMiniaturized])
+            {
+                return false;
+            }
+
+            NSSize size = view.bounds.size;
+            return size.width > 0 && size.height > 0;
 #else
             return native_window != nullptr;
 #endif
@@ -445,8 +472,29 @@ namespace Corona::Horizon
         create_info.hwnd = static_cast<HWND>(native_window_);
 
         throw_if_failed(vkCreateWin32SurfaceKHR(instance_, &create_info, nullptr, &surface_), "vkCreateWin32SurfaceKHR");
+#elif defined(__APPLE__)
+        if (vkCreateMetalSurfaceEXT == nullptr)
+        {
+            throw std::runtime_error("vkCreateMetalSurfaceEXT is not available. VK_EXT_metal_surface may be missing.");
+        }
+
+        @autoreleasepool
+        {
+            NSView* view = static_cast<NSView*>(native_window_);
+            view.wantsLayer = YES;
+            if (view.layer == nil || ![view.layer isKindOfClass:[CAMetalLayer class]])
+            {
+                view.layer = [CAMetalLayer layer];
+            }
+
+            VkMetalSurfaceCreateInfoEXT create_info {};
+            create_info.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+            create_info.pLayer = (CAMetalLayer*)view.layer;
+
+            throw_if_failed(vkCreateMetalSurfaceEXT(instance_, &create_info, nullptr, &surface_), "vkCreateMetalSurfaceEXT");
+        }
 #else
-        throw std::runtime_error("HardwareDisplayer currently supports only Win32 native windows.");
+        throw std::runtime_error("HardwareDisplayer currently supports only Win32 and Metal native windows.");
 #endif
     }
 

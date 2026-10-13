@@ -14,7 +14,13 @@
 //   3 volume    -> R32F 计数目标（加法混合，无深度附件）
 //   4 lit       -> 主目标（clear_color_target=false，加法混合叠加漫反射×可见性）
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -620,7 +626,7 @@ void run_example_edsl_shadowvolumes()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     constexpr float aspect = static_cast<float>(sv_width) / static_cast<float>(sv_height);
     // 原版自由相机初始位姿：pos(3,20,-58)、垂直角 -0.25 rad、yaw 0

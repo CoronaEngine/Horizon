@@ -6,6 +6,8 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#elif defined(__APPLE__)
+#define VK_USE_PLATFORM_METAL_EXT
 #endif
 
 #include "hardware_context.h"
@@ -527,9 +529,7 @@ namespace Corona::Horizon
 
         std::vector<FeatureStatus> status;
         add_required_feature(status, "Vulkan 1.0", "samplerAnisotropy", features.features.samplerAnisotropy);
-        add_required_feature(status, "Vulkan 1.0", "geometryShader", features.features.geometryShader);
         add_required_feature(status, "Vulkan 1.0", "shaderInt16", features.features.shaderInt16);
-        add_required_feature(status, "Vulkan 1.0", "wideLines", features.features.wideLines);
         add_required_feature(status, "Vulkan 1.0", "fragmentStoresAndAtomics", features.features.fragmentStoresAndAtomics);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageExtendedFormats", features.features.shaderStorageImageExtendedFormats);
         add_required_feature(status, "Vulkan 1.0", "shaderStorageImageReadWithoutFormat", features.features.shaderStorageImageReadWithoutFormat);
@@ -1107,8 +1107,7 @@ namespace Corona::Horizon
 #if _WIN32 || _WIN64
             extensions.insert(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif __APPLE__
-            extensions.insert(VK_MVK_MOLTENVK_EXTENSION_NAME);
-            extensions.insert(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+            extensions.insert(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
 #elif __linux__
             extensions.insert(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
 #endif
@@ -1143,9 +1142,7 @@ namespace Corona::Horizon
         create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice&) {
             VkPhysicalDeviceFeatures features {};
             features.samplerAnisotropy = VK_TRUE;
-            features.geometryShader = VK_TRUE;
             features.shaderInt16 = VK_TRUE;
-            features.wideLines = VK_TRUE;
             features.fragmentStoresAndAtomics = VK_TRUE;
             features.shaderStorageImageExtendedFormats = VK_TRUE;
             features.shaderStorageImageReadWithoutFormat = VK_TRUE;

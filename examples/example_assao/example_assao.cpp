@@ -10,7 +10,13 @@
 // bunny_decimated 是 meshopt 压缩 chunk 加载器不支持已从两边池子排除）、
 // 相机 (0,1.5,0) 俯视前方 fovy 60°。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -366,7 +372,7 @@ void run_example_assao()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     constexpr float aspect = static_cast<float>(ao_width) / static_cast<float>(ao_height);
     // 相机 (0,1.5,0) 前视稍向下（垂直角 -0.3 rad）、fovy 60°

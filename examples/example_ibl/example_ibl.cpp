@@ -8,7 +8,13 @@
 //    改 glossiness / reflectivity 后各 record 一次即可；
 //  - imgui 面板换成键盘交互（启动时在控制台打印按键说明）。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -553,7 +559,7 @@ void run_example_ibl()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     // 每个 bgfx group 一条 indirect command：索引是 group 相对的，base_vertex 走 vertex_offset。
     // 命令不随帧变化，启动时建好、逐帧复用。

@@ -12,7 +12,13 @@
 // - 固定默认设置（无 imgui）：animate=true、anim.speed=0.3、不显示 G-buffer
 //   调试视图/scissor 线框、不走 TArray/UAV 变体。
 
+#if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
@@ -358,7 +364,7 @@ void run_example_deferred()
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(glfwGetWin32Window(window));
+    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
     // 每个 draw 的参数都不随帧变化，启动时各建一条 indirect 命令即可复用。
     const std::array<horizon::DrawIndexedIndirectCommand, 1> cube_cmd { {
