@@ -147,8 +147,13 @@ struct ShaderCodeModule
 
     struct CompilerOption
     {
+#if defined(__APPLE__)
+        bool compileGLSL = false;
+        bool compileHLSL = false;
+#else
         bool compileGLSL = true;
         bool compileHLSL = true;
+#endif
         bool compileDXIL = false;
         bool compileDXBC = false;
         bool compileSpirV = true;
