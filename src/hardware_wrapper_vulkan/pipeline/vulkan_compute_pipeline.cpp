@@ -598,6 +598,15 @@ namespace Corona::Horizon
     {
         for (PipelineState& state : pipeline_cache_)
         {
+            if (state.device != VK_NULL_HANDLE)
+            {
+                (void)vkDeviceWaitIdle(state.device);
+                break;
+            }
+        }
+
+        for (PipelineState& state : pipeline_cache_)
+        {
             if (state.device == VK_NULL_HANDLE)
             {
                 continue;
