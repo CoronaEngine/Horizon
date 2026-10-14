@@ -6,6 +6,10 @@ add_subdirectory(ast)
 add_subdirectory(image)
 add_subdirectory(dsl)
 
+if(HORIZON_BUILD_ENGINE AND HORIZON_USE_LEGACY_BACKEND)
+    add_subdirectory(legacy)
+endif()
+
 add_dependencies(horizon-tests
     horizon-core
     horizon-math

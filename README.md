@@ -118,6 +118,53 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 
 ---
 
+## 旧版 HardwareWrapper 的构建与验证
+
+旧版接口位于 `include/Horizon_old.h`、`include/HardwareCommands_old.h`，实现位于
+`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。默认仍构建新版；使用独立构建目录启用旧版：
+
+```powershell
+cmake --preset engine-debug -B build/legacy-debug -DHORIZON_USE_LEGACY_BACKEND=ON -DHORIZON_BUILD_TESTS=ON
+cmake --build build/legacy-debug --config Debug --target horizon-test-legacy
+ctest --test-dir build/legacy-debug -C Debug -L legacy --output-on-failure
+```
+
+消费端链接 `Horizon` 并包含 `Horizon_old.h`；目标会传递 `HORIZON_LEGACY_API=1`。
+不要手工定义该宏后链接新版库，也不要在同一个程序中混用两套头文件。
+当前 examples、Ocarina 和 hotfix 使用新版 API，不能与旧版开关同时启用。
+
+旧代码原先未被 CMake 收集，两份公共头文件也被整体注释，因此默认构建成功并不能证明旧版可编译。
+恢复构建后，主要迁移点如下：
+
+| 层次 | 发现的问题 | 修复方式 |
+| --- | --- | --- |
+| 公共接口 | 旧文件名、缺少有效头文件保护和标准头文件 | 恢复 `_old.h` 声明，所有旧实现显式包含它们 |
+| 资源池与日志 | 引用已移除的 Corona Kernel 路径 | 使用已有 `horizon::core::Storage` 和 Core/Quill 日志 |
+| 宿主内存 | 引用旧的对齐分配器 | 使用 C++ 对齐 `operator new/delete`，保存分配对齐值，先销毁导入缓冲区再释放内存 |
+| 着色器 | `getShaderCode` 已改为可变操作，SPIRV-Cross 反射已移除 | 适配当前 Helicon API，使用 Slang 产生的二进制和反射 |
+| 资源自动绑定 | 新版反射条目可能表示常量或缓冲区，旧代码统一按图像解引用 | 分别处理值、缓冲区和图像，并检查空的回指针 |
+| Vulkan 链接与初始化 | 重复定义 Volk、依赖未导出的平台扩展变量、全局初始化要求程序启动时就有 GPU | 链接现有 Volk，查询平台扩展入口，首次 GPU 操作时初始化上下文 |
+| 拷贝与所有权 | 偏移和长度被丢弃；同一资源重复锁定；部分图像 barrier 与整体布局记录不一致 | 传递并校验拷贝范围；修复同槽锁定；图像转换与整体布局记录保持一致 |
+| 图像释放 | `destroyImage` 的释放代码被注释，退出时触发 VMA 泄漏断言 | 分配和缓存视图由共享所有权管理，最后一个图像/子视图释放时销毁 |
+
+旧版仍采用“原子 ID → Storage 槽位 → Vulkan 资源”的引用计数模型。
+拷贝命令持有资源包装对象，executor 通过 timeline semaphore 保留资源到 GPU 完成。
+测试覆盖头文件独立包含、push constant 的复制/移动/槽位复用、无窗口 displayer、
+临时缓冲区保活、整块/局部/同缓冲区拷贝、越界拒绝、图像 mip/数组层/偏移往返和子视图保活，
+以及当前 Slang、EDSL 和预编译 Slang 模块的计算管线入口。
+CPU 测试不初始化 Vulkan；GPU 测试要求 Vulkan 1.4，无相应 loader/device 时明确返回 CTest 的 skip 状态。
+设备存在但初始化、编译或执行失败会报错，不会被当成跳过。
+
+**预编译着色器迁移：** 不再接受单独的 `std::vector<uint32_t>` 来隐式反射 SPIR-V。
+请传入当前编译器返回的 `EmbeddedShader::ShaderCodeModule`（含 SPIR-V 和反射）；
+`ComputePipeline<CS>` / `RasterizerPipeline<VS, FS>` 使用当前生成器的 `slangModule`。
+旧的仅包含 `spirv` 的生成头需要用当前 ShaderCompileScripts 重新生成。
+整个迁移不添加第三方库，也不恢复 SPIRV-Cross 或 Corona Kernel。
+
+此开关用于维护旧 API，并不把新版功能全部移植回来。Linux 窗口 surface 创建仍是旧实现中的未完成分支；
+GPU 测试不覆盖窗口呈现、跨 GPU 外部内存、所有压缩格式或完整光栅化渲染。
+新版公共头和新版后端没有改动；共享 Helicon 仅增加按宏选择资源前置声明的兼容分支。
+
 ## tracy用法
 
 1、cmake打开

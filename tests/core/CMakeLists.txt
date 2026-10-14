@@ -58,7 +58,7 @@ endif()
 add_dependencies(horizon-tests horizon-test-core-public-headers)
 add_test(NAME horizon.core.public_headers COMMAND horizon-test-core-public-headers)
 
-if(HORIZON_BUILD_ENGINE)
+if(HORIZON_BUILD_ENGINE AND NOT HORIZON_USE_LEGACY_BACKEND)
     # Check both header orders and the engine's transitive Core dependency.
     foreach(target horizon-test-logging-compat horizon-test-logging-configuration)
         target_link_libraries(${target} PRIVATE Horizon)
