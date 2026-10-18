@@ -18,6 +18,8 @@
 #include "optix_accel.h"
 #include <cudaGL.h>
 #include "cuda_command_visitor.h"
+#include "cuda_external_compute.h"
+#include "cuda_command_graph.h"
 
 namespace ocarina {
 
@@ -28,6 +30,20 @@ CUDADevice::CUDADevice(RHIContext *context)
     OC_CU_CHECK(cuDevicePrimaryCtxRetain(&cu_ctx_, cu_device_));
     cmd_visitor_ = std::make_unique<CUDACommandVisitor>(this);
     init_hardware_info();
+}
+
+CUDADevice::~CUDADevice() noexcept {
+    cmd_visitor_.reset();
+    if (optix_device_context_) {
+        use_context([&] {
+            OC_OPTIX_CHECK(optixDeviceContextDestroy(optix_device_context_));
+        });
+        optix_device_context_ = nullptr;
+    }
+    if (cu_ctx_) {
+        OC_CU_CHECK(cuDevicePrimaryCtxRelease(cu_device_));
+        cu_ctx_ = nullptr;
+    }
 }
 
 void CUDADevice::init_hardware_info() {
@@ -178,6 +194,16 @@ void CUDADevice::init_optix_context() noexcept {
 #endif
         CUcontext cu_context = nullptr;
         OC_OPTIX_CHECK(optixDeviceContextCreate(cu_context, &ctx_options, &optix_device_context_));
+#if OPTIX_VERSION >= 80000
+        unsigned int ser_flags = 0u;
+        OC_OPTIX_CHECK(optixDeviceContextGetProperty(
+            optix_device_context_, OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING,
+            &ser_flags, sizeof(ser_flags)));
+        shader_execution_reordering_ =
+            (ser_flags & OPTIX_DEVICE_PROPERTY_SHADER_EXECUTION_REORDERING_FLAG_STANDARD) != 0u;
+#endif
+        OC_INFO_FORMAT("OptiX shader execution reordering: supported={}, enabled={}",
+                       shader_execution_reordering_, shader_execution_reordering_);
     });
 }
 
@@ -246,6 +272,75 @@ handle_ty CUDADevice::create_shader(const Function &function) noexcept {
     });
 
     return ptr;
+}
+
+handle_ty CUDADevice::create_external_compute_module(
+    const std::byte *image,
+    size_t image_size,
+    const string &,
+    ExternalComputeStatus *status) noexcept {
+    auto *module = new_with_allocator<CUDAExternalComputeModule>(this);
+    if (!module->load(image, image_size, status)) {
+        delete_with_allocator(module);
+        return 0u;
+    }
+    return reinterpret_cast<handle_ty>(module);
+}
+
+handle_ty CUDADevice::create_external_compute_kernel(
+    handle_ty module,
+    const string &entry,
+    ExternalComputeStatus *status) noexcept {
+    if (module == 0u) {
+        if (status) {
+            status->code = ExternalComputeStatusCode::InvalidImage;
+            status->backend_code = 0;
+        }
+        return 0u;
+    }
+    return reinterpret_cast<CUDAExternalComputeModule *>(module)->kernel(
+        entry, status);
+}
+
+void CUDADevice::destroy_external_compute_module(handle_ty handle) noexcept {
+    if (handle != 0u) {
+        delete_with_allocator(
+            reinterpret_cast<CUDAExternalComputeModule *>(handle));
+    }
+}
+
+handle_ty CUDADevice::create_command_graph(
+    CommandGraphStatus *status) noexcept {
+    if (!status) {
+        return 0u;
+    }
+    status->code = CommandGraphStatusCode::Success;
+    status->backend_code = 0;
+    return reinterpret_cast<handle_ty>(
+        new_with_allocator<CUDACommandGraph>(this));
+}
+
+bool CUDADevice::prepare_command_graph(
+    handle_ty handle,
+    span<Command *const> commands,
+    CommandGraphStatus *status) noexcept {
+    if (handle == 0u) {
+        if (status) {
+            status->code = CommandGraphStatusCode::InvalidGraph;
+            status->backend_code = 0;
+        }
+        return false;
+    }
+    return use_context([&] {
+        return reinterpret_cast<CUDACommandGraph *>(handle)->prepare(
+            commands, status);
+    });
+}
+
+void CUDADevice::destroy_command_graph(handle_ty handle) noexcept {
+    if (handle != 0u) {
+        delete_with_allocator(reinterpret_cast<CUDACommandGraph *>(handle));
+    }
 }
 
 handle_ty CUDADevice::create_mesh(const MeshParams &params) noexcept {

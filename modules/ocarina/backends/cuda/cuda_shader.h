@@ -10,6 +10,7 @@
 
 namespace ocarina {
 class CUDADevice;
+class ShaderDispatchCommand;
 class CUDAShader : public Shader<>::Impl {
 protected:
     const Function &function_;
@@ -23,6 +24,11 @@ public:
     static CUDAShader *create(Device::Impl *device,
                               const string &ptx,
                               const Function &f);
+    [[nodiscard]] virtual bool describe_graph_kernel(
+        ShaderDispatchCommand *,
+        CUDA_KERNEL_NODE_PARAMS &) noexcept {
+        return false;
+    }
 };
 
 }// namespace ocarina

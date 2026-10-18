@@ -13,6 +13,7 @@ class CUDACommandVisitor final : public CommandVisitor {
 private:
     CUDADevice *device_{};
     CUstream stream_{};
+    bool failed_{};
 
 public:
     explicit CUDACommandVisitor(CUDADevice *device, CUstream stream = nullptr)
@@ -38,7 +39,10 @@ public:
     void visit(const TLASUpdateCommand *cmd) noexcept override;
     void visit(const SynchronizeCommand *cmd) noexcept override;
     void visit(const ShaderDispatchCommand *cmd) noexcept override;
+    void visit(const ExternalComputeDispatchCommand *cmd) noexcept override;
+    void visit(const CommandGraphDispatchCommand *cmd) noexcept override;
     void visit(const HostFunctionCommand *cmd) noexcept override;
+    [[nodiscard]] bool failed() const noexcept { return failed_; }
 };
 
 }// namespace ocarina

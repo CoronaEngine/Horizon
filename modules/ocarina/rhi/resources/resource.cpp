@@ -22,6 +22,12 @@ void RHIResource::_destroy() {
         case Tag::MESH: device_->destroy_mesh(handle_); break;
         case Tag::ACCEL: device_->destroy_accel(handle_); break;
         case Tag::BINDLESS_ARRAY: device_->destroy_bindless_array(handle_); break;
+        case Tag::EXTERNAL_COMPUTE_MODULE:
+            device_->destroy_external_compute_module(handle_);
+            break;
+        case Tag::COMMAND_GRAPH:
+            device_->destroy_command_graph(handle_);
+            break;
     }
     handle_ = 0;
 }

@@ -4,7 +4,7 @@ include_guard(GLOBAL)
 FetchContent_Declare(
     pfr
     GIT_REPOSITORY https://github.com/boostorg/pfr.git
-    GIT_TAG develop
+    GIT_TAG 401385c240027423acbb1eb6dea2abe0043db5aa
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(pfr)
@@ -12,7 +12,7 @@ FetchContent_MakeAvailable(pfr)
 FetchContent_Declare(
     ktm
     GIT_REPOSITORY https://github.com/YGXXD/ktm.git
-    GIT_TAG main
+    GIT_TAG 1a9138fdfd7b7bc7f8a092e222545d81cc2bf418
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(ktm)
@@ -20,7 +20,7 @@ FetchContent_MakeAvailable(ktm)
 FetchContent_Declare(
     preprocessor
     GIT_REPOSITORY https://github.com/boostorg/preprocessor.git
-    GIT_TAG develop
+    GIT_TAG cd1b1bd03900b68505822cfa25cb16851bd6caf1
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(preprocessor)
@@ -28,7 +28,7 @@ FetchContent_MakeAvailable(preprocessor)
 FetchContent_Declare(
     glslang
     GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
-    GIT_TAG main
+    GIT_TAG a0b513644803358f66ea6379e5d206963835afac
     EXCLUDE_FROM_ALL
 )
 set(ENABLE_OPT OFF)
@@ -38,7 +38,7 @@ FetchContent_MakeAvailable(glslang)
 FetchContent_Declare(
     SPIRV-Cross
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
-    GIT_TAG main
+    GIT_TAG 6c09849fe88c48eaed08413aa022aaa136a3a057
     EXCLUDE_FROM_ALL
 )
 set(SPIRV_CROSS_SHARED OFF)
@@ -50,7 +50,7 @@ FetchContent_MakeAvailable(SPIRV-Cross)
 FetchContent_Declare(
     SPIRV-Headers
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
-    GIT_TAG vulkan-sdk-1.4.341
+    GIT_TAG 04f10f650d514df88b76d25e83db360142c7b174
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(SPIRV-Headers)
@@ -58,7 +58,7 @@ FetchContent_MakeAvailable(SPIRV-Headers)
 FetchContent_Declare(
     SPIRV-Tools
     GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
-    GIT_TAG vulkan-sdk-1.4.341
+    GIT_TAG fbe4f3ad913c44fe8700545f8ffe35d1382b7093
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(SPIRV-Tools)
@@ -78,7 +78,7 @@ set(FMT_OS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG main
+    GIT_TAG b5d1e5404bd678df41f20d0f053222a6c60fe74b
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(fmt)
@@ -93,7 +93,7 @@ set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG v1.x
+    GIT_TAG 2ee3cf8204ed5048627644e00a51a7d93fbc4786
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(spdlog)
@@ -105,7 +105,7 @@ target_link_libraries(spdlog PUBLIC fmt::fmt-header-only)
 FetchContent_Declare(
     xxhash
     GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
-    GIT_TAG dev
+    GIT_TAG e573d4d2aaeaba0f3e5a0a9a54144a1f2b4b56e7
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(xxhash)
@@ -122,7 +122,7 @@ set(VOLK_PULL_IN_VULKAN OFF) # We will provide Vulkan-Headers ourselves
 FetchContent_Declare(
     volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
-    GIT_TAG master
+    GIT_TAG 776893306c5d3b22b6185b5d4a258b81d94572bf
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(volk)
@@ -130,7 +130,7 @@ FetchContent_MakeAvailable(volk)
 FetchContent_Declare(
     Vulkan-Headers
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-    GIT_TAG v1.4.341
+    GIT_TAG b5c8f996196ba4aa6d8f97e52b5d3b6e70f7e4e2
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(Vulkan-Headers)
@@ -138,7 +138,7 @@ FetchContent_MakeAvailable(Vulkan-Headers)
 FetchContent_Declare(
     VulkanMemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-    GIT_TAG master
+    GIT_TAG 3aa921224c154a0d2c43912bc88e1c42ce1f7607
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(VulkanMemoryAllocator)

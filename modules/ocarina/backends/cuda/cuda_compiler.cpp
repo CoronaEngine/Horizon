@@ -65,8 +65,10 @@ CUDACompiler::CUDACompiler(CUDADevice *device)
 
 ocarina::string CUDACompiler::compile(const Function &function, int sm) const noexcept {
 
-    fs::path cuda_path = get_cuda_path();
-    cuda_path = cuda_path / "include";
+    fs::path cuda_path = device_->context()->runtime_directory() / "cuda" / "include";
+    if (!fs::is_regular_file(cuda_path / "cuda_fp16.h")) {
+        cuda_path = fs::path(get_cuda_path()) / "include";
+    }
 
     string header_path = "-I" + cuda_path.string();
     int ver_major = 0;
@@ -83,24 +85,17 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
     std::vector<string> header_sources;
     std::vector<const char *> header_sources_ptr;
 
+    const fs::path cuda_builtin_path = device_->context()->runtime_directory() / "cuda";
     for (auto fn : header_names) {
-        string source = RHIContext::read_file(string("cuda/") + fn);
-        header_sources_ptr.push_back(source.c_str());
+        string source = RHIContext::read_file(cuda_builtin_path / fn);
         header_sources.push_back(ocarina::move(source));
     }
 
-    // NVRTC will embed the chosen architecture into the PTX (e.g. .target sm_120).
-    // OptiX's PTX frontend can lag behind the newest GPU targets; if we hand it PTX
-    // with an unsupported .target, optixModuleCreate() fails with "Invalid PTX input".
-    //
-    // PTX is ABI-compatible by the driver for the real GPU anyway, so we can OptiX modules
-    // It's safer to cap the PTX target to a widely supported SM.
-    int ptx_sm = sm;
-    if (function.is_raytracing()) {
-        // keep this conservative(for compatibility) given OptiX releases.
-        ptx_sm = std::min(ptx_sm, 89);
-    }
-    auto compute_sm = ocarina::format("-arch=compute_{}", ptx_sm);
+    // NVRTC PTX can be newer than the installed driver's PTX frontend. Use native
+    // cubin for regular CUDA kernels and keep PTX only for OptiX raytracing code.
+    const bool use_cubin = !function.is_raytracing();
+    int codegen_sm = use_cubin ? sm : std::min(sm, 89);
+    auto compute_sm = ocarina::format("-arch={}_{}", use_cubin ? "sm" : "compute", codegen_sm);
     auto rt_option = fmt::format("-DLC_OPTIX_VERSION={}", OPTIX_VERSION);
     auto const_option = fmt::format("-Dlc_constant={}", nvrtc_version <= 110200 ? "const" : "constexpr");
     ocarina::vector<const char *> compile_option = {
@@ -120,19 +115,37 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
         "-extra-device-vectorization",
         "-dw",
         "-w"};
+    // The explicit option is part of ext_hash: a cached non-SER PTX cannot
+    // satisfy a supported SER request. Ordinary CUDA kernels do not query OptiX.
+    string ser_option;
+    if (!use_cubin) {
+        const bool ser = device_->supports_shader_execution_reordering();
+        ser_option = fmt::format("-DOCARINA_OPTIX_SER_ENABLED={}", ser ? 1 : 0);
+        compile_option.push_back(ser_option.c_str());
+    }
+    string max_register_option;
+    if (function.max_register_count() > 0u) {
+        max_register_option = fmt::format("--maxrregcount={}", function.max_register_count());
+        compile_option.push_back(max_register_option.c_str());
+    }
     ocarina::list<string> includes;
     if (function.is_raytracing()) {
-        static string inc_path = (fs::current_path() / "cuda" / "optix").string();
+        const string inc_path = (cuda_builtin_path / "optix").string();
         includes.push_back(ocarina::format("-I {}", inc_path));
         compile_option.push_back(includes.back().c_str());
         header_names.push_back("optix_device_header.h");
-        string source = RHIContext::read_file(string("cuda/optix_device_header.h"));
-        header_sources_ptr.push_back(source.c_str());
+        string source = RHIContext::read_file(cuda_builtin_path / "optix_device_header.h");
         header_sources.push_back(ocarina::move(source));
     }
+    header_sources_ptr.reserve(header_sources.size());
+    for (const auto &source : header_sources) {
+        header_sources_ptr.push_back(source.c_str());
+    }
+    string preincluded_source;
     for (const auto &header_name : header_names) {
-        includes.push_back(ocarina::format("-include={}", header_name));
-        compile_option.push_back(includes.back().c_str());
+        preincluded_source += "#include \"";
+        preincluded_source += header_name;
+        preincluded_source += "\"\n";
     }
 
     uint64_t ext_hash = hash64(hash64_list(compile_option),
@@ -143,7 +156,8 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
     auto compile = [&](const string &cu, const string &fn, int sm) -> string {
         TIMER_TAG(compile, "compile " + fn);
         nvrtcProgram program{};
-        OC_NVRTC_CHECK(nvrtcCreateProgram(&program, cu.c_str(), fn.c_str(),
+        const string source = preincluded_source + cu;
+        OC_NVRTC_CHECK(nvrtcCreateProgram(&program, source.c_str(), fn.c_str(),
                                           header_names.size(), header_sources_ptr.data(),
                                           header_names.data()));
         const nvrtcResult compile_res = nvrtcCompileProgram(program, compile_option.size(), compile_option.data());
@@ -158,18 +172,25 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
             cout << log << endl;
             std::abort();
         }
-        size_t ptx_size = 0;
         ocarina::string ptx;
-        OC_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
-        ptx.resize(ptx_size);
-        OC_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
+        if (use_cubin) {
+            size_t cubin_size = 0;
+            OC_NVRTC_CHECK(nvrtcGetCUBINSize(program, &cubin_size));
+            ptx.resize(cubin_size);
+            OC_NVRTC_CHECK(nvrtcGetCUBIN(program, ptx.data()));
+        } else {
+            size_t ptx_size = 0;
+            OC_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
+            ptx.resize(ptx_size);
+            OC_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
+        }
         OC_NVRTC_CHECK(nvrtcDestroyProgram(&program));
         return ptx;
     };
 
     string fn = function.func_name(ext_hash, function.description());
 
-    ocarina::string ptx_fn = fn + ".ptx";
+    ocarina::string ptx_fn = fn + (use_cubin ? ".cubin" : ".ptx");
     string cu_fn = fn + ".cu";
     ocarina::string ptx;
     RHIContext *context = device_->context();
@@ -178,7 +199,7 @@ ocarina::string CUDACompiler::compile(const Function &function, int sm) const no
         if (!context->is_exist_cache(cu_fn)) {
             const ocarina::string cu = emit_cuda_source(function);
             context->write_global_cache(cu_fn, cu);
-            ptx = compile(cu, cu_fn, ptx_sm);
+            ptx = compile(cu, cu_fn, codegen_sm);
             context->write_global_cache(ptx_fn, ptx);
         } else {
             const ocarina::string &cu = context->read_global_cache(cu_fn);

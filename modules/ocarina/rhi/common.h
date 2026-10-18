@@ -14,6 +14,8 @@
 #include "resources/counted_buffer.h"
 #include "resources/texture.h"
 #include "resources/bindless_array.h"
+#include "resources/external_compute.h"
+#include "resources/command_graph.h"
 #include "rhi/resources/managed.h"
 #include "tensor/tensor.h"
 #include "core/runtime/dynamic_module.h"

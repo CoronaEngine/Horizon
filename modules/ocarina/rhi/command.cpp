@@ -15,6 +15,40 @@ ShaderDispatchCommand::ShaderDispatchCommand(handle_ty entry, SP<ShaderArgumentP
       argument_list_(ocarina::move(argument_list)), dispatch_dim_(dim) {
 }
 
+ExternalComputeDispatchCommand::ExternalComputeDispatchCommand(
+    handle_ty entry,
+    span<const std::byte> parameter_data,
+    uint3 grid_dim,
+    uint3 block_dim,
+    uint32_t shared_memory_bytes,
+    SP<ExternalComputeStatus> status) noexcept
+    : Command(true),
+      entry_(entry),
+      parameter_data_(parameter_data.begin(), parameter_data.end()),
+      grid_dim_(grid_dim),
+      block_dim_(block_dim),
+      shared_memory_bytes_(shared_memory_bytes),
+      status_(ocarina::move(status)) {}
+
+CommandGraphDispatchCommand::CommandGraphDispatchCommand(
+    handle_ty graph,
+    vector<Command *> nodes,
+    SP<CommandGraphStatus> status) noexcept
+    : Command(true),
+      graph_(graph),
+      nodes_(ocarina::move(nodes)),
+      status_(ocarina::move(status)) {}
+
+void CommandGraphDispatchCommand::recycle() noexcept {
+    for (Command *node : nodes_) {
+        if (node != nullptr) {
+            node->recycle();
+        }
+    }
+    nodes_.clear();
+    CommandGraphDispatchCommand_pool().recycle(this);
+}
+
 BufferReallocateCommand::BufferReallocateCommand(RHIResource *rhi_resource,
                                                  size_t new_size, bool async)
     : Command(async), new_size_(new_size),

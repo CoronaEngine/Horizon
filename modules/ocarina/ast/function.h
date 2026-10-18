@@ -105,6 +105,7 @@ private:
     mutable uint3 block_dim_{make_uint3(0)};
     mutable uint3 grid_dim_{make_uint3(0)};
     StoragePrecisionPolicy storage_policy_{};
+    uint max_register_count_{};
 
     friend class FunctionCorrector;
     friend class Variable;
@@ -286,6 +287,8 @@ public:
     [[nodiscard]] bool has_configure() const noexcept { return all(block_dim() != 0u) || all(grid_dim() != 0u); }
     void set_storage_policy(StoragePrecisionPolicy policy) noexcept { storage_policy_ = policy; }
     [[nodiscard]] StoragePrecisionPolicy storage_policy() const noexcept { return storage_policy_; }
+    void set_max_register_count(uint count) noexcept { max_register_count_ = count; }
+    [[nodiscard]] uint max_register_count() const noexcept { return max_register_count_; }
     [[nodiscard]] ocarina::string func_name(uint64_t ext_hash = 0u, string ext_name = "") const noexcept;
     void assign(const Expression *lhs, const Expression *rhs) noexcept;
     void return_(const Expression *expression) noexcept;

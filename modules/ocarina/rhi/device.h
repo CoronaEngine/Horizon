@@ -55,6 +55,11 @@ class RHIMesh;
 class Accel;
 
 class CommandVisitor;
+class Command;
+class ExternalComputeModule;
+struct ExternalComputeStatus;
+class CommandGraph;
+struct CommandGraphStatus;
 
 class VertexBuffer;
 class IndexBuffer;
@@ -88,6 +93,19 @@ public:
         [[nodiscard]] virtual handle_ty create_shader(const Function &function) noexcept = 0;
         [[nodiscard]] virtual handle_ty create_shader_from_file(const std::string &file_name, ShaderType shader_type, const std::set<string> &options) noexcept = 0;
         virtual void destroy_shader(handle_ty handle) noexcept = 0;
+        [[nodiscard]] virtual OC_RHI_API handle_ty create_external_compute_module(
+            const std::byte *, size_t, const string &,
+            ExternalComputeStatus *) noexcept;
+        [[nodiscard]] virtual OC_RHI_API handle_ty create_external_compute_kernel(
+            handle_ty, const string &, ExternalComputeStatus *) noexcept;
+        virtual void destroy_external_compute_module(handle_ty) noexcept {}
+        [[nodiscard]] virtual OC_RHI_API handle_ty create_command_graph(
+            CommandGraphStatus *) noexcept;
+        [[nodiscard]] virtual OC_RHI_API bool prepare_command_graph(
+            handle_ty,
+            span<Command *const>,
+            CommandGraphStatus *) noexcept;
+        virtual void destroy_command_graph(handle_ty) noexcept {}
         [[nodiscard]] virtual handle_ty create_accel(AccelUsageTag usage_tag) noexcept = 0;
         virtual void destroy_accel(handle_ty handle) noexcept = 0;
         [[nodiscard]] virtual handle_ty create_stream() noexcept = 0;
@@ -210,6 +228,10 @@ public:
                                       AccelUsageTag usage_tag = AccelUsageTag::FAST_TRACE,
                                       AccelGeomTag geom_tag = AccelGeomTag::DISABLE_ANYHIT) const noexcept;// implement in mesh.h
     [[nodiscard]] Stream create_stream() noexcept;
+    [[nodiscard]] ExternalComputeModule create_external_compute_module(
+        span<const std::byte> image,
+        const string &name = {}) const noexcept;
+    [[nodiscard]] CommandGraph create_command_graph() const noexcept;
 
     [[nodiscard]] Accel create_accel(AccelUsageTag usage_tag = AccelUsageTag::FAST_TRACE) const noexcept;
     [[nodiscard]] BindlessArray create_bindless_array() const noexcept;

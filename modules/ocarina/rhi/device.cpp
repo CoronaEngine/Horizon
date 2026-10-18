@@ -9,10 +9,51 @@
 #include "resources/bindless_array.h"
 #include "resources/byte_buffer.h"
 #include "resources/dynamic_buffer.h"
+#include "resources/external_compute.h"
+#include "resources/command_graph.h"
 #include "context.h"
 #include "core/runtime/dynamic_module.h"
 
 namespace ocarina {
+
+handle_ty Device::Impl::create_external_compute_module(
+    const std::byte *, size_t, const string &,
+    ExternalComputeStatus *status) noexcept {
+    if (status) {
+        status->code = ExternalComputeStatusCode::UnsupportedBackend;
+        status->backend_code = 0;
+    }
+    return 0;
+}
+
+handle_ty Device::Impl::create_external_compute_kernel(
+    handle_ty, const string &, ExternalComputeStatus *status) noexcept {
+    if (status) {
+        status->code = ExternalComputeStatusCode::UnsupportedBackend;
+        status->backend_code = 0;
+    }
+    return 0;
+}
+
+handle_ty Device::Impl::create_command_graph(
+    CommandGraphStatus *status) noexcept {
+    if (status) {
+        status->code = CommandGraphStatusCode::UnsupportedBackend;
+        status->backend_code = 0;
+    }
+    return 0u;
+}
+
+bool Device::Impl::prepare_command_graph(
+    handle_ty,
+    span<Command *const>,
+    CommandGraphStatus *status) noexcept {
+    if (status) {
+        status->code = CommandGraphStatusCode::UnsupportedBackend;
+        status->backend_code = 0;
+    }
+    return false;
+}
 
 ByteBuffer Device::create_byte_buffer(size_t size, const std::string &name) const noexcept {
     return ByteBuffer(impl_.get(), size, name);
@@ -35,6 +76,16 @@ detail::RawDynamicBuffer Device::create_raw_dynamic_buffer_resolved(const Type *
 
 Stream Device::create_stream() noexcept {
     return create<Stream>();
+}
+
+ExternalComputeModule Device::create_external_compute_module(
+    span<const std::byte> image,
+    const string &name) const noexcept {
+    return ExternalComputeModule(impl_.get(), image, name);
+}
+
+CommandGraph Device::create_command_graph() const noexcept {
+    return CommandGraph(impl_.get());
 }
 
 Accel Device::create_accel(AccelUsageTag usage_tag) const noexcept {

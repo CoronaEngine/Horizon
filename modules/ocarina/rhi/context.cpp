@@ -86,7 +86,7 @@ bool RHIContext::create_directory_if_necessary(const fs::path &path) {
 
 string RHIContext::read_file(const fs::path &fn) {
     std::ifstream fst;
-    fst.open(fn.c_str());
+    fst.open(fn.c_str(), std::ios::binary);
     std::stringstream buffer;
     buffer << fst.rdbuf();
     return buffer.str();
@@ -94,7 +94,7 @@ string RHIContext::read_file(const fs::path &fn) {
 
 void RHIContext::write_file(const fs::path &fn, const std::string &text) {
     std::ofstream fs;
-    fs.open(fn.c_str());
+    fs.open(fn.c_str(), std::ios::binary);
     fs << text;
     fs.close();
 }

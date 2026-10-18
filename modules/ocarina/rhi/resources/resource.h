@@ -23,6 +23,8 @@ public:
         SHADER,
         MESH,
         ACCEL,
+        EXTERNAL_COMPUTE_MODULE,
+        COMMAND_GRAPH,
     };
 
 protected:

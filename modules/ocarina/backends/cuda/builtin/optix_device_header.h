@@ -134,6 +134,10 @@ OC_DEVICE_FLAG inline TriangleHit traverse_closest_impl(OptixTraversableHandle h
              0,// SBT stride
              0 // missSBTIndex
     );
+#if defined(OCARINA_OPTIX_SER_ENABLED) && OCARINA_OPTIX_SER_ENABLED
+    // Scheduling only: retain the same outgoing hit, ray, RNG and destination.
+    optixReorder();
+#endif
     return getHitObjectInfo();
 }
 

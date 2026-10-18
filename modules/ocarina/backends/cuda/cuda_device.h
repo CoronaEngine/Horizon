@@ -61,6 +61,7 @@ private:
     CUdevice cu_device_{};
     CUcontext cu_ctx_{};
     OptixDeviceContext optix_device_context_{};
+    bool shader_execution_reordering_{};
     std::unique_ptr<CommandVisitor> cmd_visitor_;
     uint32_t compute_capability_{};
 
@@ -91,6 +92,7 @@ private:
 
 public:
     explicit CUDADevice(RHIContext *context);
+    ~CUDADevice() noexcept;
     void init_hardware_info();
     template<typename Func>
     decltype(auto) use_context(Func &&func) noexcept {
@@ -112,6 +114,10 @@ public:
     }
     void init_optix_context() noexcept;
     [[nodiscard]] OptixDeviceContext optix_device_context() const noexcept { return optix_device_context_; }
+    [[nodiscard]] bool supports_shader_execution_reordering() noexcept {
+        init_optix_context();
+        return shader_execution_reordering_;
+    }
     [[nodiscard]] handle_ty create_buffer(size_t size, const string &desc, bool exported) noexcept override;
     void destroy_buffer(handle_ty handle) noexcept override;
     [[nodiscard]] handle_ty create_texture3d(uint3 res, PixelStorage pixel_storage,
@@ -136,6 +142,23 @@ public:
     [[nodiscard]] handle_ty create_shader_from_file(const std::string &file_name, ShaderType shader_type,
                                                     const std::set<string> &options) noexcept override { return InvalidUI64; }
     void destroy_shader(handle_ty handle) noexcept override;
+    [[nodiscard]] handle_ty create_external_compute_module(
+        const std::byte *image,
+        size_t image_size,
+        const string &name,
+        ExternalComputeStatus *status) noexcept override;
+    [[nodiscard]] handle_ty create_external_compute_kernel(
+        handle_ty module,
+        const string &entry,
+        ExternalComputeStatus *status) noexcept override;
+    void destroy_external_compute_module(handle_ty handle) noexcept override;
+    [[nodiscard]] handle_ty create_command_graph(
+        CommandGraphStatus *status) noexcept override;
+    [[nodiscard]] bool prepare_command_graph(
+        handle_ty,
+        span<Command *const>,
+        CommandGraphStatus *) noexcept override;
+    void destroy_command_graph(handle_ty handle) noexcept override;
     [[nodiscard]] handle_ty create_accel(AccelUsageTag usage_tag) noexcept override;
     void destroy_accel(handle_ty handle) noexcept override;
     [[nodiscard]] handle_ty create_stream() noexcept override;

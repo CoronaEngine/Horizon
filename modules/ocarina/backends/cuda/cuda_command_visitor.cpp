@@ -9,6 +9,7 @@
 #include "cuda_mesh.h"
 #include "core/stl.h"
 #include "optix_accel.h"
+#include "cuda_command_graph.h"
 
 namespace ocarina {
 void CUDACommandVisitor::visit(const BufferUploadCommand *cmd) noexcept {
@@ -113,6 +114,52 @@ void CUDACommandVisitor::visit(const SynchronizeCommand *cmd) noexcept {
 void CUDACommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
     cmd->entry<CUDAShader *>()->launch(handle_ty(stream_),
                                        const_cast<ShaderDispatchCommand *>(cmd));
+}
+
+void CUDACommandVisitor::visit(
+    const ExternalComputeDispatchCommand *cmd) noexcept {
+    const auto &status = cmd->status();
+    if (!status || !status->ok()) {
+        failed_ = true;
+        return;
+    }
+    const span<const std::byte> parameter_data = cmd->parameter_data();
+    if (cmd->entry() == 0u || parameter_data.empty()) {
+        status->code = ExternalComputeStatusCode::InvalidLaunchConfiguration;
+        status->backend_code = 0;
+        failed_ = true;
+        return;
+    }
+    void *kernel_params[] = {
+        const_cast<std::byte *>(parameter_data.data())};
+    const uint3 grid = cmd->grid_dim();
+    const uint3 block = cmd->block_dim();
+    const CUresult result = cuLaunchKernel(
+        reinterpret_cast<CUfunction>(cmd->entry()),
+        grid.x, grid.y, grid.z,
+        block.x, block.y, block.z,
+        cmd->shared_memory_bytes(),
+        stream_,
+        kernel_params,
+        nullptr);
+    if (result != CUDA_SUCCESS) {
+        status->code = ExternalComputeStatusCode::LaunchFailed;
+        status->backend_code = static_cast<int64_t>(result);
+        failed_ = true;
+    }
+}
+
+void CUDACommandVisitor::visit(
+    const CommandGraphDispatchCommand *cmd) noexcept {
+    const auto &status = cmd->status();
+    if (!status || !status->ok() || cmd->graph() == 0u) {
+        failed_ = true;
+        return;
+    }
+    auto *graph = reinterpret_cast<CUDACommandGraph *>(cmd->graph());
+    if (!graph->execute(cmd->nodes(), stream_, status.get())) {
+        failed_ = true;
+    }
 }
 
 void CUDACommandVisitor::visit(const ocarina::HostFunctionCommand *cmd) noexcept {

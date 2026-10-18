@@ -149,31 +149,83 @@ private:
         return choose_block_shape(dispatch_dim, preferred_block_threads_);
     }
 
-public:
-    CUDASimpleShader(Device::Impl *device,
-                     const ocarina::string &ptx,
-                     const Function &f) : CUDAShader(device, f) {
-        OC_CU_CHECK(cuModuleLoadData(&module_, ptx.c_str()));
-        OC_CU_CHECK(cuModuleGetFunction(&func_handle_, module_, function_.func_name().c_str()));
-    }
-    ~CUDASimpleShader() override {
-        OC_CU_CHECK(cuModuleUnload(module_));
-    }
-    void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept override {
-        uint3 dispatch_dim = cmd->dispatch_dim();
-        // User-provided launch dimensions win. Otherwise we derive a block shape
-        // from the occupancy budget and compute the matching grid dimensions.
-        uint3 block_dim = valid_dim(function_.block_dim()) ? function_.block_dim() : auto_block_dim(dispatch_dim);
-        uint3 grid_dim = valid_dim(function_.grid_dim()) ? function_.grid_dim() : ceil_div(dispatch_dim, block_dim);
+    [[nodiscard]] std::pair<uint3, uint3> launch_shape(
+        ShaderDispatchCommand *cmd) noexcept {
+        const uint3 dispatch_dim = cmd->dispatch_dim();
+        uint3 block_dim = valid_dim(function_.block_dim())
+            ? function_.block_dim()
+            : auto_block_dim(dispatch_dim);
+        uint3 grid_dim = valid_dim(function_.grid_dim())
+            ? function_.grid_dim()
+            : ceil_div(dispatch_dim, block_dim);
         if (!valid_dim(block_dim)) {
             block_dim = make_uint3(1u);
         }
         if (!valid_dim(grid_dim)) {
             grid_dim = ceil_div(dispatch_dim, block_dim);
         }
+        return {grid_dim, block_dim};
+    }
+
+public:
+    CUDASimpleShader(Device::Impl *device,
+                     const ocarina::string &ptx,
+                     const Function &f) : CUDAShader(device, f) {
+        char error_log[8192]{};
+        char info_log[8192]{};
+        CUjit_option options[] = {
+            CU_JIT_ERROR_LOG_BUFFER,
+            CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+            CU_JIT_INFO_LOG_BUFFER,
+            CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+        };
+        void *values[] = {
+            error_log,
+            reinterpret_cast<void *>(sizeof(error_log)),
+            info_log,
+            reinterpret_cast<void *>(sizeof(info_log)),
+        };
+        CUresult load_result = cuModuleLoadDataEx(&module_, ptx.c_str(), 4, options, values);
+        if (load_result != CUDA_SUCCESS) {
+            const char *error_name = nullptr;
+            const char *error_string = nullptr;
+            cuGetErrorName(load_result, &error_name);
+            cuGetErrorString(load_result, &error_string);
+            OC_ERROR_FORMAT("CUDASimpleShader load module failed: function={}, code={}, name={}, message={}, jit_error={}, jit_info={}",
+                            function_.func_name().c_str(),
+                            static_cast<int>(load_result),
+                            error_name ? error_name : "<unknown>",
+                            error_string ? error_string : "<unknown>",
+                            error_log,
+                            info_log);
+            std::abort();
+        }
+        OC_CU_CHECK(cuModuleGetFunction(&func_handle_, module_, function_.func_name().c_str()));
+    }
+    ~CUDASimpleShader() override {
+        OC_CU_CHECK(cuModuleUnload(module_));
+    }
+    void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept override {
+        const auto [grid_dim, block_dim] = launch_shape(cmd);
         OC_CU_CHECK(cuLaunchKernel(func_handle_, grid_dim.x, grid_dim.y, grid_dim.z,
                                    block_dim.x, block_dim.y, block_dim.z,
                                    0, reinterpret_cast<CUstream>(stream), cmd->args().data(), nullptr));
+    }
+    bool describe_graph_kernel(
+        ShaderDispatchCommand *cmd,
+        CUDA_KERNEL_NODE_PARAMS &params) noexcept override {
+        const auto [grid_dim, block_dim] = launch_shape(cmd);
+        params.func = func_handle_;
+        params.gridDimX = grid_dim.x;
+        params.gridDimY = grid_dim.y;
+        params.gridDimZ = grid_dim.z;
+        params.blockDimX = block_dim.x;
+        params.blockDimY = block_dim.y;
+        params.blockDimZ = block_dim.z;
+        params.sharedMemBytes = 0u;
+        params.kernelParams = cmd->args().data();
+        params.extra = nullptr;
+        return func_handle_ != nullptr;
     }
     void compute_fit_size() noexcept override {
         ensure_preferred_block_threads();

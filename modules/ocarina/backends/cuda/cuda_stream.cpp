@@ -24,6 +24,9 @@ void CUDAStream::commit(const Commit &commit) noexcept {
     CUDACommandVisitor cmd_visitor{device_, stream_};
     for (auto &cmd : command_queue_) {
         cmd->accept(cmd_visitor);
+        if (cmd_visitor.failed()) {
+            break;
+        }
     }
     command_queue_.clear();
 }

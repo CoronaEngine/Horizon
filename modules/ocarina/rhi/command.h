@@ -30,7 +30,9 @@ namespace ocarina {
         BLASBuildCommand,         \
         TLASBuildCommand,         \
         TLASUpdateCommand,        \
-        ShaderDispatchCommand
+        ShaderDispatchCommand,    \
+        ExternalComputeDispatchCommand, \
+        CommandGraphDispatchCommand
 
 /// forward declare
 #define OC_MAKE_CMD_FWD_DECL(CMD) class CMD;
@@ -405,6 +407,110 @@ public:
     template<typename T>
     [[nodiscard]] auto entry() const noexcept { return reinterpret_cast<T>(entry_); }
     OC_MAKE_CMD_COMMON_FUNC(ShaderDispatchCommand)
+};
+
+enum class ExternalComputeStatusCode : uint32_t {
+    Success = 0u,
+    UnsupportedBackend,
+    InvalidImage,
+    ModuleLoadFailed,
+    EntryNotFound,
+    InvalidLaunchConfiguration,
+    LaunchFailed,
+};
+
+struct OC_RHI_API ExternalComputeStatus {
+    ExternalComputeStatusCode code{ExternalComputeStatusCode::Success};
+    int64_t backend_code{};
+
+    [[nodiscard]] bool ok() const noexcept {
+        return code == ExternalComputeStatusCode::Success;
+    }
+};
+
+enum class CommandGraphStatusCode : uint32_t {
+    Success = 0u,
+    UnsupportedBackend,
+    InvalidGraph,
+    EmptyTopology,
+    UnsupportedNode,
+    TopologyMismatch,
+    NodeDescriptionFailed,
+    GraphCreationFailed,
+    NodeCreationFailed,
+    InstantiationFailed,
+    NodeUpdateFailed,
+    LaunchFailed,
+};
+
+struct OC_RHI_API CommandGraphStatus {
+    CommandGraphStatusCode code{CommandGraphStatusCode::Success};
+    int64_t backend_code{};
+    uint64_t graph_generation{};
+    uint64_t launch_count{};
+    uint32_t node_count{};
+
+    [[nodiscard]] bool ok() const noexcept {
+        return code == CommandGraphStatusCode::Success;
+    }
+};
+
+class OC_RHI_API ExternalComputeDispatchCommand final : public Command {
+private:
+    handle_ty entry_{};
+    vector<std::byte> parameter_data_{};
+    uint3 grid_dim_{};
+    uint3 block_dim_{};
+    uint32_t shared_memory_bytes_{};
+    SP<ExternalComputeStatus> status_{};
+
+public:
+    ExternalComputeDispatchCommand(
+        handle_ty entry,
+        span<const std::byte> parameter_data,
+        uint3 grid_dim,
+        uint3 block_dim,
+        uint32_t shared_memory_bytes,
+        SP<ExternalComputeStatus> status) noexcept;
+
+    [[nodiscard]] handle_ty entry() const noexcept { return entry_; }
+    [[nodiscard]] span<const std::byte> parameter_data() const noexcept {
+        return parameter_data_;
+    }
+    [[nodiscard]] uint3 grid_dim() const noexcept { return grid_dim_; }
+    [[nodiscard]] uint3 block_dim() const noexcept { return block_dim_; }
+    [[nodiscard]] uint32_t shared_memory_bytes() const noexcept {
+        return shared_memory_bytes_;
+    }
+    [[nodiscard]] const SP<ExternalComputeStatus> &status() const noexcept {
+        return status_;
+    }
+    OC_MAKE_CMD_COMMON_FUNC(ExternalComputeDispatchCommand)
+};
+
+class OC_RHI_API CommandGraphDispatchCommand final : public Command {
+private:
+    handle_ty graph_{};
+    vector<Command *> nodes_{};
+    SP<CommandGraphStatus> status_{};
+
+public:
+    CommandGraphDispatchCommand(
+        handle_ty graph,
+        vector<Command *> nodes,
+        SP<CommandGraphStatus> status) noexcept;
+
+    [[nodiscard]] handle_ty graph() const noexcept { return graph_; }
+    [[nodiscard]] span<Command *const> nodes() const noexcept {
+        return {nodes_.data(), nodes_.size()};
+    }
+    [[nodiscard]] const SP<CommandGraphStatus> &status() const noexcept {
+        return status_;
+    }
+
+    void recycle() noexcept override;
+    OC_MAKE_CMD_VISITOR_ACCEPT(CommandGraphDispatchCommand)
+    OC_MAKE_CMD_CREATOR(CommandGraphDispatchCommand)
 };
 
 class OC_RHI_API HostFunctionCommand : public Command {

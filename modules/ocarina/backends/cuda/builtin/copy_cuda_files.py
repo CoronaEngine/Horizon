@@ -42,7 +42,7 @@ dst = ""
 if len(args) > 1:
     dst = args[1]
 else:
-    dst = "E:/work/compile/Vision/cmake-build-debug/bin/cuda"
+    raise SystemExit("Usage: copy_cuda_files.py <runtime-cuda-directory>")
     
 print("dst is ",dst)
 
