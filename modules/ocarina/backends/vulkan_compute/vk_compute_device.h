@@ -69,6 +69,8 @@ private:
 
     // ── RT extension support ─────────────────────────────────────────────────
     bool has_rt_{false};
+    bool has_external_memory_{false};
+    vector<uint32_t> shared_queue_families_;
     VkDeviceSize scratch_alignment_{1};
     std::recursive_mutex submission_mutex_;
     std::mutex streams_mutex_;
@@ -126,7 +128,8 @@ public:
     // Buffer allocation helpers
     [[nodiscard]] VkBufferAllocation allocate_buffer(size_t size, VkBufferUsageFlags usage,
                                                      bool host_visible = false,
-                                                     const string &debug_name = "", VkDeviceSize alignment = 1) noexcept;
+                                                     const string &debug_name = "", VkDeviceSize alignment = 1,
+                                                     bool readback = false, bool exported = false) noexcept;
     void free_buffer(VkBufferAllocation &alloc) noexcept;
     [[nodiscard]] VkImageAllocation allocate_image(uint3 extent, VkFormat fmt,
                                                    uint32_t levels,
@@ -147,6 +150,9 @@ public:
     [[nodiscard]] VkImageAllocation &get_vk_image(handle_ty handle) noexcept;
 
     // ── Device::Impl interface ───────────────────────────────────────────────
+    [[nodiscard]] bool supports_buffer_export() const noexcept override { return has_external_memory_; }
+    [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const override;
+    void set_buffer_external_ownership(handle_ty handle, bool external) override;
     [[nodiscard]] handle_ty create_buffer(size_t size, const string &desc,
                                           bool exported = false) noexcept override;
     void destroy_buffer(handle_ty handle) noexcept override;

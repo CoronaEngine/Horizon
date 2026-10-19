@@ -33,13 +33,13 @@ struct VkComputeStream::State {
         VkCommandBuffer cb{};
         VkFence fence{};
         uint64_t serial{};
+        bool gpu_submitted{};
         const VkShaderBase *bound_shader{};
         vector<VkBufferAllocation> retained;
         vector<std::function<void()>> completions;
         vector<Arena> arenas;
     };
     VulkanComputeDevice *device;
-    VkSemaphore timeline{};
     std::mutex mutex;
     std::recursive_mutex operations;
     std::condition_variable cv;
@@ -50,15 +50,11 @@ struct VkComputeStream::State {
     Batch *current{};
     uint64_t next_serial{}, submitted{}, completed{}, last_host_serial{};
     bool retirement_active{}, worker_requested{};
+    bool deferred_submission{};
     bool stopping{};
     std::thread worker;
 
     explicit State(VulkanComputeDevice *d) : device(d) {
-        VkSemaphoreTypeCreateInfo type{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
-        type.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-        VkSemaphoreCreateInfo ci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        ci.pNext = &type;
-        OC_VK_CHECK(vkCreateSemaphore(device->logical_device(), &ci, nullptr, &timeline));
         worker = std::thread([this] { retire_batches(); });
     }
     ~State() {
@@ -78,7 +74,6 @@ struct VkComputeStream::State {
             vkDestroyFence(device->logical_device(), batch->fence, nullptr);
             vkDestroyCommandPool(device->logical_device(), batch->pool, nullptr);
         }
-        vkDestroySemaphore(device->logical_device(), timeline, nullptr);
     }
     Batch &begin() {
         if (current) return *current;
@@ -116,6 +111,7 @@ struct VkComputeStream::State {
         }
         for (auto &arena : current->arenas) arena.used = 0;
         current->bound_shader = nullptr;
+        current->gpu_submitted = false;
         VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         OC_VK_CHECK(vkBeginCommandBuffer(current->cb, &bi));
@@ -131,24 +127,25 @@ struct VkComputeStream::State {
         if (!batch->completions.empty()) memory_barrier(batch->cb, true);
         OC_VK_CHECK(vkEndCommandBuffer(batch->cb));
         batch->serial = ++next_serial;
-        uint64_t host_dependency;
-        {
-            std::lock_guard lock(mutex);
-            host_dependency = completed < last_host_serial ? last_host_serial : 0;
-        }
-        if (!batch->completions.empty()) last_host_serial = batch->serial;
-        // GPU-only batches are ordered by queue barriers. Wait on the CPU
-        // timeline only when preceding host work is part of stream ordering.
-        device->submit(batch->cb, batch->fence, timeline, host_dependency);
         bool background_work;
         {
             std::lock_guard lock(mutex);
+            // Preserve nonblocking commit without a GPU wait on a host-signaled
+            // timeline. That wait can stall vkSignalSemaphore on Windows/NVIDIA
+            // when the engine uses a second Vulkan device. The retirement worker
+            // submits dependent batches after the preceding callbacks finish.
+            deferred_submission |= completed < last_host_serial;
+            if (!batch->completions.empty()) last_host_serial = batch->serial;
+            if (!deferred_submission) {
+                device->submit(batch->cb, batch->fence, VK_NULL_HANDLE, 0);
+                batch->gpu_submitted = true;
+            }
             pending.push_back(batch);
             submitted = batch->serial;
             // Pure GPU commits stay asynchronous without waking a CPU worker.
             // A synchronizing caller can retire them directly. Host callbacks
             // and allocation pressure request autonomous background progress.
-            worker_requested |= !batch->completions.empty();
+            worker_requested |= deferred_submission || !batch->completions.empty();
             background_work = worker_requested;
         }
         if (background_work) work_ready.notify_one();
@@ -174,27 +171,39 @@ struct VkComputeStream::State {
         }
     }
     void retire(Batch *batch) {
+        if (!batch->gpu_submitted) {
+            device->submit(batch->cb, batch->fence, VK_NULL_HANDLE, 0);
+            batch->gpu_submitted = true;
+            if (batch->completions.empty()) {
+                // Feed the queue through the next host callback before waiting
+                // for fences. Serial submit/wait for every deferred GPU-only
+                // batch causes a CPU/GPU round trip for each kernel commit.
+                std::lock_guard lock(mutex);
+                for (auto* next : pending) {
+                    if (!next->gpu_submitted) {
+                        device->submit(next->cb, next->fence, VK_NULL_HANDLE, 0);
+                        next->gpu_submitted = true;
+                    }
+                    if (!next->completions.empty()) break;
+                }
+                deferred_submission = !pending.empty() && !pending.back()->gpu_submitted;
+            }
+        }
         OC_VK_CHECK(vkWaitForFences(device->logical_device(), 1, &batch->fence, VK_TRUE, UINT64_MAX));
-        const bool has_host_work = !batch->completions.empty();
         for (auto &fn : batch->completions) fn();
         batch->completions.clear();
         for (auto &allocation : batch->retained) device->free_buffer(allocation);
         batch->retained.clear();
-        // Only host work creates timeline dependencies. GPU-only batches are
-        // ordered by queue barriers and do not need a host semaphore signal.
-        if (has_host_work) {
-            VkSemaphoreSignalInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO};
-            signal.semaphore = timeline;
-            signal.value = batch->serial;
-            OC_VK_CHECK(vkSignalSemaphore(device->logical_device(), &signal));
-        }
         bool background_work;
         {
             std::lock_guard lock(mutex);
             completed = batch->serial;
             available.push_back(batch);
             retirement_active = false;
-            if (pending.empty()) worker_requested = false;
+            if (pending.empty()) {
+                worker_requested = false;
+                deferred_submission = false;
+            }
             background_work = worker_requested;
         }
         cv.notify_all();
@@ -308,10 +317,8 @@ void VkComputeStream::commit(const Commit &cmt) noexcept {
     command_queue_.clear();
     state_->flush();
     if (cmt.callback) {
-        // A native queue submission must observe preceding host callbacks.
-        // The marker waits for their timeline value without blocking commit.
-        state_->begin();
-        state_->flush();
+        // Native submissions must follow all deferred GPU work and host callbacks.
+        state_->wait_idle();
         device_->run_commit_callback(cmt.callback);
         // Include native submissions in the next synchronize() boundary.
         state_->begin();

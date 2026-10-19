@@ -307,17 +307,46 @@ bool ulong_makers(Device &device) {
     return passed;
 }
 
+bool vector_narrow(Device &device) {
+    auto output = device.create_buffer<float>(12u);
+    Kernel kernel = [](BufferVar<float> out, Float4 value) {
+        auto triple = make_float3(value);
+        auto pair = make_float2(triple);
+        auto half_triple = make_half3(value);
+        auto widened_pair = make_float2(make_half4(value));
+        auto integers = make_int3(make_int4(value));
+        out.write(0u, triple.x); out.write(1u, triple.y); out.write(2u, triple.z);
+        out.write(3u, pair.x); out.write(4u, pair.y);
+        out.write(5u, cast<float>(half_triple.x));
+        out.write(6u, cast<float>(half_triple.z));
+        out.write(7u, widened_pair.x); out.write(8u, widened_pair.y);
+        out.write(9u, cast<float>(integers.x));
+        out.write(10u, cast<float>(integers.y)); out.write(11u, cast<float>(integers.z));
+    };
+    auto shader = device.compile(kernel, "capability-vector-narrow");
+    array<float, 12> actual{};
+    const array<float, 12> expected{1.5f, -2.25f, 3.75f, 1.5f, -2.25f,
+                                  1.5f, 3.75f, 1.5f, -2.25f, 1.f, -2.f, 3.f};
+    auto stream = device.create_stream();
+    stream << shader(output, make_float4(1.5f, -2.25f, 3.75f, 99.f)).dispatch(1u)
+           << output.download(actual.data()) << synchronize() << commit();
+    bool passed = true;
+    for (uint i = 0; i < actual.size(); ++i) passed &= check(actual[i], expected[i], "vector-narrow", i);
+    return passed;
+}
+
 }// namespace
 
 int main(int argc, char **argv) {
     if (argc != 3 || std::string_view(argv[1]) != "--case") {
-        std::cerr << "usage: --case inverse2|determinant2|callable-storage|callable-alias|fmod-mod|ulong-makers" << std::endl;
+        std::cerr << "usage: --case inverse2|determinant2|callable-storage|callable-alias|fmod-mod|ulong-makers|vector-narrow" << std::endl;
         return EXIT_FAILURE;
     }
     const std::string_view name = argv[2];
     bool (*probe)(Device &) = name == "inverse2" ? inverse2 : name == "callable-storage" ? callable_storage
         : name == "callable-alias" ? callable_alias : name == "fmod-mod" ? fmod_mod
-        : name == "determinant2" ? determinant2 : name == "ulong-makers" ? ulong_makers : nullptr;
+        : name == "determinant2" ? determinant2 : name == "ulong-makers" ? ulong_makers
+        : name == "vector-narrow" ? vector_narrow : nullptr;
     if (!probe) {
         std::cerr << "unknown case: " << name << std::endl;
         return EXIT_FAILURE;

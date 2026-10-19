@@ -173,8 +173,18 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             } else {
                 const bool widen_half = op >= CallOp::MAKE_BOOL2 && op <= CallOp::MAKE_HALF4X4 &&
                                         !is_half_value(e->type()) && is_half_value(arg->type());
+                const bool truncate_vector = op >= CallOp::MAKE_BOOL2 && op <= CallOp::MAKE_HALF4 &&
+                                             e->arguments().size() == 1 && e->type()->is_vector() &&
+                                             arg->type()->is_vector() &&
+                                             arg->type()->dimension() > e->type()->dimension();
                 if (widen_half) current_scratch() << "oc_half2float(";
+                if (truncate_vector) current_scratch() << "(";
                 arg->accept(*this);
+                // CUDA make_float3(float4) drops w. Slang constructors require
+                // an explicitly narrowed vector, including inside half casts.
+                if (truncate_vector) {
+                    current_scratch() << ")." << string_view("xyzw").substr(0, e->type()->dimension());
+                }
                 if (widen_half) current_scratch() << ")";
             }
             ++index;
@@ -211,8 +221,13 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         for (uint i = 0; i < expr->arguments().size(); ++i) {
             if (i) current_scratch() << ", ";
             const bool half_argument = is_half_value(expr->argument(i)->type());
+            const bool truncate_vector = expr->arguments().size() == 1 && expr->type()->is_vector() &&
+                                         expr->argument(i)->type()->is_vector() &&
+                                         expr->argument(i)->type()->dimension() > expr->type()->dimension();
             if (half_argument) current_scratch() << "oc_half2float(";
+            if (truncate_vector) current_scratch() << "(";
             expr->argument(i)->accept(*this);
+            if (truncate_vector) current_scratch() << ")." << string_view("xyzw").substr(0, expr->type()->dimension());
             if (half_argument) current_scratch() << ")";
         }
         current_scratch() << ")))";

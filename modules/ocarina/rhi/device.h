@@ -64,6 +64,15 @@ class DescriptorSetLayout;
 struct RHIPipeline;
 class Image;
 
+// Vulkan opaque-memory imports must preserve the allocation type and the
+// dedicated buffer's creation parameters. Empty metadata denotes another API.
+struct BufferExportMetadata {
+    uint32_t memory_type_index{~0u};
+    uint32_t usage{};
+    vector<uint32_t> queue_families;
+    std::array<uint8_t, 16> device_uuid{}, driver_uuid{};
+};
+
 class OC_RHI_API Device : public concepts::Noncopyable {
 public:
     class Impl : public concepts::Noncopyable {
@@ -93,6 +102,11 @@ public:
             cleanup_callbacks_.clear();
             for (auto &item : callbacks) item.second();
         }
+        [[nodiscard]] virtual bool supports_buffer_export() const noexcept { return false; }
+        [[nodiscard]] virtual BufferExportMetadata buffer_export_metadata(handle_ty) const { return {}; }
+        // Caller has completed all accesses in the previous owner before this
+        // synchronous ownership transfer. Non-Vulkan backends need no barrier.
+        virtual void set_buffer_external_ownership(handle_ty, bool) {}
         [[nodiscard]] virtual handle_ty create_buffer(size_t size, const string &desc, bool exported = false) noexcept = 0;
         virtual void destroy_buffer(handle_ty handle) noexcept = 0;
         [[nodiscard]] virtual handle_ty create_texture3d(uint3 res, PixelStorage pixel_storage,
@@ -218,6 +232,13 @@ public:
         return impl_->get_aligned_memory_size(handle);
     }
 
+    [[nodiscard]] bool supports_buffer_export() const noexcept { return impl_->supports_buffer_export(); }
+    [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const {
+        return impl_->buffer_export_metadata(handle);
+    }
+    void set_buffer_external_ownership(handle_ty handle, bool external) {
+        impl_->set_buffer_external_ownership(handle, external);
+    }
     [[nodiscard]] DevicePrecisionCaps precision_caps() const noexcept {
         return impl_->precision_caps();
     }

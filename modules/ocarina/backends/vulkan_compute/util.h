@@ -40,6 +40,8 @@ struct VkBufferAllocation {
     VmaAllocation alloc{};
     VkDeviceAddress address{0};  // valid only when SHADER_DEVICE_ADDRESS was requested
     VkDeviceSize size{0};
+    bool exported{false};
+    bool external_owned{false};
 };
 
 struct VkImageAllocation {

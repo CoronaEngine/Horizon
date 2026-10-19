@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -204,6 +205,13 @@ namespace Corona::Horizon
 
         uint64_t allocation_size = 0;
         BufferRange memory_range = BufferRange::entire();
+
+        // Optional metadata for dedicated allocations exported by Vulkan.
+        // Other APIs (e.g. CUDA) leave memory_type_index at its sentinel.
+        uint32_t memory_type_index = ~0u;
+        uint32_t vulkan_buffer_usage = 0;
+        std::vector<uint32_t> vulkan_queue_families;
+        std::array<uint8_t, 16> device_uuid {}, driver_uuid {};
 
         [[nodiscard]] static constexpr ExternalMemoryHandle win32(void* value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept { return { ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range }; }
 
@@ -594,6 +602,9 @@ namespace Corona::Horizon
         [[nodiscard]] uint32_t store_descriptor() const;
         [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
+        // Synchronous external-memory ownership barriers. The caller must
+        // finish all accesses by the previous owner before calling this.
+        void set_external_ownership(bool external) const;
 
     private:
         friend class HardwareImage;

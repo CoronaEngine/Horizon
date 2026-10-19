@@ -103,7 +103,7 @@ ocarina_add_test(test-launch-latency BENCHMARK CATEGORY runtime SOURCES runtime/
 ocarina_add_test(test-backend-performance BENCHMARK CATEGORY runtime SOURCES runtime/test_backend_performance.cpp)
 # Isolate capability regressions so one failure cannot hide later scenarios.
 ocarina_add_test(test-codegen-capability-probe GPU CATEGORY runtime SOURCES runtime/test_codegen_capability_probe.cpp
-    CASES inverse2 determinant2 callable-storage callable-alias fmod-mod ulong-makers)
+    CASES inverse2 determinant2 callable-storage callable-alias fmod-mod ulong-makers vector-narrow)
 ocarina_add_test(test-backend-capability-probe GPU CATEGORY runtime SOURCES runtime/test_backend_capability_probe.cpp
     CASES empty-accel fast-build mesh-rebuild same-batch-accel multistream-ray-params)
 ocarina_add_test(test-resource-capability-probe GPU CATEGORY resources SOURCES resources/test_resource_capability_probe.cpp

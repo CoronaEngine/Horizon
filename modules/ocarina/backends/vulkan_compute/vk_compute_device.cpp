@@ -13,6 +13,11 @@
 #include "vk_accel.h"
 #include "vk_command_visitor.h"
 #include "rhi/context.h"
+#ifdef _WIN32
+#include <windows.h>
+#include <vulkan/vulkan_win32.h>
+#endif
+#include <stdexcept>
 
 
 namespace ocarina {
@@ -89,6 +94,19 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     has_rt_ = supports(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
               supports(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
               supports(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+#ifdef _WIN32
+    has_external_memory_ = supports(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+    if (has_external_memory_) {
+        VkPhysicalDeviceExternalBufferInfo external{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO};
+        external.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        external.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+        VkExternalBufferProperties properties{VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES};
+        vkGetPhysicalDeviceExternalBufferProperties(phys_device_, &external, &properties);
+        has_external_memory_ = (properties.externalMemoryProperties.externalMemoryFeatures &
+                                VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
+    }
+#endif
     if (has_rt_) {
         VkPhysicalDeviceAccelerationStructurePropertiesKHR as_props{
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
@@ -103,6 +121,9 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     vkGetPhysicalDeviceQueueFamilyProperties(phys_device_, &qfc, nullptr);
     vector<VkQueueFamilyProperties> qfp(qfc);
     vkGetPhysicalDeviceQueueFamilyProperties(phys_device_, &qfc, qfp.data());
+    for (uint32_t i = 0; i < qfc; ++i) {
+        if (qfp[i].queueCount) shared_queue_families_.push_back(i);
+    }
     compute_queue_family_ = UINT32_MAX;
     for (uint32_t i = 0; i < qfc; ++i)
         if (qfp[i].queueFlags & VK_QUEUE_COMPUTE_BIT) { compute_queue_family_ = i; break; }
@@ -146,6 +167,9 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     }
 
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+#ifdef _WIN32
+    if (has_external_memory_) exts.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+#endif
     dci.pNext                   = &feats2;
     dci.queueCreateInfoCount    = 1u;
     dci.pQueueCreateInfos       = &qci;
@@ -275,19 +299,54 @@ void VulkanComputeDevice::init_samplers() noexcept {
 VkBufferAllocation VulkanComputeDevice::allocate_buffer(size_t size,
                                                         VkBufferUsageFlags usage,
                                                         bool host_visible,
-                                                        const string &, VkDeviceSize alignment) noexcept {
+                                                        const string &, VkDeviceSize alignment,
+                                                        bool readback, bool exported) noexcept {
     VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bci.size        = size > 0 ? size : 4;
     bci.usage       = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    if (has_rt_) bci.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    if (has_rt_ && !exported) bci.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkExternalMemoryBufferCreateInfo external{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
+    VkExportMemoryAllocateInfo export_memory{VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO};
+    if (exported) {
+        OC_ERROR_IF(!has_external_memory_, "Vulkan device does not support buffer export");
+#ifdef _WIN32
+        external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+        export_memory.handleTypes = external.handleTypes;
+#endif
+        bci.pNext = &external;
+        if (shared_queue_families_.size() > 1) {
+            bci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+            bci.queueFamilyIndexCount = uint32_t(shared_queue_families_.size());
+            bci.pQueueFamilyIndices = shared_queue_families_.data();
+        }
+        VkPhysicalDeviceExternalBufferInfo query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO};
+        query.usage = bci.usage;
+        query.handleType = VkExternalMemoryHandleTypeFlagBits(external.handleTypes);
+        VkExternalBufferProperties props{VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES};
+        vkGetPhysicalDeviceExternalBufferProperties(phys_device_, &query, &props);
+        OC_ERROR_IF(!(props.externalMemoryProperties.externalMemoryFeatures & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT),
+                    "Vulkan storage buffer is not exportable");
+    }
     VmaAllocationCreateInfo aci{};
     aci.usage = host_visible ? VMA_MEMORY_USAGE_CPU_TO_GPU : VMA_MEMORY_USAGE_GPU_ONLY;
+    if (readback) aci.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
     if (host_visible) aci.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     if (host_visible) aci.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    if (readback) {
+        aci.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        aci.preferredFlags = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    }
     VkBufferAllocation result{};
-    OC_VK_CHECK(vmaCreateBufferWithAlignment(allocator_, &bci, &aci, alignment,
-        &result.buffer, &result.alloc, nullptr));
+    if (exported) {
+        aci.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+        OC_VK_CHECK(vmaCreateDedicatedBuffer(allocator_, &bci, &aci, &export_memory,
+            &result.buffer, &result.alloc, nullptr));
+    } else {
+        OC_VK_CHECK(vmaCreateBufferWithAlignment(allocator_, &bci, &aci, alignment,
+            &result.buffer, &result.alloc, nullptr));
+    }
+    result.exported = exported;
     result.size = bci.size;
     VkBufferDeviceAddressInfo ai{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     ai.buffer    = result.buffer;
@@ -460,8 +519,8 @@ void VulkanComputeDevice::unregister_stream(VkComputeStream *stream) noexcept {
 }
 void VulkanComputeDevice::synchronize_streams() noexcept {
     // keep_alive may release its final resource reference on a completion
-    // thread. Its GPU batch has finished and later work is still blocked by
-    // the timeline; waiting here would wait for this same callback to return.
+    // thread. Its GPU batch has finished and dependent submissions are deferred;
+    // waiting here would wait for this same callback to return.
     // As with CUDA, resources used by another stream must be retained there.
     if (VkComputeStream::is_completion_thread(this)) return;
     std::lock_guard lock(streams_mutex_);
@@ -475,11 +534,11 @@ void VulkanComputeDevice::run_commit_callback(const std::function<void(void *)> 
 // ── Device::Impl create/destroy ───────────────────────────────────────────────
 
 handle_ty VulkanComputeDevice::create_buffer(size_t size, const string &desc,
-                                              bool) noexcept {
+                                              bool exported) noexcept {
     if (size == 0) return 0;
     auto alloc = allocate_buffer(size,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, desc);
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, desc, 1, false, exported);
     return alloc.address;
 }
 
@@ -612,7 +671,7 @@ void VulkanComputeDevice::memory_allocate(handle_ty *handle, size_t size, bool e
     if (size == 0) { *handle = 0; return; }
     auto alloc = allocate_buffer(size,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, "managed");
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, false, "managed", 1, false, exported);
     *handle = alloc.address;
 }
 
@@ -657,10 +716,64 @@ handle_ty VulkanComputeDevice::import_handle(handle_ty handle, size_t size) {
 }
 
 uint64_t VulkanComputeDevice::export_handle(handle_ty handle_) {
-    OC_NOT_IMPLEMENT_ERROR(export_handle);
-    return 0;
+    auto g = buffer_map_guard_.lock();
+    auto it = buffer_map_.find(handle_);
+    if (it == buffer_map_.end() || !it->second.exported) throw std::runtime_error("Buffer is not exportable");
+    VmaAllocationInfo allocation{};
+    vmaGetAllocationInfo(allocator_, it->second.alloc, &allocation);
+    auto get_handle = reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(
+        vkGetDeviceProcAddr(device_, "vkGetMemoryWin32HandleKHR"));
+    if (!get_handle) throw std::runtime_error("vkGetMemoryWin32HandleKHR is unavailable");
+    VkMemoryGetWin32HandleInfoKHR info{VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR};
+    info.memory = allocation.deviceMemory;
+    info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+    HANDLE handle{};
+    if (get_handle(device_, &info, &handle) != VK_SUCCESS) throw std::runtime_error("Vulkan memory export failed");
+    return reinterpret_cast<uint64_t>(handle);
 }
 #endif
+
+BufferExportMetadata VulkanComputeDevice::buffer_export_metadata(handle_ty handle) const {
+    auto g = const_cast<VulkanComputeDevice*>(this)->buffer_map_guard_.lock();
+    const auto& buffer = buffer_map_.at(handle);
+    if (!buffer.exported) throw std::runtime_error("Buffer is not exportable");
+    VmaAllocationInfo allocation{};
+    vmaGetAllocationInfo(allocator_, buffer.alloc, &allocation);
+    VkPhysicalDeviceIDProperties ids{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    properties.pNext = &ids;
+    vkGetPhysicalDeviceProperties2(phys_device_, &properties);
+    BufferExportMetadata info;
+    info.memory_type_index = allocation.memoryType;
+    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    info.queue_families = shared_queue_families_;
+    std::copy_n(ids.deviceUUID, 16, info.device_uuid.begin());
+    std::copy_n(ids.driverUUID, 16, info.driver_uuid.begin());
+    return info;
+}
+
+void VulkanComputeDevice::set_buffer_external_ownership(handle_ty handle, bool external) {
+    auto g = buffer_map_guard_.lock();
+    auto& buffer = buffer_map_.at(handle);
+    if (!buffer.exported || buffer.external_owned == external) return;
+    const auto native_buffer = buffer.buffer;
+    const auto local_family = shared_queue_families_.size() > 1 ? VK_QUEUE_FAMILY_IGNORED : compute_queue_family_;
+    g.unlock();
+    immediate_submit([&](VkCommandBuffer cb) {
+        VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        barrier.srcAccessMask = external ? VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT : 0;
+        barrier.dstAccessMask = external ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+        barrier.srcQueueFamilyIndex = external ? local_family : VK_QUEUE_FAMILY_EXTERNAL;
+        barrier.dstQueueFamilyIndex = external ? VK_QUEUE_FAMILY_EXTERNAL : local_family;
+        barrier.buffer = native_buffer;
+        barrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 1, &barrier, 0, nullptr);
+    });
+    auto update = buffer_map_guard_.lock();
+    buffer_map_.at(handle).external_owned = external;
+}
 
 // ── Destructor ────────────────────────────────────────────────────────────────
 

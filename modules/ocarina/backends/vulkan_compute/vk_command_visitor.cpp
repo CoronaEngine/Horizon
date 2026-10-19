@@ -50,7 +50,7 @@ VkBufferAllocation VkComputeCommandVisitor::make_staging(size_t size, const void
 
 static VkBufferAllocation make_readback(VulkanComputeDevice *dev, size_t size) {
     return dev->allocate_buffer(size,
-                                VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, "readback");
+                                VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, "readback", 1, true);
 }
 
 static void full_barrier(VkCommandBuffer cb) {
@@ -97,6 +97,7 @@ void VkComputeCommandVisitor::visit(const BufferDownloadCommand *cmd) noexcept {
     complete([device = device_, rb, host = cmd->host_ptr<void *>(), size] {
         void *mapped = nullptr;
         OC_VK_CHECK(vmaMapMemory(device->vma_allocator(), rb.alloc, &mapped));
+        OC_VK_CHECK(vmaInvalidateAllocation(device->vma_allocator(), rb.alloc, 0, size));
         memcpy(host, mapped, size);
         vmaUnmapMemory(device->vma_allocator(), rb.alloc);
     });

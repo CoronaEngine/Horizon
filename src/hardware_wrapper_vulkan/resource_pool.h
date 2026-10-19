@@ -382,6 +382,9 @@ namespace Corona::Horizon
 
         bool host_imported_manual_bind { false };
         bool imported { false };
+        bool external_ownership_required { false };
+        bool external_concurrent_sharing { false };
+        bool external_owned { false };
 
         std::int32_t bindless_index { -1 };
 
@@ -424,6 +427,9 @@ namespace Corona::Horizon
             buffer_usage = 0;
             host_imported_manual_bind = false;
             imported = false;
+            external_ownership_required = false;
+            external_concurrent_sharing = false;
+            external_owned = false;
             bindless_index = -1;
             device_manager = nullptr;
             resource_manager = nullptr;

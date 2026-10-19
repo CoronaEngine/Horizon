@@ -195,6 +195,13 @@ namespace Corona::Horizon
         return buffer;
     }
 
+    void HardwareBuffer::set_external_ownership(bool external) const
+    {
+        const auto buffer = write_buffer(*this);
+        if (!buffer) throw std::invalid_argument("External ownership requires a valid buffer");
+        resource_manager().set_external_buffer_ownership(*buffer, external);
+    }
+
     ExternalMemoryHandle HardwareBuffer::export_external() const
     {
         auto buffer = write_buffer(*this);

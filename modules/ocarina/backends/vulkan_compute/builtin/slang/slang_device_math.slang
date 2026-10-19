@@ -675,12 +675,12 @@ void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y
 }
 
 
-float[N] oc_tex3d_sample_float<uint N>(OCTextureDesc desc, float u, float v, float w) {
+float[N] oc_tex3d_sample_float<uint N>(OCTextureDesc desc, float u, float v, float w = 0.0f) {
     float4 value=g_bindless_tex3d[NonUniformResourceIndex(uint(desc.tex_index))].SampleLevel(g_samplers[0], float3(u,v,w), 0);
     float result[N]; for(uint i=0;i<N;++i) result[i]=value[i]; return result;
 }
 
-float[N] oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float u, float v, float w) {
+float[N] oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float u, float v, float w = 0.0f) {
     uint index=*((uint*)(arr.tex3d_slot + slot*4u));
     OCTextureDesc desc={uint64_t(index),uint64_t(index),0,0};
     return oc_tex3d_sample_float<N>(desc, u,v,w);
