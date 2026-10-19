@@ -31,6 +31,22 @@ CUDADevice::CUDADevice(RHIContext *context)
     init_hardware_info();
 }
 
+CUDADevice::~CUDADevice() noexcept {
+    // Resource owners and stream workers must have retired before the Device.
+    // OptiX owns additional GPU state even after pipelines/modules are released.
+    use_context([&] {
+        if (optix_device_context_) {
+            OC_OPTIX_CHECK(optixDeviceContextDestroy(optix_device_context_));
+            optix_device_context_ = nullptr;
+        }
+        cmd_visitor_.reset();
+    });
+    // Balance our retain without resetting a primary context shared with other
+    // CUDA users in this process. The ContextGuard has already popped it.
+    OC_CU_CHECK(cuDevicePrimaryCtxRelease(cu_device_));
+    cu_ctx_ = nullptr;
+}
+
 void CUDADevice::init_hardware_info() {
     auto compute_cap_major = 0;
     auto compute_cap_minor = 0;

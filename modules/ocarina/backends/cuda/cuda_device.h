@@ -91,6 +91,7 @@ private:
 
 public:
     explicit CUDADevice(RHIContext *context);
+    ~CUDADevice() noexcept;
     void init_hardware_info();
     template<typename Func>
     decltype(auto) use_context(Func &&func) noexcept {
