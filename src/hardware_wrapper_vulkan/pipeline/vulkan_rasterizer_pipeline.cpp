@@ -1613,11 +1613,11 @@ namespace Corona::Horizon
         std::sort(color_outputs.begin(), color_outputs.end(),
                   [](const BoundImage* a, const BoundImage* b) { return a->location < b->location; });
 
-        plan.has_rendering_scope = !color_outputs.empty() && width != 0 && height != 0;
+        plan.has_rendering_scope = (!color_outputs.empty() || depth_target) && width != 0 && height != 0;
         if (plan.has_rendering_scope)
         {
             const bool has_depth = static_cast<bool>(depth_target);
-            plan.rendering.color = image_ref(color_outputs[0]->image);
+            if (!color_outputs.empty()) plan.rendering.color = image_ref(color_outputs[0]->image);
             for (size_t i = 1; i < color_outputs.size() && i < 4; ++i)
                 plan.rendering.extra_colors[i - 1] = image_ref(color_outputs[i]->image);
             plan.rendering.depth = has_depth ? image_ref(depth_target) : ImageRef {};
