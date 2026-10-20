@@ -15,6 +15,34 @@ namespace ocarina {
 
 namespace {
 
+[[nodiscard]] bool contains_call(const Expression *expr) noexcept {
+    switch (expr->tag()) {
+        case Expression::Tag::CALL: return true;
+        case Expression::Tag::UNARY:
+            return contains_call(static_cast<const UnaryExpr *>(expr)->operand());
+        case Expression::Tag::BINARY: {
+            const auto *binary = static_cast<const BinaryExpr *>(expr);
+            return contains_call(binary->lhs()) || contains_call(binary->rhs());
+        }
+        case Expression::Tag::MEMBER:
+            return contains_call(static_cast<const MemberExpr *>(expr)->parent());
+        case Expression::Tag::SUBSCRIPT: {
+            const auto *subscript = static_cast<const SubscriptExpr *>(expr);
+            bool result = contains_call(subscript->range());
+            subscript->for_each_index([&](const Expression *index) { result |= contains_call(index); });
+            return result;
+        }
+        case Expression::Tag::CAST:
+            return contains_call(static_cast<const CastExpr *>(expr)->expression());
+        case Expression::Tag::CONDITIONAL: {
+            const auto *conditional = static_cast<const ConditionalExpr *>(expr);
+            return contains_call(conditional->pred()) || contains_call(conditional->true_()) ||
+                   contains_call(conditional->false_());
+        }
+        default: return false;
+    }
+}
+
 bool requires_storage_helper(const Type *type) noexcept {
     return type->is_structure() || type->is_array() || type->is_matrix() ||
            type->tag() == Type::Tag::BOOL ||
@@ -521,11 +549,67 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             return;
         }
     }
+    // The resource ABI stores sizes as uint64_t; the DSL permits requesting
+    // another integer type without an explicit CastExpr at the call site.
+    const bool size_conversion = op == CallOp::BUFFER_SIZE || op == CallOp::BYTE_BUFFER_SIZE;
+    if (size_conversion) {
+        _emit_type_name(expr->type());
+        current_scratch() << "(";
+    }
     current_scratch() << callable_name;
     emit_args(expr);
+    if (size_conversion) current_scratch() << ")";
 }
 
 // ── Expressions ──────────────────────────────────────────────────────────────
+
+void AstToSlangSource::_emit_statements(span<const Statement *const> statements) noexcept {
+    for (const Statement *stmt : statements) {
+        if (!_should_emit_statement(stmt)) continue;
+        const Expression *expr = nullptr;
+        switch (stmt->tag()) {
+            case Statement::Tag::EXPR: expr = static_cast<const ExprStmt *>(stmt)->expression(); break;
+            case Statement::Tag::ASSIGN: {
+                const auto *assign = static_cast<const AssignStmt *>(stmt);
+                if (!contains_call(assign->lhs())) expr = assign->rhs();
+                break;
+            }
+            case Statement::Tag::RETURN: expr = static_cast<const ReturnStmt *>(stmt)->expression(); break;
+            default: break;
+        }
+        bool reference_call = false;
+        if (expr && expr->tag() == Expression::Tag::CALL) {
+            const auto *call = static_cast<const CallExpr *>(expr);
+            if (call->call_op() == CallOp::CUSTOM && call->function()) {
+                const auto parameters = call->function()->all_arguments();
+                uint index = 0u;
+                for (const Expression *argument : call->arguments()) {
+                    // Leave any nested builtin calls subject to ordinary diagnostics.
+                    if (contains_call(argument)) {
+                        reference_call = false;
+                        break;
+                    }
+                    const Variable &parameter = parameters[index++];
+                    reference_call |= parameter.tag() == Variable::Tag::REFERENCE &&
+                                      !parameter.type()->is_buffer() && !_is_storage_reference(argument);
+                }
+            }
+        }
+        if (reference_call) {
+            // DSL __ref parameters pass actual storage and intentionally allow aliases.
+            // Slang E30051 also covers out/inout copy semantics; suppress it only on
+            // this direct callable line, including the 2026.10 same-member false positive.
+            if (obfuscation_) current_scratch() << "\n";
+            _emit_indent();
+            current_scratch() << "#pragma warning(suppress : 30051)\n";
+        }
+        _emit_indent();
+        stmt->accept(*this);
+        current_scratch() << ";";
+        if (reference_call && obfuscation_) current_scratch() << "\n";
+        else _emit_newline();
+    }
+}
 
 void AstToSlangSource::_emit_custom_call(const CallExpr *expr) noexcept {
     const Function &function = *expr->function();
@@ -639,7 +723,11 @@ void AstToSlangSource::_emit_array_operation(const Type *result,
 
 void AstToSlangSource::visit(const UnaryExpr *expr) noexcept {
     if (!expr->type()->is_array()) {
-        AstToCppSource::visit(expr);
+        if (expr->op() == UnaryOp::NOT) {
+            current_scratch() << "!(";
+            _emit_converted_value(expr->type(), expr->operand());
+            current_scratch() << ")";
+        } else AstToCppSource::visit(expr);
         return;
     }
     constexpr string_view operators[]{"+", "-", "!", "~"};
@@ -851,17 +939,51 @@ void AstToSlangSource::_emit_buffer_address(const SubscriptExpr *expr) noexcept 
     current_scratch() << ")";
 }
 
+void AstToSlangSource::_emit_converted_value(const Type *target, const Expression *value) noexcept {
+    const bool half = needs_half_assignment_rounding(target, value);
+    const bool widen_half = !is_half_value(target) && is_half_value(value->type());
+    const bool convert = !half && target != value->type() && target->is_basic() && value->type()->is_basic();
+    if (half) current_scratch() << half_conversion_prefix(target);
+    else if (convert) {
+        _emit_type_name(target);
+        current_scratch() << "(";
+    }
+    if (widen_half) current_scratch() << "oc_half2float(";
+    value->accept(*this);
+    if (widen_half) current_scratch() << ")";
+    if (half) current_scratch() << ")))";
+    else if (convert) current_scratch() << ")";
+}
+
+void AstToSlangSource::visit(const IfStmt *stmt) noexcept {
+    current_scratch() << "if (";
+    _emit_converted_value(Type::of<bool>(), stmt->condition());
+    current_scratch() << ") ";
+    stmt->true_branch()->accept(*this);
+    const auto *false_branch = stmt->false_branch();
+    const Statement *first_statement = nullptr;
+    size_t statement_count = 0u;
+    for (const Statement *statement : false_branch->statements()) {
+        if (_should_emit_statement(statement)) {
+            if (first_statement == nullptr) first_statement = statement;
+            ++statement_count;
+        }
+    }
+    if (statement_count == 0u) return;
+    current_scratch() << " else ";
+    if (statement_count == 1u && first_statement->tag() == Statement::Tag::IF && false_branch->local_vars().empty()) {
+        first_statement->accept(*this);
+    } else false_branch->accept(*this);
+}
+
+void AstToSlangSource::visit(const LoopStmt *stmt) noexcept {
+    current_scratch() << "while (true) ";
+    stmt->body()->accept(*this);
+}
+
 void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
     const auto *lhs = stmt->lhs();
-    auto emit_rhs = [&] {
-        const bool half = needs_half_assignment_rounding(lhs->type(), stmt->rhs());
-        const bool widen_half = !is_half_value(lhs->type()) && is_half_value(stmt->rhs()->type());
-        if (half) current_scratch() << half_conversion_prefix(lhs->type());
-        if (widen_half) current_scratch() << "oc_half2float(";
-        stmt->rhs()->accept(*this);
-        if (widen_half) current_scratch() << ")";
-        if (half) current_scratch() << ")))";
-    };
+    auto emit_rhs = [&] { _emit_converted_value(lhs->type(), stmt->rhs()); };
     if (_is_storage_reference(lhs)) {
         const Type *type = lhs->type();
         _emit_storage_functions(type);
@@ -893,11 +1015,9 @@ void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
             return;
         }
     }
-    if (is_half_value(lhs->type()) || is_half_value(stmt->rhs()->type())) {
-        lhs->accept(*this);
-        current_scratch() << " = ";
-        emit_rhs();
-    } else AstToCppSource::visit(stmt);
+    lhs->accept(*this);
+    current_scratch() << " = ";
+    emit_rhs();
 }
 
 void AstToSlangSource::_emit_storage_fields(const Type *type, size_t offset,
@@ -954,16 +1074,24 @@ void AstToSlangSource::_emit_storage_functions(const Type *type) noexcept {
 }
 
 void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
+    constexpr string_view operators[]{"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>",
+                                       "&&", "||", "<", ">", "<=", ">=", "==", "!="};
     const Type *element = expr->type();
     while (element->is_array() || element->is_vector()) element = element->element();
     const bool signed_remainder = expr->op() == BinaryOp::MOD &&
                                   (element->tag() == Type::Tag::INT || element->tag() == Type::Tag::SHORT ||
                                    element->tag() == Type::Tag::CHAR);
     if (expr->type()->is_array()) {
-        constexpr string_view operators[]{"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>",
-                                           "&&", "||", "<", ">", "<=", ">=", "==", "!="};
         _emit_array_operation(expr->type(), {expr->lhs(), expr->rhs()},
                               signed_remainder ? "oc_srem" : operators[uint(expr->op())], !signed_remainder);
+        return;
+    }
+    if (expr->op() == BinaryOp::AND || expr->op() == BinaryOp::OR) {
+        current_scratch() << "(";
+        _emit_converted_value(expr->type(), expr->lhs());
+        current_scratch() << (expr->op() == BinaryOp::AND ? " && " : " || ");
+        _emit_converted_value(expr->type(), expr->rhs());
+        current_scratch() << ")";
         return;
     }
     if (signed_remainder) {
@@ -979,6 +1107,24 @@ void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
     // transpose of the ocarina one and every matrix product swaps its operands.
     const Type *lhs = expr->lhs()->type();
     const Type *rhs = expr->rhs()->type();
+    auto is_floating_scalar = [](const Type *type) {
+        return type->tag() == Type::Tag::FLOAT || type->tag() == Type::Tag::REAL || type->tag() == Type::Tag::HALF;
+    };
+    const bool promote_lhs = lhs->tag() == Type::Tag::BOOL && is_floating_scalar(rhs);
+    const bool promote_rhs = rhs->tag() == Type::Tag::BOOL && is_floating_scalar(lhs);
+    if (promote_lhs || promote_rhs) {
+        // A comparison's result is bool, but its operands still use numeric
+        // promotion. Convert only the boolean operand; keep numeric shapes
+        // and integer promotion rules unchanged.
+        current_scratch() << "(";
+        if (promote_lhs) _emit_converted_value(rhs, expr->lhs());
+        else expr->lhs()->accept(*this);
+        current_scratch() << " " << operators[uint(expr->op())] << " ";
+        if (promote_rhs) _emit_converted_value(lhs, expr->rhs());
+        else expr->rhs()->accept(*this);
+        current_scratch() << ")";
+        return;
+    }
     bool matrix_product = expr->op() == BinaryOp::MUL &&
                           (lhs->is_matrix() || rhs->is_matrix()) &&
                           !lhs->is_scalar() && !rhs->is_scalar();

@@ -18,7 +18,7 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 5u;
+constexpr unsigned slang_source_cache_version = 6u;
 
 void normalize_ray_query_extensions(vector<uint32_t> &spirv) noexcept {
     // Slang also declares SPV_KHR_ray_tracing when constructing an acceleration
@@ -92,6 +92,28 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     slang::TargetDesc target{};
     target.format  = SLANG_SPIRV;
     target.profile = global_com->findProfile("spirv_1_5");
+
+    // Slang's texture intrinsics carry these standard-library requirements even
+    // when they only emit ordinary image operations. Declaring them avoids an
+    // implicit profile upgrade; SPIR-V still declares only capabilities in use.
+    // The backend requires ballot subgroups and enables ray queries separately.
+    const char *capabilities[] = {
+        "SPV_KHR_non_semantic_info", "SPV_GOOGLE_user_type",
+        "spvDerivativeControl", "spvImageQuery", "spvImageGatherExtended",
+        "spvSparseResidency", "spvMinLod", "spvFragmentFullyCoveredEXT",
+        "spvGroupNonUniform", "spvGroupNonUniformBallot",
+        "spvRayQueryKHR"};
+    slang::CompilerOptionEntry target_options[std::size(capabilities)]{};
+    const uint32_t capability_count = uint32_t(std::size(capabilities)) - (device_->has_rt() ? 0u : 1u);
+    for (uint32_t i = 0; i < capability_count; ++i) {
+        auto capability = global_com->findCapability(capabilities[i]);
+        OC_ERROR_IF(capability == SLANG_CAPABILITY_UNKNOWN,
+                    "Slang: required target capability not found: ", capabilities[i]);
+        target_options[i].name = slang::CompilerOptionName::Capability;
+        target_options[i].value.intValue0 = capability;
+    }
+    target.compilerOptionEntries = target_options;
+    target.compilerOptionEntryCount = capability_count;
 
     // Search paths for builtin .slang files copied next to the backend DLL.
     string builtin_dir = (device_->context()->runtime_directory() / "slang").string();
@@ -186,7 +208,7 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
         module = session_->loadModuleFromSourceString(
             cache_key.c_str(), nullptr, source.c_str(), diag.writeRef());
         if (diag && diag->getBufferSize() > 0) {
-            OC_WARNING("Slang diagnostics:\n{}",
+            OC_WARNING_FORMAT("Slang diagnostics:\n{}",
                        reinterpret_cast<const char *>(diag->getBufferPointer()));
         }
         if (!module) {

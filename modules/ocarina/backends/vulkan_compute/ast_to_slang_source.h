@@ -22,6 +22,7 @@ protected:
     // In a storage-reference callable variant, these argument variables hold
     // physical addresses. Each access uses the host ABI instead of copy-in/out.
     set<uint> storage_reference_arguments_;
+    void _emit_converted_value(const Type *target, const Expression *value) noexcept;
     void _emit_custom_call(const CallExpr *expr) noexcept;
     void _emit_matrix_constructor(const CallExpr *expr) noexcept;
     void _emit_default_value(const Type *type) noexcept;
@@ -50,6 +51,8 @@ protected:
     void visit(const MemberExpr *expr) noexcept override;
     void visit(const RefExpr *expr) noexcept override;
     void visit(const AssignStmt *stmt) noexcept override;
+    void visit(const IfStmt *stmt) noexcept override;
+    void visit(const LoopStmt *stmt) noexcept override;
     void visit(const CallExpr *expr) noexcept override;
     void visit(const CastExpr *expr) noexcept override;
     void visit(const LiteralExpr *expr) noexcept override;
@@ -63,6 +66,7 @@ protected:
     void _emit_builtin_vars_define(const Function &f) noexcept override;
     void _emit_variable_define(const Variable &v) noexcept override;
     void _emit_local_var_define(const ScopeStmt *scope) noexcept override;
+    void _emit_statements(span<const Statement *const> statements) noexcept override;
 
 public:
     explicit AstToSlangSource(bool obfuscation) : AstToCppSource(obfuscation) {}

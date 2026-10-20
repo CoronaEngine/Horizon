@@ -60,6 +60,10 @@ ocarina_add_test(test-trait CATEGORY core SOURCES core/test_trait.cpp)
 # Codegen and shader interface tests.
 ocarina_add_test(test-shader-argument-pack CATEGORY codegen SOURCES codegen/test_shader_argument_pack.cpp)
 ocarina_add_test(test-shader-parameter-policy GPU CATEGORY codegen SOURCES codegen/test_shader_parameter_policy.cpp)
+ocarina_add_test(test-slang-conversions GPU CATEGORY codegen SOURCES codegen/test_slang_conversions.cpp)
+target_link_libraries(test-codegen-slang-conversions slang::slang)
+ocarina_add_test(test-slang-alias-diagnostics GPU CATEGORY codegen SOURCES codegen/test_slang_alias_diagnostics.cpp)
+target_link_libraries(test-codegen-slang-alias-diagnostics slang::slang)
 
 # Resource and buffer tests.
 ocarina_add_test(test-host-bytebuffer CATEGORY resources SOURCES resources/test_host_byte_buffer.cpp)
@@ -80,6 +84,8 @@ ocarina_add_test(test-matrix-inverse CATEGORY math SOURCES math/test_matrix_inve
 ocarina_add_test(test-swizzle GPU CATEGORY math SOURCES math/test_swizzle.cpp)
 
 # Runtime and backend-facing tests.
+ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/test_slang_capabilities.cpp
+    CASES default ray-query)
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
 ocarina_add_test(test-render-parity GPU CATEGORY runtime SOURCES runtime/test_render_parity.cpp)
 ocarina_add_test(test-codegen-parity-extended GPU CATEGORY runtime SOURCES runtime/test_codegen_parity_extended.cpp)
