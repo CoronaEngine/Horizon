@@ -278,7 +278,7 @@ int main(int argc, char **argv) {
     }
     const char *backend = test_backend_name();
     std::cout << "case=" << name << " backend=" << backend << std::endl;
-    auto device = RHIContext::instance().create_device(backend);
+    auto device = RHIContext::instance().create_device();
     const bool passed = probe(device);
     if (name != "float32-subnormal") std::cout << "case=" << name << " result=" << (passed ? "PASS" : "FAIL") << std::endl;
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;

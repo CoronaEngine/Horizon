@@ -25,7 +25,7 @@ void require(bool condition, const char *message) {
 }
 
 // Hold the callback while the submitting thread can enqueue later transfers.
-// CUDA may stage pageable uploads synchronously, so an independent thread also
+// DSL may stage pageable uploads synchronously, so an independent thread also
 // releases this gate. This tests data ordering, not upload submission latency.
 struct CallbackGate {
     std::mutex mutex;
@@ -127,7 +127,7 @@ std::vector<uint4> texture_pixels(uint count) {
 }// namespace
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     {
         constexpr uint count = 17u;
         std::vector<uint> values(count);

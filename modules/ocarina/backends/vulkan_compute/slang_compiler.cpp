@@ -1,9 +1,9 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces cuda_compiler.cpp — Slang session + SPIR-V cache.
 //
 
 #include "slang_compiler.h"
+#include <chrono>
+#include "core/util/switch_profile.h"
 #include "vk_compute_device.h"
 #include "ast_to_slang_source.h"
 #include "ir_to_slang_source.h"
@@ -134,6 +134,7 @@ void SlangShaderCompiler::ensure_session() const noexcept {
 
 vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
                                                uint3 workgroup_size) const noexcept {
+    switch_profile::Scope profile{"SlangShaderCompiler::compile", "slang"};
     std::lock_guard lock(compile_mutex_);
     ensure_session();
 
@@ -164,10 +165,16 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
                 f.seekg(0);
                 vector<uint32_t> spirv(byte_size / 4);
                 f.read(reinterpret_cast<char *>(spirv.data()), (std::streamsize)byte_size);
-                if (f.good() && spirv[0] == 0x07230203u) return spirv;
+                if (f.good() && spirv[0] == 0x07230203u) {
+                    OC_INFO_FORMAT("shader SPIR-V cache hit: {}.spv", cache_key);
+                    return spirv;
+                }
             }
         }
     }
+
+    OC_INFO_FORMAT("shader SPIR-V cache miss: {}.spv", cache_key);
+    const auto compile_start = std::chrono::steady_clock::now();
 
     // Patch numthreads attribute for compute kernels
     if (function.is_kernel()) {
@@ -237,6 +244,9 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     const uint32_t *data = reinterpret_cast<const uint32_t *>(spirv_blob->getBufferPointer());
     vector<uint32_t> spirv(data, data + byte_size / 4);
     normalize_ray_query_extensions(spirv);
+    const double compile_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - compile_start).count();
+    OC_INFO_FORMAT("task Slang compile {}.slang is take {} ms", cache_key, compile_ms);
 
     // Write to disk cache
     std::filesystem::create_directories(

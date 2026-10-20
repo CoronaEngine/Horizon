@@ -213,7 +213,7 @@ void probe_zero_dispatch(Device &device, const char *backend) {
     auto stream = device.create_stream();
     uint result = sentinel;
     stream << output.byte_set(0xcdu) << synchronize() << commit();
-    // Empty automatic dispatches must be harmless, including on CUDA.
+    // Empty automatic dispatches must be harmless, including on DSL.
     std::cout << "COMPUTE_ZERO_DISPATCH backend=" << backend << " phase=attempt" << std::endl;
     stream << shader(output).dispatch(0u) << output.download(&result) << synchronize() << commit();
     require(result == sentinel, "automatic zero dispatch wrote outside its empty domain");
@@ -287,7 +287,7 @@ void test_warp_queries(Device &device) {
            << output.download(actual.data()) << synchronize() << commit();
     for (uint i = 0; i < count; ++i) {
         const uint width = actual[i * records].y;
-        require(width == 32u, "public warp width must match CUDA's 32 lanes");
+        require(width == 32u, "public warp width must match DSL's 32 lanes");
         const uint first = (i / block) * block + ((i % block) / width) * width;
         const uint last = std::min(first + width, count);
         const uint lane = i - first;
@@ -320,7 +320,7 @@ int main(int argc, char **argv) {
     const bool zero_probe = argc == 2 && std::string_view(argv[1]) == "--zero-dispatch";
     require(argc == 1 || zero_probe, "usage: test-compute-dispatch-parity [--zero-dispatch]");
     const char *backend = test_backend_name();
-    auto device = RHIContext::instance().create_device(backend);
+    auto device = RHIContext::instance().create_device();
     if (zero_probe) {
         probe_zero_dispatch(device, backend);
         return EXIT_SUCCESS;

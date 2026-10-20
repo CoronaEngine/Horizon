@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDAMesh: wraps a Vulkan BLAS (bottom-level acceleration structure).
 //
 
 #pragma once

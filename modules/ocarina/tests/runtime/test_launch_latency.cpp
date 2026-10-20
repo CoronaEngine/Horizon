@@ -66,7 +66,7 @@ auto make_linear_write_kernel(uint width) {
 int main(int argc, char *argv[]) {
     fs::path path(argv[0]);
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     device.init_rtx();
     Stream stream = device.create_stream();
 
@@ -76,52 +76,52 @@ int main(int argc, char *argv[]) {
     raygen_small_kernel.function()->set_raytracing(true);
     auto raygen_small = device.compile(raygen_small_kernel, "launch-latency-raygen-small");
 
-    auto cuda_small_kernel = make_linear_write_kernel(1u);
-    cuda_small_kernel.function()->set_raytracing(false);
-    auto cuda_small = device.compile(cuda_small_kernel, "launch-latency-cuda-small");
+    auto compute_small_kernel = make_linear_write_kernel(1u);
+    compute_small_kernel.function()->set_raytracing(false);
+    auto compute_small = device.compile(compute_small_kernel, "launch-latency-compute-small");
 
     auto raygen_large_kernel = make_linear_write_kernel(large_dim.x);
     raygen_large_kernel.function()->set_raytracing(true);
     auto raygen_large = device.compile(raygen_large_kernel, "launch-latency-raygen-large");
 
-    auto cuda_default_large_kernel = make_linear_write_kernel(large_dim.x);
-    cuda_default_large_kernel.function()->set_raytracing(false);
-    auto cuda_default_large = device.compile(cuda_default_large_kernel, "launch-latency-cuda-default-large");
+    auto compute_default_large_kernel = make_linear_write_kernel(large_dim.x);
+    compute_default_large_kernel.function()->set_raytracing(false);
+    auto compute_default_large = device.compile(compute_default_large_kernel, "launch-latency-compute-default-large");
 
-    auto cuda_tiled_large_kernel = make_linear_write_kernel(large_dim.x);
-    cuda_tiled_large_kernel.function()->set_raytracing(false);
-    cuda_tiled_large_kernel.function()->configure(
+    auto compute_tiled_large_kernel = make_linear_write_kernel(large_dim.x);
+    compute_tiled_large_kernel.function()->set_raytracing(false);
+    compute_tiled_large_kernel.function()->configure(
         make_uint3((large_dim.x + tiled_block.x - 1u) / tiled_block.x,
                    (large_dim.y + tiled_block.y - 1u) / tiled_block.y,
                    1u),
         tiled_block);
-    auto cuda_tiled_large = device.compile(cuda_tiled_large_kernel, "launch-latency-cuda-tiled-large");
+    auto compute_tiled_large = device.compile(compute_tiled_large_kernel, "launch-latency-compute-tiled-large");
 
     const auto raygen_submit_us = measure_submit_us(stream, launch_iterations, [&] {
         stream << raygen_small(output).dispatch(1u) << commit();
     });
-    const auto cuda_submit_us = measure_submit_us(stream, launch_iterations, [&] {
-        stream << cuda_small(output).dispatch(1u) << commit();
+    const auto compute_submit_us = measure_submit_us(stream, launch_iterations, [&] {
+        stream << compute_small(output).dispatch(1u) << commit();
     });
 
     const auto raygen_total_us = measure_total_us(stream, large_launch_iterations, [&] {
         stream << raygen_large(output).dispatch(large_dim) << commit();
     });
-    const auto cuda_default_total_us = measure_total_us(stream, large_launch_iterations, [&] {
-        stream << cuda_default_large(output).dispatch(large_dim) << commit();
+    const auto compute_default_total_us = measure_total_us(stream, large_launch_iterations, [&] {
+        stream << compute_default_large(output).dispatch(large_dim) << commit();
     });
-    const auto cuda_tiled_total_us = measure_total_us(stream, large_launch_iterations, [&] {
-        stream << cuda_tiled_large(output).dispatch(large_dim) << commit();
+    const auto compute_tiled_total_us = measure_total_us(stream, large_launch_iterations, [&] {
+        stream << compute_tiled_large(output).dispatch(large_dim) << commit();
     });
 
     cout << "launch-latency benchmark" << endl;
     cout << "small dispatch dim=1" << endl;
     cout << "raygen_submit_us=" << raygen_submit_us << endl;
-    cout << "cuda_submit_us=" << cuda_submit_us << endl;
+    cout << "compute_submit_us=" << compute_submit_us << endl;
     cout << "large dispatch dim=" << large_dim.x << "x" << large_dim.y << endl;
     cout << "raygen_total_us=" << raygen_total_us << endl;
-    cout << "cuda_default_total_us=" << cuda_default_total_us << endl;
-    cout << "cuda_tiled_total_us=" << cuda_tiled_total_us << endl;
+    cout << "compute_default_total_us=" << compute_default_total_us << endl;
+    cout << "compute_tiled_total_us=" << compute_tiled_total_us << endl;
 
     stream << synchronize() << commit();
     return 0;

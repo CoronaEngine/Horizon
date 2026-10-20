@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDABindlessArray: descriptor-index-based bindless arrays.
 //
 
 #pragma once

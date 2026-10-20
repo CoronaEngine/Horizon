@@ -194,7 +194,7 @@ void test_dynamic_array_math(Device &device) {
 }// namespace
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     test_sampling_frames(device);
     test_matrix_construction(device);
     test_dynamic_array_math(device);

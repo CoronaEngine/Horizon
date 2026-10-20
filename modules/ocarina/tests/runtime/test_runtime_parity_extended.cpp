@@ -108,7 +108,7 @@ void validate_scene(const Scene &scene, uint3 dim, const vector<Ray> &rays,
                       << ',' << expected.bary.x << ',' << expected.bary.y << std::endl;
             require(false, "closest hit instance/primitive/barycentrics differ from transformed host triangles");
         }
-        // The CUDA miss path does not define primitive/barycentric payloads.
+        // The DSL miss path does not define primitive/barycentric payloads.
         if (!expected.is_miss()) {
             ++hit_count;
             seen[expected.inst_id * 2u + expected.prim_id] = true;
@@ -134,7 +134,7 @@ struct DelayedGate {
         std::unique_lock lock(mutex);
         if (!changed.wait_for(lock, std::chrono::seconds(10), [&] { return entered; })) expired = true;
         lock.unlock();
-        // Do not require pageable CUDA uploads/commit to be nonblocking.
+        // Do not require pageable DSL uploads/commit to be nonblocking.
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         lock.lock();
         released = true;
@@ -170,7 +170,7 @@ void test_ray_scene_and_clear(Device &device) {
         metadata.write(2u * i, make_uint4(dispatch_idx(), i));
         metadata.write(2u * i + 1u, make_uint4(dispatch_dim(), cast<uint>(accel.trace_occlusion(ray))));
     };
-    // OptiX raygen ignores the configured compute grid. Vulkan ray queries must
+    // ray tracing raygen ignores the configured compute grid. Vulkan ray queries must
     // still cover every requested pixel, including partial groups in 3D.
     kernel.function()->configure(make_uint3(1u), make_uint3(4u, 3u, 2u));
     auto shader = device.compile(kernel, "runtime-parity-transformed-ray-scene");
@@ -251,7 +251,7 @@ void test_async_compile_and_stream_destruction(Device &device) {
 }
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     device.init_rtx();
     test_ray_scene_and_clear(device);
     test_async_compile_and_stream_destruction(device);

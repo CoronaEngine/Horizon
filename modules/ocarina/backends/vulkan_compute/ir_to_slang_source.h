@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Mirrors ir_to_cuda_source.h.
 //
 
 #pragma once

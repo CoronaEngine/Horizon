@@ -128,7 +128,7 @@ int main(int argc, char *argv[]) {
      * stream used for process some command,e.g buffer upload and download, dispatch shader
      * default is asynchronous operation
      */
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     Stream stream = device.create_stream();
     Env::printer().init(device);
     Env::debugger().init(device);

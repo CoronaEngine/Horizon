@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDAShader / CUDASimpleShader / OptixShader.
 //
 
 #pragma once

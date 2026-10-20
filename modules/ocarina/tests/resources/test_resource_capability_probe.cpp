@@ -56,7 +56,7 @@ int probe_texture_buffer_view(Device &device, std::ostream &diagnostics) {
     return failures;
 }
 
-// CUDA returns zero for every absent channel, including alpha. Preserve that
+// DSL returns zero for every absent channel, including alpha. Preserve that
 // observed backend contract for both direct and bindless sample(4).
 template<typename Pixel, uint Dimension>
 int probe_narrow_channels(Device &device, std::ostream &diagnostics) {
@@ -120,7 +120,7 @@ int probe_narrow_channels(Device &device, std::ostream &diagnostics) {
     return failures;
 }
 
-// CUDA integer surface accesses use sizeof(Word) byte-x, independently of the
+// DSL integer surface accesses use sizeof(Word) byte-x, independently of the
 // image's storage channels. Use raw words (including NaN payloads and signed
 // zero) so a float conversion or an incorrect texel coordinate cannot pass.
 template<typename Word, uint Dimension>
@@ -362,7 +362,7 @@ int main(int argc, char **argv) {
     diagnostics << std::setprecision(17);
     int failures = 0;
     {
-        auto device = RHIContext::instance().create_device(test_backend_name());
+        auto device = create_test_device();
         if (view) {
             failures += probe_texture_buffer_view<2u>(device, diagnostics);
             failures += probe_texture_buffer_view<3u>(device, diagnostics);

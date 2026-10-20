@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces optix_accel.cpp — Vulkan TLAS build/update.
 //
 
 #include "vk_accel.h"

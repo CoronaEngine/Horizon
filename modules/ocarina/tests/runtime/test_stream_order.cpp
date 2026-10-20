@@ -286,7 +286,7 @@ void test_many_commits_and_gpu_batch_reuse(Device &device) {
 } // namespace
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     test_nonblocking_commit_and_interleaved_streams(device);
     test_transfers_callbacks_and_repeated_parameters(device);
     test_synchronize_before_resource_release(device);

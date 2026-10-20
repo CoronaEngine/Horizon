@@ -180,9 +180,9 @@ public:
     }
 
     // Allocate a buffer whose device memory is exportable as an OS-level shareable
-    // handle (CUDA: cuMemCreate + CU_MEM_HANDLE_TYPE_WIN32). Required before
+    // handle (Vulkan external-memory allocation). Required before
     // export_handle()/get_aligned_memory_size() will succeed on the result; a
-    // normally-allocated buffer is NOT exportable. Used for CUDA<->Vulkan zero-copy.
+    // normally-allocated buffer is NOT exportable. Used for Vulkan-to-Vulkan zero-copy.
     template<typename T = std::byte>
     [[nodiscard]] Buffer<T> create_exported_buffer(size_t size, const string &name = "") const noexcept {
         return Buffer<T>(impl_.get(), size, name, /*exported=*/true);
@@ -334,8 +334,7 @@ public:
         impl_->bind_descriptor_sets(descriptor_sets, descriptor_sets_num, pipeline);
     }
 
-    [[nodiscard]] static Device create_device(const string &backend_name, const ocarina::InstanceCreation &instance_creation);
-    [[nodiscard]] static Device create_device(const string &backend_name);
+    [[nodiscard]] static Device create_device();
 
 private:
     [[nodiscard]] detail::RawDynamicBuffer create_raw_dynamic_buffer(const Type *logical_type,

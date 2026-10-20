@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces ast_to_cuda_source.cpp — same virtual hook structure, Slang/HLSL targets.
 //
 
 #include "ast_to_slang_source.h"
@@ -180,7 +178,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
                 if (widen_half) current_scratch() << "oc_half2float(";
                 if (truncate_vector) current_scratch() << "(";
                 arg->accept(*this);
-                // CUDA make_float3(float4) drops w. Slang constructors require
+                // DSL make_float3(float4) drops w. Slang constructors require
                 // an explicitly narrowed vector, including inside half casts.
                 if (truncate_vector) {
                     current_scratch() << ")." << string_view("xyzw").substr(0, e->type()->dimension());
@@ -444,7 +442,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         }
         case CallOp::BYTE_BUFFER_WRITE: OC_SLANG_WRAP(byte_buffer_write); break;
         case CallOp::BYTE_BUFFER_READ: {
-            // The integral form reads N packed uints (CUDA: oc_byte_buffer_read<N>).
+            // The integral form reads N packed uints (DSL: oc_byte_buffer_read<N>).
             ocarina::visit(
                 [&]<typename T>(T &&t) {
                     if constexpr (is_integral_v<T>) {
@@ -471,8 +469,8 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::BUFFER_SIZE:       OC_SLANG_WRAP(buffer_size);       break;
         case CallOp::BYTE_BUFFER_SIZE:  OC_SLANG_WRAP(buffer_size);       break;
 
-        // Texture ops keep the CUDA builtin names and template arguments so the
-        // Slang builtins can mirror cuda_device_resource.h signatures one-to-one.
+        // Texture ops keep the DSL builtin names and template arguments so the
+        // Slang builtins can mirror the resource builtin signatures one-to-one.
         case CallOp::BINDLESS_ARRAY_TEX3D_SAMPLE: {
             uint N = std::get<uint>(expr->template_arg(0));
             current_scratch() << "oc_bindless_array_tex3d_sample<" << N << ">";
@@ -674,13 +672,13 @@ void AstToSlangSource::_emit_matrix_constructor(const CallExpr *expr) noexcept {
                 }
                 if (widen_half) current_scratch() << "oc_half2float(";
                 if (src->is_scalar()) {
-                    // CUDA's scalar matrix constructor initializes the diagonal
+                    // DSL's scalar matrix constructor initializes the diagonal
                     // of square matrices; rectangular matrices are all zero.
                     current_scratch() << (columns == rows && c == r ? "value" : "0");
                 } else if (c < src->dimension() && r < src->element()->dimension()) {
                     current_scratch() << ocarina::format("value[{}][{}]", c, r);
                 } else {
-                    // CUDA's widening constructors embed the source in identity.
+                    // DSL's widening constructors embed the source in identity.
                     current_scratch() << (c == r ? "1" : "0");
                 }
                 if (widen_half) current_scratch() << ")";
@@ -1125,7 +1123,7 @@ void AstToSlangSource::_emit_variable_define(const Variable &v) noexcept {
         return;
     }
     // inout has copy-in/copy-out semantics and may assume non-aliasing. __ref
-    // preserves CUDA reference semantics for overlapping local arguments.
+    // preserves DSL reference semantics for overlapping local arguments.
     if (v.tag() == Variable::Tag::REFERENCE && !v.type()->is_buffer()) {
         current_scratch() << "__ref ";
     }
@@ -1138,7 +1136,7 @@ void AstToSlangSource::_emit_local_var_define(const ScopeStmt *scope) noexcept {
     for (const auto &var : scope->local_vars()) {
         _emit_indent();
         _emit_variable_define(var);
-        // CUDA matrix default constructors produce identity, including matrices
+        // DSL matrix default constructors produce identity, including matrices
         // nested in aggregates. Slang's empty initializer would zero them.
         if (var.type()->tag() != Type::Tag::ACCEL) {
             current_scratch() << " = ";
@@ -1271,7 +1269,7 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         current_scratch() << "uint oc_param_bits(uint word_offset, uint shift) { return oc_param<uint>(word_offset) >> shift; }";
         _emit_newline();
     }
-    // CUDA blockIdx/threadIdx are visible in callables too; mirror them as statics.
+    // DSL blockIdx/threadIdx are visible in callables too; mirror them as statics.
     current_scratch() << "static uint3 oc_group_id;";
     _emit_newline();
     current_scratch() << "static uint3 oc_group_thread_id;";

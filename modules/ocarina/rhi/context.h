@@ -46,8 +46,7 @@ public:
     const DynamicModule *obtain_module(const string &module_name) noexcept;
     bool unload_module(const string &module_name) noexcept;
     void unload_module(void *handle) noexcept;
-    [[nodiscard]] Device create_device(const string &backend_name, const ocarina::InstanceCreation &instance_creation) noexcept;
-    [[nodiscard]] Device create_device(const string &backend_name) noexcept;
+    [[nodiscard]] Device create_device() noexcept;
 };
 
 }// namespace ocarina

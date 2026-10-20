@@ -1,11 +1,11 @@
-"""Run isolated CUDA/Vulkan capability regressions and compare their outputs.
+"""Run isolated Vulkan AST/IR capability regressions and compare their outputs.
 
 Build the four *-capability-probe / *-float32-policy-probe executables first.
 Example: python run_capability_audit.py --runtime <bin/Release> --output <logs>
 GPU work is deliberately serialized. Validation can be enabled with the usual
 VK_INSTANCE_LAYERS / VK_LAYER_PATH / VK_LAYER_SETTINGS_PATH environment variables.
-CPU oracles and matching cross-backend observation rows are required. The
-float32-subnormal policy case records GPU behavior for exact cross-backend
+CPU oracles and matching AST/IR observation rows are required. The
+float32-subnormal policy case records GPU behavior for exact AST/IR
 comparison; it does not impose a separate CPU denormal-arithmetic policy.
 Exit 1 means a process, validation or observation-capture failure; exit 2 means
 exact numeric differences in the selected deterministic regression cases.
@@ -46,22 +46,20 @@ EXPECTED_ROWS = {"texture-narrow-channels": 192, "texture-linear-fraction": 80,
 def compare_observations(results):
     """Exact numeric comparisons are observations, not universal error tolerances."""
     comparisons = []
-    lookup = {(r["case"], r["backend"], r["codegen"]): r for r in results}
-    for case, _, codegen in sorted(lookup):
-        if (case, "cuda", codegen) not in lookup or (case, "vulkan-compute", codegen) not in lookup:
-            continue
-        if any(c["case"] == case and c["codegen"] == codegen for c in comparisons):
+    lookup = {(r["case"], r["codegen"]): r for r in results}
+    for case in sorted({key[0] for key in lookup}):
+        if (case, "ast") not in lookup or (case, "ir") not in lookup:
             continue
         rows, parse_errors = [], []
-        for backend in ("cuda", "vulkan-compute"):
+        for codegen in ("ast", "ir"):
             records = {}
-            for line in Path(lookup[(case, backend, codegen)]["log"]).read_text(encoding="utf-8", errors="replace").splitlines():
+            for line in Path(lookup[(case, codegen)]["log"]).read_text(encoding="utf-8", errors="replace").splitlines():
                 prefix = line.split(" ", 1)[0]
                 if prefix not in OBSERVATIONS:
                     continue
                 fields = dict(re.findall(r"(\w+)=(\S+)", line))
                 if not all(k in fields for k in OBSERVATIONS[prefix]):
-                    parse_errors.append(dict(backend=backend, line=line))
+                    parse_errors.append(dict(codegen=codegen, line=line))
                     continue
                 # Row/index/format/dimension/op/input/channel uniquely identify
                 # these diagnostic observations. Preserve input bits verbatim.
@@ -72,7 +70,7 @@ def compare_observations(results):
                 try:
                     records[identity + (occurrence,)] = {k: float(fields[k]) for k in OBSERVATIONS[prefix]}
                 except ValueError:
-                    parse_errors.append(dict(backend=backend, line=line))
+                    parse_errors.append(dict(codegen=codegen, line=line))
             rows.append(records)
         if not rows[0] and not rows[1] and case not in EXPECTED_ROWS:
             continue
@@ -84,12 +82,12 @@ def compare_observations(results):
             if not equal:
                 mismatches += 1
                 if len(examples) < 8:
-                    examples.append(dict(identity=identity, cuda=first, vulkan=second))
+                    examples.append(dict(identity=identity, ast=first, ir=second))
                 if first and second:
                     for key in first:
                         if key != "actual_bits" and math.isfinite(first[key]) and math.isfinite(second[key]):
                             largest = max(largest, abs(first[key] - second[key]))
-        comparisons.append(dict(case=case, codegen=codegen, cuda_rows=len(rows[0]), vulkan_rows=len(rows[1]),
+        comparisons.append(dict(case=case, ast_rows=len(rows[0]), ir_rows=len(rows[1]),
                                 different_rows=mismatches, max_numeric_delta=largest, expected_rows=EXPECTED_ROWS.get(case),
                                 parse_errors=parse_errors, examples=examples))
     return comparisons
@@ -114,10 +112,10 @@ def main():
         "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "runtime": str(runtime),
         "notes": [
-            "All selected cases must pass on both backends and codegen paths.",
-            "float32-subnormal compares observed GPU policy across backends; other cases also use CPU oracles.",
+            "All selected cases must pass on both Vulkan codegen paths.",
+            "float32-subnormal compares observed GPU policy across Vulkan codegen paths; other cases also use CPU oracles.",
             "empty-accel traces zero and cleared acceleration structures.",
-            "Deterministic observation rows are compared exactly across backends.",
+            "Deterministic observation rows are compared exactly across Vulkan codegen paths.",
             "Different AS build actions are recorded separately from hit correctness.",
         ],
         "results": [],
@@ -130,10 +128,10 @@ def main():
             executable = runtime / (target + (".exe" if os.name == "nt" else ""))
             if not executable.is_file():
                 parser.error(f"missing executable: {executable}")
-            for backend in ("cuda", "vulkan-compute"):
+            for backend in ("vulkan-compute",):
                 for codegen in ("ast", "ir"):
                     env = os.environ.copy()
-                    env.update(OCARINA_TEST_BACKEND=backend, OCARINA_TEST_CODEGEN=codegen)
+                    env.update(OCARINA_TEST_CODEGEN=codegen)
                     log = output / f"{case}-{backend}-{codegen}.log"
                     start = time.monotonic()
                     command = [str(executable), "--case", case]
@@ -160,7 +158,7 @@ def main():
     report["failed_or_validation_processes"] = failed
     report["observations"] = compare_observations(report["results"])
     report["incomplete_observations"] = sum(bool(c["parse_errors"]) or any(
-        c[key] != c["expected_rows"] for key in ("cuda_rows", "vulkan_rows"))
+        c[key] != c["expected_rows"] for key in ("ast_rows", "ir_rows"))
         for c in report["observations"])
     report["different_observation_rows"] = sum(c["different_rows"] for c in report["observations"])
     result_file.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")

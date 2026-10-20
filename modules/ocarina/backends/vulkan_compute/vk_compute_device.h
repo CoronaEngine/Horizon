@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDADevice: Vulkan compute-only device with no swapchain.
 //
 
 #pragma once
@@ -20,7 +18,7 @@ class VkComputeStream;
 
 class VulkanComputeDevice : public Device::Impl {
 public:
-    // ── Type-on-device size/alignment (mirrors CUDADevice statics) ──────────
+    // ── Type-on-device size/alignment (mirrors DSLDevice statics) ──────────
     static constexpr size_t size(Type::Tag tag) {
         using Tag = Type::Tag;
         switch (tag) {

@@ -1,7 +1,5 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Mirrors ast_to_cuda_source.h; inherits AstToCppSource and replaces CUDA/OptiX
-// specifics with Slang/Vulkan equivalents. Unlike CUDA it also overrides the
+// specifics with Slang/Vulkan equivalents. Unlike DSL it also overrides the
 // C++-only constructs AstToCppSource emits (struct alignas, `T v{}` locals,
 // references, static_cast, oc_-prefixed literals, matrix `*`).
 //

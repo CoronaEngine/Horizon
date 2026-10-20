@@ -118,7 +118,7 @@ static_assert(std::is_same_v<decltype(float{} + half{}), float>);
 
 [[nodiscard]] bool test_device_half() {
         RHIContext &context = RHIContext::instance();
-        Device device = context.create_device(test_backend_name());
+        Device device = create_test_device();
         device.init_rtx();
         Stream stream = device.create_stream();
 

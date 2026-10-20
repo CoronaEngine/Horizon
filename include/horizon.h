@@ -207,7 +207,7 @@ namespace Corona::Horizon
         BufferRange memory_range = BufferRange::entire();
 
         // Optional metadata for dedicated allocations exported by Vulkan.
-        // Other APIs (e.g. CUDA) leave memory_type_index at its sentinel.
+        // Imports without explicit allocation metadata leave memory_type_index at its sentinel.
         uint32_t memory_type_index = ~0u;
         uint32_t vulkan_buffer_usage = 0;
         std::vector<uint32_t> vulkan_queue_families;

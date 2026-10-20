@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces cuda_device.cpp — Vulkan compute-only device, no swapchain.
 //
 
 #define VMA_IMPLEMENTATION
@@ -79,7 +77,7 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     OC_ERROR_IF(subgroup.subgroupSize < 32u || subgroup.subgroupSize > 128u || subgroup.subgroupSize % 32u != 0u ||
                 !(subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) ||
                 !(subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT),
-        "Vulkan backend requires compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve CUDA warp32 semantics");
+        "Vulkan backend requires compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
 
     // RT support probe
     uint32_t ec = 0;
@@ -237,7 +235,7 @@ void VulkanComputeDevice::init_descriptor_pool() noexcept {
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     ai.descriptorPool = desc_pool_; ai.descriptorSetCount = 1; ai.pSetLayouts = &global_layout_;
     OC_VK_CHECK(vkAllocateDescriptorSets(device_, &ai, &global_set_));
-    // Component-sized CUDA surface writes require a read/modify/write on Vulkan
+    // Component-sized DSL surface writes require a read/modify/write on Vulkan
     // images. Hash texture/texel pairs into a shared lock table to preserve independent
     // component writes without serializing ordinary full-texel stores.
     texture_write_locks_ = allocate_buffer(65536u * sizeof(uint32_t),
@@ -386,7 +384,7 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ici.imageType   = is_3d ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     ici.format      = fmt;
-    // CUDA surface uint loads/stores reinterpret FLOAT image bits. A compatible
+    // DSL surface uint loads/stores reinterpret FLOAT image bits. A compatible
     // integer view preserves them without a floating-point load/conversion.
     if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM ||
         fmt == VK_FORMAT_R8G8B8A8_UNORM || fmt == VK_FORMAT_R32_SFLOAT ||
@@ -408,7 +406,7 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     vci.image    = result.image;
     vci.viewType = is_3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
     vci.format   = fmt;
-    // CUDA fills every absent sampled channel with zero, including alpha.
+    // DSL fills every absent sampled channel with zero, including alpha.
     // Apply this only to the sampled view: storage views require identity.
     if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM ||
         fmt == VK_FORMAT_R32_SFLOAT || fmt == VK_FORMAT_R32G32_SFLOAT)
@@ -521,7 +519,7 @@ void VulkanComputeDevice::synchronize_streams() noexcept {
     // keep_alive may release its final resource reference on a completion
     // thread. Its GPU batch has finished and dependent submissions are deferred;
     // waiting here would wait for this same callback to return.
-    // As with CUDA, resources used by another stream must be retained there.
+    // As with DSL, resources used by another stream must be retained there.
     if (VkComputeStream::is_completion_thread(this)) return;
     std::lock_guard lock(streams_mutex_);
     for (auto *stream : streams_) stream->wait_idle();

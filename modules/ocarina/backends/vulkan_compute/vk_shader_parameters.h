@@ -7,7 +7,7 @@ namespace ocarina {
 
 // One ABI decision shared by source generation, the pipeline layout and dispatch.
 // Keep the existing BDA/dispatch prefix, and use only the Vulkan-guaranteed 128
-// push-constant bytes. The argument pack's trailing CUDA dispatch slot is not a
+// push-constant bytes. The argument pack's trailing DSL dispatch slot is not a
 // Vulkan argument and must not affect this decision.
 struct VkShaderParameterLayout {
     static constexpr uint32_t params_offset = 0u;

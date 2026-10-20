@@ -208,7 +208,7 @@ void scene(Device &device, vector<float4x4> transforms, bool update) {
 } // namespace
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     device.init_rtx();
     scene(device, {make_float4x4(1.f)}, false);
     scene(device, {translation<H>(0.f, -.65f, 0.f) * scale<H>(5.f, .2f, 4.f),

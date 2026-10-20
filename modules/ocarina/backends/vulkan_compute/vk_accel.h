@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces OptixAccel: Vulkan TLAS (top-level acceleration structure).
 //
 
 #pragma once

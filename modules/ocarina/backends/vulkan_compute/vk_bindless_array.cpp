@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces cuda_bindless_array.cpp.
 //
 
 #include "vk_bindless_array.h"

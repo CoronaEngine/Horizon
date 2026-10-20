@@ -341,7 +341,7 @@ int main(int argc, char **argv) {
                 name == "same-batch-accel" || name == "multistream-ray-params", "unknown case");
     const char *backend = test_backend_name();
     std::cout << "CAPABILITY_PROBE backend=" << backend << " case=" << name << " phase=attempt" << std::endl;
-    auto device = RHIContext::instance().create_device(backend);
+    auto device = RHIContext::instance().create_device();
     device.init_rtx();
     if (name == "empty-accel") probe_empty_accel(device);
     else if (name == "fast-build") probe_fast_build(device);

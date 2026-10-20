@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDACommandVisitor: one visit() per Command type.
 //
 
 #pragma once

@@ -156,7 +156,7 @@ void test_sampling_and_bindless_updates(Device &device) {
             }
         }
     // Dyadic fractions make interpolation weights exactly representable by
-    // CUDA's texture units. These include texel centers, edges and mirror seams.
+    // DSL's texture units. These include texel centers, edges and mirror seams.
     array<float, 14> axes{-2.125f, -1.125f, -1.f, -0.125f, 0.f, 0.125f, 0.25f,
                           0.5f, 0.875f, 1.f, 1.125f, 1.75f, 2.f, 2.125f};
     vector<float3> coordinates;
@@ -244,7 +244,7 @@ void test_dimension(Device &device) {
 }
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     test_dimension<2u>(device);
     test_dimension<3u>(device);
     std::cout << "extended texture parity checks passed" << std::endl;

@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDATexture / CUDATexture2D / CUDATexture3D.
 //
 
 #pragma once

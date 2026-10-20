@@ -36,7 +36,7 @@ struct LiteralPrinter {
                     }
                 }
             } else if constexpr (std::is_same_v<T, ulong>) {
-                // CUDA's oc_ulong is unsigned long long, including on Windows
+                // DSL's oc_ulong is unsigned long long, including on Windows
                 // where an `ul` literal otherwise deduces a 32-bit operand.
                 scratch << ocarina::format("{}ull", v);
             } else {

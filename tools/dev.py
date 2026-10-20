@@ -37,15 +37,13 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
     "engine": ("&:with_engine=True",),
     "tools": ("&:with_tools=True",),
     "examples": ("&:with_examples=True",),
-    "ocarina": ("&:with_ocarina=True", "&:with_cuda=True"),
+    "ocarina": ("&:with_ocarina=True",),
     "ocarina-tests": (
         "&:with_ocarina=True",
-        "&:with_cuda=True",
         "&:with_ocarina_tests=True",
     ),
     "vision-hotfix": (
         "&:with_ocarina=True",
-        "&:with_cuda=True",
         "&:with_vision_hotfix=True",
     ),
 }
@@ -64,7 +62,7 @@ def target_family_for_target(target: str) -> str:
         return "vision-hotfix"
     if target in {"EABase", "EASTL", "mimalloc", "mimalloc-obj", "mimalloc-static"}:
         return "ocarina"
-    if target == "copy_cuda_headers" or target.startswith("ocarina"):
+    if target == "copy_slang_headers" or target.startswith("ocarina"):
         return "ocarina"
     return "core"
 

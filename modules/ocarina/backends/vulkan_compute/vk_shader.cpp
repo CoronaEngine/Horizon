@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces cuda_shader.cpp — compute + raytracing pipelines.
 //
 
 #include "vk_shader.h"
@@ -115,7 +113,7 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
 
     uint3 wgs = workgroup_size_;
     uint3 grid = function_.grid_dim();
-    // OptiX launches exactly dispatch_dim rays and ignores compute launch
+    // ray tracing launches exactly dispatch_dim rays and ignores compute launch
     // configuration. Ray queries run in a compute pipeline here, so derive
     // enough groups to cover that same raygen domain even for a configured grid.
     if (function_.is_raytracing_kernel() || !grid.x || !grid.y || !grid.z)

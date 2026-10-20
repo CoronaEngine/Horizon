@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces cuda_mesh.cpp — Vulkan BLAS build.
 //
 
 #include "vk_mesh.h"
@@ -110,7 +108,7 @@ void VkMesh::init_build_input() noexcept {
 void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
     clear();
     init_build_input();
-    // OptiX accepts a stride per uint32 index triplet; Vulkan requires tightly
+    // ray tracing accepts a stride per uint32 index triplet; Vulkan requires tightly
     // packed indices, so remove any padding in the shared mesh representation.
     constexpr VkDeviceSize index_bytes = 3 * sizeof(uint32_t);
     OC_ERROR_IF(params_.tri_stride < index_bytes, "Triangle indices require three uint32 values");

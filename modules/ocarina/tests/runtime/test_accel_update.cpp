@@ -251,7 +251,7 @@ void test_padded_indices_and_instance_growth(Device &device) {
 int main(int argc, char *argv[]) {
     RHIContext &context = RHIContext::instance();
     context.clear_cache();
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     device.init_rtx();
 
     test_fast_trace_build(device);

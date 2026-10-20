@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Mirrors ir_to_cuda_source.cpp.
 //
 
 #include "ir_to_slang_source.h"

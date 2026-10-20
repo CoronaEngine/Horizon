@@ -211,7 +211,7 @@ int test_device_swizzle(Device &device, Stream &stream) {
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     Stream stream = device.create_stream();
 
     int total_failures = 0;

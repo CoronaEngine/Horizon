@@ -1,11 +1,9 @@
 // Ocarina Slang device math and warp intrinsic builtins.
-// Replaces cuda_device_std.h / cuda_device_scalar.h / cuda_device_vector.h /
-// cuda_device_matrix.h / cuda_device_builtin.h / cuda_vector_func.h.
 // Slang already provides sin/cos/sqrt/etc natively — only wrappers and helpers here.
 
 // ── Wave / warp intrinsic wrappers ────────────────────────────────────────────
 
-// The public warp contract is CUDA's 32 lanes, also on native 64/128-lane waves.
+// The public warp contract is DSL's 32 lanes, also on native 64/128-lane waves.
 uint oc_warp_ballot_word(bool pred) { return WaveActiveBallot(pred)[WaveGetLaneIndex() / 32u]; }
 uint4 oc_warp_active_bit_mask(bool pred) { return uint4(oc_warp_ballot_word(pred), 0, 0, 0); }
 uint oc_warp_active_count_bits(bool pred) { return countbits(oc_warp_ballot_word(pred)); }
@@ -134,7 +132,7 @@ float oc_half_mul(float a, float b) { return oc_half_value(a * b); }
 // Every input is already a binary16 value, so its product is exact in float32.
 // TwoSum retains the low bits discarded by the following addition. Correct an
 // exact half midpoint before rounding, avoiding float32 -> binary16 double
-// rounding while retaining CUDA HFMA's single binary16 rounding.
+// rounding while retaining DSL HFMA's single binary16 rounding.
 float oc_half_fma(float a, float b, float c) {
     // Slang 2026.10 ignores local precise on SPIR-V. Explicit decorations
     // preserve TwoSum's operation order without changing other shader math.
@@ -174,9 +172,8 @@ vector<float, N> oc_half_fma<uint N>(vector<float, N> a, vector<float, N> b, vec
     for (uint i = 0u; i < N; ++i) result[i] = oc_half_fma(a[i], b[i], c[i]);
     return result;
 }
-// CUDA's __hmul/__hsub (as opposed to their _rn variants) contract the first
-// product of a minor into the subtraction. Round the second product, then
-// perform that multiply/subtract with one final binary16 rounding.
+// Round the second product of a minor, then fuse the first product and the
+// subtraction with one final binary16 rounding.
 float oc_half_minor(float a, float b, float c, float d) {
     return oc_half_fma(a, b, -oc_half_mul(c, d));
 }
@@ -367,7 +364,7 @@ vector<uint, 3> oc_sqr(vector<uint, 3> x) { return x*x; }
 vector<uint, 4> oc_sqr(vector<uint, 4> x) { return x*x; }
 uint[N] oc_sqr<uint N>(uint x[N]) { uint result[N]; for(uint i=0;i<N;++i) result[i]=oc_sqr(x[i]); return result; }
 
-// CUDA sign returns +1 for both signed zero values. CUDA round rounds ties away
+// DSL sign returns +1 for both signed zero values. DSL round rounds ties away
 // from zero, whereas the Slang native round operation uses ties-to-even.
 float oc_round(float x) {
     float magnitude = abs(x);
@@ -460,7 +457,7 @@ float oc_atomicExch(OCBuffer<float> buf, uint64_t index, float val) { return oc_
 float oc_atomicExch(OCBuffer<uint8_t> buf, uint64_t offset, float val) { return oc_atomicExch(*(float*)(buf.handle + buf.offset + offset), val); }
 
 // ocarina lerp / inverse_lerp are pbrt-style: the parameter comes first
-// (CUDA oc_lerp(t, a, b) = a + t * (b - a)), whereas Slang lerp is (a, b, t).
+// (DSL oc_lerp(t, a, b) = a + t * (b - a)), whereas Slang lerp is (a, b, t).
 float  oc_lerp(float t, float a, float b)    { return lerp(a, b, t); }
 float2 oc_lerp(float2 t, float2 a, float2 b) { return lerp(a, b, t); }
 float3 oc_lerp(float3 t, float3 a, float3 b) { return lerp(a, b, t); }
@@ -475,7 +472,7 @@ float2 oc_inverse_lerp(float2 x, float2 a, float2 b) { return (x - a) / (b - a);
 float3 oc_inverse_lerp(float3 x, float3 a, float3 b) { return (x - a) / (b - a); }
 float4 oc_inverse_lerp(float4 x, float4 a, float4 b) { return (x - a) / (b - a); }
 
-// ocarina face_forward (CUDA semantics): 3-arg (n, i, n_ref) and 2-arg (v1, v2).
+// ocarina face_forward (DSL semantics): 3-arg (n, i, n_ref) and 2-arg (v1, v2).
 float3 oc_face_forward(float3 n, float3 i, float3 n_ref) { return dot(n_ref, i) < 0.0f ? n : -n; }
 float3 oc_face_forward(float3 v1, float3 v2)             { return dot(v1, v2) > 0.0f ? v1 : -v1; }
 vector<float16_t, 3> oc_face_forward(vector<float16_t, 3> n, vector<float16_t, 3> i, vector<float16_t, 3> n_ref) { return dot(n_ref, i) < float16_t(0) ? n : -n; }
@@ -485,8 +482,8 @@ vector<float16_t, 3> oc_face_forward(vector<float16_t, 3> v1, vector<float16_t, 
 void oc_unreachable() {}
 
 void oc_coordinate_system(float3 n, out float3 b1, out float3 b2) {
-    // The orientation must match CUDA, not just form an orthonormal basis:
-    // rotating this frame changes every world-space sample for a fixed seed.
+    // Keep this orientation stable across compiler paths: rotating the frame
+    // changes every world-space sample for a fixed seed.
     b1 = abs(n.x) > abs(n.y)
         ? float3(-n.z, 0.0f, n.x) / sqrt(n.x * n.x + n.z * n.z)
         : float3(0.0f, n.z, -n.y) / sqrt(n.y * n.y + n.z * n.z);
@@ -550,7 +547,7 @@ float4x4 oc_inverse(float4x4 m) {
     return inv;
 }
 
-// ── Atomic wrappers (returns old value, matching CUDA semantics) ──────────────
+// ── Atomic wrappers (returns old value, matching DSL semantics) ──────────────
 
 // ── Texture helpers (bindless descriptor-array indices) ───────────────────────
 
@@ -563,7 +560,7 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 [[vk::binding(7, 0)]] globallycoherent RWStructuredBuffer<uint> g_texture_write_locks;
 
-// Match CUDA's cudaBoundaryModeZero for surface loads and stores.
+// Match DSL's zero-border for surface loads and stores.
 bool oc_tex2d_in_bounds(OCTextureDesc desc, uint x, uint y) {
     uint width, height;
     if (desc.pixel_storage >= 3 && desc.pixel_storage <= 5)
@@ -810,10 +807,10 @@ TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
     return h;
 }
 
-// GEMM DSL markers match the CUDA placeholder; gemm_commands emits arithmetic.
+// GEMM markers are placeholders; gemm_commands emits the arithmetic.
 void oc_tensor_gemm<uint Id>() {}
 
-// CUDA surface x is measured in sizeof(the requested type), not storage texels.
+// DSL surface x is measured in sizeof(the requested type), not storage texels.
 // Integer alias views expose each native channel's unconverted bits. BYTE
 // channels are packed/unpacked in little-endian groups of four per uint.
 uint oc_texture_write_lock(OCTextureDesc desc, uint3 p) {
@@ -963,12 +960,12 @@ void oc_tex3d_write(OCTextureDesc desc, uint4 value, uint x, uint y, uint z) { o
 
 
 float2x2 oc_inverse(float2x2 m) { return float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) / determinant(m); }
-// Keep CUDA's half-precision operation order. Widening the entire inverse to
+// Keep DSL's half-precision operation order. Widening the entire inverse to
 // float loses the rounding of minors, determinant and cofactor products.
 matrix<float16_t,2,2> oc_inverse(matrix<float16_t,2,2> input) {
     float2x2 m = oc_half2float(input);
     float d = oc_half_minor(m[0][0], m[1][1], m[1][0], m[0][1]);
-    // CUDA's 1.0f / half and half * float are float operations, rounded by
+    // DSL's 1.0f / half and half * float are float operations, rounded by
     // construction of the final half matrix (not by the reciprocal itself).
     float reciprocal = 1.0f / d;
     float2x2 result = float2x2(m[1][1], -m[0][1], -m[1][0], m[0][0]) * reciprocal;
@@ -987,7 +984,7 @@ matrix<float16_t,3,3> oc_inverse(matrix<float16_t,3,3> input) {
     c[2][1] = oc_half_minor(m[2][0], m[0][1], m[0][0], m[2][1]);
     c[2][2] = oc_half_minor(m[0][0], m[1][1], m[1][0], m[0][1]);
     float d1 = oc_half_mul(m[1][0], oc_half_minor(m[0][1], m[2][2], m[2][1], m[0][2]));
-    // Match CUDA's two outer HFMA steps as well as the fused minors.
+    // Match DSL's two outer HFMA steps as well as the fused minors.
     float partial = oc_half_fma(m[0][0], c[0][0], -d1);
     float determinant = oc_half_fma(m[2][0], c[0][2], partial);
     float reciprocal = oc_half_value(1.0f / determinant);

@@ -910,7 +910,7 @@ template<PrecisionPolicy precision>
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     constexpr auto kernel_precisions = std::array{PrecisionPolicy::force_f16, PrecisionPolicy::force_f32};
 
     bool passed = true;

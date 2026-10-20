@@ -342,7 +342,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
-        self.assertEqual(target_family_for_target("copy_cuda_headers"), "ocarina")
+        self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
         self.assertEqual(target_family_for_target("EASTL"), "ocarina")
         self.assertEqual(target_family_for_target("mimalloc-static"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
@@ -359,9 +359,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(conan_options("engine"), ["&:with_engine=True"])
         self.assertEqual(target_family_slug("engine"), "engine")
         self.assertEqual(conan_options("examples"), ["&:with_examples=True"])
+        self.assertEqual(conan_options("ocarina"), ["&:with_ocarina=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),
-            ["&:with_ocarina=True", "&:with_cuda=True", "&:with_ocarina_tests=True"],
+            ["&:with_ocarina=True", "&:with_ocarina_tests=True"],
         )
         with self.assertRaises(ValueError):
             conan_options("everything")

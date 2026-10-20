@@ -260,7 +260,7 @@ bool fmod_mod(Device &device) {
     auto round_half = [](float value) { return half_to_float(float_to_half(value)); };
     for (uint row = 0u; row < half_inputs.size(); ++row) {
         const float lhs = half_inputs[row].x, rhs = half_inputs[row].y;
-        // CUDA fmod widens its half operands to float before fmodf. CUDA mod
+        // DSL fmod widens its half operands to float before fmodf. DSL mod
         // uses half division, floor, multiplication and subtraction. These
         // operands have exact products/subtractions, avoiding contraction
         // ambiguity while distinguishing truncating and floor remainders.
@@ -353,7 +353,7 @@ int main(int argc, char **argv) {
     }
     const char *backend = test_backend_name();
     std::cout << "case=" << name << " backend=" << backend << std::endl;
-    auto device = RHIContext::instance().create_device(backend);
+    auto device = RHIContext::instance().create_device();
     const bool passed = probe(device);
     std::cout << "case=" << name << " result=" << (passed ? "PASS" : "FAIL") << std::endl;
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;

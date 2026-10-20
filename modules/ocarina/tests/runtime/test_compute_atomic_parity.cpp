@@ -283,7 +283,7 @@ void test_wide_literal_diagnostic(Device &device) {
 }// namespace
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     const char *wide_literal = std::getenv("OCARINA_TEST_ATOMIC_WIDE_LITERAL");
     if (wide_literal && std::strcmp(wide_literal, "1") == 0) {
         test_wide_literal_diagnostic(device);

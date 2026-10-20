@@ -69,14 +69,9 @@ Texture3D Device::create_texture(Image *image_resource, const TextureViewCreatio
     return tex;
 }
 
-Device Device::create_device(const string &backend_name, const ocarina::InstanceCreation &instance_creation) {
+Device Device::create_device() {
     RHIContext &rhi_context = RHIContext::instance();
-    return rhi_context.create_device(backend_name, instance_creation);
-}
-
-Device Device::create_device(const string &backend_name) {
-    RHIContext &rhi_context = RHIContext::instance();
-    return rhi_context.create_device(backend_name);
+    return rhi_context.create_device();
 }
 
 }// namespace ocarina

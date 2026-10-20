@@ -171,7 +171,7 @@ void test_math_edges(Device &device) {
            << integers.download(integer_host.data()) << output.download(host.data()) << synchronize() << commit();
     for (uint i = 0; i < inputs.size(); ++i) {
         float expected_sign = inputs[i] >= 0.f ? 1.f : -1.f;
-        require(host[i].x == expected_sign && host[i].z == expected_sign, "sign of signed zero differs from CUDA");
+        require(host[i].x == expected_sign && host[i].z == expected_sign, "sign of signed zero differs from DSL");
         require(host[i].y == std::round(inputs[i]) && host[i].w == std::round(inputs[i]), "round must round halfway values away from zero");
         if (inputs[i] == 0.f)
             require(std::signbit(host[i].y) == std::signbit(inputs[i]), "round lost signed zero");
@@ -228,7 +228,7 @@ void test_global_block_barrier(Device &device) {
 }
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     test_nested_writes(device);
     test_bool_vectors<2>(device);
     test_bool_vectors<3>(device);

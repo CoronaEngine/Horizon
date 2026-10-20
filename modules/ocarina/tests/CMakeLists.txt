@@ -22,7 +22,7 @@ function(ocarina_add_test name)
             FOLDER "${_test_folder}")
     if(NOT _ocarina_test_BENCHMARK)
         if(_ocarina_test_GPU)
-            foreach(_backend cuda vulkan-compute)
+            foreach(_backend vulkan-compute)
                 if(TARGET ocarina-backend-${_backend})
                     foreach(_codegen ast ir)
                       set(_cases ${_ocarina_test_CASES})
@@ -39,7 +39,7 @@ function(ocarina_add_test name)
                         endif()
                         set_tests_properties(${_test_name} PROPERTIES
                             WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
-                            ENVIRONMENT "OCARINA_TEST_BACKEND=${_backend};OCARINA_TEST_CODEGEN=${_codegen}"
+                            ENVIRONMENT "OCARINA_TEST_CODEGEN=${_codegen}"
                             LABELS "ocarina;${_backend};${_codegen}"
                             RUN_SERIAL TRUE TIMEOUT 300)
                       endforeach()
@@ -65,9 +65,6 @@ ocarina_add_test(test-trait CATEGORY core SOURCES core/test_trait.cpp)
 # Codegen and shader interface tests.
 ocarina_add_test(test-shader-argument-pack CATEGORY codegen SOURCES codegen/test_shader_argument_pack.cpp)
 ocarina_add_test(test-shader-parameter-policy GPU CATEGORY codegen SOURCES codegen/test_shader_parameter_policy.cpp)
-ocarina_add_test(test-ast-to-cuda-source-resolved-types CATEGORY codegen SOURCES
-    codegen/test_ast_to_cuda_source_resolved_types.cpp)
-ocarina_add_test(test-tensor-gemm-codegen CATEGORY codegen SOURCES codegen/test_tensor_gemm_codegen.cpp)
 
 # Resource and buffer tests.
 ocarina_add_test(test-host-bytebuffer CATEGORY resources SOURCES resources/test_host_byte_buffer.cpp)
@@ -110,14 +107,14 @@ ocarina_add_test(test-resource-capability-probe GPU CATEGORY resources SOURCES r
     CASES texture-buffer-view-offset texture-narrow-channels texture-linear-fraction texture-uint-reinterpret)
 ocarina_add_test(test-float32-policy-probe GPU CATEGORY runtime SOURCES runtime/test_float32_policy_probe.cpp
     CASES float32-subnormal hyperbolic-stability half-intermediate half-inverse)
-if(TARGET ocarina-backend-cuda AND TARGET ocarina-backend-vulkan-compute)
+if(TARGET ocarina-backend-vulkan-compute)
     find_package(Python COMPONENTS Interpreter REQUIRED)
-    add_test(NAME ocarina.capability-cross-backend
+    add_test(NAME ocarina.capability-codegen
         COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_capability_audit.py"
             --runtime "$<TARGET_FILE_DIR:test-runtime-codegen-capability-probe>"
-            --output "${CMAKE_CURRENT_BINARY_DIR}/capability-comparison/$<CONFIG>")
-    set_tests_properties(ocarina.capability-cross-backend PROPERTIES
-        LABELS "ocarina;cuda;vulkan-compute;parity" RUN_SERIAL TRUE TIMEOUT 1200)
+            --output "${CMAKE_CURRENT_BINARY_DIR}/capability-codegen/$<CONFIG>")
+    set_tests_properties(ocarina.capability-codegen PROPERTIES
+        LABELS "ocarina;vulkan-compute;parity" RUN_SERIAL TRUE TIMEOUT 1200)
 endif()
 ocarina_add_test(test-atomic GPU CATEGORY runtime SOURCES runtime/test_atomic.cpp)
 ocarina_add_test(test-tensor-gemm GPU CATEGORY runtime SOURCES runtime/test_tensor_gemm.cpp)

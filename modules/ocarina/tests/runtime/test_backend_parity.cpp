@@ -478,7 +478,7 @@ void test_nonuniform_bindless_textures(Device &device) {
 void test_diagnostics_lifetime() {
     for (uint i = 0; i < 2u; ++i) {
         {
-            auto device = RHIContext::instance().create_device(test_backend_name());
+            auto device = create_test_device();
             Env::printer().init(device, 64u);
             Env::debugger().init(device);
         }
@@ -489,7 +489,7 @@ void test_diagnostics_lifetime() {
 }
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     test_command_order_and_byte_fill(device);
     test_views_and_record_layout(device);
     test_configured_dispatch(device);

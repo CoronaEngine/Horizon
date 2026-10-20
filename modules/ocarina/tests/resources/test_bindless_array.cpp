@@ -739,7 +739,7 @@ int test_bindless_texture3d_sampling(Device &device, Stream &stream) {
 
 int main() {
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     Stream stream = device.create_stream();
     Env::printer().init(device);
 

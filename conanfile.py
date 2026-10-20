@@ -24,7 +24,6 @@ class HorizonConan(ConanFile):
         "with_engine": [True, False],
         "with_ocarina": [True, False],
         "with_vision_hotfix": [True, False],
-        "with_cuda": [True, False],
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
@@ -40,7 +39,6 @@ class HorizonConan(ConanFile):
         "with_engine": True,
         "with_ocarina": False,
         "with_vision_hotfix": False,
-        "with_cuda": False,
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
@@ -103,10 +101,6 @@ class HorizonConan(ConanFile):
             raise ConanInvalidConfiguration(
                 "with_engine=False is incompatible with: " + ", ".join(enabled_engine_features)
             )
-        if bool(self.options.with_ocarina) and not bool(self.options.with_cuda):
-            raise ConanInvalidConfiguration("with_ocarina=True requires with_cuda=True")
-        if bool(self.options.with_ocarina) and not os.environ.get("CUDA_PATH"):
-            raise ConanInvalidConfiguration("with_ocarina=True requires CUDA_PATH to be set")
         if bool(self.options.with_vision_hotfix) and not bool(self.options.with_ocarina):
             raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True")
         if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
@@ -119,7 +113,7 @@ class HorizonConan(ConanFile):
         variables = toolchain.variables
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
         variables["HORIZON_BUILD_ENGINE"] = bool(self.options.with_engine)
-        variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina and self.options.with_cuda)
+        variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina)
         variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)

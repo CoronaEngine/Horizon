@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces cuda_command_visitor.cpp.
 //
 
 #include "vk_command_visitor.h"

@@ -1,5 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
 //
 
 #pragma once

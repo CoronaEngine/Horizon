@@ -90,7 +90,7 @@ void test_float_special_values(Device &device) {
     for (uint i = 0u; i < input.size(); ++i) {
         const float4 v = input[i];
         float x = v.x, y = v.y;
-        // CUDA fminf/fmaxf select the numeric operand if exactly one is NaN.
+        // DSL fminf/fmaxf select the numeric operand if exactly one is NaN.
         // Either sign is accepted for a min/max tie between signed zero values.
         array<float4, rows> expected{
             make_float4(std::fmin(x, y), std::fmin(y, x), std::fmax(x, y), std::fmax(y, x)),
@@ -429,7 +429,7 @@ void test_control_flow(Device &device) {
 }// namespace
 
 int main() {
-    auto device = RHIContext::instance().create_device(test_backend_name());
+    auto device = create_test_device();
     test_integer_bits(device);
     test_control_flow(device);
     test_finite_math_and_conversions(device);

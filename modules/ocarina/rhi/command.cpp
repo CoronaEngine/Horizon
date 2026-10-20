@@ -22,7 +22,7 @@ BufferReallocateCommand::BufferReallocateCommand(RHIResource *rhi_resource,
 
 span<void *> ShaderDispatchCommand::args() noexcept {
     // A reusable ShaderInvoke shares its immutable user-argument snapshot, but
-    // each command owns its launch dimensions and the CUDA argument-pointer list.
+    // each command owns its launch dimensions and argument-pointer list.
     auto arguments = argument_list_->ptr();
     args_.assign(arguments.begin(), arguments.end());
     if (argument_list_->has_accel_arguments()) {

@@ -1,5 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
 // Compute command batches with asynchronous fence retirement.
 //
 

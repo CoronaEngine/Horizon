@@ -240,7 +240,7 @@ int test_beta_accumulation_gemm(Device &device, Stream &stream) {
 int main(int argc, char *argv[]) {
     fs::path path(argv[0]);
     RHIContext &context = RHIContext::instance();
-    Device device = context.create_device(test_backend_name());
+    Device device = create_test_device();
     device.init_rtx();
     Stream stream = device.create_stream();
 

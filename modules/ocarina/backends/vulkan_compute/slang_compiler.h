@@ -1,6 +1,4 @@
 //
-// Created during CUDA→Slang+Vulkan migration.
-// Replaces CUDACompiler: EDSL Function → SPIR-V bytecode via the Slang API.
 //
 
 #pragma once
