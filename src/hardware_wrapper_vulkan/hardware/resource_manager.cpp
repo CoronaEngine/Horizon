@@ -864,7 +864,11 @@ namespace Corona::Horizon
             throw std::runtime_error(std::string(label) + " bindless descriptors require update-after-bind support.");
         }
 
-        constexpr uint32_t preferred_descriptor_count = 4096;
+        // Imported scenes can contain hundreds of meshes, each with several
+        // geometry/skinning buffers. Keep enough storage-buffer slots for those
+        // live resources while still clamping to the physical device's limits.
+        const uint32_t preferred_descriptor_count =
+            descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ? 16384u : 4096u;
         const uint32_t descriptor_count = clamp_descriptor_capacity(preferred_descriptor_count, descriptor_limit);
         if (descriptor_count == 0)
         {
@@ -1450,10 +1454,16 @@ namespace Corona::Horizon
 
     void ResourceManager::set_external_buffer_ownership(BufferWrap& buffer, bool external)
     {
-        std::lock_guard lock(mutex_);
-        if (!buffer.external_ownership_required || buffer.external_owned == external) return;
-        auto* queue = device_manager_->queue_for(QueueCapability::Compute);
-        if (!queue) throw std::runtime_error("No queue for external buffer ownership transfer");
+        Queue* queue = nullptr;
+        {
+            std::lock_guard lock(mutex_);
+            if (!buffer.external_ownership_required || buffer.external_owned == external) return;
+            queue = device_manager_->queue_for(QueueCapability::Compute);
+            if (!queue) throw std::runtime_error("No queue for external buffer ownership transfer");
+        }
+        // HardwareBuffer holds this buffer's write access throughout the transfer.
+        // Queue acquire/submit can retire submissions and destroy other resources,
+        // which reenter ResourceManager. Never hold mutex_ across those calls.
         QueueSubmission submission;
         submission.command_buffer = queue->acquire();
         submission.debug_summary = external ? "External buffer release" : "External buffer acquire";
