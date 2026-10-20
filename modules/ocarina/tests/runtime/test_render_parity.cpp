@@ -82,8 +82,7 @@ void save_image(const char *scene, const vector<float4> &pixels) {
     if (!directory || !*directory) return;
     const fs::path root(directory);
     fs::create_directories(root);
-    const string name = string(scene) + "-" + test_backend_name() + "-" +
-        (Env::shader_codegen_path() == ShaderCodegenPath::EAstToIR ? "ir" : "ast");
+    const string name = string(scene) + "-" + test_backend_name();
     std::ofstream raw(root / (name + ".f32"), std::ios::binary);
     raw.write(reinterpret_cast<const char *>(pixels.data()), pixels.size() * sizeof(float4));
     std::ofstream ppm(root / (name + ".ppm"), std::ios::binary);

@@ -6,8 +6,6 @@
 #include "core/util/switch_profile.h"
 #include "vk_compute_device.h"
 #include "ast_to_slang_source.h"
-#include "ir_to_slang_source.h"
-#include "generator/ast_to_ir.h"
 #include "rhi/context.h"
 #include "core/util/util.h"
 #include "dsl/dsl.h"
@@ -57,21 +55,9 @@ void normalize_ray_query_extensions(vector<uint32_t> &spirv) noexcept {
 }
 
 [[nodiscard]] string emit_slang_source(const Function &function) noexcept {
-    switch (Env::shader_codegen_path()) {
-        case ShaderCodegenPath::EAstToSource: {
-            AstToSlangSource emitter{Env::code_obfuscation()};
-            emitter.emit(function);
-            return emitter.scratch().c_str();
-        }
-        case ShaderCodegenPath::EAstToIR: {
-            AstToIR lowering;
-            IRModule module = lowering.lower(function);
-            IRToSlangSource emitter{Env::code_obfuscation()};
-            emitter.emit(module);
-            return emitter.scratch().c_str();
-        }
-    }
-    return {};
+    AstToSlangSource emitter{Env::code_obfuscation()};
+    emitter.emit(function);
+    return emitter.scratch().c_str();
 }
 
 }// namespace

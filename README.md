@@ -1,5 +1,8 @@
 # Horizon
 
+Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译为 SPIR-V，
+最终在 Vulkan Compute 后端执行。
+
 ## Windows 构建指南
 
 这份指南适用于第一次接触 CMake 和 Conan 的 Windows 开发者。所有命令都在仓库根目录执行。

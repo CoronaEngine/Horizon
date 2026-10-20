@@ -376,8 +376,7 @@ int main(int argc, char *argv[]) {
         }
     }
     const char *backend = test_backend_name();
-    const char *codegen_env = std::getenv("OCARINA_TEST_CODEGEN");
-    const char *codegen = codegen_env && std::string_view(codegen_env) == "ir" ? "ir" : "ast";
+    constexpr const char *codegen = "ast";
     auto &context = RHIContext::instance();
     auto device = context.create_device();
     if (options.raytracing) device.init_rtx();

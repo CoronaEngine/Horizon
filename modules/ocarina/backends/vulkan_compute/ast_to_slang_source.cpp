@@ -1307,7 +1307,7 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
 
 void AstToSlangSource::_emit_raytracing_param(const Function &) noexcept {
     // Raytracing kernels share the push-constant interface emitted from
-    // _emit_function(), which keeps the AST and IR paths identical.
+    // _emit_function().
 }
 
 void AstToSlangSource::_emit_function(const Function &f) noexcept {
@@ -1323,8 +1323,7 @@ void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
     if (has_generated(&f)) {
         return;
     }
-    // The IR path calls _emit_function() directly; builtin-var emission needs
-    // current_function().
+    // Builtin-var emission needs the active function in current_function().
     FUNCTION_GUARD(f)
     if (f.is_callable()) {
         AstToCppSource::_emit_function(f);

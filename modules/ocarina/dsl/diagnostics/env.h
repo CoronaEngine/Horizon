@@ -9,11 +9,6 @@
 
 namespace ocarina {
 
-enum class ShaderCodegenPath : uint8_t {
-    EAstToSource,
-    EAstToIR,
-};
-
 class OC_DSL_API Env {
     OC_MAKE_INSTANCE_CONSTRUCTOR(Env, s_env)
 
@@ -25,7 +20,6 @@ private:
     /// Check if the array or buffer is over boundary
     bool valid_check_{true};
     bool code_obfuscation_{false};
-    ShaderCodegenPath shader_codegen_path_{ShaderCodegenPath::EAstToSource};
 
 public:
     OC_MAKE_INSTANCE_FUNC_DECL(Env)
@@ -106,8 +100,6 @@ public:
     static void set_valid_check(bool val) noexcept { instance().valid_check_ = val; }
     [[nodiscard]] static bool code_obfuscation() noexcept { return instance().code_obfuscation_; }
     static void set_code_obfuscation(bool val) noexcept { instance().code_obfuscation_ = val; }
-    [[nodiscard]] static ShaderCodegenPath shader_codegen_path() noexcept { return instance().shader_codegen_path_; }
-    static void set_shader_codegen_path(ShaderCodegenPath path) noexcept { instance().shader_codegen_path_ = path; }
 };
 
 }// namespace ocarina

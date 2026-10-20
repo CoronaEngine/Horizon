@@ -22,30 +22,25 @@ function(ocarina_add_test name)
             FOLDER "${_test_folder}")
     if(NOT _ocarina_test_BENCHMARK)
         if(_ocarina_test_GPU)
-            foreach(_backend vulkan-compute)
-                if(TARGET ocarina-backend-${_backend})
-                    foreach(_codegen ast ir)
-                      set(_cases ${_ocarina_test_CASES})
-                      if(NOT _cases)
-                          set(_cases default)
-                      endif()
-                      foreach(_case ${_cases})
-                        set(_test_name "ocarina.${_test_target}.${_backend}.${_codegen}")
-                        if(_case STREQUAL "default")
-                            add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}>)
-                        else()
-                            string(APPEND _test_name ".${_case}")
-                            add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}> --case ${_case})
-                        endif()
-                        set_tests_properties(${_test_name} PROPERTIES
-                            WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
-                            ENVIRONMENT "OCARINA_TEST_CODEGEN=${_codegen}"
-                            LABELS "ocarina;${_backend};${_codegen}"
-                            RUN_SERIAL TRUE TIMEOUT 300)
-                      endforeach()
-                    endforeach()
+            if(TARGET ocarina-backend-vulkan-compute)
+                set(_cases ${_ocarina_test_CASES})
+                if(NOT _cases)
+                    set(_cases default)
                 endif()
-            endforeach()
+                foreach(_case ${_cases})
+                    set(_test_name "ocarina.${_test_target}.vulkan-compute")
+                    if(_case STREQUAL "default")
+                        add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}>)
+                    else()
+                        string(APPEND _test_name ".${_case}")
+                        add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}> --case ${_case})
+                    endif()
+                    set_tests_properties(${_test_name} PROPERTIES
+                        WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
+                        LABELS "ocarina;vulkan-compute"
+                        RUN_SERIAL TRUE TIMEOUT 300)
+                endforeach()
+            endif()
         else()
             add_test(NAME ocarina.${_test_target} COMMAND $<TARGET_FILE:${_test_target}>)
             set_tests_properties(ocarina.${_test_target} PROPERTIES
@@ -109,12 +104,12 @@ ocarina_add_test(test-float32-policy-probe GPU CATEGORY runtime SOURCES runtime/
     CASES float32-subnormal hyperbolic-stability half-intermediate half-inverse)
 if(TARGET ocarina-backend-vulkan-compute)
     find_package(Python COMPONENTS Interpreter REQUIRED)
-    add_test(NAME ocarina.capability-codegen
+    add_test(NAME ocarina.capability-audit
         COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_capability_audit.py"
             --runtime "$<TARGET_FILE_DIR:test-runtime-codegen-capability-probe>"
-            --output "${CMAKE_CURRENT_BINARY_DIR}/capability-codegen/$<CONFIG>")
-    set_tests_properties(ocarina.capability-codegen PROPERTIES
-        LABELS "ocarina;vulkan-compute;parity" RUN_SERIAL TRUE TIMEOUT 1200)
+            --output "${CMAKE_CURRENT_BINARY_DIR}/capability-audit/$<CONFIG>")
+    set_tests_properties(ocarina.capability-audit PROPERTIES
+        LABELS "ocarina;vulkan-compute;capability" RUN_SERIAL TRUE TIMEOUT 1200)
 endif()
 ocarina_add_test(test-atomic GPU CATEGORY runtime SOURCES runtime/test_atomic.cpp)
 ocarina_add_test(test-tensor-gemm GPU CATEGORY runtime SOURCES runtime/test_tensor_gemm.cpp)
