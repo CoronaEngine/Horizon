@@ -1476,6 +1476,12 @@ void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
         return;
     }
     _emit_kernel_params(f);
+    for (const auto &var : f.shared_vars()) {
+        current_scratch() << "groupshared ";
+        _emit_variable_define(var);
+        current_scratch() << ";";
+        _emit_newline();
+    }
     const auto policy = f.storage_policy();
     _emit_comment(ocarina::format("compile policy: policy={}, allow_real_in_storage={}",
                                   precision_policy_name(policy.policy),

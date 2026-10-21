@@ -54,6 +54,9 @@ void FunctionCorrector::process_capture(const Expression *&expression, Function 
     if (expression->context() == cur_func) {
         return;
     }
+    OC_ERROR_IF(expression->tag() == Expression::Tag::REF &&
+                    static_cast<const RefExpr *>(expression)->variable().tag() == Variable::Tag::SHARED,
+                "Shared arrays cannot be captured by callables");
     auto bit_or = [](Usage lhs, Usage rhs) {
         return Usage(to_underlying(lhs) | to_underlying(rhs));
     };

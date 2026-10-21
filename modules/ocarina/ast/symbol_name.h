@@ -43,6 +43,8 @@ template<typename T>
         case Tag::REFERENCE:
         case Tag::LOCAL:
             return "v";
+        case Tag::SHARED:
+            return "s";
         case Tag::DISPATCH_IDX:
             return "d_idx";
         case Tag::DISPATCH_ID:

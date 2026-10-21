@@ -372,6 +372,14 @@ const RefExpr *Function::local(const Type *type, std::source_location location) 
     return ret;
 }
 
+const RefExpr *Function::shared(const Type *type, std::source_location location) noexcept {
+    OC_ERROR_IF_NOT(is_general_kernel(), "Shared arrays require a compute kernel");
+    auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::SHARED));
+    ret->variable().set_src_location(location);
+    shared_vars_.push_back(ret->variable());
+    return ret;
+}
+
 const LiteralExpr *Function::literal(const Type *type, LiteralExpr::value_type value) noexcept {
     return create_expression<LiteralExpr>(resolve_ast_type(type), value);
 }
@@ -615,6 +623,9 @@ uint64_t Function::compute_hash() const noexcept {
         ret = hash64(ret, v.hash());
     }
     for (const Variable &v : builtin_vars_) {
+        ret = hash64(ret, v.hash());
+    }
+    for (const Variable &v : shared_vars_) {
         ret = hash64(ret, v.hash());
     }
     for (const CapturedResource &v : captured_resources_) {

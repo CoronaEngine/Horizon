@@ -9,6 +9,7 @@
 #include "core/expr.h"
 #include "core/var.h"
 #include "data/dynamic_array.h"
+#include "data/shared_array.h"
 #include "api/stmt_builder.h"
 #include "api/syntax.h"
 #include "api/operators.h"

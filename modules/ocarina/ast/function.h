@@ -93,6 +93,7 @@ private:
 
     ocarina::vector<CapturedResource> captured_resources_;
     ocarina::vector<Variable> builtin_vars_;
+    ocarina::vector<Variable> shared_vars_;
     ocarina::vector<Variable::Data> variable_datas_;
     ocarina::vector<ScopeStmt *> scope_stack_;
     /// use for assignment subscript access
@@ -300,6 +301,7 @@ public:
     [[nodiscard]] const RefExpr *argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *reference_argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *local(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
+    [[nodiscard]] const RefExpr *shared(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
     [[nodiscard]] const LiteralExpr *literal(const Type *type, basic_literal_t value) noexcept;
     [[nodiscard]] const UnaryExpr *unary(const Type *type, UnaryOp op, const Expression *expression) noexcept;
     [[nodiscard]] const BinaryExpr *binary(const Type *type, BinaryOp op, const Expression *lhs, const Expression *rhs) noexcept;
@@ -332,6 +334,7 @@ public:
     [[nodiscard]] ocarina::span<const Variable> arguments() const noexcept;
     [[nodiscard]] ocarina::span<const Variable> appended_arguments() const noexcept;
     [[nodiscard]] ocarina::span<const Variable> builtin_vars() const noexcept;
+    [[nodiscard]] ocarina::span<const Variable> shared_vars() const noexcept { return shared_vars_; }
     [[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
     [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::CALLABLE; }
     [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::KERNEL; }

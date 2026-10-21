@@ -89,6 +89,7 @@ if(TARGET ocarina-backend-vulkan-compute)
     ocarina_add_test(test-native-callback GPU CATEGORY runtime SOURCES runtime/test_native_callback.cpp)
     target_link_libraries(test-runtime-native-callback PRIVATE Vulkan::Headers)
 endif()
+ocarina_add_test(test-shared-array GPU CATEGORY runtime SOURCES runtime/test_shared_array.cpp)
 ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/test_slang_capabilities.cpp
     CASES default ray-query)
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
