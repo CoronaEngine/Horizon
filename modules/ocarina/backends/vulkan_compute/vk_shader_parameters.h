@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/function.h"
+#include "vk_readonly_parameter_leaves.h"
 #include "vk_compute_device.h"
 
 namespace ocarina {
@@ -18,7 +19,10 @@ struct VkShaderParameterLayout {
     static constexpr uint32_t inline_offset = 32u;
     static constexpr uint32_t max_push_bytes = 128u;
 
+    // Only the read-only NRD SharedConstants prefix uses set1; its byte ABI is unchanged.
+    static constexpr uint32_t nrd_uniform_bytes = 832u;
     size_t extent{};
+    uint32_t uniform_bytes{};
 
     explicit VkShaderParameterLayout(const Function &function) noexcept {
         auto append = [&](const Variable &arg) {
@@ -29,6 +33,20 @@ struct VkShaderParameterLayout {
         function.for_each_captured_resource([&](const CapturedResource &resource) {
             append(resource.expression()->variable());
         });
+        const auto &name = function.description();
+        const bool nrd = name.find("NRD-EDSL-REBLUR-") == 0u || name == "REBLUR-EDSL-HistoryFix";
+        if (!is_inline() && nrd && !function.arguments().empty()) {
+            const Variable &constants = function.arguments().front();
+            const Type *type = constants.type();
+            if (type->is_structure() && !type->is_param_struct() &&
+                type->cname() == "vision::reblur::edsl::SharedConstants" &&
+                type->size() == nrd_uniform_bytes && type->members().size() == 72u) {
+                VkReadOnlyParameterLeaves reads{function};
+                reads.statement(function.body());
+                if (reads.complete && reads.candidates.contains(constants.uid()))
+                    uniform_bytes = nrd_uniform_bytes;
+            }
+        }
     }
 
     [[nodiscard]] bool is_inline() const noexcept {

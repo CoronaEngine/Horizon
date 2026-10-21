@@ -83,6 +83,8 @@ struct VkComputeStream::State {
         VkBufferAllocation allocation;
         void *mapped{};
         size_t used{};
+        VkDescriptorPool uniform_pool{VK_NULL_HANDLE};
+        VkDescriptorSet uniform_set{VK_NULL_HANDLE};
     };
     struct Batch {
         VkCommandPool pool{};
@@ -140,6 +142,8 @@ struct VkComputeStream::State {
             if (batch->profile)
                 vkDestroyQueryPool(device->logical_device(), batch->profile->pool, nullptr);
             for (auto &arena : batch->arenas) {
+                if (arena.uniform_pool != VK_NULL_HANDLE)
+                    vkDestroyDescriptorPool(device->logical_device(), arena.uniform_pool, nullptr);
                 vmaUnmapMemory(device->vma_allocator(), arena.allocation.alloc);
                 device->free_buffer(arena.allocation);
             }
@@ -411,7 +415,11 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
         state_->current->profile->dispatches.size() == State::profile_dispatch_limit)
         state_->flush();
     auto data = command->argument_data();
-    const auto address = !shader->parameters_inline() ? stage_parameters(data.data(), data.size_bytes()) : 0;
+    VkDescriptorSet parameter_uniform_set{VK_NULL_HANDLE};
+    uint32_t parameter_uniform_offset{};
+    const auto address = !shader->parameters_inline() ? stage_parameters(data.data(), data.size_bytes(),
+        shader->parameters_uniform() ? &parameter_uniform_set : nullptr,
+        shader->parameters_uniform() ? &parameter_uniform_offset : nullptr) : 0;
     auto &batch = state_->begin();
     const bool bind_pipeline = update_shader_binding(shader);
     auto *queries = batch.profile.get();
@@ -439,7 +447,7 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
             vkCmdWriteTimestamp(batch.cb, starts_edsl_filter ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query);
     }
-    shader->dispatch(batch.cb, command, address, bind_pipeline);
+    shader->dispatch(batch.cb, command, address, bind_pipeline, parameter_uniform_set, parameter_uniform_offset);
     if (ends_legacy_filter || ends_nrd) {
         OC_ERROR_IF(!queries || !queries->filter_open,
             "REBLUR aggregate GPU profiling encountered a range end without a matching start");
@@ -517,14 +525,19 @@ void VkComputeStream::prepare_upload(std::function<void()> copy) noexcept {
     if (pending) host_function(std::move(copy), true);
     else copy();
 }
-VkDeviceAddress VkComputeStream::stage_parameters(const void *data, size_t size) noexcept {
+VkDeviceAddress VkComputeStream::stage_parameters(const void *data, size_t size,
+    VkDescriptorSet *uniform_set, uint32_t *uniform_offset) noexcept {
     std::lock_guard lock(state_->operations);
     if (!size) return 0;
     auto &batch = state_->begin();
-    const size_t bytes = (size + 15u) & ~size_t(15u);
+    const size_t alignment = uniform_set ? size_t(device_->parameter_uniform_alignment()) : 16u;
+    const size_t bytes = mem_offset(size, alignment);
+    size_t offset{};
     State::Arena *arena = nullptr;
     for (auto &candidate : batch.arenas) {
-        if (candidate.allocation.size - candidate.used >= bytes) {
+        const size_t aligned = mem_offset(candidate.used, alignment);
+        if (aligned <= candidate.allocation.size && candidate.allocation.size - aligned >= bytes) {
+            offset = aligned;
             arena = &candidate;
             break;
         }
@@ -532,14 +545,38 @@ VkDeviceAddress VkComputeStream::stage_parameters(const void *data, size_t size)
     if (!arena) {
         State::Arena allocation;
         allocation.allocation = device_->allocate_buffer(std::max(size_t(65536), bytes),
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, "stream-parameters", 16);
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            true, "stream-parameters", device_->parameter_uniform_alignment());
         OC_VK_CHECK(vmaMapMemory(device_->vma_allocator(), allocation.allocation.alloc, &allocation.mapped));
         batch.arenas.push_back(allocation);
         arena = &batch.arenas.back();
     }
-    memcpy(static_cast<std::byte *>(arena->mapped) + arena->used, data, size);
-    auto address = arena->allocation.address + arena->used;
-    arena->used += bytes;
+    if (uniform_set) {
+        OC_ASSERT(uniform_offset && size >= VkShaderParameterLayout::nrd_uniform_bytes);
+        OC_ERROR_IF(offset > UINT32_MAX ||
+                    offset + VkShaderParameterLayout::nrd_uniform_bytes > arena->allocation.size,
+                    "NRD dynamic UBO offset/range exceeds its immutable argument arena");
+        if (arena->uniform_set == VK_NULL_HANDLE) {
+            VkDescriptorPoolSize count{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1u};
+            VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            pool.maxSets = 1u; pool.poolSizeCount = 1u; pool.pPoolSizes = &count;
+            OC_VK_CHECK(vkCreateDescriptorPool(device_->logical_device(), &pool, nullptr, &arena->uniform_pool));
+            VkDescriptorSetLayout layout = device_->parameter_uniform_layout();
+            VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            allocate.descriptorPool = arena->uniform_pool; allocate.descriptorSetCount = 1u; allocate.pSetLayouts = &layout;
+            OC_VK_CHECK(vkAllocateDescriptorSets(device_->logical_device(), &allocate, &arena->uniform_set));
+            VkDescriptorBufferInfo buffer{arena->allocation.buffer, 0u, VkShaderParameterLayout::nrd_uniform_bytes};
+            VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            write.dstSet = arena->uniform_set; write.dstBinding = 0u; write.descriptorCount = 1u;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC; write.pBufferInfo = &buffer;
+            vkUpdateDescriptorSets(device_->logical_device(), 1u, &write, 0u, nullptr);
+        }
+        *uniform_set = arena->uniform_set;
+        *uniform_offset = uint32_t(offset);
+    }
+    memcpy(static_cast<std::byte *>(arena->mapped) + offset, data, size);
+    auto address = arena->allocation.address + offset;
+    arena->used = offset + bytes;
     return address;
 }
 void VkComputeStream::synchronize() noexcept {

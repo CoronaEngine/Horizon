@@ -16,12 +16,18 @@ protected:
     // only emitted then, with the compiled workgroup dimensions.
     bool uses_thread_id_{false};
     bool inline_parameters_{false};
+    uint32_t uniform_parameter_bytes_{};
     Scratch storage_functions_;
     set<const Type *> storage_types_;
     set<string> value_helpers_;
     // In a storage-reference callable variant, these argument variables hold
     // physical addresses. Each access uses the host ABI instead of copy-in/out.
     set<uint> storage_reference_arguments_;
+    // Kernel aggregates proven to be immutable leaf-only reads. Offsets use
+    // the unchanged host argument ABI; captured resources remain eager.
+    const Function *lazy_parameter_function_{};
+    map<uint, size_t> lazy_parameter_offsets_;
+    [[nodiscard]] bool _lazy_parameter_offset(const Expression *expr, size_t &offset) noexcept;
     void _emit_converted_value(const Type *target, const Expression *value) noexcept;
     void _emit_custom_call(const CallExpr *expr) noexcept;
     void _emit_matrix_constructor(const CallExpr *expr) noexcept;
@@ -39,7 +45,7 @@ protected:
     // Emit the push-constant block, argument-blob accessors and workgroup
     // statics for one kernel. Called once per kernel from _emit_function().
     void _emit_kernel_params(const Function &f) noexcept;
-    // Declare every kernel argument as a local loaded from the argument blob.
+    // Declare eager arguments; defer proven read-only aggregate leaf accesses.
     void _emit_kernel_argument_loads(const Function &f) noexcept;
     void _emit_parameter_load(const Type *type, size_t offset) noexcept;
 

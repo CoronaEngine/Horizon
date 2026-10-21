@@ -43,6 +43,7 @@ namespace {
     }
 }
 
+
 bool requires_storage_helper(const Type *type) noexcept {
     return type->is_structure() || type->is_array() || type->is_matrix() ||
            type->tag() == Type::Tag::BOOL ||
@@ -814,6 +815,12 @@ void AstToSlangSource::visit(const SubscriptExpr *expr) noexcept {
 }
 
 void AstToSlangSource::visit(const MemberExpr *expr) noexcept {
+    size_t parameter_offset = 0u;
+    if (!expr->type()->is_structure() && !expr->type()->is_array() &&
+        _lazy_parameter_offset(expr, parameter_offset)) {
+        _emit_parameter_load(expr->type(), parameter_offset);
+        return;
+    }
     if (!_is_storage_reference(expr)) {
         AstToCppSource::visit(expr);
         return;
@@ -824,6 +831,30 @@ void AstToSlangSource::visit(const MemberExpr *expr) noexcept {
 void AstToSlangSource::visit(const RefExpr *expr) noexcept {
     if (_is_storage_reference(expr)) _emit_storage_load(expr);
     else AstToCppSource::visit(expr);
+}
+
+bool AstToSlangSource::_lazy_parameter_offset(const Expression *expr, size_t &offset) noexcept {
+    if (&current_function() != lazy_parameter_function_) return false;
+    if (expr->tag() == Expression::Tag::REF) {
+        const auto *ref = static_cast<const RefExpr *>(expr);
+        if (ref->context() != lazy_parameter_function_) return false;
+        const auto iter = lazy_parameter_offsets_.find(ref->variable().uid());
+        if (iter == lazy_parameter_offsets_.end()) return false;
+        offset = iter->second;
+        return true;
+    }
+    if (expr->tag() != Expression::Tag::MEMBER) return false;
+    const auto *member = static_cast<const MemberExpr *>(expr);
+    if (member->is_swizzle() || !member->parent()->type()->is_structure() ||
+        !_lazy_parameter_offset(member->parent(), offset)) return false;
+    const auto members = member->parent()->type()->members();
+    size_t member_offset = 0u;
+    for (uint i = 0u; i <= member->member_index(); ++i) {
+        member_offset = mem_offset(member_offset, members[i]->alignment());
+        if (i != member->member_index()) member_offset += members[i]->size();
+    }
+    offset += member_offset;
+    return true;
 }
 
 void AstToSlangSource::_emit_storage_load(const Expression *expr) noexcept {
@@ -1364,6 +1395,7 @@ void AstToSlangSource::_emit_struct_name(const Type *type) noexcept {
 void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
     const VkShaderParameterLayout layout{f};
     inline_parameters_ = layout.is_inline();
+    uniform_parameter_bytes_ = layout.uniform_bytes;
     current_scratch() << "struct OCPushConstants {";
     _emit_newline();
     indent_inc();
@@ -1413,6 +1445,13 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         current_scratch() << "T oc_param<T>(uint offset) { return *(T *)(oc_push.params + offset); }";
         _emit_newline();
         current_scratch() << "uint oc_param_bits(uint word_offset, uint shift) { return oc_param<uint>(word_offset) >> shift; }";
+        _emit_newline();
+    }
+    if (uniform_parameter_bytes_) {
+        current_scratch() << "[[vk::binding(0, 1)]] cbuffer OCReadonlyParameters { uint4 oc_nrd_param_words["
+                          << uniform_parameter_bytes_ / 16u << "]; };";
+        _emit_newline();
+        current_scratch() << "uint oc_nrd_uniform_word(uint offset) { return oc_nrd_param_words[offset / 16u][(offset / 4u) % 4u]; }";
         _emit_newline();
     }
     // DSL blockIdx/threadIdx are visible in callables too; mirror them as statics.
@@ -1584,6 +1623,25 @@ void AstToSlangSource::_emit_parameter_load(const Type *type, size_t offset) noe
         current_scratch() << ")";
     } else if (auto scalar = narrow_scalar_load(type, offset); !scalar.empty()) {
         current_scratch() << scalar;
+    } else if (uniform_parameter_bytes_ && offset < uniform_parameter_bytes_) {
+        OC_ASSERT(offset % 4u == 0u && offset + 4u <= uniform_parameter_bytes_);
+        // The selected original NRD SharedConstants contains only float/int/uint
+        // scalar leaves. Preserve the existing vector/matrix constructors above.
+        switch (type->tag()) {
+            case Type::Tag::FLOAT:
+            case Type::Tag::REAL:
+                current_scratch() << ocarina::format("asfloat(oc_nrd_uniform_word({}u))", offset);
+                break;
+            case Type::Tag::INT:
+                current_scratch() << ocarina::format("asint(oc_nrd_uniform_word({}u))", offset);
+                break;
+            case Type::Tag::UINT:
+                current_scratch() << ocarina::format("oc_nrd_uniform_word({}u)", offset);
+                break;
+            default:
+                OC_ERROR("Unsupported NRD uniform parameter scalar '{}'", type->name());
+                break;
+        }
     } else if (inline_parameters_) {
         // Resource descriptors have a host ABI distinct from Type::size().
         // Decode their fields explicitly; a push-constant pointer cannot be
@@ -1630,12 +1688,26 @@ void AstToSlangSource::_emit_parameter_load(const Type *type, size_t offset) noe
 }
 
 void AstToSlangSource::_emit_kernel_argument_loads(const Function &f) noexcept {
+    lazy_parameter_function_ = &f;
+    lazy_parameter_offsets_.clear();
+    VkReadOnlyParameterLeaves reads{f};
+    if (!inline_parameters_) reads.statement(f.body());
+    if (inline_parameters_ || !reads.complete) reads.candidates.clear();
     // Same order as the host argument blob: arguments, then captured resources.
     size_t offset = 0;
     auto load = [&](const Variable &arg) {
         const Type *type = arg.type();
         size_t size = VulkanComputeDevice::size(type);
         offset = mem_offset(offset, VulkanComputeDevice::alignment(type));
+        if (reads.candidates.contains(arg.uid())) {
+            lazy_parameter_offsets_.insert(make_pair(arg.uid(), offset));
+            _emit_indent();
+            _emit_comment(ocarina::format("deferred read-only aggregate {}: {} bytes at offset {}",
+                                          arg.final_name(), size, offset));
+            _emit_newline();
+            offset += size;
+            return;
+        }
         _emit_indent();
         _emit_type_name(type);
         _emit_space();

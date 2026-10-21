@@ -31,7 +31,8 @@ public:
     void host_function(std::function<void()> fn, bool async) noexcept;
     void native_callback(NativeCallbackFunction fn) noexcept;
     void prepare_upload(std::function<void()> copy) noexcept;
-    [[nodiscard]] VkDeviceAddress stage_parameters(const void *data, size_t size) noexcept;
+    [[nodiscard]] VkDeviceAddress stage_parameters(const void *data, size_t size,
+        VkDescriptorSet *uniform_set = nullptr, uint32_t *uniform_offset = nullptr) noexcept;
     [[nodiscard]] bool update_shader_binding(const VkShaderBase *shader) noexcept;
     void dispatch_shader(VkShaderBase *shader, ShaderDispatchCommand *command) noexcept;
     void synchronize() noexcept;

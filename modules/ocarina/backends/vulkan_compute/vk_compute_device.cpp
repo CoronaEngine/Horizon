@@ -312,6 +312,18 @@ void VulkanComputeDevice::init_descriptor_pool() noexcept {
     VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     properties.pNext = &indexing;
     vkGetPhysicalDeviceProperties2(phys_device_, &properties);
+    parameter_uniform_alignment_ = std::max(VkDeviceSize(16u), properties.properties.limits.minUniformBufferOffsetAlignment);
+    // One dynamic UBO at set1 and range832 fit Vulkan1.2's guaranteed minima.
+    // No optional feature or new device-wide failure is introduced here.
+    VkDescriptorSetLayoutBinding parameter_binding{};
+    parameter_binding.binding = 0u;
+    parameter_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    parameter_binding.descriptorCount = 1u;
+    parameter_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutCreateInfo parameter_layout{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    parameter_layout.bindingCount = 1u;
+    parameter_layout.pBindings = &parameter_binding;
+    OC_VK_CHECK(vkCreateDescriptorSetLayout(device_, &parameter_layout, nullptr, &parameter_uniform_layout_));
     constexpr uint32_t sampled_count = max_texture_slots * 2u;
     constexpr uint32_t storage_count = max_texture_slots * 4u;
     constexpr uint32_t resource_count = sampled_count + storage_count + c_sampler_count + 1u;
@@ -903,6 +915,8 @@ VulkanComputeDevice::~VulkanComputeDevice() noexcept {
         vkFreeDescriptorSets(device_, desc_pool_, 1, &global_set_);
     if (global_layout_ != VK_NULL_HANDLE)
         vkDestroyDescriptorSetLayout(device_, global_layout_, nullptr);
+    if (parameter_uniform_layout_ != VK_NULL_HANDLE)
+        vkDestroyDescriptorSetLayout(device_, parameter_uniform_layout_, nullptr);
     if (desc_pool_ != VK_NULL_HANDLE)
         vkDestroyDescriptorPool(device_, desc_pool_, nullptr);
     free_buffer(texture_write_locks_);

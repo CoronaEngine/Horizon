@@ -27,6 +27,8 @@ VkComputeShader::~VkComputeShader() noexcept {
         vkDestroyPipeline(device_->logical_device(), pipeline_, nullptr);
     if (layout_ != VK_NULL_HANDLE)
         vkDestroyPipelineLayout(device_->logical_device(), layout_, nullptr);
+    if (params_uniform_pool_ != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(device_->logical_device(), params_uniform_pool_, nullptr);
     if (params_buf_.buffer != VK_NULL_HANDLE)
         device_->free_buffer(params_buf_);
 }
@@ -37,10 +39,10 @@ void VkComputeShader::create_pipeline_layout() noexcept {
     pc_range.offset     = 0;
     pc_range.size       = parameter_layout_.push_bytes();
 
-    VkDescriptorSetLayout global_layout = device_->global_desc_layout();
+    VkDescriptorSetLayout layouts[] = {device_->global_desc_layout(), device_->parameter_uniform_layout()};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    ci.setLayoutCount         = 1u;
-    ci.pSetLayouts            = &global_layout;
+    ci.setLayoutCount         = parameters_uniform() ? 2u : 1u;
+    ci.pSetLayouts            = layouts;
     ci.pushConstantRangeCount = 1u;
     ci.pPushConstantRanges    = &pc_range;
     OC_VK_CHECK(vkCreatePipelineLayout(device_->logical_device(), &ci, nullptr, &layout_));
@@ -82,7 +84,7 @@ void VkComputeShader::launch(handle_ty stream, ShaderDispatchCommand *cmd) noexc
 }
 
 void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, VkDeviceAddress params,
-                               bool bind_pipeline) noexcept {
+                               bool bind_pipeline, VkDescriptorSet uniform_set, uint32_t uniform_offset) noexcept {
     const uint3 dim = cmd->dispatch_dim();
     if (!dim.x || !dim.y || !dim.z) return;
     auto data = cmd->argument_data();
@@ -92,8 +94,24 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
         if (params_buf_.buffer == VK_NULL_HANDLE) {
             params_buf_ = device_->allocate_buffer(
                 (data.size_bytes() + 3u) / 4u * 4u,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                    (parameters_uniform() ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : 0u),
                 true, "shader_params");
+            if (parameters_uniform()) {
+                VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1u};
+                VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+                pool.maxSets = 1u; pool.poolSizeCount = 1u; pool.pPoolSizes = &size;
+                OC_VK_CHECK(vkCreateDescriptorPool(device_->logical_device(), &pool, nullptr, &params_uniform_pool_));
+                VkDescriptorSetLayout layout = device_->parameter_uniform_layout();
+                VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+                allocate.descriptorPool = params_uniform_pool_; allocate.descriptorSetCount = 1u; allocate.pSetLayouts = &layout;
+                OC_VK_CHECK(vkAllocateDescriptorSets(device_->logical_device(), &allocate, &params_uniform_set_));
+                VkDescriptorBufferInfo buffer{params_buf_.buffer, 0u, parameter_layout_.uniform_bytes};
+                VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                write.dstSet = params_uniform_set_; write.dstBinding = 0u; write.descriptorCount = 1u;
+                write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC; write.pBufferInfo = &buffer;
+                vkUpdateDescriptorSets(device_->logical_device(), 1u, &write, 0u, nullptr);
+            }
         }
         void *mapped = nullptr;
         vmaMapMemory(device_->vma_allocator(), params_buf_.alloc, &mapped);
@@ -105,6 +123,17 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
         VkDescriptorSet gs = device_->global_desc_set();
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &gs, 0, nullptr);
+    }
+
+    if (parameters_uniform()) {
+        OC_ERROR_IF(params && uniform_set == VK_NULL_HANDLE,
+                    "Staged NRD UBO parameters require their immutable arena descriptor");
+        VkDescriptorSet selected = params ? uniform_set : params_uniform_set_;
+        const uint32_t offset = params ? uniform_offset : 0u;
+        OC_ERROR_IF(selected == VK_NULL_HANDLE, "NRD UBO parameter descriptor is missing");
+        // Dynamic offsets are per-dispatch state even if the pipeline and set0
+        // remain bound. Never update a descriptor already used by pending work.
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 1u, 1u, &selected, 1u, &offset);
     }
 
     uint8_t pc[VkShaderParameterLayout::max_push_bytes]{};

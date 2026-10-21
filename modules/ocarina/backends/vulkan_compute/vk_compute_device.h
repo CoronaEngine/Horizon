@@ -83,6 +83,8 @@ private:
     VkDescriptorPool      desc_pool_{VK_NULL_HANDLE};
     VkDescriptorSetLayout global_layout_{VK_NULL_HANDLE};
     VkDescriptorSet       global_set_{VK_NULL_HANDLE};
+    VkDescriptorSetLayout parameter_uniform_layout_{VK_NULL_HANDLE};
+    VkDeviceSize parameter_uniform_alignment_{16u};
     VkBufferAllocation texture_write_locks_{};
     uint32_t next_texture_slot_[2]{1u, 1u};
     vector<uint32_t> free_texture_slots_[2];
@@ -128,6 +130,8 @@ public:
     [[nodiscard]] uint3 workgroup_size(const Function &function) const noexcept;
     [[nodiscard]] VkDescriptorSetLayout global_desc_layout() const noexcept { return global_layout_; }
     [[nodiscard]] VkDescriptorSet       global_desc_set()    const noexcept { return global_set_; }
+    [[nodiscard]] VkDescriptorSetLayout parameter_uniform_layout() const noexcept { return parameter_uniform_layout_; }
+    [[nodiscard]] VkDeviceSize parameter_uniform_alignment() const noexcept { return parameter_uniform_alignment_; }
     [[nodiscard]] VkSampler             sampler(uint32_t idx) const noexcept { return samplers_[idx % c_sampler_count]; }
     [[nodiscard]] SlangShaderCompiler  *compiler()           const noexcept { return compiler_.get(); }
 
