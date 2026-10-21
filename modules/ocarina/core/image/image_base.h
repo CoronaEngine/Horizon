@@ -35,7 +35,16 @@ enum struct PixelStorage : uint {
     FLOAT2,
     FLOAT4,
 
-    UNKNOWN
+    UNKNOWN,
+
+    // Native typed-image storage. Keep legacy format values and BYTE conversion
+    // semantics unchanged; UNORM stores use the device's format conversion.
+    UNORM1,
+    UNORM2,
+    HALF1,
+    HALF4,
+    USHORT1,
+    RGB10A2
 };
 
 enum struct ImageWrap : uint8_t {
@@ -89,6 +98,12 @@ OC_NDSC_INLINE size_t pixel_size(PixelStorage pixel_storage) noexcept {
         case PixelStorage::UINT1: return sizeof(uint);
         case PixelStorage::UINT2: return sizeof(uint2);
         case PixelStorage::UINT4: return sizeof(uint4);
+        case PixelStorage::UNORM1: return 1;
+        case PixelStorage::UNORM2: return 2;
+        case PixelStorage::HALF1: return 2;
+        case PixelStorage::HALF4: return 8;
+        case PixelStorage::USHORT1: return 2;
+        case PixelStorage::RGB10A2: return 4;
         case PixelStorage::UNKNOWN: break;
     }
     OC_ASSERT(0);
@@ -96,7 +111,8 @@ OC_NDSC_INLINE size_t pixel_size(PixelStorage pixel_storage) noexcept {
 }
 
 OC_NDSC_INLINE bool is_8bit(PixelStorage pixel_format) noexcept {
-    return pixel_format == PixelStorage::BYTE1 || pixel_format == PixelStorage::BYTE2 || pixel_format == PixelStorage::BYTE4;
+    return pixel_format == PixelStorage::BYTE1 || pixel_format == PixelStorage::BYTE2 || pixel_format == PixelStorage::BYTE4 ||
+           pixel_format == PixelStorage::UNORM1 || pixel_format == PixelStorage::UNORM2;
 }
 
 OC_NDSC_INLINE bool is_32bit(PixelStorage pixel_format) noexcept {
@@ -105,24 +121,32 @@ OC_NDSC_INLINE bool is_32bit(PixelStorage pixel_format) noexcept {
 }
 
 OC_NDSC_INLINE size_t channel_num(PixelStorage pixel_storage) {
-    if (pixel_storage == PixelStorage::BYTE1 || pixel_storage == PixelStorage::FLOAT1 || pixel_storage == PixelStorage::UINT1) { return 1u; }
-    if (pixel_storage == PixelStorage::BYTE2 || pixel_storage == PixelStorage::FLOAT2 || pixel_storage == PixelStorage::UINT2) { return 2u; }
+    if (pixel_storage == PixelStorage::BYTE1 || pixel_storage == PixelStorage::FLOAT1 || pixel_storage == PixelStorage::UINT1 ||
+        pixel_storage == PixelStorage::UNORM1 || pixel_storage == PixelStorage::HALF1 || pixel_storage == PixelStorage::USHORT1) { return 1u; }
+    if (pixel_storage == PixelStorage::BYTE2 || pixel_storage == PixelStorage::FLOAT2 || pixel_storage == PixelStorage::UINT2 ||
+        pixel_storage == PixelStorage::UNORM2) { return 2u; }
     return 4u;
 }
 
 OC_NDSC_INLINE uint32_t format_size_in_bytes(PixelStorage pixel_storage) {
     switch (pixel_storage) {
         case ocarina::PixelStorage::BYTE1:
+        case ocarina::PixelStorage::UNORM1:
             return 1;
         case ocarina::PixelStorage::BYTE2:
+        case ocarina::PixelStorage::UNORM2:
+        case ocarina::PixelStorage::HALF1:
+        case ocarina::PixelStorage::USHORT1:
             return 2;
         case ocarina::PixelStorage::BYTE4:
+        case ocarina::PixelStorage::RGB10A2:
             return 4;
         case ocarina::PixelStorage::UINT1:
         case ocarina::PixelStorage::FLOAT1:
             return 4;
         case ocarina::PixelStorage::UINT2:
         case ocarina::PixelStorage::FLOAT2:
+        case ocarina::PixelStorage::HALF4:
             return 8;
         case ocarina::PixelStorage::UINT4:
         case ocarina::PixelStorage::FLOAT4:

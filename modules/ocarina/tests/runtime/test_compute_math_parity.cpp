@@ -297,6 +297,95 @@ void test_half_conversion_boundaries(Device &device) {
     }
 }
 
+void test_half_conversion_exhaustive(Device &device) {
+    constexpr uint count = 65536u, rows = 4u;
+    auto output = device.create_buffer<uint4>(count * rows);
+    Kernel kernel = [](BufferVar<uint4> out) {
+        Uint i = dispatch_id();
+        Half2 pair = as<half2>(i | ((i ^ 0x8000u) << 16u));
+        Half2 other = as<half2>((i ^ 0x03ffu) | ((i ^ 0x83ffu) << 16u));
+        Half3 triple = make_half3(pair, other.x);
+        Half4 quad = make_half4(pair, other);
+        Float scalar = cast<float>(pair.x);
+        Float2 decoded_pair = make_float2(pair);
+        Float3 decoded_triple = make_float3(triple);
+        Float4 decoded_quad = make_float4(quad);
+        out.write(i * rows, make_uint4(as<uint>(scalar), as<uint>(decoded_pair.x), as<uint>(decoded_pair.y), 0u));
+        out.write(i * rows + 1u, make_uint4(as<uint3>(decoded_triple), 0u));
+        out.write(i * rows + 2u, as<uint4>(decoded_quad));
+        Half2 encoded_pair = make_half2(decoded_pair);
+        Half3 encoded_triple = make_half3(decoded_triple);
+        Half4 encoded_quad = make_half4(decoded_quad);
+        Half2 encoded_low = make_half2(encoded_quad.x, encoded_quad.y);
+        Half2 encoded_high = make_half2(encoded_quad.z, encoded_quad.w);
+        out.write(i * rows + 3u, make_uint4(as<uint>(encoded_pair), as<uint>(make_half2(encoded_triple.y, encoded_triple.z)),
+                                            as<uint>(encoded_low), as<uint>(encoded_high)));
+    };
+    auto shader = device.compile(kernel, "compute-math-half-exhaustive");
+    vector<uint4> actual(count * rows);
+    auto stream = device.create_stream();
+    stream << shader(output).dispatch(count) << output.download(actual.data()) << synchronize() << commit();
+    auto decoded_bits = [](uint bits) {
+        const uint exponent = (bits >> 10u) & 31u, mantissa = bits & 1023u;
+        if (exponent == 31u) return ((bits & 0x8000u) << 16u) | 0x7f800000u | (mantissa << 13u);
+        const float magnitude = exponent ? std::ldexp(1.f + float(mantissa) / 1024.f, int(exponent) - 15)
+                                         : std::ldexp(float(mantissa), -24);
+        return std::bit_cast<uint>(std::copysign(magnitude, bits & 0x8000u ? -1.f : 1.f));
+    };
+    auto encoded_bits = [](uint bits) {
+        // Numeric conversion quiets NaNs; sign and the remaining payload survive.
+        return (bits & 0x7c00u) == 0x7c00u && (bits & 0x03ffu) != 0u ? bits | 0x0200u : bits;
+    };
+    for (uint i = 0u; i < count; ++i) {
+        const array<uint, 4> bits{i, i ^ 0x8000u, i ^ 0x03ffu, i ^ 0x83ffu};
+        const array<uint4, rows> expected{
+            make_uint4(decoded_bits(bits[0]), decoded_bits(bits[0]), decoded_bits(bits[1]), 0u),
+            make_uint4(decoded_bits(bits[0]), decoded_bits(bits[1]), decoded_bits(bits[2]), 0u),
+            make_uint4(decoded_bits(bits[0]), decoded_bits(bits[1]), decoded_bits(bits[2]), decoded_bits(bits[3])),
+            make_uint4(encoded_bits(bits[0]) | (encoded_bits(bits[1]) << 16u),
+                       encoded_bits(bits[1]) | (encoded_bits(bits[2]) << 16u),
+                       encoded_bits(bits[0]) | (encoded_bits(bits[1]) << 16u),
+                       encoded_bits(bits[2]) | (encoded_bits(bits[3]) << 16u))};
+        for (uint row = 0u; row < rows; ++row)
+            for (uint c = 0u; c < 4u; ++c)
+                check_uint(actual[i * rows + row][c], expected[row][c], "exhaustive half conversion", i * rows + row, c);
+    }
+}
+
+void test_half_conversion_midpoints(Device &device) {
+    constexpr uint count = 0x7bffu;
+    vector<float4> input(count);
+    vector<uint2> expected(count);
+    for (uint i = 0u; i < count; ++i) {
+        auto value = [](uint bits) {
+            const uint exponent = bits >> 10u, mantissa = bits & 1023u;
+            return exponent ? std::ldexp(1.f + float(mantissa) / 1024.f, int(exponent) - 15)
+                            : std::ldexp(float(mantissa), -24);
+        };
+        const float midpoint = (value(i) + value(i + 1u)) * 0.5f;
+        input[i] = make_float4(midpoint, std::nextafter(midpoint, -std::numeric_limits<float>::infinity()),
+                              std::nextafter(midpoint, std::numeric_limits<float>::infinity()), -midpoint);
+        const uint tie = i + (i & 1u);
+        expected[i] = make_uint2(tie | (i << 16u), (i + 1u) | ((tie | 0x8000u) << 16u));
+    }
+    auto source = device.create_buffer<float4>(count);
+    auto output = device.create_buffer<uint2>(count);
+    Kernel kernel = [](BufferVar<float4> in, BufferVar<uint2> out) {
+        Half4 converted = make_half4(in.read(dispatch_id()));
+        Half2 low = make_half2(converted.x, converted.y);
+        Half2 high = make_half2(converted.z, converted.w);
+        out.write(dispatch_id(), make_uint2(as<uint>(low), as<uint>(high)));
+    };
+    auto shader = device.compile(kernel, "compute-math-half-midpoints");
+    vector<uint2> actual(count);
+    auto stream = device.create_stream();
+    stream << source.upload(input.data()) << shader(source, output).dispatch(count)
+           << output.download(actual.data()) << synchronize() << commit();
+    for (uint i = 0u; i < count; ++i)
+        for (uint c = 0u; c < 2u; ++c)
+            check_uint(actual[i][c], expected[i][c], "half midpoint rounding", i, c);
+}
+
 void test_half_array_arithmetic(Device &device) {
     vector<float4> input{
         make_float4(1.f, 0x1p-11f, -1.f, -0x1p-11f),
@@ -434,6 +523,8 @@ int main() {
     test_control_flow(device);
     test_finite_math_and_conversions(device);
     test_half_conversion_boundaries(device);
+    test_half_conversion_exhaustive(device);
+    test_half_conversion_midpoints(device);
     test_half_array_arithmetic(device);
     test_half_bit_copies(device);
     test_float_special_values(device);

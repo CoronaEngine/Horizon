@@ -27,6 +27,7 @@ public:
     ~VkShaderBase() override = default;
 
     [[nodiscard]] bool parameters_inline() const noexcept { return parameter_layout_.is_inline(); }
+    [[nodiscard]] const string &description() const noexcept { return function_.description(); }
 
     // Called by VkComputeCommandVisitor::visit(ShaderDispatchCommand*)
     virtual void dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, VkDeviceAddress params = 0,

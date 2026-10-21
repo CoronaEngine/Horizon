@@ -19,6 +19,12 @@ VkFormat pixel_storage_to_vk_format(PixelStorage ps) noexcept {
         case PixelStorage::FLOAT1:  return VK_FORMAT_R32_SFLOAT;
         case PixelStorage::FLOAT2:  return VK_FORMAT_R32G32_SFLOAT;
         case PixelStorage::FLOAT4:  return VK_FORMAT_R32G32B32A32_SFLOAT;
+        case PixelStorage::UNORM1:  return VK_FORMAT_R8_UNORM;
+        case PixelStorage::UNORM2:  return VK_FORMAT_R8G8_UNORM;
+        case PixelStorage::HALF1:   return VK_FORMAT_R16_SFLOAT;
+        case PixelStorage::HALF4:   return VK_FORMAT_R16G16B16A16_SFLOAT;
+        case PixelStorage::USHORT1: return VK_FORMAT_R16_UINT;
+        case PixelStorage::RGB10A2: return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
         default:                    return VK_FORMAT_R8G8B8A8_UNORM;
     }
 }
@@ -34,6 +40,12 @@ uint32_t pixel_storage_bytes(PixelStorage ps) noexcept {
         case PixelStorage::FLOAT1: return 4;
         case PixelStorage::FLOAT2: return 8;
         case PixelStorage::FLOAT4: return 16;
+        case PixelStorage::UNORM1: return 1;
+        case PixelStorage::UNORM2: return 2;
+        case PixelStorage::HALF1: return 2;
+        case PixelStorage::HALF4: return 8;
+        case PixelStorage::USHORT1: return 2;
+        case PixelStorage::RGB10A2: return 4;
         default:                   return 4;
     }
 }
@@ -74,8 +86,9 @@ void VkTexture::register_descriptors(bool is_3d) noexcept {
 
     writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[1].dstSet          = device_->global_desc_set();
-    bool unsigned_format = descriptor_.pixel_storage >= PixelStorage::UINT1 &&
-                           descriptor_.pixel_storage <= PixelStorage::UINT4;
+    bool unsigned_format = (descriptor_.pixel_storage >= PixelStorage::UINT1 &&
+                            descriptor_.pixel_storage <= PixelStorage::UINT4) ||
+                           descriptor_.pixel_storage == PixelStorage::USHORT1;
     writes[1].dstBinding = unsigned_format ? (is_3d ? 6 : 5) : (is_3d ? 3 : 1);
     writes[1].dstArrayElement = storage_slot_;
     writes[1].descriptorCount = 1;
@@ -84,7 +97,12 @@ void VkTexture::register_descriptors(bool is_3d) noexcept {
 
     uint32_t write_count = 2;
     VkDescriptorImageInfo uint_storage_info{};
-    if (!unsigned_format) {
+    // Only legacy BYTE/FLOAT resources expose byte-reinterpreting uint aliases.
+    // Native typed formats are accessed through their actual float/uint type.
+    bool legacy_alias = descriptor_.pixel_storage <= PixelStorage::BYTE4 ||
+                        (descriptor_.pixel_storage >= PixelStorage::FLOAT1 &&
+                         descriptor_.pixel_storage <= PixelStorage::FLOAT4);
+    if (legacy_alias) {
         VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view.image = image_.image;
         view.viewType = is_3d ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;

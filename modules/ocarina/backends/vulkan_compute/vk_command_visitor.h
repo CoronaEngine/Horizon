@@ -50,6 +50,7 @@ public:
     void visit(const SynchronizeCommand *cmd)        noexcept override;
     void visit(const ShaderDispatchCommand *cmd)     noexcept override;
     void visit(const HostFunctionCommand *cmd)       noexcept override;
+    void visit(const NativeCallbackCommand *cmd)     noexcept override;
 };
 
 }// namespace ocarina

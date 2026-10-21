@@ -9,6 +9,11 @@
 namespace ocarina {
 
 OC_COMMAND_POOL_FUNCTIONS_IMPL
+OC_COMMAND_POOL_FUNCTION_IMPL(NativeCallbackCommand)
+
+void CommandVisitor::visit(const NativeCallbackCommand *) noexcept {
+    OC_ERROR("Native callback submission is unsupported by this backend");
+}
 
 ShaderDispatchCommand::ShaderDispatchCommand(handle_ty entry, SP<ShaderArgumentPack> argument_list, uint3 dim)
     : Command(true), entry_(entry),

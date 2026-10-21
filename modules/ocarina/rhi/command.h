@@ -8,6 +8,7 @@
 #include "resources/resource.h"
 #include "core/concurrency/pool.h"
 #include "core/image/image_base.h"
+#include "native_interop.h"
 
 namespace ocarina {
 
@@ -36,12 +37,14 @@ namespace ocarina {
 #define OC_MAKE_CMD_FWD_DECL(CMD) class CMD;
 #define OC_CMD_FWD_DECL MAP(OC_MAKE_CMD_FWD_DECL, OC_RUNTIME_CMD)
 OC_CMD_FWD_DECL
+class NativeCallbackCommand;
 
 /// declare command pool function
 #define OC_COMMAND_POOL_FUNC(CMD) CMD##_pool()
 #define OC_MAKE_COMMAND_POOL_FUNC_DECL(CMD) [[nodiscard]] OC_RHI_API Pool<CMD> &OC_COMMAND_POOL_FUNC(CMD) noexcept;
 #define OC_MAKE_COMMAND_POOL_FUNCS_DECL MAP(OC_MAKE_COMMAND_POOL_FUNC_DECL, OC_RUNTIME_CMD)
 OC_MAKE_COMMAND_POOL_FUNCS_DECL
+OC_MAKE_COMMAND_POOL_FUNC_DECL(NativeCallbackCommand)
 
 /// implement command pool function
 #define OC_COMMAND_POOL_FUNCTION_IMPL(CMD)          \
@@ -73,6 +76,8 @@ class OC_RHI_API CommandVisitor {
 public:
 #define OC_MAKE_COMMAND_VISIT(CMD) virtual void visit(const CMD *cmd) noexcept = 0;
     MAP(OC_MAKE_COMMAND_VISIT, OC_RUNTIME_CMD)
+    // Optional native submission interop; unsupported backends fail explicitly.
+    virtual void visit(const NativeCallbackCommand *cmd) noexcept;
 
     virtual ~CommandVisitor() = default;
 };
@@ -419,6 +424,22 @@ public:
     [[nodiscard]] std::function<void()> function() const noexcept { return function_; }
     OC_MAKE_CMD_COMMON_FUNC(HostFunctionCommand)
 };
+
+// Runs after earlier GPU work is submitted, without waiting for completion.
+// Captures remain alive through the native work and the next engine fence.
+class OC_RHI_API NativeCallbackCommand final : public Command {
+    NativeCallbackFunction function_;
+
+public:
+    explicit NativeCallbackCommand(NativeCallbackFunction function)
+        : Command(true), function_(std::move(function)) {}
+    [[nodiscard]] const NativeCallbackFunction &function() const noexcept { return function_; }
+    OC_MAKE_CMD_COMMON_FUNC(NativeCallbackCommand)
+};
+
+[[nodiscard]] inline NativeCallbackCommand *native_callback(NativeCallbackFunction function) noexcept {
+    return NativeCallbackCommand::create(std::move(function));
+}
 
 /// Retain one or more copyable host-side objects until the command reaches execution.
 template<typename... Args>

@@ -6,6 +6,7 @@
 
 #include "core/stl.h"
 #include "rhi/resources/stream.h"
+#include "rhi/native_interop.h"
 #include "util.h"
 #include <vulkan/vulkan.h>
 
@@ -13,6 +14,7 @@ namespace ocarina {
 
 class VulkanComputeDevice;
 class VkShaderBase;
+class ShaderDispatchCommand;
 
 class VkComputeStream : public Stream::Impl {
 private:
@@ -27,9 +29,11 @@ public:
     void retain(VkBufferAllocation allocation) noexcept;
     void after_completion(std::function<void()> fn) noexcept;
     void host_function(std::function<void()> fn, bool async) noexcept;
+    void native_callback(NativeCallbackFunction fn) noexcept;
     void prepare_upload(std::function<void()> copy) noexcept;
     [[nodiscard]] VkDeviceAddress stage_parameters(const void *data, size_t size) noexcept;
     [[nodiscard]] bool update_shader_binding(const VkShaderBase *shader) noexcept;
+    void dispatch_shader(VkShaderBase *shader, ShaderDispatchCommand *command) noexcept;
     void synchronize() noexcept;
     void wait_idle() noexcept;
     [[nodiscard]] static bool is_completion_thread(const VulkanComputeDevice *device) noexcept;

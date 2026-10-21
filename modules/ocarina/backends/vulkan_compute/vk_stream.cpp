@@ -1,13 +1,26 @@
 #include "vk_stream.h"
 #include "vk_compute_device.h"
 #include "vk_command_visitor.h"
+#include "vk_shader.h"
+#include "vulkan_interop.h"
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
+#include <fstream>
+#include <iomanip>
 #include <thread>
 
 namespace ocarina {
 namespace {
 thread_local const VulkanComputeDevice *completion_device = nullptr;
+std::mutex &profile_output_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+uint64_t &profile_batch_serial() {
+    static uint64_t serial{};
+    return serial;
+}
 void memory_barrier(VkCommandBuffer cb, bool host_read = false) {
     VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
@@ -23,6 +36,49 @@ void memory_barrier(VkCommandBuffer cb, bool host_read = false) {
 }
 
 struct VkComputeStream::State {
+    // Temporary opt-in profiling. No query resources are created when
+    // REBLUR_GPU_PROFILE is unset. MODE=filter measures complete filter chains;
+    // MODE=nrd measures the EDSL core between conversion passes. Other modes
+    // time each dispatch. Full pools spill before a new range.
+    static constexpr uint32_t profile_dispatch_limit = 1024u;
+    static constexpr uint32_t profile_query_count = profile_dispatch_limit * 2u;
+    struct ProfileOutput {
+        std::ofstream file;
+        double timestamp_period{};
+        uint64_t timestamp_mask{};
+
+        ProfileOutput(VulkanComputeDevice *device, const char *path) {
+            VkPhysicalDeviceProperties properties{};
+            vkGetPhysicalDeviceProperties(device->physical_device(), &properties);
+            uint32_t count{};
+            vkGetPhysicalDeviceQueueFamilyProperties(device->physical_device(), &count, nullptr);
+            vector<VkQueueFamilyProperties> queues(count);
+            vkGetPhysicalDeviceQueueFamilyProperties(device->physical_device(), &count, queues.data());
+            const auto bits = queues[device->queue_family()].timestampValidBits;
+            OC_ERROR_IF(!bits || properties.limits.timestampPeriod <= 0.f,
+                "REBLUR_GPU_PROFILE requires Vulkan compute queue timestamp support");
+            timestamp_period = properties.limits.timestampPeriod;
+            timestamp_mask = bits == 64u ? UINT64_MAX : (uint64_t(1u) << bits) - 1u;
+            // Streams may share one output. Append and flush under the same
+            // process mutex so headers and CSV rows cannot interleave.
+            std::lock_guard lock(profile_output_mutex());
+            file.open(std::filesystem::path(path), std::ios::app);
+            OC_ERROR_IF(!file, "Cannot open REBLUR_GPU_PROFILE output");
+            if (file.tellp() == std::streampos(0)) file << "batch,name,width,height,ms\n";
+            file << std::setprecision(12);
+            file.flush();
+        }
+    };
+    struct ProfileQueries {
+        struct Dispatch {
+            string name;
+            uint32_t width{}, height{};
+        };
+        VkQueryPool pool{};
+        vector<Dispatch> dispatches;
+        bool filter_open{};
+        std::array<uint64_t, profile_query_count> timestamps;
+    };
     struct Arena {
         VkBufferAllocation allocation;
         void *mapped{};
@@ -37,7 +93,11 @@ struct VkComputeStream::State {
         const VkShaderBase *bound_shader{};
         vector<VkBufferAllocation> retained;
         vector<std::function<void()>> completions;
+        // Submission-time callbacks are kept alive through this batch's fence,
+        // without turning them into host completion dependencies.
+        vector<NativeCallbackFunction> native_submissions;
         vector<Arena> arenas;
+        std::unique_ptr<ProfileQueries> profile;
     };
     VulkanComputeDevice *device;
     std::mutex mutex;
@@ -52,9 +112,19 @@ struct VkComputeStream::State {
     bool retirement_active{}, worker_requested{};
     bool deferred_submission{};
     bool stopping{};
+    std::unique_ptr<ProfileOutput> profile;
+    bool profile_filter_mode{};
+    bool profile_nrd_mode{};
     std::thread worker;
 
     explicit State(VulkanComputeDevice *d) : device(d) {
+        const char *path = std::getenv("REBLUR_GPU_PROFILE");
+        if (path && *path) {
+            profile = std::make_unique<ProfileOutput>(device, path);
+            const char *mode = std::getenv("REBLUR_GPU_PROFILE_MODE");
+            profile_filter_mode = mode && string_view(mode) == "filter";
+            profile_nrd_mode = mode && string_view(mode) == "nrd";
+        }
         worker = std::thread([this] { retire_batches(); });
     }
     ~State() {
@@ -67,6 +137,8 @@ struct VkComputeStream::State {
         work_ready.notify_one();
         worker.join();
         for (auto &batch : batches) {
+            if (batch->profile)
+                vkDestroyQueryPool(device->logical_device(), batch->profile->pool, nullptr);
             for (auto &arena : batch->arenas) {
                 vmaUnmapMemory(device->vma_allocator(), arena.allocation.alloc);
                 device->free_buffer(arena.allocation);
@@ -74,6 +146,35 @@ struct VkComputeStream::State {
             vkDestroyFence(device->logical_device(), batch->fence, nullptr);
             vkDestroyCommandPool(device->logical_device(), batch->pool, nullptr);
         }
+    }
+    void resolve_profile(Batch &batch) {
+        if (!batch.profile || batch.profile->dispatches.empty()) return;
+        auto &queries = *batch.profile;
+        const auto count = uint32_t(queries.dispatches.size()) * 2u;
+        // Called only after this batch's existing fence has completed. Reading
+        // the results needs no WAIT_BIT and does not add a GPU round trip.
+        OC_VK_CHECK(vkGetQueryPoolResults(device->logical_device(), queries.pool, 0, count,
+            size_t(count) * sizeof(uint64_t), queries.timestamps.data(), sizeof(uint64_t),
+            VK_QUERY_RESULT_64_BIT));
+        std::lock_guard lock(profile_output_mutex());
+        const auto serial = ++profile_batch_serial();
+        for (size_t i = 0; i < queries.dispatches.size(); ++i) {
+            const auto &dispatch = queries.dispatches[i];
+            const auto ticks = (queries.timestamps[i * 2u + 1u] - queries.timestamps[i * 2u]) &
+                               profile->timestamp_mask;
+            profile->file << serial << ",\"";
+            for (char c : dispatch.name) {
+                if (c == '"') profile->file << '"';
+                profile->file << c;
+            }
+            profile->file << "\"," << dispatch.width << ',' << dispatch.height << ',' <<
+                double(ticks) * profile->timestamp_period / 1000000.0 << '\n';
+        }
+        profile->file.flush();
+        OC_ERROR_IF(!profile->file, "Cannot write REBLUR_GPU_PROFILE output");
+        // Metadata must be consumed before this batch's arenas and command
+        // pool become available to the recording thread again.
+        queries.dispatches.clear();
     }
     Batch &begin() {
         if (current) return *current;
@@ -118,8 +219,40 @@ struct VkComputeStream::State {
         memory_barrier(current->cb);
         return *current;
     }
+    void submit(Batch &batch) {
+        auto submit_engine_batch = [&] {
+            device->submit(batch.cb, batch.fence, VK_NULL_HANDLE, 0);
+        };
+        if (batch.native_submissions.empty()) {
+            submit_engine_batch();
+        } else {
+            VulkanInteropContext vk;
+            vk.instance = device->instance();
+            vk.physical_device = device->physical_device();
+            vk.device = device->logical_device();
+            vk.compute_queue = device->compute_queue();
+            vk.queue_family = device->queue_family();
+            vk.get_instance_proc_addr = vkGetInstanceProcAddr;
+            vk.backend = device;
+            vk.resolve_buffer = [](void *backend, uint64_t address, VkDeviceSize *offset) {
+                return static_cast<VulkanComputeDevice *>(backend)->get_vk_buffer(address, offset);
+            };
+            const NativeInteropContext context{NativeInteropBackend::VulkanCompute, &vk};
+            // Keep external queue submission and its following engine fence
+            // in one queue critical section. submit() uses a recursive mutex.
+            device->run_commit_callback([&](void *) {
+                for (const auto &fn : batch.native_submissions) fn(context);
+                submit_engine_batch();
+            });
+        }
+        batch.gpu_submitted = true;
+    }
     void flush() {
         if (!current) return;
+        // An aggregate range owns one pair in this batch's query pool. Do not
+        // submit an unfinished pair or let retirement read an unwritten end.
+        OC_ERROR_IF(current->profile && current->profile->filter_open,
+            "REBLUR aggregate GPU profiling requires a complete filter/core range in one batch");
         Batch *batch = current;
         current = nullptr;
         // Host visibility is needed for readbacks/callbacks, not GPU-only work.
@@ -137,8 +270,7 @@ struct VkComputeStream::State {
             deferred_submission |= completed < last_host_serial;
             if (!batch->completions.empty()) last_host_serial = batch->serial;
             if (!deferred_submission) {
-                device->submit(batch->cb, batch->fence, VK_NULL_HANDLE, 0);
-                batch->gpu_submitted = true;
+                submit(*batch);
             }
             pending.push_back(batch);
             submitted = batch->serial;
@@ -171,9 +303,17 @@ struct VkComputeStream::State {
         }
     }
     void retire(Batch *batch) {
+        // Retirement may run on the recording thread for GPU-only batches.
+        // Native capture destructors can release Ocarina resources; prevent
+        // those destructors from recursively waiting on this in-progress batch.
+        struct CompletionScope {
+            const VulkanComputeDevice *previous;
+            explicit CompletionScope(const VulkanComputeDevice *d)
+                : previous(completion_device) { completion_device = d; }
+            ~CompletionScope() { completion_device = previous; }
+        } completion_scope(device);
         if (!batch->gpu_submitted) {
-            device->submit(batch->cb, batch->fence, VK_NULL_HANDLE, 0);
-            batch->gpu_submitted = true;
+            submit(*batch);
             if (batch->completions.empty()) {
                 // Feed the queue through the next host callback before waiting
                 // for fences. Serial submit/wait for every deferred GPU-only
@@ -181,8 +321,7 @@ struct VkComputeStream::State {
                 std::lock_guard lock(mutex);
                 for (auto* next : pending) {
                     if (!next->gpu_submitted) {
-                        device->submit(next->cb, next->fence, VK_NULL_HANDLE, 0);
-                        next->gpu_submitted = true;
+                        submit(*next);
                     }
                     if (!next->completions.empty()) break;
                 }
@@ -190,8 +329,10 @@ struct VkComputeStream::State {
             }
         }
         OC_VK_CHECK(vkWaitForFences(device->logical_device(), 1, &batch->fence, VK_TRUE, UINT64_MAX));
+        if (profile) resolve_profile(*batch);
         for (auto &fn : batch->completions) fn();
         batch->completions.clear();
+        batch->native_submissions.clear();
         for (auto &allocation : batch->retained) device->free_buffer(allocation);
         batch->retained.clear();
         bool background_work;
@@ -248,6 +389,95 @@ bool VkComputeStream::update_shader_binding(const VkShaderBase *shader) noexcept
     batch.bound_shader = shader;
     return changed;
 }
+void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchCommand *command) noexcept {
+    std::lock_guard lock(state_->operations);
+    const bool filter_mode = state_->profile && state_->profile_filter_mode;
+    const bool nrd_mode = state_->profile && state_->profile_nrd_mode;
+    const bool dispatch_mode = state_->profile && !filter_mode && !nrd_mode;
+    const auto &name = shader->description();
+    const bool starts_legacy_filter = filter_mode && name == "REBLUR-ClassifyAndPack";
+    const bool ends_legacy_filter = filter_mode && name == "REBLUR-TemporalStabilization";
+    const bool starts_edsl_filter = filter_mode && name == "NRD-EDSL-REBLUR-Pack";
+    const bool ends_edsl_filter = filter_mode && name == "NRD-EDSL-REBLUR-Unpack";
+    const bool starts_nrd = nrd_mode && name == "NRD-EDSL-REBLUR-Pack";
+    const bool ends_nrd = nrd_mode && (name == "NRD-EDSL-REBLUR-TemporalStabilization" ||
+                                      name == "NRD-EDSL-REBLUR-PostBlurNoTS");
+    const bool starts_range = starts_legacy_filter || starts_edsl_filter || starts_nrd;
+    const bool starts_profile = dispatch_mode || starts_range;
+    // Spill before staging parameters: their arena address must belong to the
+    // same batch as the dispatch that consumes it. Aggregate ranges reserve
+    // their complete pair at the start and never spill between filter passes.
+    if (starts_profile && state_->current && state_->current->profile &&
+        state_->current->profile->dispatches.size() == State::profile_dispatch_limit)
+        state_->flush();
+    auto data = command->argument_data();
+    const auto address = !shader->parameters_inline() ? stage_parameters(data.data(), data.size_bytes()) : 0;
+    auto &batch = state_->begin();
+    const bool bind_pipeline = update_shader_binding(shader);
+    auto *queries = batch.profile.get();
+    uint32_t query{};
+    if (starts_profile) {
+        if (!queries) {
+            batch.profile = std::make_unique<State::ProfileQueries>();
+            queries = batch.profile.get();
+            VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+            info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            info.queryCount = State::profile_query_count;
+            OC_VK_CHECK(vkCreateQueryPool(device_->logical_device(), &info, nullptr, &queries->pool));
+        }
+        if (queries->dispatches.empty()) vkCmdResetQueryPool(batch.cb, queries->pool, 0, State::profile_query_count);
+        OC_ERROR_IF(queries->filter_open, "REBLUR aggregate GPU profiling encountered a nested range");
+        const auto dim = command->dispatch_dim();
+        query = uint32_t(queries->dispatches.size()) * 2u;
+        queries->dispatches.push_back({starts_nrd ? string("REBLUR-NRD") :
+                                       starts_range ? string("REBLUR-Filter") : name, dim.x, dim.y});
+        queries->filter_open = starts_range;
+        // Preserve the existing dispatch/legacy filter timestamp stages. EDSL
+        // aggregate ranges use BOTTOM_OF_PIPE at both ends, as NVRHI does.
+        // Core timing starts after Pack's producer/consumer barrier below.
+        if (!starts_nrd)
+            vkCmdWriteTimestamp(batch.cb, starts_edsl_filter ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query);
+    }
+    shader->dispatch(batch.cb, command, address, bind_pipeline);
+    if (ends_legacy_filter || ends_nrd) {
+        OC_ERROR_IF(!queries || !queries->filter_open,
+            "REBLUR aggregate GPU profiling encountered a range end without a matching start");
+        query = uint32_t(queries->dispatches.size() - 1u) * 2u;
+        if (ends_legacy_filter) {
+            const auto dim = command->dispatch_dim();
+            queries->dispatches.back().width = dim.x;
+            queries->dispatches.back().height = dim.y;
+        }
+        queries->filter_open = false;
+        // End core timing before the final pass's trailing visibility barrier,
+        // matching NativeReblur's nrd_timer before its Unpack barrier. All
+        // intervening clears, dispatches and barriers remain inside the pair.
+        vkCmdWriteTimestamp(batch.cb, ends_nrd ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query + 1u);
+    }
+    if (dispatch_mode)
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query + 1u);
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(batch.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 1, &barrier, 0, nullptr, 0, nullptr);
+    if (starts_nrd)
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries->pool, query);
+    if (ends_edsl_filter) {
+        OC_ERROR_IF(!queries || !queries->filter_open,
+            "REBLUR filter GPU profiling encountered Unpack without Pack");
+        query = uint32_t(queries->dispatches.size() - 1u) * 2u;
+        queries->filter_open = false;
+        // Keep the true image dimensions captured at Pack, rather than the
+        // padded dimensions of intermediate dispatches. Include Unpack's
+        // final visibility barrier in complete-filter timing.
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries->pool, query + 1u);
+    }
+}
 void VkComputeStream::retain(VkBufferAllocation allocation) noexcept {
     std::lock_guard lock(state_->operations);
     state_->begin().retained.push_back(allocation);
@@ -261,6 +491,18 @@ void VkComputeStream::host_function(std::function<void()> fn, bool async) noexce
     after_completion(std::move(fn));
     state_->flush();
     if (!async) synchronize();
+}
+void VkComputeStream::native_callback(NativeCallbackFunction fn) noexcept {
+    if (!fn) return;
+    std::lock_guard lock(state_->operations);
+    // End the preceding engine command buffer, but do not wait for its fence.
+    // If it depends on pending host work, the existing retirement sequence
+    // invokes this callback only after that work and its GPU submission.
+    state_->flush();
+    // begin() emits an ALL_COMMANDS memory dependency before any subsequent
+    // engine work. Its submission happens after the external queue callback,
+    // so this batch's fence also covers native work when it is the last command.
+    state_->begin().native_submissions.push_back(std::move(fn));
 }
 void VkComputeStream::prepare_upload(std::function<void()> copy) noexcept {
     std::lock_guard lock(state_->operations);

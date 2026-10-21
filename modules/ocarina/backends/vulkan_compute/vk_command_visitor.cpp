@@ -383,12 +383,12 @@ void VkComputeCommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
     if (!shader) return;
     const auto dim = cmd->dispatch_dim();
     if (!dim.x || !dim.y || !dim.z) return;
-    auto data = const_cast<ShaderDispatchCommand *>(cmd)->argument_data();
-    auto address = stream_ && !shader->parameters_inline() ?
-        stream_->stage_parameters(data.data(), data.size_bytes()) : 0;
+    if (stream_) {
+        stream_->dispatch_shader(shader, const_cast<ShaderDispatchCommand *>(cmd));
+        return;
+    }
     record([&](VkCommandBuffer cb) {
-        const bool bind_pipeline = !stream_ || stream_->update_shader_binding(shader);
-        shader->dispatch(cb, const_cast<ShaderDispatchCommand *>(cmd), address, bind_pipeline);
+        shader->dispatch(cb, const_cast<ShaderDispatchCommand *>(cmd));
         // All DSL kernels (including ray queries) execute in the compute stage.
         // Preserve RAW/WAR/WAW order with later compute and transfer commands
         // without serializing unrelated pipeline stages after every dispatch.
@@ -405,6 +405,11 @@ void VkComputeCommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
 void VkComputeCommandVisitor::visit(const HostFunctionCommand *cmd) noexcept {
     if (stream_) stream_->host_function(cmd->function(), cmd->async());
     else cmd->function()();
+}
+
+void VkComputeCommandVisitor::visit(const NativeCallbackCommand *cmd) noexcept {
+    OC_ERROR_IF(!stream_, "Native callback submission requires a Vulkan stream");
+    stream_->native_callback(cmd->function());
 }
 
 }// namespace ocarina

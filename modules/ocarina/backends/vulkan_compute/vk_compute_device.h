@@ -68,6 +68,11 @@ private:
     // ── RT extension support ─────────────────────────────────────────────────
     bool has_rt_{false};
     bool has_external_memory_{false};
+    // Opt-in, host-side pipeline diagnostics; disabled unless an output path is set.
+    bool has_pipeline_statistics_{false};
+    std::string pipeline_statistics_path_;
+    PFN_vkGetPipelineExecutablePropertiesKHR get_pipeline_executable_properties_{};
+    PFN_vkGetPipelineExecutableStatisticsKHR get_pipeline_executable_statistics_{};
     vector<uint32_t> shared_queue_families_;
     VkDeviceSize scratch_alignment_{1};
     std::recursive_mutex submission_mutex_;
@@ -110,12 +115,15 @@ public:
     ~VulkanComputeDevice() noexcept;
 
     // ── Accessors used by sub-objects ────────────────────────────────────────
+    [[nodiscard]] VkInstance       instance()         const noexcept { return instance_; }
     [[nodiscard]] VkDevice         logical_device()   const noexcept { return device_; }
     [[nodiscard]] VkPhysicalDevice physical_device()  const noexcept { return phys_device_; }
     [[nodiscard]] VmaAllocator     vma_allocator()    const noexcept { return allocator_; }
     [[nodiscard]] VkQueue          compute_queue()    const noexcept { return compute_queue_; }
     [[nodiscard]] uint32_t         queue_family()     const noexcept { return compute_queue_family_; }
     [[nodiscard]] bool             has_rt()           const noexcept { return has_rt_; }
+    [[nodiscard]] bool has_pipeline_statistics() const noexcept { return has_pipeline_statistics_; }
+    void report_pipeline_statistics(VkPipeline pipeline, const string &description) noexcept;
     [[nodiscard]] VkDeviceSize scratch_alignment() const noexcept { return scratch_alignment_; }
     [[nodiscard]] uint3 workgroup_size(const Function &function) const noexcept;
     [[nodiscard]] VkDescriptorSetLayout global_desc_layout() const noexcept { return global_layout_; }

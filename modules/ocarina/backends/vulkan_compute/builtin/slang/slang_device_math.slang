@@ -60,14 +60,20 @@ matrix<float, R, C> oc_half_value<uint R, uint C>(matrix<float, R, C> value) {
 float16_t oc_float2half(float value) {
     uint bits = asuint(value);
     uint sign = (bits >> 16u) & 0x8000u;
+    uint magnitude = bits & 0x7fffffffu;
     uint exponent = (bits >> 23u) & 0xffu;
     uint mantissa = bits & 0x7fffffu;
     uint encoded;
-    if (exponent == 0xffu) {
+    // The usual finite normal case rounds the whole magnitude at once; an
+    // exponent carry also produces the correct infinity at the upper boundary.
+    if (magnitude >= 0x38800000u && magnitude < 0x47800000u) {
+        uint rounded = magnitude + 0xfffu + ((magnitude >> 13u) & 1u);
+        encoded = sign | ((rounded >> 13u) - 0x1c000u);
+    } else if (exponent == 0xffu) {
         encoded = sign | 0x7c00u | (mantissa != 0u ? ((mantissa >> 13u) | 0x200u) : 0u);
     } else if (exponent >= 143u) {
         encoded = sign | 0x7c00u;
-    } else if (exponent <= 112u) {
+    } else {
         if (exponent < 102u) {
             encoded = sign;
         } else {
@@ -80,9 +86,6 @@ float16_t oc_float2half(float value) {
                 (remainder == halfway && (truncated & 1u) != 0u));
             encoded = sign | rounded;
         }
-    } else {
-        uint rounded = (mantissa + 0xfffu + ((mantissa >> 13u) & 1u)) >> 13u;
-        encoded = sign | (((exponent - 112u) << 10u) + rounded);
     }
     return bit_cast<float16_t>(uint16_t(encoded));
 }
@@ -91,38 +94,58 @@ float oc_half2float(float16_t value) {
     uint sign = (bits & 0x8000u) << 16u;
     uint exponent = (bits >> 10u) & 31u;
     uint mantissa = bits & 1023u;
-    if (exponent == 31u) return asfloat(sign | 0x7f800000u | (mantissa << 13u));
-    if (exponent == 0u) {
-        if (mantissa == 0u) return asfloat(sign);
-        uint normalized_exponent = 113u;
-        while ((mantissa & 0x400u) == 0u) {
-            mantissa <<= 1u;
-            --normalized_exponent;
-        }
-        return asfloat(sign | (normalized_exponent << 23u) | ((mantissa & 0x3ffu) << 13u));
-    }
-    return asfloat(sign | ((exponent + 112u) << 23u) | (mantissa << 13u));
+    // Every binary16 subnormal is an exact, normal float32 value. Scaling its
+    // integer mantissa by 2^-24 avoids normalization loops and FP16 denorm rules.
+    uint subnormal = asuint(float(mantissa) * 5.9604644775390625e-8f);
+    uint normal = ((exponent + 112u) << 23u) | (mantissa << 13u);
+    uint special = 0x7f800000u | (mantissa << 13u);
+    uint decoded = exponent == 0u ? subnormal : (exponent == 31u ? special : normal);
+    return asfloat(sign | decoded);
 }
 vector<float16_t, N> oc_float2half<uint N>(vector<float, N> value) {
-    vector<float16_t, N> result;
-    for (uint i = 0u; i < N; ++i) result[i] = oc_float2half(value[i]);
-    return result;
+    vector<uint, N> bits = asuint(value);
+    vector<uint, N> sign = (bits >> 16u) & 0x8000u;
+    vector<uint, N> magnitude = bits & 0x7fffffffu;
+    vector<uint, N> exponent = magnitude >> 23u;
+    vector<uint, N> mantissa = magnitude & 0x7fffffu;
+    vector<uint, N> normal = ((magnitude + 0xfffu + ((magnitude >> 13u) & 1u)) >> 13u) - 0x1c000u;
+    // Clamp before shifting: even lanes selected away below must not evaluate
+    // an out-of-range shift. The retained lanes use exactly 14..24 bits.
+    vector<uint, N> shift = 126u - clamp(exponent, 102u, 112u);
+    vector<uint, N> significand = mantissa | 0x800000u;
+    vector<uint, N> truncated = significand >> shift;
+    vector<uint, N> remainder = significand & ((1u << shift) - 1u);
+    vector<uint, N> halfway = 1u << (shift - 1u);
+    vector<uint, N> subnormal = truncated + vector<uint, N>(remainder > halfway ||
+        (remainder == halfway && (truncated & 1u) != 0u));
+    vector<uint, N> finite = select(exponent > 112u, normal, select(exponent < 102u, 0u, subnormal));
+    vector<uint, N> special = 0x7c00u | select(mantissa != 0u, (mantissa >> 13u) | 0x200u, 0u);
+    vector<uint, N> encoded = select(exponent == 255u, special, select(exponent >= 143u, 0x7c00u, finite));
+    return bit_cast<vector<float16_t, N>>(vector<uint16_t, N>(sign | encoded));
 }
 matrix<float16_t, R, C> oc_float2half<uint R, uint C>(matrix<float, R, C> value) {
     matrix<float16_t, R, C> result;
+    [ForceUnroll]
     for (uint r = 0u; r < R; ++r)
-        for (uint c = 0u; c < C; ++c) result[r][c] = oc_float2half(value[r][c]);
+        result[r] = oc_float2half(value[r]);
     return result;
 }
 vector<float, N> oc_half2float<uint N>(vector<float16_t, N> value) {
-    vector<float, N> result;
-    for (uint i = 0u; i < N; ++i) result[i] = oc_half2float(value[i]);
-    return result;
+    vector<uint, N> bits = vector<uint, N>(bit_cast<vector<uint16_t, N>>(value));
+    vector<uint, N> sign = (bits & 0x8000u) << 16u;
+    vector<uint, N> exponent = (bits >> 10u) & 31u;
+    vector<uint, N> mantissa = bits & 1023u;
+    vector<uint, N> subnormal = asuint(vector<float, N>(mantissa) * 5.9604644775390625e-8f);
+    vector<uint, N> normal = ((exponent + 112u) << 23u) | (mantissa << 13u);
+    vector<uint, N> special = 0x7f800000u | (mantissa << 13u);
+    vector<uint, N> decoded = select(exponent == 0u, subnormal, select(exponent == 31u, special, normal));
+    return asfloat(sign | decoded);
 }
 matrix<float, R, C> oc_half2float<uint R, uint C>(matrix<float16_t, R, C> value) {
     matrix<float, R, C> result;
+    [ForceUnroll]
     for (uint r = 0u; r < R; ++r)
-        for (uint c = 0u; c < C; ++c) result[r][c] = oc_half2float(value[r][c]);
+        result[r] = oc_half2float(value[r]);
     return result;
 }
 
@@ -551,7 +574,12 @@ float4x4 oc_inverse(float4x4 m) {
 
 // ── Texture helpers (bindless descriptor-array indices) ───────────────────────
 
+// Float and uint sampled views share the existing sampled-image descriptor
+// array. Each access uses an index whose VkImageView numeric type matches it.
+[allow("parameterBindingsOverlap")]
 [[vk::binding(0, 0)]] Texture2D<float4>      g_bindless_tex2d[];
+[allow("parameterBindingsOverlap")]
+[[vk::binding(0, 0)]] Texture2D<uint4>       g_nrd_uint_tex2d[];
 [[vk::binding(1, 0)]] RWTexture2D<float4>    g_bindless_surf2d[];
 [[vk::binding(2, 0)]] Texture3D<float4>      g_bindless_tex3d[];
 [[vk::binding(3, 0)]] RWTexture3D<float4>    g_bindless_surf3d[];
@@ -560,10 +588,65 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 [[vk::binding(7, 0)]] globallycoherent RWStructuredBuffer<uint> g_texture_write_locks;
 
+// NRD TA needs its normalized roughness mean rounded before squaring.
+// Keep this one product opaque to Slang and separate from its consumers.
+float oc_nrd_round_mul(float a, float b) {
+    return spirv_asm {
+        %rounded : $$float = OpFMul $a $b;
+        OpDecorate %rounded NoContraction;
+        result : $$float = OpCopyObject %rounded
+    };
+}
+
+// NRD uses the image view's native format conversion. Its Image wrapper owns
+// bounds checks; samplers 1 and 2 supply linear and point clamp filtering.
+// NRD Image descriptors come from fixed Dispatch parameter slots and are
+// uniform across all invocations. Generic texture helpers below remain nonuniform.
+float4 oc_nrd_tex2d_read(uint64_t image_index, int2 p) {
+    return g_bindless_tex2d[uint(image_index)].Load(int3(p, 0));
+}
+uint4 oc_nrd_tex2d_read_uint(uint64_t image_index, int2 p) {
+    return g_nrd_uint_tex2d[uint(image_index)].Load(int3(p, 0));
+}
+uint4 oc_nrd_tex2d_gather_uint(uint64_t image_index, float2 uv) {
+    // Match NRD GatherRed(gNearestClamp): raw HLSL order is BL, BR, TR, TL.
+    return g_nrd_uint_tex2d[uint(image_index)].GatherRed(g_samplers[2], uv);
+}
+void oc_nrd_tex2d_write(uint64_t image_index, int2 p, float4 value) {
+    g_bindless_surf2d[uint(image_index)][p] = value;
+}
+void oc_nrd_tex2d_write_uint(uint64_t image_index, int2 p, uint4 value) {
+    g_bindless_uint_surf2d[uint(image_index)][p] = value;
+}
+float4 oc_nrd_tex2d_sample(uint64_t image_index, float2 uv) {
+    return g_bindless_tex2d[uint(image_index)].SampleLevel(g_samplers[1], uv, 0.f);
+}
+float4 oc_nrd_tex2d_sample_point(uint64_t image_index, float2 uv) {
+    return g_bindless_tex2d[uint(image_index)].SampleLevel(g_samplers[2], uv, 0.f);
+}
+float4 oc_nrd_tex2d_gather_red(uint64_t image_index, float2 uv) {
+    return g_bindless_tex2d[uint(image_index)].GatherRed(g_samplers[1], uv);
+}
+float4 oc_nrd_tex2d_gather_blue(uint64_t image_index, float2 uv) {
+    return g_bindless_tex2d[uint(image_index)].GatherBlue(g_samplers[1], uv);
+}
+float4 oc_nrd_tex2d_gather(uint64_t image_index, float2 uv, uint component) {
+    switch (component) {
+        case 0u:
+            return g_bindless_tex2d[uint(image_index)].GatherRed(g_samplers[1], uv);
+        case 1u:
+            return g_bindless_tex2d[uint(image_index)].GatherGreen(g_samplers[1], uv);
+        case 2u:
+            return g_bindless_tex2d[uint(image_index)].GatherBlue(g_samplers[1], uv);
+        default:
+            return g_bindless_tex2d[uint(image_index)].GatherAlpha(g_samplers[1], uv);
+    }
+}
+
 // Match DSL's zero-border for surface loads and stores.
 bool oc_tex2d_in_bounds(OCTextureDesc desc, uint x, uint y) {
     uint width, height;
-    if (desc.pixel_storage >= 3 && desc.pixel_storage <= 5)
+    if ((desc.pixel_storage >= 3 && desc.pixel_storage <= 5) || desc.pixel_storage == 14u)
         g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
     else
         g_bindless_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
@@ -821,6 +904,11 @@ uint oc_texture_write_lock(OCTextureDesc desc, uint3 p) {
 uint4 oc_tex2d_read_words<uint N>(OCTextureDesc desc, uint2 p) {
     uint width, height;
     g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
+    // USHORT1 is a native single-channel uint texel, not a legacy byte alias.
+    if (desc.pixel_storage == 14u) {
+        if (p.x >= width || p.y >= height) return uint4(0);
+        return g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][p];
+    }
     uint channels = 1u << (desc.pixel_storage % 3u);
     uint units = desc.pixel_storage < 3u ? 4u : 1u;
     if (p.x >= width * channels / (N * units) || p.y >= height) return uint4(0);
@@ -842,6 +930,11 @@ uint4 oc_tex2d_read_words<uint N>(OCTextureDesc desc, uint2 p) {
 void oc_tex2d_write_words<uint N>(OCTextureDesc desc, uint4 value, uint2 p) {
     uint width, height;
     g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))].GetDimensions(width, height);
+    if (desc.pixel_storage == 14u) {
+        if (p.x >= width || p.y >= height) return;
+        g_bindless_uint_surf2d[NonUniformResourceIndex(uint(desc.surf_index))][p] = value;
+        return;
+    }
     uint channels = 1u << (desc.pixel_storage % 3u);
     uint units = desc.pixel_storage < 3u ? 4u : 1u;
     if (p.x >= width * channels / (N * units) || p.y >= height) return;

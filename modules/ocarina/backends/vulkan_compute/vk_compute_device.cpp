@@ -16,6 +16,9 @@
 #include <vulkan/vulkan_win32.h>
 #endif
 #include <stdexcept>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
 
 
 namespace ocarina {
@@ -92,6 +95,12 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     has_rt_ = supports(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
               supports(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
               supports(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    if (const char *path = std::getenv("REBLUR_GPU_PIPELINE_STATS"); path && *path) {
+        pipeline_statistics_path_ = path;
+        has_pipeline_statistics_ = supports(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+        if (!has_pipeline_statistics_)
+            OC_WARNING("REBLUR_GPU_PIPELINE_STATS: VK_KHR_pipeline_executable_properties is unavailable");
+    }
 #ifdef _WIN32
     has_external_memory_ = supports(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
     if (has_external_memory_) {
@@ -152,7 +161,18 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     if (has_rt_) { f12.pNext = &accel; accel.pNext = &query; }
     VkPhysicalDeviceFeatures2 feats2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     feats2.pNext = &f11;
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipeline_features{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+    if (has_pipeline_statistics_) {
+        pipeline_features.pNext = &f11;
+        feats2.pNext = &pipeline_features;
+    }
     vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    if (has_pipeline_statistics_ && !pipeline_features.pipelineExecutableInfo) {
+        has_pipeline_statistics_ = false;
+        feats2.pNext = &f11;
+        OC_WARNING("REBLUR_GPU_PIPELINE_STATS: pipelineExecutableInfo feature is unavailable");
+    }
     OC_ERROR_IF(!f12.bufferDeviceAddress || !f12.runtimeDescriptorArray || !f12.scalarBlockLayout || !f12.timelineSemaphore ||
                     !f12.descriptorBindingPartiallyBound || !f12.descriptorBindingSampledImageUpdateAfterBind ||
                     !f12.descriptorBindingStorageImageUpdateAfterBind ||
@@ -165,6 +185,9 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     }
 
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    // Append after the RT feature fallback, which clears the RT extensions.
+    if (has_pipeline_statistics_)
+        exts.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 #ifdef _WIN32
     if (has_external_memory_) exts.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
 #endif
@@ -175,6 +198,99 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     dci.ppEnabledExtensionNames = exts.data();
     OC_VK_CHECK(vkCreateDevice(phys_device_, &dci, nullptr, &device_));
     vkGetDeviceQueue(device_, compute_queue_family_, 0u, &compute_queue_);
+    if (has_pipeline_statistics_) {
+        get_pipeline_executable_properties_ = reinterpret_cast<PFN_vkGetPipelineExecutablePropertiesKHR>(
+            vkGetDeviceProcAddr(device_, "vkGetPipelineExecutablePropertiesKHR"));
+        get_pipeline_executable_statistics_ = reinterpret_cast<PFN_vkGetPipelineExecutableStatisticsKHR>(
+            vkGetDeviceProcAddr(device_, "vkGetPipelineExecutableStatisticsKHR"));
+        if (!get_pipeline_executable_properties_ || !get_pipeline_executable_statistics_) {
+            has_pipeline_statistics_ = false;
+            OC_WARNING("REBLUR_GPU_PIPELINE_STATS: executable statistics entry points are unavailable");
+        }
+    }
+}
+
+void VulkanComputeDevice::report_pipeline_statistics(VkPipeline pipeline, const string &description) noexcept {
+    if (!has_pipeline_statistics_) return;
+    VkPipelineInfoKHR info{VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR};
+    info.pipeline = pipeline;
+    uint32_t count{};
+    auto result = get_pipeline_executable_properties_(device_, &info, &count, nullptr);
+    if (result != VK_SUCCESS || !count) {
+        OC_WARNING_FORMAT("REBLUR_GPU_PIPELINE_STATS: no executable properties for {} (VkResult {})",
+            description, int(result));
+        return;
+    }
+    vector<VkPipelineExecutablePropertiesKHR> executables(count);
+    for (auto &executable : executables)
+        executable.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR;
+    result = get_pipeline_executable_properties_(device_, &info, &count, executables.data());
+    if (result != VK_SUCCESS) {
+        OC_WARNING_FORMAT("REBLUR_GPU_PIPELINE_STATS: executable properties query failed for {} (VkResult {})",
+            description, int(result));
+        return;
+    }
+    // Pipeline compilation can run on several host threads. Protect the complete
+    // CSV append, including the header, without introducing any GPU submission.
+    static std::mutex output_mutex;
+    std::lock_guard lock(output_mutex);
+    std::ofstream output(std::filesystem::path(pipeline_statistics_path_), std::ios::app);
+    if (!output) {
+        OC_WARNING_FORMAT("REBLUR_GPU_PIPELINE_STATS: cannot open {}", pipeline_statistics_path_);
+        return;
+    }
+    if (output.tellp() == std::streampos(0))
+        output << "shader,executable_index,executable_name,subgroup_size,stages,statistic_name,statistic_description,format,value\n";
+    output << std::setprecision(17);
+    auto quoted = [&](const char *value) {
+        output << '"';
+        for (; *value; ++value) {
+            if (*value == '"') output << '"';
+            output << *value;
+        }
+        output << '"';
+    };
+    for (uint32_t i = 0; i < count; ++i) {
+        VkPipelineExecutableInfoKHR executable_info{VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR};
+        executable_info.pipeline = pipeline;
+        executable_info.executableIndex = i;
+        uint32_t statistic_count{};
+        result = get_pipeline_executable_statistics_(device_, &executable_info, &statistic_count, nullptr);
+        if (result != VK_SUCCESS || !statistic_count) {
+            OC_WARNING_FORMAT("REBLUR_GPU_PIPELINE_STATS: no statistics for {} executable {} (VkResult {})",
+                description, i, int(result));
+            continue;
+        }
+        vector<VkPipelineExecutableStatisticKHR> statistics(statistic_count);
+        for (auto &statistic : statistics)
+            statistic.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR;
+        result = get_pipeline_executable_statistics_(device_, &executable_info, &statistic_count, statistics.data());
+        if (result != VK_SUCCESS) {
+            OC_WARNING_FORMAT("REBLUR_GPU_PIPELINE_STATS: statistics query failed for {} executable {} (VkResult {})",
+                description, i, int(result));
+            continue;
+        }
+        for (uint32_t j = 0; j < statistic_count; ++j) {
+            const auto &statistic = statistics[j];
+            quoted(description.c_str()); output << ',' << i << ',';
+            quoted(executables[i].name);
+            output << ',' << executables[i].subgroupSize << ',' << executables[i].stages << ',';
+            quoted(statistic.name); output << ',';
+            quoted(statistic.description); output << ',' << int(statistic.format) << ',';
+            switch (statistic.format) {
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
+                    output << (statistic.value.b32 != VK_FALSE); break;
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
+                    output << statistic.value.i64; break;
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
+                    output << statistic.value.u64; break;
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
+                    output << statistic.value.f64; break;
+                default: break;
+            }
+            output << '\n';
+        }
+    }
 }
 
 // ── init_vma ──────────────────────────────────────────────────────────────────
@@ -273,10 +389,13 @@ void VulkanComputeDevice::release_texture_slot(uint32_t slot, bool is_3d) noexce
 void VulkanComputeDevice::init_samplers() noexcept {
     for (uint32_t i = 0; i < c_sampler_count; ++i) {
         VkSamplerCreateInfo sci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        sci.magFilter    = VK_FILTER_LINEAR;
+        sci.magFilter    = i == 2u ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
         sci.minFilter    = sci.magFilter;
-        sci.mipmapMode   = (i & 2u) ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        sci.mipmapMode   = (i & 2u) && i != 2u ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        // Slot zero retains the public DSL sampler contract. NRD's typed
+        // textures use slots one and two for linear and point clamp sampling.
+        sci.addressModeU = (i == 1u || i == 2u) ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+                                             : VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         sci.addressModeV = sci.addressModeU;
         sci.addressModeW = sci.addressModeU;
         sci.maxLod       = VK_LOD_CLAMP_NONE;
@@ -408,7 +527,7 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     vci.format   = fmt;
     // DSL fills every absent sampled channel with zero, including alpha.
     // Apply this only to the sampled view: storage views require identity.
-    if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM ||
+    if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM || fmt == VK_FORMAT_R16_SFLOAT ||
         fmt == VK_FORMAT_R32_SFLOAT || fmt == VK_FORMAT_R32G32_SFLOAT)
         vci.components.a = VK_COMPONENT_SWIZZLE_ZERO;
     vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
