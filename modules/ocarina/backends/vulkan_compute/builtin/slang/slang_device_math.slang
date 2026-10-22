@@ -588,6 +588,29 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 [[vk::binding(7, 0)]] globallycoherent RWStructuredBuffer<uint> g_texture_write_locks;
 
+// The NRD conversion adapter uses float4-aligned addresses and five
+// float4-sized SOA planes, matching NativeReblurPack.hlsl's RawBufferLoad(...,16).
+// These helpers are private to that adapter; generic buffer reads stay unchanged.
+float4 oc_nrd_byte_load_float4_aligned16(OCBuffer<uint8_t> buf, uint64_t byte_offset) {
+    float4* ptr = (float4*)(buf.handle + uint64_t(buf.offset) + byte_offset);
+    return spirv_asm {
+        result : $$float4 = OpLoad $ptr Aligned 16
+    };
+}
+uint4 oc_nrd_byte_load_uint4_aligned16(OCBuffer<uint8_t> buf, uint64_t byte_offset) {
+    uint4* ptr = (uint4*)(buf.handle + uint64_t(buf.offset) + byte_offset);
+    return spirv_asm {
+        result : $$uint4 = OpLoad $ptr Aligned 16
+    };
+}
+float4 oc_nrd_buffer_load_float4_aligned16(OCBuffer<float4> buf, uint64_t index) {
+    // Typed BufferDesc offsets are in elements; ByteBuffer offsets are bytes.
+    float4* ptr = (float4*)(buf.handle + (uint64_t(buf.offset) + index) * 16ull);
+    return spirv_asm {
+        result : $$float4 = OpLoad $ptr Aligned 16
+    };
+}
+
 // NRD TA needs its normalized roughness mean rounded before squaring.
 // Keep this one product opaque to Slang and separate from its consumers.
 float oc_nrd_round_mul(float a, float b) {
