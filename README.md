@@ -178,3 +178,11 @@ Windows CPU 时钟使用 QPC，其他平台使用 steady_clock 纳秒；频率�
 此诊断不增加 GPU 命令或改变 query 边界，开启后每批次增加六次 CPU 时钟读取及
 fence 完成后的 CSV 写入。CPU 与 GPU 时钟有频率偏差，跨时钟关联需要校准，
 不能直接相减。未设置诊断变量时不采集这些时钟或写入附加 CSV。
+
+`REBLUR_GPU_PROFILE_MODE=intervals` 为 REBLUR 同时采集五个共享的
+`BOTTOM_OF_PIPE` 时间点，输出 `REBLUR-Pack`、`REBLUR-NRD`、
+`REBLUR-Unpack`、`REBLUR-Epilogue` 和 `REBLUR-Filter`。
+完整区间直接取首尾时间戳，满足 `Filter = Pack + NRD + Unpack + Epilogue`。
+Pack 结束于其可见性屏障之后；NRD 结束于最终 dispatch 之后、出站依赖屏障之前，
+该屏障计入 Unpack。Unpack 结束于输出屏障之后。EDSL 没有额外的资源状态恢复，
+Epilogue 的两个时间点相邻。原来的逐 dispatch、`nrd` 和 `filter` 模式保留。

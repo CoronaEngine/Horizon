@@ -109,10 +109,12 @@ struct VkComputeStream::State {
         struct Dispatch {
             string name;
             uint32_t width{}, height{};
+            uint32_t begin_query{}, end_query{};
         };
         VkQueryPool pool{};
         vector<Dispatch> dispatches;
         bool filter_open{};
+        uint32_t query_count{}, interval_base{}, interval_phase{};
         std::array<uint64_t, profile_query_count> timestamps;
     };
     struct Arena {
@@ -154,6 +156,7 @@ struct VkComputeStream::State {
     std::unique_ptr<ProfileOutput> profile;
     bool profile_filter_mode{};
     bool profile_nrd_mode{};
+    bool profile_interval_mode{};
     std::thread worker;
 
     explicit State(VulkanComputeDevice *d) : device(d) {
@@ -163,6 +166,8 @@ struct VkComputeStream::State {
             const char *mode = std::getenv("REBLUR_GPU_PROFILE_MODE");
             profile_filter_mode = mode && string_view(mode) == "filter";
             profile_nrd_mode = mode && string_view(mode) == "nrd";
+            profile_interval_mode = mode && string_view(mode) == "intervals";
+            if (profile_interval_mode) profile->file << std::setprecision(17);
         }
         worker = std::thread([this] { retire_batches(); });
     }
@@ -191,7 +196,7 @@ struct VkComputeStream::State {
     void resolve_profile(Batch &batch) {
         if (!batch.profile || batch.profile->dispatches.empty()) return;
         auto &queries = *batch.profile;
-        const auto count = uint32_t(queries.dispatches.size()) * 2u;
+        const auto count = queries.query_count;
         const bool diagnostics = profile->diagnostics.is_open();
         const uint64_t query_read_begin_qpc = diagnostics ? diagnostic_qpc() : 0u;
         // Called only after this batch's existing fence has completed. Reading
@@ -204,7 +209,7 @@ struct VkComputeStream::State {
         const auto serial = ++profile_batch_serial();
         for (size_t i = 0; i < queries.dispatches.size(); ++i) {
             const auto &dispatch = queries.dispatches[i];
-            const auto ticks = (queries.timestamps[i * 2u + 1u] - queries.timestamps[i * 2u]) &
+            const auto ticks = (queries.timestamps[dispatch.end_query] - queries.timestamps[dispatch.begin_query]) &
                                profile->timestamp_mask;
             profile->file << serial << ",\"";
             for (char c : dispatch.name) {
@@ -219,7 +224,7 @@ struct VkComputeStream::State {
                     << reinterpret_cast<uintptr_t>(&batch) << ',' << i << ",\"";
                 for (char c : dispatch.name) { if (c == '"') output << '"'; output << c; }
                 output << "\"," << dispatch.width << ',' << dispatch.height << ','
-                    << queries.timestamps[i * 2u] << ',' << queries.timestamps[i * 2u + 1u] << ','
+                    << queries.timestamps[dispatch.begin_query] << ',' << queries.timestamps[dispatch.end_query] << ','
                     << profile->timestamp_period << ',' << profile->timestamp_mask << ',' << profile->qpc_frequency << ','
                     << batch.submit_begin_qpc << ',' << batch.submit_end_qpc << ',' << batch.fence_wait_begin_qpc << ','
                     << batch.fence_ready_qpc << ',' << query_read_begin_qpc << ',' << query_read_end_qpc << '\n';
@@ -234,6 +239,7 @@ struct VkComputeStream::State {
         // Metadata must be consumed before this batch's arenas and command
         // pool become available to the recording thread again.
         queries.dispatches.clear();
+        queries.query_count = 0u;
     }
     Batch &begin() {
         if (current) return *current;
@@ -458,8 +464,13 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
     std::lock_guard lock(state_->operations);
     const bool filter_mode = state_->profile && state_->profile_filter_mode;
     const bool nrd_mode = state_->profile && state_->profile_nrd_mode;
-    const bool dispatch_mode = state_->profile && !filter_mode && !nrd_mode;
+    const bool interval_mode = state_->profile && state_->profile_interval_mode;
+    const bool dispatch_mode = state_->profile && !filter_mode && !nrd_mode && !interval_mode;
     const auto &name = shader->description();
+    const bool starts_intervals = interval_mode && name == "NRD-EDSL-REBLUR-Pack";
+    const bool ends_interval_nrd = interval_mode && (name == "NRD-EDSL-REBLUR-TemporalStabilization" ||
+                                                    name == "NRD-EDSL-REBLUR-PostBlurNoTS");
+    const bool ends_intervals = interval_mode && name == "NRD-EDSL-REBLUR-Unpack";
     const bool starts_legacy_filter = filter_mode && name == "REBLUR-ClassifyAndPack";
     const bool ends_legacy_filter = filter_mode && name == "REBLUR-TemporalStabilization";
     const bool starts_edsl_filter = filter_mode && name == "NRD-EDSL-REBLUR-Pack";
@@ -468,12 +479,12 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
     const bool ends_nrd = nrd_mode && (name == "NRD-EDSL-REBLUR-TemporalStabilization" ||
                                       name == "NRD-EDSL-REBLUR-PostBlurNoTS");
     const bool starts_range = starts_legacy_filter || starts_edsl_filter || starts_nrd;
-    const bool starts_profile = dispatch_mode || starts_range;
+    const bool starts_profile = dispatch_mode || starts_range || starts_intervals;
     // Spill before staging parameters: their arena address must belong to the
     // same batch as the dispatch that consumes it. Aggregate ranges reserve
     // their complete pair at the start and never spill between filter passes.
     if (starts_profile && state_->current && state_->current->profile &&
-        state_->current->profile->dispatches.size() == State::profile_dispatch_limit)
+        state_->current->profile->dispatches.size() + (starts_intervals ? 5u : 1u) > State::profile_dispatch_limit)
         state_->flush();
     auto data = command->argument_data();
     VkDescriptorSet parameter_uniform_set{VK_NULL_HANDLE};
@@ -497,18 +508,40 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
         if (queries->dispatches.empty()) vkCmdResetQueryPool(batch.cb, queries->pool, 0, State::profile_query_count);
         OC_ERROR_IF(queries->filter_open, "REBLUR aggregate GPU profiling encountered a nested range");
         const auto dim = command->dispatch_dim();
-        query = uint32_t(queries->dispatches.size()) * 2u;
-        queries->dispatches.push_back({starts_nrd ? string("REBLUR-NRD") :
-                                       starts_range ? string("REBLUR-Filter") : name, dim.x, dim.y});
-        queries->filter_open = starts_range;
+        query = queries->query_count;
+        if (starts_intervals) {
+            // Share boundary ticks between the disjoint phases and the
+            // enclosing filter range, so no timestamp gap is unaccounted.
+            queries->interval_base = query;
+            queries->interval_phase = 0u;
+            queries->query_count += 5u;
+            queries->dispatches.push_back({"REBLUR-Pack", dim.x, dim.y, query, query + 1u});
+            queries->dispatches.push_back({"REBLUR-NRD", dim.x, dim.y, query + 1u, query + 2u});
+            queries->dispatches.push_back({"REBLUR-Unpack", dim.x, dim.y, query + 2u, query + 3u});
+            queries->dispatches.push_back({"REBLUR-Epilogue", dim.x, dim.y, query + 3u, query + 4u});
+            queries->dispatches.push_back({"REBLUR-Filter", dim.x, dim.y, query, query + 4u});
+        } else {
+            queries->query_count += 2u;
+            queries->dispatches.push_back({starts_nrd ? string("REBLUR-NRD") :
+                                           starts_range ? string("REBLUR-Filter") : name,
+                                           dim.x, dim.y, query, query + 1u});
+        }
+        queries->filter_open = starts_range || starts_intervals;
         // Preserve the existing dispatch/legacy filter timestamp stages. EDSL
         // aggregate ranges use BOTTOM_OF_PIPE at both ends, as NVRHI does.
         // Core timing starts after Pack's producer/consumer barrier below.
         if (!starts_nrd)
-            vkCmdWriteTimestamp(batch.cb, starts_edsl_filter ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
+            vkCmdWriteTimestamp(batch.cb, starts_edsl_filter || starts_intervals ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query);
     }
     shader->dispatch(batch.cb, command, address, bind_pipeline, parameter_uniform_set, parameter_uniform_offset);
+    if (ends_interval_nrd) {
+        OC_ERROR_IF(!queries || !queries->filter_open || queries->interval_phase != 1u,
+            "REBLUR interval GPU profiling encountered an unmatched NRD end");
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            queries->pool, queries->interval_base + 2u);
+        queries->interval_phase = 2u;
+    }
     if (ends_legacy_filter || ends_nrd) {
         OC_ERROR_IF(!queries || !queries->filter_open,
             "REBLUR aggregate GPU profiling encountered a range end without a matching start");
@@ -534,6 +567,21 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
     vkCmdPipelineBarrier(batch.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
+    if (starts_intervals) {
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            queries->pool, queries->interval_base + 1u);
+        queries->interval_phase = 1u;
+    }
+    if (ends_intervals) {
+        OC_ERROR_IF(!queries || !queries->filter_open || queries->interval_phase != 2u,
+            "REBLUR interval GPU profiling encountered an unmatched Unpack");
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            queries->pool, queries->interval_base + 3u);
+        // EDSL has no resource-state restoration after its output barrier.
+        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            queries->pool, queries->interval_base + 4u);
+        queries->filter_open = false;
+    }
     if (starts_nrd)
         vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries->pool, query);
     if (ends_edsl_filter) {
