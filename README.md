@@ -168,3 +168,13 @@ Set 0–2 为 Horizon 保留的 bindless 集，普通 UBO 一律放在 set 3：
 | set 3 | per-pass 共享 UBO（经 Push Descriptor 下发） |
 
 同一个 Push Constant 块在 vertex / fragment 等各阶段之间共享，布局必须严格一致。
+
+### REBLUR GPU 时间戳诊断
+
+启用 `REBLUR_GPU_PROFILE` 时，可额外将 `REBLUR_GPU_PROFILE_DIAGNOSTICS`
+设为另一个 CSV 文件路径，记录原始 GPU begin/end tick、时间戳周期及有效位掩码，
+以及同一批次提交、fence 等待和 query 读取前后的 CPU 时钟。两份输出必须是不同文件。
+Windows CPU 时钟使用 QPC，其他平台使用 steady_clock 纳秒；频率写入 CSV。
+此诊断不增加 GPU 命令或改变 query 边界，开启后每批次增加六次 CPU 时钟读取及
+fence 完成后的 CSV 写入。CPU 与 GPU 时钟有频率偏差，跨时钟关联需要校准，
+不能直接相减。未设置诊断变量时不采集这些时钟或写入附加 CSV。

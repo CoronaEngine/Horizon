@@ -4,6 +4,10 @@
 #include "vk_shader.h"
 #include "vulkan_interop.h"
 #include <condition_variable>
+#include <chrono>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <cstdlib>
 #include <deque>
 #include <fstream>
@@ -16,6 +20,25 @@ thread_local const VulkanComputeDevice *completion_device = nullptr;
 std::mutex &profile_output_mutex() {
     static std::mutex mutex;
     return mutex;
+}
+uint64_t diagnostic_qpc() {
+#ifdef _WIN32
+    LARGE_INTEGER value{};
+    QueryPerformanceCounter(&value);
+    return uint64_t(value.QuadPart);
+#else
+    return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+#endif
+}
+uint64_t diagnostic_qpc_frequency() {
+#ifdef _WIN32
+    LARGE_INTEGER value{};
+    QueryPerformanceFrequency(&value);
+    return uint64_t(value.QuadPart);
+#else
+    return 1000000000u;
+#endif
 }
 uint64_t &profile_batch_serial() {
     static uint64_t serial{};
@@ -43,7 +66,8 @@ struct VkComputeStream::State {
     static constexpr uint32_t profile_dispatch_limit = 1024u;
     static constexpr uint32_t profile_query_count = profile_dispatch_limit * 2u;
     struct ProfileOutput {
-        std::ofstream file;
+        std::ofstream file, diagnostics;
+        uint64_t qpc_frequency{};
         double timestamp_period{};
         uint64_t timestamp_mask{};
 
@@ -67,6 +91,18 @@ struct VkComputeStream::State {
             if (file.tellp() == std::streampos(0)) file << "batch,name,width,height,ms\n";
             file << std::setprecision(12);
             file.flush();
+            if (const char *diagnostic_path = std::getenv("REBLUR_GPU_PROFILE_DIAGNOSTICS"); diagnostic_path && *diagnostic_path) {
+                std::error_code equivalent_error;
+                OC_ERROR_IF(std::filesystem::equivalent(path, diagnostic_path, equivalent_error),
+                    "REBLUR_GPU_PROFILE_DIAGNOSTICS requires a separate output path");
+                diagnostics.open(std::filesystem::path(diagnostic_path), std::ios::app);
+                OC_ERROR_IF(!diagnostics, "Cannot open REBLUR_GPU_PROFILE_DIAGNOSTICS output");
+                qpc_frequency = diagnostic_qpc_frequency();
+                if (diagnostics.tellp() == std::streampos(0))
+                    diagnostics << "profile_batch,submit_serial,stream_slot,batch_slot,range_index,name,width,height,begin_tick,end_tick,timestamp_period_ns,timestamp_mask,qpc_frequency,submit_begin_qpc,submit_end_qpc,fence_wait_begin_qpc,fence_ready_qpc,query_read_begin_qpc,query_read_end_qpc\n";
+                diagnostics << std::setprecision(17);
+                diagnostics.flush();
+            }
         }
     };
     struct ProfileQueries {
@@ -92,6 +128,7 @@ struct VkComputeStream::State {
         VkFence fence{};
         uint64_t serial{};
         bool gpu_submitted{};
+        uint64_t submit_begin_qpc{}, submit_end_qpc{}, fence_wait_begin_qpc{}, fence_ready_qpc{};
         const VkShaderBase *bound_shader{};
         vector<VkBufferAllocation> retained;
         vector<std::function<void()>> completions;
@@ -155,11 +192,14 @@ struct VkComputeStream::State {
         if (!batch.profile || batch.profile->dispatches.empty()) return;
         auto &queries = *batch.profile;
         const auto count = uint32_t(queries.dispatches.size()) * 2u;
+        const bool diagnostics = profile->diagnostics.is_open();
+        const uint64_t query_read_begin_qpc = diagnostics ? diagnostic_qpc() : 0u;
         // Called only after this batch's existing fence has completed. Reading
         // the results needs no WAIT_BIT and does not add a GPU round trip.
         OC_VK_CHECK(vkGetQueryPoolResults(device->logical_device(), queries.pool, 0, count,
             size_t(count) * sizeof(uint64_t), queries.timestamps.data(), sizeof(uint64_t),
             VK_QUERY_RESULT_64_BIT));
+        const uint64_t query_read_end_qpc = diagnostics ? diagnostic_qpc() : 0u;
         std::lock_guard lock(profile_output_mutex());
         const auto serial = ++profile_batch_serial();
         for (size_t i = 0; i < queries.dispatches.size(); ++i) {
@@ -173,9 +213,24 @@ struct VkComputeStream::State {
             }
             profile->file << "\"," << dispatch.width << ',' << dispatch.height << ',' <<
                 double(ticks) * profile->timestamp_period / 1000000.0 << '\n';
+            if (diagnostics) {
+                auto &output = profile->diagnostics;
+                output << serial << ',' << batch.serial << ',' << reinterpret_cast<uintptr_t>(this) << ','
+                    << reinterpret_cast<uintptr_t>(&batch) << ',' << i << ",\"";
+                for (char c : dispatch.name) { if (c == '"') output << '"'; output << c; }
+                output << "\"," << dispatch.width << ',' << dispatch.height << ','
+                    << queries.timestamps[i * 2u] << ',' << queries.timestamps[i * 2u + 1u] << ','
+                    << profile->timestamp_period << ',' << profile->timestamp_mask << ',' << profile->qpc_frequency << ','
+                    << batch.submit_begin_qpc << ',' << batch.submit_end_qpc << ',' << batch.fence_wait_begin_qpc << ','
+                    << batch.fence_ready_qpc << ',' << query_read_begin_qpc << ',' << query_read_end_qpc << '\n';
+            }
         }
         profile->file.flush();
         OC_ERROR_IF(!profile->file, "Cannot write REBLUR_GPU_PROFILE output");
+        if (diagnostics) {
+            profile->diagnostics.flush();
+            OC_ERROR_IF(!profile->diagnostics, "Cannot write REBLUR_GPU_PROFILE_DIAGNOSTICS output");
+        }
         // Metadata must be consumed before this batch's arenas and command
         // pool become available to the recording thread again.
         queries.dispatches.clear();
@@ -224,6 +279,8 @@ struct VkComputeStream::State {
         return *current;
     }
     void submit(Batch &batch) {
+        const bool diagnostics = profile && profile->diagnostics.is_open();
+        if (diagnostics) batch.submit_begin_qpc = diagnostic_qpc();
         auto submit_engine_batch = [&] {
             device->submit(batch.cb, batch.fence, VK_NULL_HANDLE, 0);
         };
@@ -249,6 +306,7 @@ struct VkComputeStream::State {
                 submit_engine_batch();
             });
         }
+        if (diagnostics) batch.submit_end_qpc = diagnostic_qpc();
         batch.gpu_submitted = true;
     }
     void flush() {
@@ -332,7 +390,10 @@ struct VkComputeStream::State {
                 deferred_submission = !pending.empty() && !pending.back()->gpu_submitted;
             }
         }
+        const bool diagnostics = profile && profile->diagnostics.is_open();
+        if (diagnostics) batch->fence_wait_begin_qpc = diagnostic_qpc();
         OC_VK_CHECK(vkWaitForFences(device->logical_device(), 1, &batch->fence, VK_TRUE, UINT64_MAX));
+        if (diagnostics) batch->fence_ready_qpc = diagnostic_qpc();
         if (profile) resolve_profile(*batch);
         for (auto &fn : batch->completions) fn();
         batch->completions.clear();
