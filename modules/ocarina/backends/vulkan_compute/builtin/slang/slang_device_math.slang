@@ -621,6 +621,15 @@ float oc_nrd_round_mul(float a, float b) {
     };
 }
 
+// Native REBLUR PrePass also rounds its reflect/mix additions separately.
+float oc_nrd_round_add(float a, float b) {
+    return spirv_asm {
+        %rounded : $$float = OpFAdd $a $b;
+        OpDecorate %rounded NoContraction;
+        result : $$float = OpCopyObject %rounded
+    };
+}
+
 // NRD uses the image view's native format conversion. Its Image wrapper owns
 // bounds checks; samplers 1 and 2 supply linear and point clamp filtering.
 // NRD Image descriptors come from fixed Dispatch parameter slots and are
