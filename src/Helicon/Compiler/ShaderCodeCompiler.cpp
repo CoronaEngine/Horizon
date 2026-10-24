@@ -265,11 +265,15 @@ namespace EmbeddedShader
             auto binTypeHeader = ShaderLanguageConverter::convertModule(typeHeaderModule);
             storeCode(binTypeHeader, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Type_Header"));
 
-            size_t index = option.branches.size() - 1;
+            // 注意：currBranchModules 的下标必须与 conditions 的下标一致。
+            // getSlangBranchModules 用 conditions[i] 选择 currBranchModules[i] 的
+            // true/false 变体；若这里反向 push，i=0 会拿到最后一个 branch 的模块，
+            // 例如 fragment 的 branch_3 变体被当成 branch_0 链接，最终链接出的
+            // fragment 走了 wrong branch（isSkyBox=false 却链接了 skybox true）。
+            size_t index = 0;
             conditions.resize(option.branches.size());
-            for (auto i = option.branches.rbegin(); i != option.branches.rend(); ++i)
+            for (auto& branch : option.branches)
             {
-                auto& branch = *i;
                 SlangBranchModule bm;
                 auto modPrefix = "branch_" + std::to_string(index);
 
@@ -291,7 +295,7 @@ namespace EmbeddedShader
 
                 conditions[index] = branch.conditionDetector;
 
-                --index;
+                ++index;
             }
             info = getCurrentConditionInfo();
 
