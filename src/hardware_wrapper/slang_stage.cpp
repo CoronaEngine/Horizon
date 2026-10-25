@@ -11,28 +11,51 @@
 
 #include "Compiler/ShaderLanguageConverter.h"
 
+#include <array>
+#include <vector>
+
 namespace Corona::Horizon
 {
     EmbeddedShader::ShaderCodeModule compile_slang_stage(EmbeddedShader::ShaderStage stage,
                                                          EmbeddedShader::SlangModule& module)
     {
-        // 原先还收一个 CompilerOption 形参，只用来喂 args.deps；两个调用点都没传过，
-        // deps 恒为空，故连形参一起删。需要模块依赖时在这里显式加回。
-        EmbeddedShader::SlangCompileArgs2 args;
-        args.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-        args.targetLanguages = { EmbeddedShader::ShaderLanguage::SpirV };
-        args.stage = stage;
-        args.module = &module;
-        args.enableReflection = true;
+        using namespace EmbeddedShader;
 
-        EmbeddedShader::SlangCompileResult result =
-            EmbeddedShader::ShaderLanguageConverter::slangCompilerWithModules(args);
-        auto spirv = result.binaryTargets.find(EmbeddedShader::ShaderLanguage::SpirV);
+        // 静态模块（离线 codegen 产出的 SlangModule）只编译一次，这里用低层 API
+        // 建 session、load IR blob、link entry point；不经过运行时的条件组合路径。
+        auto globalSession = ShaderLanguageConverter::getGlobalSession();
+        slang::TargetDesc targetDesc {};
+        targetDesc.format = SLANG_SPIRV;
+        targetDesc.profile = globalSession->findProfile("spirv_1_6");
+        std::vector targets { targetDesc };
+        std::array options = {
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::EmitSpirvDirectly,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+        };
+
+        auto session = ShaderLanguageConverter::createSession(globalSession, targets, options);
+        auto mod = ShaderLanguageConverter::loadModule(session, module);
+        if (!mod)
+            throw std::runtime_error("Failed to load serialized Slang module.");
+        // 离线生成的 slangs 模块通常没有 [shader(...)] 注解，findEntryPointByName
+        // 找不到 "main"；用 tryFindEntryPoint 让 Slang 按 stage 校验入口点。
+        auto entryPoint = ShaderLanguageConverter::tryFindEntryPoint(mod, "main", stage);
+        if (!entryPoint)
+            throw std::runtime_error("Failed to find shader entry point in Slang module.");
+        std::vector<slang::IComponentType*> components { mod.get(), entryPoint.get() };
+        auto program = ShaderLanguageConverter::link(session, components);
+
+        SlangCompileResult result;
+        ShaderLanguageConverter::fillCompileResult(result, program, 0, SLANG_SPIRV, true);
+
+        auto spirv = result.binaryTargets.find(ShaderLanguage::SpirV);
         if (spirv == result.binaryTargets.end())
             throw std::runtime_error("Slang module compilation did not produce SPIR-V.");
 
-        auto reflection = result.reflections.find(EmbeddedShader::ShaderLanguage::SpirV);
-        EmbeddedShader::ShaderCodeModule::ShaderResources resources;
+        auto reflection = result.reflections.find(ShaderLanguage::SpirV);
+        ShaderCodeModule::ShaderResources resources;
         if (reflection != result.reflections.end())
             resources = std::move(reflection->second);
 

@@ -180,11 +180,11 @@ namespace EmbeddedShader
 	    compilerOption.slangModules.swap(vertSlangModules);
 	    compilerOption.branches = outputs[0].branches;
 	    compilerOption.typeHeader = outputs[0].typeHeader;
-		result.vertex = std::make_unique<ShaderCodeCompiler>(outputs[0].output,ShaderStage::VertexShader, ShaderLanguage::Slang,compilerOption, sourceLocation);
+		result.vertex = std::make_unique<ShaderCodeCompiler>(outputs[0].output,ShaderStage::VertexShader, compilerOption, sourceLocation);
 	    compilerOption.slangModules.swap(fraqSlangModules);
 	    compilerOption.branches = outputs[1].branches;
 	    compilerOption.typeHeader = outputs[1].typeHeader;
-		result.fragment = std::make_unique<ShaderCodeCompiler>(outputs[1].output,ShaderStage::FragmentShader, ShaderLanguage::Slang,compilerOption, sourceLocation);
+		result.fragment = std::make_unique<ShaderCodeCompiler>(outputs[1].output,ShaderStage::FragmentShader, compilerOption, sourceLocation);
 
 		if (compilerOption.enableBindless)
 		{
@@ -194,11 +194,11 @@ namespace EmbeddedShader
 		    compilerOption.slangModules.swap(vertSlangModules);
 		    compilerOption.branches = outputs[0].branches;
 		    compilerOption.typeHeader = outputs[0].typeHeader;
-			result.vertex->compile(outputs[0].output, ShaderStage::VertexShader, ShaderLanguage::Slang, compilerOption);
+			result.vertex->compile(outputs[0].output, ShaderStage::VertexShader, compilerOption);
 		    compilerOption.slangModules.swap(fraqSlangModules);
 		    compilerOption.branches = outputs[1].branches;
 		    compilerOption.typeHeader = outputs[1].typeHeader;
-			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, ShaderLanguage::Slang, compilerOption);
+			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, compilerOption);
 		}
 
 		result.updateAutoBind(compilerOption.enableBindless, result.vertex->getCurrentConditionInfo(), result.fragment->getCurrentConditionInfo());

@@ -151,7 +151,7 @@ namespace EmbeddedShader
 	    compilerOption.branches.swap(outputs[0].branches);
 	    compilerOption.typeHeader = outputs[0].typeHeader;
 		ComputePipelineObject result;
-		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption,sourceLocation);
+		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, compilerOption, sourceLocation);
 
 		if (compilerOption.enableBindless)
 		{
@@ -162,7 +162,7 @@ namespace EmbeddedShader
 			outputs = parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
             compilerOption.branches.swap(outputs[0].branches);
             compilerOption.typeHeader = outputs[0].typeHeader;
-            result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
+            result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, compilerOption);
 		}
 
 		result.updateAutoBind(compilerOption.enableBindless, result.compute->getCurrentConditionInfo());
