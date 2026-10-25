@@ -71,10 +71,13 @@ namespace EmbeddedShader
 	    static Slang::ComPtr<slang::IEntryPoint> findEntryPoint(Slang::ComPtr<slang::IModule> mod, std::string_view name);
 	    static Slang::ComPtr<slang::IEntryPoint> tryFindEntryPoint(Slang::ComPtr<slang::IModule> mod,
                                                                    std::string_view name, ShaderStage stage);
+        // columnMajor=false 保持 Slang 默认 row-major，静态 GLSL/HLSL 生成的 shader
+        // 依赖这一点；EDSL 的 mat4 走 column-major，需要显式传 true。
         static Slang::ComPtr<slang::ISession> createSession(
                                         const Slang::ComPtr<slang::IGlobalSession> &globalSession,
                                         std::span<slang::TargetDesc> targetDesc,
-                                        std::span<slang::CompilerOptionEntry> options);
+                                        std::span<slang::CompilerOptionEntry> options,
+                                        bool columnMajor = false);
 	    static Slang::ComPtr<slang::IBlob> getFinalCode(Slang::ComPtr<slang::IComponentType> program, SlangInt targetIndex, bool isLibrary = false);
 	    static void fillCompileResult(SlangCompileResult &result,Slang::ComPtr<slang::IComponentType> program,SlangInt targetIndex, SlangCompileTarget dstLang,bool isNeedReflection,bool isLibrary = false);
 

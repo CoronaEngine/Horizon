@@ -172,7 +172,7 @@ namespace EmbeddedShader
         {
             std::unique_lock<std::shared_mutex> lock(threadMutex);
             if (!findCached())
-                combineLocked(bindless, conditionInfo, false);
+                combineLocked(bindless, conditionInfo, language, false);
         }
 
         {
@@ -217,7 +217,7 @@ namespace EmbeddedShader
         {
             //bind
             targets = targetList;
-            session = ShaderLanguageConverter::createSession(gs, targets, options);
+            session = ShaderLanguageConverter::createSession(gs, targets, options, option.enableMatrixColumnMajor);
             currSession = session;
             currStageModules = &stageModules;
             currBranchModules = &branchModules;
@@ -226,7 +226,7 @@ namespace EmbeddedShader
         {
             //bindless
             bindlessTargets = targetList;
-            bindlessSession = ShaderLanguageConverter::createSession(gs, bindlessTargets, options);
+            bindlessSession = ShaderLanguageConverter::createSession(gs, bindlessTargets, options, option.enableMatrixColumnMajor);
             currSession = bindlessSession;
             currStageModules = &bindlessStageModules;
             currBranchModules = &bindlessBranchModules;
@@ -317,7 +317,7 @@ namespace EmbeddedShader
         currStageModules->entryPoint = ShaderLanguageConverter::findEntryPoint(currStageModules->core, "main");
 
         const ConditionInfo info = conditions.empty() ? ConditionInfo {} : getCurrentConditionInfo();
-        combineLocked(isCompilingBindless, info, true);
+        combineLocked(isCompilingBindless, info, std::nullopt, true);
     }
 
     CompilerOption ShaderCodeCompiler::getCompilerOption() const
@@ -364,7 +364,8 @@ namespace EmbeddedShader
     // 首次 compile() 已经把 core/type-header/branch module 和 entry point 加载进
     // session；运行时只对已有的 IModule 做 compose + link，不重新创建 session，
     // 也不重新从源码/序列化 blob 加载模块。
-    void ShaderCodeCompiler::combineLocked(bool bindless, ConditionInfo conditionInfo, bool writeHardcode)
+    void ShaderCodeCompiler::combineLocked(bool bindless, ConditionInfo conditionInfo,
+                                           std::optional<ShaderLanguage> language, bool writeHardcode)
     {
         SlangStageModules& modules = bindless ? bindlessStageModules : stageModules;
         const std::vector<SlangBranchModule>& branches = bindless ? bindlessBranchModules : branchModules;
@@ -414,6 +415,11 @@ namespace EmbeddedShader
         SlangCompileResult compiled;
         for (size_t i = 0; i < currentTargets.size(); ++i)
         {
+            if (language &&
+                ShaderLanguageConverter::convertShaderLanguage(currentTargets[i].format) != *language)
+            {
+                continue;
+            }
             ShaderLanguageConverter::fillCompileResult(
                 compiled, linkedProgram, static_cast<SlangInt>(i), currentTargets[i].format, true);
         }

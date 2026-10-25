@@ -207,10 +207,11 @@ struct ShaderCodeModule
         std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const;
 
         // 用首次编译时缓存的 session / IModule / IEntryPoint 重新 compose + link
-        // 指定条件组合，编译所有 target 并写入 compiledOutputs_。
+        // 指定条件组合，并按 language 过滤目标（nullopt = 首次编译，全 target）。
         // 调用方必须持有 threadMutex 独占锁。writeHardcode 仅在首次 compile()
         // 时为 true；运行时切分支不再往 HardcodeShaders 源码追加字面量。
-        void combineLocked(bool bindless, ConditionInfo conditionInfo, bool writeHardcode);
+        void combineLocked(bool bindless, ConditionInfo conditionInfo,
+                           std::optional<ShaderLanguage> language, bool writeHardcode);
 
         // 把一次 link 的结果按 target language/条件组合写入 compiledOutputs_。
         void storeCompileResultLocked(bool bindless, const ConditionInfo& conditionInfo,

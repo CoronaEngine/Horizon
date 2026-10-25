@@ -440,6 +440,19 @@ struct DisneyEdslVaryings
     Float3 v_dir;
 };
 
+// Runtime branch benchmark: minimal shader used to compare a native C++ if
+// (one full AST/pipeline compile per CPU branch) with $IF + combine.
+struct BranchBenchVertex
+{
+    Float3 pos;
+    Float3 normal;
+};
+
+struct BranchBenchVaryings
+{
+    Float3 color;
+};
+
 struct DisneyEdslSharedProxy
 {
     Float4x4 proj_view;
@@ -772,6 +785,104 @@ void run_example_edsl_disney_pbr()
 
     horizon::RasterizerPipeline rasterizer(edsl_vertex, edsl_fragment, desc);
     rasterizer.bind_depth_target(depth_image);
+
+    // ---------------------------------------------------------------------
+    // Runtime branch benchmark.
+    //
+    // CPU if: every new CPU branch needs a fresh RasterizerPipeline, so the
+    // measured time is a full compile (AST generation -> Slang -> Vulkan
+    // pipeline object).
+    //
+    // $IF: the pipeline owns all branch modules from the first compile; changing
+    // the condition only needs combine + pipeline rebuild.
+    // ---------------------------------------------------------------------
+    {
+        using Clock = std::chrono::steady_clock;
+        auto elapsed_ms = [](Clock::duration d) {
+            return std::chrono::duration<double, std::milli>(d).count();
+        };
+
+        bool cpu_red = true;
+        auto bench_vertex = [](Aggregate<BranchBenchVertex> vertex) {
+            position() = Float4(vertex->pos, Float(1.0));
+            Aggregate<BranchBenchVaryings> out;
+            out->color = vertex->pos;
+            return out;
+        };
+
+        auto bench_fragment_cpu = [&](Aggregate<BranchBenchVaryings> in) {
+            Float3 color;
+            // Native C++ if: only one branch is emitted into the AST.
+            if (cpu_red)
+                color = Float3(Float(1.0), Float(0.0), Float(0.0));
+            else
+                color = Float3(Float(0.0), Float(1.0), Float(0.0));
+            final_output << Float4(color, Float(1.0));
+        };
+
+        bool if_red = true;
+        auto bench_fragment_if = [&](Aggregate<BranchBenchVaryings> in) {
+            Float3 color;
+            $IF(if_red)
+            {
+                color = Float3(Float(1.0), Float(0.0), Float(0.0));
+            }
+            $ELSE
+            {
+                color = Float3(Float(0.0), Float(1.0), Float(0.0));
+            };
+            final_output << Float4(color, Float(1.0));
+        };
+
+        horizon::RasterizerPipelineDesc bench_desc;
+        bench_desc.depth_test_enabled = false;
+        bench_desc.depth_write_enabled = false;
+        bench_desc.blend_enabled = false;
+
+        // Force the first actual draw so VkPipeline creation (prepare_draw) is
+        // included in the measured time, not just the CPU-side pipeline object.
+        horizon::HardwareExecutor bench_executor;
+        auto draw_benchmark = [&](auto& pipeline) {
+            pipeline.clear_records();
+            horizon::DrawIndexedIndirectParams params;
+            params.draw_count = 1;
+            pipeline.record_indirect(sphere_ib, sphere_vb, indirect_args_buffer, params);
+            auto receipt = bench_executor << pipeline.extent(64, 64) << horizon::commit();
+            bench_executor.wait(receipt);
+        };
+
+        auto t0 = Clock::now();
+        horizon::RasterizerPipeline bench_cpu_a(bench_vertex, bench_fragment_cpu, bench_desc);
+        draw_benchmark(bench_cpu_a);
+        auto t1 = Clock::now();
+        std::printf("[branch-bench] cpu-if full variant A (AST -> Vulkan pipeline): %.3f ms\n",
+                    elapsed_ms(t1 - t0));
+
+        cpu_red = false;
+        t0 = Clock::now();
+        horizon::RasterizerPipeline bench_cpu_b(bench_vertex, bench_fragment_cpu, bench_desc);
+        draw_benchmark(bench_cpu_b);
+        t1 = Clock::now();
+        std::printf("[branch-bench] cpu-if full variant B (AST -> Vulkan pipeline): %.3f ms\n",
+                    elapsed_ms(t1 - t0));
+
+        if_red = true;
+        t0 = Clock::now();
+        horizon::RasterizerPipeline bench_if(bench_vertex, bench_fragment_if, bench_desc);
+        draw_benchmark(bench_if);
+        t1 = Clock::now();
+        std::printf("[branch-bench] $IF full initial (AST -> Vulkan pipeline): %.3f ms\n",
+                    elapsed_ms(t1 - t0));
+
+        if_red = false;
+        t0 = Clock::now();
+        const bool switched = bench_if.sync_shader_conditions();
+        draw_benchmark(bench_if);
+        t1 = Clock::now();
+        std::printf("[branch-bench] $IF combine incremental (variant -> Vulkan pipeline): %.3f ms (switched=%d)\n",
+                    elapsed_ms(t1 - t0), switched ? 1 : 0);
+        std::fflush(stdout);
+    }
 
     horizon::HardwareExecutor render_executor;
     horizon::HardwareExecutor display_executor;

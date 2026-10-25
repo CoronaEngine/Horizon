@@ -897,14 +897,17 @@ namespace EmbeddedShader
     Slang::ComPtr<slang::ISession>
     ShaderLanguageConverter::createSession(const Slang::ComPtr<slang::IGlobalSession> &globalSession,
                                            std::span<slang::TargetDesc> targetDesc,
-                                           std::span<slang::CompilerOptionEntry> options)
+                                           std::span<slang::CompilerOptionEntry> options,
+                                           bool columnMajor)
     {
         slang::SessionDesc sessionDesc = {};
         sessionDesc.targets = targetDesc.data();
         sessionDesc.targetCount = targetDesc.size();
         sessionDesc.compilerOptionEntries = options.data();
         sessionDesc.compilerOptionEntryCount = options.size();
-        sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
+        sessionDesc.defaultMatrixLayoutMode = columnMajor
+            ? SLANG_MATRIX_LAYOUT_COLUMN_MAJOR
+            : SLANG_MATRIX_LAYOUT_ROW_MAJOR;
         Slang::ComPtr<slang::ISession> session;
         globalSession->createSession(sessionDesc, session.writeRef());
         return session;
