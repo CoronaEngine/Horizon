@@ -32,6 +32,7 @@
 #include <sstream>
 #include <string_view>
 #include <example_edsl_compile/example_edsl_compile.h>
+#include <example_edsl_compile_comparison/example_edsl_compile_comparison.h>
 
 int main(int argc, char **argv)
 {
@@ -191,6 +192,12 @@ int main(int argc, char **argv)
     if (mode == "edsl_compile")
     {
         run_example_edsl_compile();
+        return 0;
+    }
+
+    if (mode == "edsl_compile_comparison")
+    {
+        run_example_edsl_compile_comparison();
         return 0;
     }
 
