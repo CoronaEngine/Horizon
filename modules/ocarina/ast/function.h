@@ -104,6 +104,9 @@ private:
     StructureSet used_struct_;
     bool allow_dsl_capture_{false};
     mutable bool raytracing_{false};
+    // Requires a native compute pipeline supporting inline ray queries. This
+    // does not change logical tracing, argument packing, or dispatch semantics.
+    bool ray_query_compute_workgroups_{false};
     mutable uint3 block_dim_{make_uint3(0)};
     mutable uint3 grid_dim_{make_uint3(0)};
     StoragePrecisionPolicy storage_policy_{};
@@ -302,6 +305,10 @@ public:
     [[nodiscard]] const RefExpr *reference_argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *local(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
     [[nodiscard]] const RefExpr *shared(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
+    void require_ray_query_compute_workgroups() noexcept;
+    [[nodiscard]] bool requires_ray_query_compute_workgroups() const noexcept {
+        return ray_query_compute_workgroups_;
+    }
     [[nodiscard]] const LiteralExpr *literal(const Type *type, basic_literal_t value) noexcept;
     [[nodiscard]] const UnaryExpr *unary(const Type *type, UnaryOp op, const Expression *expression) noexcept;
     [[nodiscard]] const BinaryExpr *binary(const Type *type, BinaryOp op, const Expression *lhs, const Expression *rhs) noexcept;

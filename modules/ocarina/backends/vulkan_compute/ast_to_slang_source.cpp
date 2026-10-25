@@ -50,6 +50,27 @@ bool requires_storage_helper(const Type *type) noexcept {
            (type->is_vector() && type->element()->tag() == Type::Tag::BOOL);
 }
 
+[[nodiscard]] size_t storage_vector_alignment(const Type *type) noexcept {
+    if (!type->is_vector() || (type->dimension() != 2u && type->dimension() != 4u)) return 0u;
+    const auto tag = type->element()->tag();
+    if (tag != Type::Tag::FLOAT && tag != Type::Tag::INT && tag != Type::Tag::UINT) return 0u;
+    return type->dimension() * sizeof(uint32_t);
+}
+
+[[nodiscard]] size_t storage_vector_root_alignment(const Type *type, size_t offset) noexcept {
+    const size_t alignment = storage_vector_alignment(type);
+    if (alignment != 0u) return offset % alignment == 0u ? alignment : 0u;
+    if (!type->is_structure()) return 0u;
+    size_t member_offset = 0u;
+    size_t root_alignment = 0u;
+    for (const Type *member : type->members()) {
+        member_offset = mem_offset(member_offset, member->alignment());
+        root_alignment = std::max(root_alignment, storage_vector_root_alignment(member, offset + member_offset));
+        member_offset += member->size();
+    }
+    return root_alignment;
+}
+
 [[nodiscard]] string_view precision_policy_name(PrecisionPolicy policy) noexcept {
     switch (policy) {
         case PrecisionPolicy::force_f16: return "force_f16";
@@ -1052,15 +1073,35 @@ void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
 }
 
 void AstToSlangSource::_emit_storage_fields(const Type *type, size_t offset,
-                                           const string &value, bool load) noexcept {
-    if (type->is_structure()) {
+                                           const string &value, bool load,
+                                           size_t root_alignment) noexcept {
+    const size_t vector_alignment = storage_vector_alignment(type);
+    if (vector_alignment != 0u && root_alignment >= vector_alignment && offset % vector_alignment == 0u) {
+        const string pointer = ocarina::format("oc_storage_vector_pointer_{}", offset);
+        _emit_indent();
+        _emit_type_name(type);
+        current_scratch() << "* " << pointer << " = (";
+        _emit_type_name(type);
+        current_scratch() << ocarina::format("*)(address + {}u);\n", offset);
+        if (load) {
+            current_scratch() << value << " = spirv_asm { result : $$";
+            _emit_type_name(type);
+            current_scratch() << ocarina::format(" = OpLoad ${} Aligned {} }};\n", pointer, vector_alignment);
+        } else {
+            const string copied_value = ocarina::format("oc_storage_vector_value_{}", offset);
+            _emit_type_name(type);
+            current_scratch() << " " << copied_value << " = " << value << ";\n";
+            current_scratch() << ocarina::format("spirv_asm {{ OpStore ${} ${} Aligned {} }};\n",
+                pointer, copied_value, vector_alignment);
+        }
+    } else if (type->is_structure()) {
         size_t member_offset = 0;
         for (uint i = 0; i < type->members().size(); ++i) {
             const Type *member = type->members()[i];
             member_offset = mem_offset(member_offset, member->alignment());
             Scratch name;
             { SCRATCH_GUARD(name) _emit_member_name(type, i); }
-            _emit_storage_fields(member, offset + member_offset, value + "." + name.c_str(), load);
+            _emit_storage_fields(member, offset + member_offset, value + "." + name.c_str(), load, root_alignment);
             member_offset += member->size();
         }
     } else if (type->is_array() || type->is_vector() || type->is_matrix()) {
@@ -1095,12 +1136,26 @@ void AstToSlangSource::_emit_storage_functions(const Type *type) noexcept {
     current_scratch() << ocarina::format(" oc_storage_load_{}(uint64_t address) {{\n", type->hash());
     _emit_type_name(type);
     current_scratch() << " value;\n";
-    _emit_storage_fields(type, 0, "value", true);
+    const size_t alignment = storage_vector_root_alignment(type, 0u);
+    const bool vectorized = alignment != 0u;
+    auto emit_fields = [&](bool load) {
+        if (vectorized) {
+            // Helpers also serve byte-buffer accesses, whose root address need
+            // not obey the type's alignment. Only the checked path may issue
+            // native vector operations; its members retain their host offsets.
+            current_scratch() << ocarina::format("if ((address & {}ull) == 0ull) {{\n", alignment - 1u);
+            _emit_storage_fields(type, 0u, "value", load, alignment);
+            current_scratch() << "} else {\n";
+        }
+        _emit_storage_fields(type, 0u, "value", load);
+        if (vectorized) current_scratch() << "}\n";
+    };
+    emit_fields(true);
     current_scratch() << "return value;\n}\n";
     current_scratch() << ocarina::format("void oc_storage_store_{}(uint64_t address, ", type->hash());
     _emit_type_name(type);
     current_scratch() << " value) {\n";
-    _emit_storage_fields(type, 0, "value", false);
+    emit_fields(false);
     current_scratch() << "}\n";
 }
 
@@ -1730,7 +1785,11 @@ void AstToSlangSource::_emit_kernel_argument_loads(const Function &f) noexcept {
 void AstToSlangSource::_emit_builtin_var(Variable v) noexcept {
     using Tag = Variable::Tag;
     bool group_scoped = v.tag() == Tag::BLOCK_IDX || v.tag() == Tag::THREAD_IDX || v.tag() == Tag::THREAD_ID;
-    if (group_scoped && current_function().is_raytracing_kernel()) {
+    // This backend emits GLCompute plus inline ray queries for both logical
+    // kernel kinds. Only an explicit compute-workgroup requirement relaxes the
+    // generic logical-raygen guard; raytracing/argument/grid flags stay intact.
+    if (group_scoped && current_function().is_raytracing_kernel() &&
+        !current_function().requires_ray_query_compute_workgroups()) {
         OC_ERROR("Slang raygen shaders have no workgroup: block_idx/thread_idx/thread_id are unavailable");
     }
     _emit_type_name(v.type());

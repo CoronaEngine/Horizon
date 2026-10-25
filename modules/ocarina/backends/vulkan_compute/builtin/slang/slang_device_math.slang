@@ -16,6 +16,13 @@ uint oc_warp_prefix_count_bits(bool pred) {
 uint oc_warp_first_active_lane() { return firstbitlow(oc_warp_ballot_word(true)); }
 bool oc_warp_is_first_active_lane() { return oc_warp_lane_id() == oc_warp_first_active_lane(); }
 void  oc_synchronize_block()          { AllMemoryBarrierWithGroupSync(); }
+void oc_synchronize_block(bool shared_only) {
+    if (shared_only) {
+        GroupMemoryBarrierWithGroupSync();
+    } else {
+        AllMemoryBarrierWithGroupSync();
+    }
+}
 
 // ── Half conversion ───────────────────────────────────────────────────────────
 
@@ -887,9 +894,9 @@ struct OcHitInfo { uint inst_id; uint prim_id; float2 bary; float t; };
 bool oc_trace_occlusion(uint64_t handle, Ray ray) {
     if (handle == 0) return false;
     RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
+    RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
-    while(q.Proceed()) { if(q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) q.CommitNonOpaqueTriangleHit(); }
+    q.Proceed();
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
@@ -902,12 +909,9 @@ TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
         return miss;
     }
     RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
-    RayQuery<RAY_FLAG_NONE> q;
+    RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
     q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
-    while (q.Proceed()) {
-        if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
-            q.CommitNonOpaqueTriangleHit();
-    }
+    q.Proceed();
     TriangleHit h;
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
         h.inst_id = q.CommittedInstanceID();

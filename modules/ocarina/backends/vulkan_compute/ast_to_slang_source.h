@@ -36,7 +36,8 @@ protected:
                                string_view operation, bool infix = false, bool prefix = false) noexcept;
     void _emit_function_body(const Function &f) noexcept;
     void _emit_storage_functions(const Type *type) noexcept;
-    void _emit_storage_fields(const Type *type, size_t offset, const string &value, bool load) noexcept;
+    void _emit_storage_fields(const Type *type, size_t offset, const string &value, bool load,
+                              size_t root_alignment = 1u) noexcept;
     void _emit_buffer_address(const SubscriptExpr *expr) noexcept;
     [[nodiscard]] bool _is_storage_reference(const Expression *expr) const noexcept;
     void _emit_storage_address(const Expression *expr) noexcept;

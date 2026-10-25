@@ -372,8 +372,14 @@ const RefExpr *Function::local(const Type *type, std::source_location location) 
     return ret;
 }
 
+void Function::require_ray_query_compute_workgroups() noexcept {
+    OC_ERROR_IF_NOT(is_kernel(), "Ray-query compute workgroups require a kernel");
+    ray_query_compute_workgroups_ = true;
+}
+
 const RefExpr *Function::shared(const Type *type, std::source_location location) noexcept {
-    OC_ERROR_IF_NOT(is_general_kernel(), "Shared arrays require a compute kernel");
+    OC_ERROR_IF_NOT(is_general_kernel() || (is_kernel() && requires_ray_query_compute_workgroups()),
+                    "Shared arrays require compute or explicit ray-query compute workgroups");
     auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::SHARED));
     ret->variable().set_src_location(location);
     shared_vars_.push_back(ret->variable());
@@ -616,6 +622,10 @@ uint64_t Function::compute_hash() const noexcept {
                  static_cast<uint>(storage_policy_.policy),
                  static_cast<uint>(storage_policy_.allow_real_in_storage));
     ret = hash64(tag(), ret);
+    // Preserve every pre-existing shader identity when the requirement is off.
+    if (requires_ray_query_compute_workgroups()) {
+        ret = hash64(ret, string_view{"ray_query_compute_workgroups"});
+    }
     for (const Variable &v : arguments_) {
         ret = hash64(ret, v.hash());
     }

@@ -2,6 +2,8 @@
 #include "dsl/dsl.h"
 #include "rhi/context.h"
 #include <cmath>
+#include <bit>
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
 
@@ -13,6 +15,32 @@ struct StorageRecord {
     float3x3 transform;
 };
 OC_STRUCT(, StorageRecord, tag, points, transform) {};
+
+struct VectorStorageRecord {
+    uint tag;
+    float4 color;
+    float2 uv;
+    uint enabled;
+    array<float, 3> point;
+    uint guard;
+};
+OC_STRUCT(, VectorStorageRecord, tag, color, uv, enabled, point, guard) {};
+
+struct NestedVectorPrefix {
+    uint tag;
+    float value;
+    uint2 unsigned_pair;
+};
+OC_STRUCT(, NestedVectorPrefix, tag, value, unsigned_pair) {};
+struct NestedIntegerStorageRecord {
+    NestedVectorPrefix prefix;
+    int2 signed_pair;
+    uint2 unsigned_pair;
+    int4 signed_quad;
+    uint4 unsigned_quad;
+};
+OC_STRUCT(, NestedIntegerStorageRecord, prefix, signed_pair, unsigned_pair, signed_quad, unsigned_quad) {};
+static_assert(sizeof(NestedIntegerStorageRecord) == 64u);
 
 namespace {
 void require(bool condition, const char *message) {
@@ -86,6 +114,97 @@ void test_nested_writes(Device &device) {
                     require(values[i].transform[j][k] == expected[i].transform[j][k], "nested matrix assignment used the wrong column stride");
         }
     }
+}
+
+void test_vector_record_copies(Device &device) {
+    constexpr uint count = 4u;
+    array<VectorStorageRecord, count> source{}, destination{}, expected{};
+    std::memset(source.data(), 0xa5, sizeof(source));
+    std::memset(destination.data(), 0xcd, sizeof(destination));
+    std::memset(expected.data(), 0xcd, sizeof(expected));
+    constexpr uint bits[]{0x00000000u, 0x80000000u, 0x7fc12345u, 0x00000001u};
+    for (uint i = 0; i < count; ++i) {
+        source[i].tag = 100u + i;
+        for (uint j = 0; j < 4u; ++j) source[i].color[j] = std::bit_cast<float>(bits[(i + j) % 4u]);
+        source[i].uv = make_float2(float(i) + .25f, -float(i) - .5f);
+        source[i].enabled = i % 2u;
+        source[i].point = {float(i) + 1.f, float(i) + 2.f, float(i) + 3.f};
+        source[i].guard = 0x12345678u + i;
+        expected[i].tag = source[i].tag;
+        for (uint j = 0; j < 4u; ++j) expected[i].color[j] = source[i].color[j];
+        for (uint j = 0; j < 2u; ++j) expected[i].uv[j] = source[i].uv[j];
+        expected[i].enabled = source[i].enabled;
+        for (uint j = 0; j < 3u; ++j) expected[i].point[j] = source[i].point[j];
+        expected[i].guard = source[i].guard;
+    }
+    auto typed_source = device.create_buffer<VectorStorageRecord>(count);
+    auto typed_destination = device.create_buffer<VectorStorageRecord>(count);
+    Kernel typed_kernel = [](BufferVar<VectorStorageRecord> in, BufferVar<VectorStorageRecord> out) {
+        out.write(dispatch_id(), in.read(dispatch_id()));
+    };
+    auto typed_shader = device.compile(typed_kernel, "storage-parity-native-vector-record");
+    array<VectorStorageRecord, count> typed_host{};
+    Stream stream = device.create_stream();
+    stream << typed_source.upload(source.data()) << typed_destination.upload(destination.data())
+           << typed_shader(typed_source, typed_destination).dispatch(count)
+           << typed_destination.download(typed_host.data()) << synchronize() << commit();
+    require(std::memcmp(typed_host.data(), expected.data(), sizeof(expected)) == 0,
+            "native vector record copy changed FP32 bits, padding or scalar fields");
+
+    // A byte view may contain the same type at a root that is only word aligned.
+    // Both direct and bindless accesses must preserve the original scalar path.
+    for (uint prefix : {4u, 8u, 16u}) {
+        const uint byte_count = prefix + uint(sizeof(source)) + 16u;
+        vector<uchar> input(byte_count, 0xa5u), output(byte_count, 0xcdu), expected_bytes(byte_count, 0xcdu);
+        std::memcpy(input.data() + prefix, source.data(), sizeof(source));
+        std::memcpy(expected_bytes.data() + prefix, expected.data(), sizeof(expected));
+        auto bytes_source = device.create_byte_buffer(byte_count);
+        auto bytes_destination = device.create_byte_buffer(byte_count);
+        auto indirect_destination = device.create_byte_buffer(byte_count);
+        auto bindless = device.create_bindless_array();
+        auto source_slot = bindless.emplace(bytes_source.view(prefix, sizeof(source)));
+        auto destination_slot = bindless.emplace(indirect_destination.view(prefix, sizeof(source)));
+        Kernel bytes_kernel = [&bindless, source_slot, destination_slot](ByteBufferVar in, ByteBufferVar out) {
+            Uint offset = dispatch_id() * uint(sizeof(VectorStorageRecord));
+            out.store(offset, in.load_as<VectorStorageRecord>(offset));
+            bindless.byte_buffer_var(destination_slot).store(offset,
+                bindless.byte_buffer_var(source_slot).load_as<VectorStorageRecord>(offset));
+        };
+        auto bytes_shader = device.compile(bytes_kernel, "storage-parity-vector-record-byte-root-" + std::to_string(prefix));
+        vector<uchar> direct_host(byte_count), indirect_host(byte_count);
+        stream << bytes_source.upload(input.data()) << bytes_destination.upload(output.data())
+               << indirect_destination.upload(output.data()) << bindless.upload_handles()
+               << bytes_shader(bytes_source.view(prefix, sizeof(source)), bytes_destination.view(prefix, sizeof(source))).dispatch(count)
+               << bytes_destination.download(direct_host.data()) << indirect_destination.download(indirect_host.data())
+               << synchronize() << commit();
+        require(direct_host == expected_bytes && indirect_host == expected_bytes,
+                "vector record byte copy changed unaligned fields, padding, sentinels or FP32 payloads");
+    }
+}
+
+void test_nested_integer_vector_copies(Device &device) {
+    constexpr uint count = 4u;
+    array<NestedIntegerStorageRecord, count> initial{}, host{};
+    for (uint i = 0u; i < count; ++i) {
+        initial[i].prefix.tag = 0xfedc0000u + i;
+        initial[i].prefix.value = std::bit_cast<float>(0x7fc12345u + i);
+        initial[i].prefix.unsigned_pair = make_uint2(0x80000000u + i, 0xffffffffu - i);
+        initial[i].signed_pair = make_int2(std::bit_cast<int>(0x80000000u + i), -int(i) - 1);
+        initial[i].unsigned_pair = make_uint2(i, 0x7fffffffu - i);
+        initial[i].signed_quad = make_int4(-1, 0, 2147483647, std::bit_cast<int>(0x80000000u));
+        initial[i].unsigned_quad = make_uint4(0u, 0xffffffffu, 0x80000000u + i, 0x7fffffffu - i);
+    }
+    auto input = device.create_buffer<NestedIntegerStorageRecord>(count);
+    auto output = device.create_buffer<NestedIntegerStorageRecord>(count);
+    Kernel kernel = [](BufferVar<NestedIntegerStorageRecord> in, BufferVar<NestedIntegerStorageRecord> out) {
+        out.write(dispatch_id(), in.read(dispatch_id()));
+    };
+    auto shader = device.compile(kernel, "storage-parity-nested-native-integer-vectors");
+    Stream stream = device.create_stream();
+    stream << input.upload(initial.data()) << shader(input, output).dispatch(count)
+           << output.download(host.data()) << synchronize() << commit();
+    require(std::memcmp(host.data(), initial.data(), sizeof(initial)) == 0,
+            "nested vector copying changed NaN payloads, nested offsets or int/uint vector bits");
 }
 
 template<uint N>
@@ -230,6 +349,8 @@ void test_global_block_barrier(Device &device) {
 int main() {
     auto device = create_test_device();
     test_nested_writes(device);
+    test_vector_record_copies(device);
+    test_nested_integer_vector_copies(device);
     test_bool_vectors<2>(device);
     test_bool_vectors<3>(device);
     test_bool_vectors<4>(device);

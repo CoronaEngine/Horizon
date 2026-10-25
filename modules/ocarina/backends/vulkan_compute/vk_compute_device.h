@@ -10,6 +10,7 @@
 #include "util.h"
 #include "slang_compiler.h"
 #include <vulkan/vulkan.h>
+#include <cstdio>
 
 namespace ocarina {
 
@@ -64,6 +65,15 @@ private:
     uint32_t          compute_queue_family_{0u};
     VkQueue           compute_queue_{VK_NULL_HANDLE};
     VmaAllocator      allocator_{nullptr};
+    // Allocation-time diagnostics only; disabled unless an output path is set.
+    std::FILE *allocation_trace_{};
+    std::mutex allocation_trace_mutex_;
+    uint64_t allocation_trace_event_{};
+    void trace_allocation(const char *event, const char *kind, handle_ty handle,
+                          VmaAllocation allocation, const char *name = "",
+                          uint64_t requested_bytes = 0, uint64_t buffer_bytes = 0,
+                          VkExtent3D extent = {}, VkFormat format = VK_FORMAT_UNDEFINED,
+                          uint32_t mip_levels = 0) noexcept;
 
     // ── RT extension support ─────────────────────────────────────────────────
     bool has_rt_{false};

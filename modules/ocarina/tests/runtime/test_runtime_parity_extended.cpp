@@ -219,6 +219,82 @@ void test_ray_scene_and_clear(Device &device) {
     validate_scene(scene, dim, rays, hits, metadata);
 }
 
+void test_accept_all_triangle_queries(Device &device) {
+    // Six overlapping depth layers force nearest selection rather than merely
+    // accepting the first encountered triangle. Two BLASes are non-opaque;
+    // current public tracing commits every non-opaque triangle unconditionally.
+    Scene scene;
+    scene.vertices = {make_float3(-1.f, -1.f, 0.f), make_float3(1.f, -1.f, 0.f), make_float3(0.f, 1.f, 0.f),
+                      make_float3(-1.f, -1.f, 1.f), make_float3(1.f, -1.f, 1.f), make_float3(0.f, 1.f, 1.f)};
+    for (uint i = 0u; i < scene.transforms.size(); ++i) {
+        scene.transforms[i] = make_float4x4(1.f);
+        scene.transforms[i][3].z = 6.f - 2.f * float(i);
+    }
+    vector<Ray> rays;
+    auto append = [&](float3 origin, float3 direction, float minimum, float maximum) {
+        Ray ray = make_ray(origin, direction, maximum);
+        ray.org_min.w = minimum;
+        rays.push_back(ray);
+    };
+    for (float minimum : {.001f, 2.25f, 3.25f, 4.25f, 5.25f, 6.25f, 7.25f})
+        append(make_float3(0.f), make_float3(0.f, 0.f, 1.f), minimum, 20.f);
+    for (float minimum : {.001f, 3.25f, 4.25f, 5.25f, 6.25f, 7.25f, 8.25f})
+        append(make_float3(0.f, 0.f, 10.f), make_float3(0.f, 0.f, -1.f), minimum, 20.f);
+    append(make_float3(0.f), make_float3(0.f, 0.f, 1.f), .001f, 1.99f);
+    append(make_float3(0.f), make_float3(0.f, 0.f, 1.f), .001f, 2.01f);
+    append(make_float3(0.f), make_float3(0.f, 0.f, 1.f), 2.25f, 2.99f);
+    append(make_float3(0.f), make_float3(0.f, 0.f, 1.f), 2.25f, 3.01f);
+    append(make_float3(4.f, 0.f, 0.f), make_float3(0.f, 0.f, 1.f), .001f, 20.f);
+    append(make_float3(0.f), make_float3(0.f, 0.f, 2.f), .001f, .99f);
+    append(make_float3(0.f), make_float3(0.f, 0.f, 2.f), .001f, 1.01f);
+
+    auto vertices = device.create_buffer<float3>(scene.vertices.size());
+    auto triangles = device.create_buffer<Triangle>(scene.triangles.size());
+    auto inputs = device.create_buffer<Ray>(rays.size());
+    auto output = device.create_buffer<TriangleHit>(rays.size());
+    auto visibility = device.create_buffer<uint>(rays.size());
+    auto stream = device.create_stream();
+    stream << vertices.upload(scene.vertices.data()) << triangles.upload(scene.triangles.data())
+           << inputs.upload(rays.data()) << synchronize() << commit();
+    auto accel = device.create_accel(FAST_TRACE);
+    const array<AccelGeomTag, 3> tags{DISABLE_ANYHIT, NONE, SINGLE_ANYHIT_CALL};
+    for (uint i = 0u; i < scene.transforms.size(); ++i) {
+        auto mesh = device.create_mesh(vertices.view(), triangles.view(), FAST_TRACE, tags[i]);
+        stream << mesh.build_bvh() << commit();
+        accel.add_instance(ocarina::move(mesh), scene.transforms[i]);
+    }
+    stream << accel.build_bvh() << synchronize() << commit();
+    Kernel query = [&accel](BufferVar<Ray> input, BufferVar<TriangleHit> hits, BufferVar<uint> visible) {
+        Uint i = dispatch_id();
+        Var<Ray> ray = input.read(i);
+        hits.write(i, accel.trace_closest(ray));
+        visible.write(i, cast<uint>(accel.trace_occlusion(ray)));
+    };
+    auto shader = device.compile(query, "runtime-parity-accept-all-triangle-queries");
+    vector<TriangleHit> hits(rays.size());
+    vector<uint> visible(rays.size());
+    stream << output.byte_set(0xcdu) << visibility.byte_set(0xcdu)
+           << shader(inputs, output, visibility).dispatch(uint(rays.size()))
+           << output.download(hits.data()) << visibility.download(visible.data()) << synchronize() << commit();
+    array<bool, 6> seen{};
+    uint miss_count = 0u;
+    for (uint i = 0u; i < rays.size(); ++i) {
+        const auto expected = trace_reference(scene, rays[i]);
+        const auto actual = hits[i];
+        require(visible[i] == uint(!expected.is_miss()),
+                "accept-all occlusion differs for opaque/non-opaque layered triangles or ray bounds");
+        require(actual.is_miss() == expected.is_miss(), "accept-all closest query changed hit/miss");
+        if (expected.is_miss()) { ++miss_count; continue; }
+        require(actual.inst_id == expected.inst_id && actual.prim_id == expected.prim_id &&
+                    std::abs(actual.bary.x - expected.bary.x) < 1e-5f &&
+                    std::abs(actual.bary.y - expected.bary.y) < 1e-5f,
+                "accept-all query changed nearest layered instance/primitive/barycentrics");
+        seen[expected.inst_id * 2u + expected.prim_id] = true;
+    }
+    for (bool value : seen) require(value, "accept-all fixture must select all six depth layers");
+    require(miss_count >= 4u, "accept-all fixture needs bounded and geometric misses");
+}
+
 void test_async_compile_and_stream_destruction(Device &device) {
     constexpr uint count = 37u;
     auto intermediate = device.create_buffer<uint>(count);
@@ -254,6 +330,7 @@ int main() {
     auto device = create_test_device();
     device.init_rtx();
     test_ray_scene_and_clear(device);
+    test_accept_all_triangle_queries(device);
     test_async_compile_and_stream_destruction(device);
     std::cout << "extended runtime parity checks passed" << std::endl;
 }

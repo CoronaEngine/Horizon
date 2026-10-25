@@ -63,8 +63,7 @@ void VkComputeShader::create_pipeline(const vector<uint32_t> &spirv) noexcept {
     VkComputePipelineCreateInfo pci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     pci.stage  = stage;
     pci.layout = layout_;
-    const bool capture_statistics = device_->has_pipeline_statistics() &&
-        function_.description().find("REBLUR") != string::npos;
+    const bool capture_statistics = device_->has_pipeline_statistics();
     if (capture_statistics)
         pci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
     OC_VK_CHECK(vkCreateComputePipelines(

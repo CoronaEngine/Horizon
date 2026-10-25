@@ -27,6 +27,14 @@ namespace ocarina {
 
 VulkanComputeDevice::VulkanComputeDevice(RHIContext *context)
     : Device::Impl(context) {
+    if (const char *path = std::getenv("CORONA_GPU_ALLOCATION_TRACE"); path && *path) {
+        allocation_trace_ = std::fopen(path, "wb");
+        if (allocation_trace_) {
+            std::fputs("event_id\tevent\tkind\tresource_handle\tvma_allocation\tname\trequested_buffer_bytes\tbuffer_bytes\twidth\theight\tdepth\tvk_format\tmip_levels\tvma_size\tvma_offset\tdevice_memory\tmemory_type\tmemory_property_flags\n", allocation_trace_);
+        } else {
+            OC_WARNING_FORMAT("CORONA_GPU_ALLOCATION_TRACE: cannot open {}", path);
+        }
+    }
     init_instance();
     init_physical_device();
     init_logical_device();
@@ -423,12 +431,50 @@ void VulkanComputeDevice::init_samplers() noexcept {
 
 }
 
+// Alloc/free rows join by kind + resource_handle + vma_allocation. Names and
+// descriptors are written on alloc rows; no additional resource map is needed.
+void VulkanComputeDevice::trace_allocation(const char *event, const char *kind,
+                                           handle_ty handle, VmaAllocation allocation,
+                                           const char *name, uint64_t requested_bytes,
+                                           uint64_t buffer_bytes, VkExtent3D extent,
+                                           VkFormat format, uint32_t mip_levels) noexcept {
+    if (!allocation_trace_) return;
+    std::lock_guard lock(allocation_trace_mutex_);
+    VmaAllocationInfo info{};
+    vmaGetAllocationInfo(allocator_, allocation, &info);
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(phys_device_, &memory);
+    const auto properties = memory.memoryTypes[info.memoryType].propertyFlags;
+    std::fprintf(allocation_trace_, "%llu\t%s\t%s\t%llu\t%llu\t",
+        static_cast<unsigned long long>(++allocation_trace_event_), event, kind,
+        static_cast<unsigned long long>(handle),
+        static_cast<unsigned long long>(reinterpret_cast<handle_ty>(allocation)));
+    for (const char *p = name; *p; ++p) {
+        switch (*p) {
+            case '\\': std::fputs("\\\\", allocation_trace_); break;
+            case '\t': std::fputs("\\t", allocation_trace_); break;
+            case '\r': std::fputs("\\r", allocation_trace_); break;
+            case '\n': std::fputs("\\n", allocation_trace_); break;
+            default: std::fputc(static_cast<unsigned char>(*p), allocation_trace_); break;
+        }
+    }
+    std::fprintf(allocation_trace_, "\t%llu\t%llu\t%u\t%u\t%u\t%u\t%u\t%llu\t%llu\t%llu\t%u\t%u\n",
+        static_cast<unsigned long long>(requested_bytes),
+        static_cast<unsigned long long>(buffer_bytes),
+        extent.width, extent.height, extent.depth, static_cast<uint32_t>(format), mip_levels,
+        static_cast<unsigned long long>(info.size),
+        static_cast<unsigned long long>(info.offset),
+        static_cast<unsigned long long>(reinterpret_cast<handle_ty>(info.deviceMemory)),
+        info.memoryType, properties);
+    std::fflush(allocation_trace_);
+}
+
 // ── Buffer allocation ─────────────────────────────────────────────────────────
 
 VkBufferAllocation VulkanComputeDevice::allocate_buffer(size_t size,
                                                         VkBufferUsageFlags usage,
                                                         bool host_visible,
-                                                        const string &, VkDeviceSize alignment,
+                                                        const string &name, VkDeviceSize alignment,
                                                         bool readback, bool exported) noexcept {
     VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bci.size        = size > 0 ? size : 4;
@@ -484,11 +530,13 @@ VkBufferAllocation VulkanComputeDevice::allocate_buffer(size_t size,
         auto g = buffer_map_guard_.lock();
         buffer_map_[result.address] = result;
     }
+    trace_allocation("alloc", "buffer", result.address, result.alloc, name.c_str(), size, bci.size);
     return result;
 }
 
 void VulkanComputeDevice::free_buffer(VkBufferAllocation &alloc) noexcept {
     if (alloc.buffer == VK_NULL_HANDLE) return;
+    trace_allocation("free", "buffer", alloc.address, alloc.alloc);
     {
         auto g = buffer_map_guard_.lock();
         buffer_map_.erase(alloc.address);
@@ -511,7 +559,7 @@ VkBuffer VulkanComputeDevice::get_vk_buffer(handle_ty addr, VkDeviceSize *offset
 VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt,
                                                        uint32_t levels,
                                                        VkImageUsageFlags usage,
-                                                       const string &, bool is_3d) noexcept {
+                                                       const string &name, bool is_3d) noexcept {
     VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ici.imageType   = is_3d ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     ici.format      = fmt;
@@ -563,11 +611,14 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
         auto g = buffer_map_guard_.lock();
         image_map_[reinterpret_cast<handle_ty>(result.image)] = result;
     }
+    trace_allocation("alloc", "image", reinterpret_cast<handle_ty>(result.image), result.alloc,
+                     name.c_str(), 0, 0, ici.extent, ici.format, ici.mipLevels);
     return result;
 }
 
 void VulkanComputeDevice::free_image(VkImageAllocation &alloc) noexcept {
     if (alloc.image == VK_NULL_HANDLE) return;
+    trace_allocation("free", "image", reinterpret_cast<handle_ty>(alloc.image), alloc.alloc);
     {
         auto g = buffer_map_guard_.lock();
         image_map_.erase(reinterpret_cast<handle_ty>(alloc.image));
@@ -679,6 +730,7 @@ void VulkanComputeDevice::destroy_buffer(handle_ty handle) noexcept {
     auto alloc = it->second;
     buffer_map_.erase(it);
     g.unlock();
+    trace_allocation("free", "buffer", alloc.address, alloc.alloc);
     vmaDestroyBuffer(allocator_, alloc.buffer, alloc.alloc);
 }
 
@@ -923,6 +975,10 @@ VulkanComputeDevice::~VulkanComputeDevice() noexcept {
     if (allocator_) vmaDestroyAllocator(allocator_);
     if (device_)   vkDestroyDevice(device_, nullptr);
     if (instance_) vkDestroyInstance(instance_, nullptr);
+    if (allocation_trace_) {
+        if (std::ferror(allocation_trace_)) OC_WARNING("CORONA_GPU_ALLOCATION_TRACE: output write failed");
+        std::fclose(allocation_trace_);
+    }
 }
 
 }// namespace ocarina
