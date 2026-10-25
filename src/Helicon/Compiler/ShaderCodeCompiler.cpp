@@ -11,11 +11,13 @@
 #include "ShaderLanguageConverter.h"
 #include <Compiler/ShaderCommon.h>
 #include <shared_mutex>
+#include <optional>
 #include <ranges>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 namespace EmbeddedShader
@@ -55,6 +57,13 @@ namespace EmbeddedShader
 
             return reflection;
         }
+
+        void reportSlangDiagnostics(slang::IBlob* diagnostics)
+        {
+            if (!diagnostics)
+                return;
+            std::cerr << static_cast<const char*>(diagnostics->getBufferPointer()) << std::endl;
+        }
     }
 
     std::string enumToString(ShaderLanguage language) {
@@ -89,24 +98,22 @@ namespace EmbeddedShader
     }
 
     ShaderCodeCompiler::ShaderCodeCompiler(const std::string& shaderCode, ShaderStage inputStage,
-        ShaderLanguage language, CompilerOption option, const std::source_location& sourceLocation)
+        CompilerOption option, const std::source_location& sourceLocation)
     {
         sourceLocationStr = ShaderHardcodeManager::getSourceLocationString(sourceLocation);
         stage = enumToString(inputStage);
-        compile(shaderCode,inputStage,language,option);
+        compile(shaderCode, inputStage, option);
     }
 
     ShaderCodeModule ShaderCodeCompiler::getShaderCode(ShaderLanguage language, bool bindless, ConditionInfo conditionInfo)
     {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
+        if (!conditions.empty() && conditionInfo.empty())
+            conditionInfo = getCurrentConditionInfo();
 
-        ShaderCodeModule result;
         std::string codeKey;
         std::string reflKey;
         if (!conditions.empty())
         {
-            if (conditionInfo.empty())
-                conditionInfo = getCurrentConditionInfo();
             codeKey = getCurrentCombinationKey(language, bindless, false, conditionInfo);
             reflKey = getCurrentCombinationKey(language, bindless, true, conditionInfo);
         }
@@ -118,11 +125,10 @@ namespace EmbeddedShader
             reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
         }
 
-
-
 #if HELICON_HAS_HARDCODE_SHADERS
         try
         {
+            ShaderCodeModule result;
             result.shaderCode = std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey));
             result.shaderResources = std::get<0>(ShaderHardcodeManager::getHardcodeShader(stage, reflKey));
             return result;
@@ -133,47 +139,100 @@ namespace EmbeddedShader
         }
 #endif
 
-        if (auto it = compiledOutputs_.find(codeKey); it != compiledOutputs_.end())
-            result.shaderCode = std::get<1>(it->second);
-        else
-        {
-            if (!conditions.empty())
-            {
-                combine(false, conditionInfo);
-                if (compilerOption.enableBindless)
-                {
-                    combine(true, conditionInfo);
-                }
+        auto findCached = [&]() -> std::optional<ShaderCodeModule> {
+            auto code = compiledOutputs_.find(codeKey);
+            if (code == compiledOutputs_.end())
+                return std::nullopt;
+            auto reflection = compiledOutputs_.find(reflKey);
+            if (reflection == compiledOutputs_.end())
+                return std::nullopt;
 
-                it = compiledOutputs_.find(codeKey);
-                if (it != compiledOutputs_.end())
-                {
-                    result.shaderCode = std::get<1>(it->second);
-                }
-                else
-                {
-                    throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
-                }
-            }
+            const auto& storedCode = std::get<1>(code->second);
+            ShaderCodeModule result;
+            if (const auto* binary = std::get_if<std::vector<uint32_t>>(&storedCode))
+                result.shaderCode = *binary;
             else
-            {
-                throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
-            }
+                result.shaderCode = std::get<std::string>(storedCode);
+            result.shaderResources = std::get<0>(reflection->second);
+            return result;
+        };
+
+        // 命中已编译变体时只读共享锁；未命中才升级为独占锁并真正 link。
+        {
+            std::shared_lock<std::shared_mutex> lock(threadMutex);
+            if (auto cached = findCached())
+                return *cached;
         }
 
-        if (auto it = compiledOutputs_.find(reflKey); it != compiledOutputs_.end())
-            result.shaderResources = std::get<0>(it->second);
-        else
-            throw std::runtime_error("Compiled shader reflection not found for key: " + reflKey);
+        if (conditions.empty())
+            throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
 
-        return result;
+        // combineLocked 会写 compiledOutputs_ 并递归读取已序列化的 branch/type-header
+        // module，所以必须持有独占锁，且它内部不再加锁（见 getBranchModule 等）。
+        {
+            std::unique_lock<std::shared_mutex> lock(threadMutex);
+            if (!findCached())
+                combineLocked(bindless, conditionInfo, language, false);
+        }
+
+        {
+            std::shared_lock<std::shared_mutex> lock(threadMutex);
+            if (auto cached = findCached())
+                return *cached;
+        }
+
+        throw std::runtime_error("Compiled shader code or reflection not found for key: " + codeKey);
     }
 
-    void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language,
+    void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage,
                                      CompilerOption option)
     {
+        bool isCompilingBindless = Ast::Parser::getBindless();
+        auto gs = ShaderLanguageConverter::getGlobalSession();
+        std::vector<slang::TargetDesc> targetList;
+        auto spv_1_6 = gs->findProfile("spirv_1_6");
+        auto sm_6_6 = gs->findProfile("sm_6_6");
+        auto sm_5_0 = gs->findProfile("sm_5_0");
+        if (option.compileGLSL)
+            targetList.push_back({.format = SLANG_GLSL,.profile = spv_1_6});
+        if (option.compileDXIL)
+            targetList.push_back({.format = SLANG_DXIL,.profile = sm_6_6});
+        if (option.compileHLSL)
+            targetList.push_back({.format = SLANG_HLSL,.profile = sm_6_6});
+        if (option.compileSpirV)
+            targetList.push_back({.format = SLANG_SPIRV,.profile = spv_1_6});
+        if (option.compileDXBC && !isCompilingBindless)
+            targetList.push_back({.format = SLANG_DXBC,.profile = sm_5_0});
+
+        std::vector options = {
+            slang::CompilerOptionEntry{
+                slang::CompilerOptionName::EmitSpirvDirectly,
+                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+            },
+        };
+        Slang::ComPtr<slang::ISession> currSession;
+        SlangStageModules* currStageModules = nullptr;
+        std::vector<SlangBranchModule>* currBranchModules = nullptr;
+        if (!isCompilingBindless)
+        {
+            //bind
+            targets = targetList;
+            session = ShaderLanguageConverter::createSession(gs, targets, options, option.enableMatrixColumnMajor);
+            currSession = session;
+            currStageModules = &stageModules;
+            currBranchModules = &branchModules;
+        }
+        else
+        {
+            //bindless
+            bindlessTargets = targetList;
+            bindlessSession = ShaderLanguageConverter::createSession(gs, bindlessTargets, options, option.enableMatrixColumnMajor);
+            currSession = bindlessSession;
+            currStageModules = &bindlessStageModules;
+            currBranchModules = &bindlessBranchModules;
+        }
+
         compilerOption = option;
-        sourceStage = inputStage;
 
         // HORIZON_SLANG_DUMP=<dir>：把生成的 Slang 源码逐 stage 落盘。
         // EDSL 生成的代码平时无从查看（Release 下没有 ShaderHardcodeManager），
@@ -187,193 +246,78 @@ namespace EmbeddedShader
             std::ostringstream name;
             name << dumpDir << "/" << std::setw(3) << std::setfill('0') << seq << "_"
                  << "stage" << static_cast<int>(inputStage)
-                 << (Ast::Parser::getBindless() ? "_bindless" : "") << ".slang";
+                 << (isCompilingBindless ? "_bindless" : "") << ".slang";
             if (std::ofstream out{name.str()}; out)
                 out << shaderCode;
         }
 
-        // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
-        auto storeCode = [&](const auto& code, const std::string& itemName) {
-            compiledOutputs_[itemName] = code;
+        // 仅 Debug 下把 module 源码/IR 写入离线 hardcode 文件；运行时不需要这些
+        // 序列化 module（combine 直接使用 ComPtr），所以不再放进 compiledOutputs_。
+        auto storeModule = [&](const Slang::ComPtr<slang::IModule>& module, const std::string& itemName) {
 #ifdef CABBAGE_ENGINE_DEBUG
-            ShaderHardcodeManager::addTarget(code, stage, itemName);
+            ShaderHardcodeManager::addTarget(ShaderLanguageConverter::convertModule(module), stage, itemName);
+#else
+            (void)module;
+            (void)itemName;
 #endif
         };
-        auto storeReflection = [&](const ShaderCodeModule::ShaderResources& res, const std::string& itemName) {
-            compiledOutputs_[itemName] = res;
-#ifdef CABBAGE_ENGINE_DEBUG
-            ShaderHardcodeManager::addTarget(res, stage, itemName);
-#endif
-        };
-        std::string bindlessStr = Ast::Parser::getBindless() ? "_Bindless" : "";
+        const std::string bindlessStr = isCompilingBindless ? "_Bindless" : "";
 
-        ConditionInfo info;
-        SlangCompileResult result;
+        // 加载额外 Slang Module Dependency（只加载一次，后续 link 复用 session 内的 module）。
+        auto& currDependencies = isCompilingBindless ? bindlessDependencyModules : dependencyModules;
+        currDependencies.clear();
+        currDependencies.reserve(option.slangModules.size());
+        for (auto dep : option.slangModules)
+            currDependencies.push_back(ShaderLanguageConverter::loadModule(currSession, *dep));
+
+        auto languageStr = "SlangModule";
         if (!option.branches.empty())
         {
-            std::vector<SlangModule*> pDeclares;
-            auto languageStr = "SlangModule";
+            currStageModules->typeHeader = ShaderLanguageConverter::loadModule(currSession, "type_header", option.typeHeader);
+            storeModule(currStageModules->typeHeader,
+                        ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Type_Header"));
 
-            std::vector<SlangModule> declares;
-            std::vector<SlangModule> trueBs;
-            std::vector<SlangModule> falseBs;
-
-            std::vector<SlangModule*> pTrueBs;
-            std::vector<SlangModule*> pFalseBs;
-
-            SlangModuleCompileArgs compileArgs;
-            compileArgs.sourceLanguage = language;
-            compileArgs.shaderCode = option.typeHeader;
-            compileArgs.moduleName = "type_header";
-
-            auto typeHeaderModule = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-            option.slangModules.push_back(&typeHeaderModule);
-            storeCode(typeHeaderModule, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Type_Header"));
-
-            size_t index = option.branches.size() - 1;
+            // currBranchModules 的下标必须与 conditions 的下标一致：
+            // combineLocked 用 conditionInfo[i] 选择 branchModules[i] 的 true/false
+            // module。若这里反向 push，fragment 的 branch_3 变体会被当成 branch_0
+            // 链接，最终 isSkyBox=false 却链接了 skybox true。
+            size_t index = 0;
             conditions.resize(option.branches.size());
-            for (auto i = option.branches.rbegin(); i != option.branches.rend(); ++i)
+            for (auto& branch : option.branches)
             {
-                auto& branch = *i;
-                compileArgs.moduleName = "branch_" + std::to_string(index);
+                SlangBranchModule bm;
+                auto modPrefix = "branch_" + std::to_string(index);
 
-                compileArgs.shaderCode = branch.declareBranch;
-                compileArgs.deps = option.slangModules;
-                compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
-                auto declare = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-
-                compileArgs.shaderCode = branch.trueBranch;
-                compileArgs.deps = option.slangModules;
-                compileArgs.deps.insert(compileArgs.deps.end(),pTrueBs.begin(), pTrueBs.end());
-                auto trueB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-
-                compileArgs.shaderCode = branch.falseBranch;
-                compileArgs.deps = option.slangModules;
-                compileArgs.deps.insert(compileArgs.deps.end(),pFalseBs.begin(), pFalseBs.end());
-                auto falseB = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
+                auto trueB = ShaderLanguageConverter::loadModule(currSession, modPrefix + "_true", branch.trueBranch);
+                auto falseB = ShaderLanguageConverter::loadModule(currSession, modPrefix + "_false", branch.falseBranch);
 
                 auto branchName = "Branch_" + std::to_string(index);
+                storeModule(trueB,
+                            ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + "_True"));
+                storeModule(falseB,
+                            ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + "_False"));
 
-                storeCode(trueB, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + "_True"));
-                storeCode(falseB, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + "_False"));
-
-                declares.emplace_back(std::move(declare));
-                trueBs.emplace_back(std::move(trueB));
-                falseBs.emplace_back(std::move(falseB));
-
-                pDeclares.resize(declares.size());
-                pTrueBs.resize(trueBs.size());
-                pFalseBs.resize(falseBs.size());
-
-                for (size_t i = 0; i < declares.size(); ++i)
-                {
-                    pDeclares[i] = &declares[i];
-                    pTrueBs[i] = &trueBs[i];
-                    pFalseBs[i] = &falseBs[i];
-                }
+                bm.branchTrue = trueB;
+                bm.branchFalse = falseB;
+                currBranchModules->push_back(bm);
 
                 conditions[index] = branch.conditionDetector;
-
-                --index;
+                ++index;
             }
-            info = getCurrentConditionInfo();
 
-            compileArgs.shaderCode = shaderCode;
-            compileArgs.moduleName = "";
-            compileArgs.deps = option.slangModules;
-            compileArgs.deps.insert(compileArgs.deps.end(),pDeclares.begin(), pDeclares.end());
-            auto core = ShaderLanguageConverter::slangModuleCompiler(compileArgs);
-            storeCode(core, ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Branch_Core"));
-
-            SlangCompileArgs2 compileArgs2;
-            compileArgs2.module = &core;
-            compileArgs2.stage = inputStage;
-            compileArgs2.sourceLanguage = language;
-            compileArgs2.deps.swap(option.slangModules);
-            compileArgs2.matrixMajor = option.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
-
-            //branches
-            auto branches = getBranchModules(Ast::Parser::getBindless(), info);
-            compileArgs2.deps.insert(compileArgs2.deps.end(),branches.begin(), branches.end());
-
-            compileArgs2.enableReflection = true;
-            if (option.compileGLSL)
-                compileArgs2.targetLanguages.push_back(ShaderLanguage::GLSL);
-            if (option.compileHLSL)
-                compileArgs2.targetLanguages.push_back(ShaderLanguage::HLSL);
-            if (option.compileSpirV)
-                compileArgs2.targetLanguages.push_back(ShaderLanguage::SpirV);
-            if (option.compileDXIL)
-                compileArgs2.targetLanguages.push_back(ShaderLanguage::DXIL);
-            if (option.compileDXBC && !Ast::Parser::getBindless())
-                compileArgs2.targetLanguages.push_back(ShaderLanguage::DXBC);
-            result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs2);
+            currStageModules->core = ShaderLanguageConverter::loadModule(currSession, "core_source", shaderCode);
+            storeModule(currStageModules->core,
+                        ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Branch_Core"));
         }
         else
         {
-            SlangCompileArgs compileArgs;
-            compileArgs.source = shaderCode;
-            compileArgs.stage = inputStage;
-            compileArgs.sourceLanguage = language;
-            compileArgs.deps.swap(option.slangModules);
-            compileArgs.enableReflection = true;
-            compileArgs.matrixMajor = option.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
-            if (option.compileGLSL)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::GLSL);
-            if (option.compileHLSL)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::HLSL);
-            if (option.compileSpirV)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::SpirV);
-            if (option.compileDXIL)
-                compileArgs.targetLanguages.push_back(ShaderLanguage::DXIL);
-            if (option.compileDXBC && !Ast::Parser::getBindless())
-                compileArgs.targetLanguages.push_back(ShaderLanguage::DXBC);
-            result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs);
+            currStageModules->core = ShaderLanguageConverter::loadModule(currSession, "core_source", shaderCode);
         }
 
-        const std::vector<uint32_t>* spirvTarget = nullptr;
-        if (auto spirv = result.binaryTargets.find(ShaderLanguage::SpirV); spirv != result.binaryTargets.end())
-            spirvTarget = &spirv->second;
+        currStageModules->entryPoint = ShaderLanguageConverter::findEntryPoint(currStageModules->core, "main");
 
-        std::string codeKey;
-        std::string reflKey;
-
-        //string targets
-        for (auto& stringTarget : result.stringTargets)
-        {
-            if (!conditions.empty())
-            {
-                codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false, info);
-                reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true, info);
-            }
-            else
-            {
-                auto languageStr = enumToString(stringTarget.first);
-                codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
-                reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
-            }
-
-            storeCode(stringTarget.second,codeKey);
-            storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections), reflKey);
-        }
-
-        //binary targets
-        for (auto& binaryTarget : result.binaryTargets)
-        {
-            if (!conditions.empty())
-            {
-                codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false, info);
-                reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true, info);
-            }
-            else
-            {
-                auto languageStr = enumToString(binaryTarget.first);
-                codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr);
-                reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
-            }
-            storeCode(binaryTarget.second,codeKey);
-            storeReflection(reflectionForTarget(binaryTarget.first, spirvTarget, result.reflections), reflKey);
-        }
+        const ConditionInfo info = conditions.empty() ? ConditionInfo {} : getCurrentConditionInfo();
+        combineLocked(isCompilingBindless, info, std::nullopt, true);
     }
 
     CompilerOption ShaderCodeCompiler::getCompilerOption() const
@@ -416,170 +360,128 @@ namespace EmbeddedShader
         return info;
     }
 
-    void ShaderCodeCompiler::combine(bool bindless, ConditionInfo conditionInfo)
+    // 调用方必须持有 threadMutex 的独占锁。这里会写 compiledOutputs_。
+    // 首次 compile() 已经把 core/type-header/branch module 和 entry point 加载进
+    // session；运行时只对已有的 IModule 做 compose + link，不重新创建 session，
+    // 也不重新从源码/序列化 blob 加载模块。
+    void ShaderCodeCompiler::combineLocked(bool bindless, ConditionInfo conditionInfo,
+                                           std::optional<ShaderLanguage> language, bool writeHardcode)
     {
-        // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
+        SlangStageModules& modules = bindless ? bindlessStageModules : stageModules;
+        const std::vector<SlangBranchModule>& branches = bindless ? bindlessBranchModules : branchModules;
+        const std::vector<Slang::ComPtr<slang::IModule>>& dependencies =
+            bindless ? bindlessDependencyModules : dependencyModules;
+        const std::vector<slang::TargetDesc>& currentTargets = bindless ? bindlessTargets : targets;
+        Slang::ComPtr<slang::ISession>& currentSession = bindless ? bindlessSession : session;
+
+        if (!currentSession || !modules.core || !modules.entryPoint)
+            throw std::runtime_error("ShaderCodeCompiler: Slang modules are not loaded.");
+        if (conditionInfo.size() != branches.size())
+            throw std::runtime_error("ShaderCodeCompiler: branch condition count mismatch.");
+
+        std::vector<slang::IComponentType*> components;
+        components.reserve(3 + dependencies.size() + branches.size());
+        components.push_back(modules.core.get());
+        components.push_back(modules.entryPoint.get());
+        if (modules.typeHeader)
+            components.push_back(modules.typeHeader.get());
+        for (const auto& dependency : dependencies)
+            components.push_back(dependency.get());
+
+        for (size_t i = 0; i < branches.size(); ++i)
+        {
+            if (!branches[i].branchTrue || !branches[i].branchFalse)
+                throw std::runtime_error("ShaderCodeCompiler: branch module is missing.");
+            components.push_back(conditionInfo[i] ? branches[i].branchTrue.get()
+                                                  : branches[i].branchFalse.get());
+        }
+
+        Slang::ComPtr<slang::IComponentType> composedProgram;
+        Slang::ComPtr<slang::IBlob> diagnostics;
+        SlangResult result = currentSession->createCompositeComponentType(
+            components.data(), static_cast<SlangInt>(components.size()),
+            composedProgram.writeRef(), diagnostics.writeRef());
+        reportSlangDiagnostics(diagnostics);
+        if (SLANG_FAILED(result) || !composedProgram)
+            throw std::runtime_error("Failed to compose Slang branch program.");
+
+        Slang::ComPtr<slang::IComponentType> linkedProgram;
+        Slang::ComPtr<slang::IBlob> linkDiagnostics;
+        result = composedProgram->link(linkedProgram.writeRef(), linkDiagnostics.writeRef());
+        reportSlangDiagnostics(linkDiagnostics);
+        if (SLANG_FAILED(result) || !linkedProgram)
+            throw std::runtime_error("Failed to link Slang branch program.");
+
+        SlangCompileResult compiled;
+        for (size_t i = 0; i < currentTargets.size(); ++i)
+        {
+            if (language &&
+                ShaderLanguageConverter::convertShaderLanguage(currentTargets[i].format) != *language)
+            {
+                continue;
+            }
+            ShaderLanguageConverter::fillCompileResult(
+                compiled, linkedProgram, static_cast<SlangInt>(i), currentTargets[i].format, true);
+        }
+
+        storeCompileResultLocked(bindless, conditionInfo, compiled, writeHardcode);
+    }
+
+    void ShaderCodeCompiler::storeCompileResultLocked(bool bindless,
+                                                      const ConditionInfo& conditionInfo,
+                                                      const SlangCompileResult& result,
+                                                      bool writeHardcode)
+    {
+        // Store per-instance outputs; only the initial compile writes the offline
+        // hardcode sources. Runtime condition switches must not touch those files.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
             compiledOutputs_[itemName] = code;
 #ifdef CABBAGE_ENGINE_DEBUG
-            ShaderHardcodeManager::addTarget(code, stage, itemName);
+            if (writeHardcode)
+                ShaderHardcodeManager::addTarget(code, stage, itemName);
 #endif
         };
         auto storeReflection = [&](const ShaderCodeModule::ShaderResources& res, const std::string& itemName) {
             compiledOutputs_[itemName] = res;
 #ifdef CABBAGE_ENGINE_DEBUG
-            ShaderHardcodeManager::addTarget(res, stage, itemName);
+            if (writeHardcode)
+                ShaderHardcodeManager::addTarget(res, stage, itemName);
 #endif
         };
-
-        SlangCompileArgs2 compileArgs2;
-        compileArgs2.module = getCoreBranchModule(bindless);
-        compileArgs2.stage = sourceStage;
-        compileArgs2.sourceLanguage = sourceLanguage;
-        compileArgs2.deps = compilerOption.slangModules;
-        compileArgs2.deps.push_back(getTypeHeaderModule(bindless));
-        compileArgs2.matrixMajor = compilerOption.enableMatrixColumnMajor ? SlangMatrixMajor::ColumnMajor : SlangMatrixMajor::RowMajor;
-
-        //branches
-        auto branches = getBranchModules(bindless, conditionInfo);
-        compileArgs2.deps.insert(compileArgs2.deps.end(),branches.begin(), branches.end());
-
-        compileArgs2.enableReflection = true;
-        if (compilerOption.compileGLSL)
-            compileArgs2.targetLanguages.push_back(ShaderLanguage::GLSL);
-        if (compilerOption.compileHLSL)
-            compileArgs2.targetLanguages.push_back(ShaderLanguage::HLSL);
-        if (compilerOption.compileSpirV)
-            compileArgs2.targetLanguages.push_back(ShaderLanguage::SpirV);
-        if (compilerOption.compileDXIL)
-            compileArgs2.targetLanguages.push_back(ShaderLanguage::DXIL);
-        if (compilerOption.compileDXBC && !Ast::Parser::getBindless())
-            compileArgs2.targetLanguages.push_back(ShaderLanguage::DXBC);
-        auto result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs2);
 
         const std::vector<uint32_t>* spirvTarget = nullptr;
         if (auto spirv = result.binaryTargets.find(ShaderLanguage::SpirV); spirv != result.binaryTargets.end())
             spirvTarget = &spirv->second;
 
+        const std::string_view bindlessStr = bindless ? "_Bindless" : "";
+        auto makeKeys = [&](ShaderLanguage language, std::string& codeKey, std::string& reflKey) {
+            if (!conditions.empty())
+            {
+                codeKey = getCurrentCombinationKey(language, bindless, false, conditionInfo);
+                reflKey = getCurrentCombinationKey(language, bindless, true, conditionInfo);
+            }
+            else
+            {
+                const auto languageStr = enumToString(language);
+                codeKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + std::string(bindlessStr));
+                reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + std::string(bindlessStr));
+            }
+        };
+
         std::string codeKey;
         std::string reflKey;
-
-        //string targets
         for (auto& stringTarget : result.stringTargets)
         {
-            codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false, conditionInfo);
-            reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true, conditionInfo);
-
-            storeCode(stringTarget.second,codeKey);
+            makeKeys(stringTarget.first, codeKey, reflKey);
+            storeCode(stringTarget.second, codeKey);
             storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections), reflKey);
         }
 
-        //binary targets
         for (auto& binaryTarget : result.binaryTargets)
         {
-            codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false, conditionInfo);
-            reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true, conditionInfo);
-
-            storeCode(binaryTarget.second,codeKey);
+            makeKeys(binaryTarget.first, codeKey, reflKey);
+            storeCode(binaryTarget.second, codeKey);
             storeReflection(reflectionForTarget(binaryTarget.first, spirvTarget, result.reflections), reflKey);
         }
-    }
-
-    std::vector<SlangModule*> ShaderCodeCompiler::getBranchModules(bool bindless, ConditionInfo conditionInfo) const
-    {
-        std::vector<SlangModule*> result;
-        for (int i = conditionInfo.size() - 1; i >= 0; --i)
-        {
-            result.emplace_back(getBranchModule(i, conditionInfo[i], bindless));
-        }
-        return result;
-    }
-
-    SlangModule* ShaderCodeCompiler::getBranchModule(size_t index, bool condition, bool bindless) const
-    {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
-        SlangModule* result = nullptr;
-        std::string bindlessStr = bindless ? "_Bindless" : "";
-        auto languageStr = "SlangModule";
-
-        auto branchName = "Branch_" + std::to_string(index);
-
-        auto conditionStr = condition ? "_True" : "_False";
-
-        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + branchName + conditionStr);
-
-#if HELICON_HAS_HARDCODE_SHADERS
-        try
-        {
-            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
-        }
-        catch (const std::runtime_error&)
-        {
-            // Fall through to per-instance outputs when hardcoded shaders are stale or incomplete.
-        }
-#endif
-
-        if (auto it = compiledOutputs_.find(branchKey); it != compiledOutputs_.end())
-            result = &std::get<2>(std::get<1>(it->second));
-        else
-            throw std::runtime_error("Compiled shader code not found for key: " + branchKey);
-
-        return result;
-    }
-
-    SlangModule* ShaderCodeCompiler::getCoreBranchModule(bool bindless) const
-    {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
-        SlangModule* result = nullptr;
-        std::string bindlessStr = bindless ? "_Bindless" : "";
-        auto languageStr = "SlangModule";
-
-        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Branch_Core");
-
-#if HELICON_HAS_HARDCODE_SHADERS
-        try
-        {
-            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
-        }
-        catch (const std::runtime_error&)
-        {
-            // Fall through to per-instance outputs when hardcoded shaders are stale or incomplete.
-        }
-#endif
-
-        if (auto it = compiledOutputs_.find(branchKey); it != compiledOutputs_.end())
-            result = &std::get<2>(std::get<1>(it->second));
-        else
-            throw std::runtime_error("Compiled shader code not found for key: " + branchKey);
-
-        return result;
-    }
-
-    SlangModule* ShaderCodeCompiler::getTypeHeaderModule(bool bindless) const
-    {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
-        SlangModule* result = nullptr;
-        std::string bindlessStr = bindless ? "_Bindless" : "";
-        auto languageStr = "SlangModule";
-
-        auto branchKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + bindlessStr + "_Type_Header");;
-
-#if HELICON_HAS_HARDCODE_SHADERS
-        try
-        {
-            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
-        }
-        catch (const std::runtime_error&)
-        {
-            // Fall through to per-instance outputs when hardcoded shaders are stale or incomplete.
-        }
-#endif
-
-        if (auto it = compiledOutputs_.find(branchKey); it != compiledOutputs_.end())
-            result = &std::get<2>(std::get<1>(it->second));
-        else
-            throw std::runtime_error("Compiled shader code not found for key: " + branchKey);
-
-        return result;
     }
 }
