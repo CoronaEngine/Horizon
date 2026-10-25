@@ -26,6 +26,10 @@ namespace EmbeddedShader
 
     inline void RasterizedPipelineObject::updateAutoBind(bool bindless, ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
     {
+        // 每次分支组合变化都会重新反射并重建这张表；先清空，避免旧变体的
+        // offset/bindType 残留（否则切回旧条件时 bind_auto_resources 会写两套）。
+        autoBindEntries.clear();
+
         // Collect auto-bind entries from globalStatements (shared across VS/FS):
 		// Walk all globally-defined textures and check if they have a back-pointer
 		// to a proxy's boundResource_. Match against both vertex and fragment shader's bindInfoPool.

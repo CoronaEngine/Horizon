@@ -304,6 +304,15 @@ struct Settings
     bool do_specular = true;
     bool do_diffuse_ibl = true;
     bool do_specular_ibl = true;
+
+    // Runtime branch-switch test: cycles through the four combinations of the
+    // direct-light and IBL $IF conditions so the EDSL pipeline has to relink
+    // and swap its Vulkan pipeline while the app keeps running.
+    bool auto_branch_switch = true;
+    float branch_switch_interval = 1.5f;
+    float branch_switch_accum = 0.0f;
+    int branch_switch_state = 0;
+
     int current_probe = 0;
     glm::vec3 light_dir { -0.35f, 0.55f, -0.75f };
     glm::vec3 light_col { 1.0f, 1.0f, 1.0f };
@@ -799,6 +808,14 @@ void run_example_edsl_disney_pbr()
         ImGui::Checkbox("Direct Specular", &s.do_specular);
         ImGui::Checkbox("IBL Diffuse", &s.do_diffuse_ibl);
         ImGui::Checkbox("IBL Specular", &s.do_specular_ibl);
+        ImGui::Separator();
+        ImGui::Checkbox("Auto Branch Switch", &s.auto_branch_switch);
+        ImGui::SliderFloat("Branch Interval (s)", &s.branch_switch_interval, 0.25f, 5.0f);
+        ImGui::Text("Branch state: direct=%s ibl=%s",
+                    (s.do_diffuse || s.do_specular) ? "ON" : "OFF",
+                    (s.do_diffuse_ibl || s.do_specular_ibl) ? "ON" : "OFF");
+        ImGui::Text("Toggle the checkboxes or wait for the auto switch;");
+        ImGui::Text("the fragment shader must relink and swap its pipeline.");
         ImGui::ColorEdit3("Light Color", &s.light_col.x);
         ImGui::SliderFloat3("Light Direction", &s.light_dir.x, -1.0f, 1.0f);
         ImGui::Text("Camera: LMB orbit, RMB dolly, MMB rotate env, scroll zoom");
@@ -813,12 +830,36 @@ void run_example_edsl_disney_pbr()
         if (fps_accum_seconds >= 0.5)
         {
             const double fps = fps_frame_count / fps_accum_seconds;
-            char title[96];
-            std::snprintf(title, sizeof(title), "Horizon Disney PBR [EDSL] - %.1f FPS (%.2f ms)", fps,
-                          1000.0 / fps);
+            char title[160];
+            std::snprintf(title, sizeof(title),
+                          "Horizon Disney PBR [EDSL] - %.1f FPS (%.2f ms) | direct=%d ibl=%d", fps,
+                          1000.0 / fps, (s.do_diffuse || s.do_specular) ? 1 : 0,
+                          (s.do_diffuse_ibl || s.do_specular_ibl) ? 1 : 0);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
+        }
+
+        // Drive the runtime $IF branch switching. The flags above are the same
+        // values captured by the shader condition detectors, so changing them
+        // here forces a relink on the next submit.
+        if (s.auto_branch_switch)
+        {
+            s.branch_switch_accum += dt;
+            if (s.branch_switch_accum >= s.branch_switch_interval)
+            {
+                s.branch_switch_accum = 0.0f;
+                s.branch_switch_state = (s.branch_switch_state + 1) & 3;
+                const bool direct_on = (s.branch_switch_state & 1) == 0;
+                const bool ibl_on = (s.branch_switch_state & 2) == 0;
+                s.do_diffuse = direct_on;
+                s.do_specular = direct_on;
+                s.do_diffuse_ibl = ibl_on;
+                s.do_specular_ibl = ibl_on;
+                std::printf("[edsl_branch_switch] state=%d direct=%d ibl=%d\n",
+                            s.branch_switch_state, direct_on ? 1 : 0, ibl_on ? 1 : 0);
+                std::fflush(stdout);
+            }
         }
 
         OrbitCamera& camera = input.camera;

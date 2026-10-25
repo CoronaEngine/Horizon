@@ -11,6 +11,7 @@
 #include "ShaderLanguageConverter.h"
 #include <Compiler/ShaderCommon.h>
 #include <shared_mutex>
+#include <optional>
 #include <ranges>
 #include <atomic>
 #include <filesystem>
@@ -98,15 +99,13 @@ namespace EmbeddedShader
 
     ShaderCodeModule ShaderCodeCompiler::getShaderCode(ShaderLanguage language, bool bindless, ConditionInfo conditionInfo)
     {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
+        if (!conditions.empty() && conditionInfo.empty())
+            conditionInfo = getCurrentConditionInfo();
 
-        ShaderCodeModule result;
         std::string codeKey;
         std::string reflKey;
         if (!conditions.empty())
         {
-            if (conditionInfo.empty())
-                conditionInfo = getCurrentConditionInfo();
             codeKey = getCurrentCombinationKey(language, bindless, false, conditionInfo);
             reflKey = getCurrentCombinationKey(language, bindless, true, conditionInfo);
         }
@@ -118,11 +117,10 @@ namespace EmbeddedShader
             reflKey = ShaderHardcodeManager::getItemName(sourceLocationStr, languageStr + "_Reflection" + bindlessStr);
         }
 
-
-
 #if HELICON_HAS_HARDCODE_SHADERS
         try
         {
+            ShaderCodeModule result;
             result.shaderCode = std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey));
             result.shaderResources = std::get<0>(ShaderHardcodeManager::getHardcodeShader(stage, reflKey));
             return result;
@@ -133,40 +131,45 @@ namespace EmbeddedShader
         }
 #endif
 
-        if (auto it = compiledOutputs_.find(codeKey); it != compiledOutputs_.end())
-            result.shaderCode = std::get<1>(it->second);
-        else
-        {
-            if (!conditions.empty())
-            {
-                combine(false, conditionInfo);
-                if (compilerOption.enableBindless)
-                {
-                    combine(true, conditionInfo);
-                }
+        auto findCached = [&]() -> std::optional<ShaderCodeModule> {
+            auto code = compiledOutputs_.find(codeKey);
+            if (code == compiledOutputs_.end())
+                return std::nullopt;
+            auto reflection = compiledOutputs_.find(reflKey);
+            if (reflection == compiledOutputs_.end())
+                return std::nullopt;
 
-                it = compiledOutputs_.find(codeKey);
-                if (it != compiledOutputs_.end())
-                {
-                    result.shaderCode = std::get<1>(it->second);
-                }
-                else
-                {
-                    throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
-                }
-            }
-            else
-            {
-                throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
-            }
+            ShaderCodeModule result;
+            result.shaderCode = std::get<1>(code->second);
+            result.shaderResources = std::get<0>(reflection->second);
+            return result;
+        };
+
+        // 命中已编译变体时只读共享锁；未命中才升级为独占锁并真正 link。
+        {
+            std::shared_lock<std::shared_mutex> lock(threadMutex);
+            if (auto cached = findCached())
+                return *cached;
         }
 
-        if (auto it = compiledOutputs_.find(reflKey); it != compiledOutputs_.end())
-            result.shaderResources = std::get<0>(it->second);
-        else
-            throw std::runtime_error("Compiled shader reflection not found for key: " + reflKey);
+        if (conditions.empty())
+            throw std::runtime_error("Compiled shader code not found for key: " + codeKey);
 
-        return result;
+        // combineLocked 会写 compiledOutputs_ 并递归读取已序列化的 branch/type-header
+        // module，所以必须持有独占锁，且它内部不再加锁（见 getBranchModule 等）。
+        {
+            std::unique_lock<std::shared_mutex> lock(threadMutex);
+            if (!findCached())
+                combineLocked(bindless, conditionInfo);
+        }
+
+        {
+            std::shared_lock<std::shared_mutex> lock(threadMutex);
+            if (auto cached = findCached())
+                return *cached;
+        }
+
+        throw std::runtime_error("Compiled shader code or reflection not found for key: " + codeKey);
     }
 
     void ShaderCodeCompiler::compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language,
@@ -215,6 +218,9 @@ namespace EmbeddedShader
 
         compilerOption = option;
         sourceStage = inputStage;
+        // 运行时 combineLocked() 走 Slang API 的 “按源码语言” 会话；必须记住
+        // 构造时传入的语言（EDSL 生成的是 Slang，不是默认的 GLSL）。
+        sourceLanguage = language;
 
         // HORIZON_SLANG_DUMP=<dir>：把生成的 Slang 源码逐 stage 落盘。
         // EDSL 生成的代码平时无从查看（Release 下没有 ShaderHardcodeManager），
@@ -408,7 +414,10 @@ namespace EmbeddedShader
         return info;
     }
 
-    void ShaderCodeCompiler::combine(bool bindless, ConditionInfo conditionInfo)
+    // 调用方必须持有 threadMutex 的独占锁。这里会写 compiledOutputs_，并且
+    // getBranchModule/getCoreBranchModule/getTypeHeaderModule 都按“锁已持有”
+    // 的前提实现，不能在这里再次加锁（shared_mutex 不可递归）。
+    void ShaderCodeCompiler::combineLocked(bool bindless, ConditionInfo conditionInfo)
     {
         // Store per-instance outputs; Debug also writes hardcode shader sources for pre-generation.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
@@ -445,7 +454,7 @@ namespace EmbeddedShader
             compileArgs2.targetLanguages.push_back(ShaderLanguage::SpirV);
         if (compilerOption.compileDXIL)
             compileArgs2.targetLanguages.push_back(ShaderLanguage::DXIL);
-        if (compilerOption.compileDXBC && !Ast::Parser::getBindless())
+        if (compilerOption.compileDXBC && !bindless)
             compileArgs2.targetLanguages.push_back(ShaderLanguage::DXBC);
         auto result = ShaderLanguageConverter::slangCompilerWithModules(compileArgs2);
 
@@ -459,8 +468,8 @@ namespace EmbeddedShader
         //string targets
         for (auto& stringTarget : result.stringTargets)
         {
-            codeKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), false, conditionInfo);
-            reflKey = getCurrentCombinationKey(stringTarget.first, Ast::Parser::getBindless(), true, conditionInfo);
+            codeKey = getCurrentCombinationKey(stringTarget.first, bindless, false, conditionInfo);
+            reflKey = getCurrentCombinationKey(stringTarget.first, bindless, true, conditionInfo);
 
             storeCode(stringTarget.second,codeKey);
             storeReflection(reflectionForTarget(stringTarget.first, spirvTarget, result.reflections), reflKey);
@@ -469,8 +478,8 @@ namespace EmbeddedShader
         //binary targets
         for (auto& binaryTarget : result.binaryTargets)
         {
-            codeKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), false, conditionInfo);
-            reflKey = getCurrentCombinationKey(binaryTarget.first, Ast::Parser::getBindless(), true, conditionInfo);
+            codeKey = getCurrentCombinationKey(binaryTarget.first, bindless, false, conditionInfo);
+            reflKey = getCurrentCombinationKey(binaryTarget.first, bindless, true, conditionInfo);
 
             storeCode(binaryTarget.second,codeKey);
             storeReflection(reflectionForTarget(binaryTarget.first, spirvTarget, result.reflections), reflKey);
@@ -487,9 +496,10 @@ namespace EmbeddedShader
         return result;
     }
 
+    // 下面的 getBranchModule/getCoreBranchModule/getTypeHeaderModule 只在
+    // combineLocked 内调用，调用方已持有 threadMutex 独占锁；这里不再加锁。
     SlangModule* ShaderCodeCompiler::getBranchModule(size_t index, bool condition, bool bindless) const
     {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
         SlangModule* result = nullptr;
         std::string bindlessStr = bindless ? "_Bindless" : "";
         auto languageStr = "SlangModule";
@@ -503,7 +513,7 @@ namespace EmbeddedShader
 #if HELICON_HAS_HARDCODE_SHADERS
         try
         {
-            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
+            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, branchKey)));
         }
         catch (const std::runtime_error&)
         {
@@ -521,7 +531,6 @@ namespace EmbeddedShader
 
     SlangModule* ShaderCodeCompiler::getCoreBranchModule(bool bindless) const
     {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
         SlangModule* result = nullptr;
         std::string bindlessStr = bindless ? "_Bindless" : "";
         auto languageStr = "SlangModule";
@@ -531,7 +540,7 @@ namespace EmbeddedShader
 #if HELICON_HAS_HARDCODE_SHADERS
         try
         {
-            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
+            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, branchKey)));
         }
         catch (const std::runtime_error&)
         {
@@ -549,7 +558,6 @@ namespace EmbeddedShader
 
     SlangModule* ShaderCodeCompiler::getTypeHeaderModule(bool bindless) const
     {
-        std::shared_lock<std::shared_mutex> lock(threadMutex);
         SlangModule* result = nullptr;
         std::string bindlessStr = bindless ? "_Bindless" : "";
         auto languageStr = "SlangModule";
@@ -559,7 +567,7 @@ namespace EmbeddedShader
 #if HELICON_HAS_HARDCODE_SHADERS
         try
         {
-            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, codeKey)));
+            return &std::get<2>(std::get<1>(ShaderHardcodeManager::getHardcodeShader(stage, branchKey)));
         }
         catch (const std::runtime_error&)
         {

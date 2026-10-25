@@ -50,6 +50,9 @@ namespace EmbeddedShader
 
     inline void ComputePipelineObject::updateAutoBind(bool bindless, const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
     {
+        // 分支组合变化时重新反射；清空旧表，避免旧 offset 残留。
+        autoBindEntries.clear();
+
         // Collect auto-bind entries from globalStatements:
         // Walk all globally-defined textures and check if they have a back-pointer
         // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.

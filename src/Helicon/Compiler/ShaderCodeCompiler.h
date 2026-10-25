@@ -187,7 +187,8 @@ struct ShaderCodeModule
 
     private:
         std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const;
-        void combine(bool bindless, ConditionInfo conditionInfo);
+        // 调用方必须持有 threadMutex 独占锁；内部会写 compiledOutputs_。
+        void combineLocked(bool bindless, ConditionInfo conditionInfo);
         std::vector<SlangModule*> getBranchModules(bool bindless, ConditionInfo conditionInfo) const;
         SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
         SlangModule* getCoreBranchModule(bool bindless) const;
