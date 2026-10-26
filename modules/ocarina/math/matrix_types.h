@@ -138,6 +138,11 @@ OC_MATRIX_TRIPLE_FUNC(lerp)
 
 template<typename T, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator-(ocarina::Matrix<T, N, M> m) {
+    if constexpr (ocarina::detail::use_ktm_float_v<T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::detail::from_ktm(-ocarina::detail::as_ktm(m));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<T, N, M>((-m[i])...);
     }(std::make_index_sequence<M>());
@@ -147,6 +152,11 @@ template<typename T, typename S, size_t N, size_t M>
 requires ocarina::is_scalar_v<S>
 [[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, M> m, S s) {
     using scalar_type = decltype(T{} * s);
+    if constexpr (ocarina::detail::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::detail::from_ktm(ocarina::detail::as_ktm(m) * s);
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<scalar_type, N, M>((m[i] * s)...);
     }(std::make_index_sequence<M>());
@@ -167,6 +177,12 @@ requires ocarina::is_scalar_v<S>
 template<typename T, typename S, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, M> m,
                                        ocarina::Vector<S, M> v) noexcept {
+    if constexpr (ocarina::detail::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::detail::from_ktm(ocarina::detail::as_ktm(m) *
+                                             ocarina::detail::as_ktm(v));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ((v[i] * m[i]) + ...);
     }(std::make_index_sequence<M>());
@@ -176,6 +192,12 @@ template<typename T, typename S, size_t N, size_t M, size_t Dim>
 [[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, Dim> lhs,
                                        ocarina::Matrix<S, Dim, M> rhs) noexcept {
     using scalar_type = decltype(T{} * S{});
+    if constexpr (ocarina::detail::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::detail::from_ktm(ocarina::detail::as_ktm(lhs) *
+                                             ocarina::detail::as_ktm(rhs));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<scalar_type, N, M>((lhs * rhs[i])...);
     }(std::make_index_sequence<M>());
@@ -185,6 +207,12 @@ template<typename T, typename S, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator+(ocarina::Matrix<T, N, M> lhs,
                                        ocarina::Matrix<S, N, M> rhs) noexcept {
     using scalar_type = decltype(T{} + S{});
+    if constexpr (ocarina::detail::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::detail::from_ktm(ocarina::detail::as_ktm(lhs) +
+                                             ocarina::detail::as_ktm(rhs));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<scalar_type, N, M>(lhs[i] + rhs[i]...);
     }(std::make_index_sequence<M>());
@@ -193,6 +221,12 @@ template<typename T, typename S, size_t N, size_t M>
 template<typename T, typename S, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator-(ocarina::Matrix<T, N, M> lhs,
                                        ocarina::Matrix<S, N, M> rhs) noexcept {
+    if constexpr (ocarina::detail::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::detail::from_ktm(ocarina::detail::as_ktm(lhs) -
+                                             ocarina::detail::as_ktm(rhs));
+        }
+    }
     return lhs + (-rhs);
 }
 

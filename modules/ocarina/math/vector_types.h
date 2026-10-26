@@ -9,6 +9,7 @@
 #include "math/constants.h"
 #include "half.h"
 #include "real.h"
+#include "ktm_bridge.h"
 
 namespace ocarina {
 namespace detail {
@@ -326,25 +327,37 @@ struct Vector : public detail::VectorStorage<T, N> {
     [[nodiscard]] constexpr T &at(size_t index) noexcept { return this->data()[index]; }
     [[nodiscard]] constexpr const T &at(size_t index) const noexcept { return this->data()[index]; }
 
-#define OC_MAKE_UNARY_OP(op)                                                  \
+#define OC_MAKE_UNARY_OP(op, ktm_ok)                                          \
     [[nodiscard]] friend constexpr auto operator op(this_type val) noexcept { \
         using R = Vector<decltype(op T{}), N>;                                \
+        if constexpr (ktm_ok && detail::use_ktm_arith_v<T> &&                 \
+                      std::is_same_v<decltype(op T{}), T>) {                  \
+            if (!std::is_constant_evaluated()) {                              \
+                return detail::from_ktm(op detail::as_ktm(val));              \
+            }                                                                 \
+        }                                                                     \
         return [&]<size_t... index>(std::index_sequence<index...>) {          \
             return R{op val.at(index)...};                                    \
         }(std::make_index_sequence<N>());                                     \
     }
-    OC_MAKE_UNARY_OP(+)
-    OC_MAKE_UNARY_OP(-)
-    OC_MAKE_UNARY_OP(~)
-    OC_MAKE_UNARY_OP(!)
+    OC_MAKE_UNARY_OP(+, true)
+    OC_MAKE_UNARY_OP(-, true)
+    OC_MAKE_UNARY_OP(~, false)
+    OC_MAKE_UNARY_OP(!, false)
 #undef OC_MAKE_UNARY_OP
 
-#define OC_MAKE_VECTOR_BINARY_OPERATOR(op, ...)                                                        \
+#define OC_MAKE_VECTOR_BINARY_OPERATOR(op, ktm_ok, ...)                                                \
     template<typename U>                                                                               \
     requires __VA_ARGS__                                                                               \
     [[nodiscard]] friend constexpr auto operator op(this_type lhs,                                     \
                                                     Vector<U, N> rhs) noexcept {                       \
         using ret_type = decltype(T {} op U{});                                                        \
+        if constexpr (ktm_ok && detail::use_ktm_arith_v<T> && std::is_same_v<U, T> &&                  \
+                      std::is_same_v<ret_type, T>) {                                                   \
+            if (!std::is_constant_evaluated()) {                                                       \
+                return detail::from_ktm(detail::as_ktm(lhs) op detail::as_ktm(rhs));                   \
+            }                                                                                          \
+        }                                                                                              \
         return [&]<size_t... index>(std::index_sequence<index...>) {                                   \
             return Vector<ret_type, N>{(lhs[index] op rhs[index])...};                                 \
         }(std::make_index_sequence<N>());                                                              \
@@ -389,16 +402,16 @@ struct Vector : public detail::VectorStorage<T, N> {
         return (lhs op## = Vector<U, N>{rhs});                                                         \
     }
 
-    OC_MAKE_VECTOR_BINARY_OPERATOR(+, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(-, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(*, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(/, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(%, ocarina::is_all_number_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(>>, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(<<, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(|, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(&, ocarina::is_all_integral_v<T, U>)
-    OC_MAKE_VECTOR_BINARY_OPERATOR(^, ocarina::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(+, true, ocarina::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(-, true, ocarina::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(*, true, ocarina::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(/, true, ocarina::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(%, false, ocarina::is_all_number_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(>>, false, ocarina::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(<<, false, ocarina::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(|, false, ocarina::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(&, false, ocarina::is_all_integral_v<T, U>)
+    OC_MAKE_VECTOR_BINARY_OPERATOR(^, false, ocarina::is_all_integral_v<T, U>)
 
 #undef OC_MAKE_VECTOR_BINARY_OPERATOR
 
@@ -445,46 +458,52 @@ struct Vector : public detail::VectorStorage<T, N> {
 
 #undef OC_MAKE_VECTOR_LOGIC_OPERATOR
 
-#define OC_MAKE_VECTOR_UNARY_FUNC(func)                                                      \
+#define OC_MAKE_VECTOR_UNARY_FUNC(func, ktm_ok)                                              \
     [[nodiscard]] static constexpr decltype(auto) call_##func(const this_type &v) noexcept { \
         using ret_type = Vector<decltype(func(T{})), this_type::dimension>;                  \
+        if constexpr (ktm_ok && detail::use_ktm_float_v<T> &&                                \
+                      std::is_same_v<decltype(func(T{})), T>) {                              \
+            if (!std::is_constant_evaluated()) {                                             \
+                return detail::from_ktm(detail::ktm_fn::func(detail::as_ktm(v)));            \
+            }                                                                                \
+        }                                                                                    \
         return [&]<size_t... index>(std::index_sequence<index...>) {                         \
             return ret_type{func(v.at(index))...};                                           \
         }(std::make_index_sequence<N>());                                                    \
     }
 
 private:
-    OC_MAKE_VECTOR_UNARY_FUNC(rcp)
-    OC_MAKE_VECTOR_UNARY_FUNC(abs)
-    OC_MAKE_VECTOR_UNARY_FUNC(sqrt)
-    OC_MAKE_VECTOR_UNARY_FUNC(sqr)
-    OC_MAKE_VECTOR_UNARY_FUNC(sign)
-    OC_MAKE_VECTOR_UNARY_FUNC(cos)
-    OC_MAKE_VECTOR_UNARY_FUNC(sin)
-    OC_MAKE_VECTOR_UNARY_FUNC(tan)
-    OC_MAKE_VECTOR_UNARY_FUNC(cosh)
-    OC_MAKE_VECTOR_UNARY_FUNC(sinh)
-    OC_MAKE_VECTOR_UNARY_FUNC(tanh)
-    OC_MAKE_VECTOR_UNARY_FUNC(log)
-    OC_MAKE_VECTOR_UNARY_FUNC(log2)
-    OC_MAKE_VECTOR_UNARY_FUNC(log10)
-    OC_MAKE_VECTOR_UNARY_FUNC(exp)
-    OC_MAKE_VECTOR_UNARY_FUNC(exp2)
-    OC_MAKE_VECTOR_UNARY_FUNC(asin)
-    OC_MAKE_VECTOR_UNARY_FUNC(acos)
-    OC_MAKE_VECTOR_UNARY_FUNC(atan)
-    OC_MAKE_VECTOR_UNARY_FUNC(asinh)
-    OC_MAKE_VECTOR_UNARY_FUNC(acosh)
-    OC_MAKE_VECTOR_UNARY_FUNC(atanh)
-    OC_MAKE_VECTOR_UNARY_FUNC(floor)
-    OC_MAKE_VECTOR_UNARY_FUNC(ceil)
-    OC_MAKE_VECTOR_UNARY_FUNC(degrees)
-    OC_MAKE_VECTOR_UNARY_FUNC(radians)
-    OC_MAKE_VECTOR_UNARY_FUNC(round)
-    OC_MAKE_VECTOR_UNARY_FUNC(isnan)
-    OC_MAKE_VECTOR_UNARY_FUNC(isinf)
-    OC_MAKE_VECTOR_UNARY_FUNC(fract)
-    OC_MAKE_VECTOR_UNARY_FUNC(copysign)
+    OC_MAKE_VECTOR_UNARY_FUNC(rcp, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(abs, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(sqrt, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(sqr, false)
+    OC_MAKE_VECTOR_UNARY_FUNC(sign, false)
+    OC_MAKE_VECTOR_UNARY_FUNC(cos, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(sin, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(tan, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(cosh, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(sinh, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(tanh, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(log, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(log2, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(log10, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(exp, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(exp2, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(asin, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(acos, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(atan, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(asinh, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(acosh, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(atanh, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(floor, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(ceil, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(degrees, false)
+    OC_MAKE_VECTOR_UNARY_FUNC(radians, false)
+    OC_MAKE_VECTOR_UNARY_FUNC(round, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(isnan, false)
+    OC_MAKE_VECTOR_UNARY_FUNC(isinf, false)
+    OC_MAKE_VECTOR_UNARY_FUNC(fract, true)
+    OC_MAKE_VECTOR_UNARY_FUNC(copysign, false)
 
     [[nodiscard]] static constexpr auto call_volume(this_type v) noexcept {
         return [&]<size_t... index>(std::index_sequence<index...>) {
@@ -506,11 +525,18 @@ private:
 
 #undef OC_MAKE_VECTOR_UNARY_FUNC
 
-#define OC_MAKE_VECTOR_BINARY_FUNC(func)                                                         \
+#define OC_MAKE_VECTOR_BINARY_FUNC(func, ktm_ok)                                                 \
     OC_NODISCARD static constexpr decltype(auto) call_##func(const this_type &v,                 \
                                                              const this_type &u) noexcept {      \
         using ret_type = Vector<std::remove_cvref_t<decltype(func(T{}, T{}))>,                   \
                                 this_type::dimension>;                                           \
+        if constexpr (ktm_ok && detail::use_ktm_float_v<T> &&                                    \
+                      std::is_same_v<std::remove_cvref_t<decltype(func(T{}, T{}))>, T>) {        \
+            if (!std::is_constant_evaluated()) {                                                 \
+                return detail::from_ktm(detail::ktm_fn::func(detail::as_ktm(v),                  \
+                                                             detail::as_ktm(u)));                \
+            }                                                                                    \
+        }                                                                                        \
         return [&]<size_t... index>(std::index_sequence<index...>) {                             \
             return ret_type{func(v[index], u[index])...};                                        \
         }(std::make_index_sequence<N>());                                                        \
@@ -521,19 +547,29 @@ private:
     OC_NODISCARD static constexpr decltype(auto) call_##func(const T &v, this_type u) noexcept { \
         return call_##func(this_type{v}, u);                                                     \
     }
-    OC_MAKE_VECTOR_BINARY_FUNC(max)
-    OC_MAKE_VECTOR_BINARY_FUNC(min)
-    OC_MAKE_VECTOR_BINARY_FUNC(pow)
-    OC_MAKE_VECTOR_BINARY_FUNC(atan2)
+    OC_MAKE_VECTOR_BINARY_FUNC(max, true)
+    OC_MAKE_VECTOR_BINARY_FUNC(min, true)
+    OC_MAKE_VECTOR_BINARY_FUNC(pow, true)
+    OC_MAKE_VECTOR_BINARY_FUNC(atan2, true)
 
     [[nodiscard]] static constexpr auto call_cross(this_type u, this_type v) noexcept {
         static_assert(N == 3);
+        if constexpr (detail::use_ktm_float_v<T>) {
+            if (!std::is_constant_evaluated()) {
+                return detail::from_ktm(ktm::cross(detail::as_ktm(u), detail::as_ktm(v)));
+            }
+        }
         return this_type(u.y * v.z - v.y * u.z,
                          u.z * v.x - v.z * u.x,
                          u.x * v.y - v.x * u.y);
     }
 
     [[nodiscard]] static constexpr auto call_dot(this_type u, this_type v) noexcept {
+        if constexpr (detail::use_ktm_float_v<T>) {
+            if (!std::is_constant_evaluated()) {
+                return ktm::dot(detail::as_ktm(u), detail::as_ktm(v));
+            }
+        }
         return [&]<size_t... index>(std::index_sequence<index...>) {
             return ((v[index] * u[index]) + ...);
         }(std::make_index_sequence<N>());
@@ -549,19 +585,25 @@ private:
 
 #undef OC_MAKE_VECTOR_BINARY_FUNC
 
-#define OC_MAKE_VECTOR_TRIPLE_FUNC(func)                                      \
+#define OC_MAKE_VECTOR_TRIPLE_FUNC(func, ktm_ok)                              \
     [[nodiscard]] static this_type call_##func(const this_type &t,            \
                                                const this_type &u,            \
                                                const this_type &v) noexcept { \
+        if constexpr (ktm_ok && detail::use_ktm_float_v<T>) {                  \
+            if (!std::is_constant_evaluated()) {                              \
+                return detail::from_ktm(detail::ktm_fn::func(                 \
+                    detail::as_ktm(t), detail::as_ktm(u), detail::as_ktm(v)));\
+            }                                                                 \
+        }                                                                     \
         return [&]<size_t... index>(std::index_sequence<index...>) {          \
             return this_type{func(t[index], u[index], v[index])...};          \
         }(std::make_index_sequence<N>());                                     \
     }
 
-    OC_MAKE_VECTOR_TRIPLE_FUNC(fma)
-    OC_MAKE_VECTOR_TRIPLE_FUNC(clamp)
-    OC_MAKE_VECTOR_TRIPLE_FUNC(lerp)
-    OC_MAKE_VECTOR_TRIPLE_FUNC(inverse_lerp)
+    OC_MAKE_VECTOR_TRIPLE_FUNC(fma, true)
+    OC_MAKE_VECTOR_TRIPLE_FUNC(clamp, true)
+    OC_MAKE_VECTOR_TRIPLE_FUNC(lerp, true)
+    OC_MAKE_VECTOR_TRIPLE_FUNC(inverse_lerp, false)
 
 #undef OC_MAKE_VECTOR_TRIPLE_FUNC
 
