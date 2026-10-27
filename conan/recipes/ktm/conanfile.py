@@ -5,7 +5,7 @@ from conan.tools.scm import Git
 
 class KtmConan(ConanFile):
     name = "ktm"
-    version = "0.2.14"
+    version = "0.2.16"
     package_type = "header-library"
     license = "MIT"
     homepage = "https://github.com/YGXXD/ktm"

@@ -73,7 +73,7 @@ class HorizonConan(ConanFile):
             self.requires("spdlog/1.17.0")
 
         if bool(self.options.with_engine):
-            self.requires("ktm/0.2.14", transitive_headers=True)
+            self.requires("ktm/0.2.16", transitive_headers=True)
             self.requires("pfr/1.91.0", transitive_headers=True)
             self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
             self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)

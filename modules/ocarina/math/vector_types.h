@@ -330,10 +330,10 @@ struct Vector : public detail::VectorStorage<T, N> {
 #define OC_MAKE_UNARY_OP(op, ktm_ok)                                          \
     [[nodiscard]] friend constexpr auto operator op(this_type val) noexcept { \
         using R = Vector<decltype(op T{}), N>;                                \
-        if constexpr (ktm_ok && detail::use_ktm_arith_v<T> &&                 \
+        if constexpr (ktm_ok && bridge::use_ktm_arith_v<T> &&                 \
                       std::is_same_v<decltype(op T{}), T>) {                  \
             if (!std::is_constant_evaluated()) {                              \
-                return detail::from_ktm(op detail::as_ktm(val));              \
+                return bridge::from_ktm(op bridge::as_ktm(val));              \
             }                                                                 \
         }                                                                     \
         return [&]<size_t... index>(std::index_sequence<index...>) {          \
@@ -352,10 +352,10 @@ struct Vector : public detail::VectorStorage<T, N> {
     [[nodiscard]] friend constexpr auto operator op(this_type lhs,                                     \
                                                     Vector<U, N> rhs) noexcept {                       \
         using ret_type = decltype(T {} op U{});                                                        \
-        if constexpr (ktm_ok && detail::use_ktm_arith_v<T> && std::is_same_v<U, T> &&                  \
+        if constexpr (ktm_ok && bridge::use_ktm_arith_v<T> && std::is_same_v<U, T> &&                  \
                       std::is_same_v<ret_type, T>) {                                                   \
             if (!std::is_constant_evaluated()) {                                                       \
-                return detail::from_ktm(detail::as_ktm(lhs) op detail::as_ktm(rhs));                   \
+                return bridge::from_ktm(bridge::as_ktm(lhs) op bridge::as_ktm(rhs));                   \
             }                                                                                          \
         }                                                                                              \
         return [&]<size_t... index>(std::index_sequence<index...>) {                                   \
@@ -461,10 +461,10 @@ struct Vector : public detail::VectorStorage<T, N> {
 #define OC_MAKE_VECTOR_UNARY_FUNC(func, ktm_ok)                                              \
     [[nodiscard]] static constexpr decltype(auto) call_##func(const this_type &v) noexcept { \
         using ret_type = Vector<decltype(func(T{})), this_type::dimension>;                  \
-        if constexpr (ktm_ok && detail::use_ktm_float_v<T> &&                                \
+        if constexpr (ktm_ok && bridge::use_ktm_float_v<T> &&                                \
                       std::is_same_v<decltype(func(T{})), T>) {                              \
             if (!std::is_constant_evaluated()) {                                             \
-                return detail::from_ktm(detail::ktm_fn::func(detail::as_ktm(v)));            \
+                return bridge::from_ktm(bridge::ktm_fn::func(bridge::as_ktm(v)));            \
             }                                                                                \
         }                                                                                    \
         return [&]<size_t... index>(std::index_sequence<index...>) {                         \
@@ -530,11 +530,11 @@ private:
                                                              const this_type &u) noexcept {      \
         using ret_type = Vector<std::remove_cvref_t<decltype(func(T{}, T{}))>,                   \
                                 this_type::dimension>;                                           \
-        if constexpr (ktm_ok && detail::use_ktm_float_v<T> &&                                    \
+        if constexpr (ktm_ok && bridge::use_ktm_float_v<T> &&                                    \
                       std::is_same_v<std::remove_cvref_t<decltype(func(T{}, T{}))>, T>) {        \
             if (!std::is_constant_evaluated()) {                                                 \
-                return detail::from_ktm(detail::ktm_fn::func(detail::as_ktm(v),                  \
-                                                             detail::as_ktm(u)));                \
+                return bridge::from_ktm(bridge::ktm_fn::func(bridge::as_ktm(v),                  \
+                                                             bridge::as_ktm(u)));                \
             }                                                                                    \
         }                                                                                        \
         return [&]<size_t... index>(std::index_sequence<index...>) {                             \
@@ -554,9 +554,9 @@ private:
 
     [[nodiscard]] static constexpr auto call_cross(this_type u, this_type v) noexcept {
         static_assert(N == 3);
-        if constexpr (detail::use_ktm_float_v<T>) {
+        if constexpr (bridge::use_ktm_float_v<T>) {
             if (!std::is_constant_evaluated()) {
-                return detail::from_ktm(ktm::cross(detail::as_ktm(u), detail::as_ktm(v)));
+                return bridge::from_ktm(ktm::cross(bridge::as_ktm(u), bridge::as_ktm(v)));
             }
         }
         return this_type(u.y * v.z - v.y * u.z,
@@ -565,9 +565,9 @@ private:
     }
 
     [[nodiscard]] static constexpr auto call_dot(this_type u, this_type v) noexcept {
-        if constexpr (detail::use_ktm_float_v<T>) {
+        if constexpr (bridge::use_ktm_float_v<T>) {
             if (!std::is_constant_evaluated()) {
-                return ktm::dot(detail::as_ktm(u), detail::as_ktm(v));
+                return ktm::dot(bridge::as_ktm(u), bridge::as_ktm(v));
             }
         }
         return [&]<size_t... index>(std::index_sequence<index...>) {
@@ -589,10 +589,10 @@ private:
     [[nodiscard]] static this_type call_##func(const this_type &t,            \
                                                const this_type &u,            \
                                                const this_type &v) noexcept { \
-        if constexpr (ktm_ok && detail::use_ktm_float_v<T>) {                  \
+        if constexpr (ktm_ok && bridge::use_ktm_float_v<T>) {                  \
             if (!std::is_constant_evaluated()) {                              \
-                return detail::from_ktm(detail::ktm_fn::func(                 \
-                    detail::as_ktm(t), detail::as_ktm(u), detail::as_ktm(v)));\
+                return bridge::from_ktm(bridge::ktm_fn::func(                 \
+                    bridge::as_ktm(t), bridge::as_ktm(u), bridge::as_ktm(v)));\
             }                                                                 \
         }                                                                     \
         return [&]<size_t... index>(std::index_sequence<index...>) {          \

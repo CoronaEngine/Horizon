@@ -14,20 +14,16 @@
 #define OCARINA_MATH_USE_KTM 1
 #endif
 
-namespace ocarina::detail {
+namespace ocarina::bridge {
 
 #if OCARINA_MATH_USE_KTM
 
-// Arithmetic delegation is only enabled for element types whose binary result
-// type is the element type itself (integer promotion would otherwise change the
-// result type, e.g. char + char -> int).
 template<typename T>
 inline constexpr bool use_ktm_arith_v =
     std::is_same_v<T, float> ||
     std::is_same_v<T, int> ||
     std::is_same_v<T, uint>;
 
-// Geometric and transcendental ktm functions are floating point only.
 template<typename T>
 inline constexpr bool use_ktm_float_v = std::is_same_v<T, float>;
 
@@ -44,14 +40,11 @@ inline constexpr bool use_ktm_float_v = false;
 template<typename T, size_t N>
 using ktm_vec_t = ktm::vec<N, T>;
 
-// Matrix<T, N, M> stores M columns of N elements, while ktm::mat<Row, Col, T>
-// stores Row columns of Col elements. The template arguments are therefore
-// transposed.
 template<typename T, size_t N, size_t M>
 using ktm_mat_t = ktm::mat<M, N, T>;
 
 template<typename T, size_t N>
-[[nodiscard]] inline ktm_vec_t<T, N> &as_ktm(Vector<T, N> &v) noexcept {
+[[nodiscard]] inline ktm_vec_t<T, N> as_ktm(const Vector<T, N> &v) noexcept {
     static_assert(sizeof(Vector<T, N>) == sizeof(ktm_vec_t<T, N>),
                   "ocarina vector and ktm vector layouts must match");
     static_assert(alignof(Vector<T, N>) == alignof(ktm_vec_t<T, N>),
@@ -60,25 +53,18 @@ template<typename T, size_t N>
                   "ocarina vector must be standard layout");
     static_assert(std::is_trivially_copyable_v<Vector<T, N>>,
                   "ocarina vector must be trivially copyable");
-    return reinterpret_cast<ktm_vec_t<T, N> &>(v);
-}
-
-template<typename T, size_t N>
-[[nodiscard]] inline const ktm_vec_t<T, N> &as_ktm(const Vector<T, N> &v) noexcept {
-    return as_ktm(const_cast<Vector<T, N> &>(v));
+    return bit_cast<ktm_vec_t<T, N>>(v);
 }
 
 template<typename T, size_t N>
 [[nodiscard]] inline Vector<T, N> from_ktm(const ktm_vec_t<T, N> &v) noexcept {
     static_assert(sizeof(Vector<T, N>) == sizeof(ktm_vec_t<T, N>),
                   "ocarina vector and ktm vector layouts must match");
-    Vector<T, N> ret;
-    as_ktm(ret) = v;
-    return ret;
+    return bit_cast<Vector<T, N>>(v);
 }
 
 template<typename T, size_t N, size_t M>
-[[nodiscard]] inline ktm_mat_t<T, N, M> &as_ktm(Matrix<T, N, M> &mat) noexcept {
+[[nodiscard]] inline ktm_mat_t<T, N, M> as_ktm(const Matrix<T, N, M> &mat) noexcept {
     static_assert(sizeof(Matrix<T, N, M>) == sizeof(ktm_mat_t<T, N, M>),
                   "ocarina matrix and ktm matrix layouts must match");
     static_assert(alignof(Matrix<T, N, M>) == alignof(ktm_mat_t<T, N, M>),
@@ -87,26 +73,16 @@ template<typename T, size_t N, size_t M>
                   "ocarina matrix must be standard layout");
     static_assert(std::is_trivially_copyable_v<Matrix<T, N, M>>,
                   "ocarina matrix must be trivially copyable");
-    return reinterpret_cast<ktm_mat_t<T, N, M> &>(mat);
-}
-
-template<typename T, size_t N, size_t M>
-[[nodiscard]] inline const ktm_mat_t<T, N, M> &as_ktm(const Matrix<T, N, M> &mat) noexcept {
-    return as_ktm(const_cast<Matrix<T, N, M> &>(mat));
+    return bit_cast<ktm_mat_t<T, N, M>>(mat);
 }
 
 template<typename T, size_t N, size_t M>
 [[nodiscard]] inline Matrix<T, N, M> from_ktm(const ktm_mat_t<T, N, M> &mat) noexcept {
     static_assert(sizeof(Matrix<T, N, M>) == sizeof(ktm_mat_t<T, N, M>),
                   "ocarina matrix and ktm matrix layouts must match");
-    Matrix<T, N, M> ret;
-    as_ktm(ret) = mat;
-    return ret;
+    return bit_cast<Matrix<T, N, M>>(mat);
 }
 
-// Names used by the macro-generated vector math functions. Functions without a
-// ktm counterpart are declared but deleted: the corresponding if constexpr
-// branch is never instantiated.
 namespace ktm_fn {
 
 using ktm::abs;
