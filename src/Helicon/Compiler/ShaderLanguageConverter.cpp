@@ -942,6 +942,46 @@ namespace EmbeddedShader
         return finalCode;
     }
 
+    namespace
+    {
+        void restoreComputeLocalSize(SlangCompileResult::BinaryTarget& words,
+                                     slang::ProgramLayout* layout)
+        {
+            // GLSL -> serialized Slang IR -> SPIR-V can emit LocalSize(1,1,1)
+            // while reflection still reports the original GLSL workgroup size.
+            // dispatch_extent uses reflection, so the emitted code must agree or
+            // only a fraction of the requested image/volume is actually written.
+            // Restore the workaround from the former getCompileResult path.
+            if (!layout || layout->getEntryPointCount() != 1 || words.size() < 5)
+                return;
+            auto* entry = layout->getEntryPointByIndex(0);
+            if (!entry || entry->getStage() != SLANG_STAGE_COMPUTE)
+                return;
+            SlangUInt sizes[3]{};
+            entry->getComputeThreadGroupSize(3, sizes);
+            for (const auto size : sizes)
+                if (size == 0 || size > std::numeric_limits<uint32_t>::max())
+                    return;
+
+            constexpr uint32_t opExecutionMode = 16;
+            constexpr uint32_t localSize = 17;
+            for (size_t offset = 5; offset < words.size();)
+            {
+                const uint32_t count = words[offset] >> 16;
+                const uint32_t opcode = words[offset] & 0xffffu;
+                if (count == 0 || count > words.size() - offset)
+                    return;
+                if (opcode == opExecutionMode && count == 6 && words[offset + 2] == localSize)
+                {
+                    for (size_t axis = 0; axis < 3; ++axis)
+                        words[offset + 3 + axis] = static_cast<uint32_t>(sizes[axis]);
+                    return;
+                }
+                offset += count;
+            }
+        }
+    }
+
     void ShaderLanguageConverter::fillCompileResult(SlangCompileResult &result,
                                                       Slang::ComPtr<slang::IComponentType> program,
                                                       SlangInt targetIndex, SlangCompileTarget dstLang,bool isNeedReflection,bool isLibrary)
@@ -970,8 +1010,8 @@ namespace EmbeddedShader
 	        SlangCompileResult::BinaryTarget target(finalCode->getBufferSize() / sizeof(uint32_t));
 	        memcpy(target.data(), finalCode->getBufferPointer(),
                    finalCode->getBufferSize());
-
-
+            if (dstLang == SLANG_SPIRV)
+                restoreComputeLocalSize(target, program->getLayout(targetIndex));
 	        result.binaryTargets.insert({targetLang, std::move(target)});
 	        return;
 	    }
