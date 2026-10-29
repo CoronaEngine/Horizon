@@ -20,7 +20,11 @@ void generateBinary(std::stringstream& out, std::string_view name, const std::ve
 
 void generateBinary(std::stringstream& out, std::string_view name, const SlangModule& slangModule)
 {
-    out << "static inline ::EmbeddedShader::SlangModule " << name <<" {{\"" << slangModule.name << "\"}," << " {\"" << slangModule.path << "\"},"  << "{";
+    out << "static inline ::EmbeddedShader::SlangModule " << name << " {{";
+    emitCppStringLiteral(out, slangModule.name);
+    out << "}, {";
+    emitCppStringLiteral(out, slangModule.path);
+    out << "}, {";
     emitSlangModuleLiteral(out, slangModule.binData);
     out << "}};\n";
 }
@@ -86,15 +90,7 @@ void buildStruct(const StructInfo& structInfo, std::stringstream& out)
 
 std::string sanitizeToIdentifier(const std::filesystem::path& p)
 {
-	auto s = p.filename().string();
-	for (auto& c : s)
-	{
-		if (!std::isalnum(static_cast<unsigned char>(c)))
-			c = '_';
-	}
-	if (!s.empty() && std::isdigit(static_cast<unsigned char>(s[0])))
-		s = "_" + s;
-	return s;
+	return sanitizeFilename(p);
 }
 
 bool hasShaderEntryPoint(const std::string& code)
@@ -721,13 +717,7 @@ int main(int argc, char** argv)
     auto nsTypeName = nsName + "_t";
     out << "struct " << nsTypeName << " {\n";
 
-    auto fileName = path.string();
-    std::ranges::replace(fileName, '\\', '_');
-    std::ranges::replace(fileName, '/', '_');
-    std::ranges::replace(fileName, '.', '_');
-    std::ranges::replace(fileName, ':', '_');
-
-    auto smName = "slang_module_" + fileName;
+    auto smName = "slang_module_" + sanitizePath(path);
 
 	generateBinary(out, smName, slangModule);
 

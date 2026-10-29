@@ -542,6 +542,17 @@ namespace Corona::Horizon
         return shaders_;
     }
 
+    std::pair<EmbeddedShader::ShaderCodeCompiler::ConditionInfo,
+              EmbeddedShader::ShaderCodeCompiler::ConditionInfo>
+    VulkanRasterizerPipeline::shader_condition_info() const
+    {
+        std::lock_guard lock(mutex_);
+        if (!shaders_.object)
+            return {};
+        return { shaders_.object->vertex->getCurrentConditionInfo(),
+                 shaders_.object->fragment->getCurrentConditionInfo() };
+    }
+
     uint32_t VulkanRasterizerPipeline::push_constant_size() const noexcept
     {
         return std::max(shaders_.vertex.shaderResources.pushConstantSize,

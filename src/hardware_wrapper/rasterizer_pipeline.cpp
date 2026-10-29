@@ -103,8 +103,28 @@ namespace Corona::Horizon
         return ResourceHandle::operator bool();
     }
 
+    bool RasterizerPipelineBase::sync_shader_conditions()
+    {
+        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
+        if (!token)
+            return false;
+
+        std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
+        auto [vert_conditions, frag_conditions] = impl->shader_condition_info();
+
+        // 非 EDSL pipeline 没有 ShaderCodeCompiler object，两边都是空 vector。
+        if (vert_conditions == vert_condition_info_ && frag_conditions == frag_condition_info_)
+            return false;
+
+        return sync_shader_conditions(vert_conditions, frag_conditions);
+    }
+
     RasterizerPipelineBase& RasterizerPipelineBase::extent(uint32_t width, uint32_t height)
     {
+        // 这里不再做条件切换：extent() 通常在所有 record_indirect 之后调用，
+        // 此时切换 impl 会让已录制的 draw 留在旧 impl 上。清帧/录制入口已经
+        // 保证 pipeline 变体与当前条件一致。
+
         // set_extent 收 uint16_t；公共签名统一 uint32_t（与 HardwareImageDesc 的
         // extent 同类型），这里检查后窄化。
         constexpr uint32_t max_extent = std::numeric_limits<uint16_t>::max();
@@ -127,9 +147,11 @@ namespace Corona::Horizon
         if (!index_buffer || !vertex_buffer || !indirect_buffer || params.draw_count == 0)
             return *this;
 
-        std::shared_ptr<IResourceRef> token;
-        token = ResourceBridge::token(*this);
+        // 条件变化必须在 bind_auto_resources 之前完成 pipeline 切换，否则这一
+        // draw 的 push constant 会写进旧 shader 变体的偏移。
+        sync_shader_conditions();
 
+        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         std::shared_ptr<VulkanRasterizerPipeline> impl = pipeline_impl(token);
         bind_auto_resources(impl);
         impl->record_indirect(this, index_buffer, vertex_buffer, indirect_buffer, params);
@@ -138,9 +160,11 @@ namespace Corona::Horizon
 
     RasterizerPipelineBase& RasterizerPipelineBase::clear_records()
     {
-        std::shared_ptr<IResourceRef> token;
-        token = ResourceBridge::token(*this);
+        // 帧开始时先切到当前 $IF 条件对应的 pipeline；随后 record_indirect 的
+        // bind_auto_resources 就会写入新变体的 push constant 布局。
+        sync_shader_conditions();
 
+        std::shared_ptr<IResourceRef> token = ResourceBridge::token(*this);
         pipeline_impl(token)->clear_records();
         return *this;
     }
@@ -210,9 +234,11 @@ namespace Corona::Horizon
         auto& fc = shaders.object->fragment;
         const bool bindless = vc->getCompilerOption().enableBindless;
         if (vertex_changed)
-            shaders.vertex = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, bindless);
+            shaders.vertex = vc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, bindless, vertConditionInfo);
         if (fragment_changed)
-            shaders.fragment = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fc->getCompilerOption().enableBindless);
+            shaders.fragment = fc->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV,
+                                                 fc->getCompilerOption().enableBindless,
+                                                 fragConditionInfo);
 
         shaders.object->updateAutoBind(bindless, vertConditionInfo, fragConditionInfo);
         shaders.auto_bind_entries = shaders.object->autoBindEntries;

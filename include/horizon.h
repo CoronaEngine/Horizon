@@ -841,6 +841,14 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
         RasterizerPipelineBase& extent(uint32_t width, uint32_t height);
+
+        // 检测 EDSL $IF 条件是否变化；变化时在 CPU 侧重新 link 对应 branch 组合、
+        // 创建新的 Vulkan pipeline，并把本 handle 切换到该 pipeline。返回是否发生切换。
+        // 每帧的 clear_records() 和每次 record_indirect() 都会自动调用；条件没变时
+        // 只做一次轻量比较，不会重新编译。extent() 在 record 之后调用，因此不在这里
+        // 切换，避免已录制的 draw 留在旧变体上。
+        bool sync_shader_conditions();
+
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
                                                 const HardwareBuffer& indirect_buffer,

@@ -1,12 +1,12 @@
-﻿#pragma once
+#pragma once
 
 #include "Codegen/AST/Struct.hpp"
 #include "ktm/type_vec.h"
-#include "spirv-tools/libspirv.hpp"
 
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <slang-com-ptr.h>
 #include <source_location>
 #include <string>
 #include <unordered_map>
@@ -145,13 +145,22 @@ struct ShaderCodeModule
         std::variant<std::vector<uint32_t>, std::string, SlangModule> shaderCode;
     };
 
+    struct SlangCompileResult
+    {
+        using BinaryTarget = std::vector<uint32_t>;
+        using StringTarget = std::string;
+        std::unordered_map<ShaderLanguage, BinaryTarget> binaryTargets;
+        std::unordered_map<ShaderLanguage, StringTarget> stringTargets;
+        std::unordered_map<ShaderLanguage, ShaderCodeModule::ShaderResources> reflections;
+    };
+
     struct CompilerOption
     {
 #if defined(__APPLE__)
         bool compileGLSL = false;
         bool compileHLSL = false;
 #else
-        bool compileGLSL = true;
+        bool compileGLSL = false;
         bool compileHLSL = true;
 #endif
         bool compileDXIL = false;
@@ -164,6 +173,22 @@ struct ShaderCodeModule
         std::string typeHeader;
     };
 
+    struct SlangBranchModule
+    {
+        Slang::ComPtr<slang::IModule> branchTrue;
+        Slang::ComPtr<slang::IModule> branchFalse;
+    };
+
+    // 首次 compile() 时在 session 里加载好的 module。运行时条件切换只从
+    // 这些已经加载/验证过的 IModule 重新 compose + link，不再新建 session，
+    // 也不再从源码/序列化 blob 重新 load。
+    struct SlangStageModules
+    {
+        Slang::ComPtr<slang::IModule> typeHeader;
+        Slang::ComPtr<slang::IModule> core;
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+    };
+
     struct ShaderCodeCompiler
     {
     public:
@@ -173,11 +198,11 @@ struct ShaderCodeModule
 
 
 
-        ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
+        ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
         ~ShaderCodeCompiler() = default;
 
         [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false, ConditionInfo conditionInfo = {});
-        void compile(const std::string& shaderCode, ShaderStage inputStage, ShaderLanguage language = {}, CompilerOption option = {});
+        void compile(const std::string& shaderCode, ShaderStage inputStage, CompilerOption option = {});
         CompilerOption getCompilerOption() const;
         static std::string getCombinedKey(const ConditionInfo& conditionInfo);
 
@@ -185,20 +210,38 @@ struct ShaderCodeModule
 
     private:
         std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const;
-        void combine(bool bindless, ConditionInfo conditionInfo);
-        std::vector<SlangModule*> getBranchModules(bool bindless, ConditionInfo conditionInfo) const;
-        SlangModule* getBranchModule(size_t index, bool condition, bool bindless) const;
-        SlangModule* getCoreBranchModule(bool bindless) const;
-        SlangModule* getTypeHeaderModule(bool bindless) const;
+
+        // 用首次编译时缓存的 session / IModule / IEntryPoint 重新 compose + link
+        // 指定条件组合，并按 language 过滤目标（nullopt = 首次编译，全 target）。
+        // 调用方必须持有 threadMutex 独占锁。writeHardcode 仅在首次 compile()
+        // 时为 true；运行时切分支不再往 HardcodeShaders 源码追加字面量。
+        void combineLocked(bool bindless, ConditionInfo conditionInfo,
+                           std::optional<ShaderLanguage> language, bool writeHardcode);
+
+        // 把一次 link 的结果按 target language/条件组合写入 compiledOutputs_。
+        void storeCompileResultLocked(bool bindless, const ConditionInfo& conditionInfo,
+                                      const SlangCompileResult& result, bool writeHardcode);
+
         std::string sourceLocationStr;
         std::string stage;
         std::vector<std::function<bool()>> conditions;
         CompilerOption compilerOption;
-        ShaderLanguage sourceLanguage;
-        ShaderStage sourceStage;
+
+        Slang::ComPtr<slang::ISession> session;
+        Slang::ComPtr<slang::ISession> bindlessSession;
+
+        SlangStageModules stageModules;
+        SlangStageModules bindlessStageModules;
+        std::vector<slang::TargetDesc> targets;
+        std::vector<slang::TargetDesc> bindlessTargets;
+
+        std::vector<SlangBranchModule> branchModules;
+        std::vector<SlangBranchModule> bindlessBranchModules;
+        std::vector<Slang::ComPtr<slang::IModule>> dependencyModules;
+        std::vector<Slang::ComPtr<slang::IModule>> bindlessDependencyModules;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
-        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string, SlangModule>>;
+        using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string>>;
         mutable std::unordered_map<std::string, CompiledVariant> compiledOutputs_;
     };
 }
