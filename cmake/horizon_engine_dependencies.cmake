@@ -25,6 +25,8 @@ find_package(VulkanHeaders CONFIG REQUIRED)
 _horizon_alias_target(horizon::vulkan_headers vulkan-headers::vulkan-headers Vulkan-Headers)
 _horizon_require_target(horizon::vulkan_headers "Vulkan headers are required by Horizon and Volk")
 
+include(${CMAKE_CURRENT_LIST_DIR}/horizon_vulkan.cmake)
+
 find_package(volk CONFIG REQUIRED)
 _horizon_alias_target(horizon::volk volk::volk volk)
 _horizon_require_target(horizon::volk "Volk is required by the Vulkan backend")

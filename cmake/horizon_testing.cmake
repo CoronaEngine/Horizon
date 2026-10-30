@@ -11,5 +11,9 @@ function(horizon_add_test target)
         "${PROJECT_SOURCE_DIR}/src"
     )
 
+    if(HORIZON_BUILD_ENGINE)
+        horizon_install_vulkan_runtime(${target})
+    endif()
+
     add_test(NAME ${target} COMMAND ${target})
 endfunction()

@@ -15,7 +15,7 @@ Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译�
 - [Miniconda / Conda](https://docs.conda.io/)：管理本项目的开发工具 Python 环境和 Conan。**不需要单独安装 Python 或 Conan。**
 - CMake **4.0 或更高版本**和 Ninja：所有 preset 使用 Ninja；两者都必须能在终端中运行。
 - Visual Studio 或 Visual Studio Build Tools：安装“使用 C++ 的桌面开发”、MSVC x64/x86 生成工具和 Windows SDK。项目会自动识别本机已安装的 VS/MSVC，不限定某个 VS 年份。
-- Vulkan SDK：提供 Vulkan 头文件、加载器与构建工具；Slang 由 Conan 提供。Ocarina 固定使用 Vulkan Compute。
+- Vulkan 开发组件：Vulkan Headers、Loader、Volk、VMA 和 Slang 由 Conan 提供，无需单独安装 Vulkan SDK。Windows 构建会部署 Conan 的 `vulkan-1.dll`；运行时仍需支持所需 Vulkan 功能的 GPU 驱动。Ocarina 固定使用 Vulkan Compute。
 - VS Code 和 **CMake Tools** 扩展：仅在使用 VS Code 构建时需要。
 
 先在 PowerShell 运行以下命令。它们都能显示版本号，就说明基础工具已准备好：
@@ -116,7 +116,7 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 ### 常见问题
 
 - **VS Code 中找不到标准头文件**：确认 `cmake.useVsDeveloperEnvironment` 已手动设置为 `always`，然后重新打开 VS Code 并重新 Configure。
-- **Ocarina 配置找不到 Vulkan**：安装 Vulkan SDK 并重新打开终端，确认 CMake 能找到 Vulkan；Slang 依赖通过 Conan 准备。
+- **Ocarina 配置找不到 VulkanLoader**：重新运行开发脚本的依赖安装/配置流程，确认 Conan 生成了 `VulkanLoader` 配置及 `Vulkan::Loader` 目标；Headers 和 Loader 版本需一致。SDK 验证层与调试工具可按需安装。
 - **第一次构建很慢**：Conan 正在准备依赖；后续使用相同目标族和配置通常会快很多。
 
 ---

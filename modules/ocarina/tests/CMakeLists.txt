@@ -85,9 +85,8 @@ ocarina_add_test(test-swizzle GPU CATEGORY math SOURCES math/test_swizzle.cpp)
 
 # Runtime and backend-facing tests.
 if(TARGET ocarina-backend-vulkan-compute)
-    find_package(Vulkan REQUIRED)
     ocarina_add_test(test-native-callback GPU CATEGORY runtime SOURCES runtime/test_native_callback.cpp)
-    target_link_libraries(test-runtime-native-callback PRIVATE Vulkan::Headers)
+    target_link_libraries(test-runtime-native-callback PRIVATE horizon::vulkan_headers)
 endif()
 ocarina_add_test(test-shared-array GPU CATEGORY runtime SOURCES runtime/test_shared_array.cpp)
 ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/test_slang_capabilities.cpp

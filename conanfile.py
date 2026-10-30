@@ -78,6 +78,7 @@ class HorizonConan(ConanFile):
             self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
             self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
             self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
+            self.requires("vulkan-loader/1.4.350.0", transitive_headers=True)
             self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
             self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
             if bool(self.options.with_tracy):

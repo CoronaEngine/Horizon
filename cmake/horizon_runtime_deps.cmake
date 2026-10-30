@@ -18,6 +18,7 @@ function(horizon_install_runtime_deps target_name provider_target)
 endfunction()
 
 function(helicon_install_runtime_deps target_name)
+    horizon_install_vulkan_runtime(${target_name})
     get_target_property(HELICON_DEPS Helicon INTERFACE_HELICON_RUNTIME_DEPS)
 
     if(NOT HELICON_DEPS)
