@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
-from workflow import (
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from build_tools.paths import REPO_ROOT, LOCAL_RECIPES, RECIPE_TOGGLE_ENV
+from build_tools.workflow import (
     CONFIGURATIONS,
     DEFAULT_CONFIGURATION,
     DEFAULT_TARGET_FAMILY,
@@ -21,15 +24,7 @@ from workflow import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = "HorizonExamples"
-LOCAL_RECIPES = (
-    "conan/recipes/ktm",
-    "conan/recipes/pfr",
-    "conan/recipes/slang",
-    "conan/recipes/vulkan-memory-allocator",
-)
-RECIPE_TOGGLE_ENV = "HORIZON_CONAN_EXPORT_LOCAL_RECIPES"
 
 
 TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
@@ -50,7 +45,7 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
 
 
 def target_family_for_target(target: str) -> str:
-    if target == "Horizon":
+    if target in {"Horizon", "Helicon"}:
         return "engine"
     if target == "ShaderCompileScripts":
         return "tools"
@@ -102,7 +97,6 @@ def install(configuration: str, target_family: str, *, update: bool = False) -> 
 
 def execute(args: argparse.Namespace) -> None:
     targets = args.targets or [DEFAULT_TARGET]
-    target = targets[0]
     configuration = args.configuration
     target_family = args.target_family or target_family_for_targets(targets)
 
@@ -118,14 +112,14 @@ def execute(args: argparse.Namespace) -> None:
     elif args.command == "build":
         install(configuration, target_family)
         cmake_configure(REPO_ROOT, configuration, target_family)
-        cmake_build(REPO_ROOT, configuration, target, target_family)
+        cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "build-fast":
-        cmake_build(REPO_ROOT, configuration, target, target_family)
+        cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "rebuild":
         safe_remove(REPO_ROOT, build_dir(REPO_ROOT, configuration, target_family))
         install(configuration, target_family)
         cmake_configure(REPO_ROOT, configuration, target_family)
-        cmake_build(REPO_ROOT, configuration, target, target_family)
+        cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "update":
         install(configuration, target_family, update=True)
         cmake_configure(REPO_ROOT, configuration, target_family)

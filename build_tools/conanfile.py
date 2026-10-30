@@ -5,6 +5,9 @@ from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMakeDeps, CMakeToolchain, cmake_layout
 
 
+required_conan_version = ">=2.28"
+
+
 class HorizonConan(ConanFile):
     name = "horizon"
     version = "0.5.0"
@@ -27,7 +30,6 @@ class HorizonConan(ConanFile):
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
-        "with_benchmarks": [True, False],
         "with_ocarina_tests": [True, False],
         "with_hardcode_shaders": [True, False],
         "with_tracy": [True, False],
@@ -42,7 +44,6 @@ class HorizonConan(ConanFile):
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
-        "with_benchmarks": False,
         "with_ocarina_tests": False,
         "with_hardcode_shaders": False,
         "with_tracy": True,
@@ -53,6 +54,7 @@ class HorizonConan(ConanFile):
     }
 
     def layout(self):
+        self.folders.root = ".."
         configuration = str(self.settings.build_type).lower()
         target_family = self.conf.get("user.horizon:target_family", default="examples")
         if target_family not in self._target_families:
@@ -119,7 +121,6 @@ class HorizonConan(ConanFile):
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
         variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
-        variables["HORIZON_BUILD_BENCHMARKS"] = bool(self.options.with_benchmarks)
         variables["HORIZON_BUILD_OCARINA_TESTS"] = bool(self.options.with_ocarina_tests)
         variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
         variables["HORIZON_ENABLE_TRACY"] = bool(self.options.with_tracy)

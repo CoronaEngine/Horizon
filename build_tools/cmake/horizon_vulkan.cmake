@@ -1,4 +1,5 @@
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/horizon_runtime_deps.cmake")
 
 # Consume the Conan config explicitly; never fall back to the system SDK module.
 find_package(VulkanLoader CONFIG REQUIRED)
@@ -29,12 +30,5 @@ function(horizon_install_vulkan_runtime target_name)
         return()
     endif()
     get_property(_runtime GLOBAL PROPERTY HORIZON_VULKAN_RUNTIME_FILES)
-    # Recopy if the package changes, even when the consumer only uses Volk.
-    set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS "${_runtime}")
-    add_custom_command(TARGET ${target_name} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${_runtime} "$<TARGET_FILE_DIR:${target_name}>"
-        COMMAND_EXPAND_LISTS
-        COMMENT "Copying Conan Vulkan loader to ${target_name}"
-        VERBATIM)
+    horizon_copy_runtime_files(${target_name} ${_runtime})
 endfunction()

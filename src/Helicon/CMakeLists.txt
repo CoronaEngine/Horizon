@@ -33,26 +33,6 @@ target_link_libraries(Helicon PUBLIC
     horizon::spirv_tools_link
 )
 
-set(HELICON_RUNTIME_DEPS)
-
-if(WIN32)
-    set(SLANG_DLLS)
-    foreach(_horizon_slang_binary_dir IN LISTS HORIZON_SLANG_BINARY_DIRS)
-        file(GLOB _horizon_slang_dir_dlls CONFIGURE_DEPENDS "${_horizon_slang_binary_dir}/*.dll")
-        list(APPEND SLANG_DLLS ${_horizon_slang_dir_dlls})
-    endforeach()
-
-    if(NOT SLANG_DLLS)
-        message(FATAL_ERROR "Slang runtime DLLs were not found in Conan package bin directories: ${HORIZON_SLANG_BINARY_DIRS}")
-    endif()
-
-    list(REMOVE_DUPLICATES SLANG_DLLS)
-    list(APPEND HELICON_RUNTIME_DEPS ${SLANG_DLLS})
-endif()
-
-if(HELICON_RUNTIME_DEPS)
-    message(STATUS "Found Helicon runtime DLLs: ${HELICON_RUNTIME_DEPS}")
-    set_target_properties(Helicon PROPERTIES
-        INTERFACE_HELICON_RUNTIME_DEPS "${HELICON_RUNTIME_DEPS}"
-    )
-endif()
+# Expose the collected Slang files to parent-project runtime/test helpers.
+set_property(TARGET Helicon PROPERTY
+    INTERFACE_HELICON_RUNTIME_DEPS "${HORIZON_SLANG_RUNTIME_FILES}")

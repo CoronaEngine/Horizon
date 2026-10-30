@@ -9,7 +9,8 @@ Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译�
 
 ### 1. 准备工具
 
-本项目目前只支持 **Windows x64**。推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
+完整渲染器的本机验证以 **Windows x64** 为主；`core` 目标族另有 Windows、Linux 和 macOS CI。
+Windows 推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
 
 - Git：用于克隆和更新代码。
 - [Miniconda / Conda](https://docs.conda.io/)：管理本项目的开发工具 Python 环境和 Conan。**不需要单独安装 Python 或 Conan。**
@@ -70,14 +71,15 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 
 | 使用场景 | 选择的 Debug preset | 构建目录 |
 | --- | --- | --- |
-| Horizon / Helicon 核心库 | `core-debug` | `build/conan/core/debug` |
+| Core / Math / Image / AST / DSL 与基础测试 | `core-debug` | `build/conan/core/debug` |
+| Horizon / Helicon 渲染库 | `engine-debug` | `build/conan/engine/debug` |
 | ShaderCompileScripts | `tools-debug` | `build/conan/tools/debug` |
 | HorizonExamples | `examples-debug` | `build/conan/examples/debug` |
 | Ocarina | `ocarina-debug` | `build/conan/ocarina/debug` |
 | Ocarina 的 `test-*` 测试 | `ocarina-tests-debug` | `build/conan/ocarina-tests/debug` |
 | Vision Hotfix | `vision-hotfix-debug` | `build/conan/vision-hotfix/debug` |
 
-旧的 `debug` preset 仍可用，它等同于 `examples-debug`。每个目标族使用独立目录，切换 preset 后请重新执行 Configure，不要把不同目标族混在同一个构建目录里。
+使用完整的目标族 preset 名，例如 `examples-debug`。每个目标族使用独立目录，切换 preset 后请重新执行 Configure，不要把不同目标族混在同一个构建目录里。
 
 ### 3. 用脚本构建
 
@@ -85,24 +87,44 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 
 ```powershell
 # 配置 Examples 的 Debug 构建
-conda run -n horizon-dev --no-capture-output python tools/dev.py configure --configuration Debug --target-family examples
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py configure --configuration Debug --target-family examples
 
 # 配置并构建一个目标；脚本会从目标名自动判断目标族
-conda run -n horizon-dev --no-capture-output python tools/dev.py build HorizonExamples --configuration Debug
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py build HorizonExamples --configuration Debug
+
+# 同一目标族可以一次构建多个目标
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py build Horizon Helicon --configuration Debug
 
 # 已配置过时，快速构建该目标族的全部 target
-conda run -n horizon-dev --no-capture-output python tools/dev.py build-fast all --configuration Debug --target-family examples
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fast all --configuration Debug --target-family examples
 ```
 
-把 `examples` 换成 `core`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+
+构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
+根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
+直接使用 Conan 时执行 `conan install build_tools/conanfile.py`，并指定所需 profile 和选项。
+`tools/` 保留 ShaderCompileScripts 的 C++ 源码和资产处理工具，模块的目标声明与代码生成器保留在源码旁。
+
+缓存管理使用 `python build_tools/conan_cache.py`。`update` 与开发脚本共用平台选择和依赖安装流程，
+可用 `--target-family` 指定目标族；安装、更新与缓存删除使用 Conan home 下的 `.horizon-install.lock`，
+覆盖共用缓存的多个 Horizon 工作区。单包更新的临时文件写入 `build/conan/cache/`。
+
+构建工具与源码检查可分别运行：
+
+```powershell
+python -B -m unittest discover -s build_tools/tests -p "test_*.py"
+python -B -m unittest discover -s tests/architecture -p "test_*.py"
+python -B -m unittest discover -s modules/ocarina/tests -p "test_*.py"
+```
 
 ### 4. 新增 target 和依赖
 
 先确定新 target 属于哪个现有目标族。修改后必须重新执行 Configure，CMake Tools 才会显示新 target。
 
 - **只新增 target，或只使用项目内/已存在的依赖**：只修改对应的 `CMakeLists.txt`，添加 target 并链接已有库；不需要修改 Conan。
-- **新增第三方依赖**：同时修改两处。先在 `conanfile.py` 用 `self.requires(...)` 声明依赖，并让它只在需要的目标族启用；再在 CMake 中 `find_package(...)` 并用 `target_link_libraries(...)` 链接。不要在 CMake 中用 `FetchContent` 下载第三方库。
-- **希望用脚本直接构建新 target**：若它不符合现有名称规则，还要在 `tools/dev.py` 的 target 到目标族映射中登记；否则脚本可能选择错误的 preset。
+- **新增第三方依赖**：同时修改两处。先在 `build_tools/conanfile.py` 用 `self.requires(...)` 声明依赖，并让它只在需要的目标族启用；再在 CMake 中 `find_package(...)` 并用 `target_link_libraries(...)` 链接。不要在 CMake 中用 `FetchContent` 下载第三方库。
+- **希望用脚本直接构建新 target**：若它不符合现有名称规则，还要在 `build_tools/dev.py` 的 target 到目标族映射中登记；否则脚本可能选择错误的 preset。
 - **新增一个完整的目标族**：除 CMake 和 Conan 外，还要新增 CMake preset、Conan 选项、脚本的目标族选项和 target 映射，确保它使用独立的构建目录。
 
 例如，新增一个不引入第三方库的 Ocarina 测试，只需在 `modules/ocarina/tests/CMakeLists.txt` 增加：

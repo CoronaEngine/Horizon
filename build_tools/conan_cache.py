@@ -4,24 +4,21 @@ import argparse
 import sys
 from pathlib import Path
 
-from workflow import (
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from build_tools.paths import REPO_ROOT, LOCAL_RECIPES, RECIPE_TOGGLE_ENV
+from build_tools.dev import conan_options
+from build_tools.workflow import (
     CONFIGURATIONS,
     DEFAULT_CONFIGURATION,
     CommandError,
-    export_local_recipes,
-    profile_path,
+    DEFAULT_TARGET_FAMILY,
+    TARGET_FAMILIES,
+    conan_install,
+    conan_cache_lock,
     run_command,
 )
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-LOCAL_RECIPES = (
-    "conan/recipes/ktm",
-    "conan/recipes/pfr",
-    "conan/recipes/slang",
-    "conan/recipes/vulkan-memory-allocator",
-)
-RECIPE_TOGGLE_ENV = "HORIZON_CONAN_EXPORT_LOCAL_RECIPES"
 
 
 def reference_like(value: str) -> bool:
@@ -89,21 +86,17 @@ def update_cache(args: argparse.Namespace) -> None:
         raise RuntimeError("--package-id and --package-query are only supported by list/remove.")
     pattern = cache_pattern(args)
     concrete = concrete_reference(pattern)
-    command = ["conan", "install"]
-    if concrete:
-        command.extend(("--requires", concrete))
-    else:
-        command.append(".")
-    profile = profile_path(REPO_ROOT, args.configuration)
-    command.extend(("-pr:a", str(profile), "-pr:b", str(profile), "--build=missing"))
     update_name = None
     if args.reference:
         update_name = reference_name(args.reference)
     elif args.package:
         update_name = reference_name(args.package)
-    command.append(f"--update={update_name}" if update_name else "--update")
-    export_local_recipes(REPO_ROOT, LOCAL_RECIPES, toggle_env=RECIPE_TOGGLE_ENV)
-    run_command(command, cwd=REPO_ROOT)
+    conan_install(
+        REPO_ROOT, args.configuration, target_family=args.target_family,
+        options=() if concrete else conan_options(args.target_family),
+        recipes=LOCAL_RECIPES, recipe_toggle_env=RECIPE_TOGGLE_ENV,
+        update=update_name or True, requires=concrete,
+    )
 
 
 def remove_cache(args: argparse.Namespace) -> None:
@@ -121,7 +114,8 @@ def remove_cache(args: argparse.Namespace) -> None:
         command.extend(("--package-query", args.package_query))
     if args.dry_run:
         command.append("--dry-run")
-    run_command(command, cwd=REPO_ROOT)
+    with conan_cache_lock(REPO_ROOT):
+        run_command(command, cwd=REPO_ROOT)
 
 
 def clear_cache(args: argparse.Namespace) -> None:
@@ -130,7 +124,8 @@ def clear_cache(args: argparse.Namespace) -> None:
     command = ["conan", "remove", "*", "--confirm"]
     if args.dry_run:
         command.append("--dry-run")
-    run_command(command, cwd=REPO_ROOT)
+    with conan_cache_lock(REPO_ROOT):
+        run_command(command, cwd=REPO_ROOT)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -144,6 +139,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--package-id")
     parser.add_argument("--package-query")
     parser.add_argument("--configuration", choices=CONFIGURATIONS, default=DEFAULT_CONFIGURATION)
+    parser.add_argument("--target-family", choices=TARGET_FAMILIES, default=DEFAULT_TARGET_FAMILY)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser

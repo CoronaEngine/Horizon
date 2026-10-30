@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 
-_path = Path(__file__).resolve().parents[1] / "modules/ocarina/tests/run_capability_audit.py"
+_path = Path(__file__).with_name("run_capability_audit.py")
 _spec = importlib.util.spec_from_file_location("capability_audit", _path)
 audit = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(audit)
