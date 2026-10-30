@@ -9,6 +9,8 @@ if __package__ in (None, ""):
 
 from build_tools.paths import REPO_ROOT, LOCAL_RECIPES, RECIPE_TOGGLE_ENV
 from build_tools.dev import conan_options
+from build_tools.git_tool import ensure_git
+from build_tools.ninja_tool import ensure_ninja
 from build_tools.workflow import (
     CONFIGURATIONS,
     DEFAULT_CONFIGURATION,
@@ -91,6 +93,8 @@ def update_cache(args: argparse.Namespace) -> None:
         update_name = reference_name(args.reference)
     elif args.package:
         update_name = reference_name(args.package)
+    ensure_git()
+    ensure_ninja()
     conan_install(
         REPO_ROOT, args.configuration, target_family=args.target_family,
         options=() if concrete else conan_options(args.target_family),

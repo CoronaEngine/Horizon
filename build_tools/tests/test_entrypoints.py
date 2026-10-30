@@ -40,6 +40,7 @@ class EntryPointTests(unittest.TestCase):
 
     def test_multi_target_build_keeps_prepared_environment_during_regeneration(self):
         with patch.object(workflow, "assert_cache_matches_repo"), \
+                patch.object(workflow, "repair_ninja_cache"), \
                 patch.object(workflow, "load_conan_build_environment", return_value={}), \
                 patch.object(workflow, "run_command") as run:
             workflow.cmake_build(REPO_ROOT, "Debug", ["Horizon", "Helicon"], "engine")
@@ -48,7 +49,8 @@ class EntryPointTests(unittest.TestCase):
 
     def test_cache_update_uses_the_shared_install_transaction(self):
         for package in (None, "fmt/12.1.0"):
-            with self.subTest(package=package), patch.object(conan_cache, "conan_install") as install:
+            with self.subTest(package=package), patch.object(conan_cache, "conan_install") as install, \
+                    patch.object(conan_cache, "ensure_git"), patch.object(conan_cache, "ensure_ninja"):
                 args = conan_cache.create_parser().parse_args(
                     ["update", *([package] if package else []), "--target-family", "core"])
                 conan_cache.update_cache(args)

@@ -1,4 +1,9 @@
 function(horizon_dev_bootstrap)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${HORIZON_BUILD_TOOLS_DIR}/git_tool.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/ninja_tool.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/conda_environment.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/file_lock.py")
     if(NOT DEFINED HORIZON_CONDA_ENV OR HORIZON_CONDA_ENV STREQUAL "")
         set(HORIZON_CONDA_ENV "horizon-dev" CACHE STRING "Conda environment used by Horizon development tools")
     endif()
@@ -74,6 +79,8 @@ function(horizon_dev_bootstrap)
             PATHS
                 "$ENV{CONDA_PREFIX}/Scripts"
                 "$ENV{CONDA_PREFIX}/condabin"
+                "$ENV{USERPROFILE}/miniforge3/Scripts"
+                "$ENV{USERPROFILE}/miniforge3/condabin"
                 "$ENV{USERPROFILE}/miniconda3/Scripts"
                 "$ENV{USERPROFILE}/miniconda3/condabin"
                 "$ENV{USERPROFILE}/anaconda3/Scripts"
@@ -149,6 +156,8 @@ function(horizon_dev_bootstrap)
         message(FATAL_ERROR "Horizon build environment was not generated: ${_horizon_build_environment}")
     endif()
     include("${_horizon_build_environment}")
+    include(horizon_ninja)
+    horizon_configure_ninja()
     set(HORIZON_DEV_BUILD_ENVIRONMENT "${_horizon_build_environment}" PARENT_SCOPE)
     set(HORIZON_DEV_PYTHON "${HORIZON_DEV_PYTHON}" PARENT_SCOPE)
     set(CMAKE_TOOLCHAIN_FILE "${_horizon_toolchain}" CACHE FILEPATH "Conan toolchain" FORCE)

@@ -8,6 +8,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from build_tools.paths import REPO_ROOT, LOCAL_RECIPES, RECIPE_TOGGLE_ENV
+from build_tools.git_tool import ensure_git
+from build_tools.ninja_tool import ensure_ninja
 from build_tools.workflow import (
     CONFIGURATIONS,
     DEFAULT_CONFIGURATION,
@@ -15,6 +17,7 @@ from build_tools.workflow import (
     CommandError,
     TARGET_FAMILIES,
     build_dir,
+    cached_ninja,
     clean_repo,
     cmake_build,
     cmake_configure,
@@ -99,6 +102,10 @@ def execute(args: argparse.Namespace) -> None:
     targets = args.targets or [DEFAULT_TARGET]
     configuration = args.configuration
     target_family = args.target_family or target_family_for_targets(targets)
+    if args.command != "clean":
+        ensure_git()
+    if args.command in {"install", "_bootstrap", "configure", "build", "build-fast", "rebuild", "update"}:
+        ensure_ninja(cached_ninja(REPO_ROOT, configuration, target_family))
 
     if args.command == "status":
         run_command(("git", "status", "--short", "--branch"), cwd=REPO_ROOT)

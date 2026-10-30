@@ -307,6 +307,7 @@ class WorkflowTests(unittest.TestCase):
     def test_build_commands_keep_all_requested_targets(self):
         for command in ("build", "build-fast", "rebuild"):
             with self.subTest(command=command), patch.object(dev, "install"), \
+                    patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
                     patch.object(dev, "cmake_configure"), patch.object(dev, "safe_remove"), \
                     patch.object(dev, "cmake_build") as build:
                 dev.execute(dev.create_parser().parse_args([command, "ocarina-core", "ocarina-math"]))

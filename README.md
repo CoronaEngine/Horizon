@@ -12,9 +12,9 @@ Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译�
 完整渲染器的本机验证以 **Windows x64** 为主；`core` 目标族另有 Windows、Linux 和 macOS CI。
 Windows 推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
 
-- Git：用于克隆和更新代码。
-- [Miniconda / Conda](https://docs.conda.io/)：管理本项目的开发工具 Python 环境和 Conan。**不需要单独安装 Python 或 Conan。**
-- CMake **4.0 或更高版本**和 Ninja：所有 preset 使用 Ninja；两者都必须能在终端中运行。
+- Git：首次获取源码可使用 Git 或下载源码压缩包；构建时缺少 Git 会通过 Conda 自动安装。
+- [Miniforge / Miniconda / Conda](https://docs.conda.io/)：管理 Python、Conan、Git 和 Ninja，构建时自动准备这些工具。
+- CMake **4.0 或更高版本**：需预先安装并能在终端中运行。所有 preset 使用 Ninja，缺少 Ninja 时通过 Conda 自动安装。
 - Visual Studio 或 Visual Studio Build Tools：安装“使用 C++ 的桌面开发”、MSVC x64/x86 生成工具和 Windows SDK。项目会自动识别本机已安装的 VS/MSVC，不限定某个 VS 年份。
 - Vulkan 开发组件：Vulkan Headers、Loader、Volk、VMA 和 Slang 由 Conan 提供，无需单独安装 Vulkan SDK。Windows 构建会部署 Conan 的 `vulkan-1.dll`；运行时仍需支持所需 Vulkan 功能的 GPU 驱动。Ocarina 固定使用 Vulkan Compute。
 - VS Code 和 **CMake Tools** 扩展：仅在使用 VS Code 构建时需要。
@@ -22,13 +22,13 @@ Windows 推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PA
 先在 PowerShell 运行以下命令。它们都能显示版本号，就说明基础工具已准备好：
 
 ```powershell
-git --version
 conda --version
 cmake --version
-ninja --version
 ```
 
-如果提示“找不到命令”，请检查对应工具是否已安装并加入 `PATH`，然后重新打开终端。克隆项目后，进入仓库根目录并执行一次：
+如果提示“找不到命令”，请检查对应工具是否已安装并加入 `PATH`，然后重新打开终端。
+通过根 CMake preset 配置时，会自动创建或复用 `horizon-dev` 环境。
+如果直接运行 `build_tools/dev.py`，则需先创建开发环境，再通过 `conda run -n horizon-dev python ...` 运行：
 
 ```powershell
 conda create --yes --name horizon-dev --override-channels --channel conda-forge "python>=3.11" "conan>=2.28,<3"
@@ -36,8 +36,15 @@ conda create --yes --name horizon-dev --override-channels --channel conda-forge 
 
 第一次创建环境和配置会下载或编译 Conan 依赖，耗时较长是正常现象。
 
+Git 优先复用 PATH 或当前 Python 所属 Conda 环境中的可用程序；Ninja 还会优先检查当前构建目录的缓存路径。
+缺失或无法运行时，通过 conda-forge 安装或修复到当前 Python 所属的 Conda 环境，并复检版本命令。
+安装仅更新当前进程和子进程的 PATH，不修改系统环境变量。两个工具在 Conan 编译依赖前准备好；
+`conan_cache.py update` 同样会准备工具，`status` 只自动准备 Git，`clean` 不安装工具。
+Conda 安装使用环境内的 `conda-meta/corona-tools.lock`，与 CoronaEngine 共用同一环境时也会互斥。
+失效的 Ninja 缓存会在配置时替换；`build-fast` 会先刷新环境并重新配置，再启动构建。
+
 若仓库根目录已有 `.venv`，CMake 自动配置会优先使用其中的 Python 和 Conan，
-无需先激活环境或安装 Conda。该环境须包含 Python >=3.11 和 Conan >=2.28、<3；
+无需先激活环境或安装 Conda。该环境须包含 Python >=3.11 和 Conan >=2.28、<3，且已有可用的 Git 和 Ninja；普通 `.venv` 不会通过 Conda 安装工具。
 不存在 `.venv` 时，继续使用上面的 Conda 流程。
 
 CLion 使用 Visual Studio 工具链时，可以直接加载项目的 CMake 配置；依赖准备会识别

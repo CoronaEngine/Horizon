@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from build_tools.paths import conanfile_path, profiles_dir
+from build_tools.ninja_tool import probe_ninja
 
 
 CONFIGURATIONS = ("Debug", "Release", "RelWithDebInfo", "MinSizeRel")
@@ -384,6 +385,26 @@ def assert_cache_matches_repo(
         )
 
 
+def cached_ninja(repo_root: Path, configuration: str, target_family: str = DEFAULT_TARGET_FAMILY) -> str | None:
+    cache = build_dir(repo_root, configuration, target_family) / "CMakeCache.txt"
+    if cache.is_file() and (_cache_value(cache, "CMAKE_GENERATOR") or "").startswith("Ninja"):
+        return _cache_value(cache, "CMAKE_MAKE_PROGRAM")
+    return None
+
+
+def repair_ninja_cache(repo_root: Path, configuration: str, target_family: str) -> None:
+    cache = build_dir(repo_root, configuration, target_family) / "CMakeCache.txt"
+    if not (_cache_value(cache, "CMAKE_GENERATOR") or "").startswith("Ninja"):
+        return
+    executable = _cache_value(cache, "CMAKE_MAKE_PROGRAM")
+    if not executable or not probe_ninja(executable):
+        # cmake --build starts the cached Ninja before CMake can regenerate.
+        # Export the newly selected PATH before configuring its replacement.
+        print("[Ninja] Reconfiguring because the cached build executable is unavailable.", flush=True)
+        write_cmake_build_environment(repo_root, configuration, target_family)
+        cmake_configure(repo_root, configuration, target_family)
+
+
 def cmake_build(
     repo_root: Path,
     configuration: str,
@@ -391,6 +412,7 @@ def cmake_build(
     target_family: str = DEFAULT_TARGET_FAMILY,
 ) -> None:
     assert_cache_matches_repo(repo_root, configuration, target_family)
+    repair_ninja_cache(repo_root, configuration, target_family)
     environment = load_conan_build_environment(repo_root, configuration, target_family)
     # A Ninja regeneration belongs to this prepared environment as well.
     environment[BOOTSTRAP_ENV] = "1"
