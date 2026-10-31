@@ -17,24 +17,24 @@ function(horizon_install_runtime_deps target_name provider_target)
     )
 endfunction()
 
-function(helicon_install_runtime_deps target_name)
-    get_target_property(HELICON_DEPS Helicon INTERFACE_HELICON_RUNTIME_DEPS)
-
-    if(NOT HELICON_DEPS)
-        message(WARNING "Helicon library did not specify any runtime dependencies.")
+function(horizon_copy_runtime_files target_name)
+    if(NOT WIN32 OR NOT ARGN)
         return()
     endif()
-
-    message(STATUS "Scheduling runtime dependencies for ${target_name}: ${HELICON_DEPS}")
-
-    set(DESTINATION_DIR "$<TARGET_FILE_DIR:${target_name}>")
-
-    add_custom_command(
-        TARGET ${target_name} POST_BUILD
+    set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS "${ARGN}")
+    add_custom_command(TARGET ${target_name} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${HELICON_DEPS}
-        "${DESTINATION_DIR}"
-        COMMENT "Copying Helicon runtime dependencies to ${target_name} output directory"
-        VERBATIM
-    )
+            ${ARGN} "$<TARGET_FILE_DIR:${target_name}>"
+        COMMAND_EXPAND_LISTS VERBATIM
+        COMMENT "Copying Conan runtime files to ${target_name}")
+endfunction()
+
+function(horizon_install_slang_runtime target_name)
+    get_property(_runtime GLOBAL PROPERTY HORIZON_SLANG_RUNTIME_FILES)
+    horizon_copy_runtime_files(${target_name} ${_runtime})
+endfunction()
+
+function(helicon_install_runtime_deps target_name)
+    horizon_install_vulkan_runtime(${target_name})
+    horizon_install_slang_runtime(${target_name})
 endfunction()

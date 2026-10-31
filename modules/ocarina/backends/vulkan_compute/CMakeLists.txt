@@ -1,14 +1,10 @@
-
-find_package(Vulkan REQUIRED)
-find_package(slang CONFIG REQUIRED)
-
 file(GLOB_RECURSE HEADER_FILES "*.h")
 file(GLOB_RECURSE SOURCE_FILES "*.cpp")
 
 ocarina_add_backend(vulkan-compute SOURCES ${HEADER_FILES} ${SOURCE_FILES})
 
 target_link_libraries(ocarina-backend-vulkan-compute PRIVATE
-    Vulkan::Vulkan
+    Vulkan::Loader
     slang::slang
     vulkan-memory-allocator::vulkan-memory-allocator
 )
@@ -17,17 +13,7 @@ target_include_directories(ocarina-backend-vulkan-compute PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-if(WIN32)
-    foreach(_slang_bin_dir IN LISTS HORIZON_SLANG_BINARY_DIRS)
-        file(GLOB _slang_runtime_dlls "${_slang_bin_dir}/*.dll")
-        if(_slang_runtime_dlls)
-            add_custom_command(TARGET ocarina-backend-vulkan-compute POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${_slang_runtime_dlls} "$<TARGET_FILE_DIR:ocarina-backend-vulkan-compute>"
-                COMMAND_EXPAND_LISTS VERBATIM)
-        endif()
-    endforeach()
-endif()
+helicon_install_runtime_deps(ocarina-backend-vulkan-compute)
 
 # Copy Slang device builtin headers next to the backend DLL
 set(BUILTIN_SLANG_SRC "${CMAKE_CURRENT_SOURCE_DIR}/builtin/slang")

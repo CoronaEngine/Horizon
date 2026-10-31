@@ -40,7 +40,7 @@ set(_quill_logging_boundary_build_dir
     "${CMAKE_CURRENT_BINARY_DIR}/quill-logging-boundary")
 add_test(
     NAME horizon.architecture.quill_logging_boundary
-    COMMAND ${CMAKE_COMMAND} -E env CORONA_DEV_BOOTSTRAP_ACTIVE=1
+    COMMAND ${CMAKE_COMMAND} -E env HORIZON_DEV_BOOTSTRAP_ACTIVE=1
             ${CMAKE_COMMAND}
             -S ${PROJECT_SOURCE_DIR}
             -B ${_quill_logging_boundary_build_dir}

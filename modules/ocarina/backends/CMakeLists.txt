@@ -17,5 +17,4 @@ endfunction()
 
 add_library(ocarina-backend INTERFACE)
 
-find_package(Vulkan REQUIRED)
 add_subdirectory(vulkan_compute)

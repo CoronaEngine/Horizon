@@ -1,4 +1,9 @@
 function(horizon_dev_bootstrap)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${HORIZON_BUILD_TOOLS_DIR}/git_tool.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/ninja_tool.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/conda_environment.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/file_lock.py")
     if(NOT DEFINED HORIZON_CONDA_ENV OR HORIZON_CONDA_ENV STREQUAL "")
         set(HORIZON_CONDA_ENV "horizon-dev" CACHE STRING "Conda environment used by Horizon development tools")
     endif()
@@ -43,13 +48,13 @@ function(horizon_dev_bootstrap)
         set(_horizon_python "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
     endif()
     set(_horizon_venv_bootstrapped FALSE)
-    if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE} AND EXISTS "${_horizon_python}")
+    if(NOT DEFINED ENV{HORIZON_DEV_BOOTSTRAP_ACTIVE} AND EXISTS "${_horizon_python}")
         get_filename_component(_horizon_python_dir "${_horizon_python}" DIRECTORY)
         message(STATUS "Running Horizon dependency bootstrap with the project .venv")
         execute_process(
             COMMAND "${CMAKE_COMMAND}" -E env
                     --modify "PATH=path_list_prepend:${_horizon_python_dir}"
-                    "${_horizon_python}" tools/dev.py _bootstrap
+                    "${_horizon_python}" "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -64,7 +69,7 @@ function(horizon_dev_bootstrap)
         set(_horizon_venv_bootstrapped TRUE)
     endif()
 
-    if(NOT DEFINED ENV{CORONA_DEV_BOOTSTRAP_ACTIVE} AND NOT _horizon_venv_bootstrapped)
+    if(NOT DEFINED ENV{HORIZON_DEV_BOOTSTRAP_ACTIVE} AND NOT _horizon_venv_bootstrapped)
         # Search for conda in multiple locations:
         # - conda.exe in Scripts/ (works in Git Bash)
         # - conda.bat in condabin/ (works in cmd/PowerShell)
@@ -74,6 +79,8 @@ function(horizon_dev_bootstrap)
             PATHS
                 "$ENV{CONDA_PREFIX}/Scripts"
                 "$ENV{CONDA_PREFIX}/condabin"
+                "$ENV{USERPROFILE}/miniforge3/Scripts"
+                "$ENV{USERPROFILE}/miniforge3/condabin"
                 "$ENV{USERPROFILE}/miniconda3/Scripts"
                 "$ENV{USERPROFILE}/miniconda3/condabin"
                 "$ENV{USERPROFILE}/anaconda3/Scripts"
@@ -96,12 +103,13 @@ function(horizon_dev_bootstrap)
 
         string(JSON _conda_env_count ERROR_VARIABLE _json_error LENGTH "${_conda_env_list_json}" "envs")
         set(_env_exists FALSE)
-        if(NOT _json_error)
+        if(NOT _json_error AND _conda_env_count GREATER 0)
             math(EXPR _conda_env_last_index "${_conda_env_count} - 1")
             foreach(_env_index RANGE 0 ${_conda_env_last_index})
                 string(JSON _env_path GET "${_conda_env_list_json}" "envs" ${_env_index})
-                string(FIND "${_env_path}" "${HORIZON_CONDA_ENV}" _env_name_pos)
-                if(NOT _env_name_pos EQUAL -1)
+                file(TO_CMAKE_PATH "${_env_path}" _env_normalized)
+                get_filename_component(_env_name "${_env_normalized}" NAME)
+                if(_env_name STREQUAL "${HORIZON_CONDA_ENV}")
                     set(_env_exists TRUE)
                     break()
                 endif()
@@ -128,7 +136,7 @@ function(horizon_dev_bootstrap)
         message(STATUS "Running Horizon dependency bootstrap...")
         execute_process(
             COMMAND "${_horizon_conda}" run --name "${HORIZON_CONDA_ENV}" --no-capture-output
-                    python tools/dev.py _bootstrap
+                    python "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -148,7 +156,10 @@ function(horizon_dev_bootstrap)
         message(FATAL_ERROR "Horizon build environment was not generated: ${_horizon_build_environment}")
     endif()
     include("${_horizon_build_environment}")
+    include(horizon_ninja)
+    horizon_configure_ninja()
     set(HORIZON_DEV_BUILD_ENVIRONMENT "${_horizon_build_environment}" PARENT_SCOPE)
+    set(HORIZON_DEV_PYTHON "${HORIZON_DEV_PYTHON}" PARENT_SCOPE)
     set(CMAKE_TOOLCHAIN_FILE "${_horizon_toolchain}" CACHE FILEPATH "Conan toolchain" FORCE)
 
     # Conan installs exactly one configuration per build directory, and CMakeDeps
