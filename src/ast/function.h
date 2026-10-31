@@ -7,17 +7,15 @@
 #include "math/basic_types.h"
 #include "core/stl.h"
 #include "core/header.h"
-#include "math/storage_traits.h"
+#include "core/type.h"
 #include "core/type_system/precision_policy.h"
+#include "core/util/switch_profile.h"
 #include "expression.h"
 #include "statement.h"
 #include "ast_node.h"
 #include "op.h"
-#include "shader_interface.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 class Statement;
 class ScopeStmt;
@@ -54,14 +52,12 @@ public:
 class OC_AST_API Function : public concepts::Noncopyable, public Hashable {
 public:
     enum Tag : uint8_t {
-        Kernel,
-        Callable,
-        Vertex,
-        Fragment,
+        KERNEL,
+        CALLABLE,
     };
 
     struct StructureSet {
-        horizon::ast::map<uint64_t, const Type *> struct_map;
+        ocarina::map<uint64_t, const Type *> struct_map;
         vector<const Type *> struct_lst;
         void add(const Type *type) noexcept;
     };
@@ -69,49 +65,51 @@ public:
     using stack_type = stack<SP<Function>>;
 
 private:
-    horizon::ast::vector<horizon::ast::unique_ptr<Expression>> all_expressions_;
-    horizon::ast::vector<horizon::ast::unique_ptr<Statement>> all_statements_;
+    ocarina::vector<ocarina::unique_ptr<Expression>> all_expressions_;
+    ocarina::vector<ocarina::unique_ptr<Statement>> all_statements_;
 
 private:
     mutable string description_{};
     const Type *ret_{nullptr};
     vector<const CallExpr *> all_call_expr_;
 
-    horizon::ast::map<const Expression *, uint> expr_to_argument_index_;
+    ocarina::map<const Expression *, uint> expr_to_argument_index_;
 
-    horizon::ast::vector<string_view> headers_;
+    ocarina::vector<string_view> headers_;
 
     /// appended argument for output
-    horizon::ast::vector<Variable> appended_arguments_;
+    ocarina::vector<Variable> appended_arguments_;
 
     /// key : expression from other function , value : expression belong current function
     /// use for kernel
-    horizon::ast::map<const Expression *, const RefExpr *> outer_to_local_;
+    ocarina::map<const Expression *, const RefExpr *> outer_to_local_;
 
-    horizon::ast::vector<Variable> arguments_;
+    ocarina::vector<Variable> arguments_;
 
     /// use for splitting parameter structure start
-    horizon::ast::map<string, Variable> argument_map_;
-    horizon::ast::vector<Variable> splitted_arguments_;
+    ocarina::map<string, Variable> argument_map_;
+    ocarina::vector<Variable> splitted_arguments_;
     /// use for splitting parameter structure end
 
-    horizon::ast::vector<CapturedResource> captured_resources_;
-    horizon::ast::vector<Variable> builtin_vars_;
-    horizon::ast::vector<const RefExpr *> builtin_exprs_;
-    horizon::ast::vector<Variable::Data> variable_datas_;
-    horizon::ast::vector<ScopeStmt *> scope_stack_;
+    ocarina::vector<CapturedResource> captured_resources_;
+    ocarina::vector<Variable> builtin_vars_;
+    ocarina::vector<Variable> shared_vars_;
+    ocarina::vector<Variable::Data> variable_datas_;
+    ocarina::vector<ScopeStmt *> scope_stack_;
     /// use for assignment subscript access
-    horizon::ast::vector<horizon::ast::pair<std::byte *, size_t>> temp_memory_;
+    ocarina::vector<ocarina::pair<std::byte *, size_t>> temp_memory_;
     ScopeStmt body_{true};
-    Tag tag_{Tag::Callable};
-    horizon::ast::vector<SP<const Function>> used_custom_func_;
+    Tag tag_{Tag::CALLABLE};
+    ocarina::vector<SP<const Function>> used_custom_func_;
     StructureSet used_struct_;
     bool allow_dsl_capture_{false};
     mutable bool raytracing_{false};
+    // Requires a native compute pipeline supporting inline ray queries. This
+    // does not change logical tracing, argument packing, or dispatch semantics.
+    bool ray_query_compute_workgroups_{false};
     mutable uint3 block_dim_{make_uint3(0)};
     mutable uint3 grid_dim_{make_uint3(0)};
     StoragePrecisionPolicy storage_policy_{};
-    ShaderInterface shader_interface_;
 
     friend class FunctionCorrector;
     friend class Variable;
@@ -119,13 +117,13 @@ private:
 private:
     static stack_type &_function_stack() noexcept;
     [[nodiscard]] const Type *resolve_ast_type(const Type *type) const noexcept;
-    [[nodiscard]] horizon::ast::list<CallExpr::Template> resolve_ast_templates(horizon::ast::list<CallExpr::Template> t_args) const noexcept;
+    [[nodiscard]] ocarina::list<CallExpr::Template> resolve_ast_templates(ocarina::list<CallExpr::Template> t_args) const noexcept;
 
     [[nodiscard]] uint _next_variable_uid() noexcept;
     void mark_variable_usage(uint uid, Usage usage) noexcept;
     template<typename Func>
     static shared_ptr<Function> _define(Function::Tag tag, Func &&func) noexcept {
-        shared_ptr<Function> ret = horizon::ast::make_shared<Function>(tag);
+        shared_ptr<Function> ret = ocarina::make_shared<Function>(tag);
         push(ret);
         ret->with(ret->body(), std::forward<Func>(func));
         pop(ret);
@@ -133,8 +131,6 @@ private:
     }
 
     void correct() noexcept;
-    [[nodiscard]] static shared_ptr<Function> begin_raster(Tag tag, const Type *return_type);
-    void finalize_raster();
     /// used to capture variable from invoker start
     [[nodiscard]] const RefExpr *mapping_captured_argument(const Expression *outer_expr, bool *contain) noexcept;
     [[nodiscard]] const RefExpr *mapping_local_variable(const Expression *invoked_func_expr, bool *contain) noexcept;
@@ -151,7 +147,7 @@ private:
 
     template<typename Expr, typename Tuple, size_t... i>
     [[nodiscard]] auto _create_expression(Tuple &&tuple, std::index_sequence<i...>) {
-        auto expr = horizon::ast::make_unique<Expr>(std::get<i>(OC_FORWARD(tuple))...);
+        auto expr = ocarina::make_unique<Expr>(std::get<i>(OC_FORWARD(tuple))...);
         auto ret = expr.get();
         expr->set_context(this);
         all_expressions_.push_back(std::move(expr));
@@ -166,12 +162,11 @@ private:
     }
     [[nodiscard]] const RefExpr *_ref(const Variable &variable) noexcept;
     [[nodiscard]] const RefExpr *_builtin(Variable::Tag tag, const Type *type) noexcept;
-    [[nodiscard]] const RefExpr *array_builtin(Variable::Tag tag, const Type *element_type, uint count);
     const Function *add_used_function(SP<const Function> func) noexcept;
 
     template<typename Stmt, typename Tuple, size_t... i>
     [[nodiscard]] auto _create_statement(Tuple &&tuple, std::index_sequence<i...>) {
-        auto stmt = horizon::ast::make_unique<Stmt>(std::get<i>(OC_FORWARD(tuple))...);
+        auto stmt = ocarina::make_unique<Stmt>(std::get<i>(OC_FORWARD(tuple))...);
         auto ret = stmt.get();
         stmt->set_context(this);
         all_statements_.push_back(std::move(stmt));
@@ -192,10 +187,10 @@ private:
 
     class ScopeGuard {
     private:
-        horizon::ast::vector<ScopeStmt *> &scope_stack_;
+        ocarina::vector<ScopeStmt *> &scope_stack_;
 
     public:
-        ScopeGuard(horizon::ast::vector<ScopeStmt *> &stack, ScopeStmt *scope)
+        ScopeGuard(ocarina::vector<ScopeStmt *> &stack, ScopeStmt *scope)
             : scope_stack_(stack) {
             scope_stack_.push_back(scope);
         }
@@ -210,7 +205,7 @@ public:
     void record_call_expression(const CallExpr *call_expr) noexcept;
     [[nodiscard]] const CallExpr *current_call_expr() const noexcept;
     OC_MAKE_MEMBER_GETTER(all_call_expr, &)
-    void set_description(string desc) const noexcept { description_ = horizon::ast::move(desc); }
+    void set_description(string desc) const noexcept { description_ = ocarina::move(desc); }
     [[nodiscard]] string &description() const noexcept { return description_; }
     void set_allow_dsl_capture(bool v) noexcept { allow_dsl_capture_ = v; }
     [[nodiscard]] bool allow_dsl_capture() const noexcept { return allow_dsl_capture_; }
@@ -256,32 +251,19 @@ public:
     [[nodiscard]] static Function *current() noexcept;
     template<typename Func>
     static auto define_callable(Func &&func) noexcept {
-        return _define(Tag::Callable, std::forward<Func>(func));
+        return _define(Tag::CALLABLE, std::forward<Func>(func));
     }
     [[nodiscard]] const ScopeStmt *current_scope() const noexcept;
     [[nodiscard]] ScopeStmt *current_scope() noexcept;
     template<typename Func>
-    decltype(auto) with(ScopeStmt *scope, Func &&func) noexcept(std::is_nothrow_invocable_v<Func>) {
+    decltype(auto) with(ScopeStmt *scope, Func &&func) noexcept {
         ScopeGuard guard(scope_stack_, scope);
         return func();
     }
     template<typename Func>
-    static shared_ptr<Function> define_raster(Tag tag, const Type *return_type, Func &&func) {
-        auto function = begin_raster(tag, return_type);
-        {
-            push(function);
-            struct FunctionGuard {
-                shared_ptr<Function> function;
-                ~FunctionGuard() { Function::pop(function); }
-            } guard{function};
-            function->with(function->body(), std::forward<Func>(func));
-        }
-        function->finalize_raster();
-        return function;
-    }
-    template<typename Func>
     static shared_ptr<Function> define_kernel(Func &&func) noexcept {
-        shared_ptr<Function> function = _define(Tag::Kernel, std::forward<Func>(func));
+        switch_profile::Scope profile{"Function::define_kernel", "dsl"};
+        shared_ptr<Function> function = _define(Tag::KERNEL, std::forward<Func>(func));
         function->correct();
         return function;
     }
@@ -310,7 +292,7 @@ public:
     [[nodiscard]] bool has_configure() const noexcept { return all(block_dim() != 0u) || all(grid_dim() != 0u); }
     void set_storage_policy(StoragePrecisionPolicy policy) noexcept { storage_policy_ = policy; }
     [[nodiscard]] StoragePrecisionPolicy storage_policy() const noexcept { return storage_policy_; }
-    [[nodiscard]] horizon::ast::string func_name(uint64_t ext_hash = 0u, string ext_name = "") const noexcept;
+    [[nodiscard]] ocarina::string func_name(uint64_t ext_hash = 0u, string ext_name = "") const noexcept;
     void assign(const Expression *lhs, const Expression *rhs) noexcept;
     void return_(const Expression *expression) noexcept;
     [[nodiscard]] const RefExpr *block_idx() noexcept;
@@ -319,29 +301,14 @@ public:
     [[nodiscard]] const RefExpr *dispatch_idx() noexcept;
     [[nodiscard]] const RefExpr *dispatch_id() noexcept;
     [[nodiscard]] const RefExpr *dispatch_dim() noexcept;
-    [[nodiscard]] const RefExpr *vertex_position() noexcept;
-    [[nodiscard]] const RefExpr *vertex_index() noexcept;
-    [[nodiscard]] const RefExpr *instance_index() noexcept;
-    [[nodiscard]] const RefExpr *draw_index() noexcept;
-    [[nodiscard]] const RefExpr *fragment_coord() noexcept;
-    [[nodiscard]] const RefExpr *front_facing() noexcept;
-    [[nodiscard]] const RefExpr *primitive_index() noexcept;
-    [[nodiscard]] const RefExpr *fragment_depth() noexcept;
-    [[nodiscard]] const RefExpr *fragment_depth_greater_equal() noexcept;
-    [[nodiscard]] const RefExpr *fragment_depth_less_equal() noexcept;
-    [[nodiscard]] const RefExpr *sample_index() noexcept;
-    [[nodiscard]] const RefExpr *sample_mask() noexcept;
-    [[nodiscard]] const RefExpr *sample_mask_output() noexcept;
-    [[nodiscard]] const RefExpr *render_target_array_index() noexcept;
-    [[nodiscard]] const RefExpr *viewport_array_index() noexcept;
-    [[nodiscard]] const RefExpr *stencil_ref() noexcept;
-    [[nodiscard]] const RefExpr *shading_rate() noexcept;
-    [[nodiscard]] const RefExpr *clip_distances(uint count);
-    [[nodiscard]] const RefExpr *cull_distances(uint count);
-    void discard();
     [[nodiscard]] const RefExpr *argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *reference_argument(const Type *type) noexcept;
     [[nodiscard]] const RefExpr *local(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
+    [[nodiscard]] const RefExpr *shared(const Type *type, OC_APPEND_SRC_LOCATION) noexcept;
+    void require_ray_query_compute_workgroups() noexcept;
+    [[nodiscard]] bool requires_ray_query_compute_workgroups() const noexcept {
+        return ray_query_compute_workgroups_;
+    }
     [[nodiscard]] const LiteralExpr *literal(const Type *type, basic_literal_t value) noexcept;
     [[nodiscard]] const UnaryExpr *unary(const Type *type, UnaryOp op, const Expression *expression) noexcept;
     [[nodiscard]] const BinaryExpr *binary(const Type *type, BinaryOp op, const Expression *lhs, const Expression *rhs) noexcept;
@@ -352,10 +319,10 @@ public:
                                                  vector<const Expression *> indexes) noexcept;
     [[nodiscard]] const MemberExpr *swizzle(const Type *type, const Expression *obj, uint16_t mask, uint16_t swizzle_size) noexcept;
     [[nodiscard]] const MemberExpr *member(const Type *type, const Expression *obj, int index) noexcept;
-    const CallExpr *call(const Type *type, SP<const Function> func, horizon::ast::list<const Expression *> args) noexcept;
-    const CallExpr *call(const Type *type, string_view func_name, horizon::ast::list<const Expression *> args) noexcept;
-    const CallExpr *call_builtin(const Type *type, CallOp op, horizon::ast::list<const Expression *> args,
-                                 horizon::ast::list<CallExpr::Template> t_args = {}) noexcept;
+    const CallExpr *call(const Type *type, SP<const Function> func, ocarina::list<const Expression *> args) noexcept;
+    const CallExpr *call(const Type *type, string_view func_name, ocarina::list<const Expression *> args) noexcept;
+    const CallExpr *call_builtin(const Type *type, CallOp op, ocarina::list<const Expression *> args,
+                                 ocarina::list<CallExpr::Template> t_args = {}) noexcept;
     void add_header(string_view fn) noexcept;
     [[nodiscard]] ScopeStmt *scope() noexcept;
     [[nodiscard]] IfStmt *if_(const Expression *expr) noexcept;
@@ -367,40 +334,21 @@ public:
     [[nodiscard]] LoopStmt *loop() noexcept;
     [[nodiscard]] ForStmt *for_(const Expression *init, const Expression *cond, const Expression *step) noexcept;
     void continue_() noexcept;
-    void comment(const horizon::ast::string &string) noexcept;
+    void comment(const ocarina::string &string) noexcept;
+    void print(string fmt, const vector<const Expression *> &args) noexcept;
     [[nodiscard]] const ScopeStmt *body() const noexcept;
     [[nodiscard]] ScopeStmt *body() noexcept;
-    [[nodiscard]] horizon::ast::span<const Variable> arguments() const noexcept;
-    [[nodiscard]] horizon::ast::span<const Variable> appended_arguments() const noexcept;
-    [[nodiscard]] horizon::ast::span<const Variable> builtin_vars() const noexcept;
+    [[nodiscard]] ocarina::span<const Variable> arguments() const noexcept;
+    [[nodiscard]] ocarina::span<const Variable> appended_arguments() const noexcept;
+    [[nodiscard]] ocarina::span<const Variable> builtin_vars() const noexcept;
+    [[nodiscard]] ocarina::span<const Variable> shared_vars() const noexcept { return shared_vars_; }
     [[nodiscard]] constexpr Tag tag() const noexcept { return tag_; }
-    [[nodiscard]] constexpr horizon::core::string_view tag_name() const noexcept
-    {
-        using namespace std::string_view_literals;
-        switch (tag_)
-        {
-            case Tag::Kernel:
-                return "kernel"sv;
-            case Tag::Callable:
-                return "callable"sv;
-            case Tag::Vertex:
-                return "vertex"sv;
-            case Tag::Fragment:
-                return "fragment"sv;
-        }
-        return "unknown"sv;
-    }
-    [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::Callable; }
-    [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::Kernel; }
-    [[nodiscard]] constexpr bool is_vertex() const noexcept { return tag_ == Tag::Vertex; }
-    [[nodiscard]] constexpr bool is_fragment() const noexcept { return tag_ == Tag::Fragment; }
-    [[nodiscard]] constexpr bool is_raster() const noexcept { return is_vertex() || is_fragment(); }
-    [[nodiscard]] constexpr bool is_entry_point() const noexcept { return is_kernel() || is_raster(); }
-    [[nodiscard]] const ShaderInterface &shader_interface() const noexcept { return shader_interface_; }
+    [[nodiscard]] constexpr bool is_callable() const noexcept { return tag_ == Tag::CALLABLE; }
+    [[nodiscard]] constexpr bool is_kernel() const noexcept { return tag_ == Tag::KERNEL; }
     [[nodiscard]] constexpr bool is_raytracing_kernel() const noexcept { return is_raytracing() && is_kernel(); }
     [[nodiscard]] constexpr bool is_general_kernel() const noexcept { return !is_raytracing() && is_kernel(); }
     [[nodiscard]] constexpr bool is_raytracing() const noexcept { return raytracing_; }
     [[nodiscard]] constexpr const Type *return_type() const noexcept { return ret_; }
     constexpr void set_raytracing(bool val) const noexcept { raytracing_ = val; }
 };
-}// namespace horizon::ast
+}// namespace ocarina

@@ -10,7 +10,7 @@
 #include "core/type_system/precision_policy.h"
 #include "core/type.h"
 
-namespace horizon::core {
+namespace ocarina {
 
 /// Continuous byte range in canonical host storage.
 struct ByteRegion {
@@ -50,12 +50,12 @@ class TypedFieldPath {
 public:
     /// One navigation step from the current logical node to a child node.
     enum class StepKind : uint8_t {
-        /// Enter the Nth structure Member.
-        Member,
+        /// Enter the Nth structure member.
+        member,
         /// Enter the Nth array element.
-        Index,
-        /// Enter the Nth vector or matrix Component.
-        Component
+        index,
+        /// Enter the Nth vector or matrix component.
+        component
     };
 
     struct Step {
@@ -107,21 +107,21 @@ struct TypedFieldPathStaticStep;
 template<uint32_t Index>
 struct TypedFieldPathStaticStep<FieldMemberStep<Index>> {
     inline static constexpr TypedFieldPath::Step value{
-        .kind = TypedFieldPath::StepKind::Member,
+        .kind = TypedFieldPath::StepKind::member,
         .value = Index};
 };
 
 template<uint32_t Index>
 struct TypedFieldPathStaticStep<FieldIndexStep<Index>> {
     inline static constexpr TypedFieldPath::Step value{
-        .kind = TypedFieldPath::StepKind::Index,
+        .kind = TypedFieldPath::StepKind::index,
         .value = Index};
 };
 
 template<uint32_t Index>
 struct TypedFieldPathStaticStep<FieldComponentStep<Index>> {
     inline static constexpr TypedFieldPath::Step value{
-        .kind = TypedFieldPath::StepKind::Component,
+        .kind = TypedFieldPath::StepKind::component,
         .value = Index};
 };
 
@@ -131,7 +131,7 @@ struct TypedFieldPathStaticStep<FieldComponentStep<Index>> {
 template<typename... Steps>
 class StaticTypedFieldPath {
 private:
-    inline static constexpr horizon::core::array<TypedFieldPath::Step, sizeof...(Steps)> steps_{
+    inline static constexpr ocarina::array<TypedFieldPath::Step, sizeof...(Steps)> steps_{
         detail::TypedFieldPathStaticStep<Steps>::value...
     };
 
@@ -246,4 +246,4 @@ public:
     }
 };
 
-}// namespace horizon::core
+}// namespace ocarina

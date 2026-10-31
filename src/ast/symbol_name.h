@@ -7,32 +7,30 @@
 #include "variable.h"
 #include "core/util/string_util.h"
 
-namespace horizon::ast::detail {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina::detail {
 
 template<typename T>
 [[nodiscard]] auto to_string(T &&t) noexcept {
-    static thread_local horizon::ast::array<char, 128u> s{};
+    static thread_local ocarina::array<char, 128u> s{};
     auto [iter, size] = fmt::format_to_n(s.data(), s.size(), FMT_STRING("{}"), t);
     string ret(s.data(), size);
     return ret;
 }
 
 [[nodiscard]] inline string struct_name(uint64_t hash) {
-    return "structure_" + horizon::ast::format("{:016x}", hash);
+    return "structure_" + ocarina::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string func_name(uint64_t hash) {
-    return "function_" + horizon::ast::format("{:016x}", hash);
+    return "function_" + ocarina::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string kernel_name(uint64_t hash, string desc = "") {
-    return "kernel_" + horizon::ast::move(desc) + "_" + horizon::ast::format("{:016x}", hash);
+    return "kernel_" + ocarina::move(desc) + "_" + ocarina::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string raygen_name(uint64_t hash, string desc = "") {
-    return "__raygen__" + horizon::ast::move(desc) + "_" + horizon::ast::format("{:016x}", hash);
+    return "__raygen__" + ocarina::move(desc) + "_" + ocarina::format("{:016x}", hash);
 }
 
 [[nodiscard]] inline string member_name(uint index) {
@@ -42,66 +40,34 @@ template<typename T>
 [[nodiscard]] inline string_view variable_prefix(Variable::Tag tag) {
     using Tag = Variable::Tag;
     switch (tag) {
-        case Tag::Reference:
-        case Tag::Local:
+        case Tag::REFERENCE:
+        case Tag::LOCAL:
             return "v";
-        case Tag::StageInput:
-            return "stage_in";
-        case Tag::VertexPosition: return "vertex_position";
-        case Tag::VertexIndex: return "vertex_index";
-        case Tag::InstanceIndex: return "instance_index";
-        case Tag::DrawIndex: return "draw_index";
-        case Tag::FragmentCoord: return "fragment_coord";
-        case Tag::FrontFacing: return "front_facing";
-        case Tag::PrimitiveIndex:
-            return "primitive_index";
-        case Tag::FragmentDepth:
-            return "fragment_depth";
-        case Tag::FragmentDepthGreaterEqual:
-            return "fragment_depth_greater_equal";
-        case Tag::FragmentDepthLessEqual:
-            return "fragment_depth_less_equal";
-        case Tag::SampleIndex:
-            return "sample_index";
-        case Tag::SampleMask:
-            return "sample_mask";
-        case Tag::SampleMaskOutput:
-            return "sample_mask_output";
-        case Tag::RenderTargetArrayIndex:
-            return "render_target_array_index";
-        case Tag::ViewportArrayIndex:
-            return "viewport_array_index";
-        case Tag::StencilRef:
-            return "stencil_ref";
-        case Tag::ShadingRate:
-            return "shading_rate";
-        case Tag::ClipDistance:
-            return "clip_distances";
-        case Tag::CullDistance:
-            return "cull_distances";
-        case Tag::DispatchIdx:
+        case Tag::SHARED:
+            return "s";
+        case Tag::DISPATCH_IDX:
             return "d_idx";
-        case Tag::DispatchId:
+        case Tag::DISPATCH_ID:
             return "d_id";
-        case Tag::DispatchDim:
+        case Tag::DISPATCH_DIM:
             return "d_dim";
-        case Tag::ThreadIdx:
+        case Tag::THREAD_IDX:
             return "t_idx";
-        case Tag::ThreadId:
+        case Tag::THREAD_ID:
             return "t_id";
-        case Tag::BlockIdx:
+        case Tag::BLOCK_IDX:
             return "b_idx";
-        case Tag::Buffer:
+        case Tag::BUFFER:
             return "b";
-        case Tag::ByteBuffer:
+        case Tag::BYTE_BUFFER:
             return "bb";
-        case Tag::Texture3D:
+        case Tag::TEXTURE3D:
             return "t3d";
-        case Tag::Texture2D:
+        case Tag::TEXTURE2D:
             return "t2d";
-        case Tag::Accel:
+        case Tag::ACCEL:
             return "acc";
-        case Tag::BindlessArray:
+        case Tag::BINDLESS_ARRAY:
             return "ra";
         default:
             break;
@@ -110,4 +76,4 @@ template<typename T>
     return "";
 }
 
-}// namespace horizon::ast::detail
+}// namespace ocarina::detail

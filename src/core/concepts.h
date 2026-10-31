@@ -4,9 +4,10 @@
 
 #pragma once
 
+#include "math/basic_traits.h"
 #include "stl.h"
 
-namespace horizon::core::concepts {
+namespace ocarina::concepts {
 
 struct Noncopyable {
     Noncopyable() noexcept = default;
@@ -30,7 +31,7 @@ concept subscriptable = requires(T v) {
 
 template<typename T>
 concept string_viewable = requires(T v) {
-    horizon::core::string_view{v};
+    ocarina::string_view{v};
 };
 
 template<typename... Ts>
@@ -38,7 +39,7 @@ concept all_string_viewable = (string_viewable<Ts> && ...);
 
 template<typename T>
 concept string_convertible = requires(T v) {
-    horizon::core::string{v};
+    ocarina::string{v};
 };
 
 template<typename... Ts>
@@ -46,7 +47,7 @@ concept all_string_convertible = (string_convertible<Ts> && ...);
 
 template<typename T>
 concept span_convertible = requires(T v) {
-    horizon::core::span{v};
+    ocarina::span{v};
 };
 
 template<typename T, typename... Args>
@@ -55,7 +56,7 @@ concept constructible = requires(Args... args) {
 };
 
 template<typename T, typename F>
-concept selectable = requires {
+concept selectable = is_all_scalar_v<T, F> && requires {
     bool{} ? static_cast<decltype(std::declval<T>() + std::declval<F>())>(std::declval<T>()) :
              static_cast<decltype(std::declval<T>() + std::declval<F>())>(std::declval<F>());
 };
@@ -92,13 +93,55 @@ concept container = requires(T a) {
 };
 
 template<typename T>
-concept integral = std::is_integral_v<std::remove_cvref_t<T>>;
+concept integral = is_integral_v<T>;
 
 template<typename T>
-concept scalar = std::is_arithmetic_v<std::remove_cvref_t<T>>;
+concept scalar = is_scalar_v<T>;
+
+template<typename T>
+concept vector = is_vector_v<T>;
+
+template<typename T>
+concept vector2 = is_vector2_v<T>;
+
+template<typename T>
+concept vector3 = is_vector3_v<T>;
+
+template<typename T>
+concept vector4 = is_vector4_v<T>;
+
+template<typename T>
+concept bool_vector = is_bool_vector_v<T>;
+
+template<typename T>
+concept float_vector = is_float_vector_v<T>;
+
+template<typename T>
+concept int_vector = is_int_vector_v<T>;
+
+template<typename T>
+concept uint_vector = is_uint_vector_v<T>;
+
+template<typename T>
+concept matrix = is_matrix_v<T>;
+
+template<typename T>
+concept matrix2 = is_matrix2_v<T>;
+
+template<typename T>
+concept matrix3 = is_matrix3_v<T>;
+
+template<typename T>
+concept matrix4 = is_matrix4_v<T>;
+
+template<typename T>
+concept basic = is_basic_v<T>;
+
+template<typename... Ts>
+concept all_basic = is_all_basic_v<Ts...>;
 
 template<typename... T>
-concept same = (std::is_same_v<T, std::tuple_element_t<0, std::tuple<T...>>> && ...);
+concept same = is_same_v<T...>;
 
 template<typename... T>
 concept all_integral = (integral<T> && ...);
@@ -110,7 +153,7 @@ template<typename T>
 concept bool_able = requires(T t) { bool(t); };
 
 template<typename T>
-concept switch_able = std::is_enum_v<T> || std::is_integral_v<std::remove_cvref_t<T>>;
+concept switch_able = std::is_enum_v<T> || ocarina::is_integral_v<T>;
 
 #define OC_MAKE_UNARY_CHECK(concept_name, op) \
     template<typename T>                      \
@@ -160,4 +203,4 @@ OC_MAKE_BINARY_CHECK(right_left_assgin, >>=)
 
 #undef OC_MAKE_BINARY_CHECK
 
-}// namespace horizon::core::concepts
+}// namespace ocarina::concepts

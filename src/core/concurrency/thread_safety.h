@@ -6,7 +6,7 @@
 
 #include <mutex>
 
-namespace horizon::core {
+namespace ocarina {
 template<typename Mutex = std::mutex>
 class thread_safety {
 public:
@@ -21,6 +21,11 @@ public:
     decltype(auto) with_lock(F &&f) const noexcept {
         std::lock_guard lock{mutex_};
         return std::invoke(std::forward<F>(f));
+    }
+    // Returns a unique_lock for callers that need to manage the lock lifetime
+    // manually (e.g. acquire, mutate, then release before a slow operation).
+    [[nodiscard]] std::unique_lock<Mutex> lock() const noexcept {
+        return std::unique_lock<Mutex>{mutex_};
     }
 };
 
@@ -39,4 +44,4 @@ using conditional_mutex = std::conditional<thread_safe, Mutex, void>;
 template<bool thread_safe, typename Mutex = std::mutex>
 using conditional_mutex_t = typename conditional_mutex<thread_safe, Mutex>::type;
 
-}// namespace horizon::core
+}// namespace ocarina

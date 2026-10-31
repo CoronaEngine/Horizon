@@ -8,7 +8,7 @@ add_test(NAME horizon.core.tuple COMMAND horizon-test-core-tuple)
 
 add_library(horizon-test-dynamic-module MODULE test_dynamic_module_library.cpp)
 target_include_directories(horizon-test-dynamic-module PRIVATE
-    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/legacy/src"
 )
 target_compile_features(horizon-test-dynamic-module PRIVATE cxx_std_20)
 

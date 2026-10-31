@@ -8,21 +8,19 @@
 #include <utility>
 #include "core/stl.h"
 #include "core/util/hash.h"
-#include "math/storage_traits.h"
+#include "core/type.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 enum struct Usage : uint32_t {
-    None = 0u,
-    Read = 1 << 0,
-    Write = 1 << 1,
-    ReadWrite = Read | Write
+    NONE = 0u,
+    READ = 1 << 0,
+    WRITE = 1 << 1,
+    READ_WRITE = READ | WRITE
 };
 
 [[nodiscard]] inline bool is_write(Usage usage) {
-    return (to_underlying(usage) & to_underlying(Usage::Write)) == to_underlying(Usage::Write);
+    return (to_underlying(usage) & to_underlying(Usage::WRITE)) == to_underlying(Usage::WRITE);
 }
 
 class Function;
@@ -31,49 +29,29 @@ class OC_AST_API Variable : public Hashable {
 public:
     enum struct Tag : uint32_t {
         // data
-        Local,
-        Shared,
-        Member,
-        Uniform,
+        LOCAL,
+        SHARED,
+        MEMBER,
+        UNIFORM,
 
         // reference
-        Reference,
+        REFERENCE,
 
         // resources
-        Buffer,
-        ByteBuffer,
-        Texture3D,
-        Texture2D,
-        BindlessArray,
-        Accel,
+        BUFFER,
+        BYTE_BUFFER,
+        TEXTURE3D,
+        TEXTURE2D,
+        BINDLESS_ARRAY,
+        ACCEL,
 
         // builtins
-        ThreadIdx,
-        BlockIdx,
-        ThreadId,
-        DispatchIdx,
-        DispatchId,
-        DispatchDim,
-        StageInput,
-        VertexPosition,
-        VertexIndex,
-        InstanceIndex,
-        DrawIndex,
-        FragmentCoord,
-        FrontFacing,
-        PrimitiveIndex,
-        FragmentDepth,
-        FragmentDepthGreaterEqual,
-        FragmentDepthLessEqual,
-        SampleIndex,
-        SampleMask,
-        SampleMaskOutput,
-        RenderTargetArrayIndex,
-        ViewportArrayIndex,
-        StencilRef,
-        ShadingRate,
-        ClipDistance,
-        CullDistance
+        THREAD_IDX,
+        BLOCK_IDX,
+        THREAD_ID,
+        DISPATCH_IDX,
+        DISPATCH_ID,
+        DISPATCH_DIM
     };
 
     struct Data {
@@ -84,7 +62,7 @@ public:
         string suffix{};
         bool used{false};
         explicit Data(Usage u,
-                      Variable::Tag t = Variable::Tag::Local)
+                      Variable::Tag t = Variable::Tag::LOCAL)
             : usage(u), tag(t) {}
 
         friend class Function;
@@ -125,4 +103,4 @@ public:
     [[nodiscard]] bool used() const noexcept;
 };
 
-}// namespace horizon::ast
+}// namespace ocarina

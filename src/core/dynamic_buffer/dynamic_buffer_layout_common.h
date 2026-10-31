@@ -6,8 +6,10 @@
 
 #include "core/type_system/precision_policy.h"
 #include "core/type.h"
+#include "math/half.h"
+#include "math/real.h"
 
-namespace horizon::core::detail {
+namespace ocarina::detail {
 
 template<typename T>
 struct StaticTypeKey {
@@ -87,13 +89,25 @@ template<typename T>
 template<typename T>
 [[nodiscard]] inline size_t resolved_scalar_size(StoragePrecisionPolicy policy) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    return scalar_storage_traits<raw_t>::size(policy);
+    if constexpr (is_real_v<raw_t>) {
+        return policy.policy == PrecisionPolicy::force_f32 ? sizeof(float) : sizeof(uint16_t);
+    } else if constexpr (is_half_v<raw_t>) {
+        return sizeof(uint16_t);
+    } else {
+        return sizeof(raw_t);
+    }
 }
 
 template<typename T>
 [[nodiscard]] inline size_t resolved_scalar_alignment(StoragePrecisionPolicy policy) noexcept {
     using raw_t = std::remove_cvref_t<T>;
-    return scalar_storage_traits<raw_t>::alignment(policy);
+    if constexpr (is_real_v<raw_t>) {
+        return policy.policy == PrecisionPolicy::force_f32 ? alignof(float) : alignof(uint16_t);
+    } else if constexpr (is_half_v<raw_t>) {
+        return alignof(uint16_t);
+    } else {
+        return alignof(raw_t);
+    }
 }
 
 template<typename Adapter, typename T>
@@ -265,55 +279,62 @@ struct CompileTimeTypeLayoutAdapter {
     template<typename Node>
     [[nodiscard]] static constexpr bool is_scalar(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::is_scalar;
+        return is_scalar_v<raw_t>;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_vector(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::is_vector;
+        return is_vector_v<raw_t>;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_matrix(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::is_matrix;
+        return is_matrix_v<raw_t>;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_array(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::is_array;
+        return is_array_v<raw_t>;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr bool is_structure(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::is_structure;
+        return is_struct_v<raw_t>;
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr auto element(Node) noexcept {
         using raw_t = typename Node::type;
-        if constexpr (static_type_layout_traits<raw_t>::is_vector ||
-                      static_type_layout_traits<raw_t>::is_matrix ||
-                      static_type_layout_traits<raw_t>::is_array) {
-            return StaticTypeKey<static_type_element_t<raw_t>>{};
+        if constexpr (is_vector_v<raw_t>) {
+            return StaticTypeKey<type_element_t<raw_t>>{};
+        } else if constexpr (is_matrix_v<raw_t>) {
+            return StaticTypeKey<tuple_element_t<0, struct_member_tuple_t<raw_t>>>{};
         } else {
-            return StaticTypeKey<static_type_element_t<raw_t>>{};
+            return StaticTypeKey<array_element_t<raw_t>>{};
         }
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr size_t dimension(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::dimension;
+        if constexpr (is_vector_v<raw_t>) {
+            return vector_dimension_v<raw_t>;
+        } else if constexpr (is_matrix_v<raw_t>) {
+            return matrix_dimension_v<raw_t>;
+        } else {
+            return array_dimension_v<raw_t>;
+        }
     }
 
     template<typename Node>
     [[nodiscard]] static constexpr size_t vector_storage_width(Node) noexcept {
         using raw_t = typename Node::type;
-        return static_type_layout_traits<raw_t>::vector_storage_width;
+        constexpr size_t dim = vector_dimension_v<raw_t>;
+        return dim == 3 ? 4u : dim;
     }
 
     template<typename Node>
@@ -350,4 +371,4 @@ struct CompileTimeTypeLayoutAdapter {
     }
 };
 
-}// namespace horizon::core::detail
+}// namespace ocarina::detail

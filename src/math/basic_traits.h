@@ -8,8 +8,7 @@
 #include "core/stl.h"
 #include "core/util/element_trait.h"
 
-namespace horizon::math {
-using namespace horizon::core;
+namespace ocarina {
 
 template<typename T>
 requires std::is_enum_v<T>
@@ -23,11 +22,6 @@ class real;
 template<typename T, size_t N>
 class Vector;
 
-template<typename Scalar, size_t N>
-struct swizzle_vec {
-    using type = Vector<Scalar, N>;
-};
-
 template<typename T, size_t N, size_t M>
 class Matrix;
 
@@ -40,7 +34,6 @@ template<typename T>
 using is_integral = std::disjunction<
     std::is_same<std::remove_cvref_t<T>, int>,
     std::is_same<std::remove_cvref_t<T>, uint>,
-    std::is_same<std::remove_cvref_t<T>, ulong>,
     std::is_same<std::remove_cvref_t<T>, size_t>>;
 
 template<typename T>
@@ -94,14 +87,14 @@ constexpr auto is_unsigned_v = is_unsigned<T>::value;
 template<typename T>
 using is_scalar = std::disjunction<is_integral<T>,
                                    is_boolean<T>,
-                                   horizon::math::is_floating_point<T>>;
+                                   ocarina::is_floating_point<T>>;
 
 template<typename T>
 constexpr auto is_scalar_v = is_scalar<T>::value;
 
 template<typename T>
 using is_number = std::disjunction<is_integral<T>,
-                                   horizon::math::is_floating_point<T>>;
+                                   ocarina::is_floating_point<T>>;
 
 template<typename T>
 constexpr auto is_number_v = is_number<T>::value;
@@ -172,6 +165,9 @@ using is_swizzle = detail::is_swizzle_dim_impl<std::remove_cvref_t<T>, N>;
 template<typename T, size_t N = 0>
 constexpr auto is_swizzle_v = is_swizzle<T, N>::value;
 
+template<typename T>
+struct Var;
+
 namespace detail {
 
 template<typename T>
@@ -179,6 +175,9 @@ struct is_host_swizzle_impl : std::false_type {};
 
 template<typename T, size_t N, size_t... Indices>
 struct is_host_swizzle_impl<Swizzle<T, N, Indices...>> : std::true_type {};
+
+template<typename T, size_t N, size_t... Indices>
+struct is_host_swizzle_impl<Swizzle<Var<T>, N, Indices...>> : std::false_type {};
 
 /// fuck !!! work around bug of msvc
 template<typename T, size_t N = 0u>
@@ -254,9 +253,7 @@ constexpr auto all_is_v = all_is<Target, Ts...>::value;
 
 namespace detail {
 template<typename T>
-struct remove_device_impl {
-    using type = T;
-};
+struct remove_device_impl;
 }
 
 template<typename T>
@@ -269,6 +266,9 @@ struct is_device_swizzle_impl : std::false_type {};
 
 template<typename T, size_t N, size_t... Indices>
 struct is_device_swizzle_impl<Swizzle<T, N, Indices...>> : std::false_type {};
+
+template<typename T, size_t N, size_t... Indices>
+struct is_device_swizzle_impl<Swizzle<Var<T>, N, Indices...>> : std::true_type {};
 
 /// fuck !!! work around bug of msvc
 template<typename T, size_t N = 0u>
@@ -293,6 +293,11 @@ struct swizzle_decay_impl {
 template<typename T, size_t N, size_t... Indices>
 struct swizzle_decay_impl<Swizzle<T, N, Indices...>> {
     using type = typename Swizzle<T, N, Indices...>::vec_type;
+};
+
+template<typename T, size_t N, size_t... Indices>
+struct swizzle_decay_impl<Swizzle<Var<T>, N, Indices...>> {
+    using type = typename Swizzle<Var<T>, N, Indices...>::vec_type;
 };
 
 }// namespace detail
@@ -501,7 +506,7 @@ OC_DEFINE_TEMPLATE_VALUE_MULTI(is_same_type_dimension)
 
 namespace detail {
 template<typename... Ts>
-struct is_same_type_element_impl : horizon::math::is_same<type_element_t<Ts>...> {};
+struct is_same_type_element_impl : ocarina::is_same<type_element_t<Ts>...> {};
 
 }// namespace detail
 
@@ -704,7 +709,7 @@ template<typename T>
 struct is_std_vector_impl : std::false_type {};
 
 template<typename T>
-struct is_std_vector_impl<horizon::math::vector<T>> : std::true_type {};
+struct is_std_vector_impl<ocarina::vector<T>> : std::true_type {};
 }// namespace detail
 
 template<typename T>
@@ -743,4 +748,4 @@ template<typename... Ts>
 using match_basic_func = detail::match_basic_func_impl<std::remove_cvref_t<Ts>...>;
 OC_DEFINE_TEMPLATE_VALUE_MULTI(match_basic_func)
 
-}// namespace horizon::math
+}// namespace ocarina

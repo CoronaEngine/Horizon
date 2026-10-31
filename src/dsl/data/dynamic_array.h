@@ -7,13 +7,10 @@
 #include "core/stl.h"
 #include "../core/ref.h"
 #include "core/util/string_util.h"
-#include "ast/type_desc.h"
+#include "core/type_system/type_desc.h"
 #include "../api/syntax.h"
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
 
 template<typename T>
 class DynamicArray : public detail::EnableSubscriptAccess<DynamicArray<T>, T> {
@@ -73,7 +70,7 @@ public:
     static DynamicArray<T> one(uint size) noexcept { return DynamicArray<T>{size, static_cast<T>(1)}; }
     [[nodiscard]] bool valid() const noexcept { return size_ > 0; }
     [[nodiscard]] static const Type *type(uint size) noexcept {
-        return Type::from(horizon::dsl::format("array<{},{}>",
+        return Type::from(ocarina::format("array<{},{}>",
                                           TypeDesc<T>::description(),
                                           size));
     }
@@ -122,7 +119,7 @@ public:
 
     template<typename... Args>
     static DynamicArray<T> create(Args &&...args) noexcept {
-        return create(horizon::dsl::array<Var<T>, sizeof...(args)>{OC_FORWARD(args)...});
+        return create(ocarina::array<Var<T>, sizeof...(args)>{OC_FORWARD(args)...});
     }
 
     [[nodiscard]] Var<T> as_scalar() const noexcept {
@@ -375,7 +372,7 @@ DynamicArray<float> EnableTextureSample<T, Dim>::sample(uint channel_num, const 
                                                               OC_EXPR(u),
                                                               OC_EXPR(v)},
                                                              {channel_num});
-    texture->expression()->mark(Usage::Read);
+    texture->expression()->mark(Usage::READ);
     return eval_dynamic_array(DynamicArray<float>(channel_num, expr));
 }
 
@@ -393,7 +390,7 @@ DynamicArray<float> EnableTextureSample<T, Dim>::sample(uint channel_num, const 
                                                               OC_EXPR(v),
                                                               OC_EXPR(w)},
                                                              {channel_num});
-    texture->expression()->mark(Usage::Read);
+    texture->expression()->mark(Usage::READ);
     return eval_dynamic_array(DynamicArray<float>(channel_num, expr));
 }
 
@@ -425,7 +422,7 @@ template<typename T, typename Offset>
         offset = detail::correct_index(offset, this->size_in_byte(), typeid(*this).name(), traceback_string());
     }
     const CallExpr *expr = Function::current()->call_builtin(DynamicArray<T>::type(array_size),
-                                                             CallOp::BindlessArrayByteBufferRead,
+                                                             CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ,
                                                              {bindless_array_, index_, OC_EXPR(offset)});
     return detail::eval_dynamic_array(DynamicArray<T>(array_size, expr));
 }
@@ -439,7 +436,6 @@ DynamicArray<float> BindlessArrayTexture<Dim>::sample(uint channel_num, const U 
                                                              call_op,
                                                              {bindless_array_, index_, OC_EXPR(u), OC_EXPR(v)},
                                                              {channel_num});
-    bindless_array_->mark(Usage::Read);
     return detail::eval_dynamic_array(DynamicArray<float>(channel_num, expr));
 }
 
@@ -453,7 +449,6 @@ DynamicArray<float> BindlessArrayTexture<Dim>::sample(uint channel_num, const U 
                                                              call_op,
                                                              {bindless_array_, index_, OC_EXPR(u), OC_EXPR(v), OC_EXPR(w)},
                                                              {channel_num});
-    bindless_array_->mark(Usage::Read);
     return detail::eval_dynamic_array(DynamicArray<float>(channel_num, expr));
 }
 
@@ -477,4 +472,4 @@ DynamicArray<float> BindlessArrayTexture<Dim>::sample(uint channel_num, const UV
     }(decay_swizzle(uv));
 }
 
-}// namespace horizon::dsl
+}// namespace ocarina

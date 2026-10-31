@@ -5,8 +5,6 @@
 #pragma once
 
 #include "header.h"
-#include "tuple.h"
-#include <cstring>
 #include <functional>
 #include <deque>
 #include <stack>
@@ -27,6 +25,8 @@
 #include <string_view>
 #include <filesystem>
 #include <source_location>
+#include <EASTL/tuple.h>
+#include <EASTL/string.h>
 #include <sys/stat.h>
 
 #define OC_FORWARD(arg) std::forward<decltype(arg)>(arg)
@@ -50,7 +50,7 @@
     template<typename... Ts>                         \
     using template_name##_t = typename template_name<Ts...>::type;
 
-namespace horizon::core {
+namespace ocarina {
 
 namespace detail {
 OC_CORE_API void *allocator_allocate(size_t size, size_t alignment) noexcept;
@@ -90,10 +90,11 @@ struct allocator {
 
 template<typename T = std::byte>
 [[nodiscard]] inline auto allocate(size_t n = 1u, bool use_ea = true) noexcept {
-    // Core no longer has a separate EASTL allocator. Keep the flag for source
-    // compatibility while routing both modes through the standard allocator.
-    static_cast<void>(use_ea);
-    return allocator<T>{}.allocate(n);
+    if (use_ea) {
+        return allocator<T>{}.allocate(n);
+    } else {
+        return reinterpret_cast<T *>(_aligned_malloc(sizeof(T) * n, alignof(T)));
+    }
 }
 
 template<typename T>
@@ -110,7 +111,7 @@ constexpr T *construct_at(T *p, Args &&...args) {
 
 template<typename T, typename... Args>
 [[nodiscard]] inline auto new_with_allocator(Args &&...args) {
-    return horizon::core::construct_at(allocate<T>(), std::forward<Args>(args)...);
+    return ocarina::construct_at(allocate<T>(), std::forward<Args>(args)...);
 }
 
 template<typename T>
@@ -119,8 +120,11 @@ inline void delete_with_allocator(T *p, bool use_ea = true) noexcept {
         return;
     }
     std::destroy_at(p);
-    static_cast<void>(use_ea);
-    deallocate(p);
+    if (use_ea) {
+        deallocate(p);
+    } else {
+        _aligned_free(p);
+    }
 }
 
 template<typename T = std::byte>
@@ -139,11 +143,7 @@ using std::cout;
 using std::endl;
 
 // ptr
-// Core intentionally uses only the C++ standard library.  The former Ocarina
-// implementation used EASTL here, but that made the foundation depend on an
-// external allocator and tuple implementation.
-template<typename Signature>
-using move_only_function = std::function<Signature>;
+using eastl::move_only_function;
 using std::const_pointer_cast;
 using std::dynamic_pointer_cast;
 using std::enable_shared_from_this;
@@ -219,7 +219,11 @@ template<typename T>
 using WP = weak_ptr<T>;
 
 inline void oc_memcpy(void *dst, const void *src, size_t size) {
+#ifdef _MSC_VER
     std::memcpy(dst, src, size);
+#else
+    std::wmemcpy(reinterpret_cast<wchar_t *>(dst), reinterpret_cast<const wchar_t *>(src), size);
+#endif
 }
 
 struct MemoryBlock {
@@ -275,13 +279,64 @@ using std::unordered_map;
 using std::unordered_set;
 using std::vector;
 
+#if 1
+// tuple
+using eastl::get;
+using eastl::tuple;
+#else
+using std::get;
+using std::tuple;
+#endif
+
+namespace detail {
+template<typename T>
+struct tuple_size_impl {
+    static_assert(ocarina::always_false_v<T>);
+};
+
+template<typename... Ts>
+struct tuple_size_impl<std::tuple<Ts...>> : public std::tuple_size<std::tuple<Ts...>> {};
+
+template<typename... Ts>
+struct tuple_size_impl<eastl::tuple<Ts...>> : public eastl::tuple_size<eastl::tuple<Ts...>> {};
+}// namespace detail
+template<typename T>
+using tuple_size = typename detail::tuple_size_impl<std::remove_cvref_t<T>>;
+
+template<typename T>
+constexpr auto tuple_size_v = tuple_size<T>::value;
+
+template<size_t i, typename T>
+struct tuple_element {
+    static_assert(ocarina::always_false_v<T>);
+};
+
+template<size_t i, typename... Ts>
+struct tuple_element<i, std::tuple<Ts...>> : public std::tuple_element<i, std::tuple<Ts...>> {};
+
+template<size_t i, typename... Ts>
+struct tuple_element<i, eastl::tuple<Ts...>> : public eastl::tuple_element<i, eastl::tuple<Ts...>> {};
+
+template<size_t i, typename T>
+using tuple_element_t = typename tuple_element<i, T>::type;
+
+template<size_t i, typename... Ts>
+auto tuple_get(const std::tuple<Ts...> &tp) noexcept {
+    return std::get<i>(tp);
+}
+
+template<size_t i, typename... Ts>
+auto tuple_get(const eastl::tuple<Ts...> &tp) noexcept {
+    return eastl::get<i>(tp);
+}
+
 template<size_t i = 0, typename Tuple, typename Func>
 void traverse_tuple(Tuple &&tuple, Func &&func) noexcept {
     if constexpr (i < tuple_size_v<Tuple>) {
-        if constexpr (std::invocable<Func, decltype(horizon::core::tuple_get<i>(OC_FORWARD(tuple))), size_t>) {
-            func(horizon::core::tuple_get<i>(OC_FORWARD(tuple)), i);
+        if constexpr (std::invocable<Func, decltype(ocarina::tuple_get<i>(OC_FORWARD(tuple))), size_t>) {
+            func(ocarina::tuple_get<i>(OC_FORWARD(tuple)), i);
         } else {
-            func(horizon::core::tuple_get<i>(OC_FORWARD(tuple)));
+            func(ocarina::tuple_get<i>(OC_FORWARD(tuple)));
         }
         traverse_tuple<i + 1>(OC_FORWARD(tuple), OC_FORWARD(func));
     }
@@ -330,7 +385,7 @@ inline bool is_file_exist(const char *full_file_path) {
 template<typename T>
 struct deep_copy_shared_ptr {
 private:
-    horizon::core::shared_ptr<T> ptr_{};
+    ocarina::shared_ptr<T> ptr_{};
 
 public:
     deep_copy_shared_ptr() = default;
@@ -346,8 +401,8 @@ public:
     [[nodiscard]] T *operator->() noexcept { return ptr_.get(); }
     [[nodiscard]] const T *get() const noexcept { return ptr_.get(); }
     [[nodiscard]] T *get() noexcept { return ptr_.get(); }
-    [[nodiscard]] const horizon::core::shared_ptr<T> &ptr() const noexcept { return ptr_; }
-    [[nodiscard]] horizon::core::shared_ptr<T> &ptr() noexcept { return ptr_; }
+    [[nodiscard]] const ocarina::shared_ptr<T> &ptr() const noexcept { return ptr_; }
+    [[nodiscard]] ocarina::shared_ptr<T> &ptr() noexcept { return ptr_; }
 
     template<typename Other>
     requires std::is_convertible_v<Other *, T *>
@@ -378,24 +433,24 @@ template<typename T, typename... Args>
 template<typename T>
 struct deep_copy_unique_ptr {
 private:
-    horizon::core::unique_ptr<T> ptr_{};
+    ocarina::unique_ptr<T> ptr_{};
 
 public:
     deep_copy_unique_ptr() = default;
     template<typename U>
     requires std::is_convertible_v<U *, T *>
-    explicit deep_copy_unique_ptr(unique_ptr<U> &&u) : ptr_(horizon::core::move(u)) {}
+    explicit deep_copy_unique_ptr(unique_ptr<U> &&u) : ptr_(ocarina::move(u)) {}
     template<typename U>
     requires std::is_convertible_v<U *, T *>
-    deep_copy_unique_ptr(deep_copy_unique_ptr<U> &&u) : ptr_(horizon::core::move(u.ptr())) {}
+    deep_copy_unique_ptr(deep_copy_unique_ptr<U> &&u) : ptr_(ocarina::move(u.ptr())) {}
     [[nodiscard]] const T &operator*() const noexcept { return *ptr_; }
     [[nodiscard]] T &operator*() noexcept { return *ptr_; }
     [[nodiscard]] const T *operator->() const noexcept { return ptr_.get(); }
     [[nodiscard]] T *operator->() noexcept { return ptr_.get(); }
     [[nodiscard]] const T *get() const noexcept { return ptr_.get(); }
     [[nodiscard]] T *get() noexcept { return ptr_.get(); }
-    [[nodiscard]] const horizon::core::unique_ptr<T> &ptr() const noexcept { return ptr_; }
-    [[nodiscard]] horizon::core::unique_ptr<T> &ptr() noexcept { return ptr_; }
+    [[nodiscard]] const ocarina::unique_ptr<T> &ptr() const noexcept { return ptr_; }
+    [[nodiscard]] ocarina::unique_ptr<T> &ptr() noexcept { return ptr_; }
 
     template<typename Other>
     requires std::is_convertible_v<Other *, T *>
@@ -423,4 +478,4 @@ using DCUP = deep_copy_unique_ptr<T>;
 template<typename T>
 using DCSP = deep_copy_shared_ptr<T>;
 
-}// namespace horizon::core
+}// namespace ocarina

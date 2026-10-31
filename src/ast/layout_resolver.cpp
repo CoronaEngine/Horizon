@@ -4,9 +4,7 @@
 
 #include "layout_resolver.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 LayoutResolver::LayoutResolver(StoragePrecisionPolicy policy) noexcept : policy_(policy) {}
 
@@ -22,7 +20,7 @@ string LayoutResolver::resolve_description(const Type *type) const noexcept {
 	if (type == nullptr) {
 		return {};
 	}
-	if (type->tag() == Type::Tag::Real) {
+	if (type->tag() == Type::Tag::REAL) {
 		return resolve_real_description();
 	}
 	if (type->is_scalar()) {
@@ -54,9 +52,9 @@ string LayoutResolver::resolve_real_description() const noexcept {
 		return {};
 	}
 	switch (policy_.policy) {
-		case PrecisionPolicy::ForceF16:
+		case PrecisionPolicy::force_f16:
 			return string(TypeDesc<half>::description());
-		case PrecisionPolicy::ForceF32:
+		case PrecisionPolicy::force_f32:
 			return string(TypeDesc<float>::description());
 		default:
 			return string(TypeDesc<float>::description());
@@ -77,7 +75,7 @@ string LayoutResolver::resolve_vector_description(const Type *type) const noexce
 	if (elem == nullptr) {
 		return {};
 	}
-	return horizon::ast::format("vector<{},{}>", elem->description(), type->dimension());
+	return ocarina::format("vector<{},{}>", elem->description(), type->dimension());
 }
 
 string LayoutResolver::resolve_matrix_description(const Type *type) const noexcept {
@@ -90,7 +88,7 @@ string LayoutResolver::resolve_matrix_description(const Type *type) const noexce
 	if (scalar == nullptr) {
 		return {};
 	}
-	return horizon::ast::format("matrix<{},{},{}>", scalar->description(), type->dimension(), col->dimension());
+	return ocarina::format("matrix<{},{},{}>", scalar->description(), type->dimension(), col->dimension());
 }
 
 string LayoutResolver::resolve_array_description(const Type *type) const noexcept {
@@ -99,7 +97,7 @@ string LayoutResolver::resolve_array_description(const Type *type) const noexcep
 	if (elem == nullptr) {
 		return {};
 	}
-	return horizon::ast::format("array<{},{}>", elem->description(), type->dimension());
+	return ocarina::format("array<{},{}>", elem->description(), type->dimension());
 }
 
 string LayoutResolver::resolve_buffer_description(const Type *type) const noexcept {
@@ -108,7 +106,7 @@ string LayoutResolver::resolve_buffer_description(const Type *type) const noexce
 	if (elem == nullptr) {
 		return {};
 	}
-	string ret = horizon::ast::format("buffer<{}>", elem->description());
+	string ret = ocarina::format("buffer<{}>", elem->description());
 	return ret;
 }
 
@@ -116,7 +114,7 @@ size_t LayoutResolver::resolved_alignment(const Type *type) const noexcept {
 	if (type == nullptr) {
 		return 0u;
 	}
-	if (type->tag() == Type::Tag::Real) {
+	if (type->tag() == Type::Tag::REAL) {
 		const auto *resolved = resolve(type);
 		return resolved == nullptr ? 0u : resolved->alignment();
 	}
@@ -144,7 +142,7 @@ size_t LayoutResolver::resolved_alignment(const Type *type) const noexcept {
 string LayoutResolver::resolve_structure_description(const Type *type) const noexcept {
 	OC_ASSERT(type != nullptr && type->is_structure());
 
-	string ret = horizon::ast::format("struct<{},{},{},{}",
+	string ret = ocarina::format("struct<{},{},{},{}",
 								 type->cname(),
 								 resolved_alignment(type),
 								 type->is_builtin_struct(),

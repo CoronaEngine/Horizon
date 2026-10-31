@@ -4,9 +4,7 @@
 
 #include "function_corrector.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 void FunctionCorrector::traverse(Function &function) noexcept {
     visit(function.body());
@@ -40,7 +38,7 @@ void FunctionCorrector::apply(Function *function, int counter) noexcept {
         traverse(*current_function());
         stage_ = ProcessCapture;
     }
-    if (function->is_entry_point()) {
+    if (function->is_kernel()) {
         bool valid = function->check_context();
         OC_ERROR_IF_NOT(valid, "FunctionCorrector error: invalid function ", function->description().c_str());
     }
@@ -56,6 +54,9 @@ void FunctionCorrector::process_capture(const Expression *&expression, Function 
     if (expression->context() == cur_func) {
         return;
     }
+    OC_ERROR_IF(expression->tag() == Expression::Tag::REF &&
+                    static_cast<const RefExpr *>(expression)->variable().tag() == Variable::Tag::SHARED,
+                "Shared arrays cannot be captured by callables");
     auto bit_or = [](Usage lhs, Usage rhs) {
         return Usage(to_underlying(lhs) | to_underlying(rhs));
     };
@@ -74,12 +75,12 @@ void FunctionCorrector::visit_expr(const Expression *const &expression, Function
     }
 
     switch (expression->tag()) {
-        case Expression::Tag::Ref: {
+        case Expression::Tag::REF: {
             static_cast<const VariableExpr *>(expression)->variable().mark_used();
             process_capture(const_cast<const Expression *&>(expression), cur_func);
             break;
         }
-        case Expression::Tag::Member: {
+        case Expression::Tag::MEMBER: {
             static_cast<const VariableExpr *>(expression)->variable().mark_used();
             process_member_expr(const_cast<const Expression *&>(expression), cur_func);
             break;
@@ -320,7 +321,7 @@ void FunctionCorrector::visit(const ScopeStmt *scope) {
 void FunctionCorrector::visit(const AssignStmt *stmt) {
     visit_expr(stmt->lhs_);
     OC_ERROR_IF(stmt->lhs()->type()->is_resource());
-    stmt->lhs()->mark(Usage::Write);
+    stmt->lhs()->mark(Usage::WRITE);
     visit_expr(stmt->rhs_);
 }
 
@@ -433,4 +434,4 @@ void FunctionCorrector::visit(const UnaryExpr *expr) {
     visit_expr(expr->operand_);
 }
 
-}// namespace horizon::ast
+}// namespace ocarina

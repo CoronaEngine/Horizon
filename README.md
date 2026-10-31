@@ -3,6 +3,9 @@
 Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译为 SPIR-V，
 最终在 Vulkan Compute 后端执行。
 
+Ocarina 的源码目录已合并到 `src/`；旧 Horizon 的 `ast`、`core`、`runtime`、`dsl`、`math` 保留在 `legacy/src/`。
+原有 `horizon-*` 库从该目录构建，与 Ocarina 的头文件搜索路径分开。
+
 ## Windows 构建指南
 
 这份指南适用于第一次接触 CMake 和 Conan 的 Windows 开发者。所有命令都在仓库根目录执行。
@@ -122,7 +125,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 ```powershell
 python -B -m unittest discover -s build_tools/tests -p "test_*.py"
 python -B -m unittest discover -s tests/architecture -p "test_*.py"
-python -B -m unittest discover -s modules/ocarina/tests -p "test_*.py"
+python -B -m unittest discover -s src/tests -p "test_*.py"
 ```
 
 ### 4. 新增 target 和依赖
@@ -134,7 +137,7 @@ python -B -m unittest discover -s modules/ocarina/tests -p "test_*.py"
 - **希望用脚本直接构建新 target**：若它不符合现有名称规则，还要在 `build_tools/dev.py` 的 target 到目标族映射中登记；否则脚本可能选择错误的 preset。
 - **新增一个完整的目标族**：除 CMake 和 Conan 外，还要新增 CMake preset、Conan 选项、脚本的目标族选项和 target 映射，确保它使用独立的构建目录。
 
-例如，新增一个不引入第三方库的 Ocarina 测试，只需在 `modules/ocarina/tests/CMakeLists.txt` 增加：
+例如，新增一个不引入第三方库的 Ocarina 测试，只需在 `src/tests/CMakeLists.txt` 增加：
 
 ```cmake
 ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)

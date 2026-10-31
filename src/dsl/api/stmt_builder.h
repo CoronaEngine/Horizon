@@ -10,12 +10,9 @@
 #include "ast/function.h"
 #include "operators.h"
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
 
-inline void comment(const horizon::dsl::string &str) noexcept {
+inline void comment(const ocarina::string &str) noexcept {
     Function::current()->comment(str);
 }
 
@@ -45,22 +42,22 @@ template<typename T>
 template<typename T>
 [[nodiscard]] inline Var<expr_value_t<T>> eval(const Expression *expr) noexcept {
     using RawType = expr_value_t<T>;
-    return Var<RawType>(detail::Expr<RawType>(expr));
+    return Var<RawType>(Expr<RawType>(expr));
 }
 
 template<typename T>
-[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(T &&x) noexcept {
+[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(T &&x) noexcept {
     if constexpr (is_expr_v<T>) {
         return make_expr<T>(x.expression());
     } else {
-        return detail::Expr<expr_value_t<T>>(std::forward<T>(x));
+        return Expr<expr_value_t<T>>(std::forward<T>(x));
     }
 }
 
 template<typename T>
-[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept {
+[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept {
     using RawType = expr_value_t<T>;
-    return detail::Expr<RawType>(expr);
+    return Expr<RawType>(expr);
 }
 
 template<typename T, typename Arg>
@@ -112,7 +109,7 @@ private:
 public:
     explicit ScopeStmtBuilder(const string &str) : str_(str) {}
     template<typename Body>
-    void operator+(Body &&body) {
+    void operator+(Body &&body) noexcept {
         comment("start " + str_);
         auto scope = Function::current()->scope();
         Function::current()->with(scope, OC_FORWARD(body));
@@ -143,42 +140,42 @@ public:
     }
 
     template<typename TrueBranch>
-    IfStmtBuilder &operator/(TrueBranch &&true_branch) {
+    IfStmtBuilder &operator/(TrueBranch &&true_branch) noexcept {
         Function::current()->with(if_->true_branch(), std::forward<TrueBranch>(true_branch));
         return *this;
     }
 
     template<typename Func>
-    IfStmtBuilder operator*(Func &&func) {
+    IfStmtBuilder operator*(Func &&func) noexcept {
         return Function::current()->with(if_->false_branch(), std::forward<Func>(func));
     }
 
     template<typename FalseBranch>
-    void operator%(FalseBranch &&false_branch) {
+    void operator%(FalseBranch &&false_branch) noexcept {
         Function::current()->with(if_->false_branch(), std::forward<FalseBranch>(false_branch));
     }
 
     template<typename Condition, typename TrueBranch>
-    IfStmtBuilder elif_(Condition &&condition, TrueBranch &&true_branch) {
+    IfStmtBuilder elif_(Condition &&condition, TrueBranch &&true_branch) noexcept {
         return (*this) * [&] {
             return detail::IfStmtBuilder::create(std::forward<Condition>(condition));
         } / std::forward<TrueBranch>(true_branch);
     }
 
     template<typename Condition, typename TrueBranch>
-    IfStmtBuilder elif_with_source_location(const string &str, Condition &&condition, TrueBranch &&true_branch) {
+    IfStmtBuilder elif_with_source_location(const string &str, Condition &&condition, TrueBranch &&true_branch) noexcept {
         return (*this) * [&] {
             return detail::IfStmtBuilder::create_with_source_location(str, std::forward<Condition>(condition));
         } / std::forward<TrueBranch>(true_branch);
     }
 
     template<typename FalseBranch>
-    void else_(FalseBranch &&false_branch) {
+    void else_(FalseBranch &&false_branch) noexcept {
         (*this) % std::forward<FalseBranch>(false_branch);
     }
 
     template<typename FalseBranch>
-    void else_with_source_location(const string &str, FalseBranch &&false_branch) {
+    void else_with_source_location(const string &str, FalseBranch &&false_branch) noexcept {
         comment(str);
         else_(OC_FORWARD(false_branch));
     }
@@ -187,7 +184,7 @@ public:
 
 template<typename Condition, typename TrueBranch>
 detail::IfStmtBuilder if_(Condition &&condition,
-                          TrueBranch &&true_branch) {
+                          TrueBranch &&true_branch) noexcept {
     return detail::IfStmtBuilder::create(std::forward<Condition>(condition)) / std::forward<TrueBranch>(true_branch);
 }
 
@@ -216,7 +213,7 @@ public:
     }
 
     template<typename Body>
-    void operator*(Body &&body) {
+    void operator*(Body &&body) noexcept {
         Function::current()->with(case_stmt_->body(), [&] {
             body(Break{});
         });
@@ -236,7 +233,7 @@ public:
 
     template<typename CaseExpr, typename Body>
     requires concepts::integral<CaseExpr>
-    void operator()(CaseExpr &&t, Body &&body) {
+    void operator()(CaseExpr &&t, Body &&body) noexcept {
         detail::CaseStmtBuilder::create(std::forward<CaseExpr>(t)) * std::forward<Body>(body);
     }
 };
@@ -256,7 +253,7 @@ public:
     }
 
     template<typename Body>
-    void operator*(Body &&body) {
+    void operator*(Body &&body) noexcept {
         Function::current()->with(default_stmt_->body(), [&] {
             body(Break{});
         });
@@ -274,7 +271,7 @@ public:
 
     template<typename Body>
     requires std::is_invocable_v<Body, Break>
-    void operator()(Body &&body) {
+    void operator()(Body &&body) noexcept {
         detail::DefaultStmtBuilder() * std::forward<Body>(body);
     }
 };
@@ -304,7 +301,7 @@ public:
     }
 
     template<typename CaseExpr, typename Body>
-    SwitchStmtBuilder &case_(CaseExpr &&case_expr, Body &&body) {
+    SwitchStmtBuilder &case_(CaseExpr &&case_expr, Body &&body) noexcept {
         Function::current()->with(switch_stmt_->body(), [&] {
             CaseStmtBuilder::create(std::forward<CaseExpr>(case_expr)) * std::forward<Body>(body);
         });
@@ -312,14 +309,14 @@ public:
     }
 
     template<typename Body>
-    void default_(Body &&body) {
+    void default_(Body &&body) noexcept {
         Function::current()->with(switch_stmt_->body(), [&] {
             DefaultStmtBuilder() * std::forward<Body>(body);
         });
     }
 
     template<typename Body>
-    SwitchStmtBuilder &operator*(Body &&func) && {
+    SwitchStmtBuilder &operator*(Body &&func) && noexcept {
         Function::current()->with(switch_stmt_->body(), [&] {
             func(Case{}, Default{});
         });
@@ -330,7 +327,7 @@ public:
 }// namespace detail
 
 template<typename T, typename Body>
-void switch_(T &&t, Body &&body) {
+void switch_(T &&t, Body &&body) noexcept {
     detail::SwitchStmtBuilder::create(std::forward<T>(t)) * std::forward<Body>(body);
 }
 
@@ -340,12 +337,12 @@ decltype(auto) switch_(T &&t) noexcept {
 }
 
 template<typename T, typename Body>
-void case_(T &&t, Body &&body) {
+void case_(T &&t, Body &&body) noexcept {
     detail::CaseStmtBuilder::create(std::forward<T>(t)) * std::forward<Body>(body);
 }
 
 template<typename Body>
-void default_(Body &&body) {
+void default_(Body &&body) noexcept {
     detail::DefaultStmtBuilder() * std::forward<Body>(body);
 }
 
@@ -383,13 +380,13 @@ public:
     }
 
     template<typename Func>
-    LoopStmtBuilder &operator/(Func &&func) {
+    LoopStmtBuilder &operator/(Func &&func) noexcept {
         Function::current()->with(loop_->body(), std::forward<Func>(func));
         return *this;
     }
 
     template<typename Body>
-    void operator*(Body &&body) {
+    void operator*(Body &&body) noexcept {
         Function::current()->with(loop_->body(), [&] {
             body(Continue{}, Break());
         });
@@ -398,13 +395,13 @@ public:
 }// namespace detail
 
 template<typename Body>
-void loop(Body &&body) {
+void loop(Body &&body) noexcept {
     detail::LoopStmtBuilder::create() * std::forward<Body>(body);
 }
 
 template<typename Condition, typename Body>
-void while_(Condition &&cond, Body &&body) {
-    detail::LoopStmtBuilder::create() / [&]() {
+void while_(Condition &&cond, Body &&body) noexcept {
+    detail::LoopStmtBuilder::create() * [&]() noexcept {
         if constexpr (std::is_invocable_v<Condition>) {
             if_(!cond(), [&] {
                 syntax::break_();
@@ -432,11 +429,11 @@ public:
         : var_(begin),
           end_(end),
           step_(step) {
-        const BinaryExpr *negative_step = Function::current()->binary(Type::of<bool>(), BinaryOp::Less,
+        const BinaryExpr *negative_step = Function::current()->binary(Type::of<bool>(), BinaryOp::LESS,
                                                                       step_.expression(), OC_EXPR(T(0)));
-        const BinaryExpr *condition = Function::current()->binary(Type::of<bool>(), BinaryOp::Less,
+        const BinaryExpr *condition = Function::current()->binary(Type::of<bool>(), BinaryOp::LESS,
                                                                   var_.expression(), end_.expression());
-        const BinaryExpr *reduce_cond = Function::current()->binary(Type::of<bool>(), BinaryOp::Greater,
+        const BinaryExpr *reduce_cond = Function::current()->binary(Type::of<bool>(), BinaryOp::GREATER,
                                                                     var_.expression(), end_.expression());
         const Expression *final_condition = Function::current()->conditional(Type::of<bool>(), negative_step,
                                                                              reduce_cond, condition);
@@ -452,21 +449,63 @@ public:
     }
 
     template<typename Body>
-    void operator/(Body &&body) {
-        Function::current()->with(for_stmt_->body(), [&]() {
+    void operator/(Body &&body) noexcept {
+        Function::current()->with(for_stmt_->body(), [&]() noexcept {
             body(var_, Continue{}, Break());
         });
     }
 };
+}// namespace detail
 
+template<typename... Args, EPort p = port_v<Args...>>
+void print(ocarina::string f, Args &&...args) {
+    if constexpr (p == D) {
+        size_t num = sizeof...(Args);
+        OC_ASSERT(num == substr_count(f, "{}"));
+        Function::current()->print(f, vector<const Expression *>{OC_EXPR(args)...});
+    } else {
+        f += "\n";
+        cout << format(f.c_str(), OC_FORWARD(args)...);
+    }
+}
+
+namespace detail {
+template<typename T>
+[[nodiscard]] auto to_tuple(const T &t) {
+    if constexpr (is_vector_expr_v<T>) {
+        using elm_ty = decltype(T::x);
+        static constexpr auto dim = vector_expr_dimension_v<T>;
+        if constexpr (dim == 2) {
+            return std::tuple<elm_ty, elm_ty>(t.x, t.y);
+        } else if constexpr (dim == 3) {
+            return std::tuple<elm_ty, elm_ty, elm_ty>(t.x, t.y, t.z);
+        } else {
+            return std::tuple<elm_ty, elm_ty, elm_ty, elm_ty>(t.x, t.y, t.z, t.w);
+        }
+    } else if constexpr (is_scalar_expr_v<T>) {
+        return std::tuple<T>(t);
+    }
+}
+}// namespace detail
+
+template<typename... Args>
+void prints(ocarina::string f, Args &&...args) {
+    auto all_tuple = std::tuple_cat(detail::to_tuple(args)...);
+    auto func = [&]<typename... A, size_t... i>(std::tuple<A...> &&tp, std::index_sequence<i...>) {
+        print(f, std::get<i>(OC_FORWARD(tp))...);
+    };
+    func(ocarina::move(all_tuple), std::make_index_sequence<std::tuple_size_v<decltype(all_tuple)>>());
+}
+
+namespace detail {
 template<typename Count>
-requires horizon::dsl::is_all_integral_expr_v<Count>
+requires ocarina::is_all_integral_expr_v<Count>
 auto range(Count &&count) noexcept {
     return detail::ForStmtBuilder<expr_value_t<Count>>(0, make_expr(std::forward<Count>(count)), 1);
 }
 
 template<typename Begin, typename End>
-requires horizon::dsl::is_all_integral_expr_v<Begin, End>
+requires ocarina::is_all_integral_expr_v<Begin, End>
 auto range(Begin &&begin, End &&end) noexcept {
     return detail::ForStmtBuilder<expr_value_t<Begin>,
                                   expr_value_t<End>>(make_expr(std::forward<Begin>(begin)),
@@ -475,7 +514,7 @@ auto range(Begin &&begin, End &&end) noexcept {
 }
 
 template<typename Begin, typename End, typename Step>
-requires horizon::dsl::is_all_integral_expr_v<Begin, End, Step>
+requires ocarina::is_all_integral_expr_v<Begin, End, Step>
 auto range(Begin &&begin, End &&end, Step &&step) noexcept {
     return detail::ForStmtBuilder<expr_value_t<Begin>, expr_value_t<End>,
                                   expr_value_t<Step>>(make_expr(std::forward<Begin>(begin)),
@@ -493,21 +532,21 @@ auto range_with_source_location(const string &str, Args &&...args) noexcept {
 
 template<typename Count, typename Body>
 requires concepts::integral<expr_value_t<Count>>
-void for_range(Count &&count, Body &&body) {
+void for_range(Count &&count, Body &&body) noexcept {
     detail::range(std::forward<Count>(count)) / std::forward<Body>(body);
 }
 
 template<typename Begin, typename End, typename Body>
-requires horizon::dsl::is_all_integral_expr_v<Begin, End>
-void for_range(Begin &&begin, End &&end, Body &&body) {
+requires ocarina::is_all_integral_expr_v<Begin, End>
+void for_range(Begin &&begin, End &&end, Body &&body) noexcept {
     detail::range(std::forward<Begin>(begin),
                   std::forward<End>(end)) /
         std::forward<Body>(body);
 }
 
 template<typename Begin, typename End, typename Step, typename Body>
-requires horizon::dsl::is_all_integral_expr_v<Begin, End, Step>
-void for_range(Begin &&begin, End &&end, Step &&step, Body &&body) {
+requires ocarina::is_all_integral_expr_v<Begin, End, Step>
+void for_range(Begin &&begin, End &&end, Step &&step, Body &&body) noexcept {
     detail::range(std::forward<Begin>(begin),
                   std::forward<End>(end),
                   std::forward<Step>(step)) /
@@ -542,4 +581,4 @@ inline void return_() noexcept {
     Function::current()->return_(nullptr);
 }
 
-}// namespace horizon::dsl
+}// namespace ocarina

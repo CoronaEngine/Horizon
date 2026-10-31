@@ -6,9 +6,9 @@
 
 #include "core/dynamic_buffer/dynamic_buffer_field_access.h"
 #include "core/dynamic_buffer/dynamic_buffer_layout_common.h"
-#include "core/util/string_util.h"
+#include "core/type_system/type_desc.h"
 
-namespace horizon::core {
+namespace ocarina {
 
 namespace {
 
@@ -18,11 +18,11 @@ namespace {
         return {};
     }
     switch (policy.policy) {
-        case PrecisionPolicy::ForceF16:
-            return "half";
-        case PrecisionPolicy::ForceF32:
+        case PrecisionPolicy::force_f16:
+            return string(TypeDesc<half>::description());
+        case PrecisionPolicy::force_f32:
         default:
-            return "float";
+            return string(TypeDesc<float>::description());
     }
 }
 
@@ -45,7 +45,7 @@ namespace {
     if (type == nullptr) {
         return 0u;
     }
-    if (type->tag() == Type::Tag::Real) {
+    if (type->tag() == Type::Tag::REAL) {
         const auto *resolved = resolve_type_description(type, policy);
         return resolved == nullptr ? 0u : resolved->alignment();
     }
@@ -73,7 +73,7 @@ namespace {
     if (type == nullptr) {
         return {};
     }
-    if (type->tag() == Type::Tag::Real) {
+    if (type->tag() == Type::Tag::REAL) {
         return resolve_real_description(policy);
     }
     if (type->is_scalar()) {
@@ -81,7 +81,7 @@ namespace {
     }
     if (type->is_vector()) {
         const auto *elem = resolve_type_description(type->element(), policy);
-        return elem == nullptr ? string{} : horizon::core::format("vector<{},{}>", elem->description(), type->dimension());
+        return elem == nullptr ? string{} : ocarina::format("vector<{},{}>", elem->description(), type->dimension());
     }
     if (type->is_matrix()) {
         const auto *col = resolve_type_description(type->element(), policy);
@@ -89,21 +89,21 @@ namespace {
             return {};
         }
         const auto *scalar = col->element();
-        return scalar == nullptr ? string{} : horizon::core::format("matrix<{},{},{}>",
+        return scalar == nullptr ? string{} : ocarina::format("matrix<{},{},{}>",
                                                                scalar->description(),
                                                                type->dimension(),
                                                                col->dimension());
     }
     if (type->is_array()) {
         const auto *elem = resolve_real_container_element(type->element(), policy);
-        return elem == nullptr ? string{} : horizon::core::format("array<{},{}>", elem->description(), type->dimension());
+        return elem == nullptr ? string{} : ocarina::format("array<{},{}>", elem->description(), type->dimension());
     }
     if (type->is_buffer()) {
         const auto *elem = resolve_real_container_element(type->element(), policy);
-        return elem == nullptr ? string{} : horizon::core::format("buffer<{}>", elem->description());
+        return elem == nullptr ? string{} : ocarina::format("buffer<{}>", elem->description());
     }
     if (type->is_structure()) {
-        string ret = horizon::core::format("struct<{},{},{},{}",
+        string ret = ocarina::format("struct<{},{},{},{}",
                                      type->cname(),
                                      resolved_alignment(type, policy),
                                      type->is_builtin_struct(),
@@ -136,8 +136,8 @@ namespace {
     if (logical == nullptr || resolved == nullptr) {
         return false;
     }
-    if (logical->tag() == Type::Tag::Real) {
-        return resolved->tag() == Type::Tag::Half;
+    if (logical->tag() == Type::Tag::REAL) {
+        return resolved->tag() == Type::Tag::HALF;
     }
     if ((logical->is_vector() || logical->is_matrix() || logical->is_array()) &&
         (resolved->is_vector() || resolved->is_matrix() || resolved->is_array())) {
@@ -181,7 +181,7 @@ struct FieldRegionInfo {
     auto info = detail::resolve_runtime_field_access_info(logical_type,
                                                           resolved_type,
                                                           steps,
-                                                          detail::FieldOffsetMode::Aos,
+                                                          detail::FieldOffsetMode::AOS,
                                                           1u,
                                                           current_offset);
     if (!info.valid()) {
@@ -194,25 +194,25 @@ struct FieldRegionInfo {
 
 TypedFieldPath TypedFieldPath::append_member(uint32_t member_index) const {
     auto copy = *this;
-    copy.steps_.push_back(Step{.kind = StepKind::Member, .value = member_index});
+    copy.steps_.push_back(Step{.kind = StepKind::member, .value = member_index});
     return copy;
 }
 
 TypedFieldPath TypedFieldPath::append_index(uint32_t element_index) const {
     auto copy = *this;
-    copy.steps_.push_back(Step{.kind = StepKind::Index, .value = element_index});
+    copy.steps_.push_back(Step{.kind = StepKind::index, .value = element_index});
     return copy;
 }
 
 TypedFieldPath TypedFieldPath::append_component(uint32_t component_index) const {
     auto copy = *this;
-    copy.steps_.push_back(Step{.kind = StepKind::Component, .value = component_index});
+    copy.steps_.push_back(Step{.kind = StepKind::component, .value = component_index});
     return copy;
 }
 
 TypedFieldPath TypedFieldPath::member(uint32_t member_index) noexcept {
     TypedFieldPath path;
-    path.steps_.push_back(Step{.kind = StepKind::Member, .value = member_index});
+    path.steps_.push_back(Step{.kind = StepKind::member, .value = member_index});
     return path;
 }
 
@@ -279,4 +279,4 @@ const Type *DynamicBufferLayoutPlan::field_resolved_type(span<const TypedFieldPa
     return info.resolved_type;
 }
 
-}// namespace horizon::core
+}// namespace ocarina

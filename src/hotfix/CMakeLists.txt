@@ -1,10 +1,9 @@
-﻿file(GLOB HEADER_FILES *.h*)
+file(GLOB HEADER_FILES *.h*)
 file(GLOB SOURCE_FILES *.c*)
 
 add_library(horizon-hotfix SHARED ${SOURCE_FILES})
 target_include_directories(horizon-hotfix PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/..
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../modules/ocarina)
+        ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(horizon-hotfix PUBLIC
         ocarina)
 

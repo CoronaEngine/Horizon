@@ -12,10 +12,7 @@
 #include <utility>
 #include "core/runtime/platform.h"
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
 
 namespace detail {
 template<typename Lhs, typename Rhs>
@@ -23,12 +20,12 @@ requires(!is_param_struct_v<expr_value_t<Lhs>> && !is_param_struct_v<expr_value_
 void assign(Lhs &&lhs, Rhs &&rhs) noexcept;// implement in stmt_builder.h
 
 [[nodiscard]] OC_DSL_API Var<uint> correct_index(Var<uint> index, Var<uint> size, const string &desc,
-                                                 const string &tb) noexcept;// implement in ref_func.cpp
+                                                 const string &tb) noexcept;// implement in env.cpp
 
 [[nodiscard]] OC_DSL_API Var<uint> correct_index(Var<uint> index, uint size, const string &desc,
-                                                 const string &tb) noexcept;// implement in ref_func.cpp
+                                                 const string &tb) noexcept;// implement in env.cpp
 
-[[nodiscard]] OC_DSL_API Var<uint> divide(Var<uint> lhs, Var<uint> rhs) noexcept;// implement in ref_func.cpp
+[[nodiscard]] OC_DSL_API Var<uint> divide(Var<uint> lhs, Var<uint> rhs) noexcept;// implement in env.cpp
 
 }// namespace detail
 
@@ -39,10 +36,10 @@ template<typename T>
 [[nodiscard]] inline Var<expr_value_t<T>> eval(const Expression *expr) noexcept;// implement in stmt_builder.h
 
 template<typename T>
-[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(T &&x) noexcept;// implement in stmt_builder.h
+[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(T &&x) noexcept;// implement in stmt_builder.h
 
 template<typename T>
-[[nodiscard]] inline detail::Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept;// implement in stmt_builder.h
+[[nodiscard]] inline Expr<expr_value_t<T>> make_expr(const Expression *expr) noexcept;// implement in stmt_builder.h
 
 class TriangleHit;
 class Ray;
@@ -58,7 +55,7 @@ namespace detail {
 template<typename T>
 [[nodiscard]] decltype(auto) extract_expression(T &&v) noexcept;// implement in dsl/expr.h
 
-#define OC_EXPR(arg) horizon::dsl::detail::extract_expression(OC_FORWARD(arg))
+#define OC_EXPR(arg) ocarina::detail::extract_expression(OC_FORWARD(arg))
 
 template<typename T,
          typename element_type = std::remove_cvref_t<expr_value_t<decltype(std::declval<expr_value_t<T>>()[0])>>>
@@ -74,7 +71,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::Read);
+        expr->mark(Usage::READ);
         return eval<element_type>(expr);
     }
 
@@ -85,7 +82,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::Read);
+        expr->mark(Usage::READ);
         return eval<element_type>(expr);
     }
 
@@ -96,7 +93,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::Write);
+        expr->mark(Usage::WRITE);
         Var<element_type> *ret = f->template create_temp_obj<Var<element_type>>(expr);
         return *ret;
     }
@@ -108,7 +105,7 @@ struct EnableSubscriptAccess {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  OC_EXPR(index));
-        expr->mark(Usage::Write);
+        expr->mark(Usage::WRITE);
         Var<element_type> *ret = f->template create_temp_obj<Var<element_type>>(expr);
         return *ret;
     }
@@ -127,7 +124,7 @@ struct EnableReadAndWrite {
         const SubscriptExpr *expr = Function::current()->subscript(Type::of<element_type>(),
                                                                    self()->expression(),
                                                                    {OC_EXPR(index)...});
-        expr->mark(Usage::Read);
+        expr->mark(Usage::READ);
         return eval<element_type>(expr);
     }
 
@@ -143,7 +140,7 @@ struct EnableReadAndWrite {
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  self()->expression(),
                                                  {OC_EXPR(new_index)});
-        expr->mark(Usage::Read);
+        expr->mark(Usage::READ);
         return eval<element_type>(expr);
     }
 
@@ -162,14 +159,14 @@ struct EnableReadAndWrite {
             const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                      self()->expression(),
                                                      OC_EXPR(new_index));
-            expr->mark(Usage::Write);
+            expr->mark(Usage::WRITE);
             assign(expr, OC_FORWARD(elm));
         }
     }
 
     template<typename Index, typename Val>
     requires is_integral_expr_v<Index> &&
-             horizon::dsl::is_same_v<element_type, expr_value_t<Val>>
+             ocarina::is_same_v<element_type, expr_value_t<Val>>
     void write_and_check(Index &&index, Val &&elm, uint size, const string &desc) {
         if constexpr (is_integral_v<Index>) {
             OC_ASSERT(index <= size);
@@ -195,17 +192,17 @@ struct EnableByteLoadAndStore {
             new_offset = detail::correct_index(new_offset, self()->template size<expr_value_t<Offset>>(),
                                                typeid(*this).name(), traceback_string());
         }
-        self()->expression()->mark(Usage::Read);
+        self()->expression()->mark(Usage::READ);
         if constexpr (N == 1) {
             const CallExpr *expr = Function::current()->call_builtin(Type::of<Elm>(),
-                                                                     CallOp::ByteBufferRead,
+                                                                     CallOp::BYTE_BUFFER_READ,
                                                                      {self()->expression(),
                                                                       OC_EXPR(new_offset)},
                                                                      {N});
             return eval<Elm>(expr);
         } else {
             const CallExpr *expr = Function::current()->call_builtin(Type::of<Vector<Elm, N>>(),
-                                                                     CallOp::ByteBufferRead,
+                                                                     CallOp::BYTE_BUFFER_READ,
                                                                      {self()->expression(),
                                                                       OC_EXPR(new_offset)},
                                                                      {N});
@@ -222,9 +219,9 @@ struct EnableByteLoadAndStore {
                                                typeid(*this).name(), traceback_string());
         }
         const Type *ret_type = Type::of<Target>();
-        self()->expression()->mark(Usage::Read);
+        self()->expression()->mark(Usage::READ);
         const CallExpr *expr = Function::current()->call_builtin(ret_type,
-                                                                 CallOp::ByteBufferRead,
+                                                                 CallOp::BYTE_BUFFER_READ,
                                                                  {self()->expression(),
                                                                   OC_EXPR(new_offset)},
                                                                  {ret_type});
@@ -240,9 +237,9 @@ struct EnableByteLoadAndStore {
                                                typeid(*this).name(), traceback_string());
         }
         const Type *ret_type = Type::of<Target>();
-        self()->expression()->mark(Usage::Write);
+        self()->expression()->mark(Usage::WRITE);
         const CallExpr *expr = Function::current()->call_builtin(ret_type,
-                                                                 CallOp::ByteBufferRead,
+                                                                 CallOp::BYTE_BUFFER_READ,
                                                                  {self()->expression(),
                                                                   OC_EXPR(new_offset)},
                                                                  {ret_type});
@@ -276,10 +273,10 @@ struct EnableByteLoadAndStore {
             new_offset = detail::correct_index(new_offset, self()->template size<expr_value_t<Offset>>(),
                                                typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::ByteBufferWrite,
+        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BYTE_BUFFER_WRITE,
                                                                  {self()->expression(),
                                                                   OC_EXPR(new_offset), OC_EXPR(val)});
-        self()->expression()->mark(Usage::Write);
+        self()->expression()->mark(Usage::WRITE);
         Function::current()->expr_statement(expr);
     }
 };
@@ -287,7 +284,7 @@ struct EnableByteLoadAndStore {
 template<typename T, size_t Dim>
 struct EnableTextureSample {
     static_assert(Dim == 2 || Dim == 3, "The dimension of texture must be 2 or 3!");
-    static constexpr CallOp call_op = Dim == 2 ? CallOp::Tex2DSample : CallOp::Tex3DSample;
+    static constexpr CallOp call_op = Dim == 2 ? CallOp::TEX2D_SAMPLE : CallOp::TEX3D_SAMPLE;
     template<typename U, typename V>
     requires(is_all_floating_point_expr_v<U, V>)
     OC_NODISCARD DynamicArray<float> sample(uint channel_num, const U &u, const V &v)
@@ -312,8 +309,8 @@ struct EnableTextureSample {
 template<typename T, size_t Dim>
 struct EnableTextureReadAndWrite {
     static_assert(Dim == 2 || Dim == 3, "The dimension of texture must be 2 or 3!");
-    static constexpr CallOp Read = Dim == 2 ? CallOp::Tex2DRead : CallOp::Tex3DRead;
-    static constexpr CallOp Write = Dim == 2 ? CallOp::Tex2DWrite : CallOp::Tex3DWrite;
+    static constexpr CallOp Read = Dim == 2 ? CallOp::TEX2D_READ : CallOp::TEX3D_READ;
+    static constexpr CallOp Write = Dim == 2 ? CallOp::TEX2D_WRITE : CallOp::TEX3D_WRITE;
     [[nodiscard]] T *self() noexcept { return static_cast<T *>(this); }
     [[nodiscard]] const T *self() const noexcept { return static_cast<const T *>(this); }
 
@@ -323,7 +320,7 @@ struct EnableTextureReadAndWrite {
         const CallExpr *expr = Function::current()->call_builtin(Type::of<Output>(), Read,
                                                                  {self()->expression(), OC_EXPR(x), OC_EXPR(y)},
                                                                  {Type::of<Output>()});
-        self()->expression()->mark(Usage::Read);
+        self()->expression()->mark(Usage::READ);
         return eval<Output>(expr);
     }
 
@@ -334,13 +331,13 @@ struct EnableTextureReadAndWrite {
         const CallExpr *expr = Function::current()->call_builtin(Type::of<Output>(), Read,
                                                                  {self()->expression(), OC_EXPR(x), OC_EXPR(y), OC_EXPR(z)},
                                                                  {Type::of<Output>()});
-        self()->expression()->mark(Usage::Read);
+        self()->expression()->mark(Usage::READ);
         return eval<Output>(expr);
     }
 
     template<typename Target, typename XY>
     requires((is_general_integer_vector2_v<remove_device_t<XY>>) &&
-             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target>))
+             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target> || is_uint_element_expr_v<Target>))
     OC_NODISCARD auto read(const XY &xy) const noexcept {
         return [&]<typename Arg>(const Arg &arg) {
             return read<Target>(arg.x, arg.y);
@@ -349,7 +346,7 @@ struct EnableTextureReadAndWrite {
 
     template<typename Target, typename XYZ>
     requires((is_general_int_vector3_v<remove_device_t<XYZ>> || is_general_uint_vector3_v<remove_device_t<XYZ>>) &&
-             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target>))
+             (is_uchar_element_expr_v<Target> || is_float_element_expr_v<Target> || is_uint_element_expr_v<Target>))
     OC_NODISCARD auto read(const XYZ &xyz) const noexcept {
         return [&]<typename Arg>(const Arg &arg) {
             return read<Target>(arg.x, arg.y, arg.z);
@@ -359,26 +356,26 @@ struct EnableTextureReadAndWrite {
     template<typename X, typename Y, typename Val>
     requires(is_all_integral_expr_v<X, Y> &&
              (is_uchar_element_expr_v<Val> ||
-              is_float_element_expr_v<Val>))
+              is_float_element_expr_v<Val> || is_uint_element_expr_v<Val>))
     void write(const Val &elm, const X &x, const Y &y) noexcept {
         const T *texture = static_cast<const T *>(this);
         const CallExpr *expr = Function::current()->call_builtin(nullptr, Write,
                                                                  {self()->expression(),
                                                                   OC_EXPR(elm), OC_EXPR(x), OC_EXPR(y)});
-        self()->expression()->mark(Usage::Write);
+        self()->expression()->mark(Usage::WRITE);
         Function::current()->expr_statement(expr);
     }
 
     template<typename X, typename Y, typename Z, typename Val>
     requires(is_all_integral_expr_v<X, Y, Z> &&
              (is_uchar_element_expr_v<Val> ||
-              is_float_element_expr_v<Val>))
+              is_float_element_expr_v<Val> || is_uint_element_expr_v<Val>))
     void write(const Val &elm, const X &x, const Y &y, const Z &z) noexcept {
         static_assert(Dim == 3,"This method only available on 3D tex");
         const CallExpr *expr = Function::current()->call_builtin(nullptr, Write,
                                                                  {self()->expression(),
                                                                   OC_EXPR(elm), OC_EXPR(x), OC_EXPR(y), OC_EXPR(z)});
-        self()->expression()->mark(Usage::Write);
+        self()->expression()->mark(Usage::WRITE);
         Function::current()->expr_statement(expr);
     }
 
@@ -416,25 +413,25 @@ public:
 
     Var<T> exchange(Var<T> value) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::AtomicExch,
+                                                                   CallOp::ATOMIC_EXCH,
                                                                    {range_, index_, OC_EXPR(value)});
-        range_->mark(Usage::ReadWrite);
+        range_->mark(Usage::READ_WRITE);
         return eval<T>(expr);
     }
 
     Var<T> fetch_add(Var<T> value) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::AtomicAdd,
+                                                                   CallOp::ATOMIC_ADD,
                                                                    {range_, index_, OC_EXPR(value)});
-        range_->mark(Usage::ReadWrite);
+        range_->mark(Usage::READ_WRITE);
         return eval<T>(expr);
     }
 
     Var<T> fetch_sub(Var<T> value) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::AtomicSub,
+                                                                   CallOp::ATOMIC_SUB,
                                                                    {range_, index_, OC_EXPR(value)});
-        range_->mark(Usage::ReadWrite);
+        range_->mark(Usage::READ_WRITE);
         return eval<T>(expr);
     }
 };
@@ -480,7 +477,7 @@ struct EnableStaticCast {
     OC_NODISCARD Var<Dest>
     cast()
         const noexcept {
-        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::Static,
+        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::STATIC,
                                                          static_cast<const T *>(this)->expression());
         return eval<Dest>(expr);
     }
@@ -493,10 +490,10 @@ struct EnableBitwiseCast {
     OC_NODISCARD Var<Dest>
     as()
         const noexcept {
-        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::Bitwise,
+        const CastExpr *expr = Function::current()->cast(Type::of<Dest>(), CastOp::BITWISE,
                                                          static_cast<const T *>(this)->expression());
         return eval<Dest>(expr);
     }
 };
 }// namespace detail
-}// namespace horizon::dsl
+}// namespace ocarina

@@ -3,17 +3,15 @@
 //
 
 #include "function.h"
-#include "ast/type_desc.h"
+#include "core/util/switch_profile.h"
+#include "core/type_system/type_desc.h"
 #include "core/util/util.h"
+#include "generator/source_emitter.h"
 #include "function_corrector.h"
-#include "symbol_name.h"
-#include "raster_validation.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
-void Function::StructureSet::add(const horizon::ast::Type *type) noexcept {
+void Function::StructureSet::add(const ocarina::Type *type) noexcept {
     for (const Type *m : type->members()) {
         add(m);
     }
@@ -38,7 +36,7 @@ const Type *Function::resolve_ast_type(const Type *type) const noexcept {
     return Type::resolve(type, storage_policy_);
 }
 
-horizon::ast::list<CallExpr::Template> Function::resolve_ast_templates(horizon::ast::list<CallExpr::Template> t_args) const noexcept {
+ocarina::list<CallExpr::Template> Function::resolve_ast_templates(ocarina::list<CallExpr::Template> t_args) const noexcept {
     for (auto &t_arg : t_args) {
         if (std::holds_alternative<const Type *>(t_arg)) {
             t_arg = resolve_ast_type(std::get<const Type *>(t_arg));
@@ -48,43 +46,12 @@ horizon::ast::list<CallExpr::Template> Function::resolve_ast_templates(horizon::
 }
 
 void Function::correct() noexcept {
+    switch_profile::Scope profile{"Function::correct", "ast_correct"};
     TIMER(FunctionCorrect)
-    if (is_kernel()) {
-        auto diagnostics = detail::validate_kernel_raster_usage(*this);
-        if (!diagnostics.empty()) {
-            OC_ERROR("InvalidBuiltinStage: {}", diagnostics.front().message);
-        }
-    }
     FunctionCorrector().apply(this);
 }
 
-shared_ptr<Function> Function::begin_raster(Tag tag, const Type *return_type) {
-    if (tag != Tag::Vertex && tag != Tag::Fragment) {
-        throw RasterValidationError({{RasterDiagnosticCode::InvalidStage,
-                                      "Raster entry must be vertex or fragment"}});
-    }
-    auto function = horizon::ast::make_shared<Function>(tag);
-    function->ret_ = function->resolve_ast_type(return_type);
-    return function;
-}
-
-void Function::finalize_raster() {
-    auto graph_diagnostics = detail::validate_raster_call_graph(*this);
-    if (!graph_diagnostics.empty()) {
-        throw RasterValidationError(std::move(graph_diagnostics));
-    }
-    correct();
-    vector<RasterDiagnostic> diagnostics;
-    shader_interface_ = detail::build_shader_interface(*this, diagnostics);
-    auto validation = validate_raster_function(*this);
-    diagnostics.insert(diagnostics.end(), validation.begin(), validation.end());
-    if (!diagnostics.empty()) {
-        throw RasterValidationError(std::move(diagnostics));
-    }
-    detail::reset_raster_hashes(*this);
-}
-
-void Function::mark_variable_usage(horizon::ast::uint uid, horizon::ast::Usage usage) noexcept {
+void Function::mark_variable_usage(ocarina::uint uid, ocarina::Usage usage) noexcept {
     OC_ASSERT(uid < variable_datas_.size());
     auto old_usage = to_underlying(variable_datas_[uid].usage);
     auto new_usage = to_underlying(usage);
@@ -103,7 +70,7 @@ const RefExpr *Function::mapping_captured_argument(const Expression *outer_expr,
     if (!*contain) {
         uint arg_index = static_cast<uint>(appended_arguments_.size());
         expr_to_argument_index_.insert(make_pair(outer_expr, arg_index));
-        Variable variable = create_variable(outer_expr->type(), Variable::Tag::Reference, "", "outer");
+        Variable variable = create_variable(outer_expr->type(), Variable::Tag::REFERENCE, "", "outer");
         appended_arguments_.push_back(variable);
     }
     uint arg_index = expr_to_argument_index_.at(outer_expr);
@@ -144,7 +111,7 @@ const RefExpr *Function::mapping_output_argument(const Expression *invoked_func_
     }
     if (!expr_to_argument_index_.contains(invoked_func_expr)) {
         uint arg_index = static_cast<uint>(appended_arguments_.size());
-        Variable variable = create_variable(invoked_func_expr->type(), Variable::Tag::Reference, "", "pass");
+        Variable variable = create_variable(invoked_func_expr->type(), Variable::Tag::REFERENCE, "", "pass");
         expr_to_argument_index_.insert(make_pair(invoked_func_expr, arg_index));
         appended_arguments_.push_back(variable);
     }
@@ -159,7 +126,7 @@ void Function::append_output_argument(const Expression *expression, bool *contai
         return;
     }
     expr_to_argument_index_.insert(make_pair(expression, static_cast<uint>(appended_arguments_.size())));
-    Variable variable = create_variable(expression->type(), Variable::Tag::Reference, "", "output");
+    Variable variable = create_variable(expression->type(), Variable::Tag::REFERENCE, "", "output");
     appended_arguments_.push_back(variable);
     const RefExpr *ref_expr = _ref(variable);
     OC_ERROR_IF(expression->type()->is_resource());
@@ -171,7 +138,7 @@ void Function::append_output_argument(const Expression *expression, bool *contai
 namespace detail {
 
 [[nodiscard]] string path_key(const vector<int> &path) noexcept {
-    string ret = horizon::ast::format("{}", path[0]);
+    string ret = ocarina::format("{}", path[0]);
     for (int i = 1; i < path.size(); ++i) {
         ret += "_" + to_string(path[i]);
     }
@@ -194,13 +161,13 @@ void Function::process_param_struct_member(const Variable &arg, const Type *type
         splitting_param_struct(arg, type, path);
     } else {
         string key = detail::path_key(path);
-        Variable v = create_variable(type, Variable::Tag::Local, "", key);
+        Variable v = create_variable(type, Variable::Tag::LOCAL, "", key);
         argument_map_.insert(make_pair(key, v));
         splitted_arguments_.push_back(v);
     }
 }
 
-void Function::splitting_param_struct(const horizon::ast::Variable &arg, const Type *type,
+void Function::splitting_param_struct(const ocarina::Variable &arg, const Type *type,
                                       vector<int> &path) noexcept {
     for (int i = 0; i < type->members().size(); ++i) {
         path.push_back(i);
@@ -256,22 +223,22 @@ const CallExpr *Function::current_call_expr() const noexcept {
     return all_call_expr_.back();
 }
 
-const RefExpr *Function::_ref(const horizon::ast::Variable &variable) noexcept {
+const RefExpr *Function::_ref(const ocarina::Variable &variable) noexcept {
     return create_expression<RefExpr>(variable);
 }
 
 uint Function::_next_variable_uid() noexcept {
     auto ret = variable_datas_.size();
-    variable_datas_.push_back(Variable::Data(Usage::None));
+    variable_datas_.push_back(Variable::Data(Usage::NONE));
     return ret;
 }
 
 Variable Function::create_variable(const Type *type, Variable::Tag tag, std::string name, std::string suffix) noexcept {
-    Variable ret{this, resolve_ast_type(type), tag, _next_variable_uid(), horizon::ast::move(name), horizon::ast::move(suffix)};
+    Variable ret{this, resolve_ast_type(type), tag, _next_variable_uid(), ocarina::move(name), ocarina::move(suffix)};
     return ret;
 }
 
-void Function::add_used_structure(const horizon::ast::Type *type) noexcept {
+void Function::add_used_structure(const ocarina::Type *type) noexcept {
     used_struct_.add(type);
 }
 
@@ -285,18 +252,18 @@ Usage &Function::variable_usage(uint uid) noexcept {
     return variable_datas_[uid].usage;
 }
 
-Variable::Data &Function::variable_data(horizon::ast::uint uid) noexcept {
+Variable::Data &Function::variable_data(ocarina::uint uid) noexcept {
     OC_ASSERT(uid < variable_datas_.size());
     return variable_datas_[uid];
 }
 
-const Variable::Data &Function::variable_data(horizon::ast::uint uid) const noexcept {
+const Variable::Data &Function::variable_data(ocarina::uint uid) const noexcept {
     OC_ASSERT(uid < variable_datas_.size());
     return variable_datas_[uid];
 }
 
 void Function::return_(const Expression *expression) noexcept {
-    if (expression && !is_raster()) {
+    if (expression) {
         ret_ = resolve_ast_type(expression->type());
     }
     create_statement<ReturnStmt>(expression);
@@ -323,14 +290,17 @@ ScopeStmt *Function::body() noexcept {
 }
 
 const RefExpr *Function::_builtin(Variable::Tag tag, const Type *type) noexcept {
-    for (size_t i = 0; i < builtin_vars_.size(); ++i) {
-        if (builtin_vars_[i].tag() == tag) { return builtin_exprs_[i]; }
-    }
     Variable variable = create_variable(type, tag);
+    if (auto iter = std::find_if(builtin_vars_.begin(),
+                                 builtin_vars_.end(),
+                                 [&](auto v) {
+                                     return v.tag() == tag;
+                                 });
+        iter != builtin_vars_.end()) {
+        return _ref(*iter);
+    }
     builtin_vars_.push_back(variable);
-    const auto *expression = _ref(variable);
-    builtin_exprs_.push_back(expression);
-    return expression;
+    return _ref(variable);
 }
 
 const Function *Function::add_used_function(SP<const Function> func) noexcept {
@@ -339,150 +309,49 @@ const Function *Function::add_used_function(SP<const Function> func) noexcept {
 }
 
 const RefExpr *Function::block_idx() noexcept {
-    return _builtin(Variable::Tag::BlockIdx, Type::of<uint3>());
+    return _builtin(Variable::Tag::BLOCK_IDX, Type::of<uint3>());
 }
 
 const RefExpr *Function::thread_idx() noexcept {
-    return _builtin(Variable::Tag::ThreadIdx, Type::of<uint3>());
+    return _builtin(Variable::Tag::THREAD_IDX, Type::of<uint3>());
 }
 
 const RefExpr *Function::dispatch_dim() noexcept {
-    return _builtin(Variable::Tag::DispatchDim, Type::of<uint3>());
+    return _builtin(Variable::Tag::DISPATCH_DIM, Type::of<uint3>());
 }
 
 const RefExpr *Function::dispatch_id() noexcept {
-    return _builtin(Variable::Tag::DispatchId, Type::of<uint>());
+    return _builtin(Variable::Tag::DISPATCH_ID, Type::of<uint>());
 }
 
 const RefExpr *Function::thread_id() noexcept {
-    return _builtin(Variable::Tag::ThreadId, Type::of<uint>());
-}
-
-const RefExpr *Function::vertex_position() noexcept { return _builtin(Variable::Tag::VertexPosition, Type::of<float4>()); }
-const RefExpr *Function::vertex_index() noexcept { return _builtin(Variable::Tag::VertexIndex, Type::of<uint>()); }
-const RefExpr *Function::instance_index() noexcept { return _builtin(Variable::Tag::InstanceIndex, Type::of<uint>()); }
-const RefExpr *Function::draw_index() noexcept { return _builtin(Variable::Tag::DrawIndex, Type::of<uint>()); }
-const RefExpr *Function::fragment_coord() noexcept { return _builtin(Variable::Tag::FragmentCoord, Type::of<float4>()); }
-const RefExpr *Function::front_facing() noexcept { return _builtin(Variable::Tag::FrontFacing, Type::of<bool>()); }
-void Function::discard() { create_statement<DiscardStmt>(); }
-
-const RefExpr *Function::primitive_index() noexcept
-{
-    return _builtin(Variable::Tag::PrimitiveIndex, Type::of<uint>());
-}
-const RefExpr *Function::fragment_depth() noexcept
-{
-    return _builtin(Variable::Tag::FragmentDepth, Type::of<float>());
-}
-const RefExpr *Function::fragment_depth_greater_equal() noexcept
-{
-    return _builtin(Variable::Tag::FragmentDepthGreaterEqual, Type::of<float>());
-}
-const RefExpr *Function::fragment_depth_less_equal() noexcept
-{
-    return _builtin(Variable::Tag::FragmentDepthLessEqual, Type::of<float>());
-}
-const RefExpr *Function::sample_index() noexcept
-{
-    return _builtin(Variable::Tag::SampleIndex, Type::of<uint>());
-}
-const RefExpr *Function::sample_mask() noexcept
-{
-    return _builtin(Variable::Tag::SampleMask, Type::of<uint>());
-}
-const RefExpr *Function::sample_mask_output() noexcept
-{
-    return _builtin(Variable::Tag::SampleMaskOutput, Type::of<uint>());
-}
-const RefExpr *Function::render_target_array_index() noexcept
-{
-    return _builtin(Variable::Tag::RenderTargetArrayIndex, Type::of<uint>());
-}
-const RefExpr *Function::viewport_array_index() noexcept
-{
-    return _builtin(Variable::Tag::ViewportArrayIndex, Type::of<uint>());
-}
-const RefExpr *Function::stencil_ref() noexcept
-{
-    return _builtin(Variable::Tag::StencilRef, Type::of<uint>());
-}
-const RefExpr *Function::shading_rate() noexcept
-{
-    return _builtin(Variable::Tag::ShadingRate, Type::of<uint>());
-}
-
-namespace
-{
-void validate_clip_cull_distance_count(uint count)
-{
-    if (count == 0 || count > 8)
-    {
-        throw RasterValidationError(
-            {{RasterDiagnosticCode::InvalidBuiltinConfiguration, "Clip/cull distance count must be between 1 and 8."}});
-    }
-}
-}  // namespace
-
-const RefExpr *Function::array_builtin(Variable::Tag tag, const Type *element_type, uint count)
-{
-    const Type *type =
-        resolve_ast_type(Type::from(horizon::core::format("array<{},{}>", element_type->description(), count)));
-    for (const auto &variable : builtin_vars_)
-    {
-        if (variable.tag() == tag && variable.type() != type)
-        {
-            throw RasterValidationError({{RasterDiagnosticCode::InvalidBuiltinConfiguration,
-                                          "An array builtin must use a consistent element type and size."}});
-        }
-    }
-    return _builtin(tag, type);
-}
-
-const RefExpr *Function::clip_distances(uint count)
-{
-    validate_clip_cull_distance_count(count);
-    return array_builtin(Variable::Tag::ClipDistance, Type::of<float>(), count);
-}
-const RefExpr *Function::cull_distances(uint count)
-{
-    validate_clip_cull_distance_count(count);
-    return array_builtin(Variable::Tag::CullDistance, Type::of<float>(), count);
+    return _builtin(Variable::Tag::THREAD_ID, Type::of<uint>());
 }
 
 const RefExpr *Function::dispatch_idx() noexcept {
-    return _builtin(Variable::Tag::DispatchIdx, Type::of<uint3>());
+    return _builtin(Variable::Tag::DISPATCH_IDX, Type::of<uint3>());
 }
 
 const RefExpr *Function::argument(const Type *type) noexcept {
-    if (is_raster()) {
-        auto variable = create_variable(type, Variable::Tag::StageInput);
-        arguments_.push_back(variable);
-        return _ref(variable);
-    }
     Variable::Tag tag;
     switch (type->tag()) {
-        case Type::Tag::Buffer:
-            tag = Variable::Tag::Buffer;
+        case Type::Tag::BUFFER:
+            tag = Variable::Tag::BUFFER;
             break;
-        case Type::Tag::ByteBuffer:
-            tag = Variable::Tag::ByteBuffer;
+        case Type::Tag::BYTE_BUFFER:
+            tag = Variable::Tag::BYTE_BUFFER;
             break;
-        case Type::Tag::Texture3D:
-        case Type::Tag::RwTexture3D:
-            tag = Variable::Tag::Texture3D;
+        case Type::Tag::TEXTURE3D:
+            tag = Variable::Tag::TEXTURE3D;
             break;
-        case Type::Tag::Texture2D:
-        case Type::Tag::RwTexture2D:
-            tag = Variable::Tag::Texture2D;
+        case Type::Tag::TEXTURE2D:
+            tag = Variable::Tag::TEXTURE2D;
             break;
-        case Type::Tag::BindlessArray:
-            tag = Variable::Tag::BindlessArray;
-            break;
-        case Type::Tag::Accel:
-            tag = Variable::Tag::Accel;
+        case Type::Tag::ACCEL:
+            tag = Variable::Tag::ACCEL;
             break;
         default:
-            tag = Variable::Tag::Local;
+            tag = Variable::Tag::LOCAL;
             break;
     }
     Variable variable = create_variable(type, tag);
@@ -491,15 +360,29 @@ const RefExpr *Function::argument(const Type *type) noexcept {
 }
 
 const RefExpr *Function::reference_argument(const Type *type) noexcept {
-    Variable variable = create_variable(type, Variable::Tag::Reference, "", "ref");
+    Variable variable = create_variable(type, Variable::Tag::REFERENCE, "", "ref");
     arguments_.push_back(variable);
     return _ref(variable);
 }
 
 const RefExpr *Function::local(const Type *type, std::source_location location) noexcept {
-    auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::Local));
+    auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::LOCAL));
     ret->variable().set_src_location(location);
     current_scope()->add_var(ret->variable());
+    return ret;
+}
+
+void Function::require_ray_query_compute_workgroups() noexcept {
+    OC_ERROR_IF_NOT(is_kernel(), "Ray-query compute workgroups require a kernel");
+    ray_query_compute_workgroups_ = true;
+}
+
+const RefExpr *Function::shared(const Type *type, std::source_location location) noexcept {
+    OC_ERROR_IF_NOT(is_general_kernel() || (is_kernel() && requires_ray_query_compute_workgroups()),
+                    "Shared arrays require compute or explicit ray-query compute workgroups");
+    auto ret = create_expression<RefExpr>(create_variable(type, Variable::Tag::SHARED));
+    ret->variable().set_src_location(location);
+    shared_vars_.push_back(ret->variable());
     return ret;
 }
 
@@ -540,30 +423,30 @@ const SubscriptExpr *Function::subscript(const Type *type, const Expression *ran
 const MemberExpr *Function::swizzle(const Type *type, const Expression *obj, uint16_t mask,
                                     uint16_t swizzle_size) noexcept {
     const Type *resolved = resolve_ast_type(type);
-    return create_expression<MemberExpr>(resolved, obj, mask, swizzle_size, create_variable(resolved, Variable::Tag::Member));
+    return create_expression<MemberExpr>(resolved, obj, mask, swizzle_size, create_variable(resolved, Variable::Tag::MEMBER));
 }
 
 const MemberExpr *Function::member(const Type *type, const Expression *obj, int index) noexcept {
     const Type *resolved = resolve_ast_type(type);
-    return create_expression<MemberExpr>(resolved, obj, index, 0, create_variable(resolved, Variable::Tag::Member));
+    return create_expression<MemberExpr>(resolved, obj, index, 0, create_variable(resolved, Variable::Tag::MEMBER));
 }
 
 const CallExpr *Function::call(const Type *type, SP<const Function> func,
-                               horizon::ast::list<const Expression *> args) noexcept {
+                               ocarina::list<const Expression *> args) noexcept {
     const Function *ptr = add_used_function(func);
     const Type *resolved = ptr->return_type() != nullptr ? ptr->return_type() : resolve_ast_type(type);
     return create_expression<CallExpr>(resolved, ptr, std::move(args));
 }
 
-const CallExpr *Function::call(const horizon::ast::Type *type, string_view func_name,
-                               horizon::ast::list<const Expression *> args) noexcept {
-    return create_expression<CallExpr>(resolve_ast_type(type), func_name, horizon::ast::move(args));
+const CallExpr *Function::call(const ocarina::Type *type, string_view func_name,
+                               ocarina::list<const Expression *> args) noexcept {
+    return create_expression<CallExpr>(resolve_ast_type(type), func_name, ocarina::move(args));
 }
 
 const CallExpr *Function::call_builtin(const Type *type, CallOp op,
-                                       horizon::ast::list<const Expression *> args,
-                                       horizon::ast::list<CallExpr::Template> t_args) noexcept {
-    if (op == CallOp::TraceClosest || op == CallOp::TraceOcclusion) {
+                                       ocarina::list<const Expression *> args,
+                                       ocarina::list<CallExpr::Template> t_args) noexcept {
+    if (op == CallOp::TRACE_CLOSEST || op == CallOp::TRACE_OCCLUSION) {
         set_raytracing(true);
     }
     return create_expression<CallExpr>(resolve_ast_type(type), op, std::move(args), resolve_ast_templates(std::move(t_args)));
@@ -684,29 +567,33 @@ void Function::break_() noexcept {
     create_statement<BreakStmt>();
 }
 
-void Function::comment(const horizon::ast::string &string) noexcept {
+void Function::comment(const ocarina::string &string) noexcept {
     create_statement<CommentStmt>(string);
 }
 
-horizon::ast::span<const Variable> Function::arguments() const noexcept {
+void Function::print(string fmt, const vector<const Expression *> &args) noexcept {
+    create_statement<PrintStmt>(fmt, args);
+}
+
+ocarina::span<const Variable> Function::arguments() const noexcept {
     return arguments_;
 }
 
-horizon::ast::span<const Variable> Function::appended_arguments() const noexcept {
+ocarina::span<const Variable> Function::appended_arguments() const noexcept {
     return appended_arguments_;
 }
 
-horizon::ast::span<const Variable> Function::builtin_vars() const noexcept {
+ocarina::span<const Variable> Function::builtin_vars() const noexcept {
     return builtin_vars_;
 }
 
-horizon::ast::string Function::func_name(uint64_t ext_hash, string ext_name) const noexcept {
+ocarina::string Function::func_name(uint64_t ext_hash, string ext_name) const noexcept {
     uint64_t final_hash = ext_hash == 0 ? hash() : hash64(hash(), ext_hash);
     if (is_kernel()) {
         if (is_raytracing()) {
-            return detail::raygen_name(final_hash, horizon::ast::move(ext_name));
+            return detail::raygen_name(final_hash, ocarina::move(ext_name));
         } else {
-            return detail::kernel_name(final_hash, horizon::ast::move(ext_name));
+            return detail::kernel_name(final_hash, ocarina::move(ext_name));
         }
     } else {
         return detail::func_name(final_hash);
@@ -735,6 +622,10 @@ uint64_t Function::compute_hash() const noexcept {
                  static_cast<uint>(storage_policy_.policy),
                  static_cast<uint>(storage_policy_.allow_real_in_storage));
     ret = hash64(tag(), ret);
+    // Preserve every pre-existing shader identity when the requirement is off.
+    if (requires_ray_query_compute_workgroups()) {
+        ret = hash64(ret, string_view{"ray_query_compute_workgroups"});
+    }
     for (const Variable &v : arguments_) {
         ret = hash64(ret, v.hash());
     }
@@ -744,21 +635,14 @@ uint64_t Function::compute_hash() const noexcept {
     for (const Variable &v : builtin_vars_) {
         ret = hash64(ret, v.hash());
     }
+    for (const Variable &v : shared_vars_) {
+        ret = hash64(ret, v.hash());
+    }
     for (const CapturedResource &v : captured_resources_) {
         ret = hash64(ret, v.hash());
     }
     ret = hash64(ret, body_.hash());
-    if (is_raster()) {
-        for (const auto *slots : {&shader_interface_.inputs, &shader_interface_.outputs}) {
-            ret = hash64(ret, slots->size());
-            for (const auto &slot : *slots) {
-                ret = hash64(ret, slot.type->hash(), slot.root_index, slot.location, slot.interpolation,
-                             slot.member_path.size());
-                for (auto member : slot.member_path) { ret = hash64(ret, member); }
-            }
-        }
-    }
     return ret;
 }
 
-}// namespace horizon::ast
+}// namespace ocarina

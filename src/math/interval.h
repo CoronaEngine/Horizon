@@ -8,9 +8,9 @@
 #include "core/concepts.h"
 #include "constants.h"
 
-namespace horizon::math {
-using namespace horizon::core;
+namespace ocarina {
 
+inline namespace math {
 template<typename T>
 struct interval {
     using scalar_t = T;
@@ -49,7 +49,7 @@ struct interval {
     [[nodiscard]] interval<T> including(const T &t) { return interval<T>(std::min(begin, t), std::max(end, t)); }
 
     [[nodiscard]] static interval<T> positive() {
-        return interval<T>(T{0}, pos_infinity_v<T>);
+        return interval<T>(0.f, empty_range_upper<T>());
     }
 };
 
@@ -61,25 +61,26 @@ template<typename T>
     return interval<T>(max(a.begin, b.begin), min(a.end, b.end));
 }
 
-}// namespace horizon::math
+}
+}// namespace ocarina::math
 
 template<typename T>
-[[nodiscard]] horizon::math::interval<T> operator*(const horizon::math::interval<T> &a, const T &b) {
-    return horizon::math::build_interval<T>(a.begin * b, a.end * b);
+[[nodiscard]] ocarina::interval<T> operator*(const ocarina::interval<T> &a, const T &b) {
+    return ocarina::build_interval<T>(a.begin * b, a.end * b);
 }
 
 template<typename T>
-[[nodiscard]] horizon::math::interval<T> operator-(const horizon::math::interval<T> &a, const T &b) {
-    return horizon::math::interval<T>(a.begin - b, a.end - b);
+[[nodiscard]] ocarina::interval<T> operator-(const ocarina::interval<T> &a, const T &b) {
+    return interval<T>(a.begin - b, a.end - b);
 }
 
 template<typename T>
-[[nodiscard]] bool operator==(const horizon::math::interval<T> &a, const horizon::math::interval<T> &b) {
+[[nodiscard]] bool operator==(const ocarina::interval<T> &a, const ocarina::interval<T> &b) {
     return a.begin == b.begin && a.end == b.end;
 }
 
 template<typename T>
-[[nodiscard]] bool operator!=(const horizon::math::interval<T> &a,
-                              const horizon::math::interval<T> &b) {
+[[nodiscard]] bool operator!=(const ocarina::interval<T> &a,
+                              const ocarina::interval<T> &b) {
     return !(a == b);
 }

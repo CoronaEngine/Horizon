@@ -5,9 +5,7 @@
 #include "expression.h"
 #include "function.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 void VariableExpr::_mark(Usage usage) const noexcept {
     variable_.mark_usage(usage);
@@ -22,7 +20,7 @@ Usage VariableExpr::usage() const noexcept {
 }
 
 uint64_t LiteralExpr::compute_hash() const noexcept {
-    uint64_t ret = horizon::ast::visit(
+    uint64_t ret = ocarina::visit(
         [&](auto &&arg) {
             return hash64(OC_FORWARD(arg));
         },
@@ -58,7 +56,7 @@ uint64_t ConditionalExpr::compute_hash() const noexcept {
 
 MemberExpr::MemberExpr(const Type *type, const Expression *parent,
                        uint16_t index, uint16_t swizzle_size, Variable variable)
-    : VariableExpr(Tag::Member, variable.type(), variable), parent_(parent),
+    : VariableExpr(Tag::MEMBER, variable.type(), variable), parent_(parent),
       member_index_(index), swizzle_size_(swizzle_size) {}
 
 int MemberExpr::swizzle_index(int idx) const noexcept {
@@ -77,7 +75,7 @@ uint64_t MemberExpr::compute_hash() const noexcept {
 
 CallExpr::CallExpr(const Type *type, const Function *func,
                    list<const Expression *> &&args)
-    : Expression(Tag::Call, type),
+    : Expression(Tag::CALL, type),
       function_(func),
       arguments_(std::move(args)) {
     const_cast<Function *>(function_)->record_call_expression(this);
@@ -99,7 +97,7 @@ void CallExpr::append_argument(const Expression *expression) noexcept {
 }
 
 template<typename Elm>
-[[nodiscard]] auto get_list_iter(const horizon::ast::list<Elm> &lst, uint index) noexcept {
+[[nodiscard]] auto get_list_iter(const ocarina::list<Elm> &lst, uint index) noexcept {
     uint counter = 0;
     for(auto iter = lst.cbegin(); iter != lst.cend(); ++iter, ++counter) {
         if (counter == index) {
@@ -109,12 +107,12 @@ template<typename Elm>
     return lst.cend();
 }
 
-const Expression *CallExpr::argument(horizon::ast::uint index) const noexcept {
+const Expression *CallExpr::argument(ocarina::uint index) const noexcept {
     auto ret = get_list_iter(arguments_, index);
     return *ret;
 }
 
-const CallExpr::Template &CallExpr::template_arg(horizon::ast::uint index) const noexcept {
+const CallExpr::Template &CallExpr::template_arg(ocarina::uint index) const noexcept {
     auto ret = get_list_iter(template_args_, index);
     return *ret;
 }
@@ -124,7 +122,7 @@ uint64_t CallExpr::compute_hash() const noexcept {
     ret = hash64(call_op_, ret);
     ret = hash64(function_name_, ret);
     for (auto _template_arg : template_args_) {
-        ret = horizon::ast::visit(
+        ret = ocarina::visit(
             [&](auto &&arg) {
                 return hash64(OC_FORWARD(arg));
             },
@@ -137,4 +135,4 @@ uint64_t CallExpr::compute_hash() const noexcept {
     return ret;
 }
 
-}// namespace horizon::ast
+}// namespace ocarina

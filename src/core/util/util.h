@@ -4,19 +4,21 @@
 
 #pragma once
 
+#include "math/basic_traits.h"
 #include "core/concepts.h"
+#include "math/base.h"
 #include "core/util/logging.h"
 
-namespace horizon::core {
+namespace ocarina {
 
 template<typename T, typename U>
-requires concepts::integral<T> && concepts::integral<U>
+requires is_integral_v<T> && is_integral_v<U>
 OC_NODISCARD static constexpr auto
 mem_offset(T offset, U alignment) noexcept {
     return (offset + alignment - 1u) / alignment * alignment;
 }
 
-inline size_t structure_size(horizon::core::span<const MemoryBlock> members) noexcept {
+inline size_t structure_size(ocarina::span<const MemoryBlock> members) noexcept {
     size_t size = 0;
     size_t alignment = 0;
     for (const MemoryBlock block : members) {
@@ -34,7 +36,7 @@ inline size_t structure_size(horizon::core::span<const MemoryBlock> members) noe
 inline size_t structure_alignment(span<const MemoryBlock> members) noexcept {
     size_t ret = 0;
     for (const MemoryBlock block : members) {
-        ret = std::max(block.alignment, ret);
+        ret = max(block.alignment, ret);
     }
     return ret;
 }
@@ -53,20 +55,20 @@ requires concepts::subscriptable<T>
             return i;
         }
     }
-    return std::numeric_limits<uint>::max();
+    return InvalidUI32;
 }
 
 inline namespace size_literals {
-[[nodiscard]] constexpr auto operator""_kb(unsigned long long bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_kb(size_t bytes) noexcept {
     return static_cast<size_t>(bytes * 1024u);
 }
 
-[[nodiscard]] constexpr auto operator""_mb(unsigned long long bytes) noexcept {
-    return static_cast<size_t>(bytes * 1024u * 1024u);
+[[nodiscard]] constexpr auto operator""_mb(size_t bytes) noexcept {
+    return static_cast<size_t>(bytes * sqr(1024u));
 }
 
-[[nodiscard]] constexpr auto operator""_gb(unsigned long long bytes) noexcept {
-    return static_cast<size_t>(bytes * 1024u * 1024u * 1024u);
+[[nodiscard]] constexpr auto operator""_gb(size_t bytes) noexcept {
+    return static_cast<size_t>(bytes * Pow<3>(1024u));
 }
 }// namespace size_literals
 
@@ -75,22 +77,22 @@ inline namespace size_literals {
 }
 
 [[nodiscard]] constexpr float to_mb(size_t bytes) noexcept {
-    return static_cast<float>(bytes) / (1024.0f * 1024.0f);
+    return static_cast<float>(bytes) / sqr(1024);
 }
 
 [[nodiscard]] constexpr float to_gb(size_t bytes) noexcept {
-    return static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+    return static_cast<double>(bytes) / Pow<3>(1024u);
 }
 
 [[nodiscard]] inline string bytes_string(size_t bytes) noexcept {
     if (bytes > 1_gb) {
-        return horizon::core::format("{:.2f} gb", to_gb(bytes));
+        return ocarina::format("{:.2f} gb", to_gb(bytes));
     } else if (bytes > 1_mb) {
-        return horizon::core::format("{:.2f} mb", to_mb(bytes));
+        return ocarina::format("{:.2f} mb", to_mb(bytes));
     } else if (bytes > 1_kb) {
-        return horizon::core::format("{:.2f} kb", to_kb(bytes));
+        return ocarina::format("{:.2f} kb", to_kb(bytes));
     } else {
-        return horizon::core::format("{} byte", bytes);
+        return ocarina::format("{} byte", bytes);
     }
 }
 
@@ -113,7 +115,7 @@ public:
 
 private:
     Tick _last;
-    horizon::core::string _tag;
+    ocarina::string _tag;
 
 public:
     explicit Clock(const string &tag) noexcept
@@ -161,7 +163,7 @@ public:
     }
 };
 
-#define TIMER(task_name) horizon::core::Guard<Clock> __##task_name(Clock(#task_name));
-#define TIMER_TAG(task_name, tag) horizon::core::Guard<Clock> __##task_name(Clock(tag));
+#define TIMER(task_name) ocarina::Guard<Clock> __##task_name(Clock(#task_name));
+#define TIMER_TAG(task_name, tag) ocarina::Guard<Clock> __##task_name(Clock(tag));
 
-}// namespace horizon::core
+}// namespace ocarina

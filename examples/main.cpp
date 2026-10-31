@@ -24,7 +24,7 @@
 #include "example_edsl_rsm/example_edsl_rsm.h"
 #include "example_edsl_sponza/example_edsl_sponza.h"
 
-#include "core/util/logging.h"
+#include "horizon/core/logging.h"
 
 #include <ctime>
 #include <iomanip>
