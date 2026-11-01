@@ -381,7 +381,7 @@ int main(int argc, char *argv[]) {
     auto device = context.create_device();
     if (options.raytracing) device.init_rtx();
     auto stream = device.create_stream();
-    logger().flush();
+    log_flush();
     std::ostringstream metadata;
     metadata << "PERF_METADATA,timer=steady_clock,boundary=enqueue_submit_completion,compile_and_upload=excluded"
              << ",statistic=round_mean,percentile=linear_interpolation,block_size=" << block_size

@@ -1,5 +1,10 @@
 add_custom_target(horizon-tests)
 
+# Combined builds use the same shared Quill provider as the Ocarina executables.
+if(WIN32 AND HORIZON_BUILD_OCARINA)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
 add_subdirectory(core)
 add_subdirectory(math)
 add_subdirectory(ast)

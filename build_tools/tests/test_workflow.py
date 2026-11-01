@@ -267,7 +267,7 @@ class WorkflowTests(unittest.TestCase):
         for package in ("ktm", "pfr", "spirv-tools", "volk", "vulkan-headers",
                         "vulkan-memory-allocator", "slang", "tracy"):
             self.assertGreater(requirements.index(f'self.requires("{package}/'), engine_guard)
-        for package in ("quill", "fmt", "spdlog", "xxhash"):
+        for package in ("quill", "fmt", "xxhash"):
             self.assertLess(requirements.index(f'self.requires("{package}/'), engine_guard)
 
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:

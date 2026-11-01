@@ -71,9 +71,6 @@ class HorizonConan(ConanFile):
         self.requires("stb/cci.20240531")
         self.requires("tinyexr/1.0.7")
 
-        if bool(self.options.with_ocarina):
-            self.requires("spdlog/1.17.0")
-
         if bool(self.options.with_engine):
             self.requires("ktm/0.2.14", transitive_headers=True)
             self.requires("pfr/1.91.0", transitive_headers=True)

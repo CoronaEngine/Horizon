@@ -41,6 +41,7 @@ if(HORIZON_BUILD_ENGINE)
 
     target_link_libraries(Horizon PUBLIC
         horizon-core
+        horizon-logging
         Helicon
         quill::quill
         horizon::volk

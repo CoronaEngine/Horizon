@@ -51,7 +51,6 @@ public:
 private:
     std::shared_ptr<int> cleanup_lifetime_{std::make_shared<int>(0)};
     Managed<uint> buffer_;
-    spdlog::logger logger_{logger()};
     vector<Item> items_;
     bool enabled_{true};
     mutable string desc_;
@@ -61,9 +60,9 @@ private:
     template<typename Current, typename... Args>
     void _log_to_buffer(Uint offset, uint index, const Current &cur, const Args &...args) noexcept;
     template<typename... Args>
-    void _logs(spdlog::level::level_enum level, const string &fmt, const Args &...args) noexcept;
+    void _logs(LogLevel level, const string &fmt, const Args &...args) noexcept;
     template<typename... Args>
-    void _log(spdlog::level::level_enum level, const string &fmt, const Args &...args) noexcept;
+    void _log(LogLevel level, const string &fmt, const Args &...args) noexcept;
 
 private:
     Printer() = default;
@@ -102,10 +101,10 @@ public:
         buffer_.resize(buffer_.capacity());
     }
 
-#define OC_MAKE_LOG_FUNC(level_name)                                                                          \
+#define OC_MAKE_LOG_FUNC(level_name, log_level)                                                               \
     template<typename... Args>                                                                                \
     void level_name(const string &fmt, const Args &...args) noexcept {                                        \
-        _logs(spdlog::level::level_enum::level_name, fmt, OC_FORWARD(args)...);                               \
+        _logs(LogLevel::log_level, fmt, OC_FORWARD(args)...);                                                 \
     }                                                                                                         \
     template<typename... Args>                                                                                \
     void level_name##_with_location(const string &fmt, const Args &...args) noexcept {                        \
@@ -136,10 +135,10 @@ public:
         level_name##_with_location##_if(cond, fmt + tb, OC_FORWARD(args)...);                                 \
     }
 
-    OC_MAKE_LOG_FUNC(debug)
-    OC_MAKE_LOG_FUNC(info)
-    OC_MAKE_LOG_FUNC(warn)
-    OC_MAKE_LOG_FUNC(err)
+    OC_MAKE_LOG_FUNC(debug, Debug)
+    OC_MAKE_LOG_FUNC(info, Info)
+    OC_MAKE_LOG_FUNC(warn, Warning)
+    OC_MAKE_LOG_FUNC(err, Error)
 
 #undef OC_MAKE_LOG_FUNC
     void retrieve_immediately(const OutputFunc &func = nullptr) noexcept;
@@ -172,7 +171,7 @@ void Printer::_log_to_buffer(Uint offset, uint index, const Current &cur, const 
 }
 
 template<typename... Args>
-void Printer::_logs(spdlog::level::level_enum level, const string &fmt, const Args &...args) noexcept {
+void Printer::_logs(LogLevel level, const string &fmt, const Args &...args) noexcept {
     auto args_tuple = detail::args_to_tuple(args...);
     auto func = [&]<size_t... i>(std::index_sequence<i...>) {
         _log(level, fmt, std::get<i>(args_tuple)...);
@@ -181,7 +180,7 @@ void Printer::_logs(spdlog::level::level_enum level, const string &fmt, const Ar
 }
 
 template<typename... Args>
-void Printer::_log(spdlog::level::level_enum level, const string &fmt, const Args &...args) noexcept {
+void Printer::_log(LogLevel level, const string &fmt, const Args &...args) noexcept {
     if (!enabled_) {
         return;
     }
@@ -255,7 +254,7 @@ void Printer::_log(spdlog::level::level_enum level, const string &fmt, const Arg
         if (func) {
             func(to_underlying(level), content.c_str());
         } else {
-            logger_.log(level, content);
+            log_message(level, content);
         }
     };
     items_.push_back({decode, total_size});

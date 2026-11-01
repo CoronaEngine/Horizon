@@ -9,11 +9,13 @@
 #include <iostream>
 #include <filesystem>
 
-#include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/spdlog.h>
+#include "horizon/core/logging.h"
 
 namespace ocarina::inline core {
-OC_CORE_API spdlog::logger &logger() noexcept;
+using LogLevel = horizon::core::LogLevel;
+OC_CORE_API quill::Logger *logger() noexcept;
+OC_CORE_API void log_message(LogLevel level, std::string_view message) noexcept;
+OC_CORE_API void log_flush() noexcept;
 
 OC_CORE_API void log_level_debug() noexcept;
 OC_CORE_API void log_level_info() noexcept;
@@ -22,17 +24,17 @@ OC_CORE_API void log_level_error() noexcept;
 
 template<typename... Args>
 inline void debug(Args &&...args) noexcept {
-    logger().debug(serialize(std::forward<Args>(args)...));
+    log_message(LogLevel::Debug, serialize(std::forward<Args>(args)...));
 }
 
 template<typename... Args>
 inline void info(Args &&...args) noexcept {
-    logger().info(serialize(std::forward<Args>(args)...));
+    log_message(LogLevel::Info, serialize(std::forward<Args>(args)...));
 }
 
 template<typename... Args>
 inline void warning(Args &&...args) noexcept {
-    logger().warn(serialize(std::forward<Args>(args)...));
+    log_message(LogLevel::Warning, serialize(std::forward<Args>(args)...));
 }
 
 template<typename... Args>
@@ -62,7 +64,8 @@ inline void exception_if_not(bool predicate, Args &&...args) {
 
 template<typename... Args>
 [[noreturn]] inline void error(Args &&...args) {
-    logger().error(serialize(std::forward<Args>(args)...));
+    log_message(LogLevel::Error, serialize(std::forward<Args>(args)...));
+    log_flush();
     OC_ASSERT(0);
     exit(-1);
 }

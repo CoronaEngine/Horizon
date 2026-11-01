@@ -6,7 +6,7 @@ set_target_properties(ocarina-ext PROPERTIES
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         FOLDER "ocarina")
 
-# fmt, spdlog, and xxHash are provided by the root Conan dependency graph and
+# fmt and xxHash are provided by the root Conan dependency graph and
 # linked to ocarina-ext from the Horizon root.
 
 add_subdirectory(EASTL)

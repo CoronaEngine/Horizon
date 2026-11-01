@@ -56,6 +56,5 @@ set_target_properties(ocarina PROPERTIES
 if(TARGET ocarina-ext)
     target_link_libraries(ocarina-ext PUBLIC
         horizon::fmt
-        horizon::spdlog
         horizon::xxhash)
 endif()

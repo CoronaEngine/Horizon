@@ -135,7 +135,7 @@ bool DXCCompiler::preprocess(const char *hlsl, uint32_t size, const std::string 
     std::string errorLog;
     if (errors != nullptr && errors->GetStringLength() > 0) {
         errorLog = errors->GetStringPointer();
-        spdlog::error("Preprocess failed with error: \"{}\"\n", errorLog);
+        LOG_ERROR(logger(), "Preprocess failed with error: \"{}\"\n", errorLog);
     }
 
     ComPtr<IDxcBlobUtf8> shader_obj;
@@ -214,7 +214,7 @@ bool DXCCompiler::compile_hlsl_spriv(const CompileInput &input, CompileResult &r
    
     if (errors != nullptr && errors->GetStringLength() > 0) {
         result.error = errors->GetStringPointer();
-        spdlog::error("Preprocess failed with error: \"{}\"\n", result.error);
+        LOG_ERROR(logger(), "Preprocess failed with error: \"{}\"\n", result.error);
     }
 
     ComPtr<IDxcBlob> shader_obj;

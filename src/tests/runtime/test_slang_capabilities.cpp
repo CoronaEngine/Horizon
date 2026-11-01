@@ -5,9 +5,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
+#include <fstream>
+#include <iterator>
 #include <string_view>
-#include <spdlog/sinks/ostream_sink.h>
 
 using namespace ocarina;
 
@@ -27,11 +27,13 @@ int main(int argc, char **argv) {
 
     // A fresh cache forces Slang to diagnose every kernel on every test run.
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    RHIContext::instance().init(argv[0], ocarina::format(".cache-slang-capabilities-{}", stamp));
-    std::ostringstream diagnostics;
-    auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(diagnostics);
-    sink->set_pattern("%v");
-    logger().sinks().push_back(sink);
+    const auto cache = ocarina::format(".cache-slang-capabilities-{}", stamp);
+    const auto diagnostics_path = std::filesystem::path{cache} / "diagnostics.log";
+    horizon::core::LoggingOptions logging;
+    logging.console = false;
+    logging.file_path = diagnostics_path;
+    horizon::core::initialize_logging(logging);
+    RHIContext::instance().init(argv[0], cache);
     auto device = create_test_device();
 
     // Texture intrinsics carry Slang's standard-library SPIR-V requirements.
@@ -56,9 +58,9 @@ int main(int argc, char **argv) {
         auto trace_shader = device.compile(trace, "slang-capabilities-ray-query");
     }
 
-    logger().flush();
-    const auto output = diagnostics.str();
-    logger().sinks().pop_back();
+    log_flush();
+    std::ifstream diagnostics{diagnostics_path};
+    const std::string output{std::istreambuf_iterator<char>{diagnostics}, {}};
     size_t compiles = 0;
     for (size_t offset = 0; (offset = output.find("shader SPIR-V cache miss:", offset)) != std::string::npos;
          ++offset) ++compiles;

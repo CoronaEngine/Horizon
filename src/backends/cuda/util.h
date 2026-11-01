@@ -44,8 +44,9 @@
     [&] {                                                                                        \
         OptixResult res = EXPR;                                                                  \
         if (res != OPTIX_SUCCESS) {                                                              \
-            spdlog::error("OptiX call " #EXPR " failed with code {}: \"{}\" at {}:{}", int(res), \
+            LOG_ERROR(::ocarina::logger(), "OptiX call " #EXPR " failed with code {}: \"{}\" at {}:{}", int(res), \
                           optixGetErrorString(res), __FILE__, __LINE__);                         \
+            ::ocarina::log_flush();                                                               \
             std::abort();                                                                        \
         }                                                                                        \
     }()
@@ -54,8 +55,9 @@
     [&] {                                                                                                  \
         OptixResult res = EXPR;                                                                            \
         if (res != OPTIX_SUCCESS) {                                                                        \
-            spdlog::error("OptiX call " #EXPR " failed with code {}: \"{}\"\nLogs: {},at {}:{}", int(res), \
+            LOG_ERROR(::ocarina::logger(), "OptiX call " #EXPR " failed with code {}: \"{}\"\nLogs: {},at {}:{}", int(res), \
                           optixGetErrorString(res), LOG, __FILE__, __LINE__);                              \
+            ::ocarina::log_flush();                                                                         \
             std::abort();                                                                                  \
         }                                                                                                  \
     }()

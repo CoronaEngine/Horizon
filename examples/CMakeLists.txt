@@ -117,6 +117,9 @@ add_custom_command(TARGET HorizonExamples POST_BUILD
     VERBATIM)
 
 helicon_install_runtime_deps(HorizonExamples)
+if(HORIZON_BUILD_OCARINA)
+    horizon_copy_runtime_files(HorizonExamples "$<TARGET_FILE:horizon-logging>")
+endif()
 if(COMMAND corona_copy_tbb_runtime_artifacts)
     corona_copy_tbb_runtime_artifacts(HorizonExamples)
 endif()

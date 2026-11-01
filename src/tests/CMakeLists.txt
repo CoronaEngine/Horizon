@@ -51,6 +51,8 @@ function(ocarina_add_test name)
 endfunction()
 
 # Core type and utility tests.
+ocarina_add_test(test-logging CATEGORY core SOURCES core/test_logging.cpp)
+target_link_libraries(test-core-logging PRIVATE horizon-core)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
 ocarina_add_test(test-precision-caps CATEGORY core SOURCES core/test_precision_caps.cpp)
 ocarina_add_test(test-half GPU CATEGORY core SOURCES core/test_half.cpp)

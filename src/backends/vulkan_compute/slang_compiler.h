@@ -5,6 +5,7 @@
 
 #include "core/stl.h"
 #include "ast/function.h"
+#include <mutex>
 
 // Forward declarations only — avoids pulling slang.h into every TU.
 namespace slang { struct IGlobalSession; struct ISession; }

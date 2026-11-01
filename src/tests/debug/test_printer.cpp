@@ -47,7 +47,8 @@ template<typename Shader, typename... Args>
     return expect_true(logs.size() == 1u,
                        ocarina::format("expected 1 log for scalar/vector test, got {}", logs.size())) &&
            expect_true(logs[0].message == "printer basic 7 11 22 33",
-                       ocarina::format("unexpected scalar/vector log: {}", logs[0].message));
+                       ocarina::format("unexpected scalar/vector log: {}", logs[0].message)) &&
+           expect_true(logs[0].level == 2, "info callback level must remain 2");
 }
 
 [[nodiscard]] bool test_multiple_entries_preserve_order(Device &device, Stream &stream) {
@@ -63,7 +64,9 @@ template<typename Shader, typename... Args>
            expect_true(logs[0].message == "first 3",
                        ocarina::format("unexpected first log: {}", logs[0].message)) &&
            expect_true(logs[1].message == "second 9",
-                       ocarina::format("unexpected second log: {}", logs[1].message));
+                       ocarina::format("unexpected second log: {}", logs[1].message)) &&
+           expect_true(logs[0].level == 3 && logs[1].level == 4,
+                       "warning/error callback levels must remain 3/4");
 }
 
 [[nodiscard]] bool test_ulong_round_trip(Device &device, Stream &stream) {
@@ -97,6 +100,11 @@ template<typename Shader, typename... Args>
 }// namespace
 
 int main() {
+    const auto log_path = std::filesystem::current_path() / "test-printer-quill.log";
+    horizon::core::LoggingOptions logging;
+    logging.console = false;
+    logging.file_path = log_path;
+    horizon::core::initialize_logging(logging);
     RHIContext &context = RHIContext::instance();
     Device device = create_test_device();
     Stream stream = device.create_stream();
@@ -107,5 +115,12 @@ int main() {
     passed = test_multiple_entries_preserve_order(device, stream) && passed;
     passed = test_ulong_round_trip(device, stream) && passed;
     passed = test_disabled_printer_suppresses_output(device, stream) && passed;
+    Env::printer().reset();
+    Kernel kernel = [](Var<uint> value) { Env::printer().info("printer default {}", value); };
+    auto shader = device.compile(kernel, "test_printer_quill");
+    stream << shader(17u).dispatch(1) << Env::printer().retrieve() << synchronize() << commit();
+    log_flush();
+    passed = expect_true(text_file_contents(log_path).find("printer default 17") != string::npos,
+                         "default GPU Printer output must reach the configured Quill file") && passed;
     return passed ? 0 : 1;
 }
