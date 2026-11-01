@@ -26,8 +26,7 @@
 #include <string_view>
 #include <filesystem>
 #include <source_location>
-#include <EASTL/functional.h>
-#include <EASTL/string.h>
+#include <cstring>
 #include <sys/stat.h>
 
 #define OC_FORWARD(arg) std::forward<decltype(arg)>(arg)
@@ -90,8 +89,8 @@ struct allocator {
 };
 
 template<typename T = std::byte>
-[[nodiscard]] inline auto allocate(size_t n = 1u, bool use_ea = true) noexcept {
-    if (use_ea) {
+[[nodiscard]] inline auto allocate(size_t n = 1u, bool use_allocator = true) noexcept {
+    if (use_allocator) {
         return allocator<T>{}.allocate(n);
     } else {
         return reinterpret_cast<T *>(_aligned_malloc(sizeof(T) * n, alignof(T)));
@@ -116,12 +115,12 @@ template<typename T, typename... Args>
 }
 
 template<typename T>
-inline void delete_with_allocator(T *p, bool use_ea = true) noexcept {
+inline void delete_with_allocator(T *p, bool use_allocator = true) noexcept {
     if (p == nullptr) {
         return;
     }
     std::destroy_at(p);
-    if (use_ea) {
+    if (use_allocator) {
         deallocate(p);
     } else {
         _aligned_free(p);
@@ -144,7 +143,6 @@ using std::cout;
 using std::endl;
 
 // ptr
-using eastl::move_only_function;
 using std::const_pointer_cast;
 using std::dynamic_pointer_cast;
 using std::enable_shared_from_this;

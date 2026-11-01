@@ -44,7 +44,7 @@ public:
     using OutputFunc = std::function<void(int, const char *)>;
 
     struct Item {
-        ocarina::move_only_function<void(const uint *, const OutputFunc &)> func;
+        std::function<void(const uint *, const OutputFunc &)> func;
         uint size;
     };
 
