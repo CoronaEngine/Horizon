@@ -779,6 +779,8 @@ namespace Corona::Horizon
         create_info.physicalDevice = device_manager_->physical_device();
         create_info.device = device_manager_->logical_device();
         create_info.pVulkanFunctions = &vulkan_functions;
+        // Keep graphics/physics pool tails bounded beside compute framebuffers.
+        create_info.preferredLargeHeapBlockSize = 16ull * 1024ull * 1024ull;
 
         throw_if_failed(vmaCreateAllocator(&create_info, &allocator_), "vmaCreateAllocator");
     }

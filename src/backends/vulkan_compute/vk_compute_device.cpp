@@ -310,6 +310,9 @@ void VulkanComputeDevice::init_vma() noexcept {
     ai.instance         = instance_;
     ai.vulkanApiVersion = VK_API_VERSION_1_2;
     ai.flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    // Embedded scenes resize large framebuffers beside graphics/physics heaps.
+    // Bound unused pooled space; large buffers can still be allocated separately.
+    ai.preferredLargeHeapBlockSize = 16ull * 1024ull * 1024ull;
     OC_VK_CHECK(vmaCreateAllocator(&ai, &allocator_));
 }
 
