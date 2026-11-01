@@ -5,6 +5,7 @@
 #pragma once
 
 #include "header.h"
+#include "../../legacy/src/core/tuple.h"
 #include <functional>
 #include <deque>
 #include <stack>
@@ -25,7 +26,7 @@
 #include <string_view>
 #include <filesystem>
 #include <source_location>
-#include <EASTL/tuple.h>
+#include <EASTL/functional.h>
 #include <EASTL/string.h>
 #include <sys/stat.h>
 
@@ -279,14 +280,9 @@ using std::unordered_map;
 using std::unordered_set;
 using std::vector;
 
-#if 1
 // tuple
-using eastl::get;
-using eastl::tuple;
-#else
-using std::get;
-using std::tuple;
-#endif
+using horizon::core::get;
+using horizon::core::tuple;
 
 namespace detail {
 template<typename T>
@@ -298,7 +294,7 @@ template<typename... Ts>
 struct tuple_size_impl<std::tuple<Ts...>> : public std::tuple_size<std::tuple<Ts...>> {};
 
 template<typename... Ts>
-struct tuple_size_impl<eastl::tuple<Ts...>> : public eastl::tuple_size<eastl::tuple<Ts...>> {};
+struct tuple_size_impl<tuple<Ts...>> : public horizon::core::tuple_size<tuple<Ts...>> {};
 }// namespace detail
 template<typename T>
 using tuple_size = typename detail::tuple_size_impl<std::remove_cvref_t<T>>;
@@ -315,7 +311,7 @@ template<size_t i, typename... Ts>
 struct tuple_element<i, std::tuple<Ts...>> : public std::tuple_element<i, std::tuple<Ts...>> {};
 
 template<size_t i, typename... Ts>
-struct tuple_element<i, eastl::tuple<Ts...>> : public eastl::tuple_element<i, eastl::tuple<Ts...>> {};
+struct tuple_element<i, tuple<Ts...>> : public horizon::core::tuple_element<i, tuple<Ts...>> {};
 
 template<size_t i, typename T>
 using tuple_element_t = typename tuple_element<i, T>::type;
@@ -326,8 +322,8 @@ auto tuple_get(const std::tuple<Ts...> &tp) noexcept {
 }
 
 template<size_t i, typename... Ts>
-auto tuple_get(const eastl::tuple<Ts...> &tp) noexcept {
-    return eastl::get<i>(tp);
+auto tuple_get(const tuple<Ts...> &tp) noexcept {
+    return horizon::core::get<i>(tp);
 }
 
 template<size_t i = 0, typename Tuple, typename Func>
