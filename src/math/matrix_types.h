@@ -138,6 +138,11 @@ OC_MATRIX_TRIPLE_FUNC(lerp)
 
 template<typename T, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator-(ocarina::Matrix<T, N, M> m) {
+    if constexpr (ocarina::bridge::use_ktm_float_v<T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(-ocarina::bridge::as_ktm(m));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<T, N, M>((-m[i])...);
     }(std::make_index_sequence<M>());
@@ -147,6 +152,11 @@ template<typename T, typename S, size_t N, size_t M>
 requires ocarina::is_scalar_v<S>
 [[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, M> m, S s) {
     using scalar_type = decltype(T{} * s);
+    if constexpr (ocarina::bridge::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ocarina::bridge::as_ktm(m) * s);
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<scalar_type, N, M>((m[i] * s)...);
     }(std::make_index_sequence<M>());
@@ -167,6 +177,12 @@ requires ocarina::is_scalar_v<S>
 template<typename T, typename S, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, M> m,
                                        ocarina::Vector<S, M> v) noexcept {
+    if constexpr (ocarina::bridge::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ocarina::bridge::as_ktm(m) *
+                                             ocarina::bridge::as_ktm(v));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ((v[i] * m[i]) + ...);
     }(std::make_index_sequence<M>());
@@ -176,6 +192,12 @@ template<typename T, typename S, size_t N, size_t M, size_t Dim>
 [[nodiscard]] constexpr auto operator*(ocarina::Matrix<T, N, Dim> lhs,
                                        ocarina::Matrix<S, Dim, M> rhs) noexcept {
     using scalar_type = decltype(T{} * S{});
+    if constexpr (ocarina::bridge::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ocarina::bridge::as_ktm(lhs) *
+                                             ocarina::bridge::as_ktm(rhs));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<scalar_type, N, M>((lhs * rhs[i])...);
     }(std::make_index_sequence<M>());
@@ -185,6 +207,12 @@ template<typename T, typename S, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator+(ocarina::Matrix<T, N, M> lhs,
                                        ocarina::Matrix<S, N, M> rhs) noexcept {
     using scalar_type = decltype(T{} + S{});
+    if constexpr (ocarina::bridge::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ocarina::bridge::as_ktm(lhs) +
+                                             ocarina::bridge::as_ktm(rhs));
+        }
+    }
     return [&]<size_t... i>(std::index_sequence<i...>) {
         return ocarina::Matrix<scalar_type, N, M>(lhs[i] + rhs[i]...);
     }(std::make_index_sequence<M>());
@@ -193,6 +221,12 @@ template<typename T, typename S, size_t N, size_t M>
 template<typename T, typename S, size_t N, size_t M>
 [[nodiscard]] constexpr auto operator-(ocarina::Matrix<T, N, M> lhs,
                                        ocarina::Matrix<S, N, M> rhs) noexcept {
+    if constexpr (ocarina::bridge::use_ktm_float_v<T> && std::is_same_v<S, T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ocarina::bridge::as_ktm(lhs) -
+                                             ocarina::bridge::as_ktm(rhs));
+        }
+    }
     return lhs + (-rhs);
 }
 
@@ -236,6 +270,11 @@ OC_MAKE_MATRICES_FOR_TYPE(half)
 
 template<typename T, size_t M, size_t N>
 [[nodiscard]] constexpr Matrix<T, N, M> transpose(const Matrix<T, M, N> &mat) noexcept {
+    if constexpr (ocarina::bridge::use_ktm_float_v<T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ktm::transpose(ocarina::bridge::as_ktm(mat)));
+        }
+    }
     Matrix<T, N, M> ret = make_matrix<T, N, M>();
     auto func_m = [&]<size_t... m>(size_t i, std::index_sequence<m...>) {
         return Vector<T, N>((mat[m][i])...);
@@ -265,6 +304,11 @@ constexpr void swap_matrix_rows(Matrix<T, N, N> &mat, size_t lhs, size_t rhs) no
 template<typename T, size_t N>
 requires is_floating_point_v<T>
 [[nodiscard]] constexpr Matrix<T, N, N> inverse(Matrix<T, N, N> mat) noexcept {
+    if constexpr (ocarina::bridge::use_ktm_float_v<T>) {
+        if (!std::is_constant_evaluated()) {
+            return ocarina::bridge::from_ktm(ktm::inverse(ocarina::bridge::as_ktm(mat)));
+        }
+    }
     Matrix<T, N, N> inv{static_cast<T>(1)};
     for (size_t pivot_col = 0; pivot_col < N; ++pivot_col) {
         size_t pivot_row = pivot_col;
