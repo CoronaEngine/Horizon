@@ -167,6 +167,7 @@ ctest --test-dir build/legacy-debug -C Debug -L legacy --output-on-failure
 消费端链接 `Horizon` 并包含 `Horizon_old.h`；目标会传递 `HORIZON_LEGACY_API=1`。
 不要手工定义该宏后链接新版库，也不要在同一个程序中混用两套头文件。
 当前 examples、Ocarina 和 hotfix 使用新版 API，不能与旧版开关同时启用。
+源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
 
 旧代码原先未被 CMake 收集，两份公共头文件也被整体注释，因此默认构建成功并不能证明旧版可编译。
 恢复构建后，主要迁移点如下：

@@ -165,21 +165,19 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan()
 RasterizerPipelineVulkan::RasterizerPipelineVulkan(std::string vertexShaderCode,
                                                    std::string fragmentShaderCode,
                                                    uint32_t multiviewCount,
-                                                   EmbeddedShader::ShaderLanguage vertexShaderLanguage,
-                                                   EmbeddedShader::ShaderLanguage fragmentShaderLanguage,
+                                                   EmbeddedShader::ShaderLanguage /*vertexShaderLanguage*/,
+                                                   EmbeddedShader::ShaderLanguage /*fragmentShaderLanguage*/,
                                                    const std::source_location &sourceLocation)
     : RasterizerPipelineVulkan()
 {
-    // 编译着色器
+    // Keep the legacy signature; Helicon's runtime compiler now consumes Slang source.
     EmbeddedShader::ShaderCodeCompiler vertexCompiler(vertexShaderCode,
                                                       EmbeddedShader::ShaderStage::VertexShader,
-                                                      vertexShaderLanguage,
                                                       EmbeddedShader::CompilerOption(),
                                                       sourceLocation);
 
     EmbeddedShader::ShaderCodeCompiler fragmentCompiler(fragmentShaderCode,
                                                         EmbeddedShader::ShaderStage::FragmentShader,
-                                                        fragmentShaderLanguage,
                                                         EmbeddedShader::CompilerOption(),
                                                         sourceLocation);
 

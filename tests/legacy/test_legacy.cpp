@@ -150,7 +150,7 @@ void test_gpu()
     options.compileHLSL = false;
     EmbeddedShader::ShaderCodeCompiler compiler(
         "[shader(\"compute\")] [numthreads(1,1,1)] void main() {}",
-        EmbeddedShader::ShaderStage::ComputeShader, EmbeddedShader::ShaderLanguage::Slang, options);
+        EmbeddedShader::ShaderStage::ComputeShader, options);
     auto module = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
     expect(!std::get<std::vector<uint32_t>>(module.shaderCode).empty(), "current Slang emits SPIR-V");
     ComputePipelineBase pipeline(module);
