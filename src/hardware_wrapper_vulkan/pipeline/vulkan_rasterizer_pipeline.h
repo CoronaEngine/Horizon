@@ -13,6 +13,7 @@
 #include <source_location>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace Corona::Horizon
@@ -58,6 +59,13 @@ namespace Corona::Horizon
 
         [[nodiscard]] RasterizerPipelineDesc desc() const;
         [[nodiscard]] RasterizerPipelineShaders shaders() const;
+
+        // 只查询当前 shader 对象上的 $IF 条件值，不深拷贝 SPIR-V/反射表。
+        // RasterizerPipelineBase 用它做每帧/每 draw 的廉价变更检测。
+        [[nodiscard]] std::pair<EmbeddedShader::ShaderCodeCompiler::ConditionInfo,
+                                EmbeddedShader::ShaderCodeCompiler::ConditionInfo>
+        shader_condition_info() const;
+
         [[nodiscard]] std::source_location source_location() const noexcept { return source_location_; }
 
         void set_extent(uint16_t width, uint16_t height);

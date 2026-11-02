@@ -12,10 +12,7 @@
 #include "type_trait.h"
 #include <source_location>
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
 
 namespace detail {
 struct ArgumentCreation {};
@@ -32,17 +29,17 @@ public:
     using Ref<T>::Ref;
     using dsl_type = Var<T>;
     friend class MemberAccessor;
-    explicit Var(const horizon::dsl::Expression *expression) noexcept
-        : horizon::dsl::detail::Ref<org_type>(expression) {}
+    explicit Var(const ocarina::Expression *expression) noexcept
+        : ocarina::detail::Ref<org_type>(expression) {}
     Var(OC_APPEND_SRC_LOCATION) noexcept
-        : Var(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<org_type>(), OC_SRC_LOCATION)) {
+        : Var(ocarina::Function::current()->local(ocarina::Type::of<org_type>(), OC_SRC_LOCATION)) {
         static_assert(!is_param_struct_v<T>);
         if constexpr (is_struct_v<T>) {
             Ref<T>::set(T{});
         }
     }
     Var(Var &&another) noexcept
-        : Ref<T>(horizon::dsl::move(another)) {}
+        : Ref<T>(ocarina::move(another)) {}
 
     Var<T> &set_symbol(const string &name) {
         auto variable_expr = static_cast<const VariableExpr *>(Super::expression());
@@ -51,20 +48,20 @@ public:
     }
 
     Var(const Var &another) noexcept
-        : Var() { horizon::dsl::detail::assign(*this, another); }
+        : Var() { ocarina::detail::assign(*this, another); }
     template<typename Arg>
-    requires horizon::dsl::concepts::non_pointer<std::remove_cvref_t<Arg>> &&
+    requires ocarina::concepts::non_pointer<std::remove_cvref_t<Arg>> &&
              concepts::different<std::remove_cvref_t<Arg>, Var<org_type>> &&
-             requires(horizon::dsl::expr_value_t<org_type> a, horizon::dsl::expr_value_t<Arg> b) { a = b; }
+             requires(ocarina::expr_value_t<org_type> a, ocarina::expr_value_t<Arg> b) { a = b; }
     Var(Arg &&arg, OC_APPEND_SRC_LOCATION)
-        : Var(OC_SRC_LOCATION) { horizon::dsl::detail::assign(*this, std::forward<Arg>(arg)); }
-    explicit Var(horizon::dsl::detail::ArgumentCreation,
+        : Var(OC_SRC_LOCATION) { ocarina::detail::assign(*this, std::forward<Arg>(arg)); }
+    explicit Var(ocarina::detail::ArgumentCreation,
                  OC_APPEND_SRC_LOCATION) noexcept
-        : Var(horizon::dsl::Function::current()->argument(horizon::dsl::Type::of<org_type>())) {}
-    explicit Var(horizon::dsl::detail::ReferenceArgumentCreation, OC_APPEND_SRC_LOCATION) noexcept
-        : Var(horizon::dsl::Function::current()->reference_argument(horizon::dsl::Type::of<org_type>())) {}
+        : Var(ocarina::Function::current()->argument(ocarina::Type::of<org_type>())) {}
+    explicit Var(ocarina::detail::ReferenceArgumentCreation, OC_APPEND_SRC_LOCATION) noexcept
+        : Var(ocarina::Function::current()->reference_argument(ocarina::Type::of<org_type>())) {}
     template<typename Arg>
-    requires requires(horizon::dsl::expr_value_t<org_type> a, horizon::dsl::remove_device_t<Arg> b) { a = b; }
+    requires requires(ocarina::expr_value_t<org_type> a, ocarina::remove_device_t<Arg> b) { a = b; }
     void operator=(Arg &&arg) {
         if constexpr (is_struct_v<Arg>) {
             Super::set(OC_FORWARD(arg));
@@ -73,10 +70,10 @@ public:
             *this = decay_swizzle(OC_FORWARD(arg));
         }
         else {
-            horizon::dsl::detail::assign(*this, std::forward<Arg>(arg));
+            ocarina::detail::assign(*this, std::forward<Arg>(arg));
         }
     }
-    void operator=(const Var &other) { horizon::dsl::detail::assign(*this, other); }
+    void operator=(const Var &other) { ocarina::detail::assign(*this, other); }
     OC_MAKE_GET_PROXY
 private:
 #define OC_MAKE_VAR_UNARY_FUNC(func, tag)                                           \
@@ -87,50 +84,50 @@ private:
         return eval<ret_type>(expr);                                                \
     }
 
-    OC_MAKE_VAR_UNARY_FUNC(all, All)
-    OC_MAKE_VAR_UNARY_FUNC(any, Any)
-    OC_MAKE_VAR_UNARY_FUNC(none, None)
+    OC_MAKE_VAR_UNARY_FUNC(all, ALL)
+    OC_MAKE_VAR_UNARY_FUNC(any, ANY)
+    OC_MAKE_VAR_UNARY_FUNC(none, NONE)
 
-    OC_MAKE_VAR_UNARY_FUNC(rcp, Rcp)
-    OC_MAKE_VAR_UNARY_FUNC(abs, Abs)
-    OC_MAKE_VAR_UNARY_FUNC(sqrt, Sqrt)
-    OC_MAKE_VAR_UNARY_FUNC(sqr, Sqr)
-    OC_MAKE_VAR_UNARY_FUNC(exp, Exp)
-    OC_MAKE_VAR_UNARY_FUNC(exp2, Exp2)
-    OC_MAKE_VAR_UNARY_FUNC(exp10, Exp10)
-    OC_MAKE_VAR_UNARY_FUNC(log, Log)
-    OC_MAKE_VAR_UNARY_FUNC(log2, Log2)
-    OC_MAKE_VAR_UNARY_FUNC(log10, Log10)
-    OC_MAKE_VAR_UNARY_FUNC(cos, Cos)
-    OC_MAKE_VAR_UNARY_FUNC(sin, Sin)
-    OC_MAKE_VAR_UNARY_FUNC(tan, Tan)
-    OC_MAKE_VAR_UNARY_FUNC(cosh, Cosh)
-    OC_MAKE_VAR_UNARY_FUNC(sinh, Sinh)
-    OC_MAKE_VAR_UNARY_FUNC(tanh, Tanh)
-    OC_MAKE_VAR_UNARY_FUNC(acos, Acos)
-    OC_MAKE_VAR_UNARY_FUNC(asin, Asin)
-    OC_MAKE_VAR_UNARY_FUNC(atan, Atan)
-    OC_MAKE_VAR_UNARY_FUNC(asinh, Asinh)
-    OC_MAKE_VAR_UNARY_FUNC(acosh, Acosh)
-    OC_MAKE_VAR_UNARY_FUNC(atanh, Atanh)
-    OC_MAKE_VAR_UNARY_FUNC(degrees, Degrees)
-    OC_MAKE_VAR_UNARY_FUNC(radians, Radians)
-    OC_MAKE_VAR_UNARY_FUNC(ceil, Ceil)
-    OC_MAKE_VAR_UNARY_FUNC(round, Round)
-    OC_MAKE_VAR_UNARY_FUNC(floor, Floor)
-    OC_MAKE_VAR_UNARY_FUNC(rsqrt, Rsqrt)
-    OC_MAKE_VAR_UNARY_FUNC(isinf, IsInf)
-    OC_MAKE_VAR_UNARY_FUNC(isnan, IsNan)
-    OC_MAKE_VAR_UNARY_FUNC(fract, Fract)
-    OC_MAKE_VAR_UNARY_FUNC(saturate, Saturate)
-    OC_MAKE_VAR_UNARY_FUNC(sign, Sign)
-    OC_MAKE_VAR_UNARY_FUNC(normalize, Normalize)
-    OC_MAKE_VAR_UNARY_FUNC(length, Length)
-    OC_MAKE_VAR_UNARY_FUNC(length_squared, LengthSquared)
+    OC_MAKE_VAR_UNARY_FUNC(rcp, RCP)
+    OC_MAKE_VAR_UNARY_FUNC(abs, ABS)
+    OC_MAKE_VAR_UNARY_FUNC(sqrt, SQRT)
+    OC_MAKE_VAR_UNARY_FUNC(sqr, SQR)
+    OC_MAKE_VAR_UNARY_FUNC(exp, EXP)
+    OC_MAKE_VAR_UNARY_FUNC(exp2, EXP2)
+    OC_MAKE_VAR_UNARY_FUNC(exp10, EXP10)
+    OC_MAKE_VAR_UNARY_FUNC(log, LOG)
+    OC_MAKE_VAR_UNARY_FUNC(log2, LOG2)
+    OC_MAKE_VAR_UNARY_FUNC(log10, LOG10)
+    OC_MAKE_VAR_UNARY_FUNC(cos, COS)
+    OC_MAKE_VAR_UNARY_FUNC(sin, SIN)
+    OC_MAKE_VAR_UNARY_FUNC(tan, TAN)
+    OC_MAKE_VAR_UNARY_FUNC(cosh, COSH)
+    OC_MAKE_VAR_UNARY_FUNC(sinh, SINH)
+    OC_MAKE_VAR_UNARY_FUNC(tanh, TANH)
+    OC_MAKE_VAR_UNARY_FUNC(acos, ACOS)
+    OC_MAKE_VAR_UNARY_FUNC(asin, ASIN)
+    OC_MAKE_VAR_UNARY_FUNC(atan, ATAN)
+    OC_MAKE_VAR_UNARY_FUNC(asinh, ASINH)
+    OC_MAKE_VAR_UNARY_FUNC(acosh, ACOSH)
+    OC_MAKE_VAR_UNARY_FUNC(atanh, ATANH)
+    OC_MAKE_VAR_UNARY_FUNC(degrees, DEGREES)
+    OC_MAKE_VAR_UNARY_FUNC(radians, RADIANS)
+    OC_MAKE_VAR_UNARY_FUNC(ceil, CEIL)
+    OC_MAKE_VAR_UNARY_FUNC(round, ROUND)
+    OC_MAKE_VAR_UNARY_FUNC(floor, FLOOR)
+    OC_MAKE_VAR_UNARY_FUNC(rsqrt, RSQRT)
+    OC_MAKE_VAR_UNARY_FUNC(isinf, IS_INF)
+    OC_MAKE_VAR_UNARY_FUNC(isnan, IS_NAN)
+    OC_MAKE_VAR_UNARY_FUNC(fract, FRACT)
+    OC_MAKE_VAR_UNARY_FUNC(saturate, SATURATE)
+    OC_MAKE_VAR_UNARY_FUNC(sign, SIGN)
+    OC_MAKE_VAR_UNARY_FUNC(normalize, NORMALIZE)
+    OC_MAKE_VAR_UNARY_FUNC(length, LENGTH)
+    OC_MAKE_VAR_UNARY_FUNC(length_squared, LENGTH_SQUARED)
 
-    OC_MAKE_VAR_UNARY_FUNC(determinant, Determinant)
-    OC_MAKE_VAR_UNARY_FUNC(transpose, Transpose)
-    OC_MAKE_VAR_UNARY_FUNC(inverse, Inverse)
+    OC_MAKE_VAR_UNARY_FUNC(determinant, DETERMINANT)
+    OC_MAKE_VAR_UNARY_FUNC(transpose, TRANSPOSE)
+    OC_MAKE_VAR_UNARY_FUNC(inverse, INVERSE)
 
 #undef OC_MAKE_VAR_LOGIC_FUNC
 
@@ -144,18 +141,18 @@ private:
         return eval<ret_type>(expr);                                                 \
     }
 
-    OC_MAKE_VAR_BINARY_FUNC(max, Max)
-    OC_MAKE_VAR_BINARY_FUNC(min, Min)
-    OC_MAKE_VAR_BINARY_FUNC(pow, Pow)
-    OC_MAKE_VAR_BINARY_FUNC(fmod, Fmod)
-    OC_MAKE_VAR_BINARY_FUNC(mod, Mod)
-    OC_MAKE_VAR_BINARY_FUNC(copysign, Copysign)
-    OC_MAKE_VAR_BINARY_FUNC(atan2, Atan2)
+    OC_MAKE_VAR_BINARY_FUNC(max, MAX)
+    OC_MAKE_VAR_BINARY_FUNC(min, MIN)
+    OC_MAKE_VAR_BINARY_FUNC(pow, POW)
+    OC_MAKE_VAR_BINARY_FUNC(fmod, FMOD)
+    OC_MAKE_VAR_BINARY_FUNC(mod, MOD)
+    OC_MAKE_VAR_BINARY_FUNC(copysign, COPYSIGN)
+    OC_MAKE_VAR_BINARY_FUNC(atan2, ATAN2)
 
-    OC_MAKE_VAR_BINARY_FUNC(cross, Cross)
-    OC_MAKE_VAR_BINARY_FUNC(dot, Dot)
-    OC_MAKE_VAR_BINARY_FUNC(distance, Distance)
-    OC_MAKE_VAR_BINARY_FUNC(distance_squared, DistanceSquared)
+    OC_MAKE_VAR_BINARY_FUNC(cross, CROSS)
+    OC_MAKE_VAR_BINARY_FUNC(dot, DOT)
+    OC_MAKE_VAR_BINARY_FUNC(distance, DISTANCE)
+    OC_MAKE_VAR_BINARY_FUNC(distance_squared, DISTANCE_SQUARED)
 
 #undef OC_MAKE_VAR_BINARY_FUNC
 
@@ -174,10 +171,10 @@ private:
         return eval<ret_type>(expr);                                   \
     }
 
-    OC_MAKE_VAR_TRIPLE_FUNC(clamp, Clamp)
-    OC_MAKE_VAR_TRIPLE_FUNC(lerp, Lerp)
-    OC_MAKE_VAR_TRIPLE_FUNC(inverse_lerp, InverseLerp)
-    OC_MAKE_VAR_TRIPLE_FUNC(fma, Fma)
+    OC_MAKE_VAR_TRIPLE_FUNC(clamp, CLAMP)
+    OC_MAKE_VAR_TRIPLE_FUNC(lerp, LERP)
+    OC_MAKE_VAR_TRIPLE_FUNC(inverse_lerp, INVERSE_LERP)
+    OC_MAKE_VAR_TRIPLE_FUNC(fma, FMA)
 
 #undef OC_MAKE_VAR_TRIPLE_FUNC
 
@@ -186,7 +183,7 @@ private:
     OC_NODISCARD static auto call_select(const Var<Vector<bool, N>> &pred,
                                          const dsl_type &t, const dsl_type &f) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::Select,
+                                                                   CallOp::SELECT,
                                                                    {OC_EXPR(pred),
                                                                     OC_EXPR(t),
                                                                     OC_EXPR(f)});
@@ -202,7 +199,7 @@ private:
 
     static auto call_select(const Var<bool> &pred, const dsl_type &t, const dsl_type &f) noexcept {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::Select,
+                                                                   CallOp::SELECT,
                                                                    {OC_EXPR(pred),
                                                                     OC_EXPR(t),
                                                                     OC_EXPR(f)});
@@ -214,7 +211,7 @@ private:
              is_all_float_vector3_v<remove_device_t<Args>...>)
     static auto call_face_forward(const dsl_type &n, Args &&...args) {
         const Expression *expr = Function::current()->call_builtin(Type::of<T>(),
-                                                                   CallOp::FaceForward,
+                                                                   CallOp::FACE_FORWARD,
                                                                    {OC_EXPR(n),
                                                                     OC_EXPR(args)...});
         return eval<T>(expr);
@@ -247,19 +244,8 @@ using BufferVar = Var<Buffer<T>>;
 
 using ByteBufferVar = Var<ByteBuffer>;
 
-template<typename T>
-using Texture3DViewVar = Var<Texture3DView<T>>;
-template<typename T>
-using Texture2DViewVar = Var<Texture2DView<T>>;
-template<typename T>
-using RWTexture3DViewVar = Var<RWTexture3DView<T>>;
-template<typename T>
-using RWTexture2DViewVar = Var<RWTexture2DView<T>>;
-
-template<typename T>
-using Texture3DVar = Texture3DViewVar<T>;
-template<typename T>
-using Texture2DVar = Texture2DViewVar<T>;
+using Texture3DVar = Var<Texture3D>;
+using Texture2DVar = Var<Texture2D>;
 
 using BindlessArrayVar = Var<BindlessArray>;
 
@@ -316,4 +302,4 @@ Var(const Buffer<T> &) -> Var<Buffer<T>>;
     Type var_name;          \
     var_name.set_symbol(#var_name)
 
-}// namespace horizon::dsl
+}// namespace ocarina

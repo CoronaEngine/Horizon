@@ -6,13 +6,11 @@
 
 #include "half.h"
 #include "real.h"
-#include "constants.h"
+#include "math/constants.h"
 #include "core/concepts.h"
-#include <cmath>
 #include <numeric>
 
-namespace horizon::math {
-using namespace horizon::core;
+namespace ocarina {
 
 #define OC_WRAP_STD_UNARY_SCALAR_FUNC(func)                  \
     template<typename T>                                     \
@@ -86,7 +84,7 @@ OC_WRAP_STD_TERNARY_SCALAR_FUNC(fma)
 using std::roundf;
 
 template<typename T>
-requires horizon::math::is_scalar_v<T>
+requires ocarina::is_scalar_v<T>
 [[nodiscard]] constexpr T max(T a, T b) noexcept {
     return std::max(a, b);
 }
@@ -100,7 +98,7 @@ requires horizon::math::is_scalar_v<T>
 }
 
 template<typename T>
-requires horizon::math::is_scalar_v<T>
+requires ocarina::is_scalar_v<T>
 [[nodiscard]] constexpr auto min(T a, T b) noexcept {
     return std::min(a, b);
 }
@@ -247,4 +245,4 @@ requires is_all_basic_v<X, A, B>
     return (x - a) / (b - a);
 }
 
-}// namespace horizon::math
+}// namespace ocarina

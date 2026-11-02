@@ -3,8 +3,8 @@ if(NOT DEFINED HORIZON_SOURCE_DIR)
 endif()
 
 set(image_source_dir "${HORIZON_SOURCE_DIR}/src/image")
-set(old_dsl_image_dir "${HORIZON_SOURCE_DIR}/src/dsl/image")
-set(dsl_cmake_file "${HORIZON_SOURCE_DIR}/src/dsl/CMakeLists.txt")
+set(old_dsl_image_dir "${HORIZON_SOURCE_DIR}/legacy/src/dsl/image")
+set(dsl_cmake_file "${HORIZON_SOURCE_DIR}/legacy/src/dsl/CMakeLists.txt")
 
 if(EXISTS "${old_dsl_image_dir}")
     message(FATAL_ERROR "Image migration is incomplete: ${old_dsl_image_dir} still exists")

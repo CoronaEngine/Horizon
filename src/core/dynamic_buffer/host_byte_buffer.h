@@ -6,7 +6,7 @@
 
 #include "core/stl.h"
 
-namespace horizon::core {
+namespace ocarina {
 
 class HostByteBuffer {
 private:
@@ -98,4 +98,4 @@ public:
     }
 };
 
-}// namespace horizon::core
+}// namespace ocarina

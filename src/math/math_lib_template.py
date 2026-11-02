@@ -238,11 +238,6 @@ def main():
         f.write(string)
         f.close()
 
-    fn = os.path.join(curr_dir, "../backends/cuda/builtin/cuda_device_math.h")
-    string = get_content("oc_", "__device__")
-    with open(fn, "w") as f:
-        f.write(string)
-        f.close()
 
 
 if __name__ == "__main__":

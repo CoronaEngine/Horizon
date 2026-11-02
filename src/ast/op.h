@@ -6,248 +6,242 @@
 
 #include "math/basic_types.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 enum struct UnaryOp : uint32_t {
-    Positive,
-    Negative,
-    Not,
-    BitNot
+    POSITIVE,
+    NEGATIVE,
+    NOT,
+    BIT_NOT
 };
 
 enum struct CastOp : uint32_t {
-    Static,
-    Bitwise
+    STATIC,
+    BITWISE
 };
 
 enum struct BinaryOp : uint32_t {
     // arithmetic
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    BitAnd,
-    BitOr,
-    BitXor,
-    Shl,
-    Shr,
-    And,
-    Or,
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    MOD,
+    BIT_AND,
+    BIT_OR,
+    BIT_XOR,
+    SHL,
+    SHR,
+    AND,
+    OR,
 
     // relational
-    Less,
-    Greater,
-    LessEqual,
-    GreaterEqual,
-    Equal,
-    NotEqual
+    LESS,
+    GREATER,
+    LESS_EQUAL,
+    GREATER_EQUAL,
+    EQUAL,
+    NOT_EQUAL
 };
 
 enum struct CallOp : uint32_t {
-    Custom,
+    CUSTOM,
 
-    All,
-    Any,
-    None,
+    ALL,
+    ANY,
+    NONE,
 
-    Select,
-    Clamp,
-    Lerp,
-    InverseLerp,
+    SELECT,
+    CLAMP,
+    LERP,
+    INVERSE_LERP,
 
-    Abs,
-    Min,
-    Max,
+    ABS,
+    MIN,
+    MAX,
 
-    IsInf,
-    IsNan,
+    IS_INF,
+    IS_NAN,
 
-    Acos,
-    Asin,
-    Atan,
-    Acosh,
-    Asinh,
-    Atanh,
-    Atan2,
-    Copysign,
+    ACOS,
+    ASIN,
+    ATAN,
+    ACOSH,
+    ASINH,
+    ATANH,
+    ATAN2,
+    COPYSIGN,
 
-    Cos,
-    Sin,
-    Tan,
-    Cosh,
-    Sinh,
-    Tanh,
+    COS,
+    SIN,
+    TAN,
+    COSH,
+    SINH,
+    TANH,
 
-    Exp,
-    Exp2,
-    Exp10,
-    Log,
-    Log2,
-    Log10,
-    Pow,
-    Fmod,
-    Mod,
-    Fract,
+    EXP,
+    EXP2,
+    EXP10,
+    LOG,
+    LOG2,
+    LOG10,
+    POW,
+    FMOD,
+    MOD,
+    FRACT,
 
-    Sqrt,
-    Rsqrt,
-    Sqr,
-    Rcp,
-    Sign,
+    SQRT,
+    RSQRT,
+    SQR,
+    RCP,
+    SIGN,
 
-    Ceil,
-    Floor,
-    Round,
+    CEIL,
+    FLOOR,
+    ROUND,
 
-    Degrees,
-    Radians,
-    Saturate,
+    DEGREES,
+    RADIANS,
+    SATURATE,
 
-    Fma,
+    FMA,
 
-    Cross,
-    Dot,
-    Distance,
-    DistanceSquared,
-    Length,
-    LengthSquared,
-    Normalize,
-    FaceForward,
-    CoordinateSystem,
-    MakeNormalTangent,
+    CROSS,
+    DOT,
+    DISTANCE,
+    DISTANCE_SQUARED,
+    LENGTH,
+    LENGTH_SQUARED,
+    NORMALIZE,
+    FACE_FORWARD,
+    COORDINATE_SYSTEM,
+    MAKE_NORMAL_TANGENT,
 
-    Determinant,
-    Transpose,
-    Inverse,
+    DETERMINANT,
+    TRANSPOSE,
+    INVERSE,
 
-    IsNullBuffer,
-    IsNullTexture,
+    IS_NULL_BUFFER,
+    IS_NULL_TEXTURE,
 
-    BufferSize,
+    BUFFER_SIZE,
 
-    Tex3DSample,
-    Tex3DRead,
-    Tex3DWrite,
+    TEX3D_SAMPLE,
+    TEX3D_READ,
+    TEX3D_WRITE,
 
-    Tex2DSample,
-    Tex2DRead,
-    Tex2DWrite,
+    TEX2D_SAMPLE,
+    TEX2D_READ,
+    TEX2D_WRITE,
 
-    ByteBufferRead,
-    ByteBufferWrite,
-    ByteBufferSize,
+    BYTE_BUFFER_READ,
+    BYTE_BUFFER_WRITE,
+    BYTE_BUFFER_SIZE,
 
-    BindlessArrayBufferRead,
-    BindlessArrayBufferWrite,
-    BindlessArrayBufferSize,
-    BindlessArrayByteBufferRead,
-    BindlessArrayByteBufferWrite,
-    BindlessArrayTex3DSample,
-    BindlessArrayTex2DSample,
+    BINDLESS_ARRAY_BUFFER_READ,
+    BINDLESS_ARRAY_BUFFER_WRITE,
+    BINDLESS_ARRAY_BUFFER_SIZE,
+    BINDLESS_ARRAY_BYTE_BUFFER_READ,
+    BINDLESS_ARRAY_BYTE_BUFFER_WRITE,
+    BINDLESS_ARRAY_TEX3D_SAMPLE,
+    BINDLESS_ARRAY_TEX2D_SAMPLE,
 
-    MakeBool2,
-    MakeBool3,
-    MakeBool4,
+    MAKE_BOOL2,
+    MAKE_BOOL3,
+    MAKE_BOOL4,
 
-    MakeInt2,
-    MakeInt3,
-    MakeInt4,
+    MAKE_INT2,
+    MAKE_INT3,
+    MAKE_INT4,
 
-    MakeUint2,
-    MakeUint3,
-    MakeUint4,
+    MAKE_UINT2,
+    MAKE_UINT3,
+    MAKE_UINT4,
 
-    MakeUchar2,
-    MakeUchar3,
-    MakeUchar4,
+    MAKE_UCHAR2,
+    MAKE_UCHAR3,
+    MAKE_UCHAR4,
 
-    MakeFloat2,
-    MakeFloat3,
-    MakeFloat4,
+    MAKE_FLOAT2,
+    MAKE_FLOAT3,
+    MAKE_FLOAT4,
 
-    MakeReal2,
-    MakeReal3,
-    MakeReal4,
+    MAKE_REAL2,
+    MAKE_REAL3,
+    MAKE_REAL4,
 
-    MakeHalf2,
-    MakeHalf3,
-    MakeHalf4,
+    MAKE_HALF2,
+    MAKE_HALF3,
+    MAKE_HALF4,
 
-    MakeUlong2,
-    MakeUlong3,
-    MakeUlong4,
+    MAKE_ULONG2,
+    MAKE_ULONG3,
+    MAKE_ULONG4,
 
-    MakeFloat2x2,
-    MakeFloat2x3,
-    MakeFloat2x4,
+    MAKE_FLOAT2X2,
+    MAKE_FLOAT2X3,
+    MAKE_FLOAT2X4,
 
-    MakeFloat3x2,
-    MakeFloat3x3,
-    MakeFloat3x4,
+    MAKE_FLOAT3X2,
+    MAKE_FLOAT3X3,
+    MAKE_FLOAT3X4,
 
-    MakeFloat4x2,
-    MakeFloat4x3,
-    MakeFloat4x4,
+    MAKE_FLOAT4X2,
+    MAKE_FLOAT4X3,
+    MAKE_FLOAT4X4,
 
-    MakeReal2x2,
-    MakeReal2x3,
-    MakeReal2x4,
+    MAKE_REAL2X2,
+    MAKE_REAL2X3,
+    MAKE_REAL2X4,
 
-    MakeReal3x2,
-    MakeReal3x3,
-    MakeReal3x4,
+    MAKE_REAL3X2,
+    MAKE_REAL3X3,
+    MAKE_REAL3X4,
 
-    MakeReal4x2,
-    MakeReal4x3,
-    MakeReal4x4,
+    MAKE_REAL4X2,
+    MAKE_REAL4X3,
+    MAKE_REAL4X4,
 
-    MakeHalf2x2,
-    MakeHalf2x3,
-    MakeHalf2x4,
+    MAKE_HALF2X2,
+    MAKE_HALF2X3,
+    MAKE_HALF2X4,
 
-    MakeHalf3x2,
-    MakeHalf3x3,
-    MakeHalf3x4,
+    MAKE_HALF3X2,
+    MAKE_HALF3X3,
+    MAKE_HALF3X4,
 
-    MakeHalf4x2,
-    MakeHalf4x3,
-    MakeHalf4x4,
+    MAKE_HALF4X2,
+    MAKE_HALF4X3,
+    MAKE_HALF4X4,
 
-    Gemm,
+    GEMM,
 
-    Unreachable,
+    UNREACHABLE,
 
-    AtomicExch,
-    AtomicAdd,
-    AtomicSub,
-    AtomicCas,
+    ATOMIC_EXCH,
+    ATOMIC_ADD,
+    ATOMIC_SUB,
+    ATOMIC_CAS,
 
-    Half2Float,
-    Float2Half,
+    HALF2FLOAT,
+    FLOAT2HALF,
 
     // ray tracing
-    MakeRay,
-    RayOffsetOrigin,
-    TraceClosest,
-    TraceOcclusion,
+    MAKE_RAY,
+    RAY_OFFSET_ORIGIN,
+    TRACE_CLOSEST,
+    TRACE_OCCLUSION,
 
-    SynchronizeBlock,
-    WarpActiveCountBits, //WaveActiveCountBits
-    WarpActiveBitMask,  //WaveActiveBallot
-    WarpPrefixCountBits, //WavePrefixCountBits
-    WarpLaneId,
-    WarpSize,
-    WarpFirstActiveLane,
-    WarpIsFirstActiveLane,
+    SYNCHRONIZE_BLOCK,
+    WARP_ACTIVE_COUNT_BITS, //WaveActiveCountBits
+    WARP_ACTIVE_BIT_MASK,  //WaveActiveBallot
+    WARP_PREFIX_COUNT_BITS, //WavePrefixCountBits
+    WARP_LANE_ID,
+    WARP_SIZE,
+    WARP_FIRST_ACTIVE_LANE,
+    WARP_IS_FIRST_ACTIVE_LANE,
 
-    Ddx,
-    Ddy,
-    Fwidth,
-
-    Count
+    COUNT
 };
 
-}  // namespace horizon::ast
+}// namespace ocarina

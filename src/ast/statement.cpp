@@ -5,18 +5,20 @@
 #include "statement.h"
 #include "expression.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 uint64_t ScopeStmt::compute_hash() const noexcept {
     auto h = Hash64::default_seed;
     for (auto &v : local_vars_) { h = hash64(v.hash(), h); }
-    for (auto &&s : statements_) { h = hash64(s->hash(), h); }
+    for (auto &&s : statements_) {
+        // Comments carry diagnostic metadata, not executable shader semantics.
+        // Skip the node entirely so adding/removing comments is also neutral.
+        if (s->tag() != Statement::Tag::COMMENT) { h = hash64(s->hash(), h); }
+    }
     return h;
 }
 
-void ScopeStmt::add_var(const horizon::ast::Variable &variable) noexcept {
+void ScopeStmt::add_var(const ocarina::Variable &variable) noexcept {
     local_vars_.push_back(variable);
 }
 
@@ -50,8 +52,8 @@ uint64_t SwitchStmt::compute_hash() const noexcept {
     return hash64(ret, body_.hash());
 }
 
-SwitchCaseStmt::SwitchCaseStmt(const horizon::ast::Expression *expression)
-    : Statement(Tag::SwitchCase),
+SwitchCaseStmt::SwitchCaseStmt(const ocarina::Expression *expression)
+    : Statement(Tag::SWITCH_CASE),
       expr_(dynamic_cast<const LiteralExpr *>(expression)) {
     OC_ASSERT(expr_ != nullptr);
 }
@@ -76,4 +78,12 @@ uint64_t LoopStmt::compute_hash() const noexcept {
     return body_.hash();
 }
 
-}// namespace horizon::ast
+uint64_t PrintStmt::compute_hash() const noexcept {
+    uint64_t ret = hash64(fmt_);
+    for (const Expression *expr : args_) {
+        ret = hash64(ret, expr->hash());
+    }
+    return ret;
+}
+
+}// namespace ocarina

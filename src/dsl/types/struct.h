@@ -4,21 +4,13 @@
 
 #pragma once
 
-#include "ast/type_desc.h"
+#include "core/type_system/type_desc.h"
 #include "../core/var.h"
 #include "soa.h"
 
-#define OC_IS_DYNAMIC_SIZE(member, S) horizon::math::is_dynamic_size<std::remove_cvref_t<decltype(S::member)>>
-
-#define OC_MAKE_STRUCT_IS_DYNAMIC(S, ...)                                                                              \
-    template <>                                                                                                        \
-    struct horizon::math::is_dynamic_size<S> : std::disjunction<MAP_LIST_UD(OC_IS_DYNAMIC_SIZE, S, ##__VA_ARGS__)>     \
-    {                                                                                                                  \
-    };
-
 #define OC_STRUCT_ALIAS(NS, S)      \
     namespace NS {                  \
-    using S##Var = horizon::dsl::Var<S>; \
+    using S##Var = ocarina::Var<S>; \
     }
 
 #define OC_STRUCT_IMPL(NS, S, ...)                                            \

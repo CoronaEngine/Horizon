@@ -6,14 +6,12 @@
 
 #include "core/stl.h"
 #include "core/util/logging.h"
-#include "math/storage_traits.h"
+#include "core/type.h"
 #include "core/concepts.h"
 #include "variable.h"
 #include "op.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 class Function;
 
 class ASTNode {
@@ -68,4 +66,4 @@ bool check_context(const T &t, const Function *ctx) {
         return Super::check_context(ctx) MAP(OC_MAKE_CHECK_CONTEXT_ELEMENT, __VA_ARGS__); \
     }
 
-}// namespace horizon::ast
+}// namespace ocarina

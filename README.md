@@ -1,30 +1,37 @@
 # Horizon
 
+Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译为 SPIR-V，
+最终在 Vulkan Compute 后端执行。
+
+Ocarina 的源码目录已合并到 `src/`；旧 Horizon 的 `ast`、`core`、`runtime`、`dsl`、`math` 保留在 `legacy/src/`。
+原有 `horizon-*` 库从该目录构建，与 Ocarina 的头文件搜索路径分开。
+
 ## Windows 构建指南
 
 这份指南适用于第一次接触 CMake 和 Conan 的 Windows 开发者。所有命令都在仓库根目录执行。
 
 ### 1. 准备工具
 
-本项目目前只支持 **Windows x64**。推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
+完整渲染器的本机验证以 **Windows x64** 为主；`core` 目标族另有 Windows、Linux 和 macOS CI。
+Windows 推荐按下面顺序安装；安装后重新打开 PowerShell，使 `PATH` 生效。
 
-- Git：用于克隆和更新代码。
-- [Miniconda / Conda](https://docs.conda.io/)：管理本项目的开发工具 Python 环境和 Conan。**不需要单独安装 Python 或 Conan。**
-- CMake **4.0 或更高版本**和 Ninja：所有 preset 使用 Ninja；两者都必须能在终端中运行。
+- Git：首次获取源码可使用 Git 或下载源码压缩包；构建时缺少 Git 会通过 Conda 自动安装。
+- [Miniforge / Miniconda / Conda](https://docs.conda.io/)：管理 Python、Conan、Git 和 Ninja，构建时自动准备这些工具。
+- CMake **4.0 或更高版本**：需预先安装并能在终端中运行。所有 preset 使用 Ninja，缺少 Ninja 时通过 Conda 自动安装。
 - Visual Studio 或 Visual Studio Build Tools：安装“使用 C++ 的桌面开发”、MSVC x64/x86 生成工具和 Windows SDK。项目会自动识别本机已安装的 VS/MSVC，不限定某个 VS 年份。
-- CUDA Toolkit：仅构建 Ocarina、Ocarina 测试或 Vision Hotfix 时需要；安装后应存在 `CUDA_PATH` 环境变量。
+- Vulkan 开发组件：Vulkan Headers、Loader、Volk、VMA 和 Slang 由 Conan 提供，无需单独安装 Vulkan SDK。Windows 构建会部署 Conan 的 `vulkan-1.dll`；运行时仍需支持所需 Vulkan 功能的 GPU 驱动。Ocarina 固定使用 Vulkan Compute。
 - VS Code 和 **CMake Tools** 扩展：仅在使用 VS Code 构建时需要。
 
 先在 PowerShell 运行以下命令。它们都能显示版本号，就说明基础工具已准备好：
 
 ```powershell
-git --version
 conda --version
 cmake --version
-ninja --version
 ```
 
-如果提示“找不到命令”，请检查对应工具是否已安装并加入 `PATH`，然后重新打开终端。克隆项目后，进入仓库根目录并执行一次：
+如果提示“找不到命令”，请检查对应工具是否已安装并加入 `PATH`，然后重新打开终端。
+通过根 CMake preset 配置时，会自动创建或复用 `horizon-dev` 环境。
+如果直接运行 `build_tools/dev.py`，则需先创建开发环境，再通过 `conda run -n horizon-dev python ...` 运行：
 
 ```powershell
 conda create --yes --name horizon-dev --override-channels --channel conda-forge "python>=3.11" "conan>=2.28,<3"
@@ -32,8 +39,15 @@ conda create --yes --name horizon-dev --override-channels --channel conda-forge 
 
 第一次创建环境和配置会下载或编译 Conan 依赖，耗时较长是正常现象。
 
+Git 优先复用 PATH 或当前 Python 所属 Conda 环境中的可用程序；Ninja 还会优先检查当前构建目录的缓存路径。
+缺失或无法运行时，通过 conda-forge 安装或修复到当前 Python 所属的 Conda 环境，并复检版本命令。
+安装仅更新当前进程和子进程的 PATH，不修改系统环境变量。两个工具在 Conan 编译依赖前准备好；
+`conan_cache.py update` 同样会准备工具，`status` 只自动准备 Git，`clean` 不安装工具。
+Conda 安装使用环境内的 `conda-meta/corona-tools.lock`，与 CoronaEngine 共用同一环境时也会互斥。
+失效的 Ninja 缓存会在配置时替换；`build-fast` 会先刷新环境并重新配置，再启动构建。
+
 若仓库根目录已有 `.venv`，CMake 自动配置会优先使用其中的 Python 和 Conan，
-无需先激活环境或安装 Conda。该环境须包含 Python >=3.11 和 Conan >=2.28、<3；
+无需先激活环境或安装 Conda。该环境须包含 Python >=3.11 和 Conan >=2.28、<3，且已有可用的 Git 和 Ninja；普通 `.venv` 不会通过 Conda 安装工具。
 不存在 `.venv` 时，继续使用上面的 Conda 流程。
 
 CLion 使用 Visual Studio 工具链时，可以直接加载项目的 CMake 配置；依赖准备会识别
@@ -67,14 +81,15 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 
 | 使用场景 | 选择的 Debug preset | 构建目录 |
 | --- | --- | --- |
-| Horizon / Helicon 核心库 | `core-debug` | `build/conan/core/debug` |
+| Core / Math / Image / AST / DSL 与基础测试 | `core-debug` | `build/conan/core/debug` |
+| Horizon / Helicon 渲染库 | `engine-debug` | `build/conan/engine/debug` |
 | ShaderCompileScripts | `tools-debug` | `build/conan/tools/debug` |
 | HorizonExamples | `examples-debug` | `build/conan/examples/debug` |
 | Ocarina | `ocarina-debug` | `build/conan/ocarina/debug` |
 | Ocarina 的 `test-*` 测试 | `ocarina-tests-debug` | `build/conan/ocarina-tests/debug` |
 | Vision Hotfix | `vision-hotfix-debug` | `build/conan/vision-hotfix/debug` |
 
-旧的 `debug` preset 仍可用，它等同于 `examples-debug`。每个目标族使用独立目录，切换 preset 后请重新执行 Configure，不要把不同目标族混在同一个构建目录里。
+使用完整的目标族 preset 名，例如 `examples-debug`。每个目标族使用独立目录，切换 preset 后请重新执行 Configure，不要把不同目标族混在同一个构建目录里。
 
 ### 3. 用脚本构建
 
@@ -82,27 +97,47 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 
 ```powershell
 # 配置 Examples 的 Debug 构建
-conda run -n horizon-dev --no-capture-output python tools/dev.py configure --configuration Debug --target-family examples
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py configure --configuration Debug --target-family examples
 
 # 配置并构建一个目标；脚本会从目标名自动判断目标族
-conda run -n horizon-dev --no-capture-output python tools/dev.py build HorizonExamples --configuration Debug
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py build HorizonExamples --configuration Debug
+
+# 同一目标族可以一次构建多个目标
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py build Horizon Helicon --configuration Debug
 
 # 已配置过时，快速构建该目标族的全部 target
-conda run -n horizon-dev --no-capture-output python tools/dev.py build-fast all --configuration Debug --target-family examples
+conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fast all --configuration Debug --target-family examples
 ```
 
-把 `examples` 换成 `core`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+
+构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
+根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
+直接使用 Conan 时执行 `conan install build_tools/conanfile.py`，并指定所需 profile 和选项。
+`tools/` 保留 ShaderCompileScripts 的 C++ 源码和资产处理工具，模块的目标声明与代码生成器保留在源码旁。
+
+缓存管理使用 `python build_tools/conan_cache.py`。`update` 与开发脚本共用平台选择和依赖安装流程，
+可用 `--target-family` 指定目标族；安装、更新与缓存删除使用 Conan home 下的 `.horizon-install.lock`，
+覆盖共用缓存的多个 Horizon 工作区。单包更新的临时文件写入 `build/conan/cache/`。
+
+构建工具与源码检查可分别运行：
+
+```powershell
+python -B -m unittest discover -s build_tools/tests -p "test_*.py"
+python -B -m unittest discover -s tests/architecture -p "test_*.py"
+python -B -m unittest discover -s src/tests -p "test_*.py"
+```
 
 ### 4. 新增 target 和依赖
 
 先确定新 target 属于哪个现有目标族。修改后必须重新执行 Configure，CMake Tools 才会显示新 target。
 
 - **只新增 target，或只使用项目内/已存在的依赖**：只修改对应的 `CMakeLists.txt`，添加 target 并链接已有库；不需要修改 Conan。
-- **新增第三方依赖**：同时修改两处。先在 `conanfile.py` 用 `self.requires(...)` 声明依赖，并让它只在需要的目标族启用；再在 CMake 中 `find_package(...)` 并用 `target_link_libraries(...)` 链接。不要在 CMake 中用 `FetchContent` 下载第三方库。
-- **希望用脚本直接构建新 target**：若它不符合现有名称规则，还要在 `tools/dev.py` 的 target 到目标族映射中登记；否则脚本可能选择错误的 preset。
+- **新增第三方依赖**：同时修改两处。先在 `build_tools/conanfile.py` 用 `self.requires(...)` 声明依赖，并让它只在需要的目标族启用；再在 CMake 中 `find_package(...)` 并用 `target_link_libraries(...)` 链接。不要在 CMake 中用 `FetchContent` 下载第三方库。
+- **希望用脚本直接构建新 target**：若它不符合现有名称规则，还要在 `build_tools/dev.py` 的 target 到目标族映射中登记；否则脚本可能选择错误的 preset。
 - **新增一个完整的目标族**：除 CMake 和 Conan 外，还要新增 CMake preset、Conan 选项、脚本的目标族选项和 target 映射，确保它使用独立的构建目录。
 
-例如，新增一个不引入第三方库的 Ocarina 测试，只需在 `modules/ocarina/tests/CMakeLists.txt` 增加：
+例如，新增一个不引入第三方库的 Ocarina 测试，只需在 `src/tests/CMakeLists.txt` 增加：
 
 ```cmake
 ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
@@ -113,7 +148,7 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 ### 常见问题
 
 - **VS Code 中找不到标准头文件**：确认 `cmake.useVsDeveloperEnvironment` 已手动设置为 `always`，然后重新打开 VS Code 并重新 Configure。
-- **Ocarina 配置找不到 CUDA**：安装 CUDA Toolkit，并确认终端执行 `echo $env:CUDA_PATH` 能输出 CUDA 安装目录。
+- **Ocarina 配置找不到 VulkanLoader**：重新运行开发脚本的依赖安装/配置流程，确认 Conan 生成了 `VulkanLoader` 配置及 `Vulkan::Loader` 目标；Headers 和 Loader 版本需一致。SDK 验证层与调试工具可按需安装。
 - **第一次构建很慢**：Conan 正在准备依赖；后续使用相同目标族和配置通常会快很多。
 
 ---
@@ -212,3 +247,21 @@ Set 0–2 为 Horizon 保留的 bindless 集，普通 UBO 一律放在 set 3：
 | set 3 | per-pass 共享 UBO（经 Push Descriptor 下发） |
 
 同一个 Push Constant 块在 vertex / fragment 等各阶段之间共享，布局必须严格一致。
+
+### REBLUR GPU 时间戳诊断
+
+启用 `REBLUR_GPU_PROFILE` 时，可额外将 `REBLUR_GPU_PROFILE_DIAGNOSTICS`
+设为另一个 CSV 文件路径，记录原始 GPU begin/end tick、时间戳周期及有效位掩码，
+以及同一批次提交、fence 等待和 query 读取前后的 CPU 时钟。两份输出必须是不同文件。
+Windows CPU 时钟使用 QPC，其他平台使用 steady_clock 纳秒；频率写入 CSV。
+此诊断不增加 GPU 命令或改变 query 边界，开启后每批次增加六次 CPU 时钟读取及
+fence 完成后的 CSV 写入。CPU 与 GPU 时钟有频率偏差，跨时钟关联需要校准，
+不能直接相减。未设置诊断变量时不采集这些时钟或写入附加 CSV。
+
+`REBLUR_GPU_PROFILE_MODE=intervals` 为 REBLUR 同时采集五个共享的
+`BOTTOM_OF_PIPE` 时间点，输出 `REBLUR-Pack`、`REBLUR-NRD`、
+`REBLUR-Unpack`、`REBLUR-Epilogue` 和 `REBLUR-Filter`。
+完整区间直接取首尾时间戳，满足 `Filter = Pack + NRD + Unpack + Epilogue`。
+Pack 结束于其可见性屏障之后；NRD 结束于最终 dispatch 之后、出站依赖屏障之前，
+该屏障计入 Unpack。Unpack 结束于输出屏障之后。EDSL 没有额外的资源状态恢复，
+Epilogue 的两个时间点相邻。原来的逐 dispatch、`nrd` 和 `filter` 模式保留。

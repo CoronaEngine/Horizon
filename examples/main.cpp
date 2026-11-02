@@ -24,13 +24,15 @@
 #include "example_edsl_rsm/example_edsl_rsm.h"
 #include "example_edsl_sponza/example_edsl_sponza.h"
 
-#include "core/util/logging.h"
+#include "horizon/core/logging.h"
 
 #include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string_view>
+#include <example_edsl_compile/example_edsl_compile.h>
+#include <example_edsl_compile_comparison/example_edsl_compile_comparison.h>
 
 int main(int argc, char **argv)
 {
@@ -184,6 +186,18 @@ int main(int argc, char **argv)
     if (mode == "edsl_sponza")
     {
         run_example_edsl_sponza();
+        return 0;
+    }
+
+    if (mode == "edsl_compile")
+    {
+        run_example_edsl_compile();
+        return 0;
+    }
+
+    if (mode == "edsl_compile_comparison")
+    {
+        run_example_edsl_compile_comparison();
         return 0;
     }
 

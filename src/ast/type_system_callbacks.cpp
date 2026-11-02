@@ -2,12 +2,10 @@
 // Created by Zero on 30/04/2022.
 //
 
-#include "math/storage_traits.h"
+#include "core/type.h"
 #include "function.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 namespace {
 
@@ -20,7 +18,7 @@ void on_type_access_bridge(const Type *type) noexcept {
 
 void register_type_system_callbacks_once() noexcept {
     static bool registered = [] {
-        horizon::core::detail::register_type_system_callbacks(horizon::core::detail::TypeSystemCallbacks{
+        detail::register_type_system_callbacks(detail::TypeSystemCallbacks{
             .on_type_access = &on_type_access_bridge,
         });
         return true;
@@ -35,4 +33,4 @@ void register_type_system_callbacks_once() noexcept {
 
 }// namespace
 
-}// namespace horizon::ast
+}// namespace ocarina

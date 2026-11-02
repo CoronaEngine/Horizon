@@ -6,10 +6,7 @@
 
 #include "ref_func.h"
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
 namespace detail {
 
 #define OC_REF_COMMON(...)                                                              \
@@ -57,7 +54,7 @@ struct Ref<Vector<T, 2>>
     OC_MAKE_ASSIGNMENT_FUNC
 public:
     explicit Ref(const Var<T> &arg) noexcept
-        : expression_(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<this_type>())) {
+        : expression_(ocarina::Function::current()->local(ocarina::Type::of<this_type>())) {
         x = arg;
         y = arg;
     }
@@ -83,7 +80,7 @@ struct Ref<Vector<T, 3>>
     OC_MAKE_ASSIGNMENT_FUNC
 public:
     explicit Ref(const Var<T> &arg) noexcept
-        : expression_(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<this_type>())) {
+        : expression_(ocarina::Function::current()->local(ocarina::Type::of<this_type>())) {
         x = arg;
         y = arg;
         z = arg;
@@ -111,7 +108,7 @@ struct Ref<Vector<T, 4>>
     OC_MAKE_ASSIGNMENT_FUNC
 public:
     explicit Ref(const Var<T> &arg) noexcept
-        : expression_(horizon::dsl::Function::current()->local(horizon::dsl::Type::of<this_type>())) {
+        : expression_(ocarina::Function::current()->local(ocarina::Type::of<this_type>())) {
         x = arg;
         y = arg;
         z = arg;
@@ -138,11 +135,11 @@ struct Ref<Matrix<T, N, M>>
 };
 
 template<typename T, size_t N>
-struct Ref<horizon::dsl::array<T, N>>
-    : detail::EnableSubscriptAccess<Ref<horizon::dsl::array<T, N>>>,
-      detail::EnableGetMemberByIndex<Ref<horizon::dsl::array<T, N>>> {
-    using this_type = horizon::dsl::array<T, N>;
-    OC_REF_COMMON(Ref<horizon::dsl::array<T, N>>)
+struct Ref<ocarina::array<T, N>>
+    : detail::EnableSubscriptAccess<Ref<ocarina::array<T, N>>>,
+      detail::EnableGetMemberByIndex<Ref<ocarina::array<T, N>>> {
+    using this_type = ocarina::array<T, N>;
+    OC_REF_COMMON(Ref<ocarina::array<T, N>>)
 public:
     void set(const this_type &t) {
         for (int i = 0; i < N; ++i) {
@@ -210,7 +207,7 @@ public:
     }
     template<typename int_type = ulong>
     [[nodiscard]] auto size() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::BufferSize, {expression()});
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::BUFFER_SIZE, {expression()});
         return eval<int_type>(expr);
     }
 };
@@ -227,7 +224,7 @@ public:
     }
     template<typename int_type = uint>
     [[nodiscard]] auto size_in_byte() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::ByteBufferSize, {expression()});
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<int_type>(), CallOp::BYTE_BUFFER_SIZE, {expression()});
         return eval<int_type>(expr);
     }
 
@@ -247,28 +244,18 @@ public:
     }
 };
 
-template<typename T>
-struct Ref<Texture3DView<T>>
-    : detail::EnableTextureSample<Ref<Texture3DView<T>>, 3> {
-    OC_REF_COMMON(Ref<Texture3DView<T>>)
+template<>
+struct Ref<Texture3D>
+    : detail::EnableTextureSample<Ref<Texture3D>, 3>,
+      detail::EnableTextureReadAndWrite<Ref<Texture3D>, 3> {
+    OC_REF_COMMON(Ref<Texture3D>)
 };
 
-template<typename T>
-struct Ref<Texture2DView<T>>
-    : detail::EnableTextureSample<Ref<Texture2DView<T>>, 2> {
-    OC_REF_COMMON(Ref<Texture2DView<T>>)
-};
-
-template<typename T>
-struct Ref<RWTexture3DView<T>>
-    : detail::EnableTextureReadAndWrite<Ref<RWTexture3DView<T>>, 3> {
-    OC_REF_COMMON(Ref<RWTexture3DView<T>>)
-};
-
-template<typename T>
-struct Ref<RWTexture2DView<T>>
-    : detail::EnableTextureReadAndWrite<Ref<RWTexture2DView<T>>, 2> {
-    OC_REF_COMMON(Ref<RWTexture2DView<T>>)
+template<>
+struct Ref<Texture2D>
+    : detail::EnableTextureSample<Ref<Texture2D>, 2>,
+      detail::EnableTextureReadAndWrite<Ref<Texture2D>, 2> {
+    OC_REF_COMMON(Ref<Texture2D>)
 };
 
 template<>
@@ -280,9 +267,9 @@ public:
 };
 
 template<typename... T>
-struct Ref<horizon::dsl::tuple<T...>> {
-    using Tuple = horizon::dsl::tuple<T...>;
-    OC_REF_COMMON(Ref<horizon::dsl::tuple<T...>>)
+struct Ref<ocarina::tuple<T...>> {
+    using Tuple = ocarina::tuple<T...>;
+    OC_REF_COMMON(Ref<ocarina::tuple<T...>>)
 
 private:
     template<uint i>
@@ -291,17 +278,17 @@ private:
     template<uint i = 0>
     requires(i < sizeof...(T))
     void _assignment(const Tuple &t) noexcept {
-        set<i>(horizon::dsl::get<i>(t));
+        set<i>(ocarina::get<i>(t));
         _assignment<i + 1>(t);
     }
 
 public:
     template<size_t i>
     [[nodiscard]] auto get() const noexcept {
-        using Elm = horizon::dsl::tuple_element_t<i, Tuple>;
+        using Elm = ocarina::tuple_element_t<i, Tuple>;
         return eval<Elm>(Function::current()->member(Type::of<Elm>(), expression(), i));
     }
-    template<size_t i, typename elm_ty = horizon::dsl::tuple_element_t<i, Tuple>>
+    template<size_t i, typename elm_ty = ocarina::tuple_element_t<i, Tuple>>
     void set(elm_ty val) noexcept {
         auto expr = Function::current()->member(Type::of<expr_value_t<elm_ty>>(), expression(), i);
         assign(expr, val);
@@ -332,14 +319,14 @@ public:
         if constexpr (is_dsl_v<Index>) {
             index = detail::correct_index(index, size(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BindlessArrayBufferRead,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BINDLESS_ARRAY_BUFFER_READ,
                                                                  {bindless_array_, index_, OC_EXPR(index)});
         return eval<T>(expr);
     }
 
     template<typename Size = uint>
     [[nodiscard]] Var<Size> size_in_byte() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BindlessArrayBufferSize,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BINDLESS_ARRAY_BUFFER_SIZE,
                                                                  {bindless_array_, index_});
         return eval<Size>(expr);
     }
@@ -351,12 +338,12 @@ public:
     }
 
     template<typename Index, typename Val>
-    requires concepts::integral<expr_value_t<Index>> && horizon::dsl::is_same_v<T, expr_value_t<Val>>
+    requires concepts::integral<expr_value_t<Index>> && ocarina::is_same_v<T, expr_value_t<Val>>
     void write(Index index, Val &&elm) {
         if constexpr (is_dsl_v<Index>) {
             index = detail::correct_index(index, size(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BindlessArrayBufferWrite,
+        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BINDLESS_ARRAY_BUFFER_WRITE,
                                                                  {bindless_array_, index_, OC_EXPR(index), OC_EXPR(elm)});
         Function::current()->expr_statement(expr);
     }
@@ -377,7 +364,7 @@ public:
         if (check_boundary) {
             offset = detail::correct_index(offset, size_in_byte<Size>(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BindlessArrayByteBufferRead,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ,
                                                                  {bindless_array_, index_, OC_EXPR(offset)});
         return eval<T>(expr);
     }
@@ -388,7 +375,7 @@ public:
         if (check_boundary) {
             offset = detail::correct_index(offset, size_in_byte<Size>(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BindlessArrayByteBufferRead,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<T>(), CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ,
                                                                  {bindless_array_, index_, OC_EXPR(offset)});
         Var<T> *ret = Function::current()->template create_temp_obj<Var<T>>(expr);
         return *ret;
@@ -400,7 +387,7 @@ public:
         if (check_boundary) {
             offset = detail::correct_index(offset, size_in_byte<Size>(), typeid(*this).name(), traceback_string());
         }
-        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BindlessArrayByteBufferWrite,
+        const CallExpr *expr = Function::current()->call_builtin(nullptr, CallOp::BINDLESS_ARRAY_BYTE_BUFFER_WRITE,
                                                                  {bindless_array_, index_,
                                                                   OC_EXPR(offset), OC_EXPR(val)});
         Function::current()->expr_statement(expr);
@@ -408,7 +395,7 @@ public:
 
     template<typename Size = uint>
     [[nodiscard]] Var<Size> size_in_byte() const noexcept {
-        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BindlessArrayBufferSize,
+        const CallExpr *expr = Function::current()->call_builtin(Type::of<Size>(), CallOp::BINDLESS_ARRAY_BUFFER_SIZE,
                                                                  {bindless_array_, index_});
         return eval<Size>(expr);
     }
@@ -438,8 +425,8 @@ template<size_t Dim>
 class BindlessArrayTexture {
 private:
     static_assert(Dim == 2 || Dim == 3, "The dimension of texture must be 2 or 3!");
-    static constexpr CallOp call_op = Dim == 2 ? CallOp::BindlessArrayTex2DSample :
-                                                 CallOp::BindlessArrayTex3DSample;
+    static constexpr CallOp call_op = Dim == 2 ? CallOp::BINDLESS_ARRAY_TEX2D_SAMPLE :
+                                                 CallOp::BINDLESS_ARRAY_TEX3D_SAMPLE;
     const Expression *bindless_array_{nullptr};
     const Expression *index_{nullptr};
 
@@ -540,13 +527,13 @@ public:
 #define OC_MAKE_STRUCT_MEMBER(m)                                                                                          \
     dsl_t<std::remove_cvref_t<decltype(this_type::m)>>(m){Function::current()->member(Type::of<decltype(this_type::m)>(), \
                                                                                       expression(),                       \
-                                                                                      horizon::dsl::struct_member_tuple<this_type>::member_index(#m))};
+                                                                                      ocarina::struct_member_tuple<this_type>::member_index(#m))};
 
 #define OC_MAKE_MEMBER_ASSIGNMENT(m) \
     m.set(_t_.m);
 
 #define OC_MAKE_COMPUTABLE_BODY(S, ...)                   \
-    namespace horizon::dsl {                             \
+    namespace ocarina {                                   \
     namespace detail {                                    \
     template<>                                            \
     struct Ref<S> {                                       \
@@ -569,16 +556,16 @@ public:
 }// namespace detail
 
 template<typename T>
-struct Proxy : public horizon::dsl::detail::Ref<T> {
-    static_assert(horizon::dsl::always_false_v<T>, "proxy is invalid !");
+struct Proxy : public ocarina::detail::Ref<T> {
+    static_assert(ocarina::always_false_v<T>, "proxy is invalid !");
 };
 
 #define OC_MAKE_GET_PROXY                                                                     \
-    auto operator->() noexcept { return reinterpret_cast<horizon::dsl::Proxy<org_type> *>(this); } \
-    auto operator->() const noexcept { return reinterpret_cast<const horizon::dsl::Proxy<org_type> *>(this); }
+    auto operator->() noexcept { return reinterpret_cast<ocarina::Proxy<org_type> *>(this); } \
+    auto operator->() const noexcept { return reinterpret_cast<const ocarina::Proxy<org_type> *>(this); }
 
 #define OC_MAKE_PROXY(S) \
     template<>           \
-    struct horizon::dsl::Proxy<S> : public horizon::dsl::detail::Ref<S>
+    struct ocarina::Proxy<S> : public ocarina::detail::Ref<S>
 
-}// namespace horizon::dsl
+}// namespace ocarina

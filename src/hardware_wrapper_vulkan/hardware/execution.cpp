@@ -1140,9 +1140,17 @@ namespace Corona::Horizon
         HORIZON_PROFILE_SCOPE_N("Horizon::compile");
         ExecutionPlan plan;
         std::unordered_map<std::uintptr_t, LastResourceUse> global_last_access;
+        std::vector<std::shared_ptr<void>> retained_objects;
 
         for (CommandIR& command : task.commands)
         {
+            // Retention describes the entire recorded task, not transfer work.
+            // An independent empty transfer submission can retire before graphics
+            // or compute and release host-write leases while the GPU uses them.
+            if (command.op == CommandOp::KeepAlive) {
+                if (command.keep_alive) retained_objects.push_back(std::move(command.keep_alive));
+                continue;
+            }
             if (profile != nullptr)
             {
                 ++profile->commands;
@@ -1257,6 +1265,9 @@ namespace Corona::Horizon
             }
         }
 
+        for (auto& submission : plan.submissions)
+            for (const auto& object : retained_objects)
+                submission.keep_alive.add_object(object);
         task.commands.clear();
         return plan;
     }
@@ -2037,11 +2048,18 @@ namespace Corona::Horizon
                         throw std::logic_error("Dispatch storage image binding requires a valid HardwareImage.");
                     }
 
+                    // Bindless sampled images are also retained in the image
+                    // binding list. Match ResourceManager's descriptor layout:
+                    // sampled-only images (especially depth attachments) cannot
+                    // be transitioned to GENERAL while their descriptor says
+                    // SHADER_READ_ONLY_OPTIMAL.
+                    const bool storage = (image->desc.usage & ImageUsage_Storage) != 0;
                     transition_image(command_buffer,
                                      *image,
-                                     VK_IMAGE_LAYOUT_GENERAL,
+                                     storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                                     VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                                     storage ? (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)
+                                             : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
                 }
 
                 if (prepared.pipeline == VK_NULL_HANDLE || prepared.layout == VK_NULL_HANDLE)

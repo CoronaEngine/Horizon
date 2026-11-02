@@ -1139,8 +1139,13 @@ namespace Corona::Horizon
             };
         };
 
-        create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice&) {
+        create_config_.get_device_features = [](const VkInstance&, const VkPhysicalDevice& physical_device) {
+            VkPhysicalDeviceFeatures supported_features {};
+            vkGetPhysicalDeviceFeatures(physical_device, &supported_features);
             VkPhysicalDeviceFeatures features {};
+            // Fragment-stage PrimitiveId also needs the Geometry SPIR-V capability.
+            // Enable it where available without requiring it on portability devices.
+            features.geometryShader = supported_features.geometryShader;
             features.samplerAnisotropy = VK_TRUE;
             features.shaderInt16 = VK_TRUE;
             features.fragmentStoresAndAtomics = VK_TRUE;

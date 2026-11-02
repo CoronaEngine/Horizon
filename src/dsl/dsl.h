@@ -9,14 +9,15 @@
 #include "core/expr.h"
 #include "core/var.h"
 #include "data/dynamic_array.h"
+#include "data/shared_array.h"
 #include "api/stmt_builder.h"
 #include "api/syntax.h"
 #include "api/operators.h"
 #include "api/func.h"
-#include "api/raster.h"
+#include "tensor/tensor.h"
 #include "types/soa.h"
 #include "types/struct.h"
-
-// RTX shader semantics and legacy polymorphic-resource adapters remain
-// opt-in headers. Keeping them out of the base aggregate makes the embedded
-// DSL layer usable without an RHI or code-generation backend.
+#include "rtx.h"
+#include "core/ref.inl"
+#include "diagnostics/env.h"
+#include "types/polymorphic.h"

@@ -72,15 +72,6 @@ namespace EmbeddedShader
 		Type type = Type::Unknown;
 	};
 
-    struct SlangCompileResult
-    {
-        using BinaryTarget = std::vector<uint32_t>;
-        using StringTarget = std::string;
-        std::unordered_map<ShaderLanguage, BinaryTarget> binaryTargets;
-        std::unordered_map<ShaderLanguage, StringTarget> stringTargets;
-        std::unordered_map<ShaderLanguage, ShaderCodeModule::ShaderResources> reflections;
-    };
-
     struct SlangModuleCompileArgs
     {
         std::string moduleName;
@@ -108,34 +99,4 @@ namespace EmbeddedShader
 
     };
 
-    enum class SlangMatrixMajor
-    {
-        RowMajor,
-        ColumnMajor,
-    };
-
-    struct SlangCompileArgs0
-    {
-        ShaderLanguage sourceLanguage;
-        std::vector<ShaderLanguage> targetLanguages;
-        std::vector<SlangModule*> deps;
-        std::string entrypointName = "main";
-        //当入口点通过[shader(...)]属性注解指定stage时，stage参数可选
-        ShaderStage stage{};
-
-        SlangMatrixMajor matrixMajor = SlangMatrixMajor::RowMajor;
-
-        bool enableReflection = false;
-        std::function<void(slang::ShaderReflection*)> layoutCallback = [](slang::ProgramLayout*){};
-    };
-
-    struct SlangCompileArgs : SlangCompileArgs0
-    {
-        std::string source;
-    };
-
-    struct SlangCompileArgs2 : SlangCompileArgs0
-    {
-        SlangModule* module = nullptr;
-    };
 }

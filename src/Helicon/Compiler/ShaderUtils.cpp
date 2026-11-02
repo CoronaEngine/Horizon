@@ -12,24 +12,21 @@ namespace EmbeddedShader
 	std::string sanitizePath(const std::filesystem::path& p)
 	{
 		auto s = p.string();
-		std::ranges::replace(s, '\\', '_');
-		std::ranges::replace(s, '/', '_');
-		std::ranges::replace(s, '.', '_');
-		std::ranges::replace(s, ':', '_');
+		// C++ identifiers must not depend on path punctuation or the process locale.
+		for (auto& c : s)
+		{
+			const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+			const bool digit = c >= '0' && c <= '9';
+			if (!letter && !digit && c != '_') c = '_';
+		}
+		if (s.empty()) return "_";
+		if (s[0] >= '0' && s[0] <= '9') s.insert(s.begin(), '_');
 		return s;
 	}
 
 	std::string sanitizeFilename(const std::filesystem::path& p)
 	{
-		auto s = p.filename().string();
-		for (auto& c : s)
-		{
-			if (!std::isalnum(static_cast<unsigned char>(c)))
-				c = '_';
-		}
-		if (!s.empty() && std::isdigit(static_cast<unsigned char>(s[0])))
-			s = "_" + s;
-		return s;
+		return sanitizePath(p.filename());
 	}
 
 	// ---- SPIR-V 二进制序列化 ----

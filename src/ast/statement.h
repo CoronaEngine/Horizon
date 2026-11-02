@@ -6,9 +6,7 @@
 
 #include "ast_node.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 class ScopeStmt;
 class BreakStmt;
@@ -23,7 +21,7 @@ class SwitchCaseStmt;
 class SwitchDefaultStmt;
 class LoopStmt;
 class ForStmt;
-class DiscardStmt;
+class PrintStmt;
 
 class Expression;
 class RefExpr;
@@ -43,7 +41,7 @@ struct StmtVisitor {
     virtual void visit(const AssignStmt *) = 0;
     virtual void visit(const ForStmt *) = 0;
     virtual void visit(const CommentStmt *) = 0;
-    virtual void visit(const DiscardStmt *) = 0;
+    virtual void visit(const PrintStmt *) = 0;
 };
 
 #define OC_MAKE_STATEMENT_COMMON    \
@@ -53,20 +51,21 @@ struct StmtVisitor {
 class OC_AST_API Statement : public ASTNode, public concepts::Noncopyable, public Hashable {
 public:
     enum struct Tag : uint32_t {
-        Scope,
-        Break,
-        Continue,
-        Return,
-        If,
-        Loop,
-        Expr,
-        Switch,
-        SwitchCase,
-        SwitchDefault,
-        Assign,
-        Comment,
-        For,
-        Discard
+        SCOPE,
+        BREAK,
+        CONTINUE,
+        RETURN,
+        IF,
+        LOOP,
+        EXPR,
+        SWITCH,
+        SWITCH_CASE,
+        SWITCH_DEFAULT,
+        ASSIGN,
+        COMMENT,
+        FOR,
+        PRINT,
+        WARNING
     };
 
 private:
@@ -76,12 +75,13 @@ public:
     explicit Statement(Tag tag) noexcept : tag_{tag} {}
     [[nodiscard]] auto tag() const noexcept { return tag_; }
     virtual void accept(StmtVisitor &) const = 0;
+    virtual ~Statement() noexcept = default;
 };
 
 class OC_AST_API ScopeStmt : public Statement {
 private:
-    horizon::ast::vector<Variable> local_vars_;
-    horizon::ast::vector<const Statement *> statements_;
+    ocarina::vector<Variable> local_vars_;
+    ocarina::vector<const Statement *> statements_;
     bool is_func_body_{};
 
 private:
@@ -89,13 +89,13 @@ private:
 
 public:
     explicit ScopeStmt(bool is_func_body = false) noexcept
-        : is_func_body_(is_func_body), Statement(Tag::Scope) {}
+        : is_func_body_(is_func_body), Statement(Tag::SCOPE) {}
     bool check_context(const Function *ctx) const noexcept override {
         return detail::check_context((statements_), ctx);
     }
-    [[nodiscard]] horizon::ast::span<const Variable> local_vars() const noexcept { return local_vars_; }
+    [[nodiscard]] ocarina::span<const Variable> local_vars() const noexcept { return local_vars_; }
     [[nodiscard]] bool is_func_body() const noexcept { return is_func_body_; }
-    [[nodiscard]] horizon::ast::span<const Statement *const> statements() const noexcept { return statements_; }
+    [[nodiscard]] ocarina::span<const Statement *const> statements() const noexcept { return statements_; }
     [[nodiscard]] bool empty() const noexcept { return statements_.empty(); }
     [[nodiscard]] auto size() const noexcept { return statements_.size(); }
     void add_stmt(const Statement *stmt) noexcept;
@@ -110,7 +110,7 @@ private:
     }
 
 public:
-    BreakStmt() noexcept : Statement{Tag::Break} {}
+    BreakStmt() noexcept : Statement{Tag::BREAK} {}
     OC_MAKE_STATEMENT_COMMON
 };
 
@@ -121,16 +121,7 @@ private:
     }
 
 public:
-    ContinueStmt() noexcept : Statement(Tag::Continue) {}
-    OC_MAKE_STATEMENT_COMMON
-};
-
-class OC_AST_API DiscardStmt : public Statement {
-private:
-    [[nodiscard]] uint64_t compute_hash() const noexcept override { return hash64(Tag::Discard); }
-
-public:
-    DiscardStmt() noexcept : Statement(Tag::Discard) {}
+    ContinueStmt() noexcept : Statement(Tag::CONTINUE) {}
     OC_MAKE_STATEMENT_COMMON
 };
 
@@ -143,7 +134,7 @@ private:
 
 public:
     explicit ReturnStmt(const Expression *expr = nullptr) noexcept
-        : Statement(Tag::Return), expression_(expr) {}
+        : Statement(Tag::RETURN), expression_(expr) {}
     OC_MAKE_CHECK_CONTEXT(Statement, expression_)
     [[nodiscard]] const Expression *expression() const noexcept { return expression_; }
     OC_MAKE_STATEMENT_COMMON
@@ -158,7 +149,7 @@ private:
 
 public:
     explicit ExprStmt(const Expression *expr = nullptr) noexcept
-        : Statement(Tag::Expr), expression_(expr) {}
+        : Statement(Tag::EXPR), expression_(expr) {}
     OC_MAKE_CHECK_CONTEXT(Statement, expression_)
     const Expression *expression() const { return expression_; }
     OC_MAKE_STATEMENT_COMMON
@@ -174,7 +165,7 @@ private:
 
 public:
     explicit AssignStmt(const Expression *lhs, const Expression *rhs)
-        : Statement(Tag::Assign), lhs_(lhs), rhs_(rhs) {}
+        : Statement(Tag::ASSIGN), lhs_(lhs), rhs_(rhs) {}
     OC_MAKE_CHECK_CONTEXT(Statement, lhs_, rhs_)
     [[nodiscard]] auto lhs() const noexcept { return lhs_; }
     [[nodiscard]] auto rhs() const noexcept { return rhs_; }
@@ -191,7 +182,7 @@ private:
     [[nodiscard]] uint64_t compute_hash() const noexcept override;
 
 public:
-    explicit IfStmt(const Expression *condition) : Statement(Tag::If), condition_(condition) {}
+    explicit IfStmt(const Expression *condition) : Statement(Tag::IF), condition_(condition) {}
     OC_MAKE_CHECK_CONTEXT(Statement, condition_, true_branch_, false_branch_)
     [[nodiscard]] const Expression *condition() const noexcept { return condition_; }
     [[nodiscard]] const ScopeStmt *true_branch() const noexcept { return &true_branch_; }
@@ -210,7 +201,7 @@ private:
 
 public:
     explicit CommentStmt(const std::string &str)
-        : Statement(Tag::Comment), string_(str) {}
+        : Statement(Tag::COMMENT), string_(str) {}
     [[nodiscard]] std::string string() const noexcept { return string_; }
     OC_MAKE_STATEMENT_COMMON
 };
@@ -225,7 +216,7 @@ private:
 
 public:
     explicit SwitchStmt(const Expression *expr)
-        : Statement(Tag::Switch), expression_(expr) {}
+        : Statement(Tag::SWITCH), expression_(expr) {}
     OC_MAKE_CHECK_CONTEXT(Statement, expression_, body_)
     [[nodiscard]] auto expression() const noexcept { return expression_; }
     [[nodiscard]] auto body() const noexcept { return &body_; }
@@ -258,7 +249,7 @@ private:
     [[nodiscard]] uint64_t compute_hash() const noexcept override;
 
 public:
-    SwitchDefaultStmt() : Statement(Tag::SwitchDefault) {}
+    SwitchDefaultStmt() : Statement(Tag::SWITCH_DEFAULT) {}
     OC_MAKE_CHECK_CONTEXT(Statement, body_)
     [[nodiscard]] auto body() const noexcept { return &body_; }
     [[nodiscard]] auto body() noexcept { return &body_; }
@@ -277,7 +268,7 @@ private:
 
 public:
     ForStmt(const Expression *var, const Expression *cond, const Expression *step)
-        : Statement(Tag::For), var_(var), condition_(cond), step_(step) {}
+        : Statement(Tag::FOR), var_(var), condition_(cond), step_(step) {}
     OC_MAKE_CHECK_CONTEXT(Statement, var_, condition_, step_, body_)
     [[nodiscard]] auto var() const noexcept { return var_; }
     [[nodiscard]] auto condition() const noexcept { return condition_; }
@@ -295,11 +286,28 @@ private:
     [[nodiscard]] uint64_t compute_hash() const noexcept override;
 
 public:
-    LoopStmt() : Statement(Tag::Loop) {}
+    LoopStmt() : Statement(Tag::LOOP) {}
     OC_MAKE_CHECK_CONTEXT(Statement, body_)
     [[nodiscard]] auto body() const noexcept { return &body_; }
     [[nodiscard]] auto body() noexcept { return &body_; }
     OC_MAKE_STATEMENT_COMMON
 };
 
-}// namespace horizon::ast
+class OC_AST_API PrintStmt : public Statement {
+private:
+    ocarina::string fmt_;
+    ocarina::vector<const Expression *> args_;
+
+private:
+    [[nodiscard]] uint64_t compute_hash() const noexcept override;
+
+public:
+    explicit PrintStmt(string fmt, const vector<const Expression *> &args)
+        : Statement(Tag::PRINT), fmt_(fmt), args_(args) {}
+    OC_MAKE_CHECK_CONTEXT(Statement, args_)
+    [[nodiscard]] ocarina::string fmt() const noexcept { return fmt_; }
+    [[nodiscard]] span<const Expression *const> args() const noexcept { return args_; }
+    OC_MAKE_STATEMENT_COMMON
+};
+
+}// namespace ocarina

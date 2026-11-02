@@ -770,11 +770,17 @@ namespace Corona::Horizon
         vulkan_functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
 
         VmaAllocatorCreateInfo create_info {};
+        // HardwareContext requires/enables bufferDeviceAddress. Imported
+        // Ocarina Vulkan buffers retain that usage and VMA rejects them unless
+        // its allocator also knows the feature is enabled.
+        create_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
         create_info.vulkanApiVersion = VK_API_VERSION_1_4;
         create_info.instance = device_manager_->instance();
         create_info.physicalDevice = device_manager_->physical_device();
         create_info.device = device_manager_->logical_device();
         create_info.pVulkanFunctions = &vulkan_functions;
+        // Keep graphics/physics pool tails bounded beside compute framebuffers.
+        create_info.preferredLargeHeapBlockSize = 16ull * 1024ull * 1024ull;
 
         throw_if_failed(vmaCreateAllocator(&create_info, &allocator_), "vmaCreateAllocator");
     }
@@ -860,7 +866,11 @@ namespace Corona::Horizon
             throw std::runtime_error(std::string(label) + " bindless descriptors require update-after-bind support.");
         }
 
-        constexpr uint32_t preferred_descriptor_count = 4096;
+        // Imported scenes can contain hundreds of meshes, each with several
+        // geometry/skinning buffers. Keep enough storage-buffer slots for those
+        // live resources while still clamping to the physical device's limits.
+        const uint32_t preferred_descriptor_count =
+            descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ? 16384u : 4096u;
         const uint32_t descriptor_count = clamp_descriptor_capacity(preferred_descriptor_count, descriptor_limit);
         if (descriptor_count == 0)
         {
@@ -1301,6 +1311,26 @@ namespace Corona::Horizon
         VkBufferCreateInfo create_info = buffer_info(desc, queue_family_indices);
         create_info.size = memory_range.byte_size;
 
+        const bool from_vulkan = handle.memory_type_index != ~0u;
+        if (from_vulkan)
+        {
+            VkPhysicalDeviceIDProperties ids { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+            VkPhysicalDeviceProperties2 properties { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+            properties.pNext = &ids;
+            vkGetPhysicalDeviceProperties2(device_manager_->physical_device(), &properties);
+            if (!std::equal(handle.device_uuid.begin(), handle.device_uuid.end(), ids.deviceUUID) ||
+                !std::equal(handle.driver_uuid.begin(), handle.driver_uuid.end(), ids.driverUUID))
+                throw std::runtime_error("External Vulkan buffer belongs to a different GPU or driver");
+            if (handle.memory_type_index >= 32 || handle.vulkan_buffer_usage == 0)
+                throw std::invalid_argument("Invalid Vulkan buffer export metadata");
+            create_info.usage = handle.vulkan_buffer_usage;
+            buffer.buffer_usage = create_info.usage;
+            queue_family_indices = handle.vulkan_queue_families;
+            create_info.sharingMode = queue_family_indices.size() > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
+            create_info.queueFamilyIndexCount = queue_family_indices.size() > 1 ? uint32_t(queue_family_indices.size()) : 0;
+            create_info.pQueueFamilyIndices = queue_family_indices.data();
+        }
+
         VkExternalMemoryBufferCreateInfo external_buffer {};
         external_buffer.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
         external_buffer.handleTypes = handle_type;
@@ -1314,6 +1344,7 @@ namespace Corona::Horizon
 
         VmaAllocationCreateInfo alloc_info = allocation_info(desc);
         alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+        if (from_vulkan) alloc_info.memoryTypeBits = 1u << handle.memory_type_index;
 
 #if defined(_WIN32) || defined(_WIN64)
         VkImportMemoryWin32HandleInfoKHR import_info {};
@@ -1347,6 +1378,9 @@ namespace Corona::Horizon
 
         buffer.allocation_size = allocation_size;
         buffer.imported = true;
+        buffer.external_ownership_required = from_vulkan;
+        buffer.external_concurrent_sharing = create_info.sharingMode == VK_SHARING_MODE_CONCURRENT;
+        buffer.external_owned = from_vulkan;
         buffer.host_imported_manual_bind = false;
         name_buffer(device_manager_->logical_device(), allocator_, buffer);
         return buffer;
@@ -1418,6 +1452,41 @@ namespace Corona::Horizon
 #else
         throw std::runtime_error("External memory export is not supported on this platform.");
 #endif
+    }
+
+    void ResourceManager::set_external_buffer_ownership(BufferWrap& buffer, bool external)
+    {
+        Queue* queue = nullptr;
+        {
+            std::lock_guard lock(mutex_);
+            if (!buffer.external_ownership_required || buffer.external_owned == external) return;
+            queue = device_manager_->queue_for(QueueCapability::Compute);
+            if (!queue) throw std::runtime_error("No queue for external buffer ownership transfer");
+        }
+        // HardwareBuffer holds this buffer's write access throughout the transfer.
+        // Queue acquire/submit can retire submissions and destroy other resources,
+        // which reenter ResourceManager. Never hold mutex_ across those calls.
+        QueueSubmission submission;
+        submission.command_buffer = queue->acquire();
+        submission.debug_summary = external ? "External buffer release" : "External buffer acquire";
+        auto cb = submission.command_buffer->vk();
+        VkCommandBufferBeginInfo begin { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        throw_if_failed(vkBeginCommandBuffer(cb, &begin), "vkBeginCommandBuffer(external buffer)");
+        VkBufferMemoryBarrier barrier { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+        barrier.srcAccessMask = external ? VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT : 0;
+        barrier.dstAccessMask = external ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+        const auto local_family = buffer.external_concurrent_sharing ? VK_QUEUE_FAMILY_IGNORED : queue->id().family_index;
+        barrier.srcQueueFamilyIndex = external ? local_family : VK_QUEUE_FAMILY_EXTERNAL;
+        barrier.dstQueueFamilyIndex = external ? VK_QUEUE_FAMILY_EXTERNAL : local_family;
+        barrier.buffer = buffer.buffer_handle;
+        barrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 1, &barrier, 0, nullptr);
+        throw_if_failed(vkEndCommandBuffer(cb), "vkEndCommandBuffer(external buffer)");
+        const auto token = queue->submit(submission, {}, {});
+        queue->wait_for(token);
+        buffer.external_owned = external;
     }
 
     uint32_t ResourceManager::store_descriptor(BufferWrap& buffer)

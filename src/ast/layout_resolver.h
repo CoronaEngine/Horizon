@@ -8,11 +8,9 @@
 
 #include "core/type_system/precision_policy.h"
 #include "core/stl.h"
-#include "ast/type_desc.h"
+#include "core/type_system/type_desc.h"
 
-namespace horizon::ast {
-using namespace horizon::core;
-using namespace horizon::math;
+namespace ocarina {
 
 class LayoutResolver {
 private:
@@ -39,4 +37,4 @@ private:
     [[nodiscard]] string resolve_structure_description(const Type *type) const noexcept;
 };
 
-}// namespace horizon::ast
+}// namespace ocarina

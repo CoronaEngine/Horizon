@@ -5,9 +5,8 @@
 #include "half.h"
 #include "real.h"
 
-namespace horizon::math {
-using namespace horizon::core;
+namespace ocarina {
 
 half::operator real() const { return static_cast<real>(half_to_float(bits())); }
 
-}// namespace horizon::math
+}// namespace ocarina

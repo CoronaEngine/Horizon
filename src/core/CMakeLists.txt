@@ -1,36 +1,16 @@
 file(GLOB_RECURSE HEADER_FILES CONFIGURE_DEPENDS *.h*)
-file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS *.cpp)
-list(FILTER SOURCE_FILES EXCLUDE REGEX [[/runtime/platform_(windows|posix)\.cpp$]])
+file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS *.c*)
 
-if(WIN32)
-    list(APPEND SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/runtime/platform_windows.cpp")
-elseif(APPLE OR UNIX)
-    list(APPEND SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/runtime/platform_posix.cpp")
-else()
-    message(FATAL_ERROR "horizon-core has no platform backend for ${CMAKE_SYSTEM_NAME}")
-endif()
-
-add_library(horizon-core STATIC ${HEADER_FILES} ${SOURCE_FILES})
-target_sources(horizon-core PRIVATE
-    "${PROJECT_SOURCE_DIR}/include/horizon/core/logging.h"
-    "${PROJECT_SOURCE_DIR}/include/horizon/core/storage.h"
-    "${PROJECT_SOURCE_DIR}/include/horizon/core/stack_trace.h"
-)
-target_include_directories(horizon-core
-    PUBLIC
-    "${PROJECT_SOURCE_DIR}/src"
-    "${PROJECT_SOURCE_DIR}/include"
-)
-target_link_libraries(horizon-core PUBLIC
-    quill::quill
-    $<$<TARGET_EXISTS:horizon::fmt>:horizon::fmt>
-    $<$<TARGET_EXISTS:horizon::xxhash>:horizon::xxhash>
-)
-target_link_libraries(horizon-core PRIVATE
-    ${CMAKE_DL_LIBS}
-    $<$<PLATFORM_ID:Windows>:dbghelp>
-)
-target_compile_definitions(horizon-core
-    PUBLIC OC_STATIC_LINK=1
-    PRIVATE OC_CORE_EXPORT_DLL=1
-)
+add_library(ocarina-core SHARED ${HEADER_FILES} ${SOURCE_FILES})
+target_link_libraries(ocarina-core PUBLIC
+        ocarina-ext
+        horizon-logging
+        $<$<PLATFORM_ID:Windows>:dbghelp>
+        )
+target_link_libraries(ocarina-core PRIVATE mimalloc-static)
+target_compile_definitions(ocarina-core PRIVATE OC_CORE_EXPORT_DLL=1)
+set_target_properties(ocarina-core PROPERTIES
+        PUBLIC_HEADER "${HEADER_FILES}"
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+		FOLDER "ocarina")

@@ -3,10 +3,10 @@
 //
 
 #include "stl.h"
+#include <algorithm>
+#include <mimalloc.h>
 
-#include <cwchar>
-
-namespace horizon::core {
+namespace ocarina {
 
 fs::path parent_path(const fs::path &p, int levels) {
     fs::path cur_path = p;
@@ -32,26 +32,13 @@ void clear_directory(const std::filesystem::path &dir_path) {
 }
 
 std::string wstring_to_string(const wchar_t *source) {
-    if (source == nullptr) {
-        return {};
+    size_t len = 0;
+    wcstombs_s(&len, nullptr, 0, source, 0);
+    std::string str(len > 0 ? len - 1 : 0, '\0');
+    if (len > 0) {
+        wcstombs_s(&len, str.data(), str.size() + 1, source, str.size());
     }
-
-    std::mbstate_t state{};
-    const wchar_t *cursor = source;
-    const size_t length = std::wcsrtombs(nullptr, &cursor, 0u, &state);
-    if (length == static_cast<size_t>(-1)) {
-        return {};
-    }
-
-    std::string result(length, '\0');
-    if (result.empty()) {
-        return result;
-    }
-
-    state = {};
-    cursor = source;
-    const size_t converted = std::wcsrtombs(result.data(), &cursor, result.size(), &state);
-    return converted == static_cast<size_t>(-1) ? std::string{} : result;
+    return str;
 }
 
 std::string get_file_name(const std::string &file_path) {
@@ -67,11 +54,11 @@ std::string get_file_name(const std::string &file_path) {
 
 namespace detail {
 void *allocator_allocate(size_t size, size_t alignment) noexcept {
-    return ::operator new(size, std::align_val_t(alignment));
+    return mi_malloc_aligned(size, alignment);
 }
 
-void allocator_deallocate(void *p, size_t alignment) noexcept {
-    ::operator delete(p, std::align_val_t(alignment));
+void allocator_deallocate(void *p, size_t) noexcept {
+    mi_free(p);
 }
 
 void *allocator_reallocate(void *p, size_t size, size_t alignment) noexcept {
@@ -79,4 +66,4 @@ void *allocator_reallocate(void *p, size_t size, size_t alignment) noexcept {
     return allocator_allocate(size, alignment);
 }
 }// namespace detail
-}// namespace horizon::core
+}// namespace ocarina

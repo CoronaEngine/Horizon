@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -204,6 +205,13 @@ namespace Corona::Horizon
 
         uint64_t allocation_size = 0;
         BufferRange memory_range = BufferRange::entire();
+
+        // Optional metadata for dedicated allocations exported by Vulkan.
+        // Imports without explicit allocation metadata leave memory_type_index at its sentinel.
+        uint32_t memory_type_index = ~0u;
+        uint32_t vulkan_buffer_usage = 0;
+        std::vector<uint32_t> vulkan_queue_families;
+        std::array<uint8_t, 16> device_uuid {}, driver_uuid {};
 
         [[nodiscard]] static constexpr ExternalMemoryHandle win32(void* value, uint64_t size = 0, BufferRange range = BufferRange::entire()) noexcept { return { ExternalMemoryHandleType::OpaqueWin32, value, -1, size, range }; }
 
@@ -594,6 +602,9 @@ namespace Corona::Horizon
         [[nodiscard]] uint32_t store_descriptor() const;
         [[nodiscard]] static HardwareBuffer import_external(const ExternalMemoryHandle& handle, const HardwareBufferDesc& desc);
         [[nodiscard]] ExternalMemoryHandle export_external() const;
+        // Synchronous external-memory ownership barriers. The caller must
+        // finish all accesses by the previous owner before calling this.
+        void set_external_ownership(bool external) const;
 
     private:
         friend class HardwareImage;
@@ -830,6 +841,14 @@ namespace Corona::Horizon
         RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
         RasterizerPipelineBase& extent(uint32_t width, uint32_t height);
+
+        // 检测 EDSL $IF 条件是否变化；变化时在 CPU 侧重新 link 对应 branch 组合、
+        // 创建新的 Vulkan pipeline，并把本 handle 切换到该 pipeline。返回是否发生切换。
+        // 每帧的 clear_records() 和每次 record_indirect() 都会自动调用；条件没变时
+        // 只做一次轻量比较，不会重新编译。extent() 在 record 之后调用，因此不在这里
+        // 切换，避免已录制的 draw 留在旧变体上。
+        bool sync_shader_conditions();
+
         RasterizerPipelineBase& record_indirect(const HardwareBuffer& index_buffer,
                                                 const HardwareBuffer& vertex_buffer,
                                                 const HardwareBuffer& indirect_buffer,

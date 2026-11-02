@@ -2,8 +2,6 @@
 
 #include "ShaderLanguageConverter.h"
 
-#include "spirv-tools/linker.hpp"
-
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -575,372 +573,6 @@ namespace EmbeddedShader
 		}
 	}
 
-	std::string ShaderLanguageConverter::slangCompiler(std::string shaderCode, ShaderLanguage targetLanguage,
-	                                                   Slang::ComPtr<slang::IComponentType>& program)
-	{
-		std::string result;
-		Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-		slang::createGlobalSession(slangGlobalSession.writeRef());
-		slang::SessionDesc sessionDesc = {};
-		slang::TargetDesc targetDesc = {};
-		switch (targetLanguage)
-		{
-			case ShaderLanguage::GLSL:
-				// case ShaderLanguage::ESSL:
-			{
-				targetDesc.format = SLANG_GLSL;
-				slangGlobalSession->findProfile("glsl_460");
-				break;
-			}
-			case ShaderLanguage::HLSL:
-			{
-				targetDesc.format = SLANG_HLSL;
-				slangGlobalSession->findProfile("sm_6_7");
-				break;
-			}
-			// case ShaderLanguage::SpirV: {
-			//     targetDesc.format = SLANG_SPIRV;
-			//     slangGlobalSession->findProfile("spirv_1_6");
-			//     targetDesc.flags = SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY;
-			//     break;
-			// }
-			// case ShaderLanguage::MSL:
-			//	targetDesc.format = SLANG_METAL; break;
-			// case ShaderLanguage::DXIL:
-			//	targetDesc.format = SLANG_DXIL; break;
-			default:
-				return result;
-				break;
-		}
-		sessionDesc.targets = &targetDesc;
-		sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
-		sessionDesc.targetCount = 1;
-		Slang::ComPtr<slang::ISession> session;
-		(slangGlobalSession->createSession(sessionDesc, session.writeRef()));
-		slang::IModule* slangModule = nullptr; {
-			Slang::ComPtr<slang::IBlob> diagnosticBlob;
-			// slangModule = session->loadModule(shaderCode.c_str(), diagnosticBlob.writeRef());
-			slangModule = session->loadModuleFromSourceString(
-				std::to_string(std::hash<std::string>()(shaderCode)).c_str(), "", shaderCode.c_str(),
-				diagnosticBlob.writeRef());
-		}
-		Slang::ComPtr<slang::IEntryPoint> entryPoint;
-		slangModule->findEntryPointByName("main", entryPoint.writeRef());
-		std::vector<slang::IComponentType*> componentTypes;
-		componentTypes.push_back(slangModule);
-		componentTypes.push_back(entryPoint);
-		Slang::ComPtr<slang::IComponentType> composedProgram; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = session->createCompositeComponentType(
-				componentTypes.data(), componentTypes.size(), composedProgram.writeRef(), diagnosticsBlob.writeRef());
-		}
-		Slang::ComPtr<slang::IComponentType> linkedProgram; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = composedProgram->link(
-				linkedProgram.writeRef(),
-				diagnosticsBlob.writeRef());
-			if (SLANG_FAILED(result))
-				return {};
-		}
-		Slang::ComPtr<slang::IBlob> spirvCode; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = linkedProgram->getEntryPointCode(0, 0, spirvCode.writeRef(),
-			                                                      diagnosticsBlob.writeRef());
-			if (SLANG_FAILED(result))
-				return {};
-		}
-		result.resize(spirvCode->getBufferSize() / sizeof(char));
-		memcpy(result.data(), spirvCode->getBufferPointer(), spirvCode->getBufferSize());
-		program = linkedProgram;
-		return result;
-	}
-
-	std::vector<ShaderCodeModule::ShaderResources> ShaderLanguageConverter::slangCompiler(const std::string &shaderCode,
-                                                                                          const std::vector<ShaderLanguage> &targetBinary, const std::vector<ShaderLanguage> &targetLanguage,
-                                                                                          std::vector<std::vector<uint32_t>> &binaryTargetsOutput,
-                                                                                          std::vector<std::string> &targetsOutput, bool isEnabledReflection, bool isEnabledLink)
-	{
-	    if (targetBinary.empty() && targetLanguage.empty())
-	    {
-	        throw std::logic_error("No target language specified for Slang compilation.");
-	    }
-
-		initSlangGlobalSession();
-		Slang::ComPtr<slang::IGlobalSession> globalSession = slangGlobalSession;
-
-		slang::SessionDesc sessionDesc = {};
-
-	    std::vector<slang::TargetDesc> targets(targetLanguage.size() + targetBinary.size());
-
-	    for (size_t i = 0; i < targetBinary.size(); ++i)
-	    {
-	        auto& target = targets[i];
-	        auto language = targetBinary[i];
-	        switch (language)
-	        {
-	        case ShaderLanguage::SpirV:
-	            target.format = SLANG_SPIRV;
-	            target.profile = globalSession->findProfile("spirv_1_6");
-	            target.flags = SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY;
-	            break;
-	        case ShaderLanguage::DXIL:
-	            target.format = SLANG_DXIL;
-	            target.profile = globalSession->findProfile("sm_6_6");
-	            break;
-	        case ShaderLanguage::DXBC:
-	            target.format = SLANG_DXBC;
-	            break;
-	        default:
-	            throw std::logic_error("Unsupported binary target for Slang compilation.");
-	        }
-	    }
-
-	    for (size_t i = 0; i < targetLanguage.size(); ++i)
-	    {
-	        auto& target = targets[i + targetBinary.size()];
-	        auto language = targetLanguage[i];
-	        switch (language)
-	        {
-	        case ShaderLanguage::GLSL:
-	            // case ShaderLanguage::ESSL:
-	        {
-	            target.format = SLANG_GLSL;
-	            break;
-	        }
-	        case ShaderLanguage::HLSL:
-	        {
-	            target.format = SLANG_HLSL;
-	            break;
-	        }
-	            // case ShaderLanguage::MSL:
-	            //	targetDesc.format = SLANG_METAL; break;
-	        case ShaderLanguage::DXIL:
-	            target.format = SLANG_DXIL;
-	            break;
-	        case ShaderLanguage::DXBC:
-	            target.format = SLANG_DXBC;
-	            break;
-	        default:
-	            throw std::logic_error("Unsupported target language for Slang compilation.");
-	        }
-	    }
-
-	    sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
-	    sessionDesc.targets = targets.data();
-	    sessionDesc.targetCount = static_cast<SlangInt>(targets.size());
-
-	    std::array options =
-	    {
-	        slang::CompilerOptionEntry{
-	            slang::CompilerOptionName::EmitSpirvDirectly,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-	        },
-	        slang::CompilerOptionEntry{
-	            slang::CompilerOptionName::NoMangle,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-	        },
-	        slang::CompilerOptionEntry{
-	            slang::CompilerOptionName::IncompleteLibrary,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-	        },
-        };
-	    sessionDesc.compilerOptionEntries = options.data();
-	    sessionDesc.compilerOptionEntryCount = options.size();
-
-	    Slang::ComPtr<slang::ISession> session;
-	    globalSession->createSession(sessionDesc, session.writeRef());
-
-	    // 3. Load module
-	    Slang::ComPtr<slang::IModule> slangModule; {
-	        auto hashStr = std::to_string(std::hash<std::string>()(shaderCode));
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        slangModule = session->loadModuleFromSourceString(hashStr.c_str(), (hashStr + ".slang").c_str(),
-                                                              shaderCode.c_str(),
-                                                              diagnosticsBlob.writeRef());
-	        // Optional diagnostic container
-	        diagnoseIfNeeded(diagnosticsBlob);
-	        if (!slangModule)
-	        {
-	            throw std::runtime_error("Failed to load Slang module.");
-	        }
-	    }
-
-	    // 4. Query Entry Points
-	    Slang::ComPtr<slang::IEntryPoint> entryPoint; {
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        slangModule->findEntryPointByName("main", entryPoint.writeRef());
-	        if (!entryPoint)
-	        {
-	            std::cout << "Error getting entry point" << std::endl;
-	            throw std::runtime_error("Failed to find entry point 'main' in Slang module.");
-	        }
-	    }
-
-	    // 5. Compose Modules + Entry Points
-	    std::array<slang::IComponentType*, 2> componentTypes =
-	    {
-	        slangModule,
-            entryPoint
-        };
-
-	    Slang::ComPtr<slang::IComponentType> composedProgram; {
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        SlangResult result = session->createCompositeComponentType(
-                componentTypes.data(),
-                componentTypes.size(),
-                composedProgram.writeRef(),
-                diagnosticsBlob.writeRef());
-	        diagnoseIfNeeded(diagnosticsBlob);
-	        if (SLANG_FAILED(result))
-	            throw std::runtime_error("Failed to create composite component type in Slang.");
-	    }
-
-	    Slang::ComPtr<slang::IComponentType> program = composedProgram;
-	    if (isEnabledLink) {
-	        // 6. Link
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        SlangResult result = composedProgram->link(
-            program.writeRef(),
-            diagnosticsBlob.writeRef());
-	        diagnoseIfNeeded(diagnosticsBlob);
-	        if (SLANG_FAILED(result))
-	            throw std::runtime_error("Failed to link Slang program.");
-	    }
-
-		binaryTargetsOutput.resize(targetBinary.size());
-		for (size_t i = 0; i < binaryTargetsOutput.size(); ++i)
-		{
-			Slang::ComPtr<slang::IBlob> targetCodeBlob;
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = program->getEntryPointCode(
-			    0,
-				static_cast<SlangInt>(i),
-				targetCodeBlob.writeRef(),
-				diagnosticsBlob.writeRef());
-			diagnoseIfNeeded(diagnosticsBlob);
-			if (SLANG_FAILED(result))
-				throw std::runtime_error("Failed to get target code from Slang program.");
-			if (targetCodeBlob)
-			{
-				binaryTargetsOutput[i].resize(targetCodeBlob->getBufferSize() / sizeof(uint32_t));
-				memcpy(binaryTargetsOutput[i].data(), targetCodeBlob->getBufferPointer(),
-				       targetCodeBlob->getBufferSize());
-			}
-		}
-
-		targetsOutput.resize(targetLanguage.size());
-		for (size_t i = 0; i < targetsOutput.size(); ++i)
-		{
-			Slang::ComPtr<slang::IBlob> targetCodeBlob;
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-		    SlangResult result = program->getEntryPointCode(
-                0,
-				static_cast<SlangInt>(i + targetBinary.size()),
-				// Skip the first entry point if there are binary targets
-				targetCodeBlob.writeRef(),
-				diagnosticsBlob.writeRef());
-			diagnoseIfNeeded(diagnosticsBlob);
-			if (SLANG_FAILED(result))
-				throw std::runtime_error("Failed to get target code from Slang program.");
-			if (targetCodeBlob)
-			{
-				targetsOutput[i].resize(targetCodeBlob->getBufferSize() / sizeof(char));
-				memcpy(targetsOutput[i].data(), targetCodeBlob->getBufferPointer(), targetCodeBlob->getBufferSize());
-			}
-		}
-
-		if (!isEnabledReflection)
-			return {};
-
-		std::vector<ShaderCodeModule::ShaderResources> reflectedResources(targets.size());
-		for (size_t i = 0; i < targets.size(); ++i)
-		{
-			auto& reflection = reflectedResources[i];
-			auto programLayout = composedProgram->getLayout(static_cast<SlangInt>(i));
-
-			slangReflectParameterBlock(programLayout, "global_ubo", reflection);
-
-			for (int ii = 0; ii < programLayout->getEntryPointCount(); ++ii)
-			{
-				auto input = programLayout->getEntryPointByIndex(ii)->getVarLayout();
-				auto inputType = input->getTypeLayout();
-				//仅针对Helicon Shader特殊处理，简化反射流程
-				inputType->getFieldCount();
-				for (int j = 0; j < inputType->getFieldCount(); ++j)
-				{
-					auto param = inputType->getFieldByIndex(j);
-					slangReflectField(param, "", 0, reflection);
-				}
-			}
-		}
-		return reflectedResources;
-	}
-
-void printFunc(slang::DeclReflection* decl, int indent = 0)
-	{
-	    std::string prefix(indent * 2, ' ');
-	    auto func = decl->asFunction();
-	    std::cout << prefix << "func_return_type: " << func->getReturnType()->getName() << std::endl;
-	}
-
-void printVar(slang::DeclReflection* decl, int indent = 0)
-	{
-	    std::string prefix(indent * 2, ' ');
-	    auto func = decl->asVariable();
-	    std::cout << prefix << "var_type: " << func->getType()->getName() << std::endl;
-	}
-
-void printDecl(slang::DeclReflection* decl, int indent = 0)
-	{
-	    std::string prefix(indent * 2, ' ');
-
-	    // 获取声明名称和类型
-	    const char* name = decl->getName();
-	    auto kind = decl->getKind();
-
-	    std::cout << prefix;
-
-	    switch (kind)
-	    {
-	    case slang::DeclReflection::Kind::Module:
-	        std::cout << "module ";
-	        break;
-	    case slang::DeclReflection::Kind::Struct:
-	        std::cout << "struct ";
-	        break;
-	    case slang::DeclReflection::Kind::Enum:
-	        std::cout << "enum ";
-	        break;
-	    case slang::DeclReflection::Kind::Variable:
-	        std::cout << "var ";
-	        printVar(decl, indent + 1);
-	        break;
-	    case slang::DeclReflection::Kind::Func:
-	        std::cout << "func ";
-	        printFunc(decl, indent + 1);
-	        break;
-        case slang::DeclReflection::Kind::Unsupported:
-	        std::cout << "unsupported ";
-            break;
-        case slang::DeclReflection::Kind::Generic:
-	        std::cout << "generic ";
-            break;
-        case slang::DeclReflection::Kind::Namespace:
-	        std::cout << "namespace ";
-            break;
-	    }
-
-	    if (name)
-	        std::cout << name;
-	    std::cout << std::endl;
-
-	    // 递归遍历子声明
-	    unsigned childCount = decl->getChildren().count;
-	    for (unsigned i = 0; i < childCount; ++i)
-	    {
-	        printDecl(decl->getChild(i), indent + 1);
-	    }
-	}
     SlangModule ShaderLanguageConverter::slangModuleCompiler(SlangModuleCompileArgs arg)
     {
 	    initSlangGlobalSession();
@@ -1135,341 +767,260 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    arg.layoutCallback(slangTarget->getLayout(0));
     }
 
-    SlangCompileResult ShaderLanguageConverter::slangCompilerWithModules(SlangCompileArgs arg)
+
+    Slang::ComPtr<slang::IGlobalSession> ShaderLanguageConverter::getGlobalSession()
     {
-	    return compileBySlangModule([&](Slang::ComPtr<slang::ISession> session)
+        initSlangGlobalSession();
+        return slangGlobalSession;
+    }
+    Slang::ComPtr<slang::IModule> ShaderLanguageConverter::loadModule(Slang::ComPtr<slang::ISession> session,
+                                                                      std::string_view moduleName,
+                                                                      std::string_view moduleSource)
+    {
+        Slang::ComPtr<slang::IModule> srcModule;
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        srcModule = session->loadModuleFromSourceString(moduleName.data(), moduleName.data(), moduleSource.data(),
+                                                        diagnosticsBlob.writeRef());
+        diagnoseIfNeeded(diagnosticsBlob);
+        if (!srcModule)
         {
-            Slang::ComPtr<slang::IModule> srcModule;
-            auto hashStr = std::to_string(std::hash<std::string>()(arg.source));
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            srcModule = session->loadModuleFromSourceString(hashStr.c_str(), (hashStr + ".slang").c_str(),
-                                                            arg.source.c_str(),
-                                                            diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (!srcModule)
+            throw std::runtime_error("Failed to load Slang module.");
+        }
+        return srcModule;
+    }
+    Slang::ComPtr<slang::IModule> ShaderLanguageConverter::loadModule(Slang::ComPtr<slang::ISession> session,
+                                                                      const SlangModule &slangModule)
+    {
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        Slang::ComPtr<slang::IModule> mod;
+        auto dataBlob = slang_createBlob(slangModule.binData.data(), slangModule.binData.size());
+        mod = session->loadModuleFromIRBlob(slangModule.name.c_str(), slangModule.path.c_str(), dataBlob,
+                                                 diagnosticsBlob.writeRef());
+        diagnoseIfNeeded(diagnosticsBlob);
+        if (!mod)
+        {
+            std::cout << "Load Module From IR Blob failed: " << slangModule.name << std::endl;
+        }
+        return mod;
+    }
+    SlangModule ShaderLanguageConverter::convertModule(Slang::ComPtr<slang::IModule> mod)
+    {
+        Slang::ComPtr<slang::IBlob> moduleBlob;
+        {
+            auto result = mod->serialize(moduleBlob.writeRef());
+            if (result != SLANG_OK || !moduleBlob)
             {
-                throw std::runtime_error("Failed to load Slang module.");
+                throw std::runtime_error("Failed to serialize Slang module.");
             }
-            return srcModule;
-        },arg);
+        }
+        SlangModule module;
+        module.name = mod->getName();
+        module.path = mod->getFilePath();
+        module.binData =
+            std::vector(static_cast<uint8_t const *>(moduleBlob->getBufferPointer()),
+                        static_cast<uint8_t const *>(moduleBlob->getBufferPointer()) + moduleBlob->getBufferSize());
+        return module;
     }
-
-    SlangCompileResult ShaderLanguageConverter::slangCompilerWithModules(SlangCompileArgs2 arg)
+    ShaderLanguage ShaderLanguageConverter::convertShaderLanguage(SlangCompileTarget target)
     {
-	    return compileBySlangModule([&](Slang::ComPtr<slang::ISession> session)
+        switch (target)
         {
-	        Slang::ComPtr<slang::IModule> srcModule;
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        auto dataBlob = slang_createBlob(arg.module->binData.data(), arg.module->binData.size());
-            srcModule = session->loadModuleFromIRBlob(arg.module->name.c_str(),arg.module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (!srcModule)
-            {
-                std::cout << "Load Module From IR Blob failed: " << arg.module->name << std::endl;
-            }
-            return srcModule;
-        },arg);
-    }
-
-    void ShaderLanguageConverter::testSlangModule(const std::vector<uint8_t> &moduleData)
-    {
-	    initSlangGlobalSession();
-
-	    slang::SessionDesc sessionDesc{};
-	    slang::TargetDesc targetDesc{};
-	    targetDesc.format = SLANG_CPP_SOURCE;
-	    sessionDesc.targets = &targetDesc;
-	    sessionDesc.targetCount = 1;
-
-	    std::array options =
-        {
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::NoMangle,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::IncompleteLibrary,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
-        };
-	    sessionDesc.compilerOptionEntries = options.data();
-	    sessionDesc.compilerOptionEntryCount = options.size();
-	    Slang::ComPtr<slang::ISession> session;
-	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
-
-
-	    Slang::ComPtr irBlob{slang_createBlob(moduleData.data(),moduleData.size())};
-	    Slang::ComPtr<slang::IModule> slangModule;
-	    {
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        slangModule = session->loadModuleFromIRBlob("test-module","test-module",irBlob,diagnosticsBlob.writeRef());
-	        diagnoseIfNeeded(diagnosticsBlob);
-	        if (!slangModule)
-	        {
-	            throw std::runtime_error("Failed to load Slang module.");
-	        }
-	    }
-	    std::cout << "slang-module loaded successfully!" << std::endl;
-    }
-
-    std::vector<uint32_t> ShaderLanguageConverter::slangSpirvCompiler(const std::string& shaderCode,
-                                                                      Slang::ComPtr<slang::IComponentType>& program)
-	{
-		std::vector<uint32_t> result;
-		// 1. Create Global Session
-		Slang::ComPtr<slang::IGlobalSession> globalSession;
-		createGlobalSession(globalSession.writeRef());
-
-		// 2. Create Session
-		slang::SessionDesc sessionDesc = {};
-		slang::TargetDesc targetDesc = {};
-		targetDesc.format = SLANG_SPIRV;
-		// targetDesc.profile = globalSession->findProfile("spirv_1_6");
-		targetDesc.flags = SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY;
-
-		sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
-		sessionDesc.targets = &targetDesc;
-		sessionDesc.targetCount = 1;
-
-		std::array options =
-		{
-			slang::CompilerOptionEntry{
-				slang::CompilerOptionName::EmitSpirvDirectly,
-				{slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-			}
-		};
-		sessionDesc.compilerOptionEntries = options.data();
-		sessionDesc.compilerOptionEntryCount = options.size();
-
-		Slang::ComPtr<slang::ISession> session;
-		globalSession->createSession(sessionDesc, session.writeRef());
-
-		// 3. Load module
-		Slang::ComPtr<slang::IModule> slangModule; {
-			auto hashStr = std::to_string(std::hash<std::string>()(shaderCode));
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			slangModule = session->loadModuleFromSourceString(hashStr.c_str(), (hashStr + ".slang").c_str(),
-			                                                  shaderCode.c_str(),
-			                                                  diagnosticsBlob.writeRef());
-			// Optional diagnostic container
-			diagnoseIfNeeded(diagnosticsBlob);
-			if (!slangModule)
-			{
-				return {};
-			}
-		}
-
-		// 4. Query Entry Points
-		Slang::ComPtr<slang::IEntryPoint> entryPoint; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			slangModule->findEntryPointByName("main", entryPoint.writeRef());
-			if (!entryPoint)
-			{
-				std::cout << "Error getting entry point" << std::endl;
-				return {};
-			}
-		}
-
-		// 5. Compose Modules + Entry Points
-		std::array<slang::IComponentType*, 2> componentTypes =
-		{
-			slangModule,
-			entryPoint
-		};
-
-		Slang::ComPtr<slang::IComponentType> composedProgram; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = session->createCompositeComponentType(
-				componentTypes.data(),
-				componentTypes.size(),
-				composedProgram.writeRef(),
-				diagnosticsBlob.writeRef());
-			diagnoseIfNeeded(diagnosticsBlob);
-			if (SLANG_FAILED(result))
-				return {};
-		}
-
-		// 6. Link
-		Slang::ComPtr<slang::IComponentType> linkedProgram; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = composedProgram->link(
-				linkedProgram.writeRef(),
-				diagnosticsBlob.writeRef());
-			diagnoseIfNeeded(diagnosticsBlob);
-			if (SLANG_FAILED(result))
-				return {};
-		}
-
-		// 7. Get Target Kernel Code
-		Slang::ComPtr<slang::IBlob> spirvCode; {
-			Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-			SlangResult result = linkedProgram->getEntryPointCode(
-				0,
-				0,
-				spirvCode.writeRef(),
-				diagnosticsBlob.writeRef());
-			diagnoseIfNeeded(diagnosticsBlob);
-			if (SLANG_FAILED(result))
-				return {};
-		}
-		result.resize(spirvCode->getBufferSize() / sizeof(uint32_t));
-		memcpy(result.data(), spirvCode->getBufferPointer(), spirvCode->getBufferSize());
-		program = linkedProgram;
-		return result;
-	}
-
-    std::vector<uint32_t> ShaderLanguageConverter::spirvLinker(const std::vector<std::vector<uint32_t>> &binaries)
-    {
-	    spvToolContext.SetMessageConsumer(
-        [](spv_message_level_t level, const char* source,
-           const spv_position_t& position, const char* message) {
-            switch (level) {
-                case SPV_MSG_FATAL:
-            case SPV_MSG_INTERNAL_ERROR:
-            case SPV_MSG_ERROR:
-                std::cerr << "error: " << position.index << ": "
-                          << message << std::endl;
-                break;
-            case SPV_MSG_WARNING:
-                std::cout << "warning: " << position.index << ": "
-                          << message << std::endl;
-                break;
-            case SPV_MSG_INFO:
-                std::cout << "info: " << position.index << ": "
-                          << message << std::endl;
-                break;
+            case SLANG_SPIRV:
+                return ShaderLanguage::SpirV;
+            case SLANG_DXIL:
+                return ShaderLanguage::DXIL;
+            case SLANG_HLSL:
+                return ShaderLanguage::HLSL;
+            case SLANG_GLSL:
+                return ShaderLanguage::GLSL;
+            case SLANG_DXBC:
+                return ShaderLanguage::DXBC;
             default:
-                break;
+                return ShaderLanguage::Slang;
         }
-    });
-        std::vector<uint32_t> result;
-
-        auto spv_result = spvtools::Link(spvToolContext,binaries, &result);
-        if (SPV_SUCCESS != spv_result)
-        {
-            throw std::runtime_error("Failed to link SPIR-V binaries: " + std::to_string(spv_result));
-        }
-
-        isSpirvValid(result);
-        return result;
     }
 
-    bool ShaderLanguageConverter::isSpirvValid(const std::vector<uint32_t> &spirvCode)
+    Slang::ComPtr<slang::IComponentType>
+    ShaderLanguageConverter::link(Slang::ComPtr<slang::ISession> session,
+                                  std::span<slang::IComponentType *> composeComponents)
     {
-	    spv_diagnostic diagnostic = nullptr;
-	    spv_const_binary_t binary = { spirvCode.data(), spirvCode.size() };
-
-	    spv_result_t result = spvValidate(spvToolContext.CContext(), &binary, &diagnostic);
-	    if (result == SPV_SUCCESS) {
-	        spvDiagnosticDestroy(diagnostic);
-	        return true;
-	    }
-        std::cerr << "❌ SPIR-V 验证失败 (错误码: " << result << ")\n";
-
-        if (diagnostic) {
-            std::cerr << "位置: 字索引 " << diagnostic->position.index
-                << ", 行 " << diagnostic->position.line
-                << ", 列 " << diagnostic->position.column << "\n";
-            std::cerr << "详情: " << diagnostic->error << "\n";
+        Slang::ComPtr<slang::IComponentType> target;
+        Slang::ComPtr<slang::IComponentType> composedProgram;
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result =
+                session->createCompositeComponentType(composeComponents.data(), composeComponents.size(),
+                                                      composedProgram.writeRef(), diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to create composite component type in Slang.");
         }
-	    spvDiagnosticDestroy(diagnostic);
-	    return false;
+
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result = composedProgram->link(target.writeRef(), diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to link Slang program.");
+        }
+        return target;
+    }
+    Slang::ComPtr<slang::IEntryPoint> ShaderLanguageConverter::findEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                              std::string_view name)
+    {
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+        mod->findEntryPointByName(name.data(), entryPoint.writeRef());
+        diagnoseIfNeeded(diagnosticsBlob);
+        if (!entryPoint)
+        {
+            throw std::runtime_error("Failed to find entry point.");
+        }
+        return entryPoint;
+    }
+    Slang::ComPtr<slang::IEntryPoint> ShaderLanguageConverter::tryFindEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                                 std::string_view name,
+                                                                                 ShaderStage stage)
+    {
+        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+        Slang::ComPtr<slang::IEntryPoint> entryPoint;
+        mod->findEntryPointByName(name.data(), entryPoint.writeRef());
+
+        if (!entryPoint)
+        {
+            // 针对非shader attr标注的入口点查找
+            mod->findAndCheckEntryPoint(name.data(), toSlangStage(stage), entryPoint.writeRef(),
+                                        diagnosticsBlob.writeRef());
+        }
+        return entryPoint;
+    }
+    Slang::ComPtr<slang::ISession>
+    ShaderLanguageConverter::createSession(const Slang::ComPtr<slang::IGlobalSession> &globalSession,
+                                           std::span<slang::TargetDesc> targetDesc,
+                                           std::span<slang::CompilerOptionEntry> options,
+                                           bool columnMajor)
+    {
+        slang::SessionDesc sessionDesc = {};
+        sessionDesc.targets = targetDesc.data();
+        sessionDesc.targetCount = targetDesc.size();
+        sessionDesc.compilerOptionEntries = options.data();
+        sessionDesc.compilerOptionEntryCount = options.size();
+        sessionDesc.defaultMatrixLayoutMode = columnMajor
+            ? SLANG_MATRIX_LAYOUT_COLUMN_MAJOR
+            : SLANG_MATRIX_LAYOUT_ROW_MAJOR;
+        Slang::ComPtr<slang::ISession> session;
+        globalSession->createSession(sessionDesc, session.writeRef());
+        return session;
     }
 
-    void ShaderLanguageConverter::slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath,
-                                                    size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection)
-	{
-		auto type = field->getTypeLayout();
-		auto name = accessPath.empty() ? field->getName() : accessPath.data() + std::string(".") + field->getName();
+    Slang::ComPtr<slang::IBlob> ShaderLanguageConverter::getFinalCode(Slang::ComPtr<slang::IComponentType> program, SlangInt targetIndex, bool isLibrary)
+    {
+        Slang::ComPtr<slang::IBlob> finalCode;
+        if (!isLibrary)
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result = program->getEntryPointCode(
+                0,
+                targetIndex,
+                finalCode.writeRef(),
+                diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to get target code from Slang program.");
+        }
+        else
+        {
+            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+            SlangResult result = program->getTargetCode(
+                targetIndex,
+                finalCode.writeRef(),
+                diagnosticsBlob.writeRef());
+            diagnoseIfNeeded(diagnosticsBlob);
+            if (SLANG_FAILED(result))
+                throw std::runtime_error("Failed to get target code from Slang program.");
+        }
+        return finalCode;
+    }
 
-		int set = 0;
+    namespace
+    {
+        void restoreComputeLocalSize(SlangCompileResult::BinaryTarget& words,
+                                     slang::ProgramLayout* layout)
+        {
+            // GLSL -> serialized Slang IR -> SPIR-V can emit LocalSize(1,1,1)
+            // while reflection still reports the original GLSL workgroup size.
+            // dispatch_extent uses reflection, so the emitted code must agree or
+            // only a fraction of the requested image/volume is actually written.
+            // Restore the workaround from the former getCompileResult path.
+            if (!layout || layout->getEntryPointCount() != 1 || words.size() < 5)
+                return;
+            auto* entry = layout->getEntryPointByIndex(0);
+            if (!entry || entry->getStage() != SLANG_STAGE_COMPUTE)
+                return;
+            SlangUInt sizes[3]{};
+            entry->getComputeThreadGroupSize(3, sizes);
+            for (const auto size : sizes)
+                if (size == 0 || size > std::numeric_limits<uint32_t>::max())
+                    return;
 
-		if (type->getKind() == slang::TypeReflection::Kind::Struct ||
-		    type->getKind() == slang::TypeReflection::Kind::ParameterBlock)
-		{
-			for (uint32_t i = 0; i < type->getFieldCount(); ++i)
-			{
-				auto innerField = type->getFieldByIndex(i);
-				slangReflectField(innerField, name, varBaseOffset + field->getOffset(), reflection);
-			}
-		} else slangReflectDescriptor(field, set, name, varBaseOffset, reflection);
-	}
+            constexpr uint32_t opExecutionMode = 16;
+            constexpr uint32_t localSize = 17;
+            for (size_t offset = 5; offset < words.size();)
+            {
+                const uint32_t count = words[offset] >> 16;
+                const uint32_t opcode = words[offset] & 0xffffu;
+                if (count == 0 || count > words.size() - offset)
+                    return;
+                if (opcode == opExecutionMode && count == 6 && words[offset + 2] == localSize)
+                {
+                    for (size_t axis = 0; axis < 3; ++axis)
+                        words[offset + 3 + axis] = static_cast<uint32_t>(sizes[axis]);
+                    return;
+                }
+                offset += count;
+            }
+        }
+    }
 
-	void ShaderLanguageConverter::slangReflectParameterBlock(slang::ProgramLayout* program, std::string_view uboName,
-	                                                         ShaderCodeModule::ShaderResources& reflection)
-	{
-		for (uint32_t i = 0; i < program->getParameterCount(); ++i)
-		{
-			auto type = program->getParameterByIndex(i)->getTypeLayout()->getElementTypeLayout();
-			auto index = type->findFieldIndexByName(uboName.data());
-			if (index == -1)
-				continue;
-			auto ubo = type->getFieldByIndex(index);
-			auto uboType = ubo->getTypeLayout()->getElementTypeLayout();
-			slangReflectDescriptor(ubo, 0, uboName, 0, reflection);
-			for (uint32_t j = 0; j < uboType->getFieldCount(); ++j)
-			{
-				auto field = uboType->getFieldByIndex(j);
-				slangReflectField(field, "", 0, reflection);
-			}
-		}
-	}
+    void ShaderLanguageConverter::fillCompileResult(SlangCompileResult &result,
+                                                      Slang::ComPtr<slang::IComponentType> program,
+                                                      SlangInt targetIndex, SlangCompileTarget dstLang,bool isNeedReflection,bool isLibrary)
+    {
+        auto finalCode = getFinalCode(program, targetIndex, isLibrary);
+        bool isBin = false;
+	    switch (dstLang)
+	    {
+	    case SLANG_SPIRV:
+	    case SLANG_DXBC:
+	    case SLANG_DXIL:
+	        isBin = true;
+	        break;
+	    default:
+	        break;
+	    }
+	    auto targetLang = convertShaderLanguage(dstLang);
+        if (isNeedReflection)
+        {
+            auto resource = slangReflection(program->getLayout(targetIndex));
+            result.reflections.insert({targetLang, std::move(resource)});
+        }
 
-	void ShaderLanguageConverter::slangReflectDescriptor(slang::VariableLayoutReflection* var,
-	                                                     int set, std::string_view name, size_t varBaseOffset,
-	                                                     ShaderCodeModule::ShaderResources& resource)
-	{
-		auto type = var->getTypeLayout();
-		auto rangeCount = type->getDescriptorSetDescriptorRangeCount(set);
-		if (rangeCount > 0)
-		{
-			ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo {};
-			bindInfo.set = set;
-			bindInfo.binding = type->getBindingRangeFirstDescriptorRangeIndex(0);
-			bindInfo.typeName = type->getName();
-			bindInfo.typeSize = type->getSize();
-			bindInfo.variateName = var->getName();
-			switch (type->getDescriptorSetDescriptorRangeType(set, 0))
-			{
-				case slang::BindingType::ConstantBuffer:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::uniformBuffers;
-					bindInfo.typeSize = type->getElementTypeLayout()->getSize();
-					break;
-				case slang::BindingType::Texture:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::texture;
-					break;
-				case slang::BindingType::Sampler:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::sampler;
-					break;
-				case slang::BindingType::MutableTexture:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::storageTexture;
-					break;
-				case slang::BindingType::MutableRawBuffer:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::storageBuffer;
-					break;
-				case slang::BindingType::RawBuffer:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::rawBuffer;
-					break;
-				case slang::BindingType::CombinedTextureSampler:
-					bindInfo.bindType = ShaderCodeModule::ShaderResources::sampledImages;
-					break;
-				case slang::BindingType::Unknown:
-				default: return;
-			}
-			resource.bindInfoPool.push_back(bindInfo);
-			return;
-		}
+	    if (isBin)
+	    {
+	        SlangCompileResult::BinaryTarget target(finalCode->getBufferSize() / sizeof(uint32_t));
+	        memcpy(target.data(), finalCode->getBufferPointer(),
+                   finalCode->getBufferSize());
+            if (dstLang == SLANG_SPIRV)
+                restoreComputeLocalSize(target, program->getLayout(targetIndex));
+	        result.binaryTargets.insert({targetLang, std::move(target)});
+	        return;
+	    }
 
-		ShaderCodeModule::ShaderResources::ShaderBindInfo bindInfo {};
-		bindInfo.bindType = ShaderCodeModule::ShaderResources::none;
-		bindInfo.byteOffset = var->getOffset(var->getCategory()) + varBaseOffset;
-		bindInfo.typeName = type->getName();
-		bindInfo.typeSize = type->getSize(var->getCategory());
-		bindInfo.variateName = var->getName();
-		bindInfo.location = var->getSemanticName() ? var->getSemanticIndex() : 0;
-		bindInfo.semantic = var->getSemanticName() ? var->getSemanticName() : "";
-		resource.bindInfoPool.push_back(bindInfo);
-	}
+	    SlangCompileResult::StringTarget target;
+	    target.resize(finalCode->getBufferSize() / sizeof(char));
+	    memcpy(target.data(), finalCode->getBufferPointer(), finalCode->getBufferSize());
+	    result.stringTargets.insert({targetLang, std::move(target)});
+    }
 
     void ShaderLanguageConverter::initSlangGlobalSession()
     {
@@ -1483,312 +1034,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	            throw std::runtime_error("Failed to create Slang global session.");
 	        }
 	    }
-    }
-
-    SlangCompileResult ShaderLanguageConverter::compileBySlangModule(const std::function<Slang::ComPtr<slang::IModule>(Slang::ComPtr<slang::ISession>)>& callback, SlangCompileArgs0& arg0)
-    {
-	    initSlangGlobalSession();
-        slang::SessionDesc sessionDesc{};
-        std::vector<slang::TargetDesc> targetDescs;
-        for (auto it = arg0.targetLanguages.begin(); it != arg0.targetLanguages.end();)
-        {
-            auto lang = *it;
-            slang::TargetDesc target{};
-            switch (lang)
-            {
-            case ShaderLanguage::GLSL:
-                target.format = SLANG_GLSL;
-                break;
-            case ShaderLanguage::HLSL:
-                target.format = SLANG_HLSL;
-                break;
-            case ShaderLanguage::DXIL:
-                target.format = SLANG_DXIL;
-                target.profile = slangGlobalSession->findProfile("sm_6_6");
-                break;
-            case ShaderLanguage::DXBC:
-                target.format = SLANG_DXBC;
-                break;
-            case ShaderLanguage::SpirV:
-                target.format = SLANG_SPIRV;
-                target.flags |= SLANG_EMIT_SPIRV_DIRECTLY;
-                break;
-            case ShaderLanguage::Slang:
-                it = arg0.targetLanguages.erase(it);
-                continue;
-            }
-            targetDescs.push_back(target);
-            ++it;
-        }
-	    sessionDesc.targets = targetDescs.data();
-	    sessionDesc.targetCount = static_cast<SlangInt>(targetDescs.size());
-        if (arg0.matrixMajor == SlangMatrixMajor::RowMajor)
-            sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_ROW_MAJOR;
-        else if (arg0.matrixMajor == SlangMatrixMajor::ColumnMajor)
-            sessionDesc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
-
-	    std::string_view srcStr = "slang";
-	    switch (arg0.sourceLanguage)
-	    {
-	    case ShaderLanguage::GLSL:
-	        srcStr = "glsl";
-	        break;
-	    case ShaderLanguage::HLSL:
-	        srcStr = "hlsl";
-	        break;
-	    case ShaderLanguage::Slang:
-	        break;
-	    case ShaderLanguage::DXIL:
-	    case ShaderLanguage::DXBC:
-	    case ShaderLanguage::SpirV:
-	        throw std::runtime_error("Unsupported source language for Slang module compilation.");
-	    }
-
-	    std::array options =
-	    {
-	        slang::CompilerOptionEntry{
-	            slang::CompilerOptionName::EmitSpirvDirectly,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-	        },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::NoMangle,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::IncompleteLibrary,
-                {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
-            },
-            slang::CompilerOptionEntry{
-                slang::CompilerOptionName::Language,
-                {slang::CompilerOptionValueKind::String, 0, 0, srcStr.data(), nullptr}
-            },
-        };
-
-	    sessionDesc.compilerOptionEntries = options.data();
-	    sessionDesc.compilerOptionEntryCount = options.size();
-
-	    Slang::ComPtr<slang::ISession> session;
-	    slangGlobalSession->createSession(sessionDesc, session.writeRef());
-
-	    //load modules
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            for (auto module : arg0.deps)
-            {
-                auto dataBlob = slang_createBlob(module->binData.data(), module->binData.size());
-                auto mod = session->loadModuleFromIRBlob(module->name.c_str(),module->path.c_str(),dataBlob,diagnosticsBlob.writeRef());
-                diagnoseIfNeeded(diagnosticsBlob);
-                if (!mod)
-                {
-                    std::cout << "Load Module From IR Blob failed: " << module->name << std::endl;
-                }
-            }
-        }
-
-	    Slang::ComPtr<slang::IModule> srcModule = callback(session);
-
-	    Slang::ComPtr<slang::IComponentType> slangTarget;
-	    Slang::ComPtr<slang::IEntryPoint> entryPoint;
-	    bool isLibrary = false;
-	    {
-	        Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	        srcModule->findEntryPointByName(arg0.entrypointName.c_str(), entryPoint.writeRef());
-	        if (!entryPoint)
-	        {
-	            //针对非shader attr标注的入口点查找
-                srcModule->findAndCheckEntryPoint(arg0.entrypointName.c_str(),
-                                                  toSlangStage(arg0.stage),
-                                                  entryPoint.writeRef(),
-                                                  diagnosticsBlob.writeRef());
-	            if (!entryPoint)
-	            {
-	                //切换到库模式编译
-	                isLibrary = true;
-	            }
-            }
-	    }
-	    if (!isLibrary)
-	    {
-	        // 5. Compose Modules + Entry Points
-	        std::array<slang::IComponentType *, 2> componentTypes =
-            {
-	            srcModule,
-                entryPoint
-            };
-
-	        Slang::ComPtr<slang::IComponentType> composedProgram;
-	        {
-	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	            SlangResult result = session->createCompositeComponentType(
-                    componentTypes.data(),
-                    componentTypes.size(),
-                    composedProgram.writeRef(),
-                    diagnosticsBlob.writeRef());
-	            diagnoseIfNeeded(diagnosticsBlob);
-	            if (SLANG_FAILED(result))
-	                throw std::runtime_error("Failed to create composite component type in Slang.");
-	        }
-
-	        {
-	            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-	            SlangResult result = composedProgram->link(
-                    slangTarget.writeRef(),
-                    diagnosticsBlob.writeRef());
-	            diagnoseIfNeeded(diagnosticsBlob);
-	            if (SLANG_FAILED(result))
-	                throw std::runtime_error("Failed to link Slang program.");
-	        }
-	    }
-        else
-        {
-            Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-            auto result = srcModule->link(slangTarget.writeRef(), diagnosticsBlob.writeRef());
-            diagnoseIfNeeded(diagnosticsBlob);
-            if (SLANG_FAILED(result))
-                throw std::runtime_error("Failed to link Slang program.");
-        }
-
-        return getCompileResult(targetDescs, slangTarget, arg0, isLibrary);
-    }
-
-    namespace
-    {
-        // 从 program layout 取 compute entry 的真实 thread group size（与反射同源）。
-        // 返回 false 表示无 compute entry 或值退化（非 compute 目标）。
-        bool queryComputeThreadGroupSize(slang::ProgramLayout* layout, uint32_t out[3])
-        {
-            if (!layout) return false;
-            const int epCount = layout->getEntryPointCount();
-            for (int i = 0; i < epCount; ++i)
-            {
-                slang::EntryPointReflection* ep = layout->getEntryPointByIndex(i);
-                if (!ep || ep->getStage() != SLANG_STAGE_COMPUTE) continue;
-                SlangUInt sizes[3] = { 1, 1, 1 };
-                ep->getComputeThreadGroupSize(3, sizes);
-                out[0] = static_cast<uint32_t>(sizes[0]);
-                out[1] = static_cast<uint32_t>(sizes[1]);
-                out[2] = static_cast<uint32_t>(sizes[2]);
-                return true;
-            }
-            return false;
-        }
-
-        // 就地把 SPIR-V 的 OpExecutionMode LocalSize 三个字面量改成 (x,y,z)。
-        // 背景：GLSL → 序列化 Slang IR → 重 emit SPIR-V 的往返里，Slang 会把 GLSL
-        // local_size 丢成 (1,1,1)（反射侧却读得到真实值）。这里用反射同源的真实值把
-        // 被执行 SPIR-V 的 LocalSize 补回，令「dispatch_groups 除数」与「GPU 实际每组线程」一致。
-        // 只改操作数、不增删指令，SPIR-V 长度与 header word count 不变。已一致时 no-op。
-        // 返回 true 表示确实改写了（用于日志）。
-        bool patchSpirvLocalSize(std::vector<uint32_t>& words, uint32_t x, uint32_t y, uint32_t z)
-        {
-            constexpr uint32_t kOpExecutionMode = 16u;    // OpExecutionMode
-            constexpr uint32_t kExecModeLocalSize = 17u;  // LocalSize
-            if (words.size() < 5) return false;           // 前 5 word 是 header
-            size_t i = 5;
-            while (i < words.size())
-            {
-                const uint32_t first = words[i];
-                const uint32_t count = first >> 16;
-                const uint32_t op = first & 0xFFFFu;
-                if (count == 0 || i + count > words.size()) break;  // 结构损坏防御
-                // OpExecutionMode: [op][entryPoint][mode][operands...]
-                if (op == kOpExecutionMode && count >= 6 && words[i + 2] == kExecModeLocalSize)
-                {
-                    if (words[i + 3] == x && words[i + 4] == y && words[i + 5] == z)
-                        return false;  // 已一致，no-op（EDSL / actor_pick 天然走这里）
-                    words[i + 3] = x;
-                    words[i + 4] = y;
-                    words[i + 5] = z;
-                    return true;
-                }
-                i += count;
-            }
-            return false;
-        }
-    }
-
-    SlangCompileResult ShaderLanguageConverter::getCompileResult(std::vector<slang::TargetDesc> targetDescs, Slang::ComPtr<slang::IComponentType> slangTarget,SlangCompileArgs0& arg0,bool isLibrary)
-    {
-	    SlangCompileResult finalResult;
-	    for (size_t i = 0; i < targetDescs.size(); ++i)
-	    {
-	        Slang::ComPtr<slang::IBlob> targetCodeBlob;
-            if (!isLibrary)
-            {
-                Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-                SlangResult result = slangTarget->getEntryPointCode(
-                    0,
-                    static_cast<SlangInt>(i),
-                    targetCodeBlob.writeRef(),
-                    diagnosticsBlob.writeRef());
-                diagnoseIfNeeded(diagnosticsBlob);
-                if (SLANG_FAILED(result))
-                    throw std::runtime_error("Failed to get target code from Slang program.");
-            }
-            else
-            {
-                Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-                SlangResult result = slangTarget->getTargetCode(
-                    static_cast<SlangInt>(i),
-                    targetCodeBlob.writeRef(),
-                    diagnosticsBlob.writeRef());
-                diagnoseIfNeeded(diagnosticsBlob);
-                if (SLANG_FAILED(result))
-                    throw std::runtime_error("Failed to get target code from Slang program.");
-            }
-
-	        bool isBin = false;
-	        switch (targetDescs[i].format)
-	        {
-	        case SLANG_SPIRV:
-	        case SLANG_DXBC:
-	        case SLANG_DXIL:
-	            isBin = true;
-	            break;
-	        default:
-	            break;
-	        }
-	        auto targetLang = arg0.targetLanguages[i];
-	        if (arg0.enableReflection)
-	        {
-	            auto resource = slangReflection(slangTarget->getLayout(static_cast<SlangInt>(i)));
-	            finalResult.reflections.insert({targetLang, std::move(resource)});
-	        }
-	        arg0.layoutCallback(slangTarget->getLayout(static_cast<SlangInt>(i)));
-
-	        if (isBin)
-	        {
-	            SlangCompileResult::BinaryTarget target(targetCodeBlob->getBufferSize() / sizeof(uint32_t));
-	            memcpy(target.data(), targetCodeBlob->getBufferPointer(),
-                       targetCodeBlob->getBufferSize());
-
-	            // SPIR-V compute: 修补被 Slang 往返丢失的 LocalSize（用 layout 真实值）。
-	            if (targetDescs[i].format == SLANG_SPIRV)
-	            {
-	                uint32_t tgs[3] = { 0, 0, 0 };
-	                if (queryComputeThreadGroupSize(slangTarget->getLayout(static_cast<SlangInt>(i)), tgs)
-	                    && (tgs[0] | tgs[1] | tgs[2]) != 0)
-	                {
-	                    if (patchSpirvLocalSize(target, tgs[0], tgs[1], tgs[2]))
-	                    {
-	                        // std::cout << "[Helicon] Patched SPIR-V LocalSize -> ("
-	                        //           << tgs[0] << "," << tgs[1] << "," << tgs[2]
-	                        //           << ") for entry '" << arg0.entrypointName << "'" << std::endl;
-	                    }
-	                }
-	            }
-
-	            finalResult.binaryTargets.insert({targetLang, std::move(target)});
-	            continue;
-	        }
-
-	        SlangCompileResult::StringTarget target;
-	        target.resize(targetCodeBlob->getBufferSize() / sizeof(char));
-	        memcpy(target.data(), targetCodeBlob->getBufferPointer(), targetCodeBlob->getBufferSize());
-	        finalResult.stringTargets.insert({targetLang, std::move(target)});
-	    }
-
-        return finalResult;
     }
 
     SlangStage ShaderLanguageConverter::toSlangStage(ShaderStage stage)
@@ -1806,454 +1051,6 @@ void printDecl(slang::DeclReflection* decl, int indent = 0)
 	    }
     }
 
-    uint32_t ShaderLanguageConverter::getScalarSizeInBytes(slang::TypeReflection::ScalarType st)
-    {
-        switch (st)
-        {
-            case slang::TypeReflection::ScalarType::Float32:
-            case slang::TypeReflection::ScalarType::Int32:
-            case slang::TypeReflection::ScalarType::UInt32: return 4;
-            case slang::TypeReflection::ScalarType::Float64:
-            case slang::TypeReflection::ScalarType::Int64:
-            case slang::TypeReflection::ScalarType::UInt64: return 8;
-            case slang::TypeReflection::ScalarType::Float16:
-            case slang::TypeReflection::ScalarType::Int16:
-            case slang::TypeReflection::ScalarType::UInt16: return 2;
-            case slang::TypeReflection::ScalarType::Int8:
-            case slang::TypeReflection::ScalarType::UInt8:   return 1;
-            default:                                         return 4;
-        }
-    }
-
-    void ShaderLanguageConverter::collectSlangReflection(
-        slang::ProgramLayout* programLayout,
-        slang::VariableLayoutReflection* varLayout,
-        ShaderCodeModule::ShaderResources& resources,
-        bool insidePushConstant,
-        bool insideUniformBuffer,
-        uint64_t baseByteOffset)
-    {
-        if (!varLayout) return;
-        auto typeLayout = varLayout->getTypeLayout();
-        if (!typeLayout) return;
-
-        const char* varName = varLayout->getName();
-        if (!varName) varName = "";
-
-        auto kind = typeLayout->getKind();
-        bool isBufferWrapper = (kind == slang::TypeReflection::Kind::ConstantBuffer ||
-                                kind == slang::TypeReflection::Kind::ParameterBlock);
-
-        bool isPushConstant = false;
-        int catCount = varLayout->getCategoryCount();
-        for (int i = 0; i < catCount; ++i)
-        {
-            if (varLayout->getCategoryByIndex(i) == slang::ParameterCategory::PushConstantBuffer)
-            {
-                isPushConstant = true;
-                break;
-            }
-        }
-
-        if (isBufferWrapper && isPushConstant)
-        {
-            resources.pushConstantName = varName;
-            size_t pcSize = typeLayout->getSize(slang::ParameterCategory::Uniform);
-            if (pcSize == 0)
-            {
-                if (auto ev = typeLayout->getElementVarLayout())
-                    if (auto et = ev->getTypeLayout())
-                        pcSize = et->getSize(slang::ParameterCategory::Uniform);
-            }
-            resources.pushConstantSize = static_cast<uint32_t>(pcSize);
-
-            if (auto elementVar = typeLayout->getElementVarLayout())
-            {
-                if (auto et = elementVar->getTypeLayout())
-                {
-                    if (et->getKind() == slang::TypeReflection::Kind::Struct)
-                    {
-                        for (int f = 0; f < et->getFieldCount(); ++f)
-                            collectSlangReflection(programLayout, et->getFieldByIndex(f), resources, true, false, 0);
-                    }
-                }
-            }
-            return;
-        }
-
-        if (isBufferWrapper && !isPushConstant)
-        {
-            const char* instanceName = varName;
-
-            //resources.uniformBufferName = instanceName;
-            size_t uboSize = typeLayout->getSize(slang::ParameterCategory::Uniform);
-            if (uboSize == 0)
-            {
-                if (auto ev = typeLayout->getElementVarLayout())
-                    if (auto et = ev->getTypeLayout())
-                        uboSize = et->getSize(slang::ParameterCategory::Uniform);
-            }
-            //resources.uniformBufferSize = static_cast<uint32_t>(uboSize);
-            if (uboSize != 0)
-            {
-                resources.uniformBufferName = instanceName;
-                resources.uniformBufferSize = static_cast<uint32_t>(uboSize);
-
-                uint32_t set = 0, binding = 0;
-                for (int i = 0; i < catCount; ++i)
-                {
-                    auto cat = varLayout->getCategoryByIndex(i);
-                    if (cat == slang::ParameterCategory::ConstantBuffer ||
-                        cat == slang::ParameterCategory::DescriptorTableSlot)
-                    {
-                        set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
-                        binding = static_cast<uint32_t>(varLayout->getOffset(cat));
-                        break;
-                    }
-                }
-
-                auto bindType = ShaderCodeModule::ShaderResources::uniformBuffers;
-
-                ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
-                info.set = set;
-                info.binding = binding;
-                info.variateName = varName;
-                info.typeName = typeLayout->getName() ? typeLayout->getName() : "ConstantBuffer";
-                info.bindType = bindType;
-                info.typeSize = static_cast<uint32_t>(uboSize);
-                resources.bindInfoPool.push_back(info);
-            }
-
-            if (kind == slang::TypeReflection::Kind::ParameterBlock)
-            {
-                //collectSlangParameterBlock(typeLayout, binding, bindType,uboSize);
-                std::cout << "Parameter Block: " << instanceName << std::endl;
-                auto containerVarLayout = typeLayout->getContainerVarLayout();
-                uint32_t setIndex = containerVarLayout->getOffset(slang::ParameterCategory::RegisterSpace);
-                std::cout << "Descriptor Set: " << setIndex << std::endl;
-
-
-                std::cout << "binding:" << (uint32_t)varLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot)<< std::endl;
-                std::cout << "space:" << (uint32_t)varLayout->getOffset(slang::ParameterCategory::RegisterSpace)<< std::endl;
-                std::cout << "child space:" << (uint32_t)varLayout->getOffset(slang::ParameterCategory::SubElementRegisterSpace)<< std::endl;
-
-                // === 元素信息（Material 结构体内部）===
-                auto elementVarLayout = typeLayout->getElementVarLayout();
-                auto elementTypeLayout = elementVarLayout->getTypeLayout();
-
-                // 遍历 Material 的字段
-                uint32_t fieldCount = elementTypeLayout->getFieldCount();
-                for (uint32_t i = 0; i < fieldCount; i++) {
-                    auto field = elementTypeLayout->getFieldByIndex(i);
-                    auto fieldType = field->getType();
-
-                    std::cout << "Field: " << field->getName()
-                              << " Type: " << fieldType->getName()
-                              << " Binding: " << field->getBindingIndex()
-                              << std::endl;
-                }
-
-                // === 获取普通数据大小（用于分配 Uniform Buffer）===
-                size_t ordinaryDataSize = elementTypeLayout->getSize();
-                std::cout << "Ordinary data size: " << ordinaryDataSize << " bytes" << std::endl;
-            }
-
-            if (auto elementVar = typeLayout->getElementVarLayout())
-            {
-                if (auto et = elementVar->getTypeLayout())
-                {
-                    if (et->getKind() == slang::TypeReflection::Kind::Struct)
-                    {
-                        for (int f = 0; f < et->getFieldCount(); ++f)
-                            collectSlangReflection(programLayout, et->getFieldByIndex(f), resources, false, true, 0);
-                    }
-                }
-            }
-            return;
-        }
-
-        slang::TypeLayoutReflection* descriptorTypeLayout = typeLayout;
-        while (descriptorTypeLayout && descriptorTypeLayout->getKind() == slang::TypeReflection::Kind::Array)
-            descriptorTypeLayout = descriptorTypeLayout->getElementTypeLayout();
-        if (!descriptorTypeLayout)
-            descriptorTypeLayout = typeLayout;
-
-        const auto descriptorKind = descriptorTypeLayout->getKind();
-        const auto descriptorBindType = bindTypeFromSlangLayout(typeLayout, descriptorTypeLayout);
-        ShaderCodeModule::ShaderResources::ShaderBindInfo info {};
-        info.variateName = varName;
-        info.typeName = descriptorTypeLayout->getName() ? descriptorTypeLayout->getName() : "";
-
-        if (kind == slang::TypeReflection::Kind::Scalar)
-        {
-            info.elementCount = 1;
-            info.typeSize = getScalarSizeInBytes(typeLayout->getScalarType());
-        }
-        else if (kind == slang::TypeReflection::Kind::Vector)
-        {
-            info.elementCount = static_cast<uint64_t>(typeLayout->getElementCount());
-            info.typeSize = info.elementCount * getScalarSizeInBytes(typeLayout->getScalarType());
-        }
-        else if (kind == slang::TypeReflection::Kind::Matrix)
-        {
-            info.elementCount = static_cast<uint64_t>(typeLayout->getRowCount() * typeLayout->getColumnCount());
-            info.typeSize = info.elementCount * getScalarSizeInBytes(typeLayout->getScalarType());
-        }
-        else if (kind == slang::TypeReflection::Kind::Array)
-        {
-            size_t elementCount = typeLayout->getElementCount(programLayout);
-            info.elementCount = normalizeReflectedElementCount(elementCount);
-        }
-
-        for (int i = 0; i < catCount; ++i)
-        {
-            auto cat = varLayout->getCategoryByIndex(i);
-            switch (cat)
-            {
-                case slang::ParameterCategory::DescriptorTableSlot:
-                case slang::ParameterCategory::ShaderResource:
-                    if (descriptorKind == slang::TypeReflection::Kind::Resource)
-                    {
-                        info.bindType = descriptorBindType != ShaderCodeModule::ShaderResources::BindType::none
-                            ? descriptorBindType
-                            : ShaderCodeModule::ShaderResources::BindType::sampledImages;
-                        info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
-                        info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
-                    }
-                    else if (descriptorKind == slang::TypeReflection::Kind::SamplerState)
-                    {
-                        info.bindType = ShaderCodeModule::ShaderResources::BindType::sampler;
-                        info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
-                        info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
-                    }
-                    break;
-                case slang::ParameterCategory::VaryingInput:
-                    info.bindType = ShaderCodeModule::ShaderResources::BindType::stageInputs;
-                    info.location = static_cast<uint32_t>(varLayout->getOffset(cat));
-                    if (varLayout->getSemanticName())
-                    {
-                        info.semantic = varLayout->getSemanticName();
-                        info.location = static_cast<uint32_t>(varLayout->getSemanticIndex());
-                    }
-                    break;
-                case slang::ParameterCategory::VaryingOutput:
-                    info.bindType = ShaderCodeModule::ShaderResources::BindType::stageOutputs;
-                    info.location = static_cast<uint32_t>(varLayout->getOffset(cat));
-                    if (varLayout->getSemanticName())
-                    {
-                        info.semantic = varLayout->getSemanticName();
-                        info.location = static_cast<uint32_t>(varLayout->getSemanticIndex());
-                    }
-                    break;
-                case slang::ParameterCategory::Uniform:
-                    info.byteOffset = baseByteOffset + static_cast<uint64_t>(varLayout->getOffset(cat));
-                    info.typeSize = static_cast<uint32_t>(typeLayout->getSize(cat));
-                    if (insidePushConstant)
-                        info.bindType = ShaderCodeModule::ShaderResources::BindType::pushConstantMembers;
-                    else if (insideUniformBuffer)
-                        info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBufferMembers;
-                    break;
-                case slang::ParameterCategory::UnorderedAccess:
-                    info.bindType = descriptorBindType != ShaderCodeModule::ShaderResources::BindType::none
-                        ? descriptorBindType
-                        : ShaderCodeModule::ShaderResources::BindType::storageTexture;
-                    info.set = static_cast<uint32_t>(varLayout->getBindingSpace(cat));
-                    info.binding = static_cast<uint32_t>(varLayout->getOffset(cat));
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        if (info.bindType == ShaderCodeModule::ShaderResources::BindType::none)
-        {
-            if (insidePushConstant) info.bindType = ShaderCodeModule::ShaderResources::BindType::pushConstantMembers;
-            else if (insideUniformBuffer) info.bindType = ShaderCodeModule::ShaderResources::BindType::uniformBufferMembers;
-        }
-
-        if (info.bindType == ShaderCodeModule::ShaderResources::BindType::none &&
-            descriptorKind == slang::TypeReflection::Kind::Resource)
-        {
-            info.bindType = ShaderCodeModule::ShaderResources::BindType::sampledImages;
-        }
-
-        if (info.bindType != ShaderCodeModule::ShaderResources::BindType::none)
-            resources.bindInfoPool.push_back(info);
-
-        if (kind == slang::TypeReflection::Kind::Struct)
-        {
-            uint64_t structBaseOffset = baseByteOffset;
-            for (int c = 0; c < varLayout->getCategoryCount(); ++c)
-            {
-                if (varLayout->getCategoryByIndex(c) == slang::ParameterCategory::Uniform)
-                {
-                    structBaseOffset += static_cast<uint64_t>(varLayout->getOffset(slang::ParameterCategory::Uniform));
-                    break;
-                }
-            }
-            for (int f = 0; f < typeLayout->getFieldCount(); ++f)
-                collectSlangReflection(programLayout, typeLayout->getFieldByIndex(f), resources, insidePushConstant, insideUniformBuffer, structBaseOffset);
-        }
-    }
-
-    void ShaderLanguageConverter::collectSlangParameterBlock(slang::TypeLayoutReflection* typeLayout, uint32_t& binding, ShaderCodeModule::ShaderResources::BindType& bindType, size_t& uboSize)
-    {
-	    int set = 0;
-	    auto rangeCount = typeLayout->getDescriptorSetDescriptorRangeCount(set);
-	    if (rangeCount > 0)
-	    {
-	        binding = typeLayout->getBindingRangeFirstDescriptorRangeIndex(0);
-	        switch (typeLayout->getDescriptorSetDescriptorRangeType(set, 0))
-	        {
-	        case slang::BindingType::ConstantBuffer:
-	            bindType = ShaderCodeModule::ShaderResources::uniformBuffers;
-	            uboSize = typeLayout->getElementTypeLayout()->getSize();
-	            break;
-	        case slang::BindingType::Texture:
-	            bindType = ShaderCodeModule::ShaderResources::texture;
-	            break;
-	        case slang::BindingType::Sampler:
-	            bindType = ShaderCodeModule::ShaderResources::sampler;
-	            break;
-	        case slang::BindingType::MutableTexture:
-	            bindType = ShaderCodeModule::ShaderResources::storageTexture;
-	            break;
-	        case slang::BindingType::MutableRawBuffer:
-	            bindType = ShaderCodeModule::ShaderResources::storageBuffer;
-	            break;
-	        case slang::BindingType::RawBuffer:
-	            bindType = ShaderCodeModule::ShaderResources::rawBuffer;
-	            break;
-	        case slang::BindingType::CombinedTextureSampler:
-	            bindType = ShaderCodeModule::ShaderResources::sampledImages;
-	            break;
-	        case slang::BindingType::Unknown:
-	        default: break;
-	        }
-	    }
-    }
-
-    void ShaderLanguageConverter::slangReflectGlobalScope(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources)
-    {
-        if (!programLayout) return;
-
-        slang::VariableLayoutReflection* globalVar = programLayout->getGlobalParamsVarLayout();
-        if (!globalVar) return;
-
-        slang::TypeLayoutReflection* globalType = globalVar->getTypeLayout();
-        if (!globalType) return;
-
-        if (globalType->getKind() == slang::TypeReflection::Kind::Struct)
-        {
-            for (int i = 0; i < globalType->getFieldCount(); ++i)
-                collectSlangReflection(programLayout, globalType->getFieldByIndex(i), resources, false, false, 0);
-        }
-        else
-        {
-            collectSlangReflection(programLayout, globalVar, resources, false, false, 0);
-        }
-
-        for (uint32_t i = 0; i < programLayout->getParameterCount(); ++i)
-        {
-            slang::VariableLayoutReflection* parameter = programLayout->getParameterByIndex(i);
-            if (!parameter)
-                continue;
-
-            const auto beforeCount = resources.bindInfoPool.size();
-            collectSlangReflection(programLayout, parameter, resources, false, false, 0);
-            if (resources.bindInfoPool.size() <= beforeCount)
-                continue;
-
-            ShaderCodeModule::ShaderResources::ShaderBindInfo& added = resources.bindInfoPool.back();
-            const auto duplicate = std::find_if(resources.bindInfoPool.begin(),
-                                                std::prev(resources.bindInfoPool.end()),
-                                                [&](const ShaderCodeModule::ShaderResources::ShaderBindInfo& existing) {
-                                                    return existing.variateName == added.variateName &&
-                                                           existing.bindType == added.bindType &&
-                                                           existing.set == added.set &&
-                                                           existing.binding == added.binding &&
-                                                           existing.location == added.location &&
-                                                           existing.byteOffset == added.byteOffset;
-                                                });
-            if (duplicate != std::prev(resources.bindInfoPool.end()))
-                resources.bindInfoPool.pop_back();
-        }
-    }
-
-    void ShaderLanguageConverter::slangReflectEntryPoints(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources)
-    {
-        if (!programLayout) return;
-
-        int epCount = programLayout->getEntryPointCount();
-        for (int i = 0; i < epCount; ++i)
-        {
-            slang::EntryPointReflection* ep = programLayout->getEntryPointByIndex(i);
-            if (!ep) continue;
-
-            ShaderCodeModule::ShaderResources::EntryPointInfo info;
-            info.name = ep->getName() ? ep->getName() : "";
-            info.stage = slangStageToShaderStage(ep->getStage());
-
-            if (ep->getStage() == SLANG_STAGE_COMPUTE)
-            {
-                SlangUInt sizes[3] = { 1, 1, 1 };
-                ep->getComputeThreadGroupSize(3, sizes);
-                info.numthreads = ktm::uvec3(
-                    static_cast<unsigned>(sizes[0]),
-                    static_cast<unsigned>(sizes[1]),
-                    static_cast<unsigned>(sizes[2])
-                );
-            }
-            else
-            {
-                info.numthreads = ktm::uvec3(1, 1, 1);
-            }
-
-            resources.entryPointInfoPool.push_back(info);
-
-            for (uint32_t i = 0; i < ep->getParameterCount(); ++i)
-            {
-                slang::VariableLayoutReflection* parameter = ep->getParameterByIndex(i);
-                if (!parameter)
-                    continue;
-
-                const auto beforeCount = resources.bindInfoPool.size();
-                collectSlangReflection(programLayout, parameter, resources, false, false, 0);
-                if (resources.bindInfoPool.size() <= beforeCount)
-                    continue;
-
-                ShaderCodeModule::ShaderResources::ShaderBindInfo& added = resources.bindInfoPool.back();
-                const auto duplicate = std::find_if(resources.bindInfoPool.begin(),
-                                                    std::prev(resources.bindInfoPool.end()),
-                                                    [&](const ShaderCodeModule::ShaderResources::ShaderBindInfo& existing) {
-                                                        return existing.variateName == added.variateName &&
-                                                               existing.bindType == added.bindType &&
-                                                               existing.set == added.set &&
-                                                               existing.binding == added.binding &&
-                                                               existing.location == added.location &&
-                                                               existing.byteOffset == added.byteOffset;
-                                                    });
-                if (duplicate != std::prev(resources.bindInfoPool.end()))
-                    resources.bindInfoPool.pop_back();
-            }
-        }
-    }
-
-    ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangReflectBindInfo(slang::ProgramLayout* programLayout)
-    {
-        ShaderCodeModule::ShaderResources resources;
-        resources.bindInfoPool.clear();
-        resources.entryPointInfoPool.clear();
-        resources.pushConstantSize = 0;
-        resources.pushConstantName.clear();
-        resources.uniformBufferSize = 0;
-        resources.uniformBufferName.clear();
-
-        slangReflectGlobalScope(programLayout, resources);
-        slangReflectEntryPoints(programLayout, resources);
-
-        return resources;
-    }
 
     ShaderCodeModule::ShaderResources ShaderLanguageConverter::slangReflection(slang::ProgramLayout* programLayout)
     {

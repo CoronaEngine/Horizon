@@ -8,8 +8,7 @@
 #include "basic_traits.h"
 #include "half.h"
 
-namespace horizon::math {
-using namespace horizon::core;
+namespace ocarina {
 
 class real;
 
@@ -189,4 +188,4 @@ public:
     return real{v};
 }
 
-}// namespace horizon::math
+}// namespace ocarina

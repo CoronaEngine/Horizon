@@ -15,6 +15,10 @@ CMakeUserPresets.json
 .codegraph-*/
 .understand-anything/
 
+# Superpowers generated documents and local runtime files
+/docs/superpowers/
+/.superpowers/
+
 # 构建目录
 build/
 out/

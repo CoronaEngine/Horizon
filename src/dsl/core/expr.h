@@ -9,10 +9,9 @@
 #include "ref.h"
 #include "ast/function.h"
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
+
+struct Expression;
 
 namespace detail {
 
@@ -21,17 +20,18 @@ template<typename T>
     if constexpr (is_dsl_v<T>) {
         return std::forward<T>(v).expression();
     } else {
-        return horizon::dsl::Function::current()->literal(Type::of<T>(), std::forward<T>(v));
+        return ocarina::Function::current()->literal(Type::of<T>(), std::forward<T>(v));
     }
 }
 
-// Internal typed AST expression wrapper; does not materialize a local variable.
+}// namespace detail
+
 template<typename T>
-struct Expr : public Ref<T> {
+struct Expr : public detail::Ref<T> {
 public:
     using org_type = T;
     explicit Expr(const Expression *expression) noexcept
-        : Ref<T>(expression) {}
+        : detail::Ref<T>(expression) {}
     Expr() = default;
     template<typename Arg>
     requires concepts::non_pointer<std::remove_cvref_t<Arg>> && concepts::different<Expr<T>, std::remove_cvref_t<Arg>>
@@ -51,6 +51,4 @@ Expr(const Var<T> &) -> Expr<T>;
 template<typename T>
 Expr(const Buffer<T> &) -> Expr<Buffer<T>>;
 
-}// namespace detail
-
-}// namespace horizon::dsl
+}// namespace ocarina

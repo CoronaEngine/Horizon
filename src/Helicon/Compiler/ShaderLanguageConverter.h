@@ -1,15 +1,13 @@
 #pragma once
 
-#include <complex.h>
-#include <optional>
+#include "ShaderCodeCompiler.h"
 
-#include"ShaderCodeCompiler.h"
-
+#include <Compiler/ShaderCommon.h>
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang.h>
+#include <span>
 #include <variant>
-#include <Compiler/ShaderCommon.h>
 
 namespace EmbeddedShader
 {
@@ -56,49 +54,38 @@ namespace EmbeddedShader
 
 	struct ShaderLanguageConverter
 	{
-		// Compile Slang to others
-		static std::string slangCompiler(std::string shaderCode, ShaderLanguage targetLanguage, Slang::ComPtr<slang::IComponentType>& program);
-		static std::vector<ShaderCodeModule::ShaderResources> slangCompiler(
-            const std::string &shaderCode,
-            const std::vector<ShaderLanguage> &targetBinary,
-            const std::vector<ShaderLanguage> &targetLanguage,
-            std::vector<std::vector<uint32_t>> &binaryTargetsOutput,
-            std::vector<std::string> &targetsOutput,
-            bool isEnabledReflection, bool isEnabledLink = true);
-
+	    // 离线工具（tools/main.cpp）用：把源码编译成可序列化 Slang module，或做声明级反射。
 	    static SlangModule slangModuleCompiler(SlangModuleCompileArgs arg);
 	    static void slangModuleReflection(SlangModuleReflectionArgs arg);
-	    static SlangCompileResult slangCompilerWithModules(SlangCompileArgs arg);
-	    static SlangCompileResult slangCompilerWithModules(SlangCompileArgs2 arg);
-	    static void testSlangModule(const std::vector<uint8_t>& moduleData);
-
-		static std::vector<uint32_t> slangSpirvCompiler(const std::string& shaderCode, Slang::ComPtr<slang::IComponentType>& program);
-
-	    static std::vector<uint32_t> spirvLinker(const std::vector<std::vector<uint32_t>> &binaries);
-		//static ShaderCodeModule::ShaderResources slangReflectedBindInfo(const std::string& shaderCode);
-	    static bool isSpirvValid(const std::vector<uint32_t>& spirvCode);
-	private:
-	    static inline spvtools::Context spvToolContext{SPV_ENV_VULKAN_1_4};
-	    static inline thread_local Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
-		static void slangReflectField(slang::VariableLayoutReflection* field, std::string_view accessPath, size_t varBaseOffset, ShaderCodeModule::ShaderResources& reflection);
-		static void slangReflectParameterBlock(slang::ProgramLayout* program, std::string_view uboName, ShaderCodeModule::ShaderResources& reflection);
-		static void slangReflectDescriptor(slang::VariableLayoutReflection* var, int set, std::string_view name, size_t varBaseOffset, ShaderCodeModule::ShaderResources& resource);
-	    static void initSlangGlobalSession();
-
-	    static SlangCompileResult compileBySlangModule(
-            const std::function<Slang::ComPtr<slang::IModule>(Slang::ComPtr<slang::ISession>)>& callback,SlangCompileArgs0& arg0);
-	    static SlangCompileResult getCompileResult(std::vector<slang::TargetDesc> targetDescs, Slang::ComPtr<slang::IComponentType> slangTarget,SlangCompileArgs0& arg0, bool isLibrary);
-	    static SlangStage toSlangStage(ShaderStage stage);
-	//slang resource layout reflection//
-
-	    static void slangReflectGlobalScope(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
-	    static void slangReflectEntryPoints(slang::ProgramLayout* programLayout, ShaderCodeModule::ShaderResources& resources);
-	    static uint32_t getScalarSizeInBytes(slang::TypeReflection::ScalarType st);
-	    static void collectSlangReflection(slang::ProgramLayout* programLayout, slang::VariableLayoutReflection* varLayout, ShaderCodeModule::ShaderResources& resources, bool insidePushConstant, bool insideUniformBuffer, uint64_t baseByteOffset);
-	    static void collectSlangParameterBlock(slang::TypeLayoutReflection* typeLayout, uint32_t& binding, ShaderCodeModule::ShaderResources::BindType& bindType, size_t& uboSize);
-        static ShaderCodeModule::ShaderResources slangReflectBindInfo(slang::ProgramLayout* programLayout);
-        static ShaderCodeModule::ShaderResources slangReflection(slang::ProgramLayout* programLayout);
-    public:
         static ShaderCodeModule::ShaderResources slangModuleReflectShaderResource(SlangModuleReflectShaderResourceArgs arg);
+
+	    // Slang 低层 helper：负责 session/module/entry point 的创建和序列化。
+	    // 运行时分支切换由 ShaderCodeCompiler 直接使用首次编译缓存的 session/module，
+	    // 不再经过这里的整包编译 API。
+	    static Slang::ComPtr<slang::IGlobalSession> getGlobalSession();
+	    static Slang::ComPtr<slang::IModule> loadModule(Slang::ComPtr<slang::ISession> session, std::string_view moduleName, std::string_view moduleSource);
+	    static Slang::ComPtr<slang::IModule> loadModule(Slang::ComPtr<slang::ISession> session, const SlangModule& slangModule);
+	    static SlangModule convertModule(Slang::ComPtr<slang::IModule> mod);
+	    static ShaderLanguage convertShaderLanguage(SlangCompileTarget target);
+	    static Slang::ComPtr<slang::IComponentType> link(Slang::ComPtr<slang::ISession> session, std::span<slang::IComponentType*> composeComponents);
+	    static Slang::ComPtr<slang::IEntryPoint> findEntryPoint(Slang::ComPtr<slang::IModule> mod, std::string_view name);
+	    static Slang::ComPtr<slang::IEntryPoint> tryFindEntryPoint(Slang::ComPtr<slang::IModule> mod,
+                                                                   std::string_view name, ShaderStage stage);
+        // columnMajor=false 保持 Slang 默认 row-major，静态 GLSL/HLSL 生成的 shader
+        // 依赖这一点；EDSL 的 mat4 走 column-major，需要显式传 true。
+        static Slang::ComPtr<slang::ISession> createSession(
+                                        const Slang::ComPtr<slang::IGlobalSession> &globalSession,
+                                        std::span<slang::TargetDesc> targetDesc,
+                                        std::span<slang::CompilerOptionEntry> options,
+                                        bool columnMajor = false);
+	    static Slang::ComPtr<slang::IBlob> getFinalCode(Slang::ComPtr<slang::IComponentType> program, SlangInt targetIndex, bool isLibrary = false);
+	    static void fillCompileResult(SlangCompileResult &result,Slang::ComPtr<slang::IComponentType> program,SlangInt targetIndex, SlangCompileTarget dstLang,bool isNeedReflection,bool isLibrary = false);
+
+        static ShaderCodeModule::ShaderResources slangReflection(slang::ProgramLayout* programLayout);
+
+	private:
+	    static inline thread_local Slang::ComPtr<slang::IGlobalSession> slangGlobalSession;
+	    static void initSlangGlobalSession();
+	    static SlangStage toSlangStage(ShaderStage stage);
     };
 }

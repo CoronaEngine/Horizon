@@ -27,6 +27,8 @@ set(HORIZON_EXAMPLE_SOURCES
     example_rsm/example_rsm.cpp
     example_edsl_rsm/example_edsl_rsm.cpp
     example_edsl_sponza/example_edsl_sponza.cpp
+    example_edsl_compile/example_edsl_compile.cpp
+    example_edsl_compile_comparison/example_edsl_compile_comparison.cpp
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
@@ -62,6 +64,8 @@ set(HORIZON_EXAMPLE_HEADERS
     example_rsm/example_rsm.h
     example_edsl_rsm/example_edsl_rsm.h
     example_edsl_sponza/example_edsl_sponza.h
+    example_edsl_compile/example_edsl_compile.h
+    example_edsl_compile_comparison/example_edsl_compile_comparison.h
 )
 
 if(HORIZON_BUILD_VISION_HOTFIX)
@@ -113,6 +117,9 @@ add_custom_command(TARGET HorizonExamples POST_BUILD
     VERBATIM)
 
 helicon_install_runtime_deps(HorizonExamples)
+if(HORIZON_BUILD_OCARINA)
+    horizon_copy_runtime_files(HorizonExamples "$<TARGET_FILE:horizon-logging>")
+endif()
 if(COMMAND corona_copy_tbb_runtime_artifacts)
     corona_copy_tbb_runtime_artifacts(HorizonExamples)
 endif()

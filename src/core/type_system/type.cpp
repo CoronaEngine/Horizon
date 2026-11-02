@@ -2,17 +2,16 @@
 // Created by Zero on 30/04/2022.
 //
 
-#include "core/type_system/type_desc.h"
+#include "core/type.h"
 #include "core/type_system/type_registry.h"
 
-#include <algorithm>
 #include <cctype>
 #include <utility>
 
 #include "core/util/logging.h"
 #include "core/util/string_util.h"
 
-namespace horizon::core {
+namespace ocarina {
 
 namespace {
 }// namespace
@@ -23,25 +22,23 @@ struct TypeParser {
     [[nodiscard]] static bool is_letter(char ch) noexcept;
     [[nodiscard]] static bool is_letter_or_num(char ch) noexcept;
     [[nodiscard]] static bool is_num(char ch) noexcept;
-    [[nodiscard]] static std::pair<int, int> bracket_matching_far(horizon::core::string_view str, char l = '<', char r = '>') noexcept;
-    [[nodiscard]] static std::pair<int, int> bracket_matching_near(horizon::core::string_view str, char l = '<', char r = '>') noexcept;
-    [[nodiscard]] static horizon::core::string_view find_identifier(horizon::core::string_view &str,
+    [[nodiscard]] static std::pair<int, int> bracket_matching_far(ocarina::string_view str, char l = '<', char r = '>') noexcept;
+    [[nodiscard]] static std::pair<int, int> bracket_matching_near(ocarina::string_view str, char l = '<', char r = '>') noexcept;
+    [[nodiscard]] static ocarina::string_view find_identifier(ocarina::string_view &str,
                                                               bool check_start_with_num = false) noexcept;
-    [[nodiscard]] static horizon::core::vector<horizon::core::string_view> find_content(horizon::core::string_view &str, char l = '<', char r = '>');
-    [[nodiscard]] static const Type *parse_type_locked(horizon::core::string_view desc) noexcept;
-    static void parse_vector_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_matrix_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_struct_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_bindless_array_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_buffer_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_rw_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_rw_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_accel_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_byte_buffer_locked(Type *type, horizon::core::string_view desc) noexcept;
-    static void parse_array_locked(Type *type, horizon::core::string_view desc) noexcept;
-    [[nodiscard]] static const Type *add_type_locked(horizon::core::unique_ptr<Type> type) noexcept;
+    [[nodiscard]] static ocarina::vector<ocarina::string_view> find_content(ocarina::string_view &str, char l = '<', char r = '>');
+    [[nodiscard]] static const Type *parse_type_locked(ocarina::string_view desc) noexcept;
+    static void parse_vector_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_matrix_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_struct_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_bindless_array_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_buffer_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_texture3d_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_texture2d_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_accel_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_byte_buffer_locked(Type *type, ocarina::string_view desc) noexcept;
+    static void parse_array_locked(Type *type, ocarina::string_view desc) noexcept;
+    [[nodiscard]] static const Type *add_type_locked(ocarina::unique_ptr<Type> type) noexcept;
 };
 
 [[nodiscard]] bool TypeParser::is_letter(char ch) noexcept {
@@ -56,7 +53,7 @@ struct TypeParser {
     return ch >= '0' && ch <= '9';
 }
 
-[[nodiscard]] std::pair<int, int> TypeParser::bracket_matching_far(horizon::core::string_view str, char l, char r) noexcept {
+[[nodiscard]] std::pair<int, int> TypeParser::bracket_matching_far(ocarina::string_view str, char l, char r) noexcept {
     int start = 0;
     int end = 0;
     int pair_count = 0;
@@ -77,7 +74,7 @@ struct TypeParser {
     return std::make_pair(start, end);
 }
 
-[[nodiscard]] std::pair<int, int> TypeParser::bracket_matching_near(horizon::core::string_view str, char l, char r) noexcept {
+[[nodiscard]] std::pair<int, int> TypeParser::bracket_matching_near(ocarina::string_view str, char l, char r) noexcept {
     int start = -1;
     int end = -1;
     int pair_count = 0;
@@ -101,7 +98,7 @@ struct TypeParser {
     return std::make_pair(start, end);
 }
 
-[[nodiscard]] horizon::core::string_view TypeParser::find_identifier(horizon::core::string_view &str,
+[[nodiscard]] ocarina::string_view TypeParser::find_identifier(ocarina::string_view &str,
                                                                bool check_start_with_num) noexcept {
     OC_USING_SV
     uint i = 0u;
@@ -113,9 +110,6 @@ struct TypeParser {
         ret == "struct"sv ||
         ret == "buffer"sv ||
         ret == "texture3d"sv ||
-        ret == "texture2d"sv ||
-        ret == "rwtexture3d"sv ||
-        ret == "rwtexture2d"sv ||
         ret == "array"sv) {
         auto [start, end] = bracket_matching_near(str);
         ret = str.substr(0, end + 1);
@@ -129,8 +123,8 @@ struct TypeParser {
     return ret;
 }
 
-[[nodiscard]] horizon::core::vector<horizon::core::string_view> TypeParser::find_content(horizon::core::string_view &str, char l, char r) {
-    horizon::core::vector<horizon::core::string_view> ret;
+[[nodiscard]] ocarina::vector<ocarina::string_view> TypeParser::find_content(ocarina::string_view &str, char l, char r) {
+    ocarina::vector<ocarina::string_view> ret;
     auto prev_token = str.find(l);
     constexpr auto token = ',';
     str = str.substr(prev_token + 1);
@@ -152,8 +146,8 @@ struct TypeParser {
     return ret;
 }
 
-void TypeParser::parse_vector_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Vector;
+void TypeParser::parse_vector_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::VECTOR;
     auto [start, end] = bracket_matching_far(desc, '<', '>');
     auto content = desc.substr(start + 1, end - start - 1);
     auto lst = string_split(content, ',');
@@ -171,8 +165,8 @@ void TypeParser::parse_vector_locked(Type *type, horizon::core::string_view desc
     type->alignment_ = type->size();
 }
 
-void TypeParser::parse_matrix_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Matrix;
+void TypeParser::parse_matrix_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::MATRIX;
     auto [start, end] = bracket_matching_far(desc, '<', '>');
     auto dimension_str = desc.substr(start + 1, end - start - 1);
     auto data = string_split(dimension_str, ',');
@@ -180,16 +174,38 @@ void TypeParser::parse_matrix_locked(Type *type, horizon::core::string_view desc
     int N = std::stoi(string(data[1]));
     int M = std::stoi(string(data[2]));
     type->dimension_ = M;
-    auto tmp_desc = horizon::core::format("vector<{},{}>", type_str, N);
+    auto tmp_desc = ocarina::format("vector<{},{}>", type_str, N);
     type->members_.push_back(parse_type_locked(tmp_desc));
 
-    const auto *member = type->members_.front();
-    type->size_ = member->size() * M;
-    type->alignment_ = member->alignment();
+#define OC_SIZE_ALIGN(TypeName, NN, MM)                       \
+    if (#TypeName == type_str && N == (NN) && M == (MM)) {    \
+        type->size_ = sizeof(Matrix<TypeName, NN, MM>);       \
+        type->alignment_ = alignof(Matrix<TypeName, NN, MM>); \
+    } else
+
+#define OC_SIZE_ALIGN_FOR_TYPE(type_name) \
+    OC_SIZE_ALIGN(type_name, 2, 2)        \
+    OC_SIZE_ALIGN(type_name, 2, 3)        \
+    OC_SIZE_ALIGN(type_name, 2, 4)        \
+    OC_SIZE_ALIGN(type_name, 3, 2)        \
+    OC_SIZE_ALIGN(type_name, 3, 3)        \
+    OC_SIZE_ALIGN(type_name, 3, 4)        \
+    OC_SIZE_ALIGN(type_name, 4, 2)        \
+    OC_SIZE_ALIGN(type_name, 4, 3)        \
+    OC_SIZE_ALIGN(type_name, 4, 4)
+
+    OC_SIZE_ALIGN_FOR_TYPE(float)
+    OC_SIZE_ALIGN_FOR_TYPE(real)
+    OC_SIZE_ALIGN_FOR_TYPE(half) {
+        OC_ERROR("invalid matrix dimension <{}, {}>!", N, M);
+    }
+
+#undef OC_SIZE_ALIGN_FOR_TYPE
+#undef OC_SIZE_ALIGN
 }
 
-void TypeParser::parse_struct_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Structure;
+void TypeParser::parse_struct_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::STRUCTURE;
     auto lst = find_content(desc);
     type->cname_ = lst[0];
     auto alignment_str = lst[1];
@@ -211,13 +227,13 @@ void TypeParser::parse_struct_locked(Type *type, horizon::core::string_view desc
     type->size_ = detail::mem_offset(size, type->alignment());
 }
 
-void TypeParser::parse_bindless_array_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::BindlessArray;
+void TypeParser::parse_bindless_array_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::BINDLESS_ARRAY;
     type->alignment_ = alignof(BindlessArrayDesc);
 }
 
-void TypeParser::parse_buffer_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Buffer;
+void TypeParser::parse_buffer_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::BUFFER;
     auto lst = find_content(desc);
     OC_ERROR_IF_NOT(lst.size() == 1u,
                     "multidimensional buffer type is unsupported: ",
@@ -229,61 +245,29 @@ void TypeParser::parse_buffer_locked(Type *type, horizon::core::string_view desc
     type->size_ = sizeof(BufferDesc<>);
 }
 
-void TypeParser::parse_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Texture3D;
-    auto elements = find_content(desc);
-    OC_ERROR_IF_NOT(elements.size() == 1u,
-                    "texture3d requires exactly one element type: ",
-                    desc);
-    type->members_.push_back(parse_type_locked(elements.front()));
+void TypeParser::parse_texture3d_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::TEXTURE3D;
     type->alignment_ = alignof(TextureDesc);
     type->size_ = sizeof(TextureDesc);
 }
 
-void TypeParser::parse_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Texture2D;
-    auto elements = find_content(desc);
-    OC_ERROR_IF_NOT(elements.size() == 1u,
-                    "texture2d requires exactly one element type: ",
-                    desc);
-    type->members_.push_back(parse_type_locked(elements.front()));
+void TypeParser::parse_texture2d_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::TEXTURE2D;
     type->alignment_ = alignof(TextureDesc);
     type->size_ = sizeof(TextureDesc);
 }
 
-void TypeParser::parse_rw_texture3d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::RwTexture3D;
-    auto elements = find_content(desc);
-    OC_ERROR_IF_NOT(elements.size() == 1u,
-                    "rwtexture3d requires exactly one element type: ",
-                    desc);
-    type->members_.push_back(parse_type_locked(elements.front()));
-    type->alignment_ = alignof(TextureDesc);
-    type->size_ = sizeof(TextureDesc);
+void TypeParser::parse_accel_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::ACCEL;
 }
 
-void TypeParser::parse_rw_texture2d_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::RwTexture2D;
-    auto elements = find_content(desc);
-    OC_ERROR_IF_NOT(elements.size() == 1u,
-                    "rwtexture2d requires exactly one element type: ",
-                    desc);
-    type->members_.push_back(parse_type_locked(elements.front()));
-    type->alignment_ = alignof(TextureDesc);
-    type->size_ = sizeof(TextureDesc);
-}
-
-void TypeParser::parse_accel_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Accel;
-}
-
-void TypeParser::parse_byte_buffer_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::ByteBuffer;
+void TypeParser::parse_byte_buffer_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::BYTE_BUFFER;
     type->alignment_ = alignof(BufferDesc<>);
 }
 
-void TypeParser::parse_array_locked(Type *type, horizon::core::string_view desc) noexcept {
-    type->tag_ = Type::Tag::Array;
+void TypeParser::parse_array_locked(Type *type, ocarina::string_view desc) noexcept {
+    type->tag_ = Type::Tag::ARRAY;
     auto lst = find_content(desc);
     auto type_str = lst[0];
     auto len = std::stoi(string(lst[1]));
@@ -294,15 +278,15 @@ void TypeParser::parse_array_locked(Type *type, horizon::core::string_view desc)
     type->size_ = element_type->size() * len;
 }
 
-const Type *TypeParser::add_type_locked(horizon::core::unique_ptr<Type> type) noexcept {
+const Type *TypeParser::add_type_locked(ocarina::unique_ptr<Type> type) noexcept {
     auto &registry = type_registry();
     type->index_ = registry.count();
-    const Type *ret = registry.emplace_type(horizon::core::move(type));
+    const Type *ret = registry.emplace_type(ocarina::move(type));
     notify_type_access(ret);
     return ret;
 }
 
-const Type *TypeParser::parse_type_locked(horizon::core::string_view desc) noexcept {
+const Type *TypeParser::parse_type_locked(ocarina::string_view desc) noexcept {
     if (desc == "void") {
         return nullptr;
     }
@@ -314,103 +298,62 @@ const Type *TypeParser::parse_type_locked(horizon::core::string_view desc) noexc
     }
 
     OC_USING_SV
-    auto type = horizon::core::make_unique<Type>();
+    auto type = ocarina::make_unique<Type>();
 
-    if (desc == "int"sv) {
-        type->size_ = sizeof(int);
-        type->tag_ = Type::Tag::Int;
-        type->alignment_ = alignof(int);
-        type->dimension_ = 1;
-    } else if (desc == "uint"sv) {
-        type->size_ = sizeof(uint);
-        type->tag_ = Type::Tag::Uint;
-        type->alignment_ = alignof(uint);
-        type->dimension_ = 1;
-    } else if (desc == "bool"sv) {
-        type->size_ = sizeof(bool);
-        type->tag_ = Type::Tag::Bool;
-        type->alignment_ = alignof(bool);
-        type->dimension_ = 1;
-    } else if (desc == "float"sv) {
-        type->size_ = sizeof(float);
-        type->tag_ = Type::Tag::Float;
-        type->alignment_ = alignof(float);
-        type->dimension_ = 1;
-    } else if (desc == "real"sv) {
-        type->size_ = sizeof(float);
-        type->tag_ = Type::Tag::Real;
-        type->alignment_ = alignof(float);
-        type->dimension_ = 1;
-    } else if (desc == "half"sv) {
-        type->size_ = sizeof(uint16_t);
-        type->tag_ = Type::Tag::Half;
-        type->alignment_ = alignof(uint16_t);
-        type->dimension_ = 1;
-    } else if (desc == "uchar"sv) {
-        type->size_ = sizeof(uchar);
-        type->tag_ = Type::Tag::Uchar;
-        type->alignment_ = alignof(uchar);
-        type->dimension_ = 1;
-    } else if (desc == "char"sv) {
-        type->size_ = sizeof(char);
-        type->tag_ = Type::Tag::Char;
-        type->alignment_ = alignof(char);
-        type->dimension_ = 1;
-    } else if (desc == "ushort"sv) {
-        type->size_ = sizeof(ushort);
-        type->tag_ = Type::Tag::Ushort;
-        type->alignment_ = alignof(ushort);
-        type->dimension_ = 1;
-    } else if (desc == "ulong"sv) {
-        type->size_ = sizeof(ulong);
-        type->tag_ = Type::Tag::Ulong;
-        type->alignment_ = alignof(ulong);
-        type->dimension_ = 1;
-    } else if (desc == "short"sv) {
-        type->size_ = sizeof(short);
-        type->tag_ = Type::Tag::Short;
-        type->alignment_ = alignof(short);
-        type->dimension_ = 1;
-    }
+#define OC_PARSE_BASIC_TYPE(T, TAG)    \
+    if (desc == #T##sv) {              \
+        type->size_ = sizeof(T);       \
+        type->tag_ = Type::Tag::TAG;   \
+        type->alignment_ = alignof(T); \
+        type->dimension_ = 1;          \
+    } else
 
-    if (type->tag_ == Type::Tag::None) {
-        if (desc.starts_with("vector")) {
-            parse_vector_locked(type.get(), desc);
-        } else if (desc.starts_with("matrix")) {
-            parse_matrix_locked(type.get(), desc);
-        } else if (desc.starts_with("array")) {
-            parse_array_locked(type.get(), desc);
-        } else if (desc.starts_with("struct")) {
-            parse_struct_locked(type.get(), desc);
-        } else if (desc.starts_with("bytebuffer")) {
-            parse_byte_buffer_locked(type.get(), desc);
-        } else if (desc.starts_with("buffer")) {
-            parse_buffer_locked(type.get(), desc);
-        } else if (desc.starts_with("texture3d")) {
-            parse_texture3d_locked(type.get(), desc);
-        } else if (desc.starts_with("texture2d")) {
-            parse_texture2d_locked(type.get(), desc);
-        } else if (desc.starts_with("rwtexture3d")) {
-            parse_rw_texture3d_locked(type.get(), desc);
-        } else if (desc.starts_with("rwtexture2d")) {
-            parse_rw_texture2d_locked(type.get(), desc);
-        } else if (desc.starts_with("accel")) {
-            parse_accel_locked(type.get(), desc);
-        } else if (desc.starts_with("bindlessArray")) {
-            parse_bindless_array_locked(type.get(), desc);
-        } else {
-            OC_ERROR("invalid data type ", desc);
-        }
+    OC_PARSE_BASIC_TYPE(int, INT)
+    OC_PARSE_BASIC_TYPE(uint, UINT)
+    OC_PARSE_BASIC_TYPE(bool, BOOL)
+    OC_PARSE_BASIC_TYPE(float, FLOAT)
+    OC_PARSE_BASIC_TYPE(real, REAL)
+    OC_PARSE_BASIC_TYPE(half, HALF)
+    OC_PARSE_BASIC_TYPE(uchar, UCHAR)
+    OC_PARSE_BASIC_TYPE(char, CHAR)
+    OC_PARSE_BASIC_TYPE(ushort, USHORT)
+    OC_PARSE_BASIC_TYPE(ulong, ULONG)
+    OC_PARSE_BASIC_TYPE(short, SHORT)
+
+#undef OC_PARSE_BASIC_TYPE
+
+    if (desc.starts_with("vector")) {
+        parse_vector_locked(type.get(), desc);
+    } else if (desc.starts_with("matrix")) {
+        parse_matrix_locked(type.get(), desc);
+    } else if (desc.starts_with("array")) {
+        parse_array_locked(type.get(), desc);
+    } else if (desc.starts_with("struct")) {
+        parse_struct_locked(type.get(), desc);
+    } else if (desc.starts_with("bytebuffer")) {
+        parse_byte_buffer_locked(type.get(), desc);
+    } else if (desc.starts_with("buffer")) {
+        parse_buffer_locked(type.get(), desc);
+    } else if (desc.starts_with("texture3d")) {
+        parse_texture3d_locked(type.get(), desc);
+    } else if (desc.starts_with("texture2d")) {
+        parse_texture2d_locked(type.get(), desc);
+    } else if (desc.starts_with("accel")) {
+        parse_accel_locked(type.get(), desc);
+    } else if (desc.starts_with("bindlessArray")) {
+        parse_bindless_array_locked(type.get(), desc);
+    } else {
+        OC_ERROR("invalid data type ", desc);
     }
     type->set_description(desc);
-    return add_type_locked(horizon::core::move(type));
+    return add_type_locked(ocarina::move(type));
 }
 
 }// namespace detail
 
 namespace detail {
 
-const Type *parse_type_locked(horizon::core::string_view desc) noexcept {
+const Type *parse_type_locked(ocarina::string_view desc) noexcept {
     return detail::TypeParser::parse_type_locked(desc);
 }
 
@@ -435,27 +378,23 @@ const Type *Type::at(uint32_t uid) noexcept {
 
 bool Type::is_dynamic() const noexcept {
     switch (tag_) {
-        case Tag::Array:
-        case Tag::Vector:
-        case Tag::Matrix:
-        case Tag::Buffer:
-        case Tag::Texture3D:
-        case Tag::Texture2D:
-        case Tag::RwTexture3D:
-        case Tag::RwTexture2D:
-        case Tag::Structure: {
+        case Tag::ARRAY:
+        case Tag::VECTOR:
+        case Tag::MATRIX:
+        case Tag::BUFFER:
+        case Tag::STRUCTURE: {
             return std::ranges::any_of(members_, [](const Type *member) {
                 return member->is_dynamic();
             });
         }
-        case Tag::Real:
+        case Tag::REAL:
             return true;
         default:
             return false;
     }
 }
 
-bool Type::exists(horizon::core::string_view description) noexcept {
+bool Type::exists(ocarina::string_view description) noexcept {
     return exists(compute_type_hash(description));
 }
 
@@ -463,7 +402,7 @@ bool Type::exists(uint64_t hash) noexcept {
     return type_registry().exists(hash);
 }
 
-horizon::core::span<const Type *const> Type::members() const noexcept {
+ocarina::span<const Type *const> Type::members() const noexcept {
     return {members_};
 }
 
@@ -472,28 +411,28 @@ const Type *Type::element() const noexcept {
 }
 
 void Type::set_cname(std::string s) const noexcept {
-    cname_ = horizon::core::move(s);
+    cname_ = ocarina::move(s);
 }
 
-horizon::core::string Type::simple_cname() const noexcept {
+ocarina::string Type::simple_cname() const noexcept {
     return cname_.substr(cname_.find_last_of("::") + 1);
 }
 
 bool Type::is_valid() const noexcept {
     switch (tag_) {
-        case Tag::Structure: {
+        case Tag::STRUCTURE: {
             bool ret = true;
             for (auto member : members_) {
                 ret = ret && member->is_valid();
             }
             return ret;
         }
-        case Tag::Array: return dimension() > 0;
+        case Tag::ARRAY: return dimension() > 0;
         default: return true;
     }
 }
 
-const Type *Type::get_member(horizon::core::string_view name) const noexcept {
+const Type *Type::get_member(ocarina::string_view name) const noexcept {
     for (int i = 0; i < member_name_.size(); ++i) {
         if (member_name_[i] == name) {
             return members_[i];
@@ -504,16 +443,16 @@ const Type *Type::get_member(horizon::core::string_view name) const noexcept {
 
 size_t Type::max_member_size() const noexcept {
     switch (tag_) {
-        case Tag::Bool:
-        case Tag::Float:
-        case Tag::Int:
-        case Tag::Uint:
-        case Tag::Uchar:
-        case Tag::Char: return size();
-        case Tag::Vector:
-        case Tag::Matrix:
-        case Tag::Array: return element()->max_member_size();
-        case Tag::Structure: {
+        case Tag::BOOL:
+        case Tag::FLOAT:
+        case Tag::INT:
+        case Tag::UINT:
+        case Tag::UCHAR:
+        case Tag::CHAR: return size();
+        case Tag::VECTOR:
+        case Tag::MATRIX:
+        case Tag::ARRAY: return element()->max_member_size();
+        case Tag::STRUCTURE: {
             size_t size = 0;
             for (const Type *member : members_) {
                 if (member->max_member_size() > size) {
@@ -538,7 +477,7 @@ uint64_t Type::compute_hash() const noexcept {
     return hash64(description_);
 }
 
-void Type::set_description(horizon::core::string_view desc) noexcept {
+void Type::set_description(ocarina::string_view desc) noexcept {
     description_ = desc;
     update_name(desc);
 }
@@ -550,16 +489,16 @@ void Type::update_member_name(const string_view *names, int num) const noexcept 
     }
 }
 
-void Type::update_name(horizon::core::string_view desc) noexcept {
+void Type::update_name(ocarina::string_view desc) noexcept {
     switch (tag_) {
-        case Tag::None:
+        case Tag::NONE:
             OC_ASSERT(0);
             break;
-        case Tag::Vector:
-            name_ = horizon::core::format("{}{}", element()->name(), dimension());
+        case Tag::VECTOR:
+            name_ = ocarina::format("{}{}", element()->name(), dimension());
             break;
-        case Tag::Matrix:
-            name_ = horizon::core::format("{}{}x{}", element()->element()->name(),
+        case Tag::MATRIX:
+            name_ = ocarina::format("{}{}x{}", element()->element()->name(),
                                     element()->dimension(), dimension());
             break;
         default:
@@ -568,4 +507,4 @@ void Type::update_name(horizon::core::string_view desc) noexcept {
     }
 }
 
-}// namespace horizon::core
+}// namespace ocarina

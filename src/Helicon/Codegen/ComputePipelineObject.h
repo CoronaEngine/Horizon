@@ -50,6 +50,9 @@ namespace EmbeddedShader
 
     inline void ComputePipelineObject::updateAutoBind(bool bindless, const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
     {
+        // 分支组合变化时重新反射；清空旧表，避免旧 offset 残留。
+        autoBindEntries.clear();
+
         // Collect auto-bind entries from globalStatements:
         // Walk all globally-defined textures and check if they have a back-pointer
         // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
@@ -142,12 +145,13 @@ namespace EmbeddedShader
 		Generator::SlangGenerator::numthreads = numthreads;
 		Ast::Parser::setBindless(false);
 		auto outputs = parse(computeShaderCode);
+
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
 	    compilerOption.branches.swap(outputs[0].branches);
 	    compilerOption.typeHeader = outputs[0].typeHeader;
 		ComputePipelineObject result;
-		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption,sourceLocation);
+		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, compilerOption, sourceLocation);
 
 		if (compilerOption.enableBindless)
 		{
@@ -158,7 +162,7 @@ namespace EmbeddedShader
 			outputs = parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
             compilerOption.branches.swap(outputs[0].branches);
             compilerOption.typeHeader = outputs[0].typeHeader;
-            result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, ShaderLanguage::Slang,compilerOption);
+            result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, compilerOption);
 		}
 
 		result.updateAutoBind(compilerOption.enableBindless, result.compute->getCurrentConditionInfo());

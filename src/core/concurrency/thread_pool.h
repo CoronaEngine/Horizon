@@ -12,11 +12,12 @@
 #include <functional>
 #include <condition_variable>
 
-#include "core/stl.h"
+#include <core/stl.h>
+#include "math/basic_types.h"
 #include "core/header.h"
 
 /// reference :https://github.com/LuisaGroup/LuisaCompute/src/core/concurrency/thread_pool.h
-namespace horizon::core {
+namespace ocarina {
 
 class Barrier;
 
@@ -56,7 +57,7 @@ public:
     auto async(F f) noexcept {
         using R = std::invoke_result_t<F>;
         auto promise = make_shared<std::promise<R>>(
-            std::allocator_arg, horizon::core::allocator{});
+            std::allocator_arg, ocarina::allocator{});
         auto future = promise->get_future().share();
         task_count_.fetch_add(1u);
         _dispatch([promise = std::move(promise), future, f = std::move(f), this]() mutable noexcept {
@@ -121,4 +122,4 @@ void parallel_for(Args &&...args) noexcept {
     ThreadPool::instance().parallel_sync(OC_FORWARD(args)...);
 }
 
-}// namespace horizon::core
+}// namespace ocarina

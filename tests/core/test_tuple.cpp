@@ -41,6 +41,11 @@ static_assert(alignof(LateAlignmentTuple) == alignof(LateAlignmentLayout));
 static_assert(std::tuple_size_v<MixedTuple> == 3u);
 static_assert(std::is_same_v<std::tuple_element_t<1u, MixedTuple>, int>);
 static_assert(std::is_same_v<decltype(horizon::core::get<1u>(std::declval<const MixedTuple &>())), const int &>);
+static_assert([] {
+    MixedTuple value;
+    return horizon::core::get<0u>(value) == '\0' && horizon::core::get<1u>(value) == 0 &&
+           horizon::core::get<2u>(value) == 0.0;
+}(), "default construction value-initializes scalar elements");
 
 template<typename T>
 std::ptrdiff_t offset_of(T &object, const auto &member) {
@@ -104,11 +109,13 @@ auto make_wide_tuple(std::index_sequence<Indices...>) {
     return WideTuple{static_cast<int>(Indices)...};
 }
 
-void test_tuple_supports_the_generated_thirty_two_element_limit() {
-    auto value = make_wide_tuple(std::make_index_sequence<32u>{});
+void test_tuple_supports_large_reflected_structures() {
+    auto value = make_wide_tuple(std::make_index_sequence<72u>{});
 
     expect(horizon::core::get<0u>(value) == 0 && horizon::core::get<17u>(value) == 17 &&
-               horizon::core::get<31u>(value) == 31,
+               horizon::core::get<31u>(value) == 31 && horizon::core::get<32u>(value) == 32 &&
+               horizon::core::get<63u>(value) == 63 && horizon::core::get<64u>(value) == 64 &&
+               horizon::core::get<71u>(value) == 71,
            "the maximum supported arity retains both first and last values");
 }
 
@@ -117,6 +124,6 @@ void test_tuple_supports_the_generated_thirty_two_element_limit() {
 int main() {
     test_tuple_matches_mirror_struct_layout();
     test_tuple_exposes_standard_value_access_and_utilities();
-    test_tuple_supports_the_generated_thirty_two_element_limit();
+    test_tuple_supports_large_reflected_structures();
     return failures == 0 ? 0 : 1;
 }

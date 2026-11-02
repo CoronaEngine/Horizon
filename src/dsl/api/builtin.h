@@ -8,16 +8,12 @@
 #include "../core/expr.h"
 #include "operators.h"
 #include "core/concepts.h"
-#include "dsl/math/base.h"
+#include "math/base.h"
 #include "ast/expression.h"
 #include "../core/var.h"
 #include "../data/dynamic_array.h"
-#include <stdexcept>
 
-namespace horizon::dsl {
-using namespace horizon::core;
-using namespace horizon::math;
-using namespace horizon::ast;
+namespace ocarina {
 
 #define OC_MAKE_BUILTIN_FUNC(func, type)                \
     [[nodiscard]] inline auto func() noexcept {         \
@@ -45,7 +41,7 @@ requires concepts::all_integral<vector_element_t<expr_value_t<DispatchIdx>>>
 }
 
 template<typename DispatchId>
-requires horizon::dsl::is_integral_expr_v<DispatchId>
+requires ocarina::is_integral_expr_v<DispatchId>
 [[nodiscard]] auto dispatch_idx(DispatchId &&id) {
     Uint2 dim = dispatch_dim().xy();
     return make_uint2(id % dim.x, id / dim.x);
@@ -148,99 +144,63 @@ OC_DEFINE_TEMPLATE_TYPE(deduce_var)
         return eval_dynamic_array(DynamicArray<T>(t.size(), expr));                    \
     }
 
-OC_MAKE_DSL_UNARY_FUNC(all, All)
-OC_MAKE_DSL_UNARY_FUNC(any, Any)
-OC_MAKE_DSL_UNARY_FUNC(none, None)
-OC_MAKE_DSL_UNARY_FUNC(rcp, Rcp)
-OC_MAKE_DSL_UNARY_FUNC(abs, Abs)
-OC_MAKE_DSL_UNARY_FUNC(sign, Sign)
-OC_MAKE_DSL_UNARY_FUNC(sqr, Sqr)
-OC_MAKE_DSL_UNARY_FUNC(normalize, Normalize)
-OC_MAKE_DSL_UNARY_FUNC(length, Length)
-OC_MAKE_DSL_UNARY_FUNC(length_squared, LengthSquared)
+OC_MAKE_DSL_UNARY_FUNC(all, ALL)
+OC_MAKE_DSL_UNARY_FUNC(any, ANY)
+OC_MAKE_DSL_UNARY_FUNC(none, NONE)
+OC_MAKE_DSL_UNARY_FUNC(rcp, RCP)
+OC_MAKE_DSL_UNARY_FUNC(abs, ABS)
+OC_MAKE_DSL_UNARY_FUNC(sign, SIGN)
+OC_MAKE_DSL_UNARY_FUNC(sqr, SQR)
+OC_MAKE_DSL_UNARY_FUNC(normalize, NORMALIZE)
+OC_MAKE_DSL_UNARY_FUNC(length, LENGTH)
+OC_MAKE_DSL_UNARY_FUNC(length_squared, LENGTH_SQUARED)
 
-OC_MAKE_DSL_UNARY_FUNC(exp, Exp)
-OC_MAKE_DSL_UNARY_FUNC(exp2, Exp2)
-OC_MAKE_DSL_UNARY_FUNC(exp10, Exp10)
-OC_MAKE_DSL_UNARY_FUNC(log, Log)
-OC_MAKE_DSL_UNARY_FUNC(log2, Log2)
-OC_MAKE_DSL_UNARY_FUNC(log10, Log10)
-OC_MAKE_DSL_UNARY_FUNC(cos, Cos)
-OC_MAKE_DSL_UNARY_FUNC(sin, Sin)
-OC_MAKE_DSL_UNARY_FUNC(tan, Tan)
-OC_MAKE_DSL_UNARY_FUNC(cosh, Cosh)
-OC_MAKE_DSL_UNARY_FUNC(sinh, Sinh)
-OC_MAKE_DSL_UNARY_FUNC(tanh, Tanh)
-OC_MAKE_DSL_UNARY_FUNC(acos, Acos)
-OC_MAKE_DSL_UNARY_FUNC(asin, Asin)
-OC_MAKE_DSL_UNARY_FUNC(atan, Atan)
-OC_MAKE_DSL_UNARY_FUNC(asinh, Asinh)
-OC_MAKE_DSL_UNARY_FUNC(acosh, Acosh)
-OC_MAKE_DSL_UNARY_FUNC(atanh, Atanh)
-OC_MAKE_DSL_UNARY_FUNC(degrees, Degrees)
-OC_MAKE_DSL_UNARY_FUNC(radians, Radians)
-OC_MAKE_DSL_UNARY_FUNC(ceil, Ceil)
-OC_MAKE_DSL_UNARY_FUNC(round, Round)
-OC_MAKE_DSL_UNARY_FUNC(floor, Floor)
-OC_MAKE_DSL_UNARY_FUNC(sqrt, Sqrt)
-OC_MAKE_DSL_UNARY_FUNC(rsqrt, Rsqrt)
-OC_MAKE_DSL_UNARY_FUNC(isinf, IsInf)
-OC_MAKE_DSL_UNARY_FUNC(isnan, IsNan)
-OC_MAKE_DSL_UNARY_FUNC(fract, Fract)
-OC_MAKE_DSL_UNARY_FUNC(saturate, Saturate)
+OC_MAKE_DSL_UNARY_FUNC(exp, EXP)
+OC_MAKE_DSL_UNARY_FUNC(exp2, EXP2)
+OC_MAKE_DSL_UNARY_FUNC(exp10, EXP10)
+OC_MAKE_DSL_UNARY_FUNC(log, LOG)
+OC_MAKE_DSL_UNARY_FUNC(log2, LOG2)
+OC_MAKE_DSL_UNARY_FUNC(log10, LOG10)
+OC_MAKE_DSL_UNARY_FUNC(cos, COS)
+OC_MAKE_DSL_UNARY_FUNC(sin, SIN)
+OC_MAKE_DSL_UNARY_FUNC(tan, TAN)
+OC_MAKE_DSL_UNARY_FUNC(cosh, COSH)
+OC_MAKE_DSL_UNARY_FUNC(sinh, SINH)
+OC_MAKE_DSL_UNARY_FUNC(tanh, TANH)
+OC_MAKE_DSL_UNARY_FUNC(acos, ACOS)
+OC_MAKE_DSL_UNARY_FUNC(asin, ASIN)
+OC_MAKE_DSL_UNARY_FUNC(atan, ATAN)
+OC_MAKE_DSL_UNARY_FUNC(asinh, ASINH)
+OC_MAKE_DSL_UNARY_FUNC(acosh, ACOSH)
+OC_MAKE_DSL_UNARY_FUNC(atanh, ATANH)
+OC_MAKE_DSL_UNARY_FUNC(degrees, DEGREES)
+OC_MAKE_DSL_UNARY_FUNC(radians, RADIANS)
+OC_MAKE_DSL_UNARY_FUNC(ceil, CEIL)
+OC_MAKE_DSL_UNARY_FUNC(round, ROUND)
+OC_MAKE_DSL_UNARY_FUNC(floor, FLOOR)
+OC_MAKE_DSL_UNARY_FUNC(sqrt, SQRT)
+OC_MAKE_DSL_UNARY_FUNC(rsqrt, RSQRT)
+OC_MAKE_DSL_UNARY_FUNC(isinf, IS_INF)
+OC_MAKE_DSL_UNARY_FUNC(isnan, IS_NAN)
+OC_MAKE_DSL_UNARY_FUNC(fract, FRACT)
+OC_MAKE_DSL_UNARY_FUNC(saturate, SATURATE)
 
-OC_MAKE_DSL_UNARY_FUNC(determinant, Determinant)
-OC_MAKE_DSL_UNARY_FUNC(transpose, Transpose)
-
-namespace detail
-{
-template <CallOp Op, typename T> [[nodiscard]] auto raster_derivative(const T &value)
-{
-    auto *function = Function::current();
-    if (function == nullptr)
-    {
-        throw std::logic_error("Derivative requires an active Function.");
-    }
-    if constexpr (is_swizzle_v<T>)
-    {
-        return raster_derivative<Op>(decay_swizzle(value));
-    }
-    else
-    {
-        using Value = expr_value_t<T>;
-        return eval<Value>(function->call_builtin(Type::of<Value>(), Op, {extract_expression(value)}));
-    }
-}
-}  // namespace detail
-
-// Derivatives preserve the scalar/vector shape; stage legality is checked at the entry point.
-#define OC_MAKE_DERIVATIVE_FUNC(name, op)                                                                              \
-    template <typename T>                                                                                              \
-    requires(match_dsl_unary_func_v<T> && (is_scalar_expr_v<deduce_var_t<T>> || is_vector_expr_v<deduce_var_t<T>>) &&  \
-             is_floating_point_v<vector_expr_element_t<deduce_var_t<T>>>)                                              \
-    [[nodiscard]] auto name(const T &value)                                                                            \
-    {                                                                                                                  \
-        return detail::raster_derivative<CallOp::op>(value);                                                           \
-    }
-
-OC_MAKE_DERIVATIVE_FUNC(ddx, Ddx)
-OC_MAKE_DERIVATIVE_FUNC(ddy, Ddy)
-OC_MAKE_DERIVATIVE_FUNC(fwidth, Fwidth)
-#undef OC_MAKE_DERIVATIVE_FUNC
-OC_MAKE_DSL_UNARY_FUNC(inverse, Inverse)
+OC_MAKE_DSL_UNARY_FUNC(determinant, DETERMINANT)
+OC_MAKE_DSL_UNARY_FUNC(transpose, TRANSPOSE)
+OC_MAKE_DSL_UNARY_FUNC(inverse, INVERSE)
 
 #undef OC_MAKE_DSL_UNARY_FUNC
 
 [[nodiscard]] inline Half float2half(const Float &arg) {
     const CallExpr *expr = Function::current()->call_builtin(Type::of<half>(),
-                                                             CallOp::Float2Half,
+                                                             CallOp::FLOAT2HALF,
                                                              {OC_EXPR(arg)});
     return eval<half>(expr);
 }
 
-[[nodiscard]] inline Float half2float(const Float &arg) {
-    const CallExpr *expr = Function::current()->call_builtin(Type::of<half>(),
-                                                             CallOp::Half2Float,
+[[nodiscard]] inline Float half2float(const Half &arg) {
+    const CallExpr *expr = Function::current()->call_builtin(Type::of<float>(),
+                                                             CallOp::HALF2FLOAT,
                                                              {OC_EXPR(arg)});
     return eval<float>(expr);
 }
@@ -261,18 +221,18 @@ OC_DEFINE_TEMPLATE_VALUE_MULTI(match_dsl_basic_func)
                                               decay_swizzle(rhs));                \
     }
 
-OC_MAKE_DSL_BINARY_FUNC(max, Max)
-OC_MAKE_DSL_BINARY_FUNC(min, Min)
-OC_MAKE_DSL_BINARY_FUNC(pow, Pow)
-OC_MAKE_DSL_BINARY_FUNC(fmod, Fmod)
-OC_MAKE_DSL_BINARY_FUNC(mod, Mod)
-OC_MAKE_DSL_BINARY_FUNC(copysign, Copysign)
-OC_MAKE_DSL_BINARY_FUNC(atan2, Atan2)
+OC_MAKE_DSL_BINARY_FUNC(max, MAX)
+OC_MAKE_DSL_BINARY_FUNC(min, MIN)
+OC_MAKE_DSL_BINARY_FUNC(pow, POW)
+OC_MAKE_DSL_BINARY_FUNC(fmod, FMOD)
+OC_MAKE_DSL_BINARY_FUNC(mod, MOD)
+OC_MAKE_DSL_BINARY_FUNC(copysign, COPYSIGN)
+OC_MAKE_DSL_BINARY_FUNC(atan2, ATAN2)
 
-OC_MAKE_DSL_BINARY_FUNC(cross, Cross)
-OC_MAKE_DSL_BINARY_FUNC(dot, Dot)
-OC_MAKE_DSL_BINARY_FUNC(distance, Distance)
-OC_MAKE_DSL_BINARY_FUNC(distance_squared, DistanceSquared)
+OC_MAKE_DSL_BINARY_FUNC(cross, CROSS)
+OC_MAKE_DSL_BINARY_FUNC(dot, DOT)
+OC_MAKE_DSL_BINARY_FUNC(distance, DISTANCE)
+OC_MAKE_DSL_BINARY_FUNC(distance_squared, DISTANCE_SQUARED)
 
 #undef OC_MAKE_DSL_BINARY_FUNC
 
@@ -292,10 +252,10 @@ OC_MAKE_DSL_BINARY_FUNC(distance_squared, DistanceSquared)
                                               to_general_vector<dimension>(c));             \
     }
 
-OC_MAKE_DSL_TRIPLE_FUNC(clamp, Clamp)
-OC_MAKE_DSL_TRIPLE_FUNC(lerp, Lerp)
-OC_MAKE_DSL_TRIPLE_FUNC(inverse_lerp, InverseLerp)
-OC_MAKE_DSL_TRIPLE_FUNC(fma, Fma)
+OC_MAKE_DSL_TRIPLE_FUNC(clamp, CLAMP)
+OC_MAKE_DSL_TRIPLE_FUNC(lerp, LERP)
+OC_MAKE_DSL_TRIPLE_FUNC(inverse_lerp, INVERSE_LERP)
+OC_MAKE_DSL_TRIPLE_FUNC(fma, FMA)
 
 #undef OC_MAKE_TRIPLE_FUNC
 
@@ -341,7 +301,7 @@ template<typename P, typename T>
                                            const DynamicArray<T> &f) noexcept {
     OC_ASSERT(pred.size() == t.size() && t.size() == f.size());
     auto expr = Function::current()->call_builtin(Type::of<expr_value_t<T>>(),
-                                                  CallOp::Select,
+                                                  CallOp::SELECT,
                                                   {OC_EXPR(pred), OC_EXPR(t), OC_EXPR(f)});
     return detail::eval_dynamic_array<T>(DynamicArray<T>(pred.size(), expr));
 }
@@ -375,7 +335,7 @@ template<typename A>
 requires(is_all_float_vector3_v<expr_value_t<A>>)
 void coordinate_system(const A &a, Var<float3> &b, Var<float3> &c) noexcept {
     auto expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                  CallOp::CoordinateSystem, {OC_EXPR(a), OC_EXPR(b), OC_EXPR(c)});
+                                                  CallOp::COORDINATE_SYSTEM, {OC_EXPR(a), OC_EXPR(b), OC_EXPR(c)});
     Function::current()->expr_statement(expr);
 }
 
@@ -383,7 +343,7 @@ template<typename N, typename T>
 requires(is_all_float_vector3_v<expr_value_t<N>> && is_all_float_vector3_v<expr_value_t<T>>)
 void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b) noexcept {
     auto expr = Function::current()->call_builtin(Type::of<expr_value_t<N>>(),
-                                                  CallOp::MakeNormalTangent, {OC_EXPR(n), OC_EXPR(t), OC_EXPR(a), OC_EXPR(b)});
+                                                  CallOp::MAKE_NORMAL_TANGENT, {OC_EXPR(n), OC_EXPR(t), OC_EXPR(a), OC_EXPR(b)});
     Function::current()->expr_statement(expr);
 }
 
@@ -395,7 +355,7 @@ void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b)
     OC_NODISCARD auto make_##type##dim(const Args &...args) noexcept {             \
         auto impl = [&]<typename... As>(const As &...as) {                         \
             auto expr = Function::current()->call_builtin(Type::of<type##dim>(),   \
-                                                          CallOp::Make##tag##dim, \
+                                                          CallOp::MAKE_##tag##dim, \
                                                           {OC_EXPR(as)...});       \
             return eval<type##dim>(expr);                                          \
         };                                                                         \
@@ -407,13 +367,14 @@ void make_normal_tangent(const N &n, const T &t, Var<float3> &a, Var<float3> &b)
     OC_MAKE_VEC_MAKER_DIM(type, tag, 3) \
     OC_MAKE_VEC_MAKER_DIM(type, tag, 4)
 
-OC_MAKE_VEC_MAKER(int, Int)
-OC_MAKE_VEC_MAKER(uint, Uint)
-OC_MAKE_VEC_MAKER(float, Float)
-OC_MAKE_VEC_MAKER(half, Half)
-OC_MAKE_VEC_MAKER(real, Real)
-OC_MAKE_VEC_MAKER(bool, Bool)
-OC_MAKE_VEC_MAKER(uchar, Uchar)
+OC_MAKE_VEC_MAKER(int, INT)
+OC_MAKE_VEC_MAKER(uint, UINT)
+OC_MAKE_VEC_MAKER(ulong, ULONG)
+OC_MAKE_VEC_MAKER(float, FLOAT)
+OC_MAKE_VEC_MAKER(half, HALF)
+OC_MAKE_VEC_MAKER(real, REAL)
+OC_MAKE_VEC_MAKER(bool, BOOL)
+OC_MAKE_VEC_MAKER(uchar, UCHAR)
 
 #undef OC_MAKE_VEC_MAKER_DIM
 #undef OC_MAKE_VEC_MAKER
@@ -425,7 +386,7 @@ OC_MAKE_VEC_MAKER(uchar, Uchar)
     })                                                                                                   \
     OC_NODISCARD auto make_##type##N##x##M(const Args &...args) {                                        \
         auto expr = Function::current()->call_builtin(Type::of<type##N##x##M>(),                         \
-                                                      CallOp::Make##TYPE##N##x##M, {OC_EXPR(args)...}); \
+                                                      CallOp::MAKE_##TYPE##N##X##M, {OC_EXPR(args)...}); \
         return eval<type##N##x##M>(expr);                                                                \
     }
 
@@ -440,8 +401,8 @@ OC_MAKE_VEC_MAKER(uchar, Uchar)
     OC_MAKE_MATRIX(type, TYPE, 4, 3)        \
     OC_MAKE_MATRIX(type, TYPE, 4, 4)
 
-OC_MAKE_MATRIX_FOR_TYPE(float, Float)
-OC_MAKE_MATRIX_FOR_TYPE(half, Half)
+OC_MAKE_MATRIX_FOR_TYPE(float, FLOAT)
+OC_MAKE_MATRIX_FOR_TYPE(half, HALF)
 
 #undef OC_MAKE_MATRIX_FOR_TYPE
 #undef OC_MAKE_MATRIX
@@ -461,7 +422,7 @@ template<typename A, typename B>
 requires concepts::plus_able<expr_value_t<A>, expr_value_t<B>>
 auto atomic_add(A &&a, B &&b) noexcept {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                               CallOp::AtomicAdd,
+                                                               CallOp::ATOMIC_ADD,
                                                                {OC_EXPR(a), OC_EXPR(b)});
     return eval<expr_value_t<A>>(expr);
 }
@@ -470,7 +431,7 @@ template<typename A, typename B>
 requires concepts::minus_able<expr_value_t<A>, expr_value_t<B>>
 auto atomic_sub(A &&a, B &&b) noexcept {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                               CallOp::AtomicSub,
+                                                               CallOp::ATOMIC_SUB,
                                                                {OC_EXPR(a), OC_EXPR(b)});
     return eval<expr_value_t<A>>(expr);
 }
@@ -479,7 +440,7 @@ template<typename A, typename B>
 requires concepts::assign_able<expr_value_t<A>, expr_value_t<B>>
 auto atomic_exch(A &&a, B &&b) noexcept {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<A>>(),
-                                                               CallOp::AtomicExch,
+                                                               CallOp::ATOMIC_EXCH,
                                                                {OC_EXPR(a), OC_EXPR(b)});
     return eval<expr_value_t<A>>(expr);
 }
@@ -489,7 +450,7 @@ requires concepts::assign_able<expr_value_t<T>, expr_value_t<V>> &&
          concepts::assign_able<expr_value_t<T>, expr_value_t<V>>
 auto atomic_CAS(T &ref, U &&compare, V &&val) {
     const Expression *expr = Function::current()->call_builtin(Type::of<expr_value_t<T>>(),
-                                                               CallOp::AtomicCas,
+                                                               CallOp::ATOMIC_CAS,
                                                                {OC_EXPR(ref), OC_EXPR(compare),
                                                                 OC_EXPR(val)});
     return eval<expr_value_t<T>>(expr);
@@ -498,68 +459,76 @@ auto atomic_CAS(T &ref, U &&compare, V &&val) {
 template<typename T>
 requires is_vector_v<expr_value_t<T>> || is_scalar_v<expr_value_t<T>>
 [[nodiscard]] T zero_if_nan(T t) noexcept {
-    return horizon::dsl::select(horizon::dsl::isnan(t), T{}, t);
+    return ocarina::select(ocarina::isnan(t), T{}, t);
 }
 
 template<typename T>
 requires is_vector_v<expr_value_t<T>> || is_scalar_v<expr_value_t<T>>
 [[nodiscard]] T zero_if_nan_inf(T t) noexcept {
-    return horizon::dsl::select(horizon::dsl::isnan(t) || horizon::dsl::isinf(t), T{}, t);
+    return ocarina::select(ocarina::isnan(t) || ocarina::isinf(t), T{}, t);
 }
 
 inline void unreachable() noexcept {
-    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::Unreachable, {}));
+    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::UNREACHABLE, {}));
 }
 
 inline void synchronize_block() noexcept {
-    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::SynchronizeBlock, {}));
+    Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::SYNCHRONIZE_BLOCK, {}));
 }
 
 #define OC_MAKE_WARP_FUNC(func_name, Tag, ret_type)                                                \
     template<typename T>                                                                           \
-    requires horizon::dsl::is_boolean_expr_v<T>                                                         \
+    requires ocarina::is_boolean_expr_v<T>                                                         \
     [[nodiscard]] auto func_name(const T &pred) {                                                  \
         const Expression *expr = Function::current()->call_builtin(Type::of<ret_type>(),           \
-                                                                   CallOp::WarpActiveCountBits, \
+                                                                   CallOp::Tag,                    \
                                                                    {OC_EXPR(pred)});               \
         return eval<ret_type>(expr);                                                               \
     }
 
-OC_MAKE_WARP_FUNC(warp_active_bit_mask, WarpActiveBitMask, uint4)
-OC_MAKE_WARP_FUNC(warp_active_count_bits, WarpActiveCountBits, uint)
-OC_MAKE_WARP_FUNC(warp_prefix_count_bits, WarpPrefixCountBits, uint)
-OC_MAKE_WARP_FUNC(warp_lane_id, WarpLaneId, uint)
-OC_MAKE_WARP_FUNC(warp_size, WarpSize, uint)
-OC_MAKE_WARP_FUNC(warp_first_active_lane, WarpFirstActiveLane, uint)
-OC_MAKE_WARP_FUNC(warp_is_first_active_lane, WarpIsFirstActiveLane, uint)
-
+OC_MAKE_WARP_FUNC(warp_active_bit_mask, WARP_ACTIVE_BIT_MASK, uint4)
+OC_MAKE_WARP_FUNC(warp_active_count_bits, WARP_ACTIVE_COUNT_BITS, uint)
+OC_MAKE_WARP_FUNC(warp_prefix_count_bits, WARP_PREFIX_COUNT_BITS, uint)
 #undef OC_MAKE_WARP_FUNC
+
+#define OC_MAKE_WARP_QUERY(func_name, Tag, ret_type)                         \
+    [[nodiscard]] inline auto func_name() {                                \
+        return eval<ret_type>(Function::current()->call_builtin(           \
+            Type::of<ret_type>(), CallOp::Tag, {}));                        \
+    }
+
+OC_MAKE_WARP_QUERY(warp_lane_id, WARP_LANE_ID, uint)
+OC_MAKE_WARP_QUERY(warp_size, WARP_SIZE, uint)
+OC_MAKE_WARP_QUERY(warp_first_active_lane, WARP_FIRST_ACTIVE_LANE, uint)
+OC_MAKE_WARP_QUERY(warp_is_first_active_lane, WARP_IS_FIRST_ACTIVE_LANE, bool)
+
+#undef OC_MAKE_WARP_QUERY
 
 template<typename T>
 void DynamicArray<T>::sanitize() noexcept {
     *this = map([&](const Var<T> &val) {
-        return horizon::dsl::select(horizon::dsl::isnan(val) || horizon::dsl::isinf(val), Var<T>(0), val);
+        return ocarina::select(ocarina::isnan(val) || ocarina::isinf(val), Var<T>(0), val);
     });
 }
 
 template<typename T>
 Var<T> DynamicArray<T>::max() const noexcept {
     return reduce(0.f, [](auto r, auto x) noexcept {
-        return horizon::dsl::max(r, x);
+        return ocarina::max(r, x);
     });
 }
 template<typename T>
 Var<T> DynamicArray<T>::min() const noexcept {
     return reduce(std::numeric_limits<float>::max(), [](auto r, auto x) noexcept {
-        return horizon::dsl::min(r, x);
+        return ocarina::min(r, x);
     });
 }
 
 template<typename T>
 DynamicArray<T> DynamicArray<T>::clamp(const Var<T> &min_, const Var<T> &max_) const noexcept {
     return map([&](const Var<T> &val) {
-        return horizon::dsl::clamp(val, min_, max_);
+        return ocarina::clamp(val, min_, max_);
     });
 }
 
-}// namespace horizon::dsl
+}// namespace ocarina

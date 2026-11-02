@@ -1,0 +1,190 @@
+function(horizon_dev_bootstrap)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${HORIZON_BUILD_TOOLS_DIR}/git_tool.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/ninja_tool.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/conda_environment.py"
+        "${HORIZON_BUILD_TOOLS_DIR}/file_lock.py")
+    if(NOT DEFINED HORIZON_CONDA_ENV OR HORIZON_CONDA_ENV STREQUAL "")
+        set(HORIZON_CONDA_ENV "horizon-dev" CACHE STRING "Conda environment used by Horizon development tools")
+    endif()
+    if(NOT DEFINED HORIZON_DEV_CONFIGURATION OR HORIZON_DEV_CONFIGURATION STREQUAL "")
+        set(HORIZON_DEV_CONFIGURATION "RelWithDebInfo" CACHE STRING "Horizon developer configuration")
+    endif()
+    if(NOT DEFINED HORIZON_DEV_TARGET_FAMILY OR HORIZON_DEV_TARGET_FAMILY STREQUAL "")
+        set(HORIZON_DEV_TARGET_FAMILY "examples" CACHE STRING "Horizon developer target family")
+    endif()
+
+    set_property(CACHE HORIZON_DEV_CONFIGURATION PROPERTY STRINGS
+        Debug Release RelWithDebInfo MinSizeRel)
+    set(_horizon_configurations Debug Release RelWithDebInfo MinSizeRel)
+    list(FIND _horizon_configurations "${HORIZON_DEV_CONFIGURATION}" _horizon_configuration_index)
+    if(_horizon_configuration_index EQUAL -1)
+        message(FATAL_ERROR
+            "Unsupported HORIZON_DEV_CONFIGURATION='${HORIZON_DEV_CONFIGURATION}'. "
+            "Expected one of: ${_horizon_configurations}")
+    endif()
+
+    set_property(CACHE HORIZON_DEV_TARGET_FAMILY PROPERTY STRINGS
+        core engine tools examples ocarina ocarina-tests vision-hotfix)
+    set(_horizon_target_families core engine tools examples ocarina ocarina-tests vision-hotfix)
+    list(FIND _horizon_target_families "${HORIZON_DEV_TARGET_FAMILY}" _horizon_target_family_index)
+    if(_horizon_target_family_index EQUAL -1)
+        message(FATAL_ERROR
+            "Unsupported HORIZON_DEV_TARGET_FAMILY='${HORIZON_DEV_TARGET_FAMILY}'. "
+            "Expected one of: ${_horizon_target_families}")
+    endif()
+
+    string(TOLOWER "${HORIZON_DEV_CONFIGURATION}" _horizon_configuration_slug)
+    set(_horizon_toolchain
+        "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/conan_toolchain.cmake")
+    set(_horizon_build_environment
+        "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
+
+    # IDEs may start without an activated Python environment. Reuse the
+    # project's development venv before falling back to Conda provisioning.
+    if(WIN32)
+        set(_horizon_python "${CMAKE_CURRENT_SOURCE_DIR}/.venv/Scripts/python.exe")
+    else()
+        set(_horizon_python "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python")
+    endif()
+    set(_horizon_venv_bootstrapped FALSE)
+    if(NOT DEFINED ENV{HORIZON_DEV_BOOTSTRAP_ACTIVE} AND EXISTS "${_horizon_python}")
+        get_filename_component(_horizon_python_dir "${_horizon_python}" DIRECTORY)
+        message(STATUS "Running Horizon dependency bootstrap with the project .venv")
+        execute_process(
+            COMMAND "${CMAKE_COMMAND}" -E env
+                    --modify "PATH=path_list_prepend:${_horizon_python_dir}"
+                    "${_horizon_python}" "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
+                    --configuration "${HORIZON_DEV_CONFIGURATION}"
+                    --target-family "${HORIZON_DEV_TARGET_FAMILY}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE _horizon_bootstrap_result
+            COMMAND_ECHO STDOUT
+        )
+        if(NOT _horizon_bootstrap_result EQUAL 0)
+            message(FATAL_ERROR
+                "Horizon .venv dependency bootstrap failed (exit code ${_horizon_bootstrap_result}). "
+                "Ensure .venv contains Python >=3.11 and Conan >=2.28,<3.")
+        endif()
+        set(_horizon_venv_bootstrapped TRUE)
+    endif()
+
+    if(NOT DEFINED ENV{HORIZON_DEV_BOOTSTRAP_ACTIVE} AND NOT _horizon_venv_bootstrapped)
+        # Search for conda in multiple locations:
+        # - conda.exe in Scripts/ (works in Git Bash)
+        # - conda.bat in condabin/ (works in cmd/PowerShell)
+        # - conda in PATH (Unix-like systems)
+        find_program(_horizon_conda
+            NAMES conda.exe conda.bat conda
+            PATHS
+                "$ENV{CONDA_PREFIX}/Scripts"
+                "$ENV{CONDA_PREFIX}/condabin"
+                "$ENV{USERPROFILE}/miniforge3/Scripts"
+                "$ENV{USERPROFILE}/miniforge3/condabin"
+                "$ENV{USERPROFILE}/miniconda3/Scripts"
+                "$ENV{USERPROFILE}/miniconda3/condabin"
+                "$ENV{USERPROFILE}/anaconda3/Scripts"
+                "$ENV{USERPROFILE}/anaconda3/condabin"
+                "$ENV{HOME}/miniconda3/Scripts"
+                "$ENV{HOME}/miniconda3/condabin"
+                "$ENV{HOME}/anaconda3/Scripts"
+                "$ENV{HOME}/anaconda3/condabin"
+            DOC "Conda package manager executable"
+            REQUIRED
+        )
+
+        # Check if conda environment exists
+        # Note: conda create --yes will REMOVE and recreate existing environments, so we must check first
+        execute_process(
+            COMMAND "${_horizon_conda}" env list --json
+            OUTPUT_VARIABLE _conda_env_list_json
+            ERROR_QUIET
+        )
+
+        string(JSON _conda_env_count ERROR_VARIABLE _json_error LENGTH "${_conda_env_list_json}" "envs")
+        set(_env_exists FALSE)
+        if(NOT _json_error AND _conda_env_count GREATER 0)
+            math(EXPR _conda_env_last_index "${_conda_env_count} - 1")
+            foreach(_env_index RANGE 0 ${_conda_env_last_index})
+                string(JSON _env_path GET "${_conda_env_list_json}" "envs" ${_env_index})
+                file(TO_CMAKE_PATH "${_env_path}" _env_normalized)
+                get_filename_component(_env_name "${_env_normalized}" NAME)
+                if(_env_name STREQUAL "${HORIZON_CONDA_ENV}")
+                    set(_env_exists TRUE)
+                    break()
+                endif()
+            endforeach()
+        endif()
+
+        if(NOT _env_exists)
+            message(STATUS "Creating conda environment '${HORIZON_CONDA_ENV}' (this may take a few minutes)...")
+            execute_process(
+                COMMAND "${_horizon_conda}" create --yes --name "${HORIZON_CONDA_ENV}"
+                        --override-channels --channel conda-forge
+                        "python>=3.11" "conan>=2.28,<3"
+                RESULT_VARIABLE _horizon_env_create_result
+                COMMAND_ECHO STDOUT
+            )
+            if(NOT _horizon_env_create_result EQUAL 0)
+                message(FATAL_ERROR
+                    "Failed to create conda environment '${HORIZON_CONDA_ENV}' (exit code ${_horizon_env_create_result}).")
+            endif()
+        else()
+            message(STATUS "Using existing conda environment '${HORIZON_CONDA_ENV}'")
+        endif()
+
+        message(STATUS "Running Horizon dependency bootstrap...")
+        execute_process(
+            COMMAND "${_horizon_conda}" run --name "${HORIZON_CONDA_ENV}" --no-capture-output
+                    python "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
+                    --configuration "${HORIZON_DEV_CONFIGURATION}"
+                    --target-family "${HORIZON_DEV_TARGET_FAMILY}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE _horizon_bootstrap_result
+            COMMAND_ECHO STDOUT
+        )
+        if(NOT _horizon_bootstrap_result EQUAL 0)
+            message(FATAL_ERROR
+                "Horizon dependency bootstrap failed (exit code ${_horizon_bootstrap_result}).")
+        endif()
+    endif()
+
+    if(NOT EXISTS "${_horizon_toolchain}")
+        message(FATAL_ERROR "Horizon Conan toolchain was not generated: ${_horizon_toolchain}")
+    endif()
+    if(NOT EXISTS "${_horizon_build_environment}")
+        message(FATAL_ERROR "Horizon build environment was not generated: ${_horizon_build_environment}")
+    endif()
+    include("${_horizon_build_environment}")
+    include(horizon_ninja)
+    horizon_configure_ninja()
+    set(HORIZON_DEV_BUILD_ENVIRONMENT "${_horizon_build_environment}" PARENT_SCOPE)
+    set(HORIZON_DEV_PYTHON "${HORIZON_DEV_PYTHON}" PARENT_SCOPE)
+    set(CMAKE_TOOLCHAIN_FILE "${_horizon_toolchain}" CACHE FILEPATH "Conan toolchain" FORCE)
+
+    # Conan installs exactly one configuration per build directory, and CMakeDeps
+    # guards every usage requirement (include dirs, compile definitions, imported
+    # libraries) behind $<$<CONFIG:${HORIZON_DEV_CONFIGURATION}>:...>. Any other
+    # configuration in this directory therefore compiles with zero third-party
+    # include directories and dies on the first external header.
+    #
+    # Ninja Multi-Config otherwise defaults CMAKE_CONFIGURATION_TYPES to
+    # "Debug;Release;RelWithDebInfo" and builds the first entry when no --config
+    # is given, which is how IDE-driven builds (VS Code CMake Tools synthesizes a
+    # build preset without --config) silently ended up compiling Debug against
+    # RelWithDebInfo-only dependencies.
+    #
+    # Pin the directory to its provisioned configuration so a bare
+    # `cmake --build <dir>` is correct and a mismatched --config fails loudly.
+    if(CMAKE_GENERATOR MATCHES "Multi-Config|Visual Studio|Xcode")
+        set(CMAKE_CONFIGURATION_TYPES "${HORIZON_DEV_CONFIGURATION}" CACHE STRING
+            "Horizon configurations provisioned by Conan in this build directory" FORCE)
+        set(CMAKE_DEFAULT_BUILD_TYPE "${HORIZON_DEV_CONFIGURATION}" CACHE STRING
+            "Configuration built when --config is omitted" FORCE)
+    else()
+        set(CMAKE_BUILD_TYPE "${HORIZON_DEV_CONFIGURATION}" CACHE STRING
+            "Horizon build type provisioned by Conan in this build directory" FORCE)
+    endif()
+    set(CMAKE_TRY_COMPILE_CONFIGURATION "${HORIZON_DEV_CONFIGURATION}" CACHE STRING
+        "Configuration used for try_compile checks" FORCE)
+endfunction()
