@@ -27,13 +27,3 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     target_compile_options(mimalloc-static PRIVATE -Wno-strict-prototypes)
 endif()
 set_target_properties(mimalloc-static PROPERTIES UNITY_BUILD ON)
-
-add_subdirectory(tinyexr)
-add_subdirectory(stblib)
-
-cmake_policy(SET CMP0148 NEW)
-
-target_link_libraries(ocarina-ext
-        PUBLIC
-        ocarina-ext-stb
-        ocarina-ext-tinyexr)
