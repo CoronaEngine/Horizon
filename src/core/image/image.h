@@ -56,12 +56,17 @@ public:
     [[nodiscard]] static Image load_exr(const fs::path &fn, ColorSpace color_space, float3 scale = make_float3(1.f));
     [[nodiscard]] static Image create_empty(PixelStorage pixel_format, uint2 res);
     template<typename T>
-    static Image from_data(T *data, uint2 res) {
-        size_t size_in_bytes = sizeof(T) * res.x * res.y;
-        auto pixel = allocate(size_in_bytes);
+    static Image from_data(const T *data, uint2 res) {
+        const size_t pixel_count = detail::checked_allocation_size(res.x, res.y);
+        const size_t size_in_bytes = detail::checked_allocation_size(pixel_count, sizeof(T));
+        auto pixel = std::make_unique_for_overwrite<std::byte[]>(size_in_bytes);
         auto pixel_format = PixelStorageImpl<T>::storage;
-        oc_memcpy(pixel, data, size_in_bytes);
-        return {pixel_format, pixel, res};
+        if (size_in_bytes != 0) {
+            std::memcpy(pixel.get(), data, size_in_bytes);
+        }
+        Image image{pixel_format, pixel.get(), res};
+        pixel.release();
+        return image;
     }
     /**
      * ".bmp" or ".png" or ".tga" or ".jpg" or ".jpeg"

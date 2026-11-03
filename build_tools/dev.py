@@ -58,8 +58,6 @@ def target_family_for_target(target: str) -> str:
         return "ocarina-tests"
     if target.startswith("horizon-hotfix"):
         return "vision-hotfix"
-    if target in {"mimalloc", "mimalloc-obj", "mimalloc-static"}:
-        return "ocarina"
     if target == "copy_slang_headers" or target.startswith("ocarina"):
         return "ocarina"
     return "core"

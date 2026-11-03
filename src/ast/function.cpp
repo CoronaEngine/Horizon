@@ -190,9 +190,8 @@ void Function::splitting_arguments() noexcept {
 }
 
 Function::~Function() noexcept {
-    for (auto &mem : temp_memory_) {
-        delete_with_allocator(mem.first);
-    }
+    // Destroy temporary objects while the Function's other members are still alive.
+    temp_memory_.clear();
 }
 
 void Function::correct_used_structures() noexcept {

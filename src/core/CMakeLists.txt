@@ -8,7 +8,6 @@ target_link_libraries(ocarina-core PUBLIC
         $<$<PLATFORM_ID:Windows>:dbghelp>
         )
 target_link_libraries(ocarina-core PRIVATE
-        mimalloc-static
         horizon::stb
         horizon::tinyexr)
 target_compile_definitions(ocarina-core PRIVATE OC_CORE_EXPORT_DLL=1)

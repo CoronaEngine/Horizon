@@ -296,7 +296,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
         self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
-        self.assertEqual(target_family_for_target("mimalloc-static"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
         self.assertEqual(target_family_for_target("horizon-hotfix-run"), "vision-hotfix")
         self.assertEqual(target_family_for_targets(["test-core-parsetype"]), "ocarina-tests")

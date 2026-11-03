@@ -26,5 +26,5 @@ VS_EXPORT_API vision::hotfix::BuildRules *create() {
 }
 
 VS_EXPORT_API void destroy(vision::hotfix::BuildRules *obj) {
-    ocarina::delete_with_allocator(obj);
+    ocarina::delete_with_allocator(static_cast<vision::hotfix::JsonParser *>(obj));
 }

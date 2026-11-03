@@ -52,6 +52,11 @@ endfunction()
 
 # Core type and utility tests.
 ocarina_add_test(test-allocator CATEGORY core SOURCES core/test_allocator.cpp)
+add_test(NAME ocarina.test-core-allocator.failures
+    COMMAND "${CMAKE_COMMAND}" "-DALLOCATOR_TEST=$<TARGET_FILE:test-core-allocator>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/core/check_allocator_failures.cmake")
+set_tests_properties(ocarina.test-core-allocator.failures PROPERTIES
+    LABELS "ocarina" RUN_SERIAL TRUE TIMEOUT 120)
 ocarina_add_test(test-logging CATEGORY core SOURCES core/test_logging.cpp)
 target_link_libraries(test-core-logging PRIVATE horizon-core)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
