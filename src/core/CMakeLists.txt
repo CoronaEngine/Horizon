@@ -3,7 +3,8 @@ file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS *.c*)
 
 add_library(ocarina-core SHARED ${HEADER_FILES} ${SOURCE_FILES})
 target_link_libraries(ocarina-core PUBLIC
-        ocarina-ext
+        horizon::fmt
+        horizon::xxhash
         horizon-logging
         $<$<PLATFORM_ID:Windows>:dbghelp>
         )

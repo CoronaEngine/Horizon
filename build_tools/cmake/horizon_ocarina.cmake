@@ -16,7 +16,6 @@ set(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
 add_library(ocarina-include INTERFACE)
 target_include_directories(ocarina-include INTERFACE ${PROJECT_SOURCE_DIR}/src)
 
-add_subdirectory(src/ext)
 add_subdirectory(src/core)
 add_subdirectory(src/math)
 add_subdirectory(src/ast)
@@ -27,7 +26,6 @@ add_subdirectory(src/backends)
 
 add_library(ocarina-native INTERFACE)
 target_link_libraries(ocarina-native INTERFACE
-        ocarina-ext
         ocarina-math
         ocarina-dsl
         ocarina-ast
@@ -51,10 +49,3 @@ set_target_properties(ocarina PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
         WINDOWS_EXPORT_ALL_SYMBOLS ON
         FOLDER "ocarina")
-
-# 由根级负责把共享依赖装配到 ocarina-ext 上，子目录不再引用这些库的目标名
-if(TARGET ocarina-ext)
-    target_link_libraries(ocarina-ext PUBLIC
-        horizon::fmt
-        horizon::xxhash)
-endif()

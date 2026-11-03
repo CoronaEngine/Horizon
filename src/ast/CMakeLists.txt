@@ -10,5 +10,4 @@ set_target_properties(ocarina-ast PROPERTIES
 target_compile_definitions(ocarina-ast PRIVATE OC_AST_EXPORT_DLL=1)
 target_link_libraries(ocarina-ast
         PUBLIC
-        ocarina-ext
         ocarina-core)
