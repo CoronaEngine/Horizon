@@ -6,6 +6,7 @@ target_link_libraries(ocarina-core PUBLIC
         horizon::fmt
         horizon::xxhash
         horizon-logging
+        horizon::ktm
         $<$<PLATFORM_ID:Windows>:dbghelp>
         )
 target_link_libraries(ocarina-core PRIVATE
