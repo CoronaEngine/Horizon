@@ -14,10 +14,10 @@ namespace vision::inline hotfix {
 #define HOTFIX_VIRTUAL virtual
 
 #define VS_HOTFIX_MOVE_ATTR(attr_name) \
-    attr_name = std::move(old_obj_->attr_name);
+    do { if (old_obj_) { attr_name = std::move(old_obj_->attr_name); } } while (false);
 
-#define VS_HOTFIX_MOVE_ATTRS(...)                                                  \
-    auto old_obj_ = dynamic_cast<std::remove_cvref_t<decltype(*this)> *>(old_obj); \
+#define VS_HOTFIX_MOVE_ATTRS(...)                                                      \
+    auto old_obj_ = ::vision::hotfix::detail::restore_source(*this, old_obj);            \
     MAP(VS_HOTFIX_MOVE_ATTR, ##__VA_ARGS__)
 
 #define VS_HOTFIX_MAKE_RESTORE(Super, ...)                   \
@@ -33,6 +33,22 @@ public:
     }
     virtual ~RuntimeObject() = default;
 };
+
+namespace detail {
+
+template<typename T>
+[[nodiscard]] T *restore_source(T &replacement, RuntimeObject *previous) noexcept {
+    if constexpr (requires { static_cast<T *>(previous); }) {
+        // A patch's hidden RTTI may have a different identity. Hotfix versions
+        // of the same concrete type share the object layout by contract.
+        if (previous && string_view{typeid(*previous).name()} == typeid(replacement).name()) {
+            return static_cast<T *>(previous);
+        }
+    }
+    return dynamic_cast<T *>(previous);
+}
+
+}// namespace detail
 
 template<typename T>
 class TSlot {

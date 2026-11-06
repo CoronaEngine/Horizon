@@ -8,11 +8,9 @@ class FixtureObject : public vision::RuntimeObject {
 public:
     [[nodiscard]] virtual int generation() const noexcept = 0;
 
-    void restore(vision::RuntimeObject *previous) noexcept override {
-        // HotfixSlot matches the registered concrete type before restoring it.
-        const auto *object = static_cast<const FixtureObject *>(previous);
-        state = object->state;
-        restores = object->restores + 1;
+    void restore(vision::RuntimeObject *old_obj) noexcept override {
+        VS_HOTFIX_MOVE_ATTRS(state, restores)
+        ++restores;
     }
 
     int state{};
