@@ -1,229 +1,120 @@
-﻿//
+//
 // Created by Zero on 2024/8/24.
 //
 
 #include "cmd_process.h"
-#include "hotfix.h"
+#include "core/util/logging.h"
+
+#include <iostream>
+#include <string>
 
 namespace vision::inline hotfix {
-CmdProcess::CmdProcess() {
-    ZeroMemory(&process_info_, sizeof(process_info_));
-}
+namespace {
 
-void CmdProcess::CmdData::enqueue_callback() noexcept {
-    if (callback) {
-        HotfixSystem::instance().enqueue_function([callback = callback,
-                                                   cmd = cmd,
-                                                   success = bool(success)] {
-            std::invoke(callback, cmd, bool(success));
-        });
+constexpr std::string_view success_marker = "_HORIZON_HOTFIX_RESULT_=0";
+constexpr std::string_view failure_marker = "_HORIZON_HOTFIX_RESULT_=1";
+
+void close_handle(HANDLE &handle) noexcept {
+    if (handle) {
+        CloseHandle(handle);
+        handle = nullptr;
     }
 }
 
-void CmdProcess::change_directory(const fs::path &dir) const noexcept {
-    write_input(ocarina::format("cd {}", dir.string()));
-}
+}// namespace
 
-void CmdProcess::on_finish_cmd() const {
-    if (!store_cmd_output_) {
-        std::cout << "[Cmd process] Complete" << std::endl;
+bool CmdProcess::initialise() noexcept {
+    SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE child_input{};
+    HANDLE child_output{};
+    // Leave room for a cmd.exe command line and its status query so the write
+    // can finish before we start draining the compiler output pipe.
+    bool ready = CreatePipe(&child_input, &input_write_, &security, 16 * 1024) &&
+                 CreatePipe(&output_read_, &child_output, &security, 0) &&
+                 SetHandleInformation(input_write_, HANDLE_FLAG_INHERIT, 0) &&
+                 SetHandleInformation(output_read_, HANDLE_FLAG_INHERIT, 0);
+    if (ready) {
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdInput = child_input;
+        startup.hStdOutput = child_output;
+        startup.hStdError = child_output;
+        PROCESS_INFORMATION process{};
+        wchar_t command[] = L"cmd.exe /d /q /e:on /k @PROMPT $";
+        ready = CreateProcessW(nullptr, command, nullptr, nullptr, TRUE,
+                               CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+        if (ready) {
+            process_ = process.hProcess;
+            CloseHandle(process.hThread);
+        }
     }
-    with_lock([&] {
-        CmdData &cmd = cmd_queue_.front();
-        cmd.enqueue_callback();
-        cmd_queue_.pop();
-        is_working_ = false;
-    });
-}
-
-void CmdProcess::on_start_cmd() const {
-    if (!store_cmd_output_) {
-        std::cout << "[Cmd process] start" << std::endl;
+    close_handle(child_input);
+    close_handle(child_output);
+    if (!ready) {
+        OC_WARNING("Failed to start the hotfix command shell");
+        cleanup_process();
     }
-    is_working_ = true;
+    return ready;
 }
 
-void CmdProcess::read_output_thread() {
-    CHAR lpBuffer[1024];
-    DWORD nBytesRead;
-    string output;
-    while (true) {
-        if (!ReadFile(output_read_, lpBuffer, sizeof(lpBuffer) - 1,
-                      &nBytesRead, nullptr) ||
-            !nBytesRead) {
-            if (GetLastError() != ERROR_BROKEN_PIPE) {
-                std::cerr << "[Cmd process error] Redirect of compile output failed on read" << std::endl;
+bool CmdProcess::run(std::string_view command) {
+    if (!process_ && !initialise()) {
+        return false;
+    }
+
+    // Evaluate ERRORLEVEL on the next input line, after the command exits.
+    // IF ERRORLEVEL compares with >=, so the last branch catches negative exits.
+    // The blank line separates the marker from any unterminated tool output.
+    std::string input{command};
+    input += "\r\nif errorlevel 1 (echo. & echo _HORIZON_HOTFIX_RESULT_=1) "
+             "else if errorlevel 0 (echo. & echo _HORIZON_HOTFIX_RESULT_=0) "
+             "else (echo. & echo _HORIZON_HOTFIX_RESULT_=1)\r\n";
+    DWORD written{};
+    if (!WriteFile(input_write_, input.data(), static_cast<DWORD>(input.size()), &written, nullptr) ||
+        written != input.size()) {
+        OC_WARNING("Failed to write a hotfix command");
+        cleanup_process();
+        return false;
+    }
+
+    char buffer[4096];
+    std::string pending;
+    DWORD received{};
+    while (ReadFile(output_read_, buffer, sizeof(buffer), &received, nullptr) && received != 0) {
+        pending.append(buffer, received);
+        size_t start = 0;
+        for (auto end = pending.find('\n', start); end != std::string::npos;
+             end = pending.find('\n', start)) {
+            auto line = std::string_view{pending}.substr(start, end - start);
+            if (line.ends_with('\r')) {
+                line.remove_suffix(1);
             }
-            break;
+            if (line == success_marker || line == failure_marker) {
+                std::cout.flush();
+                return line == success_marker;
+            }
+            std::cout << line << '\n';
+            start = end + 1;
         }
-
-        lpBuffer[nBytesRead] = 0;// Add null termination
-        std::string buffer(lpBuffer);
-        size_t found = buffer.find(c_CompletionToken);
-        if (found != std::string::npos) {
-            buffer = buffer.substr(0, found);
-            on_finish_cmd();
-        }
-
-        found = buffer.find(c_StartToken);
-        if (found != std::string ::npos) {
-            buffer = buffer.substr(0, found);
-            on_start_cmd();
-        }
-
-        if (buffer.empty()) {
-            continue;
-        }
-        if (store_cmd_output_) {
-            cmd_output_ += buffer;
-            continue;
-        }
-        if (buffer.find(": error C") != std::string::npos ||
-            buffer.find(": fatal error ") != std::string::npos) {
-            cmd_queue_.front().success = false;
-            std::cerr << "[Cmd process Warning]: " << buffer << std::endl;
-        } else {
-            std::cout << "" << buffer;
-        }
+        pending.erase(0, start);
     }
+    OC_WARNING("Hotfix command shell closed before reporting its result");
+    cleanup_process();
+    return false;
 }
 
-void CmdProcess::initialise() {
-    //init compile process
-    STARTUPINFOW startupInfo;
-    ZeroMemory(&startupInfo, sizeof(startupInfo));
-    startupInfo.cb = sizeof(startupInfo);
-
-    // Set up the security attributes struct.
-    SECURITY_ATTRIBUTES sa;
-    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-    sa.lpSecurityDescriptor = nullptr;
-    sa.bInheritHandle = TRUE;
-
-    // Create the child output pipe.
-    //redirection of output
-    startupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    startupInfo.wShowWindow = SW_HIDE;
-    HANDLE hOutputReadTmp = nullptr, hOutputWrite = nullptr, hErrorWrite = nullptr;
-    auto exit_func = [&] {
-        if (hOutputReadTmp) {
-            CloseHandle(hOutputReadTmp);
-        }
-        if (hOutputWrite) {
-            CloseHandle(hOutputWrite);
-        }
-        if (hErrorWrite) {
-            CloseHandle(hErrorWrite);
-        }
-    };
-    if (!CreatePipe(&hOutputReadTmp, &hOutputWrite, &sa, 20 * 1024)) {
-        OC_WARNING("[RuntimeCompiler] Failed to create output redirection pipe\n");
-        exit_func();
-        return;
+void CmdProcess::cleanup_process() noexcept {
+    if (process_) {
+        TerminateProcess(process_, 0);
     }
-    startupInfo.hStdOutput = hOutputWrite;
-
-    // Create a duplicate of the output write handle for the std error
-    // write handle. This is necessary in case the child application
-    // closes one of its std output handles.
-    if (!DuplicateHandle(GetCurrentProcess(), hOutputWrite,
-                         GetCurrentProcess(), &hErrorWrite, 0,
-                         TRUE, DUPLICATE_SAME_ACCESS)) {
-        OC_WARNING("[RuntimeCompiler] Failed to duplicate error output redirection pipe\n");
-        exit_func();
-        return;
-    }
-    startupInfo.hStdError = hErrorWrite;
-
-    // Create new output read handle and the input write handles. Set
-    // the Properties to FALSE. Otherwise, the child inherits the
-    // properties and, as a result, non-closeable handles to the pipes
-    // are created.
-    if (startupInfo.hStdOutput) {
-        if (!DuplicateHandle(GetCurrentProcess(), hOutputReadTmp,
-                             GetCurrentProcess(),
-                             &output_read_,// Address of new handle.
-                             0, FALSE,     // Make it uninheritable.
-                             DUPLICATE_SAME_ACCESS)) {
-            OC_WARNING("[RuntimeCompiler] Failed to duplicate output read pipe\n");
-            exit_func();
-            return;
-        }
-        CloseHandle(hOutputReadTmp);
-        hOutputReadTmp = nullptr;
-    }
-
-    HANDLE hInputRead, hInputWriteTmp;
-    // Create a pipe for the child process's STDIN.
-    if (!CreatePipe(&hInputRead, &hInputWriteTmp, &sa, 4096)) {
-        OC_WARNING("[RuntimeCompiler] Failed to create input pipes\n");
-        exit_func();
-        return;
-    }
-    startupInfo.hStdInput = hInputRead;
-
-    // Create new output read handle and the input write handles. Set
-    // the Properties to FALSE. Otherwise, the child inherits the
-    // properties and, as a result, non-closeable handles to the pipes
-    // are created.
-    if (startupInfo.hStdOutput && !DuplicateHandle(GetCurrentProcess(), hInputWriteTmp,
-                                                   GetCurrentProcess(),
-                                                   &input_write_,// Address of new handle.
-                                                   0, FALSE,     // Make it uninheritable.
-                                                   DUPLICATE_SAME_ACCESS)) {
-        OC_WARNING("[RuntimeCompiler] Failed to duplicate input write pipe\n");
-        exit_func();
-        return;
-    }
-
-    const wchar_t *pCommandLine = L"cmd /q /K @PROMPT $";
-    //CreateProcessW won't accept a const pointer, so copy to an array
-    wchar_t pCmdLineNonConst[1024];
-    wcscpy_s(pCmdLineNonConst, pCommandLine);
-    CreateProcessW(
-        nullptr,         //__in_opt     LPCTSTR lpApplicationName,
-        pCmdLineNonConst,//__inout_opt  LPTSTR lpCommandLine,
-        nullptr,         //__in_opt     LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        nullptr,         //__in_opt     LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        TRUE,            //__in         BOOL bInheritHandles,
-        0,               //__in         DWORD dwCreationFlags,
-        nullptr,         //__in_opt     LPVOID lpEnvironment,
-        nullptr,         //__in_opt     LPCTSTR lpCurrentDirectory,
-        &startupInfo,    //__in         LPSTARTUPINFO lpStartupInfo,
-        &process_info_   //__out        LPPROCESS_INFORMATION lpProcessInformation
-    );
-
-    //launch threaded read.
-    output_thread_ = std::thread(&CmdProcess::read_output_thread, this);
-    output_thread_.detach();
-
-    exit_func();
-}
-
-void CmdProcess::write_input(std::string input, const callback_t &callback) const {
-    DWORD nBytesWritten;
-    input = add_flag(input);
-    auto length = static_cast<DWORD>(input.length());
-    with_lock([&] {
-        cmd_queue_.emplace(input, callback);
-    });
-    WriteFile(input_write_, input.c_str(), length, &nBytesWritten, nullptr);
-}
-
-void CmdProcess::cleanup_process() {
-    if (process_info_.hProcess) {
-        TerminateProcess(process_info_.hProcess, 0);
-        TerminateThread(process_info_.hThread, 0);
-        CloseHandle(process_info_.hThread);
-        ZeroMemory(&process_info_, sizeof(process_info_));
-        CloseHandle(input_write_);
-        input_write_ = nullptr;
-        CloseHandle(output_read_);
-        output_read_ = nullptr;
-    }
+    close_handle(process_);
+    close_handle(input_write_);
+    close_handle(output_read_);
 }
 
 CmdProcess::~CmdProcess() {
     cleanup_process();
 }
+
 }// namespace vision::inline hotfix

@@ -33,21 +33,24 @@ fs::path BuildSystem::directory() noexcept {
     return fs::current_path().parent_path();
 }
 
-void BuildSystem::compile(const Target &target) const noexcept {
+bool BuildSystem::compile(const Target &target) const noexcept {
     for (const fs::path &item : target.modified_files) {
         const CompileOptions &options = build_rules()->compile_options(item.string());
-        compiler()->compile(options);
+        if (!compiler()->compile(options)) {
+            return false;
+        }
     }
+    return true;
 }
 
-void BuildSystem::link(const Target &target, const CmdProcess::callback_t &callback) const noexcept {
+bool BuildSystem::link(const Target &target) const noexcept {
     fs::path fn(target.name);
     if (!fn.has_parent_path()) {
         fn = fs::path("bin") / fn;
     }
     const LinkOptions &options = build_rules()->link_options(fn.string());
     vector<string> extension_objs = build_rules()->obj_paths(ModuleInterface::src_path());
-    compiler()->link(options, target, FileTool::files_string(extension_objs), callback);
+    return compiler()->link(options, target, FileTool::files_string(extension_objs));
 }
 
 void BuildSystem::create_temp_path(const fs::path &path) noexcept {
@@ -57,25 +60,29 @@ void BuildSystem::create_temp_path(const fs::path &path) noexcept {
     fs::create_directory(path);
 }
 
-void BuildSystem::build_target(const Target &target,
-                               const CmdProcess::callback_t& callback) const noexcept {
-    create_temp_path(target.temp_directory());
-    compiler()->setup_environment();
-    compile(target);
-    link(target,callback);
-}
-
-void BuildSystem::build_targets(const vector<Target> &targets,
-                                const std::function<void(bool, Target)> &callback) const noexcept {
+bool BuildSystem::build_targets(const vector<Target> &targets) const noexcept {
+    if (!compiler()->setup_environment()) {
+        OC_WARNING("Hotfix toolchain setup failed");
+        return false;
+    }
     for (const auto &target : targets) {
         OC_INFO_FORMAT("target {} has been modified", target.name);
         for (const fs::path &fn : target.modified_files) {
             OC_INFO_FORMAT("file: {}", fn.string());
         }
-        build_target(target, [target, callback](const string &cmd, bool success) {
-            callback(success, target);
-        });
+        if (!compile(target)) {
+            OC_INFO_FORMAT("module {} build failure!", target.name);
+            return false;
+        }
     }
+    for (const auto &target : targets) {
+        create_temp_path(target.temp_directory());
+        if (!link(target)) {
+            OC_INFO_FORMAT("module {} build failure!", target.name);
+            return false;
+        }
+    }
+    return true;
 }
 
 }// namespace vision::inline hotfix

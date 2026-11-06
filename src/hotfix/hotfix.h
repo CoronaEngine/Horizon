@@ -12,6 +12,8 @@
 #include "file_tool.h"
 #include "hotfix/support.h"
 
+#include <future>
+
 namespace vision::inline hotfix {
 class HotfixSystem;
 
@@ -51,6 +53,7 @@ private:
     ocarina::vector<SP<const Observer>> defer_delete_;
     FileTool file_tool_;
     BuildSystem build_system_{};
+    std::shared_future<vector<Target>> pending_build_;
     queue<std::function<void()>> callbacks_;
     vector<Version> versions_;
     int cur_ver_{0};
@@ -93,10 +96,10 @@ public:
             static_map_.erase(key);
         }
     }
-    [[nodiscard]] bool is_working() const noexcept { return build_system_.is_working(); }
+    [[nodiscard]] bool is_working() const noexcept { return pending_build_.valid(); }
     void enqueue_function(std::function<void()> fn) noexcept;
     void on_build_finish(bool success, const Target &target) noexcept;
-    void on_build_all_finish(const vector<pair<bool, Target>> &modules) noexcept;
+    void on_build_all_finish(const vector<Target> &modules) noexcept;
     void load_module(Target target) noexcept;
     void update_objects(const vector<const IObjectConstructor *> &constructors) noexcept;
     bool check_and_build() noexcept;

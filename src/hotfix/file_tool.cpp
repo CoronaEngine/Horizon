@@ -7,6 +7,8 @@
 #include "rhi/context.h"
 #include "module_interface.h"
 
+#include <algorithm>
+
 namespace vision::inline hotfix {
 
 fs::path Target::temp_directory() const noexcept {
@@ -94,30 +96,35 @@ void FileTool::remove_inspected(const fs::path &path, bool recursive) noexcept {
 
 vector<Target> FileTool::get_modified_targets() noexcept {
     vector<Target> ret;
-
-    auto is_modified = [&](Target &target) {
-        bool modified = false;
-        target.modified_files.clear();
-        std::for_each(target.files.begin(), target.files.end(), [&](InspectedFile &file) {
-            FileTime write_time = modification_time(file.path);
-            if (write_time > file.write_time) {
+    for (auto &entry : target_map_) {
+        auto &target = entry.second;
+        Target candidate = target;
+        for (auto &file : candidate.files) {
+            const auto write_time = modification_time(file.path);
+            if (write_time != file.write_time) {
                 file.write_time = write_time;
-                target.modified_files.push_back(file.path);
-                modified = true;
+                candidate.modified_files.push_back(file.path);
             }
-        });
-        return modified;
-    };
-
-    for (auto &it : target_map_) {
-        const string_view &key = it.first;
-        Target &target = it.second;
-        if (is_modified(target)) {
-            target.increase_count();
-            ret.push_back(target);
         }
-        target.modified_files.clear();
+        if (!candidate.modified_files.empty()) {
+            target.increase_count();
+            candidate.increase_count();
+            ret.push_back(std::move(candidate));
+        }
     }
     return ret;
+}
+
+void FileTool::acknowledge_build(const Target &target) noexcept {
+    auto registered = target_map_.find(target.name);
+    if (registered == target_map_.end()) {
+        return;
+    }
+    for (auto &file : registered->second.files) {
+        const auto snapshot = std::ranges::find(target.files, file.path, &InspectedFile::path);
+        if (snapshot != target.files.end()) {
+            file.write_time = snapshot->write_time;
+        }
+    }
 }
 }// namespace vision::inline hotfix

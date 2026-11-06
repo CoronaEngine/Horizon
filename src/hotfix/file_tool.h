@@ -85,6 +85,7 @@ public:
     void add_inspected(const fs::path &path, string_view module_name, bool recursive = true);
     void remove_inspected(const fs::path &path, bool recursive = true) noexcept;
     [[nodiscard]] vector<Target> get_modified_targets() noexcept;
+    void acknowledge_build(const Target &target) noexcept;
     [[nodiscard]] const Target &get_target(string_view name) const noexcept {
         return target_map_.at(name);
     }

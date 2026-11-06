@@ -42,6 +42,14 @@ void HotfixSystem::enqueue_function(std::function<void()> fn) noexcept {
 }
 
 void HotfixSystem::execute_callback() {
+    if (pending_build_.valid() &&
+        pending_build_.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+        const auto &modules = pending_build_.get();
+        if (!modules.empty()) {
+            on_build_all_finish(modules);
+        }
+        pending_build_ = {};
+    }
     while (!callbacks_.empty()) {
         std::invoke(callbacks_.front());
         callbacks_.pop();
@@ -65,19 +73,15 @@ void HotfixSystem::on_build_finish(bool success, const Target &target) noexcept 
     load_module(target);
 }
 
-void HotfixSystem::on_build_all_finish(const vector<pair<bool, Target>> &modules) noexcept {
+void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     Version version;
-    version.targets = modules;
-
-    for (const auto &item : modules) {
-        Target module = item.second;
-        on_build_finish(item.first, item.second);
-        if (!item.first) {
-            continue;
-        }
+    for (const auto &module : modules) {
+        version.targets.emplace_back(true, module);
+        on_build_finish(true, module);
         ModuleInterface *module_interface = module.module_interface();
         auto tmp = module_interface->constructors(module.modified_files);
         version.constructors.insert(version.constructors.cend(), tmp.cbegin(), tmp.cend());
+        file_tool_.acknowledge_build(module);
     }
 
     for (auto &ver : versions_) {
@@ -120,20 +124,18 @@ void HotfixSystem::update_objects(const vector<const vision::IObjectConstructor 
 }
 
 bool HotfixSystem::check_and_build() noexcept {
+    if (is_working()) {
+        return false;
+    }
     auto modules = file_tool_.get_modified_targets();
     if (modules.empty()) {
         return false;
     }
-    ThreadPool::instance().async([&, modules]{
-        static vector<pair<bool, Target>> pairs;
-        pairs.clear();
-        build_system_.build_targets(modules, [this, modules](bool success, const Target &target) {
-            //        this->on_build_finish(success, target);
-            pairs.emplace_back(success, target);
-            if (target.name == modules.back().name) {
-                on_build_all_finish(pairs);
-            }
-        });
+    pending_build_ = ThreadPool::instance().async([this, modules = std::move(modules)]() mutable -> vector<Target> {
+        if (!build_system_.build_targets(modules)) {
+            return {};
+        }
+        return std::move(modules);
     });
     return true;
 }
@@ -153,6 +155,10 @@ void HotfixSystem::destroy_instance() noexcept {
     s_mgr = nullptr;
 }
 
-HotfixSystem::~HotfixSystem() = default;
+HotfixSystem::~HotfixSystem() {
+    if (pending_build_.valid()) {
+        pending_build_.wait();
+    }
+}
 
 }// namespace vision::inline hotfix
