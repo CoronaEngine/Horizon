@@ -186,10 +186,13 @@ class WorkflowTests(unittest.TestCase):
             (root / "recipe/conanfile.py").touch()
             results = context.Queue()
             for stage, expected in (("failure", "Simulated Conan failure"), ("", None)):
+                # Keep the semaphores alive while the spawned child opens them.
+                entered = context.Event()
+                release = context.Event()
+                ready = context.Event()
                 process = context.Process(
                     target=_concurrent_install_worker,
-                    args=(root, cache, "core", stage, context.Event(), context.Event(),
-                          context.Event(), results),
+                    args=(root, cache, "core", stage, entered, release, ready, results),
                 )
                 process.start()
                 process.join(10)
