@@ -241,6 +241,9 @@ enum struct CallOp : uint32_t {
     WARP_FIRST_ACTIVE_LANE,
     WARP_IS_FIRST_ACTIVE_LANE,
 
+    F32TOF16,
+    F16TOF32,
+
     COUNT
 };
 

@@ -143,6 +143,8 @@ void AstToCudaSource::visit(const CallExpr *expr) noexcept {
 
         case CallOp::FLOAT2HALF: OC_GEN_FUNC_NAME(float2half); break;
         case CallOp::HALF2FLOAT: OC_GEN_FUNC_NAME(half2float); break;
+        case CallOp::F32TOF16: OC_GEN_FUNC_NAME(f32tof16); break;
+        case CallOp::F16TOF32: OC_GEN_FUNC_NAME(f16tof32); break;
 
         case CallOp::MAKE_HALF2X2: OC_GEN_FUNC_NAME(make_half2x2); break;
         case CallOp::MAKE_HALF2X3: OC_GEN_FUNC_NAME(make_half2x3); break;
