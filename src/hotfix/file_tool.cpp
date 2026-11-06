@@ -20,13 +20,19 @@ fs::path Target::target_path(std::string extension) const noexcept {
 }
 
 const DynamicModule *Target::obtain_cur_module() const noexcept {
+    if (!module_path.empty()) {
+        return RHIContext::instance().obtain_module_at(module_path);
+    }
     return RHIContext::instance().obtain_module(dll_path().string());
 }
 
 ModuleInterface *Target::module_interface() const noexcept {
     const DynamicModule *module = obtain_cur_module();
+    if (!module || !module->handle()) {
+        return nullptr;
+    }
     auto creator = module->function<ModuleInterface::creator_t *>("module_interface");
-    return creator();
+    return creator ? creator() : nullptr;
 }
 
 void Version::merge_constructor(const vision::IObjectConstructor *input) noexcept {
@@ -63,7 +69,7 @@ void FileTool::add_inspected(const fs::path &path, string_view module_name, bool
     if (!is_directory) {
         InspectedFile inspected(path);
         add_file(target, inspected);
-        target_map_.insert(std::make_pair(module_name, target));
+        target_map_.emplace(module_name, std::move(target));
         return;
     }
 
@@ -83,7 +89,7 @@ void FileTool::add_inspected(const fs::path &path, string_view module_name, bool
             func(entry);
         }
     }
-    target_map_.insert(std::make_pair(module_name, target));
+    target_map_.emplace(module_name, std::move(target));
 }
 
 void FileTool::remove_inspected(const fs::path &path, bool recursive) noexcept {

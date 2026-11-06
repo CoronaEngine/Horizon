@@ -26,6 +26,11 @@ const IObjectConstructor *ModuleInterface::constructor(const std::string &cls_na
     return constructor_map_.at(cls_name).get();
 }
 
+const IObjectConstructor *ModuleInterface::find_constructor(const string &cls_name) const noexcept {
+    const auto entry = constructor_map_.find(cls_name);
+    return entry == constructor_map_.end() ? nullptr : entry->second.get();
+}
+
 void ModuleInterface::update(SP<const vision::IObjectConstructor> constructor) noexcept {
     string key(constructor->class_name());
     if (constructor_map_.contains(key)) {

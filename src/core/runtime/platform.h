@@ -9,6 +9,7 @@
 
 namespace ocarina {
 [[nodiscard]] OC_CORE_API void *dynamic_module_load(const fs::path &path) noexcept;
+[[nodiscard]] OC_CORE_API void *dynamic_module_try_load(const fs::path &path) noexcept;
 OC_CORE_API void dynamic_module_destroy(void *handle) noexcept;
 [[nodiscard]] OC_CORE_API void *dynamic_module_find_symbol(void *handle,
                                                            ocarina::string_view name) noexcept;

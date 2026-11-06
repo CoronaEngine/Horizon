@@ -58,7 +58,13 @@ void HotfixSystem::execute_callback() {
 
 void HotfixSystem::load_module(vision::Target target) noexcept {
     ModuleInterface *module_interface = target.module_interface();
-    vector<const IObjectConstructor *> constructors = module_interface->constructors(target.modified_files);
+    if (!module_interface) {
+        OC_WARNING_FORMAT("Hotfix module {} could not be loaded", target.name);
+        return;
+    }
+    const auto constructors = target.module_path.empty()
+                                  ? module_interface->constructors(target.modified_files)
+                                  : module_interface->constructors();
     update_objects(constructors);
 }
 
@@ -76,21 +82,42 @@ void HotfixSystem::on_build_finish(bool success, const Target &target) noexcept 
 void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     Version version;
     for (const auto &module : modules) {
-        version.targets.emplace_back(true, module);
-        on_build_finish(true, module);
         ModuleInterface *module_interface = module.module_interface();
-        auto tmp = module_interface->constructors(module.modified_files);
-        version.constructors.insert(version.constructors.cend(), tmp.cbegin(), tmp.cend());
-        file_tool_.acknowledge_build(module);
-    }
-
-    for (auto &ver : versions_) {
-        for (const IObjectConstructor *item : version.constructors) {
-            ver.merge_constructor(ModuleInterface::instance().constructor(item->class_name().data()));
+        if (!module_interface) {
+            OC_WARNING_FORMAT("Hotfix module {} could not be loaded", module.name);
+            return;
         }
+        const auto constructors = module.module_path.empty()
+                                      ? module_interface->constructors(module.modified_files)
+                                      : module_interface->constructors();
+        if (!module.module_path.empty() && constructors.empty()) {
+            OC_WARNING_FORMAT("Hotfix module {} has no object constructors", module.name);
+            return;
+        }
+        version.targets.emplace_back(true, module);
+        version.constructors.insert(version.constructors.end(), constructors.begin(), constructors.end());
     }
 
-    versions_.push_back(version);
+    // Resolve the initial constructors before changing objects or history.
+    vector<const IObjectConstructor *> initial_constructors;
+    for (const auto *constructor : version.constructors) {
+        const auto *initial = ModuleInterface::instance().find_constructor(string{constructor->class_name()});
+        if (!initial) {
+            OC_WARNING_FORMAT("Hotfix object {} has no initial constructor", constructor->class_name());
+            return;
+        }
+        initial_constructors.push_back(initial);
+    }
+    for (auto &ver : versions_) {
+        ver.merge_constructors(initial_constructors);
+    }
+
+    update_objects(version.constructors);
+    for (const auto &module : modules) {
+        file_tool_.acknowledge_build(module);
+        OC_INFO_FORMAT("module {} build success!", module.name);
+    }
+    versions_.push_back(std::move(version));
     cur_ver_ = versions_.size() - 1;
 }
 
@@ -121,6 +148,14 @@ void HotfixSystem::update_objects(const vector<const vision::IObjectConstructor 
         observer->notified(constructors);
     }
     defer_delete_.clear();
+}
+
+bool HotfixSystem::set_build_backend(std::shared_ptr<::horizon::hotfix::IBuildBackend> backend,
+                                     fs::path build_directory, string configuration) {
+    if (is_working()) {
+        return false;
+    }
+    return build_system_.set_build_backend(std::move(backend), std::move(build_directory), std::move(configuration));
 }
 
 bool HotfixSystem::check_and_build() noexcept {

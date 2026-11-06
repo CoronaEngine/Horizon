@@ -13,31 +13,46 @@ namespace ocarina {
 
 namespace detail {
 [[nodiscard]] ocarina::string win32_last_error_message() {
-    void *buffer = nullptr;
+    char *buffer = nullptr;
     auto err_code = GetLastError();
-    FormatMessage(
+    FormatMessageA(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
         nullptr,
         err_code,
         MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        (LPTSTR)&buffer,
+        reinterpret_cast<LPSTR>(&buffer),
         0, nullptr);
-    ocarina::string err_msg{fmt::format("{} (code = 0x{:x}).", static_cast<char *>(buffer), err_code)};
+    ocarina::string err_msg{fmt::format("{} (code = 0x{:x}).", buffer ? buffer : "Win32 error", err_code)};
     LocalFree(buffer);
     return err_msg;
 }
 }// namespace detail
 
-void *dynamic_module_load(const fs::path &path) noexcept {
-    auto path_string = path.string();
-    TIMER_TAG(dynamic_module_load, "load module: "+path.string())
-    auto module = LoadLibraryA(path_string.c_str());
+namespace {
+
+void *load_dynamic_module(const fs::path &path, bool fatal) noexcept {
+    const auto utf8 = path.u8string();
+    const string path_string{reinterpret_cast<const char *>(utf8.data()), utf8.size()};
+    TIMER_TAG(dynamic_module_load, "load module: " + path_string)
+    auto module = LoadLibraryW(path.c_str());
     if (module == nullptr) [[unlikely]] {
-        OC_ERROR_FORMAT(
-            "Failed to load dynamic module '{}', reason: {}.",
-            path_string, detail::win32_last_error_message());
+        const auto reason = detail::win32_last_error_message();
+        if (fatal) {
+            OC_ERROR_FORMAT("Failed to load dynamic module '{}', reason: {}.", path_string, reason);
+        }
+        OC_WARNING_FORMAT("Failed to load dynamic module '{}', reason: {}.", path_string, reason);
     }
     return module;
+}
+
+}// namespace
+
+void *dynamic_module_load(const fs::path &path) noexcept {
+    return load_dynamic_module(path, true);
+}
+
+void *dynamic_module_try_load(const fs::path &path) noexcept {
+    return load_dynamic_module(path, false);
 }
 
 void dynamic_module_destroy(void *handle) noexcept {

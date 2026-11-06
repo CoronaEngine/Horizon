@@ -5,20 +5,31 @@
 #include "compiler.h"
 #include "build_rules.h"
 #include "hotfix/support.h"
+#include "horizon/hotfix/build_backend.h"
+
+#include <memory>
 
 namespace vision::inline hotfix {
 class BuildSystem {
 private:
     mutable BuildRules::Handle build_rules_{BuildRules::Handle(nullptr, nullptr)};
     mutable Compiler::Handle compiler_{Compiler::Handle{nullptr, nullptr}};
+    std::shared_ptr<::horizon::hotfix::IBuildBackend> backend_;
+    fs::path backend_directory_;
+    string backend_configuration_;
+    fs::path staging_session_;
+    size_t staged_generation_{};
     [[nodiscard]] bool compile(const Target &target) const noexcept;
     [[nodiscard]] bool link(const Target &target) const noexcept;
+    [[nodiscard]] bool build_with_backend(vector<Target> &targets);
 
 public:
     BuildSystem();
     void clear() noexcept;
     [[nodiscard]] static fs::path directory() noexcept;
-    [[nodiscard]] bool build_targets(const vector<Target> &targets) const noexcept;
+    [[nodiscard]] bool set_build_backend(std::shared_ptr<::horizon::hotfix::IBuildBackend> backend,
+                                         fs::path build_directory, string configuration);
+    [[nodiscard]] bool build_targets(vector<Target> &targets) noexcept;
     [[nodiscard]] BuildRules::Handle& build_rules() const noexcept;
     [[nodiscard]] Compiler::Handle& compiler() const noexcept;
     static void create_temp_path(const fs::path &path) noexcept;

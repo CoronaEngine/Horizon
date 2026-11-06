@@ -76,6 +76,9 @@ public:
         file_tool_.remove_inspected(path);
     }
     void execute_callback();
+    // Configure on the callback thread. Watched names are backend target names.
+    [[nodiscard]] bool set_build_backend(std::shared_ptr<::horizon::hotfix::IBuildBackend> backend,
+                                         fs::path build_directory, string configuration);
 
     template<typename T>
     void register_static_var(const string &key, T &val) noexcept {

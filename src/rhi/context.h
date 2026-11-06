@@ -44,6 +44,7 @@ public:
     void clear_cache() const noexcept;
     [[nodiscard]] bool is_exist_cache(const string &fn) const noexcept;
     const DynamicModule *obtain_module(const string &module_name) noexcept;
+    const DynamicModule *obtain_module_at(const fs::path &absolute_path) noexcept;
     bool unload_module(const string &module_name) noexcept;
     void unload_module(void *handle) noexcept;
     [[nodiscard]] Device create_device() noexcept;

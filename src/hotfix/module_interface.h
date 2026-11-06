@@ -30,6 +30,7 @@ public:
     [[nodiscard]] static ModuleInterface &instance() noexcept;
     void add_constructor(SP<const IObjectConstructor> constructor) noexcept;
     [[nodiscard]] const IObjectConstructor *constructor(const string &cls_name) const noexcept;
+    [[nodiscard]] const IObjectConstructor *find_constructor(const string &cls_name) const noexcept;
     void update(SP<const IObjectConstructor> constructor) noexcept;
     void update_constructors(const ModuleInterface *other) noexcept;
     [[nodiscard]] vector<const IObjectConstructor *> constructors() const noexcept;

@@ -19,8 +19,8 @@ struct ProcessRequest {
 };
 
 struct ProcessResult {
-    // Present only after normal process exit; absent before execution or when
-    // launch/wait fails or the process terminates without a normal exit code.
+    // Present when the OS reports an exit code after termination. Absent before
+    // execution, after launch/wait failure, or when no exit code is available.
     std::optional<int> exit_code;
     std::string stdout_text;
     std::string stderr_text;

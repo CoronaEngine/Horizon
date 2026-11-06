@@ -40,6 +40,7 @@ private:
 
 public:
     string name;
+    fs::path module_path; // Versioned copy supplied by a build backend.
     vector<InspectedFile> files;
     vector<fs::path> modified_files;
     [[nodiscard]] fs::path temp_directory() const noexcept;
@@ -74,7 +75,7 @@ struct Version {
 class FileTool {
 public:
     /// key: name, value : Target
-    using map_type = map<string_view, Target>;
+    using map_type = map<string, Target, std::less<>>;
 
 private:
     map_type target_map_;
@@ -87,7 +88,7 @@ public:
     [[nodiscard]] vector<Target> get_modified_targets() noexcept;
     void acknowledge_build(const Target &target) noexcept;
     [[nodiscard]] const Target &get_target(string_view name) const noexcept {
-        return target_map_.at(name);
+        return target_map_.at(string{name});
     }
     [[nodiscard]] bool has_target(string_view target_name) noexcept {
         return target_map_.contains(target_name);
