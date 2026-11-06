@@ -3,7 +3,7 @@
 公共接口使用 `horizon::hotfix` 命名空间，依赖 C++20 标准库。
 Windows、POSIX 进程执行器和 CMake 构建后端已实现对应接口。
 现有 `vision::hotfix` 的 MSVC 构建仍使用自己的常驻命令会话。
-Windows 宿主可以显式选择 CMake 后端运行热更新。
+Windows、Linux 和 macOS 宿主可以选择 CMake 后端运行热更新。
 
 ## 接口与职责
 
@@ -86,20 +86,23 @@ horizon_generate_hotfix_manifest(my_hotfix_module)
 
 ### 接入运行时
 
-宿主链接 `horizon-hotfix`、`horizon-hotfix-build-cmake` 和
-`horizon-hotfix-process-windows`。创建执行器和共享的 `CMakeBuildBackend`，调用
+宿主链接 `horizon-hotfix`、`horizon-hotfix-build-cmake` 和对应平台的进程执行器。
+macOS 和 Linux 使用 `horizon-hotfix-process-posix`，Windows 使用 `horizon-hotfix-process-windows`。
+创建执行器和共享的 `CMakeBuildBackend`，调用
 `HotfixSystem::set_build_backend(backend, build_directory, configuration)` 选择后端。
 在主线程配置，调用返回 `true` 后使用 `register_target` 登记要监控的源文件及其 CMake
 目标名。执行器必须存活到后台构建结束并销毁 `HotfixSystem`。
 
-每个可更新的 `MODULE` 编译 `src/hotfix/module_interface.cpp`，并用 `VS_REGISTER_HOTFIX`
-注册对象工厂。宿主注册初始对象的工厂，供首次加载和回退使用。模块和宿主使用相同的
-工具链、配置及兼容的对象接口。
+用 `horizon_register_hotfix_module(my_hotfix_module)` 注册可更新的 CMake `MODULE`。
+该函数为目标编译模块入口、隔离模块内的工厂注册表并生成产物清单。
+模块源码用 `VS_REGISTER_HOTFIX` 注册对象工厂。宿主管理观察者和被监控的目标，
+并注册初始对象的工厂，供首次加载和回退使用。模块和宿主使用相同的工具链、配置及兼容的对象接口。
+Core 构建提供 CMake 热更新运行时。`HORIZON_BUILD_VISION_HOTFIX` 用于构建原有 Windows 插件和示例。
 
 `check_and_build()` 负责触发后台构建。整批构建成功后，模块按原文件名复制到
 构建目录下的 `hotfix-staged/<会话>/generation_<序号>/`。主线程调用
 `execute_callback()` 验证模块和工厂后应用更新。加载使用副本的绝对路径，已加载的
-版本由运行时保留以支持回退。构建、复制或模块验证失败时保留当前版本和版本历史，
+版本保留到进程退出，以支持回退以及仍引用旧版本代码的对象。构建、复制或模块验证失败时保留当前版本和版本历史，
 下一次构建仍会处理未应用的源码修改。
 
 ## 验证
@@ -115,14 +118,15 @@ ctest --test-dir build/conan/core/debug -C Debug -R horizon.hotfix --output-on-f
 stderr 警告、构建失败携带旧路径、成功但缺失模块、可选附属产物和平台无关命名。
 Windows、Linux 和 macOS 测试另外启动真实子进程，验证参数、环境覆盖、工作目录、两路输出和退出码。
 Windows Ninja 构建还运行一个独立 MODULE 项目，验证初次构建、增量重建、编译失败和产物路径。
+三端 Core CI 都运行 `horizon.hotfix.runtime`。用例用真实 CMake 模块验证两次连续更新和对象状态恢复、
+回退到已加载版本、编译失败时保留当前对象及版本历史，以及失败后重新切到之前的最新版本。
 
 ## 后续迁移与验收
 
 - [x] Windows 进程执行器及真实子进程测试。
 - [x] POSIX 进程执行器及 Linux/macOS 真实子进程测试。
 - [x] CMake 后端及小模块构建、增量、失败和产物测试。
-- [x] Windows 运行时接入 CMake 后端及版本副本，验证连续更新、版本回退和编译失败保护。
-- [ ] POSIX 模块加载与生命周期：符号隔离及安全卸载。
+- [x] Windows、Linux 和 macOS 运行时接入 CMake 后端及版本副本，验证连续更新、版本回退和编译失败保护。
 
 原有 MSVC 路径使用常驻 cmd 会话保存环境。接入新的逐进程执行器时，必须显式传递
 完整继承环境及覆盖值，不能把一次 `vcvarsall.bat` 调用当成后续进程的永久环境初始化。

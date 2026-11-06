@@ -6,6 +6,7 @@
 //#define XXH_STATIC_LINKING_ONLY   /* access advanced declarations */
 //#define XXH_INLINE_ALL   /* access definitions */
 #include "xxhash.h"
+#include "core/rtti.h"
 #include "core/stl.h"
 #include "math/basic_types.h"
 #include "core/concepts.h"
@@ -125,13 +126,6 @@ requires concepts::iterable<T>
     }
     return ret;
 }
-
-class RTTI {
-public:
-    [[nodiscard]] virtual const char *class_name() const noexcept {
-        return typeid(*this).name();
-    }
-};
 
 class Hashable : public RTTI {
 private:

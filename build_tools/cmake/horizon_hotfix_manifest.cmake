@@ -30,3 +30,17 @@ function(horizon_generate_hotfix_manifest target)
         CONTENT "$<TARGET_FILE:${target}>\n"
         NEWLINE_STYLE LF)
 endfunction()
+
+function(horizon_register_hotfix_module target)
+    horizon_generate_hotfix_manifest("${target}")
+    target_sources("${target}" PRIVATE
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../../src/hotfix/module_interface.cpp")
+    if(HORIZON_BUILD_VISION_HOTFIX)
+        target_link_libraries("${target}" PRIVATE horizon-hotfix)
+    else()
+        target_link_libraries("${target}" PRIVATE horizon-hotfix-runtime-api)
+    endif()
+    target_compile_definitions("${target}" PRIVATE HORIZON_HOTFIX_MODULE=1)
+    set_target_properties("${target}" PROPERTIES
+        CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+endfunction()

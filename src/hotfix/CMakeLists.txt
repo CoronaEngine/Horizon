@@ -1,12 +1,31 @@
-file(GLOB HEADER_FILES *.h*)
-file(GLOB SOURCE_FILES *.c*)
+set(hotfix_runtime_sources
+    build_system.cpp
+    file_tool.cpp
+    hotfix.cpp
+    module_interface.cpp
+    staged_module.cpp)
 
-add_library(horizon-hotfix SHARED ${SOURCE_FILES})
-target_include_directories(horizon-hotfix PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(horizon-hotfix PUBLIC
-        ocarina
-        horizon-hotfix-api)
+add_library(horizon-hotfix-runtime-api INTERFACE)
+target_include_directories(horizon-hotfix-runtime-api INTERFACE "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(horizon-hotfix-runtime-api INTERFACE horizon-hotfix-api horizon::fmt)
+
+if(HORIZON_BUILD_VISION_HOTFIX)
+    add_library(horizon-hotfix SHARED ${hotfix_runtime_sources}
+        build_rules.cpp cmd_process.cpp compiler.cpp)
+    target_compile_definitions(horizon-hotfix PUBLIC HORIZON_HOTFIX_LEGACY_BUILD=1)
+    target_link_libraries(horizon-hotfix PUBLIC ocarina)
+else()
+    add_library(horizon-hotfix STATIC ${hotfix_runtime_sources})
+endif()
+
+find_package(Threads REQUIRED)
+target_link_libraries(horizon-hotfix
+    PUBLIC horizon-hotfix-runtime-api
+    PRIVATE horizon-logging Threads::Threads ${CMAKE_DL_LIBS})
+
+if(NOT HORIZON_BUILD_VISION_HOTFIX)
+    return()
+endif()
 
 if (MSVC)
     set(CPP_COMPILE_TYPE "msvc")

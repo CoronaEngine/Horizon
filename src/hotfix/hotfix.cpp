@@ -3,12 +3,12 @@
 //
 
 #include "hotfix.h"
-#include "core/util/logging.h"
-#include "core/concurrency/thread_pool.h"
+#include "module_interface.h"
+#include "horizon/core/logging.h"
+
+#include <algorithm>
 
 namespace vision ::inline hotfix {
-using namespace ocarina;
-
 HotfixSystem *HotfixSystem::s_mgr = nullptr;
 
 Observer::Observer() {
@@ -34,11 +34,11 @@ void HotfixSystem::deregister_observer(vision::Observer *observer) noexcept {
 
 void HotfixSystem::defer_delete(SP<const Observer> observer) noexcept {
     const_cast<Observer *>(observer.get())->invalidation();
-    defer_delete_.push_back(ocarina::move(observer));
+    defer_delete_.push_back(std::move(observer));
 }
 
 void HotfixSystem::enqueue_function(std::function<void()> fn) noexcept {
-    callbacks_.push(ocarina::move(fn));
+    callbacks_.push(std::move(fn));
 }
 
 void HotfixSystem::execute_callback() {
@@ -59,7 +59,7 @@ void HotfixSystem::execute_callback() {
 void HotfixSystem::load_module(vision::Target target) noexcept {
     ModuleInterface *module_interface = target.module_interface();
     if (!module_interface) {
-        OC_WARNING_FORMAT("Hotfix module {} could not be loaded", target.name);
+        CFW_LOG_WARNING("Hotfix module {} could not be loaded", target.name);
         return;
     }
     const auto constructors = target.module_path.empty()
@@ -71,10 +71,10 @@ void HotfixSystem::load_module(vision::Target target) noexcept {
 void HotfixSystem::on_build_finish(bool success, const Target &target) noexcept {
 
     if (!success) {
-        OC_INFO_FORMAT("module {} build failure!", target.name);
+        CFW_LOG_INFO("module {} build failure!", target.name);
         return;
     }
-    OC_INFO_FORMAT("module {} build success!", target.name);
+    CFW_LOG_INFO("module {} build success!", target.name);
 
     load_module(target);
 }
@@ -84,14 +84,14 @@ void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     for (const auto &module : modules) {
         ModuleInterface *module_interface = module.module_interface();
         if (!module_interface) {
-            OC_WARNING_FORMAT("Hotfix module {} could not be loaded", module.name);
+            CFW_LOG_WARNING("Hotfix module {} could not be loaded", module.name);
             return;
         }
         const auto constructors = module.module_path.empty()
                                       ? module_interface->constructors(module.modified_files)
                                       : module_interface->constructors();
         if (!module.module_path.empty() && constructors.empty()) {
-            OC_WARNING_FORMAT("Hotfix module {} has no object constructors", module.name);
+            CFW_LOG_WARNING("Hotfix module {} has no object constructors", module.name);
             return;
         }
         version.targets.emplace_back(true, module);
@@ -103,7 +103,7 @@ void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     for (const auto *constructor : version.constructors) {
         const auto *initial = ModuleInterface::instance().find_constructor(string{constructor->class_name()});
         if (!initial) {
-            OC_WARNING_FORMAT("Hotfix object {} has no initial constructor", constructor->class_name());
+            CFW_LOG_WARNING("Hotfix object {} has no initial constructor", constructor->class_name());
             return;
         }
         initial_constructors.push_back(initial);
@@ -115,7 +115,7 @@ void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     update_objects(version.constructors);
     for (const auto &module : modules) {
         file_tool_.acknowledge_build(module);
-        OC_INFO_FORMAT("module {} build success!", module.name);
+        CFW_LOG_INFO("module {} build success!", module.name);
     }
     versions_.push_back(std::move(version));
     cur_ver_ = versions_.size() - 1;
@@ -130,12 +130,12 @@ void HotfixSystem::on_version_change() noexcept {
 }
 
 void HotfixSystem::previous_version() noexcept {
-    cur_ver_ = ocarina::clamp(cur_ver_ - 1, 0, int(versions_.size() - 1));
+    cur_ver_ = std::clamp(cur_ver_ - 1, 0, int(versions_.size() - 1));
     on_version_change();
 }
 
 void HotfixSystem::next_version() noexcept {
-    cur_ver_ = ocarina::clamp(cur_ver_ + 1, 0, int(versions_.size() - 1));
+    cur_ver_ = std::clamp(cur_ver_ + 1, 0, int(versions_.size() - 1));
     on_version_change();
 }
 
@@ -166,12 +166,17 @@ bool HotfixSystem::check_and_build() noexcept {
     if (modules.empty()) {
         return false;
     }
-    pending_build_ = ThreadPool::instance().async([this, modules = std::move(modules)]() mutable -> vector<Target> {
-        if (!build_system_.build_targets(modules)) {
-            return {};
-        }
-        return std::move(modules);
-    });
+    try {
+        pending_build_ = std::async(std::launch::async, [this, modules = std::move(modules)]() mutable -> vector<Target> {
+            if (!build_system_.build_targets(modules)) {
+                return {};
+            }
+            return std::move(modules);
+        }).share();
+    } catch (const std::exception &error) {
+        CFW_LOG_WARNING("Hotfix could not start a background build: {}", error.what());
+        return false;
+    }
     return true;
 }
 

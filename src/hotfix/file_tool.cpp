@@ -3,9 +3,8 @@
 //
 
 #include "file_tool.h"
-#include <windows.h>
-#include "rhi/context.h"
 #include "module_interface.h"
+#include "staged_module.h"
 
 #include <algorithm>
 
@@ -19,20 +18,29 @@ fs::path Target::target_path(std::string extension) const noexcept {
     return temp_directory() / (target_stem().string() + std::move(extension));
 }
 
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
 const DynamicModule *Target::obtain_cur_module() const noexcept {
     if (!module_path.empty()) {
         return RHIContext::instance().obtain_module_at(module_path);
     }
     return RHIContext::instance().obtain_module(dll_path().string());
 }
+#endif
 
 ModuleInterface *Target::module_interface() const noexcept {
-    const DynamicModule *module = obtain_cur_module();
+    if (!module_path.empty()) {
+        return detail::load_staged_module(module_path);
+    }
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
+    const auto *module = obtain_cur_module();
     if (!module || !module->handle()) {
         return nullptr;
     }
     auto creator = module->function<ModuleInterface::creator_t *>("module_interface");
     return creator ? creator() : nullptr;
+#else
+    return nullptr;
+#endif
 }
 
 void Version::merge_constructor(const vision::IObjectConstructor *input) noexcept {

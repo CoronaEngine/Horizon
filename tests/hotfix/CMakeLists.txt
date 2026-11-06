@@ -41,6 +41,45 @@ if(WIN32)
         TIMEOUT 30)
 endif()
 
+if(WIN32 OR UNIX)
+    set(fixture_dir "${CMAKE_CURRENT_SOURCE_DIR}/runtime_fixture")
+    set(fixture_source "${CMAKE_CURRENT_BINARY_DIR}/runtime fixture/fixture_object.cpp")
+    # A nested build can regenerate CMake after the test edits this source.
+    if(NOT EXISTS "${fixture_source}")
+        configure_file("${fixture_dir}/fixture_object.cpp" "${fixture_source}" COPYONLY)
+    endif()
+    add_library(horizon-hotfix-runtime-fixture MODULE EXCLUDE_FROM_ALL "${fixture_source}")
+    target_include_directories(horizon-hotfix-runtime-fixture PRIVATE "${fixture_dir}")
+    include(horizon_hotfix_manifest)
+    horizon_register_hotfix_module(horizon-hotfix-runtime-fixture)
+
+    add_executable(horizon-test-hotfix-runtime test_hotfix_runtime.cpp "${fixture_dir}/fixture_object.cpp")
+    target_link_libraries(horizon-test-hotfix-runtime PRIVATE horizon-hotfix horizon-hotfix-build-cmake)
+    if(WIN32)
+        target_link_libraries(horizon-test-hotfix-runtime PRIVATE horizon-hotfix-process-windows)
+    else()
+        target_link_libraries(horizon-test-hotfix-runtime PRIVATE horizon-hotfix-process-posix)
+    endif()
+    if(MINGW)
+        target_link_options(horizon-test-hotfix-runtime PRIVATE -municode)
+    endif()
+    add_dependencies(horizon-tests horizon-test-hotfix-runtime)
+
+    set(runtime_test_command "$<TARGET_FILE:horizon-test-hotfix-runtime>"
+        "${CMAKE_COMMAND}" "${CMAKE_BINARY_DIR}" "$<CONFIG>"
+        "${fixture_source}" "${fixture_dir}/fixture_object.cpp")
+    set(build_environment "${CMAKE_BINARY_DIR}/CMakeFiles/horizon-build-environment.json")
+    if(WIN32 AND HORIZON_DEV_PYTHON AND EXISTS "${build_environment}")
+        add_test(NAME horizon.hotfix.runtime
+            COMMAND "${HORIZON_DEV_PYTHON}" "${HORIZON_BUILD_TOOLS_DIR}/scripts/run_build_tool.py"
+                "${build_environment}" "" ${runtime_test_command})
+    else()
+        add_test(NAME horizon.hotfix.runtime COMMAND ${runtime_test_command})
+    endif()
+    set_tests_properties(horizon.hotfix.runtime PROPERTIES
+        LABELS "hotfix;integration" RESOURCE_LOCK horizon-hotfix-runtime-fixture TIMEOUT 180)
+endif()
+
 if(UNIX)
     find_package(Threads REQUIRED)
     add_executable(horizon-test-hotfix-posix-process-child posix_process_child.cpp)

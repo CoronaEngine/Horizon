@@ -4,7 +4,10 @@
 
 #pragma once
 
-#include "core/stl.h"
+#include "core/util/macro_map.h"
+#include "support.h"
+
+#include <type_traits>
 
 namespace vision ::inline hotfix {
 template<typename T>
@@ -17,8 +20,8 @@ template<typename T>
     namespace {                                                                   \
     struct FileRegistrar {                                                        \
         FileRegistrar() {                                                         \
-            auto key = ocarina::parent_path(path, level);                         \
-            vision::HotfixSystem::instance().register_target(key, ##__VA_ARGS__); \
+            auto key = ::vision::parent_path(path, level);                         \
+            ::vision::HotfixSystem::instance().register_target(key, ##__VA_ARGS__); \
         }                                                                         \
     };                                                                            \
     static FileRegistrar registrar;                                               \
@@ -35,7 +38,7 @@ template<typename T>
     struct Class##ConstructorRegistrar {                                               \
         Class##ConstructorRegistrar() {                                                \
             using namespace vision::hotfix;                                            \
-            auto value = ocarina::make_unique<ObjectConstructor<NS::Class>>(__FILE__); \
+            auto value = std::make_unique<ObjectConstructor<NS::Class>>(__FILE__);     \
             ModuleInterface::instance().add_constructor(std::move(value));             \
         }                                                                              \
     };                                                                                 \

@@ -4,16 +4,16 @@
 
 #pragma once
 
-#include "core/stl.h"
-#include "core/util/string_util.h"
-#include "core/runtime/dynamic_module.h"
 #include "hotfix/support.h"
+
+#include <chrono>
+#include <stdexcept>
 
 namespace vision::inline hotfix {
 static constexpr const char *debug_dir = "hotfix_debug";
 
 namespace {
-using FileTime = std::chrono::time_point<std::chrono::file_clock>;
+using FileTime = fs::file_time_type;
 inline FileTime modification_time(const fs::path &file_path) {
     if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
         throw std::runtime_error("File does not exist or is not a regular file.");
@@ -45,10 +45,12 @@ public:
     vector<fs::path> modified_files;
     [[nodiscard]] fs::path temp_directory() const noexcept;
     [[nodiscard]] fs::path target_path(string extension) const noexcept;
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
     [[nodiscard]] const DynamicModule *obtain_cur_module() const noexcept;
+#endif
     [[nodiscard]] ModuleInterface *module_interface() const noexcept;
     [[nodiscard]] fs::path target_stem() const noexcept {
-        return ocarina::format("module_{}", build_count);
+        return format("module_{}", build_count);
     }
     [[nodiscard]] fs::path dll_path() const noexcept {
         return target_path(".dll");

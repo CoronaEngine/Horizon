@@ -3,17 +3,21 @@
 //
 
 #include "build_system.h"
-#include "core/util/logging.h"
+#include "horizon/core/logging.h"
+
+#include <fmt/format.h>
 
 #include <chrono>
 
 namespace vision::inline hotfix {
 
 BuildSystem::BuildSystem() {
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
     DynamicModule::add_search_path(directory() / "bin");
+#endif
 }
 
-
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
 Compiler::Handle &BuildSystem::compiler() const noexcept {
     if (compiler_ == nullptr) {
         compiler_ = Compiler::create();
@@ -26,13 +30,6 @@ BuildRules::Handle &BuildSystem::build_rules() const noexcept {
         build_rules_ = BuildRules::create();
     }
     return build_rules_;
-}
-
-void BuildSystem::clear() noexcept {
-}
-
-fs::path BuildSystem::directory() noexcept {
-    return fs::current_path().parent_path();
 }
 
 bool BuildSystem::compile(const Target &target) const noexcept {
@@ -53,6 +50,14 @@ bool BuildSystem::link(const Target &target) const noexcept {
     const LinkOptions &options = build_rules()->link_options(fn.string());
     vector<string> extension_objs = build_rules()->obj_paths(ModuleInterface::src_path());
     return compiler()->link(options, target, FileTool::files_string(extension_objs));
+}
+#endif
+
+void BuildSystem::clear() noexcept {
+}
+
+fs::path BuildSystem::directory() noexcept {
+    return fs::current_path().parent_path();
 }
 
 void BuildSystem::create_temp_path(const fs::path &path) noexcept {
@@ -91,10 +96,10 @@ bool BuildSystem::build_with_backend(vector<Target> &targets) {
             .modified_files = target.modified_files,
         });
         if (!result.diagnostics.empty()) {
-            OC_INFO_FORMAT("{}", result.diagnostics);
+            CFW_LOG_INFO("{}", result.diagnostics);
         }
         if (!result.succeeded() || !result.artifacts.module_path.is_absolute()) {
-            OC_INFO_FORMAT("module {} build failure!", target.name);
+            CFW_LOG_INFO("module {} build failure!", target.name);
             return false;
         }
         modules.push_back(result.artifacts.module_path);
@@ -106,7 +111,7 @@ bool BuildSystem::build_with_backend(vector<Target> &targets) {
         fs::create_directories(root);
         const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
         for (size_t attempt = 0;; ++attempt) {
-            auto session = root / ocarina::format("session_{}_{}", stamp, attempt);
+            auto session = root / fmt::format("session_{}_{}", stamp, attempt);
             if (fs::create_directory(session)) {
                 staging_session_ = std::move(session);
                 break;
@@ -114,9 +119,9 @@ bool BuildSystem::build_with_backend(vector<Target> &targets) {
         }
     }
     for (size_t index = 0; index < targets.size(); ++index) {
-        const auto version = staging_session_ / ocarina::format("generation_{}", ++staged_generation_);
+        const auto version = staging_session_ / fmt::format("generation_{}", ++staged_generation_);
         if (!fs::create_directory(version)) {
-            OC_WARNING_FORMAT("Hotfix staging directory already exists for {}", targets[index].name);
+            CFW_LOG_WARNING("Hotfix staging directory already exists for {}", targets[index].name);
             return false;
         }
         auto copy = version / modules[index].filename();
@@ -131,21 +136,22 @@ bool BuildSystem::build_targets(vector<Target> &targets) noexcept {
         try {
             return build_with_backend(targets);
         } catch (const std::exception &error) {
-            OC_WARNING_FORMAT("Hotfix build or staging failed: {}", error.what());
+            CFW_LOG_WARNING("Hotfix build or staging failed: {}", error.what());
             return false;
         }
     }
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
     if (!compiler()->setup_environment()) {
-        OC_WARNING("Hotfix toolchain setup failed");
+        CFW_LOG_WARNING("Hotfix toolchain setup failed");
         return false;
     }
     for (const auto &target : targets) {
-        OC_INFO_FORMAT("target {} has been modified", target.name);
+        CFW_LOG_INFO("target {} has been modified", target.name);
         for (const fs::path &fn : target.modified_files) {
-            OC_INFO_FORMAT("file: {}", fn.string());
+            CFW_LOG_INFO("file: {}", fn.string());
         }
         if (!compile(target)) {
-            OC_INFO_FORMAT("module {} build failure!", target.name);
+            CFW_LOG_INFO("module {} build failure!", target.name);
             return false;
         }
     }
@@ -157,6 +163,10 @@ bool BuildSystem::build_targets(vector<Target> &targets) noexcept {
         }
     }
     return true;
+#else
+    CFW_LOG_WARNING("Hotfix requires a configured build backend");
+    return false;
+#endif
 }
 
 }// namespace vision::inline hotfix
