@@ -1,0 +1,12 @@
+foreach(contract process build)
+    set(test_target horizon-test-hotfix-${contract}-contract)
+    add_executable(${test_target} test_${contract}_contract.cpp)
+    target_link_libraries(${test_target} PRIVATE horizon-hotfix-api)
+    if(MSVC)
+        target_compile_options(${test_target} PRIVATE /utf-8)
+    endif()
+    add_dependencies(horizon-tests ${test_target})
+    add_test(NAME horizon.hotfix.${contract}_contract COMMAND ${test_target})
+    set_tests_properties(horizon.hotfix.${contract}_contract PROPERTIES
+        LABELS "hotfix;contracts")
+endforeach()

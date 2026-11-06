@@ -5,7 +5,8 @@ add_library(horizon-hotfix SHARED ${SOURCE_FILES})
 target_include_directories(horizon-hotfix PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(horizon-hotfix PUBLIC
-        ocarina)
+        ocarina
+        horizon-hotfix-api)
 
 if (MSVC)
     set(CPP_COMPILE_TYPE "msvc")
