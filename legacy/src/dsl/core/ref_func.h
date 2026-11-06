@@ -458,16 +458,17 @@ struct EnableGetMemberByIndex {
     using element_type = std::remove_cvref_t<decltype(std::declval<expr_value_t<T>>()[0])>;
     template<int i>
     [[nodiscard]] auto get() const noexcept {
-        return eval<element_type>(Function::current()->subscript(Type::of<element_type>(),
-                                                                 OC_EXPR(*self()),
-                                                                 OC_EXPR(i)));
+        auto f = Function::current();
+        return eval<element_type>(f->subscript(Type::of<element_type>(),
+                                               OC_EXPR(*self()),
+                                               f->literal(Type::of<int>(), i)));
     }
     template<int i>
     auto &get() noexcept {
         auto f = Function::current();
         const SubscriptExpr *expr = f->subscript(Type::of<element_type>(),
                                                  OC_EXPR(*self()),
-                                                 OC_EXPR(int(i)));
+                                                 f->literal(Type::of<int>(), i));
         Var<element_type> *ret = f->template create_temp_obj<Var<element_type>>(expr);
         return *ret;
     }
