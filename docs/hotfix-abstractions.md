@@ -107,6 +107,15 @@ Core 构建提供 CMake 热更新运行时。`HORIZON_BUILD_VISION_HOTFIX` 用�
 
 ## 验证
 
+在 Linux 下可直接构建运行时和端到端测试。`dev.py` 会为这些目标选择 `core` 构建树。
+
+```bash
+python3 build_tools/dev.py build horizon-hotfix horizon-test-hotfix-runtime --configuration Debug
+ctest --test-dir build/conan/core/debug -C Debug -R '^horizon\.hotfix\.runtime$' --no-tests=error --output-on-failure
+```
+
+如需运行所有热更新测试，先构建聚合目标 `horizon-tests`。
+
 ```powershell
 python build_tools/dev.py build-fast horizon-tests --configuration Debug --target-family core
 ctest --test-dir build/conan/core/debug -C Debug -R horizon.hotfix --output-on-failure

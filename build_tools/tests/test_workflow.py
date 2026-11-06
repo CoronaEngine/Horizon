@@ -305,6 +305,18 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             target_family_for_targets(["HorizonExamples", "ocarina-native"])
 
+    def test_posix_hotfix_targets_infer_the_core_build(self) -> None:
+        targets = ["horizon-hotfix", "horizon-hotfix-build-cmake", "horizon-hotfix-process-posix",
+                   "horizon-hotfix-runtime-fixture", "horizon-test-hotfix-runtime"]
+        for platform in ("linux", "darwin"):
+            with self.subTest(platform=platform), patch.object(dev.sys, "platform", platform):
+                self.assertEqual(target_family_for_targets(targets), "core")
+
+    def test_windows_keeps_legacy_hotfix_runtime_inference(self) -> None:
+        with patch.object(dev.sys, "platform", "win32"):
+            self.assertEqual(target_family_for_target("horizon-hotfix"), "vision-hotfix")
+            self.assertEqual(target_family_for_target("horizon-hotfix-all"), "vision-hotfix")
+
     def test_build_commands_keep_all_requested_targets(self):
         for command in ("build", "build-fast", "rebuild"):
             with self.subTest(command=command), patch.object(dev, "install"), \

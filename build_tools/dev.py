@@ -56,6 +56,13 @@ def target_family_for_target(target: str) -> str:
         return "examples"
     if target.startswith("test-"):
         return "ocarina-tests"
+    if sys.platform != "win32" and target in {
+        "horizon-hotfix",
+        "horizon-hotfix-build-cmake",
+        "horizon-hotfix-process-posix",
+        "horizon-hotfix-runtime-fixture",
+    }:
+        return "core"
     if target.startswith("horizon-hotfix"):
         return "vision-hotfix"
     if target == "copy_slang_headers" or target.startswith("ocarina"):
