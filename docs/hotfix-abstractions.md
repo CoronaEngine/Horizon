@@ -130,6 +130,18 @@ Windows Ninja 构建还运行一个独立 MODULE 项目，验证初次构建、�
 三端 Core CI 都运行 `horizon.hotfix.runtime`。用例用真实 CMake 模块验证两次连续更新和对象状态恢复、
 回退到已加载版本、编译失败时保留当前对象及版本历史，以及失败后重新切到之前的最新版本。
 
+`horizon.hotfix.baseline_window` 使用实际的 `example_baseline` 渲染循环和资源。
+它在同一个进程里检查 GLFW 窗口标题、成功呈现的帧数、对象身份和版本副本。
+Linux CI 使用 Xvfb 和 lavapipe，macOS CI 使用 Cocoa 和 MoltenVK。
+本地有 GLFW 3.4、GLM、Volk、Vulkan 加载器及可用的图形会话时，可以构建并运行这个用例。
+
+```bash
+python3 build_tools/dev.py install horizon-test-baseline-window --configuration Release --target-family core
+HORIZON_DEV_BOOTSTRAP_ACTIVE=1 cmake --preset core-release -DHORIZON_BUILD_BASELINE_WINDOW_TEST=ON
+python3 build_tools/dev.py build-fast horizon-test-baseline-window --configuration Release --target-family core
+ctest --test-dir build/conan/core/release -C Release -L '^window$' --no-tests=error --verbose
+```
+
 ## 后续迁移与验收
 
 - [x] Windows 进程执行器及真实子进程测试。
