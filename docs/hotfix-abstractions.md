@@ -1,7 +1,7 @@
 # 热更新跨平台接口
 
 公共接口使用 `horizon::hotfix` 命名空间，依赖 C++20 标准库。
-Windows 进程执行器和 CMake 构建后端已实现对应接口。
+Windows、POSIX 进程执行器和 CMake 构建后端已实现对应接口。
 现有 `vision::hotfix` 的 MSVC 构建仍使用自己的常驻命令会话。
 Windows 宿主可以显式选择 CMake 后端运行热更新。
 
@@ -9,7 +9,7 @@ Windows 宿主可以显式选择 CMake 后端运行热更新。
 
 | 接口 | 输入 | 输出 | 后续实现 |
 | --- | --- | --- | --- |
-| `IProcessRunner::run()` | `ProcessRequest` | `ProcessResult` | Windows 已实现，POSIX 待实现 |
+| `IProcessRunner::run()` | `ProcessRequest` | `ProcessResult` | Windows、Linux、macOS 已实现 |
 | `IBuildBackend::build()` | `BuildRequest` | `BuildResult` | CMake 已实现 |
 
 两个调用均同步完成。后台线程、任务串行化、回调和对象替换由上层调度。
@@ -57,6 +57,11 @@ Windows 消费者链接 `horizon-hotfix-process-windows`，并从
 执行器在直接子进程退出后收集已进入管道的数据并返回，后代持有写端时也能完成。
 退出码保留 Windows 返回的 32 位值，以有符号整数表示。
 
+Linux 和 macOS 消费者链接 `horizon-hotfix-process-posix`，并从
+`horizon/hotfix/posix_process_runner.h` 使用 `PosixProcessRunner`。
+环境变量名区分大小写。子进程的标准输入为 EOF，stdout 和 stderr 分别保留原始字节。
+子进程因信号终止时，`exit_code` 为空，`error_message` 包含信号编号。
+
 ### CMake 构建后端
 
 在项目中注册已有的 `MODULE` 或 `SHARED` 目标。
@@ -72,9 +77,9 @@ horizon_generate_hotfix_manifest(my_hotfix_module)
 未设置构建类型的单配置构建树。名称使用字母、数字、下划线、加号、点或连字符，
 以字母、数字、下划线或加号开头，结尾不用点。
 
-消费者链接 `horizon-hotfix-build-cmake`。Windows 上同时链接
-`horizon-hotfix-process-windows`，将执行器和 CMake 可执行文件路径传给
-`CMakeBuildBackend`。构造时可以传入构建环境覆盖值。调用方负责串行使用同一个构建树。
+消费者链接 `horizon-hotfix-build-cmake` 和对应平台的进程执行器目标，
+将执行器和 CMake 可执行文件路径传给 `CMakeBuildBackend`。
+构造时可以传入构建环境覆盖值。调用方负责串行使用同一个构建树。
 
 后端执行指定目标和配置的 `cmake --build`。构建成功后，后端读取清单并确认模块文件存在且非空。
 构建失败通过 `BuildResult` 返回诊断和空产物。
@@ -108,13 +113,13 @@ ctest --test-dir build/conan/core/debug -C Debug -R horizon.hotfix --output-on-f
 
 测试通过独立头文件编译检查接口可实现性，并验证默认失败、非零退出、执行错误、
 stderr 警告、构建失败携带旧路径、成功但缺失模块、可选附属产物和平台无关命名。
-Windows 测试另外启动真实子进程，验证参数、环境覆盖、工作目录、两路输出和退出码。
+Windows、Linux 和 macOS 测试另外启动真实子进程，验证参数、环境覆盖、工作目录、两路输出和退出码。
 Windows Ninja 构建还运行一个独立 MODULE 项目，验证初次构建、增量重建、编译失败和产物路径。
 
 ## 后续迁移与验收
 
 - [x] Windows 进程执行器及真实子进程测试。
-- [ ] POSIX 进程执行器：Linux/macOS 实机验证，同一组契约测试。
+- [x] POSIX 进程执行器及 Linux/macOS 真实子进程测试。
 - [x] CMake 后端及小模块构建、增量、失败和产物测试。
 - [x] Windows 运行时接入 CMake 后端及版本副本，验证连续更新、版本回退和编译失败保护。
 - [ ] POSIX 模块加载与生命周期：符号隔离及安全卸载。

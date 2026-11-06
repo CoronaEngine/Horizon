@@ -41,6 +41,30 @@ if(WIN32)
         TIMEOUT 30)
 endif()
 
+if(UNIX)
+    find_package(Threads REQUIRED)
+    add_executable(horizon-test-hotfix-posix-process-child posix_process_child.cpp)
+    target_link_libraries(horizon-test-hotfix-posix-process-child PRIVATE Threads::Threads)
+    set_target_properties(horizon-test-hotfix-posix-process-child PROPERTIES
+        OUTPUT_NAME "horizon posix process child")
+
+    add_executable(horizon-test-hotfix-posix-process-runner test_posix_process_runner.cpp)
+    target_link_libraries(horizon-test-hotfix-posix-process-runner PRIVATE
+        horizon-hotfix-process-posix Threads::Threads)
+    add_dependencies(horizon-test-hotfix-posix-process-runner horizon-test-hotfix-posix-process-child)
+    add_dependencies(horizon-tests horizon-test-hotfix-posix-process-runner)
+
+    set(posix_working_directory "${CMAKE_CURRENT_BINARY_DIR}/posix runner working directory")
+    file(MAKE_DIRECTORY "${posix_working_directory}")
+    add_test(NAME horizon.hotfix.posix_process_runner
+        COMMAND horizon-test-hotfix-posix-process-runner
+            "$<TARGET_FILE:horizon-test-hotfix-posix-process-child>" "${posix_working_directory}")
+    set_tests_properties(horizon.hotfix.posix_process_runner PROPERTIES
+        ENVIRONMENT "HORIZON_PROCESS_TEST_INHERITED=parent;HORIZON_PROCESS_TEST_OVERRIDE=original;Horizon_Process_Test_Override=distinct"
+        LABELS "hotfix;posix"
+        TIMEOUT 40)
+endif()
+
 if(WIN32 AND CMAKE_GENERATOR MATCHES "^Ninja")
     add_executable(horizon-test-hotfix-cmake-build-backend test_cmake_build_backend.cpp)
     target_link_libraries(horizon-test-hotfix-cmake-build-backend PRIVATE
