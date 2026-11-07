@@ -24,6 +24,12 @@ namespace Corona::Horizon
 
     HardwareDisplayer::~HardwareDisplayer() = default;
 
+    PresentationInfo HardwareDisplayer::presentation_info() const
+    {
+        const auto manager = std::static_pointer_cast<DisplayManager>(manager_);
+        return manager ? manager->presentation_info() : PresentationInfo{};
+    }
+
     // 从 horizon.h 移出（原为 inline）。只为压缩公共头，语义未变。
     PresentCommand present(const HardwareDisplayer& displayer,
                            const HardwareImage& image,

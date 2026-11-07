@@ -404,6 +404,13 @@ namespace Corona::Horizon
 
     [[nodiscard]] CommitCommand commit() noexcept;
 
+    struct PresentationInfo
+    {
+        Format format { Format::UNKNOWN };
+        // Advances whenever this displayer creates a new swapchain.
+        uint64_t generation { 0 };
+    };
+
     class HardwareDisplayer
     {
     public:
@@ -418,6 +425,8 @@ namespace Corona::Horizon
 
         [[nodiscard]] explicit operator bool() const noexcept { return displayer_.id != 0 && manager_ != nullptr; }
         [[nodiscard]] DisplayerRef displayer_ref() const noexcept { return displayer_; }
+        // Creates or refreshes the swapchain when drawable; otherwise the format is UNKNOWN.
+        [[nodiscard]] PresentationInfo presentation_info() const;
 
     private:
         DisplayerRef displayer_ {};

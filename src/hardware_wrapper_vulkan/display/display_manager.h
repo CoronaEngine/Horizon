@@ -56,6 +56,7 @@ namespace Corona::Horizon
         [[nodiscard]] DisplayerRef displayer() const noexcept { return displayer_; }
         [[nodiscard]] bool has_swapchain() const noexcept;
         [[nodiscard]] Queue* present_queue() const noexcept;
+        [[nodiscard]] PresentationInfo presentation_info();
 
         [[nodiscard]] SwapchainAcquire acquire_next_image();
         [[nodiscard]] PreparedPresent prepare_present(PresentDesc& desc);
@@ -109,6 +110,7 @@ namespace Corona::Horizon
         VkSurfaceKHR surface_ { VK_NULL_HANDLE };
         VkSwapchainKHR swapchain_ { VK_NULL_HANDLE };
         VkFormat swapchain_format_ { VK_FORMAT_UNDEFINED };
+        uint64_t presentation_generation_ { 0 };
         VkExtent2D swapchain_extent_ {};
         uint32_t swapchain_min_image_count_ { 0 };
         std::vector<HardwareImage> swapchain_images_;

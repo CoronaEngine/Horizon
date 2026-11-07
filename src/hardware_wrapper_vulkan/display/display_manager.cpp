@@ -415,6 +415,31 @@ namespace Corona::Horizon
         return present_queue_;
     }
 
+    PresentationInfo DisplayManager::presentation_info()
+    {
+        std::lock_guard lock(mutex_);
+        if (!native_window_available() || !native_window_drawable(native_window_))
+        {
+            return { Format::UNKNOWN, presentation_generation_ };
+        }
+
+        if (needs_recreate_ && !pending_frame_)
+        {
+            // Preserve any acquired image until its presentation has completed.
+            destroy_swapchain();
+            needs_recreate_ = false;
+        }
+        ensure_swapchain();
+
+        if (swapchain_images_.empty())
+        {
+            return { Format::UNKNOWN, presentation_generation_ };
+        }
+
+        const auto image = read<ImageStore>(ResourceBridge::token(swapchain_images_.front()));
+        return { image ? image->desc.format : Format::UNKNOWN, presentation_generation_ };
+    }
+
     void DisplayManager::ensure_swapchain()
     {
         if (swapchain_ != VK_NULL_HANDLE)
@@ -431,6 +456,7 @@ namespace Corona::Horizon
         choose_present_queue();
         create_swapchain();
         create_sync_objects();
+        ++presentation_generation_;
     }
 
     bool DisplayManager::native_window_available() const noexcept
