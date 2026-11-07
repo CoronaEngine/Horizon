@@ -128,9 +128,6 @@ struct VkReadOnlyParameterLeaves {
             }
             case Statement::Tag::SWITCH_DEFAULT:
                 statement(static_cast<const SwitchDefaultStmt *>(stmt)->body()); break;
-            case Statement::Tag::PRINT:
-                for (const Expression *arg : static_cast<const PrintStmt *>(stmt)->args()) expression(arg);
-                break;
             case Statement::Tag::BREAK:
             case Statement::Tag::CONTINUE:
             case Statement::Tag::COMMENT: break;

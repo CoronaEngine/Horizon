@@ -12,6 +12,12 @@ using namespace ocarina;
 
 namespace {
 
+template<typename T>
+concept HasShaderPrint = requires(const T &value) { print("{}", value); } ||
+                         requires(const T &value) { prints("{}", value); };
+
+static_assert(!HasShaderPrint<Var<uint>>, "Shader logging uses Env::printer()");
+
 struct CapturedLog {
     int level;
     string message;
@@ -49,6 +55,19 @@ template<typename Shader, typename... Args>
            expect_true(logs[0].message == "printer basic 7 11 22 33",
                        ocarina::format("unexpected scalar/vector log: {}", logs[0].message)) &&
            expect_true(logs[0].level == 2, "info callback level must remain 2");
+}
+
+[[nodiscard]] bool test_outlined_local_logging(Device &device, Stream &stream) {
+    Env::printer().reset();
+    Kernel kernel = [](Var<uint> seed) {
+        Var<uint> local = seed + 6u;
+        outline("printer capture", [&] { Env::printer().info("outlined local {}", local); });
+    };
+    auto shader = device.compile(kernel, "test_printer_outlined_capture");
+    auto logs = run_and_capture(stream, shader, 7u);
+    return expect_true(logs.size() == 1u, "outlined local must produce one log") &&
+           expect_true(logs[0].message == "outlined local 13" && logs[0].level == 2,
+                       "outlined log must contain the runtime shader value and info level");
 }
 
 [[nodiscard]] bool test_multiple_entries_preserve_order(Device &device, Stream &stream) {
@@ -112,6 +131,7 @@ int main() {
 
     bool passed = true;
     passed = test_scalar_and_vector_logging(device, stream) && passed;
+    passed = test_outlined_local_logging(device, stream) && passed;
     passed = test_multiple_entries_preserve_order(device, stream) && passed;
     passed = test_ulong_round_trip(device, stream) && passed;
     passed = test_disabled_printer_suppresses_output(device, stream) && passed;
