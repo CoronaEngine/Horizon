@@ -46,11 +46,16 @@ using std::string_view;
 using std::unique_ptr;
 using std::vector;
 
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
+using ocarina::SP;
+using ocarina::UP;
+#else
 template<typename T>
 using SP = std::shared_ptr<T>;
 
 template<typename... Ts>
 using UP = std::unique_ptr<Ts...>;
+#endif
 
 using uint = std::uint32_t;
 namespace fs = std::filesystem;

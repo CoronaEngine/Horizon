@@ -10,7 +10,7 @@ namespace horizon::example_baseline {
 void BaselineHotfixTest::restore(vision::RuntimeObject* oldObject) noexcept
 {
 #if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
-    const auto* oldTest = vision::hotfix::detail::restore_source(*this, oldObject);
+    const auto* oldTest = vision::hotfix::hotfix_detail::restore_source(*this, oldObject);
 #else
     const auto* oldTest = dynamic_cast<const BaselineHotfixTest*>(oldObject);
 #endif

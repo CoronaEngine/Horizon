@@ -17,7 +17,7 @@ namespace vision::inline hotfix {
     do { if (old_obj_) { attr_name = std::move(old_obj_->attr_name); } } while (false);
 
 #define VS_HOTFIX_MOVE_ATTRS(...)                                                      \
-    auto old_obj_ = ::vision::hotfix::detail::restore_source(*this, old_obj);            \
+    auto old_obj_ = ::vision::hotfix::hotfix_detail::restore_source(*this, old_obj);     \
     MAP(VS_HOTFIX_MOVE_ATTR, ##__VA_ARGS__)
 
 #define VS_HOTFIX_MAKE_RESTORE(Super, ...)                   \
@@ -34,7 +34,8 @@ public:
     virtual ~RuntimeObject() = default;
 };
 
-namespace detail {
+// The inline hotfix namespace must not introduce another vision::detail.
+namespace hotfix_detail {
 
 template<typename T>
 [[nodiscard]] T *restore_source(T &replacement, RuntimeObject *previous) noexcept {
@@ -48,7 +49,7 @@ template<typename T>
     return dynamic_cast<T *>(previous);
 }
 
-}// namespace detail
+}// namespace hotfix_detail
 
 template<typename T>
 class TSlot {
