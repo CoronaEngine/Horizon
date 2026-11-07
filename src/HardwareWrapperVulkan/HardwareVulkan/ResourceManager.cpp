@@ -957,7 +957,7 @@ ResourceManager::BufferHardwareWrap ResourceManager::importBufferMemory(const Ex
     importedBuffer.elementCount = elementCount;
     importedBuffer.elementSize = elementSize;
 
-    // allocSize 必须等于 CUDA 导出时的 aligned_size
+    // allocSize 必须等于外部内存导出时的对齐分配大小
     if (allocSize == 0)
     {
         throw std::runtime_error("Import failed: allocSize == 0.");
@@ -1029,7 +1029,7 @@ ResourceManager::BufferHardwareWrap ResourceManager::importBufferMemory(const Ex
     importedBuffer.bufferAllocInfo.size = allocSize;
 
     CFW_LOG_DEBUG(
-        "[Import] External CUDA buffer imported. "
+        "[Import] External buffer memory imported. "
         "logicalSize={} allocSize={} dedicatedOnly={} feats=0x{:X}",
         logicalSize,
         allocSize,
