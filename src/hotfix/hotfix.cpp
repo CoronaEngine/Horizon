@@ -3,12 +3,12 @@
 //
 
 #include "hotfix.h"
-#include "core/util/logging.h"
-#include "core/concurrency/thread_pool.h"
+#include "module_interface.h"
+#include "horizon/core/logging.h"
+
+#include <algorithm>
 
 namespace vision ::inline hotfix {
-using namespace ocarina;
-
 HotfixSystem *HotfixSystem::s_mgr = nullptr;
 
 Observer::Observer() {
@@ -34,14 +34,22 @@ void HotfixSystem::deregister_observer(vision::Observer *observer) noexcept {
 
 void HotfixSystem::defer_delete(SP<const Observer> observer) noexcept {
     const_cast<Observer *>(observer.get())->invalidation();
-    defer_delete_.push_back(ocarina::move(observer));
+    defer_delete_.push_back(std::move(observer));
 }
 
 void HotfixSystem::enqueue_function(std::function<void()> fn) noexcept {
-    callbacks_.push(ocarina::move(fn));
+    callbacks_.push(std::move(fn));
 }
 
 void HotfixSystem::execute_callback() {
+    if (pending_build_.valid() &&
+        pending_build_.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+        const auto &modules = pending_build_.get();
+        if (!modules.empty()) {
+            on_build_all_finish(modules);
+        }
+        pending_build_ = {};
+    }
     while (!callbacks_.empty()) {
         std::invoke(callbacks_.front());
         callbacks_.pop();
@@ -50,43 +58,66 @@ void HotfixSystem::execute_callback() {
 
 void HotfixSystem::load_module(vision::Target target) noexcept {
     ModuleInterface *module_interface = target.module_interface();
-    vector<const IObjectConstructor *> constructors = module_interface->constructors(target.modified_files);
+    if (!module_interface) {
+        CFW_LOG_WARNING("Hotfix module {} could not be loaded", target.name);
+        return;
+    }
+    const auto constructors = target.module_path.empty()
+                                  ? module_interface->constructors(target.modified_files)
+                                  : module_interface->constructors();
     update_objects(constructors);
 }
 
 void HotfixSystem::on_build_finish(bool success, const Target &target) noexcept {
 
     if (!success) {
-        OC_INFO_FORMAT("module {} build failure!", target.name);
+        CFW_LOG_INFO("module {} build failure!", target.name);
         return;
     }
-    OC_INFO_FORMAT("module {} build success!", target.name);
+    CFW_LOG_INFO("module {} build success!", target.name);
 
     load_module(target);
 }
 
-void HotfixSystem::on_build_all_finish(const vector<pair<bool, Target>> &modules) noexcept {
+void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     Version version;
-    version.targets = modules;
-
-    for (const auto &item : modules) {
-        Target module = item.second;
-        on_build_finish(item.first, item.second);
-        if (!item.first) {
-            continue;
-        }
+    for (const auto &module : modules) {
         ModuleInterface *module_interface = module.module_interface();
-        auto tmp = module_interface->constructors(module.modified_files);
-        version.constructors.insert(version.constructors.cend(), tmp.cbegin(), tmp.cend());
-    }
-
-    for (auto &ver : versions_) {
-        for (const IObjectConstructor *item : version.constructors) {
-            ver.merge_constructor(ModuleInterface::instance().constructor(item->class_name().data()));
+        if (!module_interface) {
+            CFW_LOG_WARNING("Hotfix module {} could not be loaded", module.name);
+            return;
         }
+        const auto constructors = module.module_path.empty()
+                                      ? module_interface->constructors(module.modified_files)
+                                      : module_interface->constructors();
+        if (!module.module_path.empty() && constructors.empty()) {
+            CFW_LOG_WARNING("Hotfix module {} has no object constructors", module.name);
+            return;
+        }
+        version.targets.emplace_back(true, module);
+        version.constructors.insert(version.constructors.end(), constructors.begin(), constructors.end());
     }
 
-    versions_.push_back(version);
+    // Resolve the initial constructors before changing objects or history.
+    vector<const IObjectConstructor *> initial_constructors;
+    for (const auto *constructor : version.constructors) {
+        const auto *initial = ModuleInterface::instance().find_constructor(string{constructor->class_name()});
+        if (!initial) {
+            CFW_LOG_WARNING("Hotfix object {} has no initial constructor", constructor->class_name());
+            return;
+        }
+        initial_constructors.push_back(initial);
+    }
+    for (auto &ver : versions_) {
+        ver.merge_constructors(initial_constructors);
+    }
+
+    update_objects(version.constructors);
+    for (const auto &module : modules) {
+        file_tool_.acknowledge_build(module);
+        CFW_LOG_INFO("module {} build success!", module.name);
+    }
+    versions_.push_back(std::move(version));
     cur_ver_ = versions_.size() - 1;
 }
 
@@ -99,12 +130,12 @@ void HotfixSystem::on_version_change() noexcept {
 }
 
 void HotfixSystem::previous_version() noexcept {
-    cur_ver_ = ocarina::clamp(cur_ver_ - 1, 0, int(versions_.size() - 1));
+    cur_ver_ = std::clamp(cur_ver_ - 1, 0, int(versions_.size() - 1));
     on_version_change();
 }
 
 void HotfixSystem::next_version() noexcept {
-    cur_ver_ = ocarina::clamp(cur_ver_ + 1, 0, int(versions_.size() - 1));
+    cur_ver_ = std::clamp(cur_ver_ + 1, 0, int(versions_.size() - 1));
     on_version_change();
 }
 
@@ -119,22 +150,33 @@ void HotfixSystem::update_objects(const vector<const vision::IObjectConstructor 
     defer_delete_.clear();
 }
 
+bool HotfixSystem::set_build_backend(std::shared_ptr<::horizon::hotfix::IBuildBackend> backend,
+                                     fs::path build_directory, string configuration) {
+    if (is_working()) {
+        return false;
+    }
+    return build_system_.set_build_backend(std::move(backend), std::move(build_directory), std::move(configuration));
+}
+
 bool HotfixSystem::check_and_build() noexcept {
+    if (is_working()) {
+        return false;
+    }
     auto modules = file_tool_.get_modified_targets();
     if (modules.empty()) {
         return false;
     }
-    ThreadPool::instance().async([&, modules]{
-        static vector<pair<bool, Target>> pairs;
-        pairs.clear();
-        build_system_.build_targets(modules, [this, modules](bool success, const Target &target) {
-            //        this->on_build_finish(success, target);
-            pairs.emplace_back(success, target);
-            if (target.name == modules.back().name) {
-                on_build_all_finish(pairs);
+    try {
+        pending_build_ = std::async(std::launch::async, [this, modules = std::move(modules)]() mutable -> vector<Target> {
+            if (!build_system_.build_targets(modules)) {
+                return {};
             }
-        });
-    });
+            return std::move(modules);
+        }).share();
+    } catch (const std::exception &error) {
+        CFW_LOG_WARNING("Hotfix could not start a background build: {}", error.what());
+        return false;
+    }
     return true;
 }
 
@@ -153,6 +195,10 @@ void HotfixSystem::destroy_instance() noexcept {
     s_mgr = nullptr;
 }
 
-HotfixSystem::~HotfixSystem() = default;
+HotfixSystem::~HotfixSystem() {
+    if (pending_build_.valid()) {
+        pending_build_.wait();
+    }
+}
 
 }// namespace vision::inline hotfix

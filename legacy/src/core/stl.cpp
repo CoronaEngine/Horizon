@@ -4,6 +4,7 @@
 
 #include "stl.h"
 
+#include <algorithm>
 #include <cwchar>
 
 namespace horizon::core {

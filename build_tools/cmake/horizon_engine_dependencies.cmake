@@ -1,6 +1,7 @@
 include_guard(GLOBAL)
 
-find_package(ktm CONFIG REQUIRED)
+# The Ocarina math bridge bit-casts KTM vectors, which requires 0.2.16.
+find_package(ktm 0.2.16 CONFIG REQUIRED)
 _horizon_alias_target(horizon::ktm ktm::ktm)
 
 find_package(pfr CONFIG REQUIRED)

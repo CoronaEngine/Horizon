@@ -4,13 +4,16 @@
 
 #pragma once
 
-#include "core/stl.h"
 #include "hotfix/export.h"
 #include "object.h"
 
 namespace vision::inline hotfix {
 
+#if defined(HORIZON_HOTFIX_MODULE) && !defined(_WIN32)
+class [[gnu::visibility("hidden")]] ModuleInterface {
+#else
 class ModuleInterface {
+#endif
 public:
     using creator_t = ModuleInterface *();
 
@@ -30,13 +33,14 @@ public:
     [[nodiscard]] static ModuleInterface &instance() noexcept;
     void add_constructor(SP<const IObjectConstructor> constructor) noexcept;
     [[nodiscard]] const IObjectConstructor *constructor(const string &cls_name) const noexcept;
+    [[nodiscard]] const IObjectConstructor *find_constructor(const string &cls_name) const noexcept;
     void update(SP<const IObjectConstructor> constructor) noexcept;
     void update_constructors(const ModuleInterface *other) noexcept;
     [[nodiscard]] vector<const IObjectConstructor *> constructors() const noexcept;
     template<typename... Args>
-    requires concepts::all_string_viewable<Args...>
+    requires (std::constructible_from<string_view, Args> && ...)
     [[nodiscard]] vector<const IObjectConstructor *> constructors(Args &&...args) const noexcept {
-        constexpr array<string_view, sizeof...(Args)> paths = {string_view{args}...};
+        const array<string_view, sizeof...(Args)> paths = {string_view{args}...};
         vector<const IObjectConstructor *> ret;
         for (const auto &filename : paths) {
             for (const auto &item : constructor_map_) {

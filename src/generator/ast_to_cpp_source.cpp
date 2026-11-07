@@ -162,52 +162,6 @@ void AstToCppSource::visit(const ForStmt *stmt) noexcept {
     stmt->body()->accept(*this);
 }
 
-void AstToCppSource::visit(const PrintStmt *stmt) noexcept {
-    span<const Expression *const> args = stmt->args();
-    current_scratch() << "printf(";
-    Scratch format_scratch("\"");
-    format_scratch << stmt->fmt() << "\\n\"";
-    Scratch args_scratch;
-
-    for (const Expression *expr : args) {
-        switch (expr->type()->tag()) {
-            case Type::Tag::USHORT:
-            case Type::Tag::UINT: {
-                format_scratch.replace("{}", "%u");
-                break;
-            }
-            case Type::Tag::BOOL: {
-                format_scratch.replace("{}", "%d");
-                break;
-            }
-            case Type::Tag::FLOAT: {
-                format_scratch.replace("{}", "%f");
-                break;
-            }
-            case Type::Tag::SHORT:
-            case Type::Tag::INT: {
-                format_scratch.replace("{}", "%d");
-                break;
-            }
-            case Type::Tag::UCHAR: {
-                format_scratch.replace("{}", "%u");
-                break;
-            }
-            case Type::Tag::CHAR: {
-                format_scratch.replace("{}", "%d");
-                break;
-            }
-            default: break;
-        }
-        SCRATCH_GUARD(args_scratch);
-        current_scratch() << ",";
-        expr->accept(*this);
-    }
-    current_scratch() << format_scratch
-                      << args_scratch
-                      << ")";
-}
-
 void AstToCppSource::visit(const UnaryExpr *expr) noexcept {
     switch (expr->op()) {
         case UnaryOp::POSITIVE: current_scratch() << "+"; break;

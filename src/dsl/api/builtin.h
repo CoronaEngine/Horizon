@@ -205,6 +205,21 @@ OC_MAKE_DSL_UNARY_FUNC(inverse, INVERSE)
     return eval<float>(expr);
 }
 
+// Convert between a float and the binary16 encoding in the low 16 bits of a uint.
+[[nodiscard]] inline Uint f32tof16(const Float &arg) {
+    const CallExpr *expr = Function::current()->call_builtin(Type::of<uint>(),
+                                                             CallOp::F32TOF16,
+                                                             {OC_EXPR(arg)});
+    return eval<uint>(expr);
+}
+
+[[nodiscard]] inline Float f16tof32(const Uint &arg) {
+    const CallExpr *expr = Function::current()->call_builtin(Type::of<float>(),
+                                                             CallOp::F16TOF32,
+                                                             {OC_EXPR(arg)});
+    return eval<float>(expr);
+}
+
 template<typename... Ts>
 using match_dsl_basic_func = std::conjunction<any_device_type<Ts...>,
                                               match_basic_func<remove_device_t<Ts>...>>;

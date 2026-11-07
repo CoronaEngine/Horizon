@@ -10,6 +10,8 @@
 #include "half.h"
 #include "real.h"
 
+#include <algorithm>
+
 namespace horizon::math {
 using namespace horizon::core;
 namespace detail {

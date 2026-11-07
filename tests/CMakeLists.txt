@@ -10,6 +10,7 @@ add_subdirectory(math)
 add_subdirectory(ast)
 add_subdirectory(image)
 add_subdirectory(dsl)
+add_subdirectory(hotfix)
 
 if(HORIZON_BUILD_ENGINE AND HORIZON_USE_LEGACY_BACKEND)
     add_subdirectory(legacy)

@@ -190,9 +190,8 @@ void Function::splitting_arguments() noexcept {
 }
 
 Function::~Function() noexcept {
-    for (auto &mem : temp_memory_) {
-        delete_with_allocator(mem.first);
-    }
+    // Destroy temporary objects while the Function's other members are still alive.
+    temp_memory_.clear();
 }
 
 void Function::correct_used_structures() noexcept {
@@ -569,10 +568,6 @@ void Function::break_() noexcept {
 
 void Function::comment(const ocarina::string &string) noexcept {
     create_statement<CommentStmt>(string);
-}
-
-void Function::print(string fmt, const vector<const Expression *> &args) noexcept {
-    create_statement<PrintStmt>(fmt, args);
 }
 
 ocarina::span<const Variable> Function::arguments() const noexcept {

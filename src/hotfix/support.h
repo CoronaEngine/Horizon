@@ -1,48 +1,82 @@
 ﻿#pragma once
 
+#include "core/rtti.h"
+
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <queue>
+#include <set>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
+#include "core/concepts.h"
 #include "core/concurrency/thread_safety.h"
 #include "core/runtime/dynamic_module.h"
-#include "core/stl.h"
-#include "core/type.h"
-#include "core/type_system/type_desc.h"
-#include "core/util/element_trait.h"
 #include "core/util/hash.h"
-#include "core/util/logging.h"
 #include "core/util/string_util.h"
 #include "dsl/types/polymorphic.h"
 #include "rhi/context.h"
+#else
+#include <fmt/format.h>
+#endif
 
 namespace vision {
 
-using ocarina::array;
+using ocarina::RTTI;
+using std::array;
+using std::function;
+using std::make_pair;
+using std::make_shared;
+using std::map;
+using std::optional;
+using std::pair;
+using std::queue;
+using std::set;
+using std::string;
+using std::string_view;
+using std::unique_ptr;
+using std::vector;
+
+template<typename T>
+using SP = std::shared_ptr<T>;
+
+template<typename... Ts>
+using UP = std::unique_ptr<Ts...>;
+
+using uint = std::uint32_t;
+namespace fs = std::filesystem;
+
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
 using ocarina::DynamicModule;
 using ocarina::format;
-using ocarina::function;
 using ocarina::Hashable;
-using ocarina::make_pair;
-using ocarina::make_shared;
-using ocarina::map;
-using ocarina::optional;
-using ocarina::pair;
 using ocarina::parent_path;
 using ocarina::Polymorphic;
 using ocarina::ptr_t;
-using ocarina::queue;
-using ocarina::RTTI;
-using ocarina::set;
-using ocarina::SP;
-using ocarina::string;
-using ocarina::string_view;
+using ocarina::RHIContext;
 using ocarina::thread_safety;
 using ocarina::tuple;
-using ocarina::uint;
-using ocarina::unique_ptr;
-using ocarina::UP;
-using ocarina::vector;
 
-using ocarina::RHIContext;
-
-namespace fs = ocarina::fs;
 namespace concepts = ocarina::concepts;
+#else
+using fmt::format;
+using std::tuple;
+
+[[nodiscard]] inline fs::path parent_path(fs::path path, int levels) {
+    for (int i = 0; i < levels; ++i) {
+        path = path.parent_path();
+    }
+    return path;
+}
+#endif
 
 }// namespace vision

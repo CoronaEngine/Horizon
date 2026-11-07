@@ -4,18 +4,20 @@
 
 #pragma once
 
-#include "core/util/hash.h"
 #include "macro.h"
 #include "hotfix/support.h"
+
+#include <concepts>
+#include <type_traits>
 
 namespace vision::inline hotfix {
 #define HOTFIX_VIRTUAL virtual
 
 #define VS_HOTFIX_MOVE_ATTR(attr_name) \
-    attr_name = ocarina::move(old_obj_->attr_name);
+    do { if (old_obj_) { attr_name = std::move(old_obj_->attr_name); } } while (false);
 
-#define VS_HOTFIX_MOVE_ATTRS(...)                                                  \
-    auto old_obj_ = dynamic_cast<std::remove_cvref_t<decltype(*this)> *>(old_obj); \
+#define VS_HOTFIX_MOVE_ATTRS(...)                                                      \
+    auto old_obj_ = ::vision::hotfix::detail::restore_source(*this, old_obj);            \
     MAP(VS_HOTFIX_MOVE_ATTR, ##__VA_ARGS__)
 
 #define VS_HOTFIX_MAKE_RESTORE(Super, ...)                   \
@@ -32,6 +34,22 @@ public:
     virtual ~RuntimeObject() = default;
 };
 
+namespace detail {
+
+template<typename T>
+[[nodiscard]] T *restore_source(T &replacement, RuntimeObject *previous) noexcept {
+    if constexpr (requires { static_cast<T *>(previous); }) {
+        // A patch's hidden RTTI may have a different identity. Hotfix versions
+        // of the same concrete type share the object layout by contract.
+        if (previous && string_view{typeid(*previous).name()} == typeid(replacement).name()) {
+            return static_cast<T *>(previous);
+        }
+    }
+    return dynamic_cast<T *>(previous);
+}
+
+}// namespace detail
+
 template<typename T>
 class TSlot {
 public:
@@ -41,7 +59,9 @@ protected:
     impl_type impl_;
 
 public:
-    OC_MAKE_MEMBER_GETTER_SETTER(impl, &)
+    [[nodiscard]] const impl_type &impl() const noexcept { return impl_; }
+    [[nodiscard]] impl_type &impl() noexcept { return impl_; }
+    void set_impl(impl_type impl) noexcept { impl_ = std::move(impl); }
     TSlot() = default;
     TSlot(T impl) : impl_(std::move(impl)) {}
     [[nodiscard]] operator bool() const noexcept { return impl().get() != nullptr; }
@@ -61,24 +81,28 @@ protected:
     string_view filename_{};
 
 public:
-    explicit IObjectConstructor(const char *fn) : filename_(fn) {}
-    OC_MAKE_MEMBER_GETTER(filename, )
+    explicit IObjectConstructor(const char *fn) : filename_(fn ? fn : "") {}
+    [[nodiscard]] string_view filename() const noexcept { return filename_; }
     template<typename T>
     [[nodiscard]] bool match(T &&t) const noexcept {
-        return class_name() == t->class_name();
+        return t && class_name() == t->class_name();
     }
     template<typename T>
     [[nodiscard]] T construct() const {
-        using raw_type = ocarina::ptr_t<T>;
-        static_assert(std::derived_from<raw_type, RuntimeObject>);
-        if constexpr (ocarina::pointer_category_v<T> == ocarina::PointerCategory::Raw) {
-            return construct_raw<raw_type>();
-        } else if constexpr (ocarina::pointer_category_v<T> == ocarina::PointerCategory::Shared) {
-            return construct_shared<raw_type>();
-        } else if constexpr (ocarina::pointer_category_v<T> == ocarina::PointerCategory::Unique) {
-            return construct_unique<raw_type>();
-        } else {
+        if constexpr (std::is_pointer_v<T>) {
+            return construct_raw<std::remove_pointer_t<T>>();
+        } else if constexpr (requires { typename T::impl_type; }) {
             return T{construct<typename T::impl_type>()};
+        } else {
+            using raw_type = typename T::element_type;
+            static_assert(std::derived_from<raw_type, RuntimeObject>);
+            if constexpr (std::same_as<T, SP<raw_type>>) {
+                return construct_shared<raw_type>();
+            } else if constexpr (std::same_as<T, UP<raw_type>>) {
+                return T{construct_raw<raw_type>()};
+            } else {
+                return construct_unique<raw_type>();
+            }
         }
     }
     template<typename T = RuntimeObject>
@@ -91,7 +115,8 @@ public:
     }
     template<typename T = RuntimeObject>
     [[nodiscard]] UP<T, Deleter *> construct_unique() const noexcept {
-        return ocarina::static_unique_pointer_cast<T>(construct_unique_impl());
+        auto object = construct_unique_impl();
+        return {static_cast<T *>(object.release()), object.get_deleter()};
     }
     [[nodiscard]] virtual RuntimeObject *construct_impl() const = 0;
     [[nodiscard]] virtual SP<RuntimeObject> construct_shared_impl() const = 0;

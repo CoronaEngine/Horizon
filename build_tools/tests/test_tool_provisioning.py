@@ -28,7 +28,7 @@ class ProvisioningTests(unittest.TestCase):
     @contextmanager
     def environment(self, module):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
-            prefix = Path(temporary) / "Conda environment"
+            prefix = Path(temporary).resolve() / "Conda environment"
             (prefix / "conda-meta").mkdir(parents=True)
             stack.enter_context(patch.object(module.sys, "prefix", str(prefix)))
             stack.enter_context(patch.object(module.shutil, "which", return_value=None))
@@ -136,7 +136,7 @@ class ProvisioningTests(unittest.TestCase):
 
     def test_conda_found_without_activated_shell(self):
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()
             conda = base / ("Scripts/conda.exe" if os.name == "nt" else "bin/conda")
             conda.parent.mkdir()
             conda.touch()

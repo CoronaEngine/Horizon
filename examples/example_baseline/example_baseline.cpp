@@ -29,12 +29,25 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
 #include "example_baseline/baseline_hotfix_test.h"
 #include "hotfix/module_interface.h"
+#endif
+
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+#include "horizon/hotfix/cmake_build_backend.h"
+#if defined(_WIN32)
+#include "horizon/hotfix/windows_process_runner.h"
+#else
+#include "horizon/hotfix/posix_process_runner.h"
+#endif
+#include <memory>
+#include <string_view>
+#include <system_error>
 #endif
 
 const uint32_t WIDTH = 800;
@@ -174,6 +187,9 @@ public:
 
     void run()
     {
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+        configureLiveHotfix();
+#endif
         initWindow();
 #if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
         std::cout << "[baseline hotfix] edit examples/example_baseline/baseline_hotfix_test.cpp, then press H" << std::endl;
@@ -243,17 +259,36 @@ private:
 
     bool framebufferResized = false;
 
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+    struct LiveHotfixLifetime
+    {
+        ~LiveHotfixLifetime() { vision::HotfixSystem::destroy_instance(); }
+    } liveHotfixLifetime;
+    std::filesystem::path liveControl;
+    std::string liveWindowLabel;
+    std::uint64_t liveFrames = 0;
+#endif
 #if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
     horizon::example_baseline::BaselineHotfixSlot hotfixTest;
 #endif
 
+    [[noreturn]] static void throwGlfwError(const char* message)
+    {
+        const char* detail = nullptr;
+        glfwGetError(&detail);
+        throw std::runtime_error(detail ? std::string(message) + ": " + detail : message);
+    }
+
     void initWindow()
     {
-        glfwInit();
+        if (!glfwInit())
+            throwGlfwError("failed to initialize GLFW");
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "example_baseline", nullptr, nullptr);
+        if (!window)
+            throwGlfwError("failed to create baseline window");
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         glfwSetKeyCallback(window, keyCallback);
@@ -276,7 +311,92 @@ private:
             std::cout << "[baseline hotfix] hotfix support is disabled" << std::endl;
 #endif
         }
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+        else if (key == GLFW_KEY_F9 && action == GLFW_PRESS)
+        {
+            auto& hotfix = vision::HotfixSystem::instance();
+            if (!hotfix.is_working() && hotfix.has_previous())
+                hotfix.previous_version();
+        }
+#endif
     }
+
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+    void configureLiveHotfix()
+    {
+        auto requiredPath = [](const char* name) -> std::filesystem::path
+        {
+#if defined(_WIN32)
+            const auto* value = _wgetenv(std::filesystem::path(name).c_str());
+#else
+            const auto* value = std::getenv(name);
+#endif
+            if (!value || !*value)
+                throw std::runtime_error(std::string("Missing live validation setting ") + name);
+            return value;
+        };
+#if defined(_WIN32)
+        static horizon::hotfix::WindowsProcessRunner process;
+#else
+        static horizon::hotfix::PosixProcessRunner process;
+#endif
+        const auto* configuration = std::getenv("HORIZON_BASELINE_LIVE_CONFIG");
+        auto backend = std::make_shared<horizon::hotfix::CMakeBuildBackend>(
+            process, requiredPath("HORIZON_BASELINE_LIVE_CMAKE"));
+        auto& hotfix = vision::HotfixSystem::instance();
+        if (!hotfix.set_build_backend(backend, requiredPath("HORIZON_BASELINE_LIVE_BUILD"),
+                                      configuration ? configuration : ""))
+            throw std::runtime_error("Could not configure baseline live CMake backend");
+        const auto source = requiredPath("HORIZON_BASELINE_LIVE_SOURCE");
+        if (!std::filesystem::is_regular_file(source))
+            throw std::runtime_error("The watched baseline live source does not exist");
+        hotfix.register_target(source, "horizon-baseline-live-patch");
+        liveControl = requiredPath("HORIZON_BASELINE_LIVE_CONTROL");
+    }
+
+    void serviceLiveValidation()
+    {
+        const std::string_view label = hotfixTest->live_label();
+        if (label != liveWindowLabel)
+        {
+            liveWindowLabel = label;
+            glfwSetWindowTitle(window, ("example_baseline | " + liveWindowLabel).c_str());
+        }
+        std::ifstream control(liveControl);
+        if (!control)
+            return;
+        std::string command;
+        std::getline(control, command);
+        control.close();
+        std::error_code error;
+        std::filesystem::remove(liveControl, error);
+        if (error)
+            throw std::system_error(error, "Remove baseline live control command");
+
+        auto& hotfix = vision::HotfixSystem::instance();
+        if (command == "reload")
+            keyCallback(window, GLFW_KEY_H, 0, GLFW_PRESS, 0);
+        else if (command == "previous")
+            keyCallback(window, GLFW_KEY_F9, 0, GLFW_PRESS, 0);
+        else if (command == "next" && !hotfix.is_working() && hotfix.has_next())
+            hotfix.next_version();
+        else if (command == "quit")
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        else if (command == "status")
+        {
+            const auto* title = glfwGetWindowTitle(window);
+            if (!title)
+                throwGlfwError("failed to read the baseline window title");
+            std::cout << "[baseline live] label=" << label << " frame=" << liveFrames
+                      << " object=" << static_cast<const void*>(hotfixTest.get())
+                      << " previous=" << static_cast<int>(hotfix.has_previous())
+                      << " next=" << static_cast<int>(hotfix.has_next())
+                      << " working=" << static_cast<int>(hotfix.is_working())
+                      << " title=" << title << std::endl;
+            hotfixTest->print();
+        }
+    }
+#endif
 
 #if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
     void requestHotfix()
@@ -343,6 +463,9 @@ private:
             vision::HotfixSystem::instance().execute_callback();
 #endif
             drawFrame();
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+            serviceLiveValidation();
+#endif
         }
 
         vkDeviceWaitIdle(device);
@@ -461,6 +584,12 @@ private:
         createInfo.pApplicationInfo = &appInfo;
 
         auto extensions = getRequiredExtensions();
+#if defined(__APPLE__)
+        // The loader only enumerates MoltenVK devices when explicitly requested.
+        extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         createInfo.ppEnabledExtensionNames = extensions.data();
 
@@ -574,8 +703,21 @@ private:
 
         createInfo.pEnabledFeatures = &deviceFeatures;
 
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
-        createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        auto enabledExtensions = deviceExtensions;
+#if defined(__APPLE__)
+        // The extension name is declared in the Vulkan beta headers. The
+        // renderer only needs to enable it when the selected device advertises it.
+        static constexpr char portabilitySubset[] = "VK_KHR_portability_subset";
+        const auto availableExtensions = queryDeviceExtensions(physicalDevice);
+        if (std::ranges::any_of(availableExtensions, [](const auto& extension) {
+                return std::strcmp(extension.extensionName, portabilitySubset) == 0;
+            }))
+        {
+            enabledExtensions.push_back(portabilitySubset);
+        }
+#endif
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
+        createInfo.ppEnabledExtensionNames = enabledExtensions.data();
 
         if (enableValidationLayers)
         {
@@ -1599,6 +1741,11 @@ private:
 
         result = vkQueuePresentKHR(presentQueue, &presentInfo);
 
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
+            ++liveFrames;
+#endif
+
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
         {
             framebufferResized = false;
@@ -1723,17 +1870,28 @@ private:
         return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
     }
 
+    static std::vector<VkExtensionProperties> queryDeviceExtensions(VkPhysicalDevice device)
+    {
+        uint32_t extensionCount = 0;
+        if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to enumerate Vulkan device extensions!");
+        }
+        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        if (extensionCount != 0 &&
+            vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data()) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to read Vulkan device extensions!");
+        }
+        availableExtensions.resize(extensionCount);
+        return availableExtensions;
+    }
+
     bool checkDeviceExtensionSupport(VkPhysicalDevice device)
     {
-        uint32_t extensionCount;
-        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-
-        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
-
         std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
 
-        for (const auto& extension : availableExtensions)
+        for (const auto& extension : queryDeviceExtensions(device))
         {
             requiredExtensions.erase(extension.extensionName);
         }
@@ -1781,8 +1939,13 @@ private:
     std::vector<const char*> getRequiredExtensions()
     {
         uint32_t glfwExtensionCount = 0;
-        const char** glfwExtensions;
-        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        if (glfwExtensions == nullptr || glfwExtensionCount == 0)
+        {
+            const char* reason = nullptr;
+            glfwGetError(&reason);
+            throw std::runtime_error(reason ? reason : "GLFW did not report Vulkan surface extensions");
+        }
 
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 

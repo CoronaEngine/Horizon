@@ -97,7 +97,9 @@ private:
     ocarina::vector<Variable::Data> variable_datas_;
     ocarina::vector<ScopeStmt *> scope_stack_;
     /// use for assignment subscript access
-    ocarina::vector<ocarina::pair<std::byte *, size_t>> temp_memory_;
+    // Retain the original destructor and alignment when erasing the object type.
+    using TempObject = ocarina::unique_ptr<void, void (*)(void *) noexcept>;
+    ocarina::vector<TempObject> temp_memory_;
     ScopeStmt body_{true};
     Tag tag_{Tag::CALLABLE};
     ocarina::vector<SP<const Function>> used_custom_func_;
@@ -273,8 +275,10 @@ public:
     void correct_used_structures() noexcept;
     template<typename T, typename... Args>
     T *create_temp_obj(Args &&...args) noexcept {
-        T *ptr = new_with_allocator<T>(std::forward<Args>(args)...);
-        temp_memory_.emplace_back(reinterpret_cast<std::byte *>(ptr), sizeof(T));
+        TempObject object{new_with_allocator<T>(std::forward<Args>(args)...),
+                          [](void *p) noexcept { delete_with_allocator(static_cast<T *>(p)); }};
+        auto *ptr = static_cast<T *>(object.get());
+        temp_memory_.push_back(std::move(object));
         return ptr;
     }
     void set_block_dim(uint x, uint y = 1, uint z = 1) const noexcept { block_dim_ = make_uint3(x, y, z); }
@@ -335,7 +339,6 @@ public:
     [[nodiscard]] ForStmt *for_(const Expression *init, const Expression *cond, const Expression *step) noexcept;
     void continue_() noexcept;
     void comment(const ocarina::string &string) noexcept;
-    void print(string fmt, const vector<const Expression *> &args) noexcept;
     [[nodiscard]] const ScopeStmt *body() const noexcept;
     [[nodiscard]] ScopeStmt *body() noexcept;
     [[nodiscard]] ocarina::span<const Variable> arguments() const noexcept;

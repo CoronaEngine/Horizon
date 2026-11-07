@@ -12,6 +12,14 @@ oc_float oc_half2float(oc_half h) {
     return __half2float(h);
 }
 
+oc_uint oc_f32tof16(oc_float value) {
+    return __half_as_ushort(__float2half_rn(value));
+}
+
+oc_float oc_f16tof32(oc_uint bits) {
+    return __half2float(__ushort_as_half(static_cast<unsigned short>(bits)));
+}
+
 template<typename Dst, typename Src>
 Dst oc_static_cast(Src src) {
     return static_cast<Dst>(src);

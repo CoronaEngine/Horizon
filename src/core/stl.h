@@ -27,6 +27,9 @@
 #include <filesystem>
 #include <source_location>
 #include <cstring>
+#include <cstdlib>
+#include <limits>
+#include <new>
 #include <sys/stat.h>
 
 #define OC_FORWARD(arg) std::forward<decltype(arg)>(arg)
@@ -54,8 +57,15 @@ namespace ocarina {
 
 namespace detail {
 OC_CORE_API void *allocator_allocate(size_t size, size_t alignment) noexcept;
+// Pass the original allocation alignment, including after type erasure.
 OC_CORE_API void allocator_deallocate(void *p, size_t alignment) noexcept;
-OC_CORE_API void *allocator_reallocate(void *p, size_t size, size_t alignment) noexcept;
+
+[[nodiscard]] inline size_t checked_allocation_size(size_t count, size_t element_size) noexcept {
+    if (element_size != 0 && count > (std::numeric_limits<size_t>::max)() / element_size) {
+        std::abort();
+    }
+    return count * element_size;
+}
 }// namespace detail
 
 template<typename... T>
@@ -77,7 +87,7 @@ struct allocator {
     template<typename U>
     constexpr explicit allocator(allocator<U>) noexcept {}
     [[nodiscard]] auto allocate(std::size_t n) const noexcept {
-        return static_cast<T *>(detail::allocator_allocate(sizeof(T) * n, alignof(T)));
+        return static_cast<T *>(detail::allocator_allocate(detail::checked_allocation_size(n, sizeof(T)), alignof(T)));
     }
     void deallocate(T *p, size_t) const noexcept {
         detail::allocator_deallocate(p, alignof(T));
@@ -93,7 +103,12 @@ template<typename T = std::byte>
     if (use_allocator) {
         return allocator<T>{}.allocate(n);
     } else {
-        return reinterpret_cast<T *>(_aligned_malloc(sizeof(T) * n, alignof(T)));
+        const size_t size = detail::checked_allocation_size(n, sizeof(T));
+        auto *p = static_cast<T *>(_aligned_malloc(size == 0 ? 1 : size, alignof(T)));
+        if (p == nullptr) {
+            std::abort();
+        }
+        return p;
     }
 }
 
@@ -111,7 +126,13 @@ constexpr T *construct_at(T *p, Args &&...args) {
 
 template<typename T, typename... Args>
 [[nodiscard]] inline auto new_with_allocator(Args &&...args) {
-    return ocarina::construct_at(allocate<T>(), std::forward<Args>(args)...);
+    T *p = allocate<T>();
+    try {
+        return ocarina::construct_at(p, std::forward<Args>(args)...);
+    } catch (...) {
+        deallocate(p);
+        throw;
+    }
 }
 
 template<typename T>

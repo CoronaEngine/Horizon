@@ -1,7 +1,5 @@
 ﻿#pragma once
 
-#include "support.h"
-
 #ifdef __cplusplus
 #define VS_EXTERN_C extern "C"
 #define VS_NOEXCEPT noexcept
@@ -24,8 +22,10 @@
 #define VS_IMPORT_API VS_EXTERN_C
 #endif
 
-#ifdef VS_EXPORT_DLL
+#if defined(_WIN32) && defined(VS_EXPORT_DLL)
 #define VS_EXPORT_SYMBOL __declspec(dllexport)
-#else
+#elif defined(_WIN32)
 #define VS_EXPORT_SYMBOL __declspec(dllimport)
+#else
+#define VS_EXPORT_SYMBOL [[gnu::visibility("default")]]
 #endif

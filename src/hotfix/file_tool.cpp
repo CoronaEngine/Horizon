@@ -3,9 +3,10 @@
 //
 
 #include "file_tool.h"
-#include <windows.h>
-#include "rhi/context.h"
 #include "module_interface.h"
+#include "staged_module.h"
+
+#include <algorithm>
 
 namespace vision::inline hotfix {
 
@@ -17,14 +18,29 @@ fs::path Target::target_path(std::string extension) const noexcept {
     return temp_directory() / (target_stem().string() + std::move(extension));
 }
 
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
 const DynamicModule *Target::obtain_cur_module() const noexcept {
+    if (!module_path.empty()) {
+        return RHIContext::instance().obtain_module_at(module_path);
+    }
     return RHIContext::instance().obtain_module(dll_path().string());
 }
+#endif
 
 ModuleInterface *Target::module_interface() const noexcept {
-    const DynamicModule *module = obtain_cur_module();
+    if (!module_path.empty()) {
+        return detail::load_staged_module(module_path);
+    }
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
+    const auto *module = obtain_cur_module();
+    if (!module || !module->handle()) {
+        return nullptr;
+    }
     auto creator = module->function<ModuleInterface::creator_t *>("module_interface");
-    return creator();
+    return creator ? creator() : nullptr;
+#else
+    return nullptr;
+#endif
 }
 
 void Version::merge_constructor(const vision::IObjectConstructor *input) noexcept {
@@ -61,7 +77,7 @@ void FileTool::add_inspected(const fs::path &path, string_view module_name, bool
     if (!is_directory) {
         InspectedFile inspected(path);
         add_file(target, inspected);
-        target_map_.insert(std::make_pair(module_name, target));
+        target_map_.emplace(module_name, std::move(target));
         return;
     }
 
@@ -81,7 +97,7 @@ void FileTool::add_inspected(const fs::path &path, string_view module_name, bool
             func(entry);
         }
     }
-    target_map_.insert(std::make_pair(module_name, target));
+    target_map_.emplace(module_name, std::move(target));
 }
 
 void FileTool::remove_inspected(const fs::path &path, bool recursive) noexcept {
@@ -94,30 +110,35 @@ void FileTool::remove_inspected(const fs::path &path, bool recursive) noexcept {
 
 vector<Target> FileTool::get_modified_targets() noexcept {
     vector<Target> ret;
-
-    auto is_modified = [&](Target &target) {
-        bool modified = false;
-        target.modified_files.clear();
-        std::for_each(target.files.begin(), target.files.end(), [&](InspectedFile &file) {
-            FileTime write_time = modification_time(file.path);
-            if (write_time > file.write_time) {
+    for (auto &entry : target_map_) {
+        auto &target = entry.second;
+        Target candidate = target;
+        for (auto &file : candidate.files) {
+            const auto write_time = modification_time(file.path);
+            if (write_time != file.write_time) {
                 file.write_time = write_time;
-                target.modified_files.push_back(file.path);
-                modified = true;
+                candidate.modified_files.push_back(file.path);
             }
-        });
-        return modified;
-    };
-
-    for (auto &it : target_map_) {
-        const string_view &key = it.first;
-        Target &target = it.second;
-        if (is_modified(target)) {
-            target.increase_count();
-            ret.push_back(target);
         }
-        target.modified_files.clear();
+        if (!candidate.modified_files.empty()) {
+            target.increase_count();
+            candidate.increase_count();
+            ret.push_back(std::move(candidate));
+        }
     }
     return ret;
+}
+
+void FileTool::acknowledge_build(const Target &target) noexcept {
+    auto registered = target_map_.find(target.name);
+    if (registered == target_map_.end()) {
+        return;
+    }
+    for (auto &file : registered->second.files) {
+        const auto snapshot = std::ranges::find(target.files, file.path, &InspectedFile::path);
+        if (snapshot != target.files.end()) {
+            file.write_time = snapshot->write_time;
+        }
+    }
 }
 }// namespace vision::inline hotfix

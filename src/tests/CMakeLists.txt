@@ -52,12 +52,26 @@ endfunction()
 
 # Core type and utility tests.
 ocarina_add_test(test-allocator CATEGORY core SOURCES core/test_allocator.cpp)
+add_test(NAME ocarina.test-core-allocator.failures
+    COMMAND "${CMAKE_COMMAND}" "-DALLOCATOR_TEST=$<TARGET_FILE:test-core-allocator>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/core/check_allocator_failures.cmake")
+set_tests_properties(ocarina.test-core-allocator.failures PROPERTIES
+    LABELS "ocarina" RUN_SERIAL TRUE TIMEOUT 120)
 ocarina_add_test(test-logging CATEGORY core SOURCES core/test_logging.cpp)
 target_link_libraries(test-core-logging PRIVATE horizon-core)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
 ocarina_add_test(test-precision-caps CATEGORY core SOURCES core/test_precision_caps.cpp)
 ocarina_add_test(test-half GPU CATEGORY core SOURCES core/test_half.cpp)
-ocarina_add_test(test-function-corrector CATEGORY core SOURCES core/test_function_corrector.cpp)
+ocarina_add_test(test-function-corrector CATEGORY core SOURCES
+    core/test_function_corrector.cpp
+    core/function_corrector_visitors.cpp
+    core/function_corrector_calls.cpp
+    core/function_corrector_parameters.cpp)
+add_test(NAME ocarina.test-core-function-corrector.rejected-captures
+    COMMAND "${CMAKE_COMMAND}" "-DCORRECTOR_TEST=$<TARGET_FILE:test-core-function-corrector>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/core/check_function_corrector_rejections.cmake")
+set_tests_properties(ocarina.test-core-function-corrector.rejected-captures PROPERTIES
+    LABELS "ocarina" RUN_SERIAL TRUE TIMEOUT 60)
 ocarina_add_test(test-trait CATEGORY core SOURCES core/test_trait.cpp)
 
 # Codegen and shader interface tests.
@@ -97,6 +111,8 @@ ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/te
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
 ocarina_add_test(test-render-parity GPU CATEGORY runtime SOURCES runtime/test_render_parity.cpp)
 ocarina_add_test(test-codegen-parity-extended GPU CATEGORY runtime SOURCES runtime/test_codegen_parity_extended.cpp)
+ocarina_add_test(test-outline-equivalence GPU CATEGORY runtime SOURCES runtime/test_outline_equivalence.cpp
+    CASES repeated-output returned-output control-flow-resources)
 ocarina_add_test(test-runtime-parity-extended GPU CATEGORY runtime SOURCES runtime/test_runtime_parity_extended.cpp)
 ocarina_add_test(test-compute-dispatch-parity GPU CATEGORY runtime SOURCES runtime/test_compute_dispatch_parity.cpp)
 ocarina_add_test(test-compute-math-parity GPU CATEGORY runtime SOURCES runtime/test_compute_math_parity.cpp)

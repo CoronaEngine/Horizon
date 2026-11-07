@@ -72,11 +72,7 @@ struct TempDirectory {
 
 template<typename T>
 [[nodiscard]] Image make_owned_image(const vector<T> &pixels, uint2 res) {
-    auto *owned_pixels = new_array<T>(pixels.size());
-    std::copy(pixels.begin(), pixels.end(), owned_pixels);
-    return {PixelStorageImpl<T>::storage,
-            reinterpret_cast<const std::byte *>(owned_pixels),
-            res};
+    return Image::from_data(pixels.data(), res);
 }
 
 [[nodiscard]] vector<uchar4> make_ldr_pixels(uint2 res) {

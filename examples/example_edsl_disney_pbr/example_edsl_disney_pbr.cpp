@@ -421,11 +421,16 @@ const ktm::fmat4x4& to_edsl_matrix(const glm::mat4& matrix)
     return *reinterpret_cast<const ktm::fmat4x4*>(&matrix);
 }
 
-template <typename Type, size_t N>
+template <typename Type, glm::length_t N>
     requires std::is_arithmetic_v<Type>
-const ktm::vec<N, Type>& to_edsl_vector(const glm::vec<N, Type>& vec)
+ktm::vec<static_cast<size_t>(N), Type> to_edsl_vector(const glm::vec<N, Type>& vec)
 {
-    return *reinterpret_cast<const ktm::vec<N, Type>*>(&vec);
+    ktm::vec<static_cast<size_t>(N), Type> result;
+    for (int i = 0; i < N; ++i)
+    {
+        result[i] = vec[i];
+    }
+    return result;
 }
 
 } // namespace

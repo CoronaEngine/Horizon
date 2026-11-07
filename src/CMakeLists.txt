@@ -1,6 +1,7 @@
 # Keep the previous Horizon libraries on a separate include root.
 add_subdirectory("${PROJECT_SOURCE_DIR}/legacy/src" "${CMAKE_CURRENT_BINARY_DIR}/legacy")
 add_subdirectory(image)
+add_subdirectory(hotfix/api)
 
 if(HORIZON_BUILD_ENGINE)
     if(HORIZON_USE_LEGACY_BACKEND)

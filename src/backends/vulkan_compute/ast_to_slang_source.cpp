@@ -458,6 +458,8 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 
         case CallOp::FLOAT2HALF: OC_SLANG_WRAP(float2half); break;
         case CallOp::HALF2FLOAT: OC_SLANG_WRAP(half2float); break;
+        case CallOp::F32TOF16:   OC_SLANG_FUNC(f32tof16);   break;
+        case CallOp::F16TOF32:   OC_SLANG_FUNC(f16tof32);   break;
 
         case CallOp::GEMM: {
             uint id = std::get<uint>(expr->template_arg(0));
