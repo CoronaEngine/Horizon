@@ -134,6 +134,8 @@ Windows Ninja 构建还运行一个独立 MODULE 项目，验证初次构建、�
 它在同一个进程里检查 GLFW 窗口标题、成功呈现的帧数、对象身份和版本副本。
 Linux CI 使用 Xvfb 和 lavapipe，macOS CI 使用 Cocoa 和 MoltenVK。
 本地有 GLFW 3.4、GLM、Volk、Vulkan 加载器及可用的图形会话时，可以构建并运行这个用例。
+`dev.py` 根据 `horizon-test-baseline-window` 目标启用 Conan 的 `with_baseline_window_test`，
+安装纹理加载所需的 stb 并启用对应 CMake 测试选项；普通 core 构建仍只需要 fmt 和 Quill。
 
 ```bash
 python3 build_tools/dev.py install horizon-test-baseline-window --configuration Release --target-family core
