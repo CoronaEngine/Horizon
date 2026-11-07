@@ -3,8 +3,8 @@
 Ocarina 的着色器统一通过 C++ EDSL 构建 AST，再生成 Slang、编译为 SPIR-V，
 最终在 Vulkan Compute 后端执行。
 
-Ocarina 的源码目录已合并到 `src/`；旧 Horizon 的 `ast`、`core`、`runtime`、`dsl`、`math` 保留在 `legacy/src/`。
-原有 `horizon-*` 库从该目录构建，与 Ocarina 的头文件搜索路径分开。
+Ocarina 的源码目录已合并到 `src/`，旧 Horizon 的独立模块已移除。
+共享日志由 `src/logging/` 提供，Ocarina 的结构体布局 tuple 位于 `src/core/tuple.h`。
 
 ## Windows 构建指南
 
@@ -81,7 +81,7 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 
 | 使用场景 | 选择的 Debug preset | 构建目录 |
 | --- | --- | --- |
-| Core / Math / Image / AST / DSL 与基础测试 | `core-debug` | `build/conan/core/debug` |
+| 共享日志、存储、tuple 与 hotfix 基础测试 | `core-debug` | `build/conan/core/debug` |
 | Horizon / Helicon 渲染库 | `engine-debug` | `build/conan/engine/debug` |
 | ShaderCompileScripts | `tools-debug` | `build/conan/tools/debug` |
 | HorizonExamples | `examples-debug` | `build/conan/examples/debug` |
@@ -124,7 +124,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 ```powershell
 python -B -m unittest discover -s build_tools/tests -p "test_*.py"
-python -B -m unittest discover -s tests/architecture -p "test_*.py"
+python src/core/generate_tuple.py --check
 python -B -m unittest discover -s src/tests -p "test_*.py"
 ```
 

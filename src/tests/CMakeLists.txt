@@ -58,7 +58,7 @@ add_test(NAME ocarina.test-core-allocator.failures
 set_tests_properties(ocarina.test-core-allocator.failures PROPERTIES
     LABELS "ocarina" RUN_SERIAL TRUE TIMEOUT 120)
 ocarina_add_test(test-logging CATEGORY core SOURCES core/test_logging.cpp)
-target_link_libraries(test-core-logging PRIVATE horizon-core)
+target_link_libraries(test-core-logging PRIVATE horizon-logging)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
 ocarina_add_test(test-precision-caps CATEGORY core SOURCES core/test_precision_caps.cpp)
 ocarina_add_test(test-half GPU CATEGORY core SOURCES core/test_half.cpp)
