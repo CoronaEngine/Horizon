@@ -5,7 +5,7 @@
 #pragma once
 
 #include "header.h"
-#include "../../legacy/src/core/tuple.h"
+#include "core/tuple.h"
 #include <functional>
 #include <deque>
 #include <stack>
@@ -300,8 +300,8 @@ using std::unordered_set;
 using std::vector;
 
 // tuple
-using horizon::core::get;
-using horizon::core::tuple;
+using tuple_storage::get;
+using tuple_storage::tuple;
 
 namespace detail {
 template<typename T>
@@ -313,7 +313,7 @@ template<typename... Ts>
 struct tuple_size_impl<std::tuple<Ts...>> : public std::tuple_size<std::tuple<Ts...>> {};
 
 template<typename... Ts>
-struct tuple_size_impl<tuple<Ts...>> : public horizon::core::tuple_size<tuple<Ts...>> {};
+struct tuple_size_impl<tuple<Ts...>> : public tuple_storage::tuple_size<tuple<Ts...>> {};
 }// namespace detail
 template<typename T>
 using tuple_size = typename detail::tuple_size_impl<std::remove_cvref_t<T>>;
@@ -330,7 +330,7 @@ template<size_t i, typename... Ts>
 struct tuple_element<i, std::tuple<Ts...>> : public std::tuple_element<i, std::tuple<Ts...>> {};
 
 template<size_t i, typename... Ts>
-struct tuple_element<i, tuple<Ts...>> : public horizon::core::tuple_element<i, tuple<Ts...>> {};
+struct tuple_element<i, tuple<Ts...>> : public tuple_storage::tuple_element<i, tuple<Ts...>> {};
 
 template<size_t i, typename T>
 using tuple_element_t = typename tuple_element<i, T>::type;
@@ -342,7 +342,7 @@ auto tuple_get(const std::tuple<Ts...> &tp) noexcept {
 
 template<size_t i, typename... Ts>
 auto tuple_get(const tuple<Ts...> &tp) noexcept {
-    return horizon::core::get<i>(tp);
+    return tuple_storage::get<i>(tp);
 }
 
 template<size_t i = 0, typename Tuple, typename Func>

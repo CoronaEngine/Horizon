@@ -17,12 +17,24 @@
 #include <Codegen/MathProxy.h>
 
 // Forward declarations for Level 2 resource binding (defined in horizon.h)
+#ifdef HORIZON_LEGACY_API
+struct HardwareImage;
+struct HardwareBuffer;
+struct HardwareImageCreateInfo;
+namespace Corona::Horizon
+{
+    using HardwareImage = ::HardwareImage;
+    using HardwareBuffer = ::HardwareBuffer;
+    using HardwareImageDesc = ::HardwareImageCreateInfo;
+}
+#else
 namespace Corona::Horizon
 {
 	class HardwareImage;
 	class HardwareBuffer;
 	struct HardwareImageDesc;
 }
+#endif
 
 namespace EmbeddedShader
 {

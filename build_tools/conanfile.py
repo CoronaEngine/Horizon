@@ -67,9 +67,11 @@ class HorizonConan(ConanFile):
     def requirements(self):
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
         self.requires("fmt/12.1.0")
-        self.requires("xxhash/0.8.3")
-        self.requires("stb/cci.20240531")
-        self.requires("tinyexr/1.0.7")
+        if bool(self.options.with_ocarina):
+            self.requires("xxhash/0.8.3")
+            self.requires("tinyexr/1.0.7")
+        if bool(self.options.with_ocarina) or bool(self.options.with_examples):
+            self.requires("stb/cci.20240531")
 
         if bool(self.options.with_engine):
             self.requires("ktm/0.2.16", transitive_headers=True)

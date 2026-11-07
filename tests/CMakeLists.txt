@@ -6,41 +6,11 @@ if(WIN32 AND HORIZON_BUILD_OCARINA)
 endif()
 
 add_subdirectory(core)
-add_subdirectory(math)
-add_subdirectory(ast)
-add_subdirectory(image)
-add_subdirectory(dsl)
 add_subdirectory(hotfix)
 
-add_dependencies(horizon-tests
-    horizon-core
-    horizon-math
-    horizon-ast
-    horizon-dsl
-    horizon-image
-)
-
-add_test(
-    NAME horizon.architecture.core_math_boundary
-    COMMAND ${CMAKE_COMMAND}
-            -DCORE_SOURCE_DIR=${PROJECT_SOURCE_DIR}/legacy/src/core
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_core_math_boundary.cmake
-)
-
-add_test(
-    NAME horizon.architecture.image_module_boundary
-    COMMAND ${CMAKE_COMMAND}
-            -DHORIZON_SOURCE_DIR=${PROJECT_SOURCE_DIR}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_image_module_boundary.cmake
-)
-
-add_test(
-    NAME horizon.architecture.dsl_runtime_boundary
-    COMMAND ${CMAKE_COMMAND}
-            -DDSL_SOURCE_DIR=${PROJECT_SOURCE_DIR}/legacy/src/dsl
-            -DRUNTIME_SOURCE_DIR=${PROJECT_SOURCE_DIR}/legacy/src/runtime
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/architecture/check_dsl_runtime_boundary.cmake
-)
+if(HORIZON_BUILD_ENGINE AND HORIZON_USE_LEGACY_BACKEND)
+    add_subdirectory(legacy)
+endif()
 
 set(_quill_logging_boundary_build_dir
     "${CMAKE_CURRENT_BINARY_DIR}/quill-logging-boundary")
@@ -52,8 +22,16 @@ add_test(
             -B ${_quill_logging_boundary_build_dir}
             -G "${CMAKE_GENERATOR}"
             -DHORIZON_DEV_CONFIGURATION=${HORIZON_DEV_CONFIGURATION}
-            -DHORIZON_DEV_TARGET_FAMILY=core
+            -DHORIZON_DEV_TARGET_FAMILY=${HORIZON_DEV_TARGET_FAMILY}
             -DHORIZON_BUILD_ENGINE=OFF
             -DHORIZON_BUILD_TESTS=OFF
+            -DHORIZON_BUILD_EXAMPLES=OFF
+            -DHORIZON_BUILD_TOOLS=OFF
+            -DHORIZON_BUILD_OCARINA=OFF
+            -DHORIZON_BUILD_OCARINA_TESTS=OFF
+            -DHORIZON_BUILD_VISION_HOTFIX=OFF
             -DCMAKE_DISABLE_FIND_PACKAGE_spdlog=TRUE
+            -DCMAKE_DISABLE_FIND_PACKAGE_xxHash=TRUE
+            -DCMAKE_DISABLE_FIND_PACKAGE_stb=TRUE
+            -DCMAKE_DISABLE_FIND_PACKAGE_tinyexr=TRUE
 )

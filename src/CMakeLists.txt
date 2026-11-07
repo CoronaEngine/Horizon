@@ -1,9 +1,15 @@
-# Keep the previous Horizon libraries on a separate include root.
-add_subdirectory("${PROJECT_SOURCE_DIR}/legacy/src" "${CMAKE_CURRENT_BINARY_DIR}/legacy")
-add_subdirectory(image)
+add_subdirectory(logging)
 add_subdirectory(hotfix/api)
 
 if(HORIZON_BUILD_ENGINE)
+    if(HORIZON_USE_LEGACY_BACKEND)
+        file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapper/*.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/*.h"
+        )
+    else()
     file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper/*.hpp"
@@ -15,6 +21,7 @@ if(HORIZON_BUILD_ENGINE)
         "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/*.h"
     )
+    endif()
 
     if(APPLE)
         enable_language(OBJCXX)
@@ -23,6 +30,11 @@ if(HORIZON_BUILD_ENGINE)
             "${CMAKE_CURRENT_SOURCE_DIR}/hardware_wrapper_vulkan/display/display_manager.cpp"
             PROPERTIES LANGUAGE OBJCXX
         )
+        if(HORIZON_USE_LEGACY_BACKEND)
+            set_source_files_properties(
+                "${CMAKE_CURRENT_SOURCE_DIR}/HardwareWrapperVulkan/DisplayVulkan/DisplayManager.cpp"
+                PROPERTIES LANGUAGE OBJCXX)
+        endif()
     endif()
 
     set(PUBLIC_HEADERS
@@ -32,6 +44,16 @@ if(HORIZON_BUILD_ENGINE)
 
     add_subdirectory(Helicon)
     add_library(Horizon STATIC ${SOURCE_FILES} ${PUBLIC_HEADERS})
+    if(HORIZON_USE_LEGACY_BACKEND)
+        # Helicon's resource proxies must use the same API types as its consumers.
+        target_compile_definitions(Helicon PUBLIC HORIZON_LEGACY_API=1)
+        target_sources(Horizon PRIVATE
+            "${PROJECT_SOURCE_DIR}/include/Horizon_old.h"
+            "${PROJECT_SOURCE_DIR}/include/HardwareCommands_old.h")
+    endif()
+    if(MSVC AND HORIZON_USE_LEGACY_BACKEND)
+        target_compile_options(Horizon PRIVATE /utf-8)
+    endif()
 
     target_include_directories(Horizon
         PUBLIC
@@ -41,7 +63,6 @@ if(HORIZON_BUILD_ENGINE)
     )
 
     target_link_libraries(Horizon PUBLIC
-        horizon-core
         horizon-logging
         Helicon
         quill::quill

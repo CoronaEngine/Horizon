@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import locale
 import multiprocessing
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -270,8 +272,29 @@ class WorkflowTests(unittest.TestCase):
         for package in ("ktm", "pfr", "spirv-tools", "volk", "vulkan-headers",
                         "vulkan-memory-allocator", "slang", "tracy"):
             self.assertGreater(requirements.index(f'self.requires("{package}/'), engine_guard)
-        for package in ("quill", "fmt", "xxhash"):
+        for package in ("quill", "fmt"):
             self.assertLess(requirements.index(f'self.requires("{package}/'), engine_guard)
+
+    def test_image_and_hash_dependencies_follow_active_consumers(self) -> None:
+        recipe = ast.parse((REPO_ROOT / "build_tools/conanfile.py").read_text(encoding="utf-8"))
+        recipe_class = next(node for node in recipe.body if isinstance(node, ast.ClassDef))
+        requirements = next(node for node in recipe_class.body
+                            if isinstance(node, ast.FunctionDef) and node.name == "requirements")
+        namespace = {}
+        exec(compile(ast.Module(body=[requirements], type_ignores=[]), "requirements", "exec"), namespace)
+
+        for ocarina, examples in ((False, False), (False, True), (True, False), (True, True)):
+            with self.subTest(ocarina=ocarina, examples=examples):
+                packages = set()
+                consumer = SimpleNamespace(
+                    options=SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
+                                            with_examples=examples, with_tracy=False),
+                    requires=lambda reference, **kwargs: packages.add(reference.split("/", 1)[0]))
+                namespace["requirements"](consumer)
+                self.assertEqual("xxhash" in packages, ocarina)
+                self.assertEqual("tinyexr" in packages, ocarina)
+                self.assertEqual("stb" in packages, ocarina or examples)
+                self.assertTrue({"fmt", "quill"} <= packages)
 
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")

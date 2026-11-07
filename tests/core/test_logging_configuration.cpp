@@ -1,4 +1,3 @@
-#include "core/util/logging.h"
 #include "horizon/core/logging.h"
 #ifdef HORIZON_TEST_ENGINE_LOGGING
 #include "horizon.h"
@@ -62,13 +61,13 @@ int main(int argc, char**)
                                         : directory / "nested" / "messages.log";
     options.level = horizon::core::LogLevel::Warning;
     horizon::core::initialize_logging(options);
-    horizon::core::info("filtered core info");
+    LOG_INFO(horizon::core::get_quill_logger(), "filtered core info");
     CFW_LOG_INFO("filtered legacy info");
-    horizon::core::warning("core file message");
+    LOG_WARNING(horizon::core::get_quill_logger(), "core file message");
     CFW_LOG_WARNING("legacy file value {}", 42);
     PY_LOG_WARNING("python value {}", 7);
     VUE_LOG_WARNING("vue value {}", 9);
-    horizon::core::warning("UTF-8: ", "\xe4\xb8\xad\xe6\x96\x87");
+    LOG_WARNING(horizon::core::get_quill_logger(), "UTF-8: {}", "\xe4\xb8\xad\xe6\x96\x87");
     horizon::core::log_flush();
 
     // Repeated initialization must neither truncate the file nor reset its level.
@@ -80,7 +79,7 @@ int main(int argc, char**)
     for (int i = 0; i < 4; ++i)
     {
         writers.emplace_back([i] {
-            horizon::core::warning("core worker ", i);
+            LOG_WARNING(horizon::core::get_quill_logger(), "core worker {}", i);
             CFW_LOG_WARNING("legacy worker {}", i);
         });
     }
