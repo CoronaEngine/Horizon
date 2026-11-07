@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import itertools
 import json
 import locale
 import multiprocessing
@@ -283,18 +284,37 @@ class WorkflowTests(unittest.TestCase):
         namespace = {}
         exec(compile(ast.Module(body=[requirements], type_ignores=[]), "requirements", "exec"), namespace)
 
-        for ocarina, examples in ((False, False), (False, True), (True, False), (True, True)):
-            with self.subTest(ocarina=ocarina, examples=examples):
+        for ocarina, examples, baseline in itertools.product((False, True), repeat=3):
+            with self.subTest(ocarina=ocarina, examples=examples, baseline=baseline):
                 packages = set()
                 consumer = SimpleNamespace(
                     options=SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
-                                            with_examples=examples, with_tracy=False),
+                                            with_examples=examples, with_baseline_window_test=baseline,
+                                            with_tracy=False),
                     requires=lambda reference, **kwargs: packages.add(reference.split("/", 1)[0]))
                 namespace["requirements"](consumer)
                 self.assertEqual("xxhash" in packages, ocarina)
                 self.assertEqual("tinyexr" in packages, ocarina)
-                self.assertEqual("stb" in packages, ocarina or examples)
+                self.assertEqual("stb" in packages, ocarina or examples or baseline)
                 self.assertTrue({"fmt", "quill"} <= packages)
+                if not ocarina and not examples:
+                    self.assertEqual(packages, {"fmt", "quill", "stb"} if baseline else {"fmt", "quill"})
+
+    def test_baseline_window_commands_install_stb_without_the_engine(self) -> None:
+        for platform in ("linux", "darwin"):
+            for command in ("install", "_bootstrap", "configure", "build", "rebuild", "update"):
+                with self.subTest(platform=platform, command=command), \
+                        patch.object(dev.sys, "platform", platform), \
+                        patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                        patch.object(dev, "cached_ninja", return_value=None), \
+                        patch.object(dev, "safe_remove"), patch.object(dev, "cmake_configure"), \
+                        patch.object(dev, "cmake_build"), patch.object(dev, "conan_install") as install:
+                    args = dev.create_parser().parse_args(
+                        [command, "horizon-test-baseline-window", "--configuration", "Release"])
+                    dev.execute(args)
+                    self.assertEqual(install.call_args.kwargs["target_family"], "core")
+                    self.assertEqual(install.call_args.kwargs["options"], [
+                        "&:with_engine=False", "&:with_tests=True", "&:with_baseline_window_test=True"])
 
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")

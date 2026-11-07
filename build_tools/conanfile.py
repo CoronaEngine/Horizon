@@ -30,6 +30,7 @@ class HorizonConan(ConanFile):
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
+        "with_baseline_window_test": [True, False],
         "with_ocarina_tests": [True, False],
         "with_hardcode_shaders": [True, False],
         "with_tracy": [True, False],
@@ -44,6 +45,7 @@ class HorizonConan(ConanFile):
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
+        "with_baseline_window_test": False,
         "with_ocarina_tests": False,
         "with_hardcode_shaders": False,
         "with_tracy": True,
@@ -70,7 +72,8 @@ class HorizonConan(ConanFile):
         if bool(self.options.with_ocarina):
             self.requires("xxhash/0.8.3")
             self.requires("tinyexr/1.0.7")
-        if bool(self.options.with_ocarina) or bool(self.options.with_examples):
+        if (bool(self.options.with_ocarina) or bool(self.options.with_examples)
+                or bool(self.options.with_baseline_window_test)):
             self.requires("stb/cci.20240531")
 
         if bool(self.options.with_engine):
@@ -120,6 +123,7 @@ class HorizonConan(ConanFile):
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
         variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)
+        variables["HORIZON_BUILD_BASELINE_WINDOW_TEST"] = bool(self.options.with_baseline_window_test)
         variables["HORIZON_BUILD_OCARINA_TESTS"] = bool(self.options.with_ocarina_tests)
         variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
         variables["HORIZON_ENABLE_TRACY"] = bool(self.options.with_tracy)
