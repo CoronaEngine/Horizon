@@ -5,12 +5,13 @@
 #pragma once
 
 #include "macro.h"
-#include "dsl/types/polymorphic.h"
-#include "core/util/hash.h"
 #include "object.h"
 #include "build_system.h"
 #include "file_tool.h"
 #include "hotfix/support.h"
+
+#include <cstring>
+#include <future>
 
 namespace vision::inline hotfix {
 class HotfixSystem;
@@ -47,10 +48,11 @@ private:
     static HotfixSystem *s_mgr;
 
 private:
-    ocarina::vector<Observer *> observers_;
-    ocarina::vector<SP<const Observer>> defer_delete_;
+    vector<Observer *> observers_;
+    vector<SP<const Observer>> defer_delete_;
     FileTool file_tool_;
     BuildSystem build_system_{};
+    std::shared_future<vector<Target>> pending_build_;
     queue<std::function<void()>> callbacks_;
     vector<Version> versions_;
     int cur_ver_{0};
@@ -64,24 +66,27 @@ public:
     void register_observer(Observer *observer) noexcept;
     void deregister_observer(Observer *observer) noexcept;
     void defer_delete(SP<const Observer> observer) noexcept;
-    OC_MAKE_MEMBER_GETTER(file_tool, &)
+    [[nodiscard]] const FileTool &file_tool() const noexcept { return file_tool_; }
+    [[nodiscard]] FileTool &file_tool() noexcept { return file_tool_; }
     template<typename... Args>
     void register_target(Args &&...args) {
-        file_tool_.add_inspected(OC_FORWARD(args)...);
+        file_tool_.add_inspected(std::forward<Args>(args)...);
     }
     void remove_inspected(const fs::path &path) noexcept {
         file_tool_.remove_inspected(path);
     }
     void execute_callback();
+    // Configure on the callback thread. Watched names are backend target names.
+    [[nodiscard]] bool set_build_backend(std::shared_ptr<::horizon::hotfix::IBuildBackend> backend,
+                                         fs::path build_directory, string configuration);
 
     template<typename T>
     void register_static_var(const string &key, T &val) noexcept {
-        size_t size = sizeof(T);
-        StaticMemoryBlock new_block{addressof(val), sizeof(T)};
+        StaticMemoryBlock new_block{std::addressof(val), sizeof(T)};
         if (static_map_.contains(key)) {
             StaticMemoryBlock old_block = static_map_.at(key);
-            if (old_block.ptr != new_block.ptr) {
-                oc_memcpy(new_block.ptr, old_block.ptr, new_block.size);
+            if (old_block.ptr != new_block.ptr && old_block.size >= new_block.size) {
+                std::memcpy(new_block.ptr, old_block.ptr, new_block.size);
             }
             static_map_.at(key) = new_block;
         } else {
@@ -93,10 +98,10 @@ public:
             static_map_.erase(key);
         }
     }
-    [[nodiscard]] bool is_working() const noexcept { return build_system_.is_working(); }
+    [[nodiscard]] bool is_working() const noexcept { return pending_build_.valid(); }
     void enqueue_function(std::function<void()> fn) noexcept;
     void on_build_finish(bool success, const Target &target) noexcept;
-    void on_build_all_finish(const vector<pair<bool, Target>> &modules) noexcept;
+    void on_build_all_finish(const vector<Target> &modules) noexcept;
     void load_module(Target target) noexcept;
     void update_objects(const vector<const IObjectConstructor *> &constructors) noexcept;
     bool check_and_build() noexcept;
@@ -110,7 +115,7 @@ public:
     }
     template<typename Tuple>
     static void replace_objects(const IObjectConstructor *constructor, Tuple tuple) noexcept {
-        traverse_tuple(tuple, [&]<typename T>(SP<T> *ptr) {
+        auto replace = [&]<typename T>(SP<T> *ptr) {
             if (constructor->match(ptr->get())) {
                 SP<T> new_obj = constructor->construct_shared<T>();
                 new_obj->restore(ptr->get());
@@ -119,7 +124,12 @@ public:
                 }
                 *ptr = new_obj;
             }
-        });
+        };
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
+        ocarina::traverse_tuple(tuple, replace);
+#else
+        std::apply([&](auto... pointers) { (replace(pointers), ...); }, tuple);
+#endif
     }
     void on_version_change() noexcept;
     static HotfixSystem &instance() noexcept;
@@ -127,10 +137,10 @@ public:
 };
 
 template<typename T>
-requires ocarina::is_ptr_v<T>
+requires requires(T &value) { value.get(); }
 class HotfixSlot : public TSlot<T>, public Observer {
 public:
-    using ptr_type = ptr_t<T>;
+    using ptr_type = std::remove_pointer_t<decltype(std::declval<T &>().get())>;
     using raw_type = std::remove_pointer_t<ptr_type>;
     static_assert(std::derived_from<raw_type, RuntimeObject>);
 
@@ -156,6 +166,7 @@ public:
     }
 };
 
+#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
 template<typename T>
 class PolymorphicObserver : public Polymorphic<T>, public Observer {
 public:
@@ -173,5 +184,6 @@ public:
         }
     }
 };
+#endif
 
 }// namespace vision::inline hotfix

@@ -54,17 +54,20 @@ jobs:
       - name: Verify CMake version
         run: cmake --version
 
-      - name: Test build orchestration and source contracts
-        run: |
-          python -B -m unittest discover -s build_tools/tests -p "test_*.py"
-          python -B -m unittest discover -s tests/architecture -p "test_*.py"
-          python -B -m unittest discover -s src/tests -p "test_*.py"
+      - name: Test build orchestration
+        run: python -B -m unittest discover -s build_tools/tests -p "test_*.py"
+
+      - name: Test architecture contracts
+        run: python -B -m unittest discover -s tests/architecture -p "test_*.py"
+
+      - name: Test Ocarina capability audit
+        run: python -B -m unittest discover -s src/tests -p "test_*.py"
 
       - name: Build all registered infrastructure test targets
         run: python build_tools/dev.py build horizon-tests --configuration Debug --target-family core
 
       - name: Verify generated tuple header
-        run: python legacy/src/core/generate_tuple.py --max-arity 32 --check
+        run: python legacy/src/core/generate_tuple.py --check
 
       - name: Run all registered infrastructure tests
         run: ctest --test-dir build/conan/core/debug -C Debug --output-on-failure

@@ -1,0 +1,57 @@
+name: Function Corrector
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
+
+jobs:
+  corrector:
+    name: Windows Corrector Tests and Vulkan Build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install build tools
+        run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
+
+      - name: Prefer pip build tools
+        shell: python
+        run: |
+          import os
+          import sysconfig
+
+          with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
+              output.write(sysconfig.get_path("scripts") + "\n")
+
+      - name: Build Corrector and Vulkan regression executables
+        run: >-
+          python build_tools/dev.py build
+          test-core-function-corrector test-runtime-outline-equivalence
+          test-runtime-codegen-capability-probe test-debug-printer
+          test-debug-printer-bytebuffer-debug test-debug-printer-bindless-buffer-debug
+          --configuration RelWithDebInfo --target-family ocarina-tests
+
+      # The Vulkan tests require a device with compute ballot subgroups of at least
+      # 32 lanes. Hosted Windows runners compile these tests without executing them.
+      - name: Run Corrector AST and rejected-capture tests
+        run: >-
+          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo
+          -C RelWithDebInfo -R '^ocarina\.test-core-function-corrector($|\.)'
+          --no-tests=error --output-on-failure

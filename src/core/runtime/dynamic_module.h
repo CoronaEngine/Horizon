@@ -12,12 +12,14 @@ namespace ocarina {
 class OC_CORE_API DynamicModule : public concepts::Noncopyable {
 private:
     void *handle_{};
+    explicit DynamicModule(void *handle) noexcept : handle_(handle) {}
     static ocarina::vector<fs::path> &search_path();
 
 public:
     static void add_search_path(fs::path path) noexcept;
     static void remove_search_path(fs::path path) noexcept;
     static void clear_search_path() noexcept;
+    [[nodiscard]] static DynamicModule from_path(const fs::path &path) noexcept;
     explicit DynamicModule(const string &name) noexcept;
     OC_MAKE_MEMBER_GETTER(handle, )
     DynamicModule(fs::path path, const string &name) noexcept;

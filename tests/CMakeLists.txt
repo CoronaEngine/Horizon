@@ -10,6 +10,7 @@ add_subdirectory(math)
 add_subdirectory(ast)
 add_subdirectory(image)
 add_subdirectory(dsl)
+add_subdirectory(hotfix)
 
 add_dependencies(horizon-tests
     horizon-core

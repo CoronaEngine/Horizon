@@ -45,7 +45,6 @@ private:
     void visit(const SwitchCaseStmt *stmt) override;
     void visit(const SwitchStmt *stmt) override;
     void visit(const SwitchDefaultStmt *stmt) override;
-    void visit(const PrintStmt *stmt) override {}
 
     void visit(const BinaryExpr *expr) override;
     void visit(const CallExpr *expr) override;
@@ -63,6 +62,8 @@ private:
 
     void traverse(Function &function) noexcept;
     [[nodiscard]] CallExpr *find_call_expr_for(const Function *func) const noexcept;
+    [[nodiscard]] static uint hidden_argument_index(const CallExpr &call, const Expression *source) noexcept;
+    static void set_hidden_argument(CallExpr &call, uint index, const Expression *argument) noexcept;
     void process_capture(const Expression *&expression, Function *cur_func) noexcept;
     void visit_expr(const Expression *const &expression, Function *cur_func = nullptr) noexcept;
 
@@ -71,6 +72,7 @@ private:
 
     [[nodiscard]] bool is_from_invoker(const Expression *expression) noexcept;
     void capture_from_invoker(const Expression *&expression, Function *cur_func) noexcept;
+    void propagate_output(Function *callee, const Expression *source) noexcept;
     void output_from_invoked(const Expression *&expression, Function *cur_func) noexcept;
 
 public:

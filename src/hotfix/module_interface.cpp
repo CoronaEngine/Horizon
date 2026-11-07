@@ -3,12 +3,10 @@
 //
 
 #include "module_interface.h"
-#include "hotfix/export.h"
-#include "object.h"
+#include <cassert>
+#include <iostream>
 
 namespace vision::inline hotfix {
-using namespace ocarina;
-
 ModuleInterface::ModuleInterface() = default;
 
 ModuleInterface &ModuleInterface::instance() noexcept {
@@ -18,12 +16,17 @@ ModuleInterface &ModuleInterface::instance() noexcept {
 
 void ModuleInterface::add_constructor(SP<const IObjectConstructor> constructor) noexcept {
     string_view name = constructor->class_name();
-    constructor_map_.insert(make_pair(name, ocarina::move(constructor)));
+    constructor_map_.emplace(name, std::move(constructor));
 }
 
 const IObjectConstructor *ModuleInterface::constructor(const std::string &cls_name) const noexcept {
-    OC_ASSERT(constructor_map_.contains(cls_name));
+    assert(constructor_map_.contains(cls_name));
     return constructor_map_.at(cls_name).get();
+}
+
+const IObjectConstructor *ModuleInterface::find_constructor(const string &cls_name) const noexcept {
+    const auto entry = constructor_map_.find(cls_name);
+    return entry == constructor_map_.end() ? nullptr : entry->second.get();
 }
 
 void ModuleInterface::update(SP<const vision::IObjectConstructor> constructor) noexcept {
@@ -31,7 +34,7 @@ void ModuleInterface::update(SP<const vision::IObjectConstructor> constructor) n
     if (constructor_map_.contains(key)) {
         constructor_map_.erase(key);
     }
-    constructor_map_.insert(make_pair(key, ocarina::move(constructor)));
+    constructor_map_.emplace(std::move(key), std::move(constructor));
 }
 
 void ModuleInterface::update_constructors(const ModuleInterface *other) noexcept {
@@ -53,7 +56,7 @@ string_view ModuleInterface::src_path() noexcept {
 }
 
 ModuleInterface::~ModuleInterface() {
-    cout << "ModuleInterface  exit" << endl;
+    std::cout << "ModuleInterface  exit" << std::endl;
 }
 
 }// namespace vision::inline hotfix

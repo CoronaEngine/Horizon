@@ -8,11 +8,23 @@
 #include "ast/expression.h"
 
 #include <cstdlib>
+#include <exception>
 #include <iostream>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace ocarina;
+
+void test_function_corrector_visitors();
+void test_function_corrector_shared_calls();
+void test_function_corrector_capture_after_resource();
+void test_function_corrector_mixed_output_calls();
+void test_function_corrector_sibling_outputs();
+void test_function_corrector_parameters();
+void probe_function_corrector_shared_capture();
+void probe_function_corrector_forbidden_capture();
 
 namespace {
 
@@ -250,17 +262,6 @@ void test_capture_3level_lambda() {
     require_eq(L3_func->current_call_expr()->arguments().size(), static_cast<size_t>(3), "3level L3 callsite");
 }
 
-void test_capture_3level_callable() {
-    // This test is removed: Callable capture is now forbidden at compile time.
-    // The equivalent Lambda version is test_capture_3level_lambda.
-    std::cout << "  (skipped, Callable capture now forbidden)" << std::endl;
-}
-
-void test_capture_mixed_callable_lambda() {
-    // This test is removed: Callable capture is now forbidden at compile time.
-    std::cout << "  (skipped, Callable capture now forbidden)" << std::endl;
-}
-
 // ========== output_from_invoked tests ==========
 
 void test_output_basic() {
@@ -375,17 +376,8 @@ void test_callable_no_capture() {
 
 // test_callable_dedup_same_variable removed: Callable capture now forbidden.
 
-// ========== Tests exposing _call_expr overwrite bug ==========
-// Root cause: CallExpr constructor does set_call_expression(this) on the callee
-// Function, so multiple call sites overwrite each other. capture_from_invoker
-// uses cur_func->call_expr() to find the caller context and append arguments,
-// but gets the WRONG call_expr when the Function has been called more than once.
-
-// Bug pattern 1: Lambda invoking a shared Callable multiple times.
-// Bug pattern 1 (fixed): Lambda wrapping a shared Callable, called twice.
-// Previously, second L(20) would overwrite shared.function_->_call_expr,
-// causing capture_from_invoker to append to the wrong CallExpr.
-void test_bug_lambda_shared_callable_multi_call() {
+// Each Lambda invocation defines a new callable and must capture in its own context.
+void test_repeated_lambda_wrapper() {
     shared_ptr<Function> kernel_function;
 
     [[maybe_unused]] Kernel kernel = [&] {
@@ -401,16 +393,11 @@ void test_bug_lambda_shared_callable_multi_call() {
     };
     kernel_function = kernel.function();
 
-    // kernel should have 2 custom functions from L(10) and L(20) (each Lambda call
-    // creates a new internal callable). Both should successfully correct.
     auto custom = collect_custom_functions(kernel_function);
-    require(custom.size() >= 2, "bug1: expected at least 2 custom functions, got " + std::to_string(custom.size()));
-    std::cout << "  bug1 passed (lambda shared callable multi-call)" << std::endl;
+    require_eq(custom.size(), size_t{2}, "repeated wrapper count");
 }
 
-// Bug pattern 2 (fixed): Same Lambda called twice.
-// Lambda creates a new internal callable per invocation, so no multi-callsite issue.
-void test_bug_callable_multi_callsite_capture() {
+void test_repeated_lambda_capture() {
     shared_ptr<Function> kernel_function;
 
     [[maybe_unused]] Kernel kernel = [&] {
@@ -424,14 +411,10 @@ void test_bug_callable_multi_callsite_capture() {
     kernel_function = kernel.function();
 
     auto custom = collect_custom_functions(kernel_function);
-    // Lambda creates a new wrapper each call, so at least 2
-    require(custom.size() >= 2, "bug2: expected at least 2 custom functions, got " + std::to_string(custom.size()));
-    std::cout << "  bug2 passed (lambda multi-callsite capture)" << std::endl;
+    require_eq(custom.size(), size_t{2}, "repeated capture wrapper count");
 }
 
-// Bug pattern 3 (fixed): Multi-level Lambda chain where an intermediate Callable
-// is shared across two Lambda invocations.
-void test_bug_nested_lambda_shared_callable() {
+void test_nested_lambda_wrapper() {
     shared_ptr<Function> kernel_function;
 
     [[maybe_unused]] Kernel kernel = [&] {
@@ -451,21 +434,16 @@ void test_bug_nested_lambda_shared_callable() {
     kernel_function = kernel.function();
 
     auto custom = collect_custom_functions(kernel_function);
-    require(custom.size() >= 2, "bug3: expected at least 2 custom functions, got " + std::to_string(custom.size()));
-    std::cout << "  bug3 passed (nested lambda shared callable)" << std::endl;
+    require_eq(custom.size(), size_t{2}, "nested wrapper count");
 }
 
-// Bug pattern 4: output_from_invoked multi-callsite.
-// Originally tested Callable called twice with output. Now Callable can't capture,
-// so we use Lambda. Lambda creates a new Function per call, avoiding the original bug.
-// This test just verifies that the pattern doesn't crash.
-void test_bug_output_multi_callsite() {
+void test_repeated_lambda_output() {
     shared_ptr<Function> kernel_function;
 
     [[maybe_unused]] Kernel kernel = [&] {
-        Var<int> *leaked = nullptr;
+        std::unique_ptr<Var<int>> leaked;
         Lambda producer = [&]() {
-            leaked = new Var<int>(77);
+            leaked = std::make_unique<Var<int>>(77);
         };
         producer();
         producer();
@@ -474,57 +452,70 @@ void test_bug_output_multi_callsite() {
             producer();
         };
         [[maybe_unused]] Var<int> y = *leaked + 1;
-        delete leaked;
     };
     kernel_function = kernel.function();
 
     auto custom = collect_custom_functions(kernel_function);
-    // Lambda creates a new wrapper per call, so multiple functions
-    require(custom.size() >= 1, "bug4: expected at least 1 custom function");
-    std::cout << "  bug4 passed (output multi-callsite with Lambda)" << std::endl;
+    require_eq(custom.size(), size_t{3}, "output wrapper count");
 }
 
 }// namespace
 
-int main() {
-    std::cout << "running single capture" << std::endl;
-    test_single_capture_deduplicates_repeated_use();
-    std::cout << "running multi capture" << std::endl;
-    test_multiple_outer_variables_are_captured();
-    std::cout << "running member capture" << std::endl;
-    test_member_expression_capture();
-    std::cout << "running subscript capture" << std::endl;
-    test_subscript_capture();
-    std::cout << "running nested capture" << std::endl;
-    test_nested_capture_propagates_through_intermediate_callable();
-    std::cout << "running multi callsite capture" << std::endl;
-    test_same_capture_is_reused_across_multiple_callsites();
-    std::cout << "running 3-level Lambda capture" << std::endl;
-    test_capture_3level_lambda();
-    std::cout << "running 3-level Callable capture (skipped)" << std::endl;
-    test_capture_3level_callable();
-    std::cout << "running mixed Callable+Lambda capture (skipped)" << std::endl;
-    test_capture_mixed_callable_lambda();
-    std::cout << "running output basic" << std::endl;
-    test_output_basic();
-    std::cout << "running output 2-level" << std::endl;
-    test_output_2level();
-    std::cout << "running output sibling" << std::endl;
-    test_output_sibling_callable();
-    std::cout << "running callable no capture" << std::endl;
-    test_callable_no_capture();
-
-    // Bug regression tests (previously crashed at function_corrector.cpp:95)
-    std::cout << "\n=== Bug regression tests ===" << std::endl;
-    std::cout << "running bug1: Lambda + shared Callable multi-call" << std::endl;
-    test_bug_lambda_shared_callable_multi_call();
-    std::cout << "running bug2: Callable multi-callsite capture" << std::endl;
-    test_bug_callable_multi_callsite_capture();
-    std::cout << "running bug3: nested Lambda + shared Callable" << std::endl;
-    test_bug_nested_lambda_shared_callable();
-    std::cout << "running bug4: output multi-callsite" << std::endl;
-    test_bug_output_multi_callsite();
-
-    std::cout << "test_function_corrector passed" << std::endl;
-    return 0;
+int main(int argc, char **argv) {
+    std::string_view selected = argc == 2 ? argv[1] : "";
+    if (selected == "--probe-shared-capture") {
+        probe_function_corrector_shared_capture();
+        return 0;
+    }
+    if (selected == "--probe-forbidden-capture") {
+        probe_function_corrector_forbidden_capture();
+        return 0;
+    }
+    struct TestCase {
+        std::string_view name;
+        void (*run)();
+    };
+    constexpr TestCase cases[] = {
+        {"single-capture", test_single_capture_deduplicates_repeated_use},
+        {"multiple-captures", test_multiple_outer_variables_are_captured},
+        {"member-capture", test_member_expression_capture},
+        {"subscript-capture", test_subscript_capture},
+        {"nested-capture", test_nested_capture_propagates_through_intermediate_callable},
+        {"lambda-calls", test_same_capture_is_reused_across_multiple_callsites},
+        {"three-level-lambda", test_capture_3level_lambda},
+        {"output", test_output_basic},
+        {"nested-output", test_output_2level},
+        {"sibling-capture", test_output_sibling_callable},
+        {"no-capture", test_callable_no_capture},
+        {"repeated-lambda-wrapper", test_repeated_lambda_wrapper},
+        {"repeated-lambda-capture", test_repeated_lambda_capture},
+        {"nested-lambda-wrapper", test_nested_lambda_wrapper},
+        {"repeated-lambda-output", test_repeated_lambda_output},
+        {"visitors", test_function_corrector_visitors},
+        {"shared-calls", test_function_corrector_shared_calls},
+        {"capture-after-resource", test_function_corrector_capture_after_resource},
+        {"mixed-output-calls", test_function_corrector_mixed_output_calls},
+        {"sibling-outputs", test_function_corrector_sibling_outputs},
+        {"parameters", test_function_corrector_parameters},
+    };
+    if (argc > 2) {
+        fail("usage: test-core-function-corrector [case]");
+    }
+    unsigned int count = 0;
+    for (const auto &test : cases) {
+        if (argc == 2 && selected != test.name) {
+            continue;
+        }
+        std::cout << "running " << test.name << std::endl;
+        try {
+            test.run();
+        } catch (const std::exception &error) {
+            fail(std::string{test.name} + ": " + error.what());
+        }
+        ++count;
+    }
+    if (count == 0) {
+        fail("unknown case: " + std::string{selected});
+    }
+    std::cout << count << " function corrector cases passed" << std::endl;
 }

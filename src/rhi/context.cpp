@@ -139,6 +139,22 @@ const DynamicModule *RHIContext::obtain_module(const string &module_name) noexce
     return ret;
 }
 
+const DynamicModule *RHIContext::obtain_module_at(const fs::path &absolute_path) noexcept {
+    if (!absolute_path.is_absolute()) {
+        return nullptr;
+    }
+    const auto utf8 = absolute_path.u8string();
+    string key{reinterpret_cast<const char *>(utf8.data()), utf8.size()};
+    if (auto iter = impl_->modules.find(key); iter != impl_->modules.end()) {
+        return &iter->second;
+    }
+    auto module = DynamicModule::from_path(absolute_path);
+    if (!module.handle()) {
+        return nullptr;
+    }
+    return &impl_->modules.emplace(std::move(key), std::move(module)).first->second;
+}
+
 void RHIContext::unload_module(void *handle) noexcept {
     dynamic_module_destroy(handle);
 }

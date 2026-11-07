@@ -21,7 +21,6 @@ class SwitchCaseStmt;
 class SwitchDefaultStmt;
 class LoopStmt;
 class ForStmt;
-class PrintStmt;
 
 class Expression;
 class RefExpr;
@@ -41,7 +40,6 @@ struct StmtVisitor {
     virtual void visit(const AssignStmt *) = 0;
     virtual void visit(const ForStmt *) = 0;
     virtual void visit(const CommentStmt *) = 0;
-    virtual void visit(const PrintStmt *) = 0;
 };
 
 #define OC_MAKE_STATEMENT_COMMON    \
@@ -64,7 +62,6 @@ public:
         ASSIGN,
         COMMENT,
         FOR,
-        PRINT,
         WARNING
     };
 
@@ -290,23 +287,6 @@ public:
     OC_MAKE_CHECK_CONTEXT(Statement, body_)
     [[nodiscard]] auto body() const noexcept { return &body_; }
     [[nodiscard]] auto body() noexcept { return &body_; }
-    OC_MAKE_STATEMENT_COMMON
-};
-
-class OC_AST_API PrintStmt : public Statement {
-private:
-    ocarina::string fmt_;
-    ocarina::vector<const Expression *> args_;
-
-private:
-    [[nodiscard]] uint64_t compute_hash() const noexcept override;
-
-public:
-    explicit PrintStmt(string fmt, const vector<const Expression *> &args)
-        : Statement(Tag::PRINT), fmt_(fmt), args_(args) {}
-    OC_MAKE_CHECK_CONTEXT(Statement, args_)
-    [[nodiscard]] ocarina::string fmt() const noexcept { return fmt_; }
-    [[nodiscard]] span<const Expression *const> args() const noexcept { return args_; }
     OC_MAKE_STATEMENT_COMMON
 };
 

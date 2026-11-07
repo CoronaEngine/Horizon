@@ -42,6 +42,10 @@ void DynamicModule::clear_search_path() noexcept {
     search_path().clear();
 }
 
+DynamicModule DynamicModule::from_path(const fs::path &path) noexcept {
+    return DynamicModule{dynamic_module_try_load(path)};
+}
+
 DynamicModule::DynamicModule(const string &name) noexcept {
     if (fs::path(name).is_absolute()) {
         handle_ = dynamic_module_load(name);

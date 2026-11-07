@@ -4,6 +4,8 @@
 
 #include "function_corrector.h"
 
+#include <iterator>
+
 namespace ocarina {
 
 void FunctionCorrector::traverse(Function &function) noexcept {
@@ -27,6 +29,20 @@ CallExpr *FunctionCorrector::find_call_expr_for(const Function *func) const noex
     return nullptr;
 }
 
+uint FunctionCorrector::hidden_argument_index(const CallExpr &call, const Expression *source) noexcept {
+    const Function &callee = *call.function();
+    // Function::all_arguments lists bound resources after explicit parameters.
+    const auto prefix = callee.arguments().size() + callee.captured_resources().size();
+    return static_cast<uint>(prefix) + callee.expr_to_argument_index_.at(source);
+}
+
+void FunctionCorrector::set_hidden_argument(CallExpr &call, uint index, const Expression *argument) noexcept {
+    // An output can be discovered before this call's captures are replayed.
+    if (call.arguments_.size() <= index) {
+        call.arguments_.resize(index + 1, nullptr);
+    }
+    *std::next(call.arguments_.begin(), index) = argument;
+}
 
 void FunctionCorrector::apply(Function *function, int counter) noexcept {
     function_stack_.push_back(function);
@@ -57,10 +73,6 @@ void FunctionCorrector::process_capture(const Expression *&expression, Function 
     OC_ERROR_IF(expression->tag() == Expression::Tag::REF &&
                     static_cast<const RefExpr *>(expression)->variable().tag() == Variable::Tag::SHARED,
                 "Shared arrays cannot be captured by callables");
-    auto bit_or = [](Usage lhs, Usage rhs) {
-        return Usage(to_underlying(lhs) | to_underlying(rhs));
-    };
-    const Expression *old_expr = expression;
     if (is_from_invoker(expression)) {
         capture_from_invoker(expression, cur_func);
     } else {
@@ -100,7 +112,7 @@ void FunctionCorrector::visit_expr(const Expression *const &expression, Function
 ///      so it can be replayed when the same function is invoked by a second CallExpr.
 ///   3. Find the CallExpr that calls cur_func, recursively process the expression
 ///      in the invoker's context (visit_expr may trigger further captures up the chain),
-///      then append the expression as an actual argument to that CallExpr.
+///      then bind the expression at the corresponding argument index of that CallExpr.
 void FunctionCorrector::capture_from_invoker(const Expression *&expression, Function *cur_func) noexcept {
     bool contain;
     const Expression *old_expr = expression;
@@ -114,10 +126,10 @@ void FunctionCorrector::capture_from_invoker(const Expression *&expression, Func
     captured_outer_exprs_[cur_func].push_back(old_expr);
     /// Find the CallExpr that invokes cur_func
     CallExpr *call_expr = find_call_expr_for(cur_func);
+    const uint index = hidden_argument_index(*call_expr, old_expr);
     /// Recursively process the expression in the invoker's context (may trigger upper-level captures)
     visit_expr(old_expr, const_cast<Function *>(call_expr->context()));
-    /// Append the expression as an actual argument, corresponding to cur_func's new formal parameter
-    call_expr->append_argument(old_expr);
+    set_hidden_argument(*call_expr, index, old_expr);
 }
 
 namespace detail {
@@ -135,6 +147,7 @@ void correct_usage(const CallExpr *expr) noexcept {
         Usage &formal_arg_usage = const_cast<Usage &>(expr->function()->variable_usage(formal_arg.uid()));
 
         const Expression *act_arg = expr->argument(i);
+        OC_ERROR_IF_NOT(act_arg, "Missing corrected argument ", i);
         Usage act_arg_usage = act_arg->usage();
 
         Usage combined = bit_or(formal_arg_usage, act_arg_usage);
@@ -149,24 +162,6 @@ void correct_usage(const CallExpr *expr) noexcept {
 
 }// namespace detail
 
-/// Process a function call expression. This is the core entry point for the multi-callsite fix.
-///
-/// Problem:
-///   When the same Function (e.g. a Callable) is called multiple times, the first call
-///   traverses normally and discovers all captures/outputs, appending formal params to the
-///   Function and actual args to the CallExpr. But on the second call, the function body
-///   has already been corrected (captures/outputs replaced with parameter references), so
-///   traverse won't rediscover them, leaving the second CallExpr with too few arguments
-///   and causing correct_usage to crash on argument count mismatch.
-///
-/// Fix strategy (two steps):
-///   1. Capture args: replay the original outer expressions from captured_outer_exprs_
-///      via visit_expr to re-run the capture chain in the current invoker's context.
-///      Each callsite generates expressions belonging to its own context.
-///      (Essential for Lambda, where different wrapper expressions are not interchangeable.)
-///   2. Output args: copy directly from the first fully-corrected CallExpr.
-///      Output args are created by mapping_output_argument/mapping_local_variable on the
-///      invoker or kernel, independent of wrapper context, so they can be safely copied.
 void FunctionCorrector::visit(const CallExpr *const_expr) {
     CallExpr *expr = const_cast<CallExpr *>(const_expr);
     /// First, recursively process existing actual argument expressions
@@ -181,133 +176,54 @@ void FunctionCorrector::visit(const CallExpr *const_expr) {
     apply(const_cast<Function *>(expr->function_));
     call_expr_stack_.pop_back();
 
-    /// === Multi-callsite completion logic ===
-    /// If the Function was already corrected by a previous callsite,
-    /// the Function's formal param count > this CallExpr's actual arg count.
-    const Function *func = expr->function_;
-    size_t expected = func->all_arguments().size();
-    size_t actual = expr->arguments().size();
-    if (actual < expected) {
-        /// Step 1: Replay capture arguments.
-        /// Retrieve the original outer expressions recorded during first correction,
-        /// re-run visit_expr -> capture_from_invoker in the current invoker's context
-        /// to generate expressions belonging to the correct context.
-        /// For Lambda, each wrapper follows its own capture path, producing expressions
-        /// tied to its own context, preventing cross-wrapper pointer check_context failures.
-        auto it = captured_outer_exprs_.find(func);
-        if (it != captured_outer_exprs_.end()) {
-            for (const Expression *original_outer : it->second) {
+    // The body no longer refers to its original captures after the first visit.
+    // Replay them in this caller's context and preserve the formal argument order.
+    auto captures = captured_outer_exprs_.find(expr->function());
+    if (captures != captured_outer_exprs_.end()) {
+        for (const Expression *original_outer : captures->second) {
+            const uint index = hidden_argument_index(*expr, original_outer);
+            if (index >= expr->arguments_.size() || !expr->argument(index)) {
                 const Expression *propagated = original_outer;
                 visit_expr(propagated);
-                expr->append_argument(propagated);
-            }
-        }
-        /// Step 2: Fill in output arguments.
-        /// After capture args are filled, remaining missing args are output args
-        /// (produced by output_from_invoked). Their expressions (RefExpr) are created
-        /// by mapping_output_argument/mapping_local_variable on the invoker or kernel,
-        /// with context belonging to the caller rather than the callee Function,
-        /// so they can be safely copied from the first fully-corrected CallExpr.
-        actual = expr->arguments().size();
-        if (actual < expected) {
-            for (const CallExpr *first_ce : func->all_call_expr()) {
-                if (first_ce != expr && first_ce->arguments().size() == expected) {
-                    for (size_t i = actual; i < expected; ++i) {
-                        expr->append_argument(first_ce->argument(static_cast<uint>(i)));
-                    }
-                    break;
-                }
+                set_hidden_argument(*expr, index, propagated);
             }
         }
     }
     detail::correct_usage(expr);
 }
 
-/// Propagate an output variable from an invoked function to the outside.
-///
-/// Scenario: when a variable created inside a function body (e.g. new Var<int>) needs
-/// to be used externally, it must be passed up layer by layer along the call chain,
-/// ultimately creating a local variable in the kernel to receive it.
-///
-/// Multi-callsite note:
-///   output_from_invoked uses current_call_expr() (i.e. all_call_expr_.back()).
-///   When a Function is called multiple times, the first call correctly handles output.
-///   The second CallExpr's output args are filled by step 2 in visit(CallExpr)
-///   (copy from the first corrected CallExpr). Output expressions belong to the
-///   invoker/kernel context and can be safely copied across callsites.
-void FunctionCorrector::output_from_invoked(const Expression *&expression, Function *cur_func) noexcept {
-    auto context = const_cast<Function *>(expression->context());
-    Function *invoked = context;
-    Function *invoker = nullptr;
-    bool in_path = false;
-    /// Create an output formal parameter in the invoked function for this expression
-    context->append_output_argument(expression, nullptr);
-    const Expression *org_expr = expression;
+// Follow every incoming call edge. Each caller needs its own output reference,
+// and all paths end at the same kernel local for this source expression.
+void FunctionCorrector::propagate_output(Function *callee, const Expression *source) noexcept {
+    for (const CallExpr *const_call : callee->all_call_expr()) {
+        auto *call = const_cast<CallExpr *>(const_call);
+        auto *caller = const_cast<Function *>(call->context());
+        const uint index = hidden_argument_index(*call, source);
+        if (caller == kernel()) {
+            set_hidden_argument(*call, index, caller->mapping_local_variable(source, nullptr));
+        } else {
+            bool already_mapped;
+            set_hidden_argument(*call, index, caller->mapping_output_argument(source, &already_mapped));
+            if (!already_mapped) {
+                propagate_output(caller, source);
+            }
+        }
+    }
+}
 
-    /// Walk up the call chain layer by layer, propagating the output variable to the kernel.
-    /// At each layer: create a formal parameter / local variable mapping in the invoker
-    /// and append it as an actual argument to that layer's CallExpr.
-    while (true) {
-        CallExpr *call_expr = const_cast<CallExpr *>(invoked->current_call_expr());
-        invoker = const_cast<Function *>(call_expr->context());
-        if (invoked == cur_func || invoker == cur_func) {
-            in_path = true;
-        }
-        bool contain;
-        const RefExpr *ref_expr;
-        if (invoker == kernel()) {
-            /// Reached kernel layer: create a local variable to receive the output
-            ref_expr = invoker->mapping_local_variable(org_expr, &contain);
-            if (!contain) {
-                call_expr->append_argument(ref_expr);
-            }
-            break;
-        } else {
-            /// Intermediate layer: create an output parameter mapping, continue upward
-            ref_expr = invoker->mapping_output_argument(org_expr, &contain);
-            if (!contain) {
-                call_expr->append_argument(ref_expr);
-            }
-        }
-        invoked = invoker;
+void FunctionCorrector::output_from_invoked(const Expression *&expression, Function *cur_func) noexcept {
+    auto *callee = const_cast<Function *>(expression->context());
+    bool already_mapped;
+    callee->append_output_argument(expression, &already_mapped);
+    if (!already_mapped) {
+        propagate_output(callee, expression);
     }
-    /// The while loop above only processed the single call chain rooted at current_call_expr().
-    /// The same function may be invoked by multiple CallExprs (e.g. direct calls + calls inside
-    /// $outline), and those other CallExprs also need the output argument appended.
-    /// Since the while loop has already created the mappings on each invoker,
-    /// we just look up the existing mapping and append it to any unprocessed CallExprs.
-    {
-        Function *level = context;
-        while (level != kernel()) {
-            size_t expected_args = level->all_arguments().size();
-            for (const CallExpr *ce : level->all_call_expr()) {
-                if (ce->arguments().size() >= expected_args) {
-                    continue;
-                }
-                CallExpr *extra_ce = const_cast<CallExpr *>(ce);
-                Function *ce_invoker = const_cast<Function *>(extra_ce->context());
-                bool contain;
-                const RefExpr *ref;
-                if (ce_invoker == kernel()) {
-                    ref = ce_invoker->mapping_local_variable(org_expr, &contain);
-                } else {
-                    ref = ce_invoker->mapping_output_argument(org_expr, &contain);
-                }
-                extra_ce->append_argument(ref);
-            }
-            auto *primary_ce = level->current_call_expr();
-            level = const_cast<Function *>(primary_ce->context());
-        }
-    }
-    if (in_path) {
-        if (cur_func == kernel()) {
-            expression = cur_func->outer_to_local(org_expr);
-        } else {
-            expression = cur_func->outer_to_argument(org_expr);
-        }
+    if (cur_func == kernel()) {
+        expression = kernel()->outer_to_local(expression);
+    } else if (cur_func->expr_to_argument_index_.contains(expression)) {
+        expression = cur_func->outer_to_argument(expression);
     } else {
-        const RefExpr *kernel_expr = kernel()->outer_to_local(expression);
-        expression = kernel_expr;
+        expression = kernel()->outer_to_local(expression);
         capture_from_invoker(expression, cur_func);
     }
 }

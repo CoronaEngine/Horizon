@@ -12,10 +12,10 @@ class LLVMCompiler : public Compiler,
                      public RuntimeObject {
 public:
     LLVMCompiler();
-    void compile(const vision::CompileOptions &options) noexcept override;
+    bool compile(const vision::CompileOptions &options) noexcept override;
 
-    void link(const vision::LinkOptions &options, const Target &target,
-              const string &extension_objs, const CmdProcess::callback_t &callback) noexcept override;
+    bool link(const vision::LinkOptions &options, const Target &target,
+              const string &extension_objs) noexcept override;
     
     [[nodiscard]] fs::path installation_directory() noexcept override {
         return parent_path(cli_path(), 1);
@@ -26,11 +26,13 @@ LLVMCompiler::LLVMCompiler() {
 
 }
 
-void LLVMCompiler::compile(const CompileOptions &options) noexcept {
+bool LLVMCompiler::compile(const CompileOptions &options) noexcept {
+    return false;
 }
 
-void LLVMCompiler::link(const LinkOptions &options, const Target &target,
-                        const string &extension_objs, const CmdProcess::callback_t &callback) noexcept {
+bool LLVMCompiler::link(const LinkOptions &options, const Target &target,
+                        const string &extension_objs) noexcept {
+    return false;
 }
 
 }// namespace vision::inline hotfix

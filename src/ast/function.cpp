@@ -570,10 +570,6 @@ void Function::comment(const ocarina::string &string) noexcept {
     create_statement<CommentStmt>(string);
 }
 
-void Function::print(string fmt, const vector<const Expression *> &args) noexcept {
-    create_statement<PrintStmt>(fmt, args);
-}
-
 ocarina::span<const Variable> Function::arguments() const noexcept {
     return arguments_;
 }
