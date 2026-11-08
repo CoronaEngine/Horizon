@@ -75,6 +75,16 @@ struct CommandRecordVulkan
     ExecutorType executorType{ExecutorType::Invalid};
 };
 
+// A borrowed completion point. Queue storage and its device must outlive use;
+// public executors use DeviceManager queues, which remain stable after initialization.
+struct SubmissionPoint
+{
+    const DeviceManager::QueueUtils* queue{nullptr};
+    uint64_t value{0};
+
+    explicit operator bool() const noexcept { return queue != nullptr && value != 0; }
+};
+
 struct HardwareExecutorVulkan
 {
     explicit HardwareExecutorVulkan(std::shared_ptr<HardwareContext::HardwareUtils> context)
@@ -100,6 +110,14 @@ struct HardwareExecutorVulkan
 
     ~HardwareExecutorVulkan();
 
+    HardwareExecutorVulkan(const HardwareExecutorVulkan&) = delete;
+    HardwareExecutorVulkan& operator=(const HardwareExecutorVulkan&) = delete;
+
+    [[nodiscard]] SubmissionPoint getSubmissionPoint() const noexcept
+    {
+        return lastSubmission;
+    }
+
     HardwareExecutorVulkan &operator<<(CommandRecordVulkan *commandRecord)
     {
         if (commandRecord && commandRecord->getExecutorType() != CommandRecordVulkan::ExecutorType::Invalid)
@@ -123,21 +141,26 @@ struct HardwareExecutorVulkan
         return *this;
     }
 
-    HardwareExecutorVulkan &wait(HardwareExecutorVulkan &other)
+    HardwareExecutorVulkan &wait(const HardwareExecutorVulkan &other)
     {
-        if (other)
+        return wait(other.getSubmissionPoint());
+    }
+
+    HardwareExecutorVulkan &wait(SubmissionPoint point)
+    {
+        if (point)
         {
             // 跨设备时自动解析为本设备可用的 imported semaphore；同设备零开销直接返回
             VkSemaphore resolvedSemaphore = hardwareContext->deviceManager.getOrImportTimelineSemaphore(
-                *other.currentRecordQueue);
+                *point.queue);
 
             if (resolvedSemaphore == VK_NULL_HANDLE)
             {
                 // CPU-bridge fallback：跨设备 semaphore 导入不可用（不同架构 GPU），
                 // 回退到 host 侧等待外部设备完成，再让本地 GPU 继续
-                uint64_t waitValue = other.lastSignalValue;
-                VkSemaphore foreignSem = other.currentRecordQueue->timelineSemaphore;
-                VkDevice foreignDevice = other.currentRecordQueue->deviceManager->getLogicalDevice();
+                uint64_t waitValue = point.value;
+                VkSemaphore foreignSem = point.queue->timelineSemaphore;
+                VkDevice foreignDevice = point.queue->deviceManager->getLogicalDevice();
 
                 VkSemaphoreWaitInfo cpuWaitInfo{};
                 cpuWaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
@@ -160,7 +183,7 @@ struct HardwareExecutorVulkan
             VkSemaphoreSubmitInfo timelineWaitSemaphoreSubmitInfo{};
             timelineWaitSemaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
             timelineWaitSemaphoreSubmitInfo.semaphore = resolvedSemaphore;
-            timelineWaitSemaphoreSubmitInfo.value = other.lastSignalValue;
+            timelineWaitSemaphoreSubmitInfo.value = point.value;
             timelineWaitSemaphoreSubmitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
             waitSemaphores.push_back(timelineWaitSemaphoreSubmitInfo);
         }
@@ -169,7 +192,7 @@ struct HardwareExecutorVulkan
 
     explicit operator bool() const
     {
-        return currentRecordQueue != nullptr;
+        return static_cast<bool>(lastSubmission);
     }
 
     HardwareExecutorVulkan &commit();
@@ -199,7 +222,6 @@ struct HardwareExecutorVulkan
                                                   std::function<bool(DeviceManager::QueueUtils *currentRecordQueue)> commitCommand);
 
     DeviceManager::QueueUtils *currentRecordQueue{nullptr};
-    uint64_t lastSignalValue{0}; // 记录最近一次提交的 signal timeline 值，避免跨原子操作竞态
     std::shared_ptr<HardwareContext::HardwareUtils> hardwareContext;
     std::vector<CommandRecordVulkan *> commandList;
     std::vector<VkSemaphoreSubmitInfo> waitSemaphores;
@@ -212,4 +234,7 @@ struct HardwareExecutorVulkan
     // ========== 延迟释放成员 ==========
     std::vector<std::shared_ptr<CopyCommandImpl>> pendingResources;
     std::vector<DeferredRelease> deferredReleaseQueue;
+
+  private:
+    SubmissionPoint lastSubmission; // Published only after a successful queue submission.
 };

@@ -1,15 +1,8 @@
 #pragma once
 
-#include "HardwareWrapperVulkan/DisplayVulkan/DisplayManager.h"
+#include <cstdint>
 
-// Remaining shared control blocks; reference counts are owner-thread only.
-struct DisplayerHardwareWrap
-{
-    void *displaySurface = nullptr;
-    std::shared_ptr<DisplayManager> displayManager;
-    uint64_t refCount = 1;
-};
-
+// Remaining shared control block; reference counts are owner-thread only.
 struct PushConstantWrap
 {
     uint8_t *data{nullptr};

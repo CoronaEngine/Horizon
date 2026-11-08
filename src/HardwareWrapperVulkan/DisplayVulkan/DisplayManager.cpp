@@ -57,7 +57,7 @@ void DisplayManager::cleanUpDisplayManager()
     mainDeviceExecutor.reset();
     //displayDeviceExecutors.clear();
     displayDeviceExecutor.reset();
-    waitedExecutor.reset();
+    waitedSubmission = {};
     displaySurface = nullptr;
     displaySize = {0, 0};
     currentFrame = 0;
@@ -307,8 +307,8 @@ void DisplayManager::choosePresentDevice()
         throw std::runtime_error("Failed to find suitable present device");
     }
 
-    mainDeviceExecutor = std::make_shared<HardwareExecutorVulkan>(getHardwareContext().getMainDevice());
-    displayDeviceExecutor = std::make_shared<HardwareExecutorVulkan>(displayDevice);
+    mainDeviceExecutor = std::make_unique<HardwareExecutorVulkan>(getHardwareContext().getMainDevice());
+    displayDeviceExecutor = std::make_unique<HardwareExecutorVulkan>(displayDevice);
 }
 
 void DisplayManager::createSwapChain()
@@ -516,9 +516,9 @@ void DisplayManager::setupCrossDeviceTransfer(const ResourceManager::ImageHardwa
     dstStaging = displayDevice->resourceManager.importBufferMemory(memHandle, srcStaging.elementCount, srcStaging.elementSize,srcStaging.bufferAllocInfo.size,srcStaging.bufferUsage);*/
 }
 
-bool DisplayManager::waitExecutor(HardwareExecutorVulkan &executor)
+bool DisplayManager::waitExecutor(const HardwareExecutorVulkan &executor)
 {
-    waitedExecutor = std::make_shared<HardwareExecutorVulkan>(executor);
+    waitedSubmission = executor.getSubmissionPoint();
     return true;
 }
 
@@ -562,11 +562,10 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         }
 
         // 等待之前的执行器
-        if (waitedExecutor)
+        if (waitedSubmission)
         {
-            mainDeviceExecutor->wait(*waitedExecutor);
-            //displayDeviceExecutors[currentFrame]->wait(*waitedExecutor);
-            displayDeviceExecutor->wait(*waitedExecutor);
+            mainDeviceExecutor->wait(waitedSubmission);
+            displayDeviceExecutor->wait(waitedSubmission);
         }
 
         // 检查交换链是否需要重建

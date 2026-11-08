@@ -35,7 +35,7 @@ struct HardwareExecutor;
 
 // Legacy resources and control objects are owner-thread objects.
 // Copying/releasing shared handles and modifying resource state require external serialization.
-// Pipelines and executors uniquely own their backend objects and can only be moved.
+// Pipelines, executors and displayers uniquely own their backend objects and can only be moved.
 
 enum class ImageFormat : uint32_t
 {
@@ -360,11 +360,11 @@ struct HardwareDisplayer
 {
 public:
     explicit HardwareDisplayer(void* surface = nullptr);
-    HardwareDisplayer(const HardwareDisplayer& other);
+    HardwareDisplayer(const HardwareDisplayer& other) = delete;
     HardwareDisplayer(HardwareDisplayer&& other) noexcept;
     ~HardwareDisplayer();
 
-    HardwareDisplayer& operator=(const HardwareDisplayer& other);
+    HardwareDisplayer& operator=(const HardwareDisplayer& other) = delete;
     HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept;
     HardwareDisplayer& operator<<(const HardwareImage& image);
 
@@ -377,6 +377,7 @@ public:
 
 private:
     std::uintptr_t displaySurfaceID{0};
+    void* displaySurface{nullptr};
 };
 
 // ================= 对外封装：ComputePipelineBase =================

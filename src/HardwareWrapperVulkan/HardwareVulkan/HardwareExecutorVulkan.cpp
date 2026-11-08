@@ -533,8 +533,8 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
             return nullptr;
         }
 
-        // 记录本次提交的 signal 值，供 commit() 尾部和 wait() 使用
-        this->lastSignalValue = signalValue;
+        // Publish this successful submission independently of later recording.
+        lastSubmission = {currentRecordQueue, signalValue};
 
         // ===== 将待释放资源绑定到此次提交的 timeline 值 =====
         for (auto &resource : localPendingResources)
@@ -693,11 +693,10 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
         if (queueType == CommandRecordVulkan::ExecutorType::Graphics &&
             submittedQueue != nullptr &&
             graphicsSubmitChainDevice != VK_NULL_HANDLE &&
-            this->currentRecordQueue != nullptr &&
-            this->lastSignalValue > 0)
+            lastSubmission)
         {
             gGraphicsSubmitChains[graphicsSubmitChainDevice] =
-                {this->currentRecordQueue->timelineSemaphore, this->lastSignalValue};
+                {lastSubmission.queue->timelineSemaphore, lastSubmission.value};
         }
 
         commandList.clear();
@@ -708,14 +707,14 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
         signalSemaphores.clear();
         waitFence = VK_NULL_HANDLE;
 
-        if (this->currentRecordQueue != nullptr)
+        if (lastSubmission)
         {
             VkSemaphoreSubmitInfo timelineWaitSemaphoreSubmitInfo{};
             timelineWaitSemaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-            timelineWaitSemaphoreSubmitInfo.semaphore = currentRecordQueue->timelineSemaphore;
+            timelineWaitSemaphoreSubmitInfo.semaphore = lastSubmission.queue->timelineSemaphore;
             // 使用 pickQueueAndCommit 中记录的确切 signal 值，
             // 避免在 mutex 释放后读取可能已被其他线程递增的 timelineValue
-            timelineWaitSemaphoreSubmitInfo.value = this->lastSignalValue;
+            timelineWaitSemaphoreSubmitInfo.value = lastSubmission.value;
             timelineWaitSemaphoreSubmitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
             waitSemaphores.push_back(timelineWaitSemaphoreSubmitInfo);
         }
