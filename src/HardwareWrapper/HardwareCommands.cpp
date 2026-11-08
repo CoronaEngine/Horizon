@@ -2,7 +2,7 @@
 #include "Horizon_old.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 
 // ================= CopyCommandImpl 基类 =================
 // CopyCommandImpl definition moved to HardwareExecutorVulkan.h to allow shared usage
@@ -38,24 +38,8 @@ struct BufferCopyCommandImpl : CopyCommandImpl
             return nullptr;
         }
 
-        // 按 ID 顺序获取锁以避免死锁
-        if (srcBufferID == dstBufferID)
-        {
-            auto handle = globalBufferStorages.acquire_write(srcBufferID);
-            command = std::make_unique<CopyBufferCommand>(*handle, *handle, srcOffset, dstOffset, size);
-        }
-        else if (srcBufferID < dstBufferID)
-        {
-            auto srcHandle = globalBufferStorages.acquire_write(srcBufferID);
-            auto dstHandle = globalBufferStorages.acquire_write(dstBufferID);
-            command = std::make_unique<CopyBufferCommand>(*srcHandle, *dstHandle, srcOffset, dstOffset, size);
-        }
-        else
-        {
-            auto dstHandle = globalBufferStorages.acquire_write(dstBufferID);
-            auto srcHandle = globalBufferStorages.acquire_write(srcBufferID);
-            command = std::make_unique<CopyBufferCommand>(*srcHandle, *dstHandle, srcOffset, dstOffset, size);
-        }
+        command = std::make_unique<CopyBufferCommand>(*legacyBufferFromId(srcBufferID),
+            *legacyBufferFromId(dstBufferID), srcOffset, dstOffset, size);
 
         return command.get();
     }
@@ -84,8 +68,8 @@ struct BufferToImageCommandImpl : CopyCommandImpl
             return nullptr;
         }
 
-        auto srcHandle = globalBufferStorages.acquire_write(srcBuffer.getBufferID());
-        auto dstHandle = globalImageStorages.acquire_write(dstImage.getImageID());
+        auto srcHandle = legacyBufferFromId(srcBuffer.getBufferID());
+        auto dstHandle = legacyImageFromId(dstImage.getImageID());
         command = std::make_unique<CopyBufferToImageCommand>(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
 
         return command.get();
@@ -144,19 +128,8 @@ struct ImageCopyCommandImpl : CopyCommandImpl
         if (srcImageID == dstImageID)
             throw std::invalid_argument("A legacy image copy requires distinct images");
 
-        // 按 ID 顺序获取锁以避免死锁
-        if (srcImageID < dstImageID)
-        {
-            auto srcHandle = globalImageStorages.acquire_write(srcImageID);
-            auto dstHandle = globalImageStorages.acquire_write(dstImageID);
-            command = std::make_unique<CopyImageCommand>(*srcHandle, *dstHandle, srcLayer, dstLayer, srcMip, dstMip);
-        }
-        else
-        {
-            auto dstHandle = globalImageStorages.acquire_write(dstImageID);
-            auto srcHandle = globalImageStorages.acquire_write(srcImageID);
-            command = std::make_unique<CopyImageCommand>(*srcHandle, *dstHandle, srcLayer, dstLayer, srcMip, dstMip);
-        }
+        command = std::make_unique<CopyImageCommand>(*legacyImageFromId(srcImageID),
+            *legacyImageFromId(dstImageID), srcLayer, dstLayer, srcMip, dstMip);
 
         return command.get();
     }
@@ -198,8 +171,8 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
             return nullptr;
         }
 
-        auto srcHandle = globalImageStorages.acquire_write(srcImage.getImageID());
-        auto dstHandle = globalBufferStorages.acquire_write(dstBuffer.getBufferID());
+        auto srcHandle = legacyImageFromId(srcImage.getImageID());
+        auto dstHandle = legacyBufferFromId(dstBuffer.getBufferID());
         command = std::make_unique<CopyImageToBufferCommand>(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
 
         return command.get();

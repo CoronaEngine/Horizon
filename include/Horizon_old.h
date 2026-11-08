@@ -33,8 +33,8 @@ typedef void* HANDLE;
 
 struct HardwareExecutor;
 
-// Push constants, pipelines, executors and displayers are owner-thread objects.
-// Copying/releasing their shared handles also requires external serialization.
+// Legacy resources and control objects are owner-thread objects.
+// Copying/releasing shared handles and modifying resource state require external serialization.
 
 enum class ImageFormat : uint32_t
 {
@@ -161,12 +161,11 @@ public:
 
     [[nodiscard]] uintptr_t getBufferID() const
     {
-        return bufferID.load(std::memory_order_acquire);
+        return bufferID;
     }
 
 private:
-    std::atomic<std::uintptr_t> bufferID;
-    mutable std::mutex bufferMutex;
+    std::uintptr_t bufferID{0};
 
     friend class HardwareImage;
 };
@@ -210,7 +209,7 @@ public:
     [[nodiscard]] uint32_t storeDescriptor();
     [[nodiscard]] uintptr_t getImageID() const
     {
-        return imageID.load(std::memory_order_acquire);
+        return imageID;
     }
 
     /// Set the clear color used by the RasterizerPipeline render pass (LOAD_OP_CLEAR).
@@ -233,8 +232,7 @@ public:
     //[[nodiscard]] uint32_t getArrayLayers() const;
 
 private:
-    std::atomic<std::uintptr_t> imageID;
-    mutable std::mutex imageMutex;
+    std::uintptr_t imageID{0};
 
     friend class HardwareDisplayer;
 };

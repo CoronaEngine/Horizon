@@ -4,7 +4,7 @@
 #include <cstring>
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "Compiler/ShaderLanguageConverter.h"
 
 namespace
@@ -79,8 +79,8 @@ bool bind_image_descriptor_slot(const HardwareImage &image, uint32_t descriptorS
         return false;
     }
 
-    auto imageHandle = globalImageStorages.acquire_write(imageId);
-    return mainDevice->resourceManager.storeDescriptorAt(imageHandle, descriptorSlot);
+    auto imageHandle = legacyImageFromId(imageId);
+    return mainDevice->resourceManager.storeDescriptorAt(*imageHandle, descriptorSlot);
 }
 } // namespace
 
@@ -384,7 +384,7 @@ void RasterizerPipelineVulkan::createRenderPass(int multiviewCount)
         VkAttachmentDescription attachment{};
         VkImageUsageFlags imageUsage{};
         {
-            auto const handle = globalImageStorages.acquire_read(renderTarget.getImageID());
+            auto const handle = legacyImageFromId(renderTarget.getImageID());
             attachment.format = handle->imageFormat;
             imageUsage = handle->imageUsage;
         }
@@ -683,11 +683,11 @@ void RasterizerPipelineVulkan::createFramebuffers(ktm::uvec2 imageSize)
 
     for (const auto &renderTarget : renderTargets)
     {
-        auto const handle = globalImageStorages.acquire_read(renderTarget.getImageID());
+        auto const handle = legacyImageFromId(renderTarget.getImageID());
         attachments.push_back(handle->imageView);
     }
     {
-        auto const depthHandle = globalImageStorages.acquire_read(depthImage.getImageID());
+        auto const depthHandle = legacyImageFromId(depthImage.getImageID());
         attachments.push_back(depthHandle->imageView);
     }
 
@@ -869,7 +869,7 @@ CommandRecordVulkan::RequiredBarriers RasterizerPipelineVulkan::getRequiredBarri
     for (auto &renderTarget : renderTargets)
     {
         {
-            auto const handle = globalImageStorages.acquire_read(renderTarget.getImageID());
+            auto const handle = legacyImageFromId(renderTarget.getImageID());
             VkImageMemoryBarrier2 imageBarrier = imageBarrierTemplate;
             imageBarrier.image = handle->imageHandle;
             imageBarrier.oldLayout = handle->imageLayout;
@@ -884,7 +884,7 @@ CommandRecordVulkan::RequiredBarriers RasterizerPipelineVulkan::getRequiredBarri
         // 更新图像布局为 render pass 的 finalLayout
         // 如果图像用作 storage image，finalLayout 为 GENERAL；否则为 COLOR_ATTACHMENT_OPTIMAL
         {
-            auto handle = globalImageStorages.acquire_write(renderTarget.getImageID());
+            auto handle = legacyImageFromId(renderTarget.getImageID());
             handle->imageLayout = (handle->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) 
                                       ? VK_IMAGE_LAYOUT_GENERAL 
                                       : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -895,7 +895,7 @@ CommandRecordVulkan::RequiredBarriers RasterizerPipelineVulkan::getRequiredBarri
     if (depthImage)
     {
         {
-            auto const handle = globalImageStorages.acquire_read(depthImage.getImageID());
+            auto const handle = legacyImageFromId(depthImage.getImageID());
             VkImageMemoryBarrier2 imageBarrier = imageBarrierTemplate;
             imageBarrier.image = handle->imageHandle;
             imageBarrier.oldLayout = handle->imageLayout;
@@ -910,7 +910,7 @@ CommandRecordVulkan::RequiredBarriers RasterizerPipelineVulkan::getRequiredBarri
 
         // 更新图像布局
         {
-            auto handle = globalImageStorages.acquire_write(depthImage.getImageID());
+            auto handle = legacyImageFromId(depthImage.getImageID());
             handle->imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         }
     }
@@ -932,7 +932,7 @@ CommandRecordVulkan::RequiredBarriers RasterizerPipelineVulkan::getRequiredBarri
 
         VkBufferMemoryBarrier2 indexBarrier = bufferBarrierTemplate;
         {
-            auto handle = globalBufferStorages.acquire_read(mesh.indexBuffer.getBufferID());
+            auto handle = legacyBufferFromId(mesh.indexBuffer.getBufferID());
             indexBarrier.buffer = handle->bufferHandle;
         }
         indexBarrier.dstStageMask = VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT;
@@ -944,7 +944,7 @@ CommandRecordVulkan::RequiredBarriers RasterizerPipelineVulkan::getRequiredBarri
         {
             VkBufferMemoryBarrier2 vertexBarrier = bufferBarrierTemplate;
             {
-                auto handle = globalBufferStorages.acquire_read(mesh.vertexBuffer.getBufferID());
+                auto handle = legacyBufferFromId(mesh.vertexBuffer.getBufferID());
                 vertexBarrier.buffer = handle->bufferHandle;
             }
             vertexBarrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
@@ -981,7 +981,7 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
 
         // 转换深度图像布局
         {
-            auto const handle = globalImageStorages.acquire_write(depthImage.getImageID());
+            auto const handle = legacyImageFromId(depthImage.getImageID());
             mainDevice->resourceManager.transitionImageLayout(hardwareExecutor.currentRecordQueue->commandBuffer,
                                                               *handle,
                                                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -1013,17 +1013,17 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
 
     for (const auto &renderTarget : renderTargets)
     {
-        auto const handle = globalImageStorages.acquire_read(renderTarget.getImageID());
+        auto const handle = legacyImageFromId(renderTarget.getImageID());
         clearValues.push_back(handle->clearValue);
     }
 
     {
-        auto const handle = globalImageStorages.acquire_read(depthImage.getImageID());
+        auto const handle = legacyImageFromId(depthImage.getImageID());
         clearValues.push_back(handle->clearValue);
     }
 
     {
-        auto const handle = globalImageStorages.acquire_read(depthImage.getImageID());
+        auto const handle = legacyImageFromId(depthImage.getImageID());
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassInfo.renderPass = renderPass;
@@ -1119,14 +1119,14 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
         // offsets.reserve(mesh.vertexBuffers.size());
 
         // for (const auto& vertexBuffer : mesh.vertexBuffers) {
-        //     auto handle = globalBufferStorages.acquire_read(*vertexBuffer.getBufferID());
+        //     auto handle = legacyBufferFromId(*vertexBuffer.getBufferID());
         //     vertexBuffers.push_back(handle->bufferHandle);
         //     offsets.push_back(0);
         // }
 
         // 绑定顶点缓冲区
         {
-            auto vertexBufferHandle = globalBufferStorages.acquire_read(mesh.vertexBuffer.getBufferID());
+            auto vertexBufferHandle = legacyBufferFromId(mesh.vertexBuffer.getBufferID());
             VkBuffer vertexBuffers[] = {vertexBufferHandle->bufferHandle};
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(commandBuffer,
@@ -1137,7 +1137,7 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
         }
         // 绑定索引缓冲区
         {
-            auto handle = globalBufferStorages.acquire_read(mesh.indexBuffer.getBufferID());
+            auto handle = legacyBufferFromId(mesh.indexBuffer.getBufferID());
             VkIndexType index_type = VK_INDEX_TYPE_UINT16;
             switch (mesh.drawParams.indexType)
             {
@@ -1174,7 +1174,7 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
         }
 
         {
-            auto handle = globalBufferStorages.acquire_read(mesh.indexBuffer.getBufferID());
+            auto handle = legacyBufferFromId(mesh.indexBuffer.getBufferID());
             const uint32_t draw_index_count =
                 mesh.drawParams.indexCount > 0 ? mesh.drawParams.indexCount : static_cast<uint32_t>(handle->elementCount);
             vkCmdDrawIndexed(commandBuffer,
@@ -1276,7 +1276,7 @@ void RasterizerPipelineVulkan::updateUBODescriptor()
     }
     const VkDevice device = mainDevice->deviceManager.getLogicalDevice();
 
-    auto bufferHandle = globalBufferStorages.acquire_read(uboBuffer.getBufferID());
+    auto bufferHandle = legacyBufferFromId(uboBuffer.getBufferID());
 
     VkDescriptorBufferInfo bufferInfo{};
     bufferInfo.buffer = bufferHandle->bufferHandle;

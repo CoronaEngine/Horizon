@@ -1,7 +1,7 @@
 ﻿#include "ComputePipeline.h"
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "Compiler/ShaderLanguageConverter.h"
 #include <cstring>
 
@@ -473,7 +473,7 @@ void ComputePipelineVulkan::updateUBODescriptor()
     }
     const VkDevice device = mainDevice->deviceManager.getLogicalDevice();
 
-    auto bufferHandle = globalBufferStorages.acquire_read(uboBuffer.getBufferID());
+    auto bufferHandle = legacyBufferFromId(uboBuffer.getBufferID());
 
     VkDescriptorBufferInfo bufferInfo{};
     bufferInfo.buffer = bufferHandle->bufferHandle;

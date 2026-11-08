@@ -1,10 +1,10 @@
 ﻿#pragma once
 
 #include <ktm/ktm.h>
+#include <stdexcept>
 
 #include "DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
-#include "horizon/core/storage.h"
 
 class HardwareExecutor;
 
@@ -17,7 +17,6 @@ struct ResourceManager
         VmaAllocator allocator{VK_NULL_HANDLE};
         VkImage image{VK_NULL_HANDLE};
         VmaAllocation allocation{VK_NULL_HANDLE};
-        std::mutex viewsMutex;
         std::vector<VkImageView> views;
         ~ImageAllocation();
     };
@@ -85,6 +84,12 @@ struct ResourceManager
         VkDescriptorPool descriptorPool{VK_NULL_HANDLE};
         VkDescriptorSetLayout descriptorSetLayout{VK_NULL_HANDLE};
         VkDescriptorSet descriptorSet{VK_NULL_HANDLE};
+        enum class Slot : uint8_t { Free, Automatic, Fixed, Retired };
+        uint32_t capacity{0};
+        uint32_t nextIndex{0};
+        std::vector<Slot> slots;
+        std::vector<uint32_t> freeIndices;
+        std::vector<uint32_t> retiredIndices;
     };
 
     ResourceManager();
@@ -122,10 +127,10 @@ struct ResourceManager
     [[nodiscard]] BufferHardwareWrap importHostBuffer(void *hostPtr, uint64_t size);
 
     // Descriptor operations
-    [[nodiscard]] int32_t storeDescriptor(horizon::core::Storage<ResourceManager::ImageHardwareWrap>::WriteHandle &image);
-    [[nodiscard]] int32_t storeDescriptor(horizon::core::Storage<ResourceManager::BufferHardwareWrap>::WriteHandle &buffer);
-    [[nodiscard]] bool storeDescriptorAt(horizon::core::Storage<ResourceManager::ImageHardwareWrap>::WriteHandle &image, uint32_t descriptorIndex);
-    [[nodiscard]] bool storeDescriptorAt(horizon::core::Storage<ResourceManager::BufferHardwareWrap>::WriteHandle &buffer, uint32_t descriptorIndex);
+    [[nodiscard]] int32_t storeDescriptor(ImageHardwareWrap &image);
+    [[nodiscard]] int32_t storeDescriptor(BufferHardwareWrap &buffer);
+    [[nodiscard]] bool storeDescriptorAt(ImageHardwareWrap &image, uint32_t descriptorIndex);
+    [[nodiscard]] bool storeDescriptorAt(BufferHardwareWrap &buffer, uint32_t descriptorIndex);
 
     // Copy operations
     ResourceManager &copyBuffer(VkCommandBuffer &commandBuffer, BufferHardwareWrap &srcBuffer, BufferHardwareWrap &dstBuffer);
@@ -152,6 +157,18 @@ struct ResourceManager
     BindlessDescriptorSet bindlessDescriptors[3];
     
   private:
+    uint32_t allocateDescriptorIndex(uint32_t binding);
+    void reserveDescriptorIndex(uint32_t binding, uint32_t index, int32_t automaticIndex);
+    void retireDescriptorIndex(uint32_t binding, int32_t &index);
+    void reclaimDescriptorIndices();
+    struct DescriptorWait
+    {
+        VkSemaphore semaphore{VK_NULL_HANDLE};
+        uint64_t value{0};
+    };
+    // Retired indices are reused only after all captured submissions complete.
+    // CPU command records/callers must retain the resource while storing its index.
+    std::vector<DescriptorWait> descriptorWaits;
     //enum class DescriptorBindingType : uint8_t
     //{
     //   Texture = 0,
@@ -196,3 +213,16 @@ struct ResourceManager
     VkPhysicalDeviceProperties cachedDeviceProperties{};
     VkPhysicalDeviceDescriptorIndexingProperties cachedIndexingProperties{};
 };
+
+// IDs remain opaque addresses for API compatibility; resources are heap-owned.
+inline ResourceManager::BufferHardwareWrap *legacyBufferFromId(uintptr_t id)
+{
+    if (!id) throw std::runtime_error("Empty HardwareBuffer handle");
+    return reinterpret_cast<ResourceManager::BufferHardwareWrap *>(id);
+}
+
+inline ResourceManager::ImageHardwareWrap *legacyImageFromId(uintptr_t id)
+{
+    if (!id) throw std::runtime_error("Empty HardwareImage handle");
+    return reinterpret_cast<ResourceManager::ImageHardwareWrap *>(id);
+}

@@ -4,10 +4,6 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
-#include "horizon/core/storage.h"
-
-extern horizon::core::Storage<ResourceManager::BufferHardwareWrap> globalBufferStorages;
-extern horizon::core::Storage<ResourceManager::ImageHardwareWrap> globalImageStorages;
 
 // Control wrappers are heap-owned; their reference counts are owner-thread only.
 struct RasterizerPipelineWrap

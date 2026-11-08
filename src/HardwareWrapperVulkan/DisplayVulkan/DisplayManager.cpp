@@ -4,7 +4,7 @@
 #include <optional>
 
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include <new>
 
 //#define USE_SAME_DEVICE
@@ -532,7 +532,7 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
     try
     {
         // 检查是否需要重新初始化
-        if (auto const handle = globalImageStorages.acquire_read(displayImage.getImageID());
+        if (auto const handle = legacyImageFromId(displayImage.getImageID());
             this->displaySurface != surface)
         {
             this->displaySurface = surface;
@@ -619,7 +619,7 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         // 跨设备传输（如果需要）
         // copyCmd2 必须在 commit() 之前保持存活，提升到外层作用域
         std::optional<CopyBufferToImageCommand> copyCmd2;
-        if (auto const handle = globalImageStorages.acquire_write(displayImage.getImageID());
+        if (auto const handle = legacyImageFromId(displayImage.getImageID());
             getHardwareContext().getMainDevice() != displayDevice)
         // if (true)
         {

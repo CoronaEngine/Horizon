@@ -1,7 +1,10 @@
 ﻿#include "ResourceManager.h"
 
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
+
+#include <algorithm>
+#include <numeric>
+#include <utility>
 
 #define VK_NO_PROTOTYPES
 #define VMA_IMPLEMENTATION
@@ -68,7 +71,14 @@ void ResourceManager::cleanUpResourceManager()
             vkDestroyDescriptorSetLayout(logicalDevice, bindlessDesc.descriptorSetLayout, nullptr);
             bindlessDesc.descriptorSetLayout = VK_NULL_HANDLE;
         }
+        bindlessDesc.descriptorSet = VK_NULL_HANDLE;
+        bindlessDesc.capacity = bindlessDesc.nextIndex = 0;
+        bindlessDesc.slots.clear();
+        bindlessDesc.freeIndices.clear();
+        bindlessDesc.retiredIndices.clear();
     }
+
+    descriptorWaits.clear();
 
     // 清理纹理采样器
     if (textureSampler != VK_NULL_HANDLE)
@@ -277,6 +287,11 @@ void ResourceManager::createBindlessDescriptorSet()
     {
         const uint32_t maxCount = maxResourceCounts[i];
         const VkDescriptorType descriptorType = configs[i].type;
+        auto &table = bindlessDescriptors[i];
+        table.capacity = table.nextIndex = maxCount;
+        table.slots.assign(maxCount, BindlessDescriptorSet::Slot::Free);
+        table.freeIndices.reserve(maxCount);
+        table.retiredIndices.reserve(maxCount);
 
         // 创建描述符集布局
         VkDescriptorSetLayoutBinding binding{};
@@ -328,6 +343,14 @@ void ResourceManager::createBindlessDescriptorSet()
 
         coronaHardwareCheck(vkAllocateDescriptorSets(logicalDevice, &allocInfo, &bindlessDescriptors[i].descriptorSet));
     }
+    auto addQueues = [this](const auto &queues) {
+        for (const auto &queue : queues)
+            if (queue.timelineSemaphore != VK_NULL_HANDLE)
+                descriptorWaits.push_back({queue.timelineSemaphore, 0});
+    };
+    addQueues(device->graphicsQueues);
+    addQueues(device->computeQueues);
+    addQueues(device->transferQueues);
 }
 
 void ResourceManager::createExternalBufferMemoryPool()
@@ -639,7 +662,6 @@ VkImageView ResourceManager::createImageView(ImageHardwareWrap &image, uint32_t 
     coronaHardwareCheck(vkCreateImageView(device->getLogicalDevice(), &viewInfo, nullptr, &imageView));
     if (image.allocationOwner)
     {
-        std::lock_guard lock(image.allocationOwner->viewsMutex);
         image.allocationOwner->views.push_back(imageView);
     }
     image.allSubViews[cacheKey] = imageView;
@@ -648,6 +670,8 @@ VkImageView ResourceManager::createImageView(ImageHardwareWrap &image, uint32_t 
 
 void ResourceManager::destroyImage(ImageHardwareWrap &image)
 {
+    const uint32_t binding = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? storageImageBinding : textureBinding;
+    retireDescriptorIndex(binding, image.bindlessIndex);
     image.allSubViews.clear();
     image.imageView = VK_NULL_HANDLE;
     image.imageHandle = VK_NULL_HANDLE;
@@ -895,6 +919,7 @@ void ResourceManager::destroyBuffer(BufferHardwareWrap &buffer)
         buffer.bufferAlloc = VK_NULL_HANDLE;
         buffer.elementCount = 0;
     }
+    retireDescriptorIndex(storageBufferBinding, buffer.bindlessIndex);
 }
 
 ResourceManager::ExternalMemoryHandle ResourceManager::exportBufferMemory(BufferHardwareWrap &sourceBuffer)
@@ -1161,42 +1186,139 @@ ResourceManager::BufferHardwareWrap ResourceManager::importHostBuffer(void *host
     return bufferWrap;
 }
 
-int32_t ResourceManager::storeDescriptor(horizon::core::Storage<ResourceManager::ImageHardwareWrap>::WriteHandle &image)
+uint32_t ResourceManager::allocateDescriptorIndex(uint32_t binding)
 {
-    if (image->bindlessIndex < 0)
+    reclaimDescriptorIndices();
+    auto &table = bindlessDescriptors[binding];
+    using Slot = BindlessDescriptorSet::Slot;
+    while (!table.freeIndices.empty())
     {
-        image->bindlessIndex = globalImageStorages.seq_id(image);
+        const uint32_t index = table.freeIndices.back();
+        table.freeIndices.pop_back();
+        if (table.slots[index] == Slot::Free)
+        {
+            table.slots[index] = Slot::Automatic;
+            return index;
+        }
     }
-    storeDescriptorAt(image, static_cast<uint32_t>(image->bindlessIndex));
-
-    return image->bindlessIndex;
+    // Allocate from the high end; legacy explicit bindings normally use low slots.
+    // The state check also handles fixed bindings reserved before reaching a slot.
+    while (table.nextIndex > 0)
+    {
+        const uint32_t index = --table.nextIndex;
+        if (table.slots[index] == Slot::Free)
+        {
+            table.slots[index] = Slot::Automatic;
+            return index;
+        }
+    }
+    throw std::runtime_error("Legacy bindless descriptor table exhausted (binding " + std::to_string(binding) + ")");
 }
 
-int32_t ResourceManager::storeDescriptor(horizon::core::Storage<ResourceManager::BufferHardwareWrap>::WriteHandle &buffer)
+void ResourceManager::reserveDescriptorIndex(uint32_t binding, uint32_t index, int32_t automaticIndex)
 {
-    if (buffer->bindlessIndex < 0)
-    {
-        buffer->bindlessIndex = globalBufferStorages.seq_id(buffer);
-    }
-    storeDescriptorAt(buffer, static_cast<uint32_t>(buffer->bindlessIndex));
-
-    return buffer->bindlessIndex;
+    auto &table = bindlessDescriptors[binding];
+    if (index >= table.capacity)
+        throw std::out_of_range("Legacy descriptor index exceeds table capacity");
+    using Slot = BindlessDescriptorSet::Slot;
+    auto &slot = table.slots[index];
+    if (automaticIndex >= 0 && index == static_cast<uint32_t>(automaticIndex) && slot == Slot::Automatic)
+        return;
+    if (slot == Slot::Automatic || slot == Slot::Retired)
+        throw std::runtime_error("Legacy fixed descriptor binding conflicts with an automatic descriptor");
+    slot = Slot::Fixed;
 }
 
-bool ResourceManager::storeDescriptorAt(horizon::core::Storage<ResourceManager::ImageHardwareWrap>::WriteHandle &image, uint32_t descriptorIndex)
+void ResourceManager::retireDescriptorIndex(uint32_t binding, int32_t &index)
+{
+    if (index < 0) return;
+    auto &table = bindlessDescriptors[binding];
+    const uint32_t retired = static_cast<uint32_t>(std::exchange(index, -1));
+    table.slots[retired] = BindlessDescriptorSet::Slot::Retired;
+    table.retiredIndices.push_back(retired);
+    // Shared image allocations can outlive a subview. Its descriptor must not be
+    // overwritten while a submitted shader can still address it.
+    auto capture = [this](const auto &queues) {
+        for (const auto &queue : queues)
+        {
+            if (!queue.timelineValue) continue;
+            for (auto &wait : descriptorWaits)
+                if (wait.semaphore == queue.timelineSemaphore)
+                    wait.value = std::max(wait.value, queue.timelineValue->load(std::memory_order_acquire));
+        }
+    };
+    capture(device->graphicsQueues);
+    capture(device->computeQueues);
+    capture(device->transferQueues);
+}
+
+void ResourceManager::reclaimDescriptorIndices()
+{
+    bool pending = false;
+    for (const auto &table : bindlessDescriptors)
+        pending |= !table.retiredIndices.empty();
+    if (!pending) return;
+    for (const auto &wait : descriptorWaits)
+    {
+        if (!wait.value) continue;
+        uint64_t completed = 0;
+        coronaHardwareCheck(vkGetSemaphoreCounterValue(device->getLogicalDevice(), wait.semaphore, &completed));
+        if (completed < wait.value) return;
+    }
+    for (auto &table : bindlessDescriptors)
+    {
+        for (uint32_t index : table.retiredIndices)
+        {
+            table.slots[index] = BindlessDescriptorSet::Slot::Free;
+            table.freeIndices.push_back(index);
+        }
+        table.retiredIndices.clear();
+    }
+    for (auto &wait : descriptorWaits) wait.value = 0;
+}
+
+int32_t ResourceManager::storeDescriptor(ImageHardwareWrap &image)
+{
+    if (image.bindlessIndex < 0)
+    {
+        const uint32_t binding = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? storageImageBinding : textureBinding;
+        image.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(binding));
+    }
+    if (!storeDescriptorAt(image, static_cast<uint32_t>(image.bindlessIndex)))
+        throw std::runtime_error("Cannot store image descriptor without an initialized device");
+
+    return image.bindlessIndex;
+}
+
+int32_t ResourceManager::storeDescriptor(BufferHardwareWrap &buffer)
+{
+    if (buffer.bindlessIndex < 0)
+    {
+        buffer.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(storageBufferBinding));
+    }
+    if (!storeDescriptorAt(buffer, static_cast<uint32_t>(buffer.bindlessIndex)))
+        throw std::runtime_error("Cannot store buffer descriptor without an initialized device");
+
+    return buffer.bindlessIndex;
+}
+
+bool ResourceManager::storeDescriptorAt(ImageHardwareWrap &image, uint32_t descriptorIndex)
 {
     if (!device || device->getLogicalDevice() == VK_NULL_HANDLE)
     {
         return false;
     }
 
-    VkDescriptorType descriptorType = (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
+    VkDescriptorType descriptorType = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
                                           ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                           : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
+    const uint32_t binding = descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ? storageImageBinding : textureBinding;
+    reserveDescriptorIndex(binding, descriptorIndex, image.bindlessIndex);
+
     VkDescriptorImageInfo imageInfo{};
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageInfo.imageView = image->imageView;
+    imageInfo.imageView = image.imageView;
     imageInfo.sampler = textureSampler;
 
     VkWriteDescriptorSet write{};
@@ -1221,15 +1343,17 @@ bool ResourceManager::storeDescriptorAt(horizon::core::Storage<ResourceManager::
     return true;
 }
 
-bool ResourceManager::storeDescriptorAt(horizon::core::Storage<ResourceManager::BufferHardwareWrap>::WriteHandle &buffer, uint32_t descriptorIndex)
+bool ResourceManager::storeDescriptorAt(BufferHardwareWrap &buffer, uint32_t descriptorIndex)
 {
     if (!device || device->getLogicalDevice() == VK_NULL_HANDLE)
     {
         return false;
     }
 
+    reserveDescriptorIndex(storageBufferBinding, descriptorIndex, buffer.bindlessIndex);
+
     VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = buffer->bufferHandle;
+    bufferInfo.buffer = buffer.bufferHandle;
     bufferInfo.offset = 0;
     bufferInfo.range = VK_WHOLE_SIZE;
 
