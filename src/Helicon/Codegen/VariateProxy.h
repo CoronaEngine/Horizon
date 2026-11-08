@@ -1287,7 +1287,7 @@ namespace EmbeddedShader
 	// Pipeline-bound field proxy for direct member access syntax:
 	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
 	// PipelineType is RasterizerPipeline or ComputePipeline.
-	// operator= implementation is deferred to Horizon.h (needs ResourceProxy).
+	// operator= implementation is supplied by the active Horizon API header.
 	template<typename PipelineType>
 	struct BoundField
 	{

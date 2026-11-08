@@ -271,37 +271,6 @@ struct DrawIndexedParams
     ScissorRect scissor {};
 };
 
-// ================= 资源代理类：ResourceProxy =================
-// 内部实现细节，用于支持 pipeline[key] = value 语法
-struct ResourceProxy
-{
-private:
-    ComputePipelineBase* compute_pipeline_ { nullptr };
-    RasterizerPipelineBase* rasterizer_pipeline_ { nullptr };
-
-    // Direct-access metadata (from BindingKey)
-    uint64_t byte_offset_ { 0 };
-    uint32_t type_size_ { 0 };
-    int32_t bind_type_ { -1 };
-    uint32_t location_ { 0 };
-
-public:
-    ResourceProxy(ComputePipelineBase* p, uint64_t offset, uint32_t size, int32_t type, uint32_t loc)
-        : compute_pipeline_(p),
-          byte_offset_(offset), type_size_(size), bind_type_(type), location_(loc)
-    {
-    }
-
-    ResourceProxy(RasterizerPipelineBase* p, uint64_t offset, uint32_t size, int32_t type, uint32_t loc)
-        : rasterizer_pipeline_(p),
-          byte_offset_(offset), type_size_(size), bind_type_(type), location_(loc)
-    {
-    }
-
-    template <typename T>
-    ResourceProxy& operator=(const T& value);
-};
-
 // ================= 对外封装：HardwareDisplayer =================
 struct HardwareDisplayer
 {
@@ -366,15 +335,9 @@ public:
         return computePipelineID;
     }
 
-    template <typename ProxyType>
-        requires requires(const ProxyType& t) { t.byteOffset; t.typeSize; t.bindType; t.location; }
-    ResourceProxy operator[](const ProxyType& proxy)
-    {
-        return ResourceProxy(this, proxy.byteOffset, proxy.typeSize, proxy.bindType, proxy.location);
-    }
-
 private:
-    friend struct ResourceProxy;
+    template <typename>
+    friend struct EmbeddedShader::BoundField;
 
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
@@ -427,14 +390,6 @@ public:
     void setDepthImage(HardwareImage& depthImage);
     [[nodiscard]] HardwareImage getDepthImage();
 
-    // 通过 shader 反射键绑定资源（BindingKey 由 GLSL 编译生成的 .hpp 提供）
-    template <typename ProxyType>
-        requires requires(const ProxyType& t) { t.byteOffset; t.typeSize; t.bindType; t.location; }
-    ResourceProxy operator[](const ProxyType& proxy)
-    {
-        return ResourceProxy(this, proxy.byteOffset, proxy.typeSize, proxy.bindType, proxy.location);
-    }
-
     RasterizerPipelineBase& operator()(uint16_t width, uint16_t height);
     RasterizerPipelineBase& record(const HardwareBuffer& indexBuffer, const HardwareBuffer& vertexBuffer);
     RasterizerPipelineBase& record(const HardwareBuffer& indexBuffer, const HardwareBuffer& vertexBuffer, const DrawIndexedParams& params);
@@ -465,7 +420,8 @@ public:
     }
 
 private:
-    friend struct ResourceProxy;
+    template <typename>
+    friend struct EmbeddedShader::BoundField;
 
     void setPushConstantDirect(uint64_t byteOffset, const void* data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
@@ -511,45 +467,32 @@ private:
     std::uintptr_t executorID{0};
 };
 
-// ================= ResourceProxy Implementation =================
-
-template <typename T>
-ResourceProxy& ResourceProxy::operator=(const T& value)
-{
-    if constexpr (std::is_same_v<std::remove_cvref_t<T>, HardwareImage>)
-    {
-        if (compute_pipeline_)
-            compute_pipeline_->setResourceDirect(byte_offset_, type_size_, value, bind_type_);
-        if (rasterizer_pipeline_)
-            rasterizer_pipeline_->setResourceDirect(byte_offset_, type_size_, value, bind_type_, location_);
-    }
-    else if constexpr (std::is_same_v<std::remove_cvref_t<T>, HardwareBuffer>)
-    {
-        if (compute_pipeline_)
-            compute_pipeline_->setResourceDirect(byte_offset_, type_size_, value, bind_type_);
-        if (rasterizer_pipeline_)
-            rasterizer_pipeline_->setResourceDirect(byte_offset_, type_size_, value, bind_type_);
-    }
-    else if constexpr (!std::is_same_v<std::remove_cvref_t<T>, ResourceProxy>)
-    {
-        if (compute_pipeline_)
-            compute_pipeline_->setPushConstantDirect(byte_offset_, &value, sizeof(T), bind_type_);
-        if (rasterizer_pipeline_)
-            rasterizer_pipeline_->setPushConstantDirect(byte_offset_, &value, sizeof(T), bind_type_);
-    }
-    return *this;
-}
-
 // ================= BoundField::operator= Implementation =================
-// Deferred from VariateProxy.h — now ResourceProxy is fully defined.
+// Deferred from VariateProxy.h until the legacy pipeline types are complete.
 namespace EmbeddedShader
 {
     template <typename PipelineType>
     template <typename T>
     BoundField<PipelineType>& BoundField<PipelineType>::operator=(const T& value)
     {
-        ResourceProxy proxy(pipeline_, byteOffset, typeSize, bindType, location);
-        proxy = value;
+        if (!pipeline_)
+            return *this;
+
+        if constexpr (std::is_same_v<std::remove_cvref_t<T>, HardwareImage>)
+        {
+            if constexpr (std::is_base_of_v<RasterizerPipelineBase, PipelineType>)
+                pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType, location);
+            else
+                pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType);
+        }
+        else if constexpr (std::is_same_v<std::remove_cvref_t<T>, HardwareBuffer>)
+        {
+            pipeline_->setResourceDirect(byteOffset, typeSize, value, bindType);
+        }
+        else
+        {
+            pipeline_->setPushConstantDirect(byteOffset, &value, sizeof(T), bindType);
+        }
         return *this;
     }
 } // namespace EmbeddedShader
