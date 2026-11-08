@@ -13,6 +13,7 @@
 
 #include "Codegen/ControlFlows.h"
 #include "legacy_common.h"
+#include "example_edsl_disney_pbr_old/example_edsl_disney_pbr_old.h"
 #include "Horizon_old.h"
 #include "imgui_horizon_old.h"
 
@@ -360,8 +361,8 @@ struct InputContext
     bool has_prev = false;
 };
 
-template <typename VertShader, typename FragShader>
-void apply_material_to_pipeline(RasterizerPipeline<VertShader, FragShader>& rasterizer,
+template <typename Pipeline>
+void apply_material_to_pipeline(Pipeline& rasterizer,
                                 const DisneyMaterial& material, float aspect)
 {
     rasterizer.vpc.mat0 = glm::vec4(material.base_color, material.metallic);
@@ -413,8 +414,10 @@ void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
 
 } // namespace
 
-void run_example_disney_pbr_old()
+template<bool Edsl>
+void run_disney_pbr_old_scene()
 {
+    const char* mode = Edsl ? "edsl_disney_pbr_old" : "disney_pbr_old";
     legacy_example::Window window_owner(disney_width, disney_height, "Horizon disney_pbr_old [Legacy]");
     GLFWwindow* window = window_owner.get();
 
@@ -438,7 +441,9 @@ void run_example_disney_pbr_old()
 
     HardwareImage depth_image(disney_width, disney_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    RasterizerPipeline<disney_pbr_old_vert_glsl_t, disney_pbr_old_frag_glsl_t> rasterizer;
+    const auto shader_start = std::chrono::steady_clock::now();
+    std::conditional_t<Edsl, DisneyEdslOldPipeline, RasterizerPipeline<disney_pbr_old_vert_glsl_t, disney_pbr_old_frag_glsl_t>> rasterizer;
+    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
 
@@ -455,31 +460,33 @@ void run_example_disney_pbr_old()
 
     HorizonImGuiLayerOld ui(window, disney_width, disney_height);
 
-    legacy_example::Benchmark benchmark("disney_pbr_old", disney_width, disney_height);
+    legacy_example::Benchmark benchmark(mode, disney_width, disney_height);
+    benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
     {
         benchmark.begin_frame();
         // Legacy owns one mutable UBO/SSBO: wait before the next host write.
         render_executor.waitForDeferredResources();
         glfwPollEvents();
-        ui.new_frame();
-
         Settings& s = input.settings;
-        ImGui::Begin("Disney PBR Chart");
-        ImGui::Text("10 rows (parameter) x 11 columns (0.0 .. 1.0)");
-        ImGui::Text("Rows: subsurface, metallic, specular, specularTint, roughness,");
-        ImGui::Text("      anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss");
-        const char* probe_names[] = { "Bolonga", "Kyoto" };
-        ImGui::Combo("Light Probe", &s.current_probe, probe_names, IM_ARRAYSIZE(probe_names));
-        ImGui::SliderFloat("Exposure", &s.exposure, -4.0f, 4.0f);
-        ImGui::Checkbox("Direct Diffuse", &s.do_diffuse);
-        ImGui::Checkbox("Direct Specular", &s.do_specular);
-        ImGui::Checkbox("IBL Diffuse", &s.do_diffuse_ibl);
-        ImGui::Checkbox("IBL Specular", &s.do_specular_ibl);
-        ImGui::ColorEdit3("Light Color", &s.light_col.x);
-        ImGui::SliderFloat3("Light Direction", &s.light_dir.x, -1.0f, 1.0f);
-        ImGui::Text("Camera: LMB orbit, RMB dolly, MMB rotate env, scroll zoom");
-        ImGui::End();
+        if (!benchmark.offscreen()) {
+            ui.new_frame();
+            ImGui::Begin("Disney PBR Chart");
+            ImGui::Text("10 rows (parameter) x 11 columns (0.0 .. 1.0)");
+            ImGui::Text("Rows: subsurface, metallic, specular, specularTint, roughness,");
+            ImGui::Text("      anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss");
+            const char* probe_names[] = { "Bolonga", "Kyoto" };
+            ImGui::Combo("Light Probe", &s.current_probe, probe_names, IM_ARRAYSIZE(probe_names));
+            ImGui::SliderFloat("Exposure", &s.exposure, -4.0f, 4.0f);
+            ImGui::Checkbox("Direct Diffuse", &s.do_diffuse);
+            ImGui::Checkbox("Direct Specular", &s.do_specular);
+            ImGui::Checkbox("IBL Diffuse", &s.do_diffuse_ibl);
+            ImGui::Checkbox("IBL Specular", &s.do_specular_ibl);
+            ImGui::ColorEdit3("Light Color", &s.light_col.x);
+            ImGui::SliderFloat3("Light Direction", &s.light_dir.x, -1.0f, 1.0f);
+            ImGui::Text("Camera: LMB orbit, RMB dolly, MMB rotate env, scroll zoom");
+            ImGui::End();
+        }
 
         const float dt = benchmark.dt();
 
@@ -494,6 +501,8 @@ void run_example_disney_pbr_old()
 
 
 
+        benchmark.begin_scene();
+        if constexpr (Edsl) rasterizer.bind_textures(probe.lod, probe.irr);
         const uint32_t cube_index = probe.lod.storeDescriptor();
         const uint32_t irradiance_index = probe.irr.storeDescriptor();
         rasterizer.vsp.proj_view = proj * view;
@@ -505,6 +514,7 @@ void run_example_disney_pbr_old()
         rasterizer.vsp.envMtx = env_rot;
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
         rasterizer.vsp.exposurePad = glm::vec4(s.exposure, 0.0f, 0.0f, 0.0f);
+        if constexpr (Edsl) rasterizer.prepare_draws();
 
         // 材质与 model 走 push constant，按 record 调用保存：每个球写完自己的
         // 参数后单独 record 一次。合成一个多 draw 批次会让 110 个球全部用最后一个材质叠在一处。
@@ -528,12 +538,20 @@ void run_example_disney_pbr_old()
             }
         }
 
-        render_executor << rasterizer(disney_width, disney_height);
-        render_executor.commit();
-        auto frame_output = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame_output.executor) << frame_output.image;
-        benchmark.end_frame(window, chart_sphere_count, frame_output.image, *frame_output.executor);
+        benchmark.submit(render_executor, rasterizer(disney_width, disney_height));
+        if (benchmark.offscreen()) {
+            benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
+        } else {
+            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
+            display.wait(*frame_output.executor) << frame_output.image;
+            benchmark.end_frame(window, chart_sphere_count, frame_output.image, *frame_output.executor);
+        }
     }
 
     render_executor.waitForDeferredResources();
+}
+
+void run_example_disney_pbr_old(bool edsl) {
+    if (edsl) run_disney_pbr_old_scene<true>();
+    else run_disney_pbr_old_scene<false>();
 }

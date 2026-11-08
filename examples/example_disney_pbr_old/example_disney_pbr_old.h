@@ -1,2 +1,2 @@
 #pragma once
-void run_example_disney_pbr_old();
+void run_example_disney_pbr_old(bool edsl = false);

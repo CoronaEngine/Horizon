@@ -29,12 +29,17 @@ private:
     GLFWwindow* window_{};
 };
 
-// Wall-clock throughput, including explicit Legacy safety waits and presentation.
-// Fixed animation dt never changes benchmark timings. No GPU-time claim is made.
+// Bounded runs measure serialized scene submissions with Vulkan timestamps.
+// Animation uses an independent fixed dt; UI/presentation can be excluded.
 class Benchmark {
 public:
     Benchmark(const char* mode, uint32_t width, uint32_t height);
+    ~Benchmark();
     void begin_frame();
+    void begin_scene();
+    void submit(HardwareExecutor&, RasterizerPipelineBase&);
+    bool offscreen() const { return offscreen_; }
+    void set_shader_setup_ms(double value) { shader_setup_ms_ = value; }
     float dt() const;
     float time() const;
     void end_frame(GLFWwindow*, uint64_t draws, const HardwareImage&, HardwareExecutor&);
@@ -49,6 +54,13 @@ private:
     double dt_{}, title_seconds_{};
     uint64_t title_frames_{};
     std::vector<double> samples_;
+    struct GpuTimer;
+    std::unique_ptr<GpuTimer> gpu_timer_;
+    bool offscreen_{};
+    Clock::time_point scene_start_;
+    double shader_setup_ms_{}, first_submit_ms_{};
+    double record_ms_{}, submit_ms_{}, gpu_ms_{};
+    std::vector<double> record_samples_, submit_samples_, gpu_samples_;
 };
 
 void capture(const HardwareImage&, HardwareExecutor&, uint32_t width, uint32_t height,

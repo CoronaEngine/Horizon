@@ -151,6 +151,8 @@ void HardwareContext::prepareFeaturesChain()
         VkPhysicalDeviceVulkan11Features features11{};
         features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
         features11.multiview = VK_TRUE;
+        // Slang's SV_VertexID lowering uses the DrawParameters capability.
+        features11.shaderDrawParameters = VK_TRUE;
 
         VkPhysicalDeviceVulkan12Features features12{};
         features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;

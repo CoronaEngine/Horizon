@@ -20,6 +20,7 @@
 
 #include "Codegen/ControlFlows.h"
 #include "legacy_common.h"
+#include "example_edsl_drawstress_old/example_edsl_drawstress_old.h"
 #include "Horizon_old.h"
 #include "horizon_profiling.h"  // 内部头（src/），埋点需在 CMake 里 opt-in
 #include "imgui_horizon_old.h"
@@ -106,8 +107,10 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 } // namespace
 
-void run_example_drawstress_old()
+template<bool Edsl>
+void run_drawstress_old_scene()
 {
+    const char* mode = Edsl ? "edsl_drawstress_old" : "drawstress_old";
     legacy_example::Window window_owner(stress_width, stress_height, "Horizon drawstress_old [Legacy]");
     GLFWwindow* window = window_owner.get();
 
@@ -129,7 +132,9 @@ void run_example_drawstress_old()
 
     HardwareImage depth_image(stress_width, stress_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    RasterizerPipeline<drawstress_old_vert_glsl_t, drawstress_old_frag_glsl_t> rasterizer;
+    const auto shader_start = std::chrono::steady_clock::now();
+    std::conditional_t<Edsl, DrawstressEdslOldPipeline, RasterizerPipeline<drawstress_old_vert_glsl_t, drawstress_old_frag_glsl_t>> rasterizer;
+    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
 
@@ -149,6 +154,7 @@ void run_example_drawstress_old()
               << ", vertex descriptor_index=" << vertex_descriptor_index
               << ", capacity=" << max_draws << std::endl;
 
+    if constexpr (Edsl) rasterizer.bind_buffers(per_draw_ssbo, vertex_ssbo);
     HardwareExecutor render_executor;
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
 
@@ -166,18 +172,22 @@ void run_example_drawstress_old()
 
     HorizonImGuiLayerOld ui(window, stress_width, stress_height);
 
-    legacy_example::Benchmark benchmark("drawstress_old", stress_width, stress_height);
+    legacy_example::Benchmark benchmark(mode, stress_width, stress_height);
+    benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
     {
         benchmark.begin_frame();
         // Legacy owns one mutable UBO/SSBO: wait before the next host write.
         render_executor.waitForDeferredResources();
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
+        if (!benchmark.offscreen()) {
+            ui.new_frame();
+            ImGui::Begin("Hello");
+            ImGui::Text("hello world!");
+            ImGui::End();
+        }
 
+        benchmark.begin_scene();
         const float time = benchmark.time();
         const int dim = state.dim;
         const float step = 0.6f;
@@ -225,14 +235,22 @@ void run_example_drawstress_old()
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress_old::submit");
-            render_executor << rasterizer(stress_width, stress_height);
-            render_executor.commit();
+            benchmark.submit(render_executor, rasterizer(stress_width, stress_height));
         }
-        auto frame_output = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame_output.executor) << frame_output.image;
-        benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim,
-                            frame_output.image, *frame_output.executor);
+        if (benchmark.offscreen()) {
+            benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim, final_output_image, render_executor);
+        } else {
+            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
+            display.wait(*frame_output.executor) << frame_output.image;
+            benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim,
+                                frame_output.image, *frame_output.executor);
+        }
     }
 
     render_executor.waitForDeferredResources();
+}
+
+void run_example_drawstress_old(bool edsl) {
+    if (edsl) run_drawstress_old_scene<true>();
+    else run_drawstress_old_scene<false>();
 }

@@ -81,7 +81,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (mode == "ibl_old")
+    if (mode == "ibl_old" || mode == "edsl_ibl_old")
     {
         return run_legacy_example(argc, argv);
     }
@@ -97,7 +97,7 @@ int main(int argc, char **argv)
         run_example_drawstress();
         return 0;
     }
-    if (mode == "drawstress_old")
+    if (mode == "drawstress_old" || mode == "edsl_drawstress_old")
     {
         return run_legacy_example(argc, argv);
     }
@@ -178,7 +178,7 @@ int main(int argc, char **argv)
         run_example_disney_pbr();
         return 0;
     }
-    if (mode == "disney_pbr_old")
+    if (mode == "disney_pbr_old" || mode == "edsl_disney_pbr_old")
     {
         return run_legacy_example(argc, argv);
     }

@@ -1,5 +1,8 @@
 # Build the original RHI in a separate binary/configuration; never mix APIs.
 add_executable(HorizonExamplesOld
+    example_edsl_ibl_old/example_edsl_ibl_old.cpp
+    example_edsl_disney_pbr_old/example_edsl_disney_pbr_old.cpp
+    example_edsl_drawstress_old/example_edsl_drawstress_old.cpp
     main_old.cpp
     legacy_common.cpp
     imgui_horizon_old.cpp

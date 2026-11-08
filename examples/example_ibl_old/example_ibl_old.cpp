@@ -21,6 +21,7 @@
 
 #include "Codegen/ControlFlows.h"
 #include "legacy_common.h"
+#include "example_edsl_ibl_old/example_edsl_ibl_old.h"
 #include "Horizon_old.h"
 #include "imgui_horizon_old.h"
 
@@ -490,8 +491,10 @@ void print_controls()
 
 } // namespace
 
-void run_example_ibl_old()
+template<bool Edsl>
+void run_ibl_old_scene()
 {
+    const char* mode = Edsl ? "edsl_ibl_old" : "ibl_old";
     legacy_example::Window window_owner(ibl_width, ibl_height, "Horizon ibl_old [Legacy]");
     GLFWwindow* window = window_owner.get();
 
@@ -530,7 +533,9 @@ void run_example_ibl_old()
     HardwareImage depth_image(ibl_width, ibl_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
     // ---- Pipeline ----
-    RasterizerPipeline<ibl_old_vert_glsl_t, ibl_old_frag_glsl_t> rasterizer;
+    const auto shader_start = std::chrono::steady_clock::now();
+    std::conditional_t<Edsl, IblEdslOldPipeline, RasterizerPipeline<ibl_old_vert_glsl_t, ibl_old_frag_glsl_t>> rasterizer;
+    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
 
@@ -547,17 +552,20 @@ void run_example_ibl_old()
 
     HorizonImGuiLayerOld ui(window, ibl_width, ibl_height);
 
-    legacy_example::Benchmark benchmark("ibl_old", ibl_width, ibl_height);
+    legacy_example::Benchmark benchmark(mode, ibl_width, ibl_height);
+    benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
     {
         benchmark.begin_frame();
         // Legacy owns one mutable UBO/SSBO: wait before the next host write.
         render_executor.waitForDeferredResources();
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
+        if (!benchmark.offscreen()) {
+            ui.new_frame();
+            ImGui::Begin("Hello");
+            ImGui::Text("hello world!");
+            ImGui::End();
+        }
 
         const float dt = benchmark.dt();
 
@@ -577,6 +585,8 @@ void run_example_ibl_old()
         // VS/FS 共用同一个 binding=0 的 IblShared block，经 vsp 代理写入。
         // per-draw 数据（model、params0、misc）通过 push constant pc 写入。
         // cube 图存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
+        benchmark.begin_scene();
+        if constexpr (Edsl) rasterizer.bind_textures(probe.lod, probe.irr);
         const uint32_t cube_index = probe.lod.storeDescriptor();
         const uint32_t irradiance_index = probe.irr.storeDescriptor();
         rasterizer.vsp.proj_view = proj * view;   // VS 内算 mvp = proj_view * pc.model
@@ -589,6 +599,7 @@ void run_example_ibl_old()
         rasterizer.vsp.lightCol = glm::vec4(s.light_col, 0.0f);
         rasterizer.vsp.envMtx = env_rot;
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
+        if constexpr (Edsl) rasterizer.prepare_draws();
 
         glm::mat4 draw_model(1.0f);
         glm::vec4 draw_misc{}, draw_params{};
@@ -656,12 +667,20 @@ void run_example_ibl_old()
         draw_params = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
         record(sky_ib, sky_vb, DrawIndexedParams{.indexCount = 3, .indexType = IndexType::UInt16});
 
-        render_executor << rasterizer(ibl_width, ibl_height);
-        render_executor.commit();
-        auto frame_output = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame_output.executor) << frame_output.image;
-        benchmark.end_frame(window, draw_count, frame_output.image, *frame_output.executor);
+        benchmark.submit(render_executor, rasterizer(ibl_width, ibl_height));
+        if (benchmark.offscreen()) {
+            benchmark.end_frame(window, draw_count, final_output_image, render_executor);
+        } else {
+            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
+            display.wait(*frame_output.executor) << frame_output.image;
+            benchmark.end_frame(window, draw_count, frame_output.image, *frame_output.executor);
+        }
     }
 
     render_executor.waitForDeferredResources();
+}
+
+void run_example_ibl_old(bool edsl) {
+    if (edsl) run_ibl_old_scene<true>();
+    else run_ibl_old_scene<false>();
 }
