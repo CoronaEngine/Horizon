@@ -19,14 +19,12 @@ class HorizonConan(ConanFile):
         "examples",
         "ocarina",
         "ocarina-tests",
-        "vision-hotfix",
     )
 
     options = {
         "shared": [True, False],
         "with_engine": [True, False],
         "with_ocarina": [True, False],
-        "with_vision_hotfix": [True, False],
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
@@ -40,7 +38,6 @@ class HorizonConan(ConanFile):
         "shared": False,
         "with_engine": True,
         "with_ocarina": False,
-        "with_vision_hotfix": False,
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
@@ -94,15 +91,12 @@ class HorizonConan(ConanFile):
             "with_tools": bool(self.options.with_tools),
             "with_examples": bool(self.options.with_examples),
             "with_ocarina": bool(self.options.with_ocarina),
-            "with_vision_hotfix": bool(self.options.with_vision_hotfix),
         }
         enabled_engine_features = [name for name, enabled in engine_features.items() if enabled]
         if enabled_engine_features and not bool(self.options.with_engine):
             raise ConanInvalidConfiguration(
                 "with_engine=False is incompatible with: " + ", ".join(enabled_engine_features)
             )
-        if bool(self.options.with_vision_hotfix) and not bool(self.options.with_ocarina):
-            raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True")
         if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
             raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True")
 
@@ -114,7 +108,6 @@ class HorizonConan(ConanFile):
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
         variables["HORIZON_BUILD_ENGINE"] = bool(self.options.with_engine)
         variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina)
-        variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
         variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)

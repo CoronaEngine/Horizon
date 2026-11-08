@@ -6,13 +6,13 @@ option(HORIZON_BUILD_TESTS "Build Horizon correctness tests" ON)
 option(HORIZON_BUILD_BASELINE_WINDOW_TEST "Build the rendered baseline hotfix test" OFF)
 option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module and available GPU backends" OFF)
 option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
-option(HORIZON_BUILD_VISION_HOTFIX "Build Vision hotfix support targets" OFF)
+option(HORIZON_ENABLE_EXAMPLE_HOTFIX "Enable portable CMake hot reload in the baseline example" OFF)
 option(HORIZON_ENABLE_HARDCODE_SHADERS "Compile and use generated Helicon hardcoded shader cache" OFF)
 option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 option(HORIZON_ENABLE_IMGUI_RENDER "Render the ImGui overlay in Horizon examples" ON)
 
 if(NOT HORIZON_BUILD_ENGINE AND
-   (HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES OR HORIZON_BUILD_OCARINA OR HORIZON_BUILD_VISION_HOTFIX))
+   (HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES OR HORIZON_BUILD_OCARINA))
     message(FATAL_ERROR
-        "HORIZON_BUILD_ENGINE=OFF is incompatible with tools, examples, Ocarina, and Vision hotfix targets")
+        "HORIZON_BUILD_ENGINE=OFF is incompatible with tools, examples, and Ocarina targets")
 endif()

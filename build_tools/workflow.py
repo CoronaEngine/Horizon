@@ -26,7 +26,6 @@ TARGET_FAMILIES = (
     "examples",
     "ocarina",
     "ocarina-tests",
-    "vision-hotfix",
 )
 DEFAULT_TARGET_FAMILY = "examples"
 BOOTSTRAP_ENV = "HORIZON_DEV_BOOTSTRAP_ACTIVE"

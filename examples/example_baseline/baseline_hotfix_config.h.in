@@ -1,0 +1,11 @@
+#pragma once
+
+namespace horizon::example_baseline::hotfix_config {
+
+inline constexpr auto cmake_command = u8R"horizon(@CMAKE_COMMAND@)horizon";
+inline constexpr auto build_directory = u8R"horizon(@CMAKE_BINARY_DIR@)horizon";
+inline constexpr auto source = u8R"horizon(@CMAKE_CURRENT_SOURCE_DIR@/example_baseline/baseline_hotfix_test.cpp)horizon";
+inline constexpr auto configuration = R"horizon($<CONFIG>)horizon";
+inline constexpr auto target = "horizon-baseline-hotfix-patch";
+
+} // namespace horizon::example_baseline::hotfix_config

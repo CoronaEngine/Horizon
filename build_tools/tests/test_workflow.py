@@ -284,7 +284,7 @@ class WorkflowTests(unittest.TestCase):
             build_dir(root, "Debug", "ocarina-tests"),
             root / "build" / "conan" / "ocarina-tests" / "debug",
         )
-        self.assertEqual(preset_name("vision-hotfix", "RelWithDebInfo"), "vision-hotfix-relwithdebinfo")
+        self.assertEqual(preset_name("core", "RelWithDebInfo"), "core-relwithdebinfo")
 
     def test_unknown_configuration_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -297,25 +297,31 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("Helicon"), "engine")
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "horizon-baseline-hotfix-patch"]),
+                         "examples")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
         self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
-        self.assertEqual(target_family_for_target("horizon-hotfix-run"), "vision-hotfix")
+        self.assertEqual(target_family_for_target("horizon-hotfix-build-cmake"), "core")
         self.assertEqual(target_family_for_targets(["test-core-parsetype"]), "ocarina-tests")
         with self.assertRaises(ValueError):
             target_family_for_targets(["HorizonExamples", "ocarina-native"])
 
-    def test_posix_hotfix_targets_infer_the_core_build(self) -> None:
+    def test_hotfix_targets_infer_the_core_build_on_every_platform(self) -> None:
         targets = ["horizon-hotfix", "horizon-hotfix-build-cmake", "horizon-hotfix-process-posix",
-                   "horizon-hotfix-runtime-fixture", "horizon-test-hotfix-runtime"]
-        for platform in ("linux", "darwin"):
+                   "horizon-hotfix-process-windows", "horizon-hotfix-runtime-fixture",
+                   "horizon-test-hotfix-runtime"]
+        for platform in ("win32", "linux", "darwin"):
             with self.subTest(platform=platform), patch.object(dev.sys, "platform", platform):
                 self.assertEqual(target_family_for_targets(targets), "core")
+                self.assertEqual(conan_options(target_family_for_targets(targets)),
+                                 ["&:with_engine=False", "&:with_tests=True"])
 
-    def test_windows_keeps_legacy_hotfix_runtime_inference(self) -> None:
-        with patch.object(dev.sys, "platform", "win32"):
-            self.assertEqual(target_family_for_target("horizon-hotfix"), "vision-hotfix")
-            self.assertEqual(target_family_for_target("horizon-hotfix-all"), "vision-hotfix")
+    def test_retired_vision_hotfix_family_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            target_family_slug("vision-hotfix")
+        with self.assertRaises(ValueError):
+            conan_options("vision-hotfix")
 
     def test_build_commands_keep_all_requested_targets(self):
         for command in ("build", "build-fast", "rebuild"):

@@ -36,9 +36,6 @@
 #if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
 #include "example_baseline/baseline_hotfix_test.h"
 #include "hotfix/module_interface.h"
-#endif
-
-#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
 #include "horizon/hotfix/cmake_build_backend.h"
 #if defined(_WIN32)
 #include "horizon/hotfix/windows_process_runner.h"
@@ -46,6 +43,12 @@
 #include "horizon/hotfix/posix_process_runner.h"
 #endif
 #include <memory>
+#if !defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+#include "baseline_hotfix_config.h"
+#endif
+#endif
+
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
 #include <string_view>
 #include <system_error>
 #endif
@@ -187,12 +190,12 @@ public:
 
     void run()
     {
-#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
-        configureLiveHotfix();
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+        configureHotfix();
 #endif
         initWindow();
 #if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
-        std::cout << "[baseline hotfix] edit examples/example_baseline/baseline_hotfix_test.cpp, then press H" << std::endl;
+        std::cout << "[baseline hotfix] edit examples/example_baseline/baseline_hotfix_test.cpp, then press H; F9 restores the previous version" << std::endl;
         hotfixTest->print();
 #endif
         initVulkan();
@@ -259,17 +262,18 @@ private:
 
     bool framebufferResized = false;
 
-#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
-    struct LiveHotfixLifetime
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+    // Destroy the slot before unloading its patch modules and joining any build.
+    struct HotfixLifetime
     {
-        ~LiveHotfixLifetime() { vision::HotfixSystem::destroy_instance(); }
-    } liveHotfixLifetime;
+        ~HotfixLifetime() { vision::HotfixSystem::destroy_instance(); }
+    } hotfixLifetime;
+    horizon::example_baseline::BaselineHotfixSlot hotfixTest;
+#endif
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
     std::filesystem::path liveControl;
     std::string liveWindowLabel;
     std::uint64_t liveFrames = 0;
-#endif
-#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
-    horizon::example_baseline::BaselineHotfixSlot hotfixTest;
 #endif
 
     [[noreturn]] static void throwGlfwError(const char* message)
@@ -311,7 +315,7 @@ private:
             std::cout << "[baseline hotfix] hotfix support is disabled" << std::endl;
 #endif
         }
-#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
         else if (key == GLFW_KEY_F9 && action == GLFW_PRESS)
         {
             auto& hotfix = vision::HotfixSystem::instance();
@@ -321,9 +325,10 @@ private:
 #endif
     }
 
-#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
-    void configureLiveHotfix()
+#if defined(HORIZON_EXAMPLE_HOTFIX_ENABLED)
+    void configureHotfix()
     {
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
         auto requiredPath = [](const char* name) -> std::filesystem::path
         {
 #if defined(_WIN32)
@@ -335,25 +340,38 @@ private:
                 throw std::runtime_error(std::string("Missing live validation setting ") + name);
             return value;
         };
+        const auto cmakeCommand = requiredPath("HORIZON_BASELINE_LIVE_CMAKE");
+        const auto buildDirectory = requiredPath("HORIZON_BASELINE_LIVE_BUILD");
+        const auto source = requiredPath("HORIZON_BASELINE_LIVE_SOURCE");
+        const auto* configured = std::getenv("HORIZON_BASELINE_LIVE_CONFIG");
+        const std::string configuration = configured ? configured : "";
+        const auto* target = "horizon-baseline-live-patch";
+        liveControl = requiredPath("HORIZON_BASELINE_LIVE_CONTROL");
+#else
+        namespace config = horizon::example_baseline::hotfix_config;
+        const std::filesystem::path cmakeCommand{config::cmake_command};
+        const std::filesystem::path buildDirectory{config::build_directory};
+        const std::filesystem::path source{config::source};
+        const std::string configuration = config::configuration;
+        const auto* target = config::target;
+#endif
 #if defined(_WIN32)
         static horizon::hotfix::WindowsProcessRunner process;
 #else
         static horizon::hotfix::PosixProcessRunner process;
 #endif
-        const auto* configuration = std::getenv("HORIZON_BASELINE_LIVE_CONFIG");
         auto backend = std::make_shared<horizon::hotfix::CMakeBuildBackend>(
-            process, requiredPath("HORIZON_BASELINE_LIVE_CMAKE"));
+            process, cmakeCommand);
         auto& hotfix = vision::HotfixSystem::instance();
-        if (!hotfix.set_build_backend(backend, requiredPath("HORIZON_BASELINE_LIVE_BUILD"),
-                                      configuration ? configuration : ""))
-            throw std::runtime_error("Could not configure baseline live CMake backend");
-        const auto source = requiredPath("HORIZON_BASELINE_LIVE_SOURCE");
+        if (!hotfix.set_build_backend(backend, buildDirectory, configuration))
+            throw std::runtime_error("Could not configure baseline CMake hotfix backend");
         if (!std::filesystem::is_regular_file(source))
-            throw std::runtime_error("The watched baseline live source does not exist");
-        hotfix.register_target(source, "horizon-baseline-live-patch");
-        liveControl = requiredPath("HORIZON_BASELINE_LIVE_CONTROL");
+            throw std::runtime_error("The watched baseline hotfix source does not exist");
+        hotfix.register_target(source, target);
     }
+#endif
 
+#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
     void serviceLiveValidation()
     {
         const std::string_view label = hotfixTest->live_label();

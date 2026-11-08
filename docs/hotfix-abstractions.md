@@ -2,8 +2,8 @@
 
 公共接口使用 `horizon::hotfix` 命名空间，依赖 C++20 标准库。
 Windows、POSIX 进程执行器和 CMake 构建后端已实现对应接口。
-现有 `vision::hotfix` 的 MSVC 构建仍使用自己的常驻命令会话。
-Windows、Linux 和 macOS 宿主可以选择 CMake 后端运行热更新。
+共享运行时保留 `vision::hotfix` 的对象替换和版本管理接口，统一使用 CMake 构建后端。
+Windows、Linux 和 macOS 宿主使用相同的热更新流程；旧编译器插件、构建规则解析器和常驻命令会话已移除。
 
 ## 接口与职责
 
@@ -97,7 +97,14 @@ macOS 和 Linux 使用 `horizon-hotfix-process-posix`，Windows 使用 `horizon-
 该函数为目标编译模块入口、隔离模块内的工厂注册表并生成产物清单。
 模块源码用 `VS_REGISTER_HOTFIX` 注册对象工厂。宿主管理观察者和被监控的目标，
 并注册初始对象的工厂，供首次加载和回退使用。模块和宿主使用相同的工具链、配置及兼容的对象接口。
-Core 构建提供 CMake 热更新运行时。`HORIZON_BUILD_VISION_HOTFIX` 用于构建原有 Windows 插件和示例。
+Core 构建提供 CMake 热更新运行时，不依赖 Ocarina。`horizon-hotfix` 在三个平台均选择 `core` 目标族。
+
+普通 baseline 示例通过 `HORIZON_ENABLE_EXAMPLE_HOTFIX=ON` 开启热更新。
+配置好的 `examples` 构建树会注册 `horizon-baseline-hotfix-patch` 模块，并将构建目录、配置、CMake
+路径与原始源码传给宿主。修改 `examples/example_baseline/baseline_hotfix_test.cpp` 后按 H 构建并应用新版本，
+F9 回退历史版本。构建和加载均复用同一跨平台运行时；窗口验证仍使用独立的源码副本和测试控制文件。
+完整引擎示例的 CI 覆盖 Windows 和 macOS；当前引擎使用的 Slang 包配方不支持 Linux，
+Linux 使用不依赖引擎的 Core 和 baseline-window 用例验证热更新。
 
 `check_and_build()` 负责触发后台构建。整批构建成功后，模块按原文件名复制到
 构建目录下的 `hotfix-staged/<会话>/generation_<序号>/`。主线程调用
@@ -149,5 +156,5 @@ ctest --test-dir build/conan/core/release -C Release -L '^window$' --no-tests=er
 - [x] CMake 后端及小模块构建、增量、失败和产物测试。
 - [x] Windows、Linux 和 macOS 运行时接入 CMake 后端及版本副本，验证连续更新、版本回退和编译失败保护。
 
-原有 MSVC 路径使用常驻 cmd 会话保存环境。接入新的逐进程执行器时，必须显式传递
-完整继承环境及覆盖值，不能把一次 `vcvarsall.bat` 调用当成后续进程的永久环境初始化。
+进程执行器继承宿主环境并应用显式覆盖值。工具链环境由已配置的 CMake 构建树准备，
+不再依赖常驻 cmd 会话保存环境。

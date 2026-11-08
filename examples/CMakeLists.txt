@@ -31,7 +31,7 @@ set(HORIZON_EXAMPLE_SOURCES
     example_edsl_compile_comparison/example_edsl_compile_comparison.cpp
 )
 
-if(HORIZON_BUILD_VISION_HOTFIX)
+if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
     list(APPEND HORIZON_EXAMPLE_SOURCES
         example_baseline/baseline_hotfix_test.cpp)
 endif()
@@ -68,18 +68,38 @@ set(HORIZON_EXAMPLE_HEADERS
     example_edsl_compile_comparison/example_edsl_compile_comparison.h
 )
 
-if(HORIZON_BUILD_VISION_HOTFIX)
+if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
     list(APPEND HORIZON_EXAMPLE_HEADERS
         example_baseline/baseline_hotfix_test.h)
 endif()
 
 add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})
 
-if(HORIZON_BUILD_VISION_HOTFIX)
+if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
     target_compile_definitions(HorizonExamples PRIVATE
         HORIZON_EXAMPLE_HOTFIX_ENABLED=1)
 
-    horizon_install_runtime_deps(HorizonExamples horizon-hotfix-all)
+    target_link_libraries(HorizonExamples PRIVATE
+        horizon-hotfix horizon-hotfix-build-cmake)
+    if(WIN32)
+        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-process-windows)
+    else()
+        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-process-posix)
+    endif()
+
+    configure_file(example_baseline/baseline_hotfix_config.h.in
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/baseline_hotfix_config.h.configured" @ONLY)
+    file(GENERATE
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>/baseline_hotfix_config.h"
+        INPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/baseline_hotfix_config.h.configured")
+    target_include_directories(HorizonExamples PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/$<CONFIG>")
+
+    # Rebuild the original editable source independently of the running host.
+    add_library(horizon-baseline-hotfix-patch MODULE EXCLUDE_FROM_ALL
+        example_baseline/baseline_hotfix_test.cpp)
+    include(horizon_hotfix_manifest)
+    horizon_register_hotfix_module(horizon-baseline-hotfix-patch)
 endif()
 
 target_include_directories(HorizonExamples PRIVATE
