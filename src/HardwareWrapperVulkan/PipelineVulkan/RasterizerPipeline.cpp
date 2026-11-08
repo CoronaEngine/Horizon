@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <span>
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
@@ -14,15 +15,15 @@ using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
 constexpr uint32_t kDescriptorHandle32Size = sizeof(uint32_t);
 constexpr uint32_t kDescriptorHandle64Size = sizeof(uint32_t) * 2;
 
-bool copy_to_push_constant(HardwarePushConstant &target, uint64_t byteOffset, const void *src, size_t size)
+bool copy_to_push_constant(std::span<uint8_t> target, uint64_t byteOffset, const void *src, size_t size)
 {
-    uint8_t *dst = target.getData();
+    uint8_t *dst = target.data();
     if (!dst || !src || size == 0)
     {
         return false;
     }
 
-    const uint64_t targetSize = target.getSize();
+    const uint64_t targetSize = target.size();
     if (byteOffset > targetSize || size > targetSize - byteOffset)
     {
         return false;
@@ -41,7 +42,7 @@ uint32_t descriptor_write_size(uint32_t reflectedTypeSize)
     return reflectedTypeSize >= kDescriptorHandle64Size ? kDescriptorHandle64Size : kDescriptorHandle32Size;
 }
 
-bool write_descriptor_handle(HardwarePushConstant &target, uint64_t byteOffset, uint32_t reflectedTypeSize, uint32_t descriptorIndex)
+bool write_descriptor_handle(std::span<uint8_t> target, uint64_t byteOffset, uint32_t reflectedTypeSize, uint32_t descriptorIndex)
 {
     const uint32_t writeSize = descriptor_write_size(reflectedTypeSize);
     if (writeSize >= kDescriptorHandle64Size)
@@ -213,7 +214,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(std::string vertexShaderCode,
 
     if (pushConstantSize > 0)
     {
-        tempPushConstant = HardwarePushConstant(pushConstantSize, 0);
+        tempPushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
     }
 
     // 初始化 per-pipeline UBO
@@ -222,7 +223,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(std::string vertexShaderCode,
     uboSize = std::max(vertUBOSize, fragUBOSize);
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
+        tempUBO = std::make_unique_for_overwrite<uint8_t[]>(uboSize);
         uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
     }
 }
@@ -264,7 +265,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCom
 
     if (pushConstantSize > 0)
     {
-        tempPushConstant = HardwarePushConstant(pushConstantSize, 0);
+        tempPushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
     }
 
     // 初始化 per-pipeline UBO
@@ -273,7 +274,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCom
     uboSize = std::max(vertUBOSize, fragUBOSize);
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
+        tempUBO = std::make_unique_for_overwrite<uint8_t[]>(uboSize);
         uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
     }
 }
@@ -304,14 +305,14 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(const EmbeddedShader::ShaderC
 
     pushConstantSize = std::max(vertPushConstSize, fragPushConstSize);
     if (pushConstantSize > 0)
-        tempPushConstant = HardwarePushConstant(pushConstantSize, 0);
+        tempPushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
 
     const uint32_t vertUBOSize = vertResources.uniformBufferSize;
     const uint32_t fragUBOSize = fragResources.uniformBufferSize;
     uboSize = std::max(vertUBOSize, fragUBOSize);
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
+        tempUBO = std::make_unique_for_overwrite<uint8_t[]>(uboSize);
         uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
     }
 }
@@ -712,12 +713,12 @@ void RasterizerPipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const 
     const auto typedBindType = static_cast<BindType>(bindType);
     if (typedBindType == BindType::pushConstantMembers)
     {
-        copy_to_push_constant(tempPushConstant, byteOffset, data, size);
+        copy_to_push_constant({tempPushConstant.get(), pushConstantSize}, byteOffset, data, size);
         return;
     }
     if (typedBindType == BindType::uniformBufferMembers)
     {
-        if (copy_to_push_constant(tempUBO, byteOffset, data, size))
+        if (copy_to_push_constant({tempUBO.get(), uboSize}, byteOffset, data, size))
         {
             uboDescriptorDirty = true;
         }
@@ -732,12 +733,12 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
 
     if (typedBindType == BindType::pushConstantMembers)
     {
-        write_descriptor_handle(tempPushConstant, byteOffset, typeSize, descriptorIndex);
+        write_descriptor_handle({tempPushConstant.get(), pushConstantSize}, byteOffset, typeSize, descriptorIndex);
         return;
     }
     if (typedBindType == BindType::uniformBufferMembers)
     {
-        if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+        if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
         {
             uboDescriptorDirty = true;
         }
@@ -748,11 +749,11 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
         return;
     }
 
-    if (write_descriptor_handle(tempPushConstant, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({tempPushConstant.get(), pushConstantSize}, byteOffset, typeSize, descriptorIndex))
     {
         return;
     }
-    if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
     {
         uboDescriptorDirty = true;
     }
@@ -774,12 +775,12 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
 
     if (typedBindType == BindType::pushConstantMembers)
     {
-        write_descriptor_handle(tempPushConstant, byteOffset, typeSize, descriptorIndex);
+        write_descriptor_handle({tempPushConstant.get(), pushConstantSize}, byteOffset, typeSize, descriptorIndex);
         return;
     }
     if (typedBindType == BindType::uniformBufferMembers)
     {
-        if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+        if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
         {
             uboDescriptorDirty = true;
         }
@@ -790,11 +791,11 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
         return;
     }
 
-    if (write_descriptor_handle(tempPushConstant, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({tempPushConstant.get(), pushConstantSize}, byteOffset, typeSize, descriptorIndex))
     {
         return;
     }
-    if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
     {
         uboDescriptorDirty = true;
         return;
@@ -819,20 +820,21 @@ CommandRecordVulkan *RasterizerPipelineVulkan::record(const HardwareBuffer &inde
                                                       const HardwareBuffer &vertexBuffer,
                                                       const DrawIndexedParams &params)
 {
-    TriangleGeomMesh mesh;
+    // Allocate before transferring the current draw's bytes. Each record owns
+    // its snapshot; the next draw starts with fresh, uninitialized storage.
+    std::unique_ptr<uint8_t[]> nextPushConstant;
+    if (pushConstantSize > 0)
+    {
+        nextPushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
+    }
+
+    auto &mesh = geomMeshesRecord.emplace_back();
     mesh.indexBuffer = indexBuffer;
     mesh.vertexBuffer = vertexBuffer;
     mesh.drawParams = params;
 
-    mesh.pushConstant = tempPushConstant;
-
-    // 重置临时推送常量
-    if (pushConstantSize > 0)
-    {
-        tempPushConstant = HardwarePushConstant(pushConstantSize, 0);
-    }
-
-    geomMeshesRecord.push_back(std::move(mesh));
+    mesh.pushConstant = std::move(tempPushConstant);
+    tempPushConstant = std::move(nextPushConstant);
 
     return &dumpCommandRecordVulkan;
 }
@@ -1057,9 +1059,9 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
     // 上传 UBO 数据并更新描述符
-    if (uboSize > 0 && tempUBO.getData())
+    if (uboSize > 0 && tempUBO.get())
     {
-        uboBuffer.copyFromData(tempUBO.getData(), uboSize);
+        uboBuffer.copyFromData(tempUBO.get(), uboSize);
         if (uboDescriptorDirty)
         {
             updateUBODescriptor();
@@ -1163,7 +1165,7 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExe
         }
 
         // 推送常量
-        if (const void *pushConstData = mesh.pushConstant.getData(); pushConstData != nullptr && pushConstantSize > 0)
+        if (const void *pushConstData = mesh.pushConstant.get(); pushConstData != nullptr && pushConstantSize > 0)
         {
             vkCmdPushConstants(commandBuffer,
                                pipelineLayout,

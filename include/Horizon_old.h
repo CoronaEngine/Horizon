@@ -238,59 +238,6 @@ private:
     friend class HardwareDisplayer;
 };
 
-// ================= 对外封装：HardwarePushConstant =================
-struct HardwarePushConstant
-{
-public:
-    HardwarePushConstant();
-    HardwarePushConstant(const HardwarePushConstant& other);
-    HardwarePushConstant(HardwarePushConstant&& other) noexcept;
-
-    template <typename T>
-        requires(!std::is_same_v<std::remove_cvref_t<T>, HardwarePushConstant>)
-    explicit HardwarePushConstant(T data)
-    {
-        copyFromRaw(&data, sizeof(T));
-    }
-
-    // NOTE: the sub and whole must in the same thread
-    HardwarePushConstant(uint64_t size, uint64_t offset, HardwarePushConstant* whole = nullptr);
-
-    ~HardwarePushConstant();
-
-    HardwarePushConstant& operator=(const HardwarePushConstant& other);
-    HardwarePushConstant& operator=(HardwarePushConstant&& other) noexcept;
-
-    template <typename T>
-        requires(!std::is_same_v<std::remove_cvref_t<T>, HardwarePushConstant>)
-    HardwarePushConstant& operator=(const T& data)
-    {
-        copyFromRaw(&data, sizeof(T));
-        return *this;
-    }
-
-    template <typename T>
-        requires(!std::is_same_v<std::remove_cvref_t<T>, HardwarePushConstant>)
-    HardwarePushConstant& operator=(T&& data)
-    {
-        copyFromRaw(&data, sizeof(T));
-        return *this;
-    }
-
-    // NOTE: must in the same thread
-    [[nodiscard]] uint8_t* getData() const;
-    [[nodiscard]] uint64_t getSize() const;
-    [[nodiscard]] uintptr_t getPushConstantID() const
-    {
-        return pushConstantID;
-    }
-
-private:
-    void copyFromRaw(const void* src, uint64_t size);
-
-    std::uintptr_t pushConstantID{0};
-};
-
 // Forward declarations
 struct ComputePipelineBase;
 struct RasterizerPipelineBase;

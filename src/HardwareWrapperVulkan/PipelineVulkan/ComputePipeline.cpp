@@ -4,6 +4,7 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "Compiler/ShaderLanguageConverter.h"
 #include <cstring>
+#include <span>
 
 namespace
 {
@@ -12,15 +13,15 @@ using BindType = EmbeddedShader::ShaderCodeModule::ShaderResources::BindType;
 constexpr uint32_t kDescriptorHandle32Size = sizeof(uint32_t);
 constexpr uint32_t kDescriptorHandle64Size = sizeof(uint32_t) * 2;
 
-bool copy_to_push_constant(HardwarePushConstant &target, uint64_t byteOffset, const void *src, size_t size)
+bool copy_to_push_constant(std::span<uint8_t> target, uint64_t byteOffset, const void *src, size_t size)
 {
-    uint8_t *dst = target.getData();
+    uint8_t *dst = target.data();
     if (!dst || !src || size == 0)
     {
         return false;
     }
 
-    const uint64_t targetSize = target.getSize();
+    const uint64_t targetSize = target.size();
     if (byteOffset > targetSize || size > targetSize - byteOffset)
     {
         return false;
@@ -39,7 +40,7 @@ uint32_t descriptor_write_size(uint32_t reflectedTypeSize)
     return reflectedTypeSize >= kDescriptorHandle64Size ? kDescriptorHandle64Size : kDescriptorHandle32Size;
 }
 
-bool write_descriptor_handle(HardwarePushConstant &target, uint64_t byteOffset, uint32_t reflectedTypeSize, uint32_t descriptorIndex)
+bool write_descriptor_handle(std::span<uint8_t> target, uint64_t byteOffset, uint32_t reflectedTypeSize, uint32_t descriptorIndex)
 {
     const uint32_t writeSize = descriptor_write_size(reflectedTypeSize);
     if (writeSize >= kDescriptorHandle64Size)
@@ -85,14 +86,14 @@ ComputePipelineVulkan::ComputePipelineVulkan(std::string shaderCode,
     const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
     if (pushConstantSize > 0)
     {
-        this->pushConstant = HardwarePushConstant(pushConstantSize, 0);
+        this->pushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
     }
 
     // 初始化 per-pipeline UBO
     uboSize = this->shaderCode.shaderResources.uniformBufferSize;
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
+        tempUBO = std::make_unique_for_overwrite<uint8_t[]>(uboSize);
         uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
     }
 }
@@ -106,14 +107,14 @@ ComputePipelineVulkan::ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler 
     const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
     if (pushConstantSize > 0)
     {
-        this->pushConstant = HardwarePushConstant(pushConstantSize, 0);
+        this->pushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
     }
 
     // 初始化 per-pipeline UBO
     uboSize = this->shaderCode.shaderResources.uniformBufferSize;
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
+        tempUBO = std::make_unique_for_overwrite<uint8_t[]>(uboSize);
         uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
     }
 }
@@ -130,13 +131,13 @@ ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ShaderCodeMod
     const uint32_t pushConstantSize = resources.pushConstantSize;
     if (pushConstantSize > 0)
     {
-        this->pushConstant = HardwarePushConstant(pushConstantSize, 0);
+        this->pushConstant = std::make_unique_for_overwrite<uint8_t[]>(pushConstantSize);
     }
 
     uboSize = resources.uniformBufferSize;
     if (uboSize > 0)
     {
-        tempUBO = HardwarePushConstant(uboSize, 0);
+        tempUBO = std::make_unique_for_overwrite<uint8_t[]>(uboSize);
         uboBuffer = HardwareBuffer(uboSize, BufferUsage::UniformBuffer);
     }
 }
@@ -184,12 +185,12 @@ void ComputePipelineVulkan::setPushConstantDirect(uint64_t byteOffset, const voi
     const auto typedBindType = static_cast<BindType>(bindType);
     if (typedBindType == BindType::pushConstantMembers)
     {
-        copy_to_push_constant(pushConstant, byteOffset, data, size);
+        copy_to_push_constant({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, byteOffset, data, size);
         return;
     }
     if (typedBindType == BindType::uniformBufferMembers)
     {
-        if (copy_to_push_constant(tempUBO, byteOffset, data, size))
+        if (copy_to_push_constant({tempUBO.get(), uboSize}, byteOffset, data, size))
         {
             uboDescriptorDirty = true;
         }
@@ -204,12 +205,12 @@ void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t type
 
     if (typedBindType == BindType::pushConstantMembers)
     {
-        write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex);
+        write_descriptor_handle({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, byteOffset, typeSize, descriptorIndex);
         return;
     }
     if (typedBindType == BindType::uniformBufferMembers)
     {
-        if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+        if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
         {
             uboDescriptorDirty = true;
         }
@@ -220,11 +221,11 @@ void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t type
         return;
     }
 
-    if (write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, byteOffset, typeSize, descriptorIndex))
     {
         return;
     }
-    if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
     {
         uboDescriptorDirty = true;
     }
@@ -237,12 +238,12 @@ void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t type
 
     if (typedBindType == BindType::pushConstantMembers)
     {
-        write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex);
+        write_descriptor_handle({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, byteOffset, typeSize, descriptorIndex);
         return;
     }
     if (typedBindType == BindType::uniformBufferMembers)
     {
-        if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+        if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
         {
             uboDescriptorDirty = true;
         }
@@ -253,11 +254,11 @@ void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t type
         return;
     }
 
-    if (write_descriptor_handle(pushConstant, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({pushConstant.get(), shaderCode.shaderResources.pushConstantSize}, byteOffset, typeSize, descriptorIndex))
     {
         return;
     }
-    if (write_descriptor_handle(tempUBO, byteOffset, typeSize, descriptorIndex))
+    if (write_descriptor_handle({tempUBO.get(), uboSize}, byteOffset, typeSize, descriptorIndex))
     {
         uboDescriptorDirty = true;
     }
@@ -365,9 +366,9 @@ void ComputePipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExecut
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 
     // 上传 UBO 数据并更新描述符
-    if (uboSize > 0 && tempUBO.getData())
+    if (uboSize > 0 && tempUBO.get())
     {
-        uboBuffer.copyFromData(tempUBO.getData(), uboSize);
+        uboBuffer.copyFromData(tempUBO.get(), uboSize);
         if (uboDescriptorDirty)
         {
             updateUBODescriptor();
@@ -397,7 +398,7 @@ void ComputePipelineVulkan::commitCommand(HardwareExecutorVulkan &hardwareExecut
                             nullptr);
 
     // 推送常量
-    if (const void *data = pushConstant.getData(); data != nullptr)
+    if (const void *data = pushConstant.get(); data != nullptr)
     {
         const uint32_t pushConstantSize = shaderCode.shaderResources.pushConstantSize;
         if (pushConstantSize > 0)

@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <memory>
 #include <ktm/ktm.h>
 
 #include "Horizon_old.h"
@@ -22,8 +23,6 @@ struct ComputePipelineVulkan : public CommandRecordVulkan
     // 从 SPIR-V + Slang 反射构造
     ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &sourceLocation = std::source_location::current());
 
-    // std::variant<HardwarePushConstant> operator[](const std::string& resourceName);
-
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
@@ -45,11 +44,11 @@ struct ComputePipelineVulkan : public CommandRecordVulkan
     VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
     VkPipeline pipeline{VK_NULL_HANDLE};
 
-    HardwarePushConstant pushConstant;
+    std::unique_ptr<uint8_t[]> pushConstant;
     EmbeddedShader::ShaderCodeModule shaderCode;
 
     // Per-pipeline UBO support
-    HardwarePushConstant tempUBO;
+    std::unique_ptr<uint8_t[]> tempUBO;
     HardwareBuffer uboBuffer;
     uint32_t uboSize{0};
     VkDescriptorPool uboDescriptorPool{VK_NULL_HANDLE};

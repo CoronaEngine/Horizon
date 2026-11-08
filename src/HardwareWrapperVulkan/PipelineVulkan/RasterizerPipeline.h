@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <memory>
 #include <vector>
 
 #include "Horizon_old.h"
@@ -61,8 +62,6 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
         return depthImage;
     }
 
-    // std::variant<HardwarePushConstant, HardwareBuffer*, HardwareImage*> operator[](const std::string& resourceName);
-
     // Direct-access methods: bypass string lookup, use pre-resolved metadata
     void setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
@@ -89,7 +88,7 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
         HardwareBuffer indexBuffer;
         HardwareBuffer vertexBuffer;
         DrawIndexedParams drawParams;
-        HardwarePushConstant pushConstant;
+        std::unique_ptr<uint8_t[]> pushConstant;
     };
     std::vector<TriangleGeomMesh> geomMeshesRecord;
 
@@ -120,11 +119,11 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
     EmbeddedShader::ShaderCodeModule fragShaderCode;
 
     CommandRecordVulkan dumpCommandRecordVulkan;
-    HardwarePushConstant tempPushConstant;
+    std::unique_ptr<uint8_t[]> tempPushConstant;
     // std::vector<HardwareBuffer> tempVertexBuffers;
 
     // Per-pipeline UBO support
-    HardwarePushConstant tempUBO;
+    std::unique_ptr<uint8_t[]> tempUBO;
     HardwareBuffer uboBuffer;
     uint32_t uboSize{0};
     VkDescriptorPool uboDescriptorPool{VK_NULL_HANDLE};
