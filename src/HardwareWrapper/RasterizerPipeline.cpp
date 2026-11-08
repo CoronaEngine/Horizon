@@ -1,55 +1,30 @@
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 
 #include "Horizon_old.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
 #include <stdexcept>
 
 namespace {
-RasterizerPipelineWrap* rasterFromId(uintptr_t id)
+RasterizerPipelineVulkan* rasterFromId(uintptr_t id)
 {
     if (!id)
-        throw std::runtime_error("Empty RasterizerPipelineWrap handle");
-    return reinterpret_cast<RasterizerPipelineWrap*>(id);
-}
-
-void retainRaster(uintptr_t id)
-{
-    if (id)
-        ++rasterFromId(id)->refCount;
-}
-
-void releaseRaster(uintptr_t id)
-{
-    if (!id)
-        return;
-    auto* handle = rasterFromId(id);
-    if (--handle->refCount == 0)
-    {
-        delete handle->impl;
-        delete handle;
-    }
+        throw std::runtime_error("Empty RasterizerPipelineBase handle");
+    return reinterpret_cast<RasterizerPipelineVulkan*>(id);
 }
 } // namespace
 
 RasterizerPipelineBase::RasterizerPipelineBase()
 {
-    auto handle = std::make_unique<RasterizerPipelineWrap>();
-    handle->impl = new RasterizerPipelineVulkan();
-    rasterizerPipelineID = reinterpret_cast<uintptr_t>(handle.release());
+    rasterizerPipelineID = reinterpret_cast<uintptr_t>(new RasterizerPipelineVulkan());
 }
 
 RasterizerPipelineBase::RasterizerPipelineBase(std::string vs, std::string fs, uint32_t multiviewCount, EmbeddedShader::ShaderLanguage vlang, EmbeddedShader::ShaderLanguage flang, const std::source_location &src)
 {
-    auto handle = std::make_unique<RasterizerPipelineWrap>();
-    handle->impl = new RasterizerPipelineVulkan(vs, fs, multiviewCount, vlang, flang, src);
-    rasterizerPipelineID = reinterpret_cast<uintptr_t>(handle.release());
+    rasterizerPipelineID = reinterpret_cast<uintptr_t>(new RasterizerPipelineVulkan(vs, fs, multiviewCount, vlang, flang, src));
 }
 
 RasterizerPipelineBase::RasterizerPipelineBase(const EmbeddedShader::ShaderCodeModule &vertexSpirV, const EmbeddedShader::ShaderCodeModule &fragmentSpirV, uint32_t multiviewCount, const std::source_location &src)
 {
-    auto handle = std::make_unique<RasterizerPipelineWrap>();
-    handle->impl = new RasterizerPipelineVulkan(vertexSpirV, fragmentSpirV, multiviewCount, src);
-    rasterizerPipelineID = reinterpret_cast<uintptr_t>(handle.release());
+    rasterizerPipelineID = reinterpret_cast<uintptr_t>(new RasterizerPipelineVulkan(vertexSpirV, fragmentSpirV, multiviewCount, src));
 }
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 初始化 RasterizerPipeline
@@ -59,15 +34,7 @@ void rasterizerPipelineInitFromCompiler(std::uintptr_t &pipelineID,
                                          uint32_t multiviewCount,
                                          const std::source_location &src)
 {
-    auto handle = std::make_unique<RasterizerPipelineWrap>();
-    handle->impl = new RasterizerPipelineVulkan(vertexCompiler, fragmentCompiler, multiviewCount, src);
-    pipelineID = reinterpret_cast<uintptr_t>(handle.release());
-}
-
-RasterizerPipelineBase::RasterizerPipelineBase(const RasterizerPipelineBase& other)
-    : rasterizerPipelineID(other.rasterizerPipelineID), autoBindEntries_(other.autoBindEntries_)
-{
-    retainRaster(rasterizerPipelineID);
+    pipelineID = reinterpret_cast<uintptr_t>(new RasterizerPipelineVulkan(vertexCompiler, fragmentCompiler, multiviewCount, src));
 }
 
 RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineBase&& other) noexcept
@@ -77,20 +44,7 @@ RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineBase&& other) n
 
 RasterizerPipelineBase::~RasterizerPipelineBase()
 {
-    releaseRaster(rasterizerPipelineID);
-}
-
-RasterizerPipelineBase& RasterizerPipelineBase::operator=(const RasterizerPipelineBase& other)
-{
-    if (rasterizerPipelineID == other.rasterizerPipelineID)
-        return *this;
-
-    auto entries = other.autoBindEntries_;
-    retainRaster(other.rasterizerPipelineID);
-    releaseRaster(rasterizerPipelineID);
-    rasterizerPipelineID = other.rasterizerPipelineID;
-    autoBindEntries_ = std::move(entries);
-    return *this;
+    delete reinterpret_cast<RasterizerPipelineVulkan*>(rasterizerPipelineID);
 }
 
 RasterizerPipelineBase& RasterizerPipelineBase::operator=(RasterizerPipelineBase&& other) noexcept
@@ -98,7 +52,7 @@ RasterizerPipelineBase& RasterizerPipelineBase::operator=(RasterizerPipelineBase
     if (this == &other)
         return *this;
 
-    releaseRaster(rasterizerPipelineID);
+    delete reinterpret_cast<RasterizerPipelineVulkan*>(rasterizerPipelineID);
     rasterizerPipelineID = std::exchange(other.rasterizerPipelineID, 0);
     autoBindEntries_ = std::move(other.autoBindEntries_);
     return *this;
@@ -107,45 +61,45 @@ RasterizerPipelineBase& RasterizerPipelineBase::operator=(RasterizerPipelineBase
 void RasterizerPipelineBase::setDepthImage(HardwareImage &depthImage)
 {
     auto handle = rasterFromId(rasterizerPipelineID);
-    handle->impl->setDepthImage(depthImage);
+    handle->setDepthImage(depthImage);
 }
 
 void RasterizerPipelineBase::setDepthEnabled(bool enabled)
 {
     auto handle = rasterFromId(rasterizerPipelineID);
-    handle->impl->setDepthEnabled(enabled);
+    handle->setDepthEnabled(enabled);
 }
 
 //void RasterizerPipeline::setDepthWriteEnabled(bool enabled)
 //{
 //    auto handle = rasterFromId(rasterizerPipelineID);
-//    handle->impl->setDepthEnabled(enabled);
+//    handle->setDepthEnabled(enabled);
 //}
 
 HardwareImage RasterizerPipelineBase::getDepthImage()
 {
     HardwareImage img;
     auto handle = rasterFromId(rasterizerPipelineID);
-    img = handle->impl->getDepthImage();
+    img = handle->getDepthImage();
     return img;
 }
 
 void RasterizerPipelineBase::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
     auto handle = rasterFromId(rasterizerPipelineID);
-    handle->impl->setPushConstantDirect(byteOffset, data, size, bindType);
+    handle->setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
 void RasterizerPipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
     auto handle = rasterFromId(rasterizerPipelineID);
-    handle->impl->setResourceDirect(byteOffset, typeSize, buffer, bindType);
+    handle->setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
 void RasterizerPipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
 {
     auto handle = rasterFromId(rasterizerPipelineID);
-    handle->impl->setResourceDirect(byteOffset, typeSize, image, bindType, location);
+    handle->setResourceDirect(byteOffset, typeSize, image, bindType, location);
 }
 
 RasterizerPipelineBase &RasterizerPipelineBase::operator()(uint16_t width, uint16_t height)
@@ -167,7 +121,7 @@ RasterizerPipelineBase &RasterizerPipelineBase::operator()(uint16_t width, uint1
         }
     }
     auto handle = rasterFromId(rasterizerPipelineID);
-    (*handle->impl)(width, height);
+    (*handle)(width, height);
     return *this;
 }
 
@@ -182,6 +136,6 @@ RasterizerPipelineBase &RasterizerPipelineBase::record(const HardwareBuffer &ind
                                                const DrawIndexedParams &params)
 {
     auto handle = rasterFromId(rasterizerPipelineID);
-    handle->impl->record(indexBuffer, vertexBuffer, params);
+    handle->record(indexBuffer, vertexBuffer, params);
     return *this;
 }

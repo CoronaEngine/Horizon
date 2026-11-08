@@ -35,6 +35,7 @@ struct HardwareExecutor;
 
 // Legacy resources and control objects are owner-thread objects.
 // Copying/releasing shared handles and modifying resource state require external serialization.
+// Pipelines and executors uniquely own their backend objects and can only be moved.
 
 enum class ImageFormat : uint32_t
 {
@@ -403,11 +404,11 @@ public:
                         EmbeddedShader::CompilerOption compilerOption = {},
                         std::source_location sourceLocation = std::source_location::current());
 
-    ComputePipelineBase(const ComputePipelineBase& other);
+    ComputePipelineBase(const ComputePipelineBase& other) = delete;
     ComputePipelineBase(ComputePipelineBase&& other) noexcept;
     ~ComputePipelineBase();
 
-    ComputePipelineBase& operator=(const ComputePipelineBase& other);
+    ComputePipelineBase& operator=(const ComputePipelineBase& other) = delete;
     ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
 
     ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
@@ -466,11 +467,11 @@ public:
                            EmbeddedShader::CompilerOption compilerOption = {},
                            std::source_location sourceLocation = std::source_location::current());
 
-    RasterizerPipelineBase(const RasterizerPipelineBase& other);
+    RasterizerPipelineBase(const RasterizerPipelineBase& other) = delete;
     RasterizerPipelineBase(RasterizerPipelineBase&& other) noexcept;
     ~RasterizerPipelineBase();
 
-    RasterizerPipelineBase& operator=(const RasterizerPipelineBase& other);
+    RasterizerPipelineBase& operator=(const RasterizerPipelineBase& other) = delete;
     RasterizerPipelineBase& operator=(RasterizerPipelineBase&& other) noexcept;
 
     void setDepthEnabled(bool enabled);
@@ -531,11 +532,11 @@ struct HardwareExecutor
 {
 public:
     HardwareExecutor();
-    HardwareExecutor(const HardwareExecutor& other);
+    HardwareExecutor(const HardwareExecutor& other) = delete;
     HardwareExecutor(HardwareExecutor&& other) noexcept;
     ~HardwareExecutor();
 
-    HardwareExecutor& operator=(const HardwareExecutor& other);
+    HardwareExecutor& operator=(const HardwareExecutor& other) = delete;
     HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
 
     HardwareExecutor& operator<<(ComputePipelineBase& computePipeline);
@@ -702,21 +703,14 @@ struct RasterizerPipeline
     {
     }
 
-    RasterizerPipeline(const RasterizerPipeline& other)
-        : RasterizerPipelineBase(other), VSRes(static_cast<RasterizerPipelineBase*>(this)), FSOut(static_cast<RasterizerPipelineBase*>(this))
-    {
-    }
+    RasterizerPipeline(const RasterizerPipeline& other) = delete;
 
     RasterizerPipeline(RasterizerPipeline&& other) noexcept
         : RasterizerPipelineBase(std::move(other)), VSRes(static_cast<RasterizerPipelineBase*>(this)), FSOut(static_cast<RasterizerPipelineBase*>(this))
     {
     }
 
-    RasterizerPipeline& operator=(const RasterizerPipeline& other)
-    {
-        RasterizerPipelineBase::operator=(other);
-        return *this;
-    }
+    RasterizerPipeline& operator=(const RasterizerPipeline& other) = delete;
 
     RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept
     {
@@ -760,21 +754,14 @@ struct ComputePipeline
     {
     }
 
-    ComputePipeline(const ComputePipeline& other)
-        : ComputePipelineBase(other), CSBindings(static_cast<ComputePipelineBase*>(this))
-    {
-    }
+    ComputePipeline(const ComputePipeline& other) = delete;
 
     ComputePipeline(ComputePipeline&& other) noexcept
         : ComputePipelineBase(std::move(other)), CSBindings(static_cast<ComputePipelineBase*>(this))
     {
     }
 
-    ComputePipeline& operator=(const ComputePipeline& other)
-    {
-        ComputePipelineBase::operator=(other);
-        return *this;
-    }
+    ComputePipeline& operator=(const ComputePipeline& other) = delete;
 
     ComputePipeline& operator=(ComputePipeline&& other) noexcept
     {

@@ -78,17 +78,12 @@ HardwareDisplayer& HardwareDisplayer::operator=(HardwareDisplayer&& other) noexc
 
 HardwareDisplayer &HardwareDisplayer::wait(const HardwareExecutor &executor)
 {
-    auto const executor_id = executor.getExecutorID();
-    auto const self_id = displaySurfaceID;
-    if (executor_id > 0 && self_id > 0)
+    const auto executorId = executor.getExecutorID();
+    if (executorId && displaySurfaceID)
     {
-        if (auto const executor_handle = reinterpret_cast<ExecutorWrap*>(executor_id); executor_handle->impl)
-        {
-            if (auto const display_handle = displayFromId(self_id); display_handle->displayManager)
-            {
-                display_handle->displayManager->waitExecutor(*executor_handle->impl);
-            }
-        }
+        auto* display = displayFromId(displaySurfaceID);
+        if (display->displayManager)
+            display->displayManager->waitExecutor(*reinterpret_cast<HardwareExecutorVulkan*>(executorId));
     }
     return *this;
 }

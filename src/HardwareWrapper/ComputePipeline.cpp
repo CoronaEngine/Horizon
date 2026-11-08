@@ -2,33 +2,14 @@
 
 #include "Horizon_old.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
 #include <stdexcept>
 
 namespace {
-ComputePipelineWrap* computeFromId(uintptr_t id)
+ComputePipelineVulkan* computeFromId(uintptr_t id)
 {
     if (!id)
-        throw std::runtime_error("Empty ComputePipelineWrap handle");
-    return reinterpret_cast<ComputePipelineWrap*>(id);
-}
-
-void retainCompute(uintptr_t id)
-{
-    if (id)
-        ++computeFromId(id)->refCount;
-}
-
-void releaseCompute(uintptr_t id)
-{
-    if (!id)
-        return;
-    auto* handle = computeFromId(id);
-    if (--handle->refCount == 0)
-    {
-        delete handle->impl;
-        delete handle;
-    }
+        throw std::runtime_error("Empty ComputePipelineBase handle");
+    return reinterpret_cast<ComputePipelineVulkan*>(id);
 }
 } // namespace
 
@@ -37,36 +18,22 @@ void computePipelineInitFromCompiler(std::uintptr_t &pipelineID,
                                       EmbeddedShader::ShaderCodeCompiler &compiler,
                                       const std::source_location &src)
 {
-    auto handle = std::make_unique<ComputePipelineWrap>();
-    handle->impl = new ComputePipelineVulkan(compiler, src);
-    pipelineID = reinterpret_cast<uintptr_t>(handle.release());
+    pipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan(compiler, src));
 }
 
 ComputePipelineBase::ComputePipelineBase()
 {
-    auto handle = std::make_unique<ComputePipelineWrap>();
-    handle->impl = new ComputePipelineVulkan();
-    computePipelineID = reinterpret_cast<uintptr_t>(handle.release());
+    computePipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan());
 }
 
 ComputePipelineBase::ComputePipelineBase(const std::string &shaderCode, EmbeddedShader::ShaderLanguage language, const std::source_location &src)
 {
-    auto handle = std::make_unique<ComputePipelineWrap>();
-    handle->impl = new ComputePipelineVulkan(shaderCode, language, src);
-    computePipelineID = reinterpret_cast<uintptr_t>(handle.release());
+    computePipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan(shaderCode, language, src));
 }
 
 ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)
 {
-    auto handle = std::make_unique<ComputePipelineWrap>();
-    handle->impl = new ComputePipelineVulkan(spirV, src);
-    computePipelineID = reinterpret_cast<uintptr_t>(handle.release());
-}
-
-ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
-    : computePipelineID(other.computePipelineID), autoBindEntries_(other.autoBindEntries_)
-{
-    retainCompute(computePipelineID);
+    computePipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan(spirV, src));
 }
 
 ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&& other) noexcept
@@ -76,20 +43,7 @@ ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&& other) noexcept
 
 ComputePipelineBase::~ComputePipelineBase()
 {
-    releaseCompute(computePipelineID);
-}
-
-ComputePipelineBase& ComputePipelineBase::operator=(const ComputePipelineBase& other)
-{
-    if (computePipelineID == other.computePipelineID)
-        return *this;
-
-    auto entries = other.autoBindEntries_;
-    retainCompute(other.computePipelineID);
-    releaseCompute(computePipelineID);
-    computePipelineID = other.computePipelineID;
-    autoBindEntries_ = std::move(entries);
-    return *this;
+    delete reinterpret_cast<ComputePipelineVulkan*>(computePipelineID);
 }
 
 ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other) noexcept
@@ -97,7 +51,7 @@ ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other)
     if (this == &other)
         return *this;
 
-    releaseCompute(computePipelineID);
+    delete reinterpret_cast<ComputePipelineVulkan*>(computePipelineID);
     computePipelineID = std::exchange(other.computePipelineID, 0);
     autoBindEntries_ = std::move(other.autoBindEntries_);
     return *this;
@@ -106,19 +60,19 @@ ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other)
 void ComputePipelineBase::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
     auto const handle = computeFromId(computePipelineID);
-    handle->impl->setPushConstantDirect(byteOffset, data, size, bindType);
+    handle->setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
 void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
     auto const handle = computeFromId(computePipelineID);
-    handle->impl->setResourceDirect(byteOffset, typeSize, buffer, bindType);
+    handle->setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
 void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
 {
     auto const handle = computeFromId(computePipelineID);
-    handle->impl->setResourceDirect(byteOffset, typeSize, image, bindType);
+    handle->setResourceDirect(byteOffset, typeSize, image, bindType);
 }
 
 ComputePipelineBase &ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
@@ -140,6 +94,6 @@ ComputePipelineBase &ComputePipelineBase::operator()(uint16_t x, uint16_t y, uin
         }
     }
     auto const handle = computeFromId(computePipelineID);
-    (*handle->impl)(x, y, z);
+    (*handle)(x, y, z);
     return *this;
 }
