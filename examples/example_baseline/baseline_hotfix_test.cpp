@@ -5,15 +5,9 @@
 
 namespace horizon::example_baseline {
 
-
-
 void BaselineHotfixTest::restore(vision::RuntimeObject* oldObject) noexcept
 {
-#if defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
     const auto* oldTest = vision::hotfix::hotfix_detail::restore_source(*this, oldObject);
-#else
-    const auto* oldTest = dynamic_cast<const BaselineHotfixTest*>(oldObject);
-#endif
     if (oldTest == nullptr)
     {
         std::cout << "[baseline hotfix] state restore skipped: incompatible object" << std::endl;
@@ -35,7 +29,7 @@ const char* BaselineHotfixTest::live_label() const noexcept
 }
 #endif
 
-#if !defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST) || !defined(HORIZON_HOTFIX_MODULE)
+#if !defined(HORIZON_HOTFIX_MODULE)
 void BaselineHotfixSlot::update_runtime_object(const vision::IObjectConstructor* constructor) noexcept
 {
     const bool matchesCurrentObject = get() != nullptr && constructor->match(get());
@@ -51,7 +45,4 @@ void BaselineHotfixSlot::update_runtime_object(const vision::IObjectConstructor*
 
 } // namespace horizon::example_baseline
 
-#if !defined(HORIZON_BASELINE_HOTFIX_WINDOW_TEST)
-VS_REGISTER_CURRENT_PATH(0, "examples\\HorizonExamples.exe")
-#endif
 VS_REGISTER_HOTFIX(horizon::example_baseline, BaselineHotfixTest)

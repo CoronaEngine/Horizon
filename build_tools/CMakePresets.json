@@ -245,46 +245,6 @@
         "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
         "HORIZON_DEV_TARGET_FAMILY": "ocarina-tests"
       }
-    },
-    {
-      "name": "vision-hotfix-debug",
-      "displayName": "Vision Hotfix - Debug",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/debug",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "Debug",
-        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
-      }
-    },
-    {
-      "name": "vision-hotfix-relwithdebinfo",
-      "displayName": "Vision Hotfix - RelWithDebInfo",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/relwithdebinfo",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
-        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
-      }
-    },
-    {
-      "name": "vision-hotfix-release",
-      "displayName": "Vision Hotfix - Release",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/release",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "Release",
-        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
-      }
-    },
-    {
-      "name": "vision-hotfix-minsizerel",
-      "displayName": "Vision Hotfix - MinSizeRel",
-      "generator": "Ninja Multi-Config",
-      "binaryDir": "${sourceDir}/build/conan/vision-hotfix/minsizerel",
-      "cacheVariables": {
-        "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
-        "HORIZON_DEV_TARGET_FAMILY": "vision-hotfix"
-      }
     }
   ],
   "buildPresets": [
@@ -406,26 +366,6 @@
     {
       "name": "ocarina-tests-minsizerel",
       "configurePreset": "ocarina-tests-minsizerel",
-      "configuration": "MinSizeRel"
-    },
-    {
-      "name": "vision-hotfix-debug",
-      "configurePreset": "vision-hotfix-debug",
-      "configuration": "Debug"
-    },
-    {
-      "name": "vision-hotfix-relwithdebinfo",
-      "configurePreset": "vision-hotfix-relwithdebinfo",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "vision-hotfix-release",
-      "configurePreset": "vision-hotfix-release",
-      "configuration": "Release"
-    },
-    {
-      "name": "vision-hotfix-minsizerel",
-      "configurePreset": "vision-hotfix-minsizerel",
       "configuration": "MinSizeRel"
     }
   ]

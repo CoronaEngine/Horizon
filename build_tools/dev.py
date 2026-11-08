@@ -40,10 +40,6 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
         "&:with_ocarina=True",
         "&:with_ocarina_tests=True",
     ),
-    "vision-hotfix": (
-        "&:with_ocarina=True",
-        "&:with_vision_hotfix=True",
-    ),
 }
 
 
@@ -52,19 +48,12 @@ def target_family_for_target(target: str) -> str:
         return "engine"
     if target == "ShaderCompileScripts":
         return "tools"
-    if target == "HorizonExamples":
+    if target in {"HorizonExamples", "horizon-baseline-hotfix-patch"}:
         return "examples"
     if target.startswith("test-"):
         return "ocarina-tests"
-    if sys.platform != "win32" and target in {
-        "horizon-hotfix",
-        "horizon-hotfix-build-cmake",
-        "horizon-hotfix-process-posix",
-        "horizon-hotfix-runtime-fixture",
-    }:
-        return "core"
     if target.startswith("horizon-hotfix"):
-        return "vision-hotfix"
+        return "core"
     if target == "copy_slang_headers" or target.startswith("ocarina"):
         return "ocarina"
     return "core"

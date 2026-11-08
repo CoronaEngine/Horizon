@@ -87,7 +87,6 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 | HorizonExamples | `examples-debug` | `build/conan/examples/debug` |
 | Ocarina | `ocarina-debug` | `build/conan/ocarina/debug` |
 | Ocarina 的 `test-*` 测试 | `ocarina-tests-debug` | `build/conan/ocarina-tests/debug` |
-| Vision Hotfix | `vision-hotfix-debug` | `build/conan/vision-hotfix/debug` |
 
 使用完整的目标族 preset 名，例如 `examples-debug`。每个目标族使用独立目录，切换 preset 后请重新执行 Configure，不要把不同目标族混在同一个构建目录里。
 
@@ -109,7 +108,20 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build Hor
 conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fast all --configuration Debug --target-family examples
 ```
 
-把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+把 `examples` 换成 `core`、`engine`、`tools`、`ocarina` 或 `ocarina-tests`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+
+热更新统一使用跨平台 CMake 后端，`horizon-hotfix` 及其基础测试属于 `core`，不依赖 Ocarina。
+普通 baseline 示例可在配置好的 `examples` 构建树中开启热更新：
+
+```powershell
+cmake --preset examples-debug -DHORIZON_ENABLE_EXAMPLE_HOTFIX=ON
+python build_tools/dev.py build-fast HorizonExamples horizon-baseline-hotfix-patch --configuration Debug --target-family examples
+```
+
+首次使用先运行 `python build_tools/dev.py configure --configuration Debug --target-family examples`。
+baseline 示例使用 H 触发重编译，F9 回退版本；模块路径由 CMake 清单提供。
+热更新运行时支持 Windows、Linux 和 macOS；完整 `examples` 目标仍受引擎依赖的平台支持范围限制，
+Linux 的窗口热更新由独立的 baseline-window 用例验证。
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。

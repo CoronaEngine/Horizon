@@ -100,9 +100,7 @@ public:
     }
     [[nodiscard]] bool is_working() const noexcept { return pending_build_.valid(); }
     void enqueue_function(std::function<void()> fn) noexcept;
-    void on_build_finish(bool success, const Target &target) noexcept;
     void on_build_all_finish(const vector<Target> &modules) noexcept;
-    void load_module(Target target) noexcept;
     void update_objects(const vector<const IObjectConstructor *> &constructors) noexcept;
     bool check_and_build() noexcept;
     void next_version() noexcept;
@@ -125,11 +123,7 @@ public:
                 *ptr = new_obj;
             }
         };
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-        ocarina::traverse_tuple(tuple, replace);
-#else
         std::apply([&](auto... pointers) { (replace(pointers), ...); }, tuple);
-#endif
     }
     void on_version_change() noexcept;
     static HotfixSystem &instance() noexcept;
@@ -165,25 +159,5 @@ public:
         }
     }
 };
-
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-template<typename T>
-class PolymorphicObserver : public Polymorphic<T>, public Observer {
-public:
-    using Super = Polymorphic<T>;
-    using Polymorphic<T>::Polymorphic;
-    void update_runtime_object(const vision::IObjectConstructor *constructor) noexcept override {
-        for (uint i = 0; i < Polymorphic<T>::size(); ++i) {
-            auto element = Super::at(i);
-            if (!constructor->match(element.get())) {
-                continue;
-            }
-            auto new_element = constructor->construct<T>();
-            new_element->restore(element.get());
-            Super::replace(i, new_element);
-        }
-    }
-};
-#endif
 
 }// namespace vision::inline hotfix

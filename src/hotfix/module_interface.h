@@ -28,7 +28,6 @@ public:
     ModuleInterface(const ModuleInterface &) = delete;
     ModuleInterface(ModuleInterface &&) = delete;
     ModuleInterface operator=(const ModuleInterface &) = delete;
-    [[nodiscard]] static string_view src_path() noexcept;
     ModuleInterface operator=(ModuleInterface &&) = delete;
     [[nodiscard]] static ModuleInterface &instance() noexcept;
     void add_constructor(SP<const IObjectConstructor> constructor) noexcept;

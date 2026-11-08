@@ -20,6 +20,7 @@ if(HORIZON_BUILD_ENGINE)
 endif()
 
 add_subdirectory(src)
+add_subdirectory(src/hotfix)
 
 if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
     add_subdirectory(tools)
@@ -49,27 +50,6 @@ if (MSVC)
 endif()
 
 include(horizon_ocarina)
-
-if(HORIZON_BUILD_VISION_HOTFIX)
-    if(NOT WIN32)
-        message(FATAL_ERROR "Legacy Vision hotfix plugins require Windows. Use horizon-hotfix with a CMake build backend on POSIX.")
-    endif()
-    if(NOT TARGET ocarina OR NOT TARGET ocarina-include)
-        message(FATAL_ERROR "HORIZON_BUILD_VISION_HOTFIX requires HORIZON_BUILD_OCARINA=ON and available ocarina targets")
-    endif()
-    target_include_directories(ocarina-include INTERFACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src")
-endif()
-
-add_subdirectory(src/hotfix)
-
-if(HORIZON_BUILD_VISION_HOTFIX)
-    target_link_libraries(ocarina-include INTERFACE horizon-hotfix)
-
-    if(TARGET HorizonExamples)
-        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-all)
-    endif()
-endif()
 
 if(HORIZON_BUILD_BASELINE_WINDOW_TEST)
     enable_testing()

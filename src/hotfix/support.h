@@ -17,17 +17,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-#include "core/concepts.h"
-#include "core/concurrency/thread_safety.h"
-#include "core/runtime/dynamic_module.h"
-#include "core/util/hash.h"
-#include "core/util/string_util.h"
-#include "dsl/types/polymorphic.h"
-#include "rhi/context.h"
-#else
 #include <fmt/format.h>
-#endif
 
 namespace vision {
 
@@ -46,33 +36,15 @@ using std::string_view;
 using std::unique_ptr;
 using std::vector;
 
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-using ocarina::SP;
-using ocarina::UP;
-#else
 template<typename T>
 using SP = std::shared_ptr<T>;
 
 template<typename... Ts>
 using UP = std::unique_ptr<Ts...>;
-#endif
 
 using uint = std::uint32_t;
 namespace fs = std::filesystem;
 
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-using ocarina::DynamicModule;
-using ocarina::format;
-using ocarina::Hashable;
-using ocarina::parent_path;
-using ocarina::Polymorphic;
-using ocarina::ptr_t;
-using ocarina::RHIContext;
-using ocarina::thread_safety;
-using ocarina::tuple;
-
-namespace concepts = ocarina::concepts;
-#else
 using fmt::format;
 using std::tuple;
 
@@ -82,6 +54,5 @@ using std::tuple;
     }
     return path;
 }
-#endif
 
 }// namespace vision
