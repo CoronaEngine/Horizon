@@ -5,6 +5,7 @@ endif()
 
 set(HORIZON_EXAMPLE_SOURCES
     main.cpp
+    legacy_example_launcher.cpp
     common.cpp
     imgui_horizon.cpp
     example_baseline/example_baseline.cpp
@@ -43,6 +44,7 @@ endif()
 
 set(HORIZON_EXAMPLE_HEADERS
     common.h
+    legacy_example_launcher.h
     imgui_horizon.h
     example_baseline/example_baseline.h
     example_glsl/example_glsl.h
@@ -79,6 +81,15 @@ if(HORIZON_BUILD_VISION_HOTFIX)
 endif()
 
 add_executable(HorizonExamples ${HORIZON_EXAMPLE_SOURCES} ${HORIZON_EXAMPLE_HEADERS})
+
+# The Legacy RHI/Helicon build is isolated, but its modes share this entry point.
+# A sibling executable or a runtime environment override takes precedence.
+set(HORIZON_LEGACY_EXAMPLES_EXECUTABLE
+    "${PROJECT_SOURCE_DIR}/build/legacy-examples/examples/$<CONFIG>/HorizonExamplesOld${CMAKE_EXECUTABLE_SUFFIX}"
+    CACHE STRING "Legacy examples executable (supports configuration generator expressions)")
+string(REPLACE "\\" "/" _legacy_examples_executable "${HORIZON_LEGACY_EXAMPLES_EXECUTABLE}")
+target_compile_definitions(HorizonExamples PRIVATE
+    HORIZON_LEGACY_EXAMPLES_EXECUTABLE="${_legacy_examples_executable}")
 
 if(HORIZON_BUILD_VISION_HOTFIX)
     target_compile_definitions(HorizonExamples PRIVATE

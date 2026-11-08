@@ -23,6 +23,7 @@
 #include "example_rsm/example_rsm.h"
 #include "example_edsl_rsm/example_edsl_rsm.h"
 #include "example_edsl_sponza/example_edsl_sponza.h"
+#include "legacy_example_launcher.h"
 
 #include "horizon/core/logging.h"
 
@@ -80,6 +81,11 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    if (mode == "ibl_old")
+    {
+        return run_legacy_example(argc, argv);
+    }
+
     if (mode == "edsl_ibl")
     {
         run_example_edsl_ibl();
@@ -90,6 +96,10 @@ int main(int argc, char **argv)
     {
         run_example_drawstress();
         return 0;
+    }
+    if (mode == "drawstress_old")
+    {
+        return run_legacy_example(argc, argv);
     }
     if (mode == "raymarch")
     {
@@ -167,6 +177,10 @@ int main(int argc, char **argv)
     {
         run_example_disney_pbr();
         return 0;
+    }
+    if (mode == "disney_pbr_old")
+    {
+        return run_legacy_example(argc, argv);
     }
     if (mode == "edsl_disney_pbr")
     {
