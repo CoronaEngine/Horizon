@@ -1,3 +1,8 @@
+if(HORIZON_USE_LEGACY_BACKEND)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/legacy_examples.cmake")
+    return()
+endif()
+
 set(HORIZON_EXAMPLE_SOURCES
     main.cpp
     common.cpp
