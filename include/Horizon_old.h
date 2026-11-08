@@ -33,6 +33,9 @@ typedef void* HANDLE;
 
 struct HardwareExecutor;
 
+// Push constants, pipelines, executors and displayers are owner-thread objects.
+// Copying/releasing their shared handles also requires external serialization.
+
 enum class ImageFormat : uint32_t
 {
     RGBA8_UINT,
@@ -280,14 +283,13 @@ public:
     [[nodiscard]] uint64_t getSize() const;
     [[nodiscard]] uintptr_t getPushConstantID() const
     {
-        return pushConstantID.load(std::memory_order_acquire);
+        return pushConstantID;
     }
 
 private:
     void copyFromRaw(const void* src, uint64_t size);
 
-    std::atomic<std::uintptr_t> pushConstantID{0};
-    mutable std::mutex pushConstantMutex;
+    std::uintptr_t pushConstantID{0};
 };
 
 // Forward declarations
@@ -371,12 +373,11 @@ public:
 
     [[nodiscard]] uintptr_t getDisplayerID() const
     {
-        return displaySurfaceID.load(std::memory_order_acquire);
+        return displaySurfaceID;
     }
 
 private:
-    std::atomic<std::uintptr_t> displaySurfaceID;
-    mutable std::mutex displayerMutex;
+    std::uintptr_t displaySurfaceID{0};
 };
 
 // ================= 对外封装：ComputePipelineBase =================
@@ -415,7 +416,7 @@ public:
 
     [[nodiscard]] uintptr_t getComputePipelineID() const
     {
-        return computePipelineID.load(std::memory_order_acquire);
+        return computePipelineID;
     }
 
     template <typename ProxyType>
@@ -432,8 +433,7 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType);
 
-    mutable std::mutex computePipelineMutex;
-    std::atomic<std::uintptr_t> computePipelineID;
+    std::uintptr_t computePipelineID{0};
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
 };
 
@@ -514,7 +514,7 @@ public:
 
     [[nodiscard]] uintptr_t getRasterizerPipelineID() const
     {
-        return rasterizerPipelineID.load(std::memory_order_acquire);
+        return rasterizerPipelineID;
     }
 
 private:
@@ -524,8 +524,7 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
 
-    mutable std::mutex rasterizerPipelineMutex;
-    std::atomic<std::uintptr_t> rasterizerPipelineID;
+    std::uintptr_t rasterizerPipelineID{0};
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
 };
 
@@ -558,12 +557,11 @@ public:
 
     [[nodiscard]] uintptr_t getExecutorID() const
     {
-        return executorID.load(std::memory_order_acquire);
+        return executorID;
     }
 
 private:
-    mutable std::mutex executorMutex;
-    std::atomic<std::uintptr_t> executorID;
+    std::uintptr_t executorID{0};
 };
 
 // ================= ResourceProxy Implementation =================
@@ -610,8 +608,8 @@ namespace EmbeddedShader
 } // namespace EmbeddedShader
 
 // ================= ComputePipeline 模板构造函数实现 =================
-// 需要访问 Storage 和 ComputePipelineVulkan，通过辅助函数实现
-void computePipelineInitFromCompiler(std::atomic<std::uintptr_t>& pipelineID,
+// 通过辅助函数创建后端 ComputePipelineVulkan 实现
+void computePipelineInitFromCompiler(std::uintptr_t& pipelineID,
                                      EmbeddedShader::ShaderCodeCompiler& compiler,
                                      const std::source_location& src);
 
@@ -637,7 +635,7 @@ ComputePipelineBase::ComputePipelineBase(F&& computeShaderCode,
 }
 
 // ================= RasterizerPipeline 模板构造函数实现 =================
-void rasterizerPipelineInitFromCompiler(std::atomic<std::uintptr_t>& pipelineID,
+void rasterizerPipelineInitFromCompiler(std::uintptr_t& pipelineID,
                                         EmbeddedShader::ShaderCodeCompiler& vertexCompiler,
                                         EmbeddedShader::ShaderCodeCompiler& fragmentCompiler,
                                         uint32_t multiviewCount,

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "HardwareWrapperVulkan/DisplayVulkan/DisplayManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
@@ -9,21 +9,18 @@
 extern horizon::core::Storage<ResourceManager::BufferHardwareWrap> globalBufferStorages;
 extern horizon::core::Storage<ResourceManager::ImageHardwareWrap> globalImageStorages;
 
+// Control wrappers are heap-owned; their reference counts are owner-thread only.
 struct RasterizerPipelineWrap
 {
     RasterizerPipelineVulkan *impl = nullptr;
     uint64_t refCount = 1;
 };
 
-extern horizon::core::Storage<RasterizerPipelineWrap> gRasterizerPipelineStorage;
-
 struct ComputePipelineWrap
 {
     ComputePipelineVulkan *impl = nullptr;
     uint64_t refCount = 1;
 };
-
-extern horizon::core::Storage<ComputePipelineWrap> gComputePipelineStorage;
 
 struct DisplayerHardwareWrap
 {
@@ -32,15 +29,11 @@ struct DisplayerHardwareWrap
     uint64_t refCount = 1;
 };
 
-extern horizon::core::Storage<DisplayerHardwareWrap> globalDisplayerStorages;
-
 struct ExecutorWrap
 {
     HardwareExecutorVulkan *impl = nullptr;
     uint64_t refCount = 1;
 };
-
-extern horizon::core::Storage<ExecutorWrap> gExecutorStorage;
 
 struct PushConstantWrap
 {
@@ -49,5 +42,3 @@ struct PushConstantWrap
     uint64_t refCount{1};
     bool isSub{false};
 };
-
-extern horizon::core::Storage<PushConstantWrap> globalPushConstantStorages;

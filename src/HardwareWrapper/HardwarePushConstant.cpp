@@ -1,277 +1,134 @@
-﻿#include "Horizon_old.h"
+#include "Horizon_old.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <new>
 #include <stdexcept>
-#include "HardwareWrapperVulkan/HardwareContext.h"
 #include "HardwareWrapperVulkan/ResourcePool.h"
-#include "horizon/core/storage.h"
 
-static void incrementPushConstantRefCount(uintptr_t id, const horizon::core::Storage<PushConstantWrap>::WriteHandle &handle)
+namespace {
+PushConstantWrap* pushConstantFromId(uintptr_t id) noexcept
 {
-    ++handle->refCount;
-    // CFW_LOG_TRACE("HardwarePushConstant ref++: id={}, count={}", id, handle->refCount);
+    return reinterpret_cast<PushConstantWrap*>(id);
 }
 
-static bool decrementPushConstantRefCount(uintptr_t id, const horizon::core::Storage<PushConstantWrap>::WriteHandle &handle)
+void retainPushConstant(uintptr_t id)
 {
-    const auto count = --handle->refCount;
-    // CFW_LOG_TRACE("HardwarePushConstant ref--: id={}, count={}", id, count);
-    if (count == 0)
+    if (auto* handle = pushConstantFromId(id))
+        ++handle->refCount;
+}
+
+void releasePushConstant(uintptr_t id)
+{
+    auto* handle = pushConstantFromId(id);
+    if (handle && --handle->refCount == 0)
     {
-        if (handle->data != nullptr && !handle->isSub)
-        {
+        if (!handle->isSub)
             std::free(handle->data);
-            handle->data = nullptr;
-        }
-        // CFW_LOG_TRACE("HardwarePushConstant destroyed: id={}", id);
-        return true;
+        delete handle;
     }
-    return false;
 }
+} // namespace
 
 HardwarePushConstant::HardwarePushConstant()
-    : pushConstantID(globalPushConstantStorages.allocate())
+    : pushConstantID(reinterpret_cast<uintptr_t>(new PushConstantWrap{}))
 {
-    // CFW_LOG_TRACE("HardwarePushConstant created: id={}", pushConstantID.load(std::memory_order_acquire));
 }
 
-HardwarePushConstant::HardwarePushConstant(uint64_t size, uint64_t offset, HardwarePushConstant *whole)
+HardwarePushConstant::HardwarePushConstant(uint64_t size, uint64_t offset, HardwarePushConstant* whole)
 {
-    auto const self_id = globalPushConstantStorages.allocate();
-    pushConstantID.store(self_id, std::memory_order_release);
-    auto pushConstantHandle = globalPushConstantStorages.acquire_write(self_id);
-    pushConstantHandle->size = size;
-    pushConstantHandle->isSub = false;
+    auto handle = std::make_unique<PushConstantWrap>();
+    handle->size = size;
 
-    if (whole != nullptr)
+    if (whole)
     {
-        auto wholeHandle = globalPushConstantStorages.acquire_read(whole->getPushConstantID());
-        if (wholeHandle->data != nullptr)
+        auto* parent = pushConstantFromId(whole->getPushConstantID());
+        if (!parent)
+            throw std::runtime_error("Empty PushConstantWrap handle");
+        if (parent->data)
         {
-            pushConstantHandle->data = wholeHandle->data + offset;
-            pushConstantHandle->isSub = true;
+            handle->data = parent->data + offset;
+            handle->isSub = true;
         }
     }
 
-    if (!pushConstantHandle->isSub)
-    {
-        pushConstantHandle->data = static_cast<uint8_t *>(std::malloc(size));
-    }
-    // CFW_LOG_TRACE("HardwarePushConstant created: id={}", self_id);
+    if (!handle->isSub)
+        handle->data = static_cast<uint8_t*>(std::malloc(size));
+
+    pushConstantID = reinterpret_cast<uintptr_t>(handle.release());
 }
 
-HardwarePushConstant::HardwarePushConstant(const HardwarePushConstant &other)
+HardwarePushConstant::HardwarePushConstant(const HardwarePushConstant& other)
+    : pushConstantID(other.pushConstantID)
 {
-    std::lock_guard<std::mutex> lock(other.pushConstantMutex);
-    auto const other_id = other.pushConstantID.load(std::memory_order_acquire);
-    pushConstantID.store(other_id, std::memory_order_release);
-    if (other_id > 0)
-    {
-        auto const handle = globalPushConstantStorages.acquire_write(other_id);
-        incrementPushConstantRefCount(other_id, handle);
-    }
+    retainPushConstant(pushConstantID);
 }
 
-HardwarePushConstant::HardwarePushConstant(HardwarePushConstant &&other) noexcept
+HardwarePushConstant::HardwarePushConstant(HardwarePushConstant&& other) noexcept
+    : pushConstantID(std::exchange(other.pushConstantID, 0))
 {
-    std::lock_guard<std::mutex> lock(other.pushConstantMutex);
-    auto const other_id = other.pushConstantID.load(std::memory_order_acquire);
-    pushConstantID.store(other_id, std::memory_order_release);
-    other.pushConstantID.store(0, std::memory_order_release);
 }
 
 HardwarePushConstant::~HardwarePushConstant()
 {
-    auto const self_id = pushConstantID.load(std::memory_order_acquire);
-    if (self_id > 0)
-    {
-        bool destroy = false;
-        if (auto const handle = globalPushConstantStorages.acquire_write(self_id); decrementPushConstantRefCount(self_id, handle))
-        {
-            destroy = true;
-        }
-        if (destroy)
-        {
-            globalPushConstantStorages.deallocate(self_id);
-        }
-        pushConstantID.store(0, std::memory_order_release);
-    }
+    releasePushConstant(pushConstantID);
 }
 
-HardwarePushConstant &HardwarePushConstant::operator=(const HardwarePushConstant &other)
+HardwarePushConstant& HardwarePushConstant::operator=(const HardwarePushConstant& other)
 {
-    if (this == &other)
+    if (pushConstantID == other.pushConstantID)
+        return *this;
+
+    auto* self = pushConstantFromId(pushConstantID);
+    auto* source = pushConstantFromId(other.pushConstantID);
+    // Assignment into a subregion writes its parent's bytes; ordinary copies
+    // continue to share storage. The parent must outlive its subregions.
+    if (self && source && self->isSub)
     {
+        if (self->data && source->data)
+            std::memcpy(self->data, source->data, std::min(self->size, source->size));
         return *this;
     }
-    std::scoped_lock lock(pushConstantMutex, other.pushConstantMutex);
-    auto const self_id = pushConstantID.load(std::memory_order_acquire);
-    auto const other_id = other.pushConstantID.load(std::memory_order_acquire);
 
-    // Copies can share a slot. Do not recursively lock its shared_timed_mutex.
-    if (self_id == other_id)
-    {
-        return *this;
-    }
-
-    bool isSub = false;
-    if (self_id > 0 && other_id > 0)
-    {
-        auto thisPc = globalPushConstantStorages.acquire_write(self_id);
-        auto otherPc = globalPushConstantStorages.acquire_read(other_id);
-
-        if (thisPc->isSub)
-        {
-            if (thisPc->data != nullptr && otherPc->data != nullptr)
-            {
-                std::memcpy(thisPc->data, otherPc->data, std::min(thisPc->size, otherPc->size));
-            }
-            isSub = true;
-        }
-    }
-
-    if (!isSub)
-    {
-        if (self_id == other_id)
-        {
-            return *this;
-        }
-
-        if (other_id == 0)
-        {
-            bool should_destroy_self = false;
-            if (auto const self_handle = globalPushConstantStorages.acquire_write(self_id);
-                decrementPushConstantRefCount(self_id, self_handle))
-            {
-                should_destroy_self = true;
-            }
-            if (should_destroy_self)
-            {
-                globalPushConstantStorages.deallocate(self_id);
-            }
-            pushConstantID.store(0, std::memory_order_release);
-            return *this;
-        }
-
-        if (self_id == 0)
-        {
-            pushConstantID.store(other_id, std::memory_order_release);
-            auto const other_handle = globalPushConstantStorages.acquire_write(other_id);
-            incrementPushConstantRefCount(other_id, other_handle);
-            return *this;
-        }
-
-        bool should_destroy_self = false;
-        if (self_id < other_id)
-        {
-            auto const self_handle = globalPushConstantStorages.acquire_write(self_id);
-            auto const other_handle = globalPushConstantStorages.acquire_write(other_id);
-            incrementPushConstantRefCount(other_id, other_handle);
-            if (decrementPushConstantRefCount(self_id, self_handle))
-            {
-                should_destroy_self = true;
-            }
-        }
-        else
-        {
-            auto const other_handle = globalPushConstantStorages.acquire_write(other_id);
-            auto const self_handle = globalPushConstantStorages.acquire_write(self_id);
-            incrementPushConstantRefCount(other_id, other_handle);
-            if (decrementPushConstantRefCount(self_id, self_handle))
-            {
-                should_destroy_self = true;
-            }
-        }
-        if (should_destroy_self)
-        {
-            globalPushConstantStorages.deallocate(self_id);
-        }
-        pushConstantID.store(other_id, std::memory_order_release);
-    }
+    retainPushConstant(other.pushConstantID);
+    releasePushConstant(pushConstantID);
+    pushConstantID = other.pushConstantID;
     return *this;
 }
 
-HardwarePushConstant &HardwarePushConstant::operator=(HardwarePushConstant &&other) noexcept
+HardwarePushConstant& HardwarePushConstant::operator=(HardwarePushConstant&& other) noexcept
 {
     if (this == &other)
-    {
         return *this;
-    }
-    std::scoped_lock lock(pushConstantMutex, other.pushConstantMutex);
-    auto const self_id = pushConstantID.load(std::memory_order_acquire);
-    auto const other_id = other.pushConstantID.load(std::memory_order_acquire);
 
-    if (self_id > 0)
-    {
-        bool should_destroy_self = false;
-        if (auto const self_handle = globalPushConstantStorages.acquire_write(self_id);
-            decrementPushConstantRefCount(self_id, self_handle))
-        {
-            should_destroy_self = true;
-        }
-        if (should_destroy_self)
-        {
-            globalPushConstantStorages.deallocate(self_id);
-        }
-    }
-    pushConstantID.store(other_id, std::memory_order_release);
-    other.pushConstantID.store(0, std::memory_order_release);
+    releasePushConstant(pushConstantID);
+    pushConstantID = std::exchange(other.pushConstantID, 0);
     return *this;
 }
 
-uint8_t *HardwarePushConstant::getData() const
+uint8_t* HardwarePushConstant::getData() const
 {
-    auto const self_id = pushConstantID.load(std::memory_order_acquire);
-    if (self_id > 0)
-    {
-        return globalPushConstantStorages.acquire_write(self_id)->data;
-    }
-    return nullptr;
+    auto* handle = pushConstantFromId(pushConstantID);
+    return handle ? handle->data : nullptr;
 }
 
 uint64_t HardwarePushConstant::getSize() const
 {
-    auto const self_id = pushConstantID.load(std::memory_order_acquire);
-    if (self_id > 0)
-    {
-        return globalPushConstantStorages.acquire_read(self_id)->size;
-    }
-    return 0;
+    auto* handle = pushConstantFromId(pushConstantID);
+    return handle ? handle->size : 0;
 }
 
-void HardwarePushConstant::copyFromRaw(const void *src, uint64_t size)
+void HardwarePushConstant::copyFromRaw(const void* src, uint64_t size)
 {
-    if (src != nullptr && size != 0)
-    {
-        auto const self_id = pushConstantID.load(std::memory_order_acquire);
-        if (self_id > 0)
-        {
-            bool destroy = false;
-            if (auto const handle = globalPushConstantStorages.acquire_write(self_id); decrementPushConstantRefCount(self_id, handle))
-            {
-                destroy = true;
-            }
-            if (destroy)
-            {
-                globalPushConstantStorages.deallocate(self_id);
-            }
-        }
+    if (!src || !size)
+        return;
 
-        auto const new_id = globalPushConstantStorages.allocate();
-        pushConstantID.store(new_id, std::memory_order_release);
+    auto handle = std::make_unique<PushConstantWrap>();
+    handle->size = size;
+    handle->data = static_cast<uint8_t*>(std::malloc(size));
+    if (handle->data)
+        std::memcpy(handle->data, src, size);
 
-        auto handle = globalPushConstantStorages.acquire_write(new_id);
-
-        handle->size = size;
-        handle->isSub = false;
-        handle->data = static_cast<uint8_t *>(std::malloc(size));
-
-        if (handle->data != nullptr)
-        {
-            std::memcpy(handle->data, src, size);
-        }
-    }
+    releasePushConstant(pushConstantID);
+    pushConstantID = reinterpret_cast<uintptr_t>(handle.release());
 }

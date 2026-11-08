@@ -1,229 +1,123 @@
-﻿#include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
+#include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
 
 #include "Horizon_old.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/ResourcePool.h"
-#include "horizon/core/storage.h"
+#include <stdexcept>
 
-static void incCompute(uintptr_t id, const horizon::core::Storage<ComputePipelineWrap>::WriteHandle &write_handle)
+namespace {
+ComputePipelineWrap* computeFromId(uintptr_t id)
 {
-    ++write_handle->refCount;
-    // CFW_LOG_TRACE("ComputePipeline ref++: id={}, count={}", id, write_handle->refCount);
+    if (!id)
+        throw std::runtime_error("Empty ComputePipelineWrap handle");
+    return reinterpret_cast<ComputePipelineWrap*>(id);
 }
 
-static bool decCompute(uintptr_t id, const horizon::core::Storage<ComputePipelineWrap>::WriteHandle &write_handle)
+void retainCompute(uintptr_t id)
 {
-    int count = --write_handle->refCount;
-    // CFW_LOG_TRACE("ComputePipeline ref--: id={}, count={}", id, count);
-    if (count == 0)
+    if (id)
+        ++computeFromId(id)->refCount;
+}
+
+void releaseCompute(uintptr_t id)
+{
+    if (!id)
+        return;
+    auto* handle = computeFromId(id);
+    if (--handle->refCount == 0)
     {
-        delete write_handle->impl;
-        write_handle->impl = nullptr;
-        // CFW_LOG_TRACE("ComputePipeline destroyed: id={}", id);
-        return true;
+        delete handle->impl;
+        delete handle;
     }
-    return false;
 }
+} // namespace
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 创建 ComputePipeline
-void computePipelineInitFromCompiler(std::atomic<std::uintptr_t> &pipelineID,
+void computePipelineInitFromCompiler(std::uintptr_t &pipelineID,
                                       EmbeddedShader::ShaderCodeCompiler &compiler,
                                       const std::source_location &src)
 {
-    auto const id = gComputePipelineStorage.allocate();
-    pipelineID.store(id, std::memory_order_release);
-    auto const handle = gComputePipelineStorage.acquire_write(id);
+    auto handle = std::make_unique<ComputePipelineWrap>();
     handle->impl = new ComputePipelineVulkan(compiler, src);
+    pipelineID = reinterpret_cast<uintptr_t>(handle.release());
 }
 
 ComputePipelineBase::ComputePipelineBase()
 {
-    auto const id = gComputePipelineStorage.allocate();
-    computePipelineID.store(id, std::memory_order_release);
-    auto const handle = gComputePipelineStorage.acquire_write(id);
+    auto handle = std::make_unique<ComputePipelineWrap>();
     handle->impl = new ComputePipelineVulkan();
-    // CFW_LOG_TRACE("ComputePipelineBase created: id={}", id);
+    computePipelineID = reinterpret_cast<uintptr_t>(handle.release());
 }
 
 ComputePipelineBase::ComputePipelineBase(const std::string &shaderCode, EmbeddedShader::ShaderLanguage language, const std::source_location &src)
 {
-    auto const id = gComputePipelineStorage.allocate();
-    computePipelineID.store(id, std::memory_order_release);
-    auto const handle = gComputePipelineStorage.acquire_write(id);
+    auto handle = std::make_unique<ComputePipelineWrap>();
     handle->impl = new ComputePipelineVulkan(shaderCode, language, src);
-    // CFW_LOG_TRACE("ComputePipelineBase created: id={}", id);
+    computePipelineID = reinterpret_cast<uintptr_t>(handle.release());
 }
 
 ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)
 {
-    auto const id = gComputePipelineStorage.allocate();
-    computePipelineID.store(id, std::memory_order_release);
-    auto const handle = gComputePipelineStorage.acquire_write(id);
+    auto handle = std::make_unique<ComputePipelineWrap>();
     handle->impl = new ComputePipelineVulkan(spirV, src);
+    computePipelineID = reinterpret_cast<uintptr_t>(handle.release());
 }
 
-ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase &other)
+ComputePipelineBase::ComputePipelineBase(const ComputePipelineBase& other)
+    : computePipelineID(other.computePipelineID), autoBindEntries_(other.autoBindEntries_)
 {
-    std::lock_guard<std::mutex> lock(other.computePipelineMutex);
-    auto const other_id = other.computePipelineID.load(std::memory_order_acquire);
-    computePipelineID.store(other_id, std::memory_order_release);
-    autoBindEntries_ = other.autoBindEntries_;
-    if (other_id > 0)
-    {
-        auto const write_handle = gComputePipelineStorage.acquire_write(other_id);
-        incCompute(other_id, write_handle);
-    }
+    retainCompute(computePipelineID);
 }
 
-ComputePipelineBase::ComputePipelineBase(ComputePipelineBase &&other) noexcept
+ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&& other) noexcept
+    : computePipelineID(std::exchange(other.computePipelineID, 0)), autoBindEntries_(std::move(other.autoBindEntries_))
 {
-    std::lock_guard<std::mutex> lock(other.computePipelineMutex);
-    auto const other_id = other.computePipelineID.load(std::memory_order_acquire);
-    computePipelineID.store(other_id, std::memory_order_release);
-    other.computePipelineID.store(0, std::memory_order_release);
-    autoBindEntries_ = std::move(other.autoBindEntries_);
 }
 
 ComputePipelineBase::~ComputePipelineBase()
 {
-    auto const self_id = computePipelineID.load(std::memory_order_acquire);
-    if (self_id > 0)
-    {
-        bool destroy = false;
-        if (auto const write_handle = gComputePipelineStorage.acquire_write(self_id); decCompute(self_id, write_handle))
-        {
-            destroy = true;
-        }
-
-        if (destroy)
-        {
-            gComputePipelineStorage.deallocate(self_id);
-        }
-        computePipelineID.store(0, std::memory_order_release);
-    }
+    releaseCompute(computePipelineID);
 }
 
-ComputePipelineBase &ComputePipelineBase::operator=(const ComputePipelineBase &other)
+ComputePipelineBase& ComputePipelineBase::operator=(const ComputePipelineBase& other)
 {
-    if (this == &other)
-    {
+    if (computePipelineID == other.computePipelineID)
         return *this;
-    }
-    std::scoped_lock lock(computePipelineMutex, other.computePipelineMutex);
-    auto const self_id = computePipelineID.load(std::memory_order_acquire);
-    auto const other_id = other.computePipelineID.load(std::memory_order_acquire);
 
-    if (self_id == 0 && other_id == 0)
-    {
-        return *this;
-    }
-    if (self_id == other_id)
-    {
-        return *this;
-    }
-
-    if (other_id == 0)
-    {
-        bool should_destroy_self = false;
-        if (auto const self_handle = gComputePipelineStorage.acquire_write(self_id);
-            decCompute(self_id, self_handle))
-        {
-            should_destroy_self = true;
-        }
-
-        if (should_destroy_self)
-        {
-            gComputePipelineStorage.deallocate(self_id);
-        }
-        computePipelineID.store(0, std::memory_order_release);
-        autoBindEntries_.clear();
-        return *this;
-    }
-
-    if (self_id == 0)
-    {
-        computePipelineID.store(other_id, std::memory_order_release);
-        autoBindEntries_ = other.autoBindEntries_;
-        auto const other_handle = gComputePipelineStorage.acquire_write(other_id);
-        incCompute(other_id, other_handle);
-        return *this;
-    }
-
-    bool should_destroy_self = false;
-    if (self_id < other_id)
-    {
-        auto const self_handle = gComputePipelineStorage.acquire_write(self_id);
-        auto const other_handle = gComputePipelineStorage.acquire_write(other_id);
-        incCompute(other_id, other_handle);
-        if (decCompute(self_id, self_handle))
-        {
-            should_destroy_self = true;
-        }
-    }
-    else
-    {
-        auto const other_handle = gComputePipelineStorage.acquire_write(other_id);
-        auto const self_handle = gComputePipelineStorage.acquire_write(self_id);
-        incCompute(other_id, other_handle);
-        if (decCompute(self_id, self_handle))
-        {
-            should_destroy_self = true;
-        }
-    }
-
-    if (should_destroy_self)
-    {
-        gComputePipelineStorage.deallocate(self_id);
-    }
-    computePipelineID.store(other_id, std::memory_order_release);
-    autoBindEntries_ = other.autoBindEntries_;
+    auto entries = other.autoBindEntries_;
+    retainCompute(other.computePipelineID);
+    releaseCompute(computePipelineID);
+    computePipelineID = other.computePipelineID;
+    autoBindEntries_ = std::move(entries);
     return *this;
 }
 
-ComputePipelineBase &ComputePipelineBase::operator=(ComputePipelineBase &&other) noexcept
+ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other) noexcept
 {
     if (this == &other)
-    {
         return *this;
-    }
-    std::scoped_lock lock(computePipelineMutex, other.computePipelineMutex);
-    auto const self_id = computePipelineID.load(std::memory_order_acquire);
-    auto const other_id = other.computePipelineID.load(std::memory_order_acquire);
 
-    if (self_id > 0)
-    {
-        bool should_destroy_self = false;
-        if (auto const self_handle = gComputePipelineStorage.acquire_write(self_id);
-            decCompute(self_id, self_handle))
-        {
-            should_destroy_self = true;
-        }
-        if (should_destroy_self)
-        {
-            gComputePipelineStorage.deallocate(self_id);
-        }
-    }
-    computePipelineID.store(other_id, std::memory_order_release);
-    other.computePipelineID.store(0, std::memory_order_release);
+    releaseCompute(computePipelineID);
+    computePipelineID = std::exchange(other.computePipelineID, 0);
     autoBindEntries_ = std::move(other.autoBindEntries_);
     return *this;
 }
 
 void ComputePipelineBase::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
-    auto const handle = gComputePipelineStorage.acquire_read(computePipelineID.load(std::memory_order_acquire));
+    auto const handle = computeFromId(computePipelineID);
     handle->impl->setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
 void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
-    auto const handle = gComputePipelineStorage.acquire_read(computePipelineID.load(std::memory_order_acquire));
+    auto const handle = computeFromId(computePipelineID);
     handle->impl->setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
 void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
 {
-    auto const handle = gComputePipelineStorage.acquire_read(computePipelineID.load(std::memory_order_acquire));
+    auto const handle = computeFromId(computePipelineID);
     handle->impl->setResourceDirect(byteOffset, typeSize, image, bindType);
 }
 
@@ -245,7 +139,7 @@ ComputePipelineBase &ComputePipelineBase::operator()(uint16_t x, uint16_t y, uin
                 setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType);
         }
     }
-    auto const handle = gComputePipelineStorage.acquire_read(computePipelineID.load(std::memory_order_acquire));
+    auto const handle = computeFromId(computePipelineID);
     (*handle->impl)(x, y, z);
     return *this;
 }
