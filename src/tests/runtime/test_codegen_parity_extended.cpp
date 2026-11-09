@@ -29,7 +29,7 @@ void test_sampling_frames(Device &device) {
         make_float3(1.f, 0.f, 0.f), make_float3(0.f, 1.f, 0.f),
         normalize(make_float3(1.f, 1.f, 1.f)), normalize(make_float3(-2.f, 1.f, -3.f)),
         normalize(make_float3(0.01f, -0.75f, 0.66f)), make_float3(0.f, 0.f, 2.f)};
-    constexpr uint rows = 6u;
+    static constexpr uint rows = 6u;
     auto input = device.create_buffer<float3>(normals.size());
     auto output = device.create_buffer<float4>(normals.size() * rows);
     Kernel kernel = [](BufferVar<float3> in, BufferVar<float4> out) {
@@ -142,7 +142,7 @@ void test_matrix_construction(Device &device) {
 void test_dynamic_array_math(Device &device) {
     // Five spectral-style samples exercise fixed arrays outside Slang's native
     // vector widths, including singleton broadcasts on either side of an op.
-    constexpr uint samples = 5u, rows = 4u;
+    static constexpr uint samples = 5u, rows = 4u;
     auto output = device.create_buffer<float4>(samples * rows);
     Kernel kernel = [](BufferVar<float4> out, Float scale) {
         DynamicArray<float> values(samples), other(samples);

@@ -59,6 +59,12 @@ set_tests_properties(ocarina.test-core-allocator.failures PROPERTIES
     LABELS "ocarina" RUN_SERIAL TRUE TIMEOUT 120)
 ocarina_add_test(test-logging CATEGORY core SOURCES core/test_logging.cpp)
 target_link_libraries(test-core-logging PRIVATE horizon-logging)
+add_library(ocarina-platform-fixture MODULE core/platform_fixture.cpp)
+set_target_properties(ocarina-platform-fixture PROPERTIES FOLDER "ocarina/test/core")
+ocarina_add_test(test-platform CATEGORY core SOURCES core/test_platform.cpp)
+target_compile_definitions(test-core-platform PRIVATE
+    OC_PLATFORM_FIXTURE_PATH="$<TARGET_FILE:ocarina-platform-fixture>")
+add_dependencies(test-core-platform ocarina-platform-fixture)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
 ocarina_add_test(test-precision-caps CATEGORY core SOURCES core/test_precision_caps.cpp)
 ocarina_add_test(test-half GPU CATEGORY core SOURCES core/test_half.cpp)

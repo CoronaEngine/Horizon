@@ -154,10 +154,8 @@ public:
 
         virtual uint64_t get_aligned_memory_size(handle_ty handle) const { return 0; }
 
-#if _WIN32 || _WIN64
         virtual handle_ty import_handle(handle_ty handle, size_t size) { return 0; }
         virtual uint64_t export_handle(handle_ty handle_) { return 0; }
-#endif
     };
 
     using Creator = Device::Impl *(RHIContext *);

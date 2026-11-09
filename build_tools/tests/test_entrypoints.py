@@ -1,6 +1,7 @@
 """Public entry points, profile selection and command boundaries."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -46,6 +47,67 @@ class EntryPointTests(unittest.TestCase):
             workflow.cmake_build(REPO_ROOT, "Debug", ["Horizon", "Helicon"], "engine")
         self.assertEqual(run.call_args.args[0][-3:], ("--target", "Horizon", "Helicon"))
         self.assertEqual(run.call_args.kwargs["env"][workflow.BOOTSTRAP_ENV], "1")
+
+    def test_ide_bootstrap_keeps_enabled_features_for_each_python_provider(self):
+        cmake = shutil.which("cmake")
+        if not cmake:
+            self.skipTest("CMake required")
+        for provider in ("venv", "conda"):
+            for features in ((), ("ocarina",), ("ocarina_tests",), ("tests",),
+                             ("ocarina", "ocarina_tests", "tests")):
+                with self.subTest(provider=provider, features=features), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    generators = root / "build/conan/examples/release/generators"
+                    generators.mkdir(parents=True)
+                    for name in ("conan_toolchain.cmake", "dev_build_environment.cmake"):
+                        (generators / name).touch()
+                    (root / "horizon_ninja.cmake").write_text(
+                        "function(horizon_configure_ninja)\nendfunction()\n", encoding="utf-8")
+                    if provider == "venv":
+                        python = root / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+                        python.parent.mkdir(parents=True)
+                        python.touch()
+                    # Capture the external process boundary, leaving all bootstrap
+                    # argument selection and provider branching in real CMake.
+                    script = root / "bootstrap.cmake"
+                    script.write_text(
+                        'cmake_minimum_required(VERSION 4.0)\n'
+                        f'set(HORIZON_BUILD_TOOLS_DIR "{(REPO_ROOT / "build_tools").as_posix()}")\n'
+                        f'set(CMAKE_MODULE_PATH "{root.as_posix()}")\n'
+                        'set(HORIZON_DEV_CONFIGURATION Release CACHE STRING "")\n'
+                        'set(HORIZON_DEV_TARGET_FAMILY examples CACHE STRING "")\n'
+                        'set(HORIZON_BUILD_BASELINE_WINDOW_TEST ON)\n'
+                        + ''.join(f'set(HORIZON_BUILD_{feature.upper()} {"ON" if feature in features else "OFF"})\n'
+                                  for feature in ("ocarina", "ocarina_tests", "tests"))
+                        + f'set(_horizon_conda "{(root / "conda").as_posix()}")\n'
+                        'macro(execute_process)\n'
+                        '  cmake_parse_arguments(PROCESS "" "RESULT_VARIABLE;OUTPUT_VARIABLE;WORKING_DIRECTORY;COMMAND_ECHO" "COMMAND" ${ARGV})\n'
+                        '  if(PROCESS_RESULT_VARIABLE)\n'
+                        '    set(${PROCESS_RESULT_VARIABLE} 0)\n'
+                        '    set_property(GLOBAL PROPERTY captured_bootstrap "${PROCESS_COMMAND}")\n'
+                        '  endif()\n'
+                        '  if(PROCESS_OUTPUT_VARIABLE)\n'
+                        f'    set(${{PROCESS_OUTPUT_VARIABLE}} [=[{{"envs":["{(root / "horizon-dev").as_posix()}"]}}]=])\n'
+                        '  endif()\n'
+                        'endmacro()\n'
+                        'include("${HORIZON_BUILD_TOOLS_DIR}/cmake/horizon_dev_bootstrap.cmake")\n'
+                        'horizon_dev_bootstrap()\n'
+                        'get_property(command GLOBAL PROPERTY captured_bootstrap)\n'
+                        'file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/command.txt" "${command}")\n',
+                        encoding="utf-8")
+                    env = dict(os.environ)
+                    env.pop(workflow.BOOTSTRAP_ENV, None)
+                    result = subprocess.run([cmake, "-P", str(script)], cwd=root,
+                                            env=env, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    command = (root / "command.txt").read_text(encoding="utf-8").split(";")
+                    self.assertEqual(command[command.index("--target-family") + 1], "examples")
+                    self.assertIn("horizon-test-baseline-window", command)
+                    self.assertEqual("--modify" in command, provider == "venv", command)
+                    for feature, flag in (("ocarina", "--with-ocarina"),
+                                          ("ocarina_tests", "--with-ocarina-tests"),
+                                          ("tests", "--with-tests")):
+                        self.assertEqual(flag in command, feature in features, command)
 
     def test_cache_update_uses_the_shared_install_transaction(self):
         for package in (None, "fmt/12.1.0"):

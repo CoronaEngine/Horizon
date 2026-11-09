@@ -316,6 +316,30 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(install.call_args.kwargs["options"], [
                         "&:with_engine=False", "&:with_tests=True", "&:with_baseline_window_test=True"])
 
+    def test_examples_commands_preserve_enabled_ocarina_and_test_features(self) -> None:
+        for command in ("install", "_bootstrap", "configure", "build", "rebuild", "update"):
+            with self.subTest(command=command), \
+                    patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                    patch.object(dev, "safe_remove"), patch.object(dev, "cmake_configure"), \
+                    patch.object(dev, "cmake_build"), patch.object(dev, "conan_install") as install:
+                args = dev.create_parser().parse_args([
+                    command, "--target-family", "examples", "--configuration", "Release",
+                    "--with-ocarina", "--with-ocarina-tests", "--with-tests"])
+                dev.execute(args)
+                self.assertEqual(install.call_args.kwargs["target_family"], "examples")
+                self.assertEqual(install.call_args.kwargs["options"], [
+                    "&:with_examples=True", "&:with_ocarina=True",
+                    "&:with_ocarina_tests=True", "&:with_tests=True"])
+
+    def test_enabled_features_do_not_duplicate_target_family_options(self) -> None:
+        with patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                patch.object(dev, "conan_install") as install:
+            dev.execute(dev.create_parser().parse_args([
+                "_bootstrap", "--target-family", "ocarina-tests",
+                "--with-ocarina", "--with-ocarina-tests"]))
+        self.assertEqual(install.call_args.kwargs["options"], [
+            "&:with_ocarina=True", "&:with_ocarina_tests=True"])
+
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")
         self.assertEqual(configuration_slug("RelWithDebInfo"), "relwithdebinfo")

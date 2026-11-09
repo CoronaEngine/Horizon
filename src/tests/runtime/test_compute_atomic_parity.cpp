@@ -33,10 +33,10 @@ T initial_value(uint i) {
 // methods and the free functions taking a resource reference are exercised.
 template<typename T>
 void test_atomic_views(Device &device, const char *type_name) {
-    constexpr uint count = 37u;
+    static constexpr uint count = 37u;
     constexpr uint padding = 2u;
     constexpr bool integral = !std::is_floating_point_v<T>;
-    constexpr uint rows = integral ? 8u : 6u;
+    static constexpr uint rows = integral ? 8u : 6u;
     constexpr T sentinel = T(777);
     auto typed = device.create_buffer<T>(count + 2u * padding);
     auto bytes = device.create_byte_buffer((count + 2u * padding) * sizeof(T));
@@ -117,7 +117,7 @@ void test_atomic_views(Device &device, const char *type_name) {
 // Sorting old values checks atomicity without relying on invocation scheduling.
 template<typename T>
 void test_contended_add(Device &device, const char *type_name) {
-    constexpr uint count = 513u;
+    static constexpr uint count = 513u;
     T start = initial_value<T>(0u);
     T increment = std::is_floating_point_v<T> ? T(0.5f) : T(1);
     auto counter = device.create_buffer<T>(3u);
@@ -167,7 +167,7 @@ void test_contended_add(Device &device, const char *type_name) {
 
 template<typename T>
 void test_contended_cas(Device &device, const char *type_name) {
-    constexpr uint count = 257u;
+    static constexpr uint count = 257u;
     auto counter = device.create_buffer<T>(1u);
     auto returns = device.create_buffer<T>(count);
     Kernel kernel = [](BufferVar<T> counter, BufferVar<T> out, Var<T> compare) {
@@ -190,11 +190,11 @@ void test_contended_cas(Device &device, const char *type_name) {
 }
 
 void test_bindless_byte_atomics(Device &device) {
-    constexpr uint count = 19u;
+    static constexpr uint count = 19u;
     constexpr uint view_prefix = 3u;
-    constexpr uint element_prefix = 2u;
+    static constexpr uint element_prefix = 2u;
     constexpr uint suffix = 4u;
-    constexpr uint total = view_prefix + element_prefix + count + suffix;
+    static constexpr uint total = view_prefix + element_prefix + count + suffix;
     constexpr uint sentinel = 0x13579bdfu;
     constexpr uint dummy_sentinel = 0x2468ace0u;
     auto dummy = device.create_byte_buffer(total * sizeof(uint), "atomic-bindless-dummy");

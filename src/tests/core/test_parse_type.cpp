@@ -188,6 +188,14 @@ static bool test_void_and_scalar_types() {
     CHECK(half_type->size() == sizeof(half));
     CHECK(half_type->alignment() == alignof(half));
 
+    const Type *ulong_type = Type::of<ocarina::ulong>();
+    CHECK(ulong_type->tag() == Type::Tag::ULONG);
+    CHECK(ulong_type->size() == 8u);
+    CHECK(ulong_type->alignment() == alignof(ocarina::ulong));
+    CHECK(ulong_type->description() == "ulong");
+    const Type *size_type = Type::of<size_t>();
+    CHECK(size_type == (sizeof(size_t) == 8u ? ulong_type : Type::of<uint>()));
+
     const Type *real_type = Type::from(TypeDesc<real>::description());
     CHECK(real_type != nullptr);
     CHECK(real_type->is_scalar());
