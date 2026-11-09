@@ -58,16 +58,22 @@ requires concepts::subscriptable<T>
     return InvalidUI32;
 }
 
+// Integer literal parameters must use unsigned long long, which can differ
+// from the host size_t. Keep the alias local so host indices are unaffected.
+namespace size_literal_types {
+using size_t = unsigned long long;
+}
+
 inline namespace size_literals {
-[[nodiscard]] constexpr auto operator""_kb(unsigned long long bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_kb(size_literal_types::size_t bytes) noexcept {
     return static_cast<size_t>(bytes * 1024u);
 }
 
-[[nodiscard]] constexpr auto operator""_mb(unsigned long long bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_mb(size_literal_types::size_t bytes) noexcept {
     return static_cast<size_t>(bytes * sqr(1024u));
 }
 
-[[nodiscard]] constexpr auto operator""_gb(unsigned long long bytes) noexcept {
+[[nodiscard]] constexpr auto operator""_gb(size_literal_types::size_t bytes) noexcept {
     return static_cast<size_t>(bytes * Pow<3>(1024u));
 }
 }// namespace size_literals
