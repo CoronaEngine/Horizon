@@ -4,6 +4,7 @@
 
 #include "stl.h"
 #include <algorithm>
+#include <cwchar>
 
 namespace ocarina {
 
@@ -31,6 +32,7 @@ void clear_directory(const std::filesystem::path &dir_path) {
 }
 
 std::string wstring_to_string(const wchar_t *source) {
+#ifdef _WIN32
     size_t len = 0;
     wcstombs_s(&len, nullptr, 0, source, 0);
     std::string str(len > 0 ? len - 1 : 0, '\0');
@@ -38,6 +40,24 @@ std::string wstring_to_string(const wchar_t *source) {
         wcstombs_s(&len, str.data(), str.size() + 1, source, str.size());
     }
     return str;
+#else
+    if (source == nullptr) {
+        return {};
+    }
+    std::mbstate_t state{};
+    const wchar_t *cursor = source;
+    const size_t length = std::wcsrtombs(nullptr, &cursor, 0, &state);
+    if (length == static_cast<size_t>(-1)) {
+        return {};
+    }
+    std::string str(length, '\0');
+    state = {};
+    cursor = source;
+    if (std::wcsrtombs(str.data(), &cursor, str.size(), &state) == static_cast<size_t>(-1)) {
+        return {};
+    }
+    return str;
+#endif
 }
 
 std::string get_file_name(const std::string &file_path) {

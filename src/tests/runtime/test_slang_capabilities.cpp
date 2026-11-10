@@ -35,6 +35,7 @@ int main(int argc, char **argv) {
     horizon::core::initialize_logging(logging);
     RHIContext::instance().init(argv[0], cache);
     auto device = create_test_device();
+    if (ray_query && skip_without_feature(device.supports_raytracing(), "ray queries")) return 0;
 
     // Texture intrinsics carry Slang's standard-library SPIR-V requirements.
     Kernel texture = [](Texture2DVar input, BufferVar<float4> output) {

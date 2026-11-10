@@ -4,8 +4,10 @@
 
 #include <cstring>
 #include <iostream>
+#include <limits>
 
 #include "ast/function.h"
+#include "generator/ast_to_cpp_source.h"
 #include "rhi/resources/shader.h"
 
 using namespace ocarina;
@@ -91,12 +93,31 @@ template<typename T>
     return true;
 }
 
+[[nodiscard]] bool test_ulong_literal_source() {
+    struct LiteralSource final : AstToCppSource {
+        LiteralSource() : AstToCppSource(false) {}
+        using AstToCppSource::visit;
+    } source;
+
+    const auto max_value = std::numeric_limits<ocarina::ulong>::max();
+    LiteralExpr scalar(Type::of<ocarina::ulong>(), max_value);
+    source.visit(&scalar);
+    CHECK(source.scratch().view() == "18446744073709551615ull");
+
+    source.scratch().clear();
+    LiteralExpr vector(Type::of<ulong2>(), make_ulong2(ocarina::ulong{4294967296ull}, max_value));
+    source.visit(&vector);
+    CHECK(source.scratch().view() == "oc_ulong2(4294967296ull,18446744073709551615ull)");
+    return true;
+}
+
 }// namespace
 
 int main() {
     bool passed = true;
     passed = test_exact_boundary() && passed;
     passed = test_dynamic_overflow_storage() && passed;
+    passed = test_ulong_literal_source() && passed;
     if (!passed) {
         return 1;
     }

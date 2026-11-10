@@ -124,7 +124,7 @@ void test_layout_cases(Device &device, const char *backend, const char *name,
 }
 
 void test_full_group_barriers(Device &device) {
-    constexpr uint bx = 4u, by = 3u, bz = 2u, group_size = bx * by * bz;
+    static constexpr uint bx = 4u, by = 3u, bz = 2u, group_size = bx * by * bz;
     const auto block = make_uint3(bx, by, bz);
     const auto grid = make_uint3(3u, 2u, 2u);
     const auto dim = make_uint3(12u, 6u, 4u);
@@ -264,7 +264,7 @@ void test_invoke_reuse(Device &device) {
 }
 
 void test_warp_queries(Device &device) {
-    constexpr uint block = 64u, count = 141u, records = 4u;
+    static constexpr uint block = 64u, count = 141u, records = 4u;
     auto output = device.create_buffer<uint4>(count * records);
     Kernel kernel = [](BufferVar<uint4> out) {
         Uint i = dispatch_id();

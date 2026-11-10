@@ -104,7 +104,16 @@ template<typename T = std::byte>
         return allocator<T>{}.allocate(n);
     } else {
         const size_t size = detail::checked_allocation_size(n, sizeof(T));
+#ifdef _WIN32
         auto *p = static_cast<T *>(_aligned_malloc(size == 0 ? 1 : size, alignof(T)));
+#else
+        void *allocation = nullptr;
+        constexpr size_t alignment = alignof(T) < sizeof(void *) ? sizeof(void *) : alignof(T);
+        if (posix_memalign(&allocation, alignment, size == 0 ? 1 : size) != 0) {
+            std::abort();
+        }
+        auto *p = static_cast<T *>(allocation);
+#endif
         if (p == nullptr) {
             std::abort();
         }
@@ -144,7 +153,11 @@ inline void delete_with_allocator(T *p, bool use_allocator = true) noexcept {
     if (use_allocator) {
         deallocate(p);
     } else {
+#ifdef _WIN32
         _aligned_free(p);
+#else
+        std::free(p);
+#endif
     }
 }
 
@@ -239,11 +252,7 @@ template<typename T>
 using WP = weak_ptr<T>;
 
 inline void oc_memcpy(void *dst, const void *src, size_t size) {
-#ifdef _MSC_VER
     std::memcpy(dst, src, size);
-#else
-    std::wmemcpy(reinterpret_cast<wchar_t *>(dst), reinterpret_cast<const wchar_t *>(src), size);
-#endif
 }
 
 struct MemoryBlock {

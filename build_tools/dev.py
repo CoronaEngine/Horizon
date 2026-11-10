@@ -73,23 +73,24 @@ def target_family_for_targets(targets: list[str]) -> str:
     return families.pop()
 
 
-def conan_options(target_family: str, targets: list[str] | None = None) -> list[str]:
+def conan_options(target_family: str, targets: list[str] | None = None, *,
+                  extra_options: list[str] | None = None) -> list[str]:
     try:
         options = list(TARGET_FAMILY_OPTIONS[target_family])
     except KeyError as error:
         raise ValueError(f"Unsupported target family: {target_family}") from error
     if targets and "horizon-test-baseline-window" in targets:
         options.append("&:with_baseline_window_test=True")
-    return options
+    return list(dict.fromkeys([*options, *(extra_options or [])]))
 
 
 def install(configuration: str, target_family: str, *, targets: list[str] | None = None,
-            update: bool = False) -> None:
+            extra_options: list[str] | None = None, update: bool = False) -> None:
     conan_install(
         REPO_ROOT,
         configuration,
         target_family=target_family,
-        options=conan_options(target_family, targets),
+        options=conan_options(target_family, targets, extra_options=extra_options),
         recipes=LOCAL_RECIPES,
         recipe_toggle_env=RECIPE_TOGGLE_ENV,
         update=update,
@@ -110,23 +111,23 @@ def execute(args: argparse.Namespace) -> None:
         run_command(("conan", "--version"), cwd=REPO_ROOT)
         run_command(("cmake", "--list-presets"), cwd=REPO_ROOT)
     elif args.command in {"install", "_bootstrap"}:
-        install(configuration, target_family, targets=targets)
+        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
     elif args.command == "configure":
-        install(configuration, target_family, targets=targets)
+        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "build":
-        install(configuration, target_family, targets=targets)
+        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "build-fast":
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "rebuild":
         safe_remove(REPO_ROOT, build_dir(REPO_ROOT, configuration, target_family))
-        install(configuration, target_family, targets=targets)
+        install(configuration, target_family, targets=targets, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "update":
-        install(configuration, target_family, targets=targets, update=True)
+        install(configuration, target_family, targets=targets, extra_options=args.extra_options, update=True)
         cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "clean":
         clean_repo(REPO_ROOT)
@@ -153,6 +154,14 @@ def create_parser() -> argparse.ArgumentParser:
         choices=TARGET_FAMILIES,
         help="Configure a named target family instead of inferring it from the build target.",
     )
+    for feature in ("ocarina", "ocarina_tests", "tests"):
+        parser.add_argument(
+            f"--with-{feature.replace('_', '-')}",
+            action="append_const",
+            const=f"&:with_{feature}=True",
+            dest="extra_options",
+            help=f"Include {feature.replace('_', ' ')} alongside the selected target family.",
+        )
     return parser
 
 

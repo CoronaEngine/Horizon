@@ -173,7 +173,7 @@ static_assert(std::is_same_v<decltype(float{} + half{}), float>);
                 4097.f, -4097.f, 4099.f, -4099.f, 65504.f, -65504.f, 65520.f, -65520.f,
                 std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
                 std::numeric_limits<float>::quiet_NaN()};
-        constexpr uint rows = 5u;
+        static constexpr uint rows = 5u;
         vector<float4> inputs;
         for (float x : boundary_values) inputs.push_back(make_float4(x, 0x1p-24f, .5f, 0.f));
         auto input = device.create_buffer<float4>(inputs.size(), "half_dynamic_input");

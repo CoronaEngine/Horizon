@@ -2,6 +2,7 @@
 #include "core/concurrency/pool.h"
 #include "core/image/image.h"
 #include "core/util/string_util.h"
+#include "core/util/util.h"
 
 #include <algorithm>
 #include <array>
@@ -16,6 +17,8 @@
 #include <vector>
 
 namespace {
+using namespace ocarina::size_literals;
+static_assert(1_kb == 1024u && 1_mb == 1024u * 1024u && 1_gb == 1024u * 1024u * 1024u);
 
 int failures = 0;
 
@@ -64,6 +67,18 @@ void test_aligned_allocations() {
     expect(crt->value == 23, "explicit CRT allocation mode remains usable");
     ocarina::delete_with_allocator(crt, false);
     expect(Item::live == 0, "CRT deletion runs the destructor");
+}
+
+void test_small_crt_allocations_and_wide_strings() {
+    auto *value = std::construct_at(ocarina::allocate<unsigned char>(1, false), 7);
+    expect(*value == 7, "CRT allocation supports alignments smaller than a pointer");
+    ocarina::delete_with_allocator(value, false);
+    auto *empty = std::construct_at(ocarina::allocate<unsigned char>(0, false), 3);
+    expect(*empty == 3, "zero-sized CRT allocation remains usable");
+    ocarina::delete_with_allocator(empty, false);
+    expect(ocarina::wstring_to_string(L"portable ASCII") == "portable ASCII",
+           "wide string conversion preserves ASCII");
+    expect(ocarina::wstring_to_string(L"").empty(), "empty wide string conversion stays empty");
 }
 
 void test_function_temporary_lifetimes() {
@@ -226,7 +241,11 @@ int probe_allocation_failure(const char *probe) {
     } else if (std::strcmp(probe, "--probe-size-overflow") == 0) {
         ocarina::deallocate(ocarina::allocate<Item>(excessive_count));
     } else if (std::strcmp(probe, "--probe-crt-size-overflow") == 0) {
+#ifdef _WIN32
         _aligned_free(ocarina::allocate<Item>(excessive_count, false));
+#else
+        std::free(ocarina::allocate<Item>(excessive_count, false));
+#endif
     } else if (std::strcmp(probe, "--probe-invalid-alignment") == 0) {
         (void)ocarina::detail::allocator_allocate(32, 3);
     } else if (std::strcmp(probe, "--probe-zero-alignment") == 0) {
@@ -254,6 +273,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     test_aligned_allocations();
+    test_small_crt_allocations_and_wide_strings();
     test_function_temporary_lifetimes();
     test_constructor_failure();
     test_image_data_ownership();

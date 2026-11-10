@@ -55,6 +55,10 @@ void VulkanComputeDevice::init_instance() noexcept {
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+#ifdef __APPLE__
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     ci.pApplicationInfo        = &app_info;
     ci.enabledExtensionCount   = (uint32_t)extensions.size();
     ci.ppEnabledExtensionNames = extensions.data();
@@ -176,6 +180,7 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         feats2.pNext = &pipeline_features;
     }
     vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    has_int64_atomics_ = f12.shaderBufferInt64Atomics != 0u;
     if (has_pipeline_statistics_ && !pipeline_features.pipelineExecutableInfo) {
         has_pipeline_statistics_ = false;
         feats2.pNext = &f11;

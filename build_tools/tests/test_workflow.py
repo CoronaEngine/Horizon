@@ -288,6 +288,7 @@ class WorkflowTests(unittest.TestCase):
             with self.subTest(ocarina=ocarina, examples=examples, baseline=baseline):
                 packages = set()
                 consumer = SimpleNamespace(
+                    settings=SimpleNamespace(os="Linux"),
                     options=SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
                                             with_examples=examples, with_baseline_window_test=baseline,
                                             with_tracy=False),
@@ -299,6 +300,41 @@ class WorkflowTests(unittest.TestCase):
                 self.assertTrue({"fmt", "quill"} <= packages)
                 if not ocarina and not examples:
                     self.assertEqual(packages, {"fmt", "quill", "stb"} if baseline else {"fmt", "quill"})
+
+    def test_windows_baseline_installs_window_dependencies_without_duplicate_requirements(self) -> None:
+        recipe = ast.parse((REPO_ROOT / "build_tools/conanfile.py").read_text(encoding="utf-8"))
+        recipe_class = next(node for node in recipe.body if isinstance(node, ast.ClassDef))
+        requirements = next(node for node in recipe_class.body
+                            if isinstance(node, ast.FunctionDef) and node.name == "requirements")
+        namespace = {}
+        exec(compile(ast.Module(body=[requirements], type_ignores=[]), "requirements", "exec"), namespace)
+
+        window = {"glfw/3.4", "glm/1.0.1"}
+        vulkan = {"volk/1.4.350.0", "vulkan-headers/1.4.350.0", "vulkan-loader/1.4.350.0"}
+        for system, engine, examples, baseline in itertools.product(
+                ("Windows", "Linux", "Macos"), (False, True), (False, True), (False, True)):
+            if examples and not engine:
+                continue
+            with self.subTest(system=system, engine=engine, examples=examples, baseline=baseline):
+                packages = []
+                consumer = SimpleNamespace(
+                    settings=SimpleNamespace(os=system),
+                    options=SimpleNamespace(with_engine=engine, with_ocarina=False, with_examples=examples,
+                                            with_baseline_window_test=baseline, with_tracy=False),
+                    requires=lambda reference, **kwargs: packages.append(reference))
+                namespace["requirements"](consumer)
+                actual = set(packages)
+                windows_baseline = system == "Windows" and baseline
+                self.assertEqual(actual & window, window if examples or windows_baseline else set())
+                self.assertEqual(actual & vulkan, vulkan if engine or windows_baseline else set())
+                self.assertEqual(len(packages), len(actual), "Each dependency must be required only once")
+                if not engine:
+                    expected = {"fmt/12.1.0", "quill/11.0.2"}
+                    if baseline:
+                        expected.add("stb/cci.20240531")
+                    if windows_baseline:
+                        expected |= window | vulkan
+                    self.assertEqual(actual, expected, "Standalone window tests must not pull engine packages")
 
     def test_baseline_window_commands_install_stb_without_the_engine(self) -> None:
         for platform in ("linux", "darwin"):
@@ -315,6 +351,30 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(install.call_args.kwargs["target_family"], "core")
                     self.assertEqual(install.call_args.kwargs["options"], [
                         "&:with_engine=False", "&:with_tests=True", "&:with_baseline_window_test=True"])
+
+    def test_examples_commands_preserve_enabled_ocarina_and_test_features(self) -> None:
+        for command in ("install", "_bootstrap", "configure", "build", "rebuild", "update"):
+            with self.subTest(command=command), \
+                    patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                    patch.object(dev, "safe_remove"), patch.object(dev, "cmake_configure"), \
+                    patch.object(dev, "cmake_build"), patch.object(dev, "conan_install") as install:
+                args = dev.create_parser().parse_args([
+                    command, "--target-family", "examples", "--configuration", "Release",
+                    "--with-ocarina", "--with-ocarina-tests", "--with-tests"])
+                dev.execute(args)
+                self.assertEqual(install.call_args.kwargs["target_family"], "examples")
+                self.assertEqual(install.call_args.kwargs["options"], [
+                    "&:with_examples=True", "&:with_ocarina=True",
+                    "&:with_ocarina_tests=True", "&:with_tests=True"])
+
+    def test_enabled_features_do_not_duplicate_target_family_options(self) -> None:
+        with patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                patch.object(dev, "conan_install") as install:
+            dev.execute(dev.create_parser().parse_args([
+                "_bootstrap", "--target-family", "ocarina-tests",
+                "--with-ocarina", "--with-ocarina-tests"]))
+        self.assertEqual(install.call_args.kwargs["options"], [
+            "&:with_ocarina=True", "&:with_ocarina_tests=True"])
 
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")

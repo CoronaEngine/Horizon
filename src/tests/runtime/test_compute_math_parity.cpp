@@ -65,7 +65,7 @@ void test_float_special_values(Device &device) {
         make_float4(infinity, -2.f, 2.f, nan),
         make_float4(-infinity, 2.f, -2.f, nan),
         make_float4(-1.75f, 0.625f, 1.75f, -0.625f)};
-    constexpr uint rows = 8u;
+    static constexpr uint rows = 8u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     Kernel kernel = [](BufferVar<float4> in, BufferVar<float4> out) {
@@ -119,7 +119,7 @@ void test_finite_math_and_conversions(Device &device) {
         make_float4(0.5f, 2.5f, 0.00006103515625f, 0.5f),
         make_float4(-0.f, 4.f, 0.000000059604644775390625f, 1.f),
         make_float4(0.f, 8.f, 65504.f, 0.5f)};
-    constexpr uint rows = 5u;
+    static constexpr uint rows = 5u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     auto integers = device.create_buffer<uint4>(input.size());
@@ -176,7 +176,7 @@ void test_integer_bits(Device &device) {
         make_uint4(0x80000000u, 0x7fffffffu, 1u, std::bit_cast<uint>(17)),
         make_uint4(0x12345678u, 0x9abcdef0u, 7u, std::bit_cast<uint>(-12345)),
         make_uint4(1u, 0xffffffffu, 31u, std::bit_cast<uint>(12345))};
-    constexpr uint rows = 10u;
+    static constexpr uint rows = 10u;
     auto source = device.create_buffer<uint4>(input.size());
     auto destination = device.create_buffer<uint4>(input.size() * rows);
     Kernel kernel = [](BufferVar<uint4> in, BufferVar<uint4> out) {
@@ -255,7 +255,7 @@ void test_half_conversion_boundaries(Device &device) {
         make_float4(nan, -nan, 65504.f, 65520.f),
         make_float4(0x1p-24f, -0x1p-24f, 0x1p-25f, -0x1p-25f),
         make_float4(0x1.8p-24f, -0x1.8p-24f, 0x1.ffcp-15f, -0x1.ffcp-15f)};
-    constexpr uint rows = 6u;
+    static constexpr uint rows = 6u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     Kernel kernel = [](BufferVar<float4> in, BufferVar<float4> out) {
@@ -298,7 +298,7 @@ void test_half_conversion_boundaries(Device &device) {
 }
 
 void test_half_conversion_exhaustive(Device &device) {
-    constexpr uint count = 65536u, rows = 4u;
+    static constexpr uint count = 65536u, rows = 4u;
     auto output = device.create_buffer<uint4>(count * rows);
     Kernel kernel = [](BufferVar<uint4> out) {
         Uint i = dispatch_id();

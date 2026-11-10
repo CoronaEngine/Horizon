@@ -103,6 +103,8 @@ public:
             for (auto &item : callbacks) item.second();
         }
         [[nodiscard]] virtual bool supports_buffer_export() const noexcept { return false; }
+        [[nodiscard]] virtual bool supports_raytracing() const noexcept { return false; }
+        [[nodiscard]] virtual bool supports_int64_atomics() const noexcept { return false; }
         [[nodiscard]] virtual BufferExportMetadata buffer_export_metadata(handle_ty) const { return {}; }
         // Caller has completed all accesses in the previous owner before this
         // synchronous ownership transfer. Non-Vulkan backends need no barrier.
@@ -154,10 +156,8 @@ public:
 
         virtual uint64_t get_aligned_memory_size(handle_ty handle) const { return 0; }
 
-#if _WIN32 || _WIN64
         virtual handle_ty import_handle(handle_ty handle, size_t size) { return 0; }
         virtual uint64_t export_handle(handle_ty handle_) { return 0; }
-#endif
     };
 
     using Creator = Device::Impl *(RHIContext *);
@@ -233,6 +233,8 @@ public:
     }
 
     [[nodiscard]] bool supports_buffer_export() const noexcept { return impl_->supports_buffer_export(); }
+    [[nodiscard]] bool supports_raytracing() const noexcept { return impl_->supports_raytracing(); }
+    [[nodiscard]] bool supports_int64_atomics() const noexcept { return impl_->supports_int64_atomics(); }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const {
         return impl_->buffer_export_metadata(handle);
     }

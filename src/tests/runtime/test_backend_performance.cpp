@@ -379,6 +379,10 @@ int main(int argc, char *argv[]) {
     constexpr const char *codegen = "ast";
     auto &context = RHIContext::instance();
     auto device = context.create_device();
+    if (options.raytracing && !device.supports_raytracing()) {
+        std::cerr << "SKIPPED raytracing benchmark: device does not support ray queries" << std::endl;
+        options.raytracing = false;
+    }
     if (options.raytracing) device.init_rtx();
     auto stream = device.create_stream();
     log_flush();

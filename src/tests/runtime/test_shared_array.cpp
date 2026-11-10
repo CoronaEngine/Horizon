@@ -20,7 +20,7 @@ void require(bool condition, const char *message) {
 
 int main() {
     auto device = create_test_device();
-    constexpr uint width = 32u, height = 8u, lanes = 128u;
+    static constexpr uint width = 32u, height = 8u, lanes = 128u;
     auto values = device.create_buffer<float4>(width * height);
     auto identities = device.create_buffer<uint4>(width * height);
     Kernel kernel = [](BufferVar<float4> out_values, BufferVar<uint4> out_identities) {

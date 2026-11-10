@@ -9,15 +9,16 @@ permissions:
   contents: read
 
 env:
-  HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
   HORIZON_DEV_BOOTSTRAP_ACTIVE: "1"
-  CMAKE_BUILD_PARALLEL_LEVEL: "3"
 
 jobs:
   build:
     name: ${{ matrix.name }} Portable Hotfix Example
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    env:
+      HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
     strategy:
       fail-fast: false
       matrix:
@@ -65,4 +66,136 @@ jobs:
         with:
           name: portable-hotfix-example-${{ matrix.os }}
           path: build/verification/portable-hotfix-example.log
+          if-no-files-found: warn
+
+  window:
+    name: ${{ matrix.name }} Baseline Window
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "false"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-26.04
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install build tools
+        run: python -m pip install "conan>=2.28,<3" "cmake>=4.0" ninja
+
+      - name: Prefer pip build tools on Windows
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os
+          import sysconfig
+          with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
+              output.write(sysconfig.get_path("scripts") + "\n")
+
+      - name: Install Windows Vulkan software rendering
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import urllib.request
+          import winreg
+
+          # Version-pinned Lavapipe with Win32 surface/swapchain support.
+          version = "26.2.5"
+          name = f"mesa-lavapipe-x64-{version}.7z"
+          root = Path(os.environ["RUNNER_TEMP"]) / "horizon-lavapipe"
+          root.mkdir(parents=True, exist_ok=True)
+          archive = root / name
+          url = f"https://github.com/mmozeiko/build-mesa/releases/download/{version}/{name}"
+          with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as output:
+              shutil.copyfileobj(response, output)
+          expected = "57ebaa70c16edf11edc9dbba1c5db40169dd86cb50cdd700eb2f4442bb410682"
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise RuntimeError("Lavapipe archive SHA-256 mismatch")
+          subprocess.run(["7z", "x", str(archive), f"-o{root}", "-y"], check=True)
+          icd = root / "lvp_icd.x86_64.json"
+          if not icd.is_file() or not (root / "vulkan_lvp.dll").is_file():
+              raise RuntimeError("Lavapipe archive is missing its ICD or driver")
+          # Hosted Windows runners are elevated, so the Vulkan loader ignores
+          # the ICD environment overrides. Register the software driver too.
+          with winreg.CreateKeyEx(
+              winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\Vulkan\Drivers", 0,
+              winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+          ) as key:
+              winreg.SetValueEx(key, str(icd.resolve(strict=True)), 0, winreg.REG_DWORD, 0)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"VK_DRIVER_FILES={icd.as_posix()}\n")
+              output.write(f"VK_ICD_FILENAMES={icd.as_posix()}\n")
+
+      - name: Install X11 and Vulkan software rendering
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libglfw3-dev libglm-dev \
+            libvulkan-dev libvulkan-volk-dev mesa-vulkan-drivers xvfb xauth
+
+      - name: Install Cocoa and Vulkan dependencies
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install glfw glm vulkan-headers vulkan-volk molten-vk
+
+      - name: Build the rendered baseline
+        run: |
+          python build_tools/dev.py install horizon-test-baseline-window --configuration Release --target-family core
+          cmake --preset core-release -DHORIZON_BUILD_BASELINE_WINDOW_TEST=ON
+          python build_tools/dev.py build-fast horizon-test-baseline-window --configuration Release --target-family core
+
+      - name: Test the real baseline window with Xvfb and lavapipe
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          test -f "${icds[0]}"
+          export VK_DRIVER_FILES="${icds[0]}"
+          xvfb-run -a -s '-screen 0 1024x768x24' \
+            ctest --test-dir build/conan/core/release -C Release -L '^window$' --no-tests=error --verbose
+
+      - name: Test the real baseline window with Cocoa and MoltenVK
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          export VK_DRIVER_FILES="$(find -H "$(brew --prefix molten-vk)" -name MoltenVK_icd.json -print -quit)"
+          test -f "$VK_DRIVER_FILES"
+          export DYLD_LIBRARY_PATH="$(brew --prefix vulkan-loader)/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          ctest --test-dir build/conan/core/release -C Release -L '^window$' --no-tests=error --verbose
+
+      - name: Test the real baseline window with Win32 and lavapipe
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build/conan/core/release -C Release -L '^window$' --no-tests=error --verbose
+
+      - name: Upload Windows baseline window logs
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-window-windows
+          path: |
+            build/conan/core/release/baseline-window-test/baseline.log
+            build/conan/core/release/Testing/Temporary/LastTest.log
+            build/conan/core/release/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: warn

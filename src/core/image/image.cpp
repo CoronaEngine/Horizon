@@ -368,10 +368,10 @@ void Image::save_exr(const fs::path &fn, PixelStorage pixel_storage,
         image_ptr[1][i] = rgba[i].z;
         image_ptr[0][i] = rgba[i].w;
     }
-    strcpy_s(header.channels[0].name, sizeof(header.channels[0].name), "A");
-    strcpy_s(header.channels[1].name, sizeof(header.channels[1].name), "B");
-    strcpy_s(header.channels[2].name, sizeof(header.channels[2].name), "G");
-    strcpy_s(header.channels[3].name, sizeof(header.channels[3].name), "R");
+    std::strcpy(header.channels[0].name, "A");
+    std::strcpy(header.channels[1].name, "B");
+    std::strcpy(header.channels[2].name, "G");
+    std::strcpy(header.channels[3].name, "R");
     const char *err = nullptr;
     if (auto ret = SaveEXRImageToFile(&image, &header, fn.string().c_str(), &err); ret != TINYEXR_SUCCESS) {
         OC_EXCEPTION_IF("Failed to save texture as OpenEXR image: ", fn.string());

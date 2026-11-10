@@ -64,6 +64,8 @@ class HorizonConan(ConanFile):
         cmake_layout(self, build_folder=f"build/conan/{target_family}/{configuration}")
 
     def requirements(self):
+        windows_baseline = (bool(self.options.with_baseline_window_test)
+                            and self.settings.os == "Windows")
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
         self.requires("fmt/12.1.0")
         if bool(self.options.with_ocarina):
@@ -77,18 +79,22 @@ class HorizonConan(ConanFile):
             self.requires("ktm/0.2.16", transitive_headers=True)
             self.requires("pfr/1.91.0", transitive_headers=True)
             self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
-            self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
-            self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
-            self.requires("vulkan-loader/1.4.350.0", transitive_headers=True)
             self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
             self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
             if bool(self.options.with_tracy):
                 self.requires("tracy/0.13.1", options={"on_demand": True})
 
-        if bool(self.options.with_examples):
+        if bool(self.options.with_engine) or windows_baseline:
+            self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
+            self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
+            self.requires("vulkan-loader/1.4.350.0", transitive_headers=True)
+
+        if bool(self.options.with_examples) or windows_baseline:
             self.requires("glfw/3.4")
-            self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
+
+        if bool(self.options.with_examples):
+            self.requires("tinyobjloader/1.0.7")
             self.requires("imgui/1.92.8")
 
     def validate(self):
