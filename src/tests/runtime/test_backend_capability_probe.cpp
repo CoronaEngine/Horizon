@@ -342,6 +342,7 @@ int main(int argc, char **argv) {
     const char *backend = test_backend_name();
     std::cout << "CAPABILITY_PROBE backend=" << backend << " case=" << name << " phase=attempt" << std::endl;
     auto device = RHIContext::instance().create_device();
+    if (skip_without_feature(device.supports_raytracing(), "ray queries")) return 0;
     device.init_rtx();
     if (name == "empty-accel") probe_empty_accel(device);
     else if (name == "fast-build") probe_fast_build(device);

@@ -284,21 +284,24 @@ void test_wide_literal_diagnostic(Device &device) {
 
 int main() {
     auto device = create_test_device();
+    const bool int64_atomics = !skip_without_feature(device.supports_int64_atomics(),
+                                                     "64-bit buffer atomics");
     const char *wide_literal = std::getenv("OCARINA_TEST_ATOMIC_WIDE_LITERAL");
     if (wide_literal && std::strcmp(wide_literal, "1") == 0) {
+        if (!int64_atomics) return 0;
         test_wide_literal_diagnostic(device);
         return 0;
     }
     test_atomic_views<int>(device, "int");
     test_atomic_views<uint>(device, "uint");
-    test_atomic_views<ulong>(device, "ulong");
+    if (int64_atomics) test_atomic_views<ulong>(device, "ulong");
     test_atomic_views<float>(device, "float");
     test_contended_add<uint>(device, "uint");
-    test_contended_add<ulong>(device, "ulong");
+    if (int64_atomics) test_contended_add<ulong>(device, "ulong");
     test_contended_add<float>(device, "float");
     test_contended_cas<uint>(device, "uint");
-    test_contended_cas<ulong>(device, "ulong");
+    if (int64_atomics) test_contended_cas<ulong>(device, "ulong");
     test_bindless_byte_atomics(device);
-    test_wide_literal_diagnostic(device);
+    if (int64_atomics) test_wide_literal_diagnostic(device);
     std::cout << "compute atomic parity checks passed" << std::endl;
 }

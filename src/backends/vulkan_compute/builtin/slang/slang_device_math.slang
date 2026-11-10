@@ -24,6 +24,58 @@ void oc_synchronize_block(bool shared_only) {
     }
 }
 
+// ── Stable inverse hyperbolic functions ──────────────────────────────────────
+float oc_log1p(float x) {
+    float y = x / (2.0f + x);
+    if (abs(y) < 0.25f) {
+        float y2 = y * y;
+        return 2.0f * y * (1.0f + y2 * (1.0f / 3.0f + y2 * (1.0f / 5.0f +
+            y2 * (1.0f / 7.0f + y2 * (1.0f / 9.0f + y2 * (1.0f / 11.0f))))));
+    }
+    return log(1.0f + x);
+}
+
+float oc_asinh(float x) {
+    float ax = abs(x);
+    float t;
+    if (ax > 1.0e19f) {
+        t = log(ax) + 0.6931471805599453f;
+    } else {
+        float ax2 = ax * ax;
+        t = oc_log1p(ax + ax2 / (1.0f + sqrt(1.0f + ax2)));
+    }
+    return x < 0.0f ? -t : t;
+}
+
+float oc_acosh(float x) {
+    if (x < 1.0f) return asfloat(0x7fc00000u);
+    if (x > 1.0e19f) return log(x) + 0.6931471805599453f;
+    return log(x + sqrt(x * x - 1.0f));
+}
+
+float oc_atanh(float x) {
+    float ax = abs(x);
+    if (ax > 1.0f) return asfloat(0x7fc00000u);
+    if (ax == 1.0f) return x < 0.0f ? asfloat(0xff800000u) : asfloat(0x7f800000u);
+    // Near -1, log1p(2x / (1 - x)) cancels catastrophically: the rounded ratio
+    // is within one ulp of -1, so 1 + ratio loses most of its significant bits.
+    if (ax > 0.5f) return 0.5f * log((1.0f + x) / (1.0f - x));
+    return 0.5f * oc_log1p(2.0f * x / (1.0f - x));
+}
+
+float2 oc_asinh(float2 x) { return float2(oc_asinh(x.x), oc_asinh(x.y)); }
+float3 oc_asinh(float3 x) { return float3(oc_asinh(x.x), oc_asinh(x.y), oc_asinh(x.z)); }
+float4 oc_asinh(float4 x) { return float4(oc_asinh(x.x), oc_asinh(x.y), oc_asinh(x.z), oc_asinh(x.w)); }
+float2 oc_acosh(float2 x) { return float2(oc_acosh(x.x), oc_acosh(x.y)); }
+float3 oc_acosh(float3 x) { return float3(oc_acosh(x.x), oc_acosh(x.y), oc_acosh(x.z)); }
+float4 oc_acosh(float4 x) { return float4(oc_acosh(x.x), oc_acosh(x.y), oc_acosh(x.z), oc_acosh(x.w)); }
+float2 oc_atanh(float2 x) { return float2(oc_atanh(x.x), oc_atanh(x.y)); }
+float3 oc_atanh(float3 x) { return float3(oc_atanh(x.x), oc_atanh(x.y), oc_atanh(x.z)); }
+float4 oc_atanh(float4 x) { return float4(oc_atanh(x.x), oc_atanh(x.y), oc_atanh(x.z), oc_atanh(x.w)); }
+half oc_asinh(half x) { return half(oc_asinh(float(x))); }
+half oc_acosh(half x) { return half(oc_acosh(float(x))); }
+half oc_atanh(half x) { return half(oc_atanh(float(x))); }
+
 // ── Half conversion ───────────────────────────────────────────────────────────
 
 // Enforce binary16 round-to-nearest-even using float32 bits. Native half casts

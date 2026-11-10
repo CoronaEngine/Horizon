@@ -252,6 +252,7 @@ int main(int argc, char *argv[]) {
     RHIContext &context = RHIContext::instance();
     context.clear_cache();
     Device device = create_test_device();
+    if (skip_without_feature(device.supports_raytracing(), "ray queries")) return 0;
     device.init_rtx();
 
     test_fast_trace_build(device);

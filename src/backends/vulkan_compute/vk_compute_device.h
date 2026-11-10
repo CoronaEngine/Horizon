@@ -77,6 +77,7 @@ private:
 
     // ── RT extension support ─────────────────────────────────────────────────
     bool has_rt_{false};
+    bool has_int64_atomics_{false};
     bool has_external_memory_{false};
     // Opt-in, host-side pipeline diagnostics; disabled unless an output path is set.
     bool has_pipeline_statistics_{false};
@@ -171,6 +172,8 @@ public:
 
     // ── Device::Impl interface ───────────────────────────────────────────────
     [[nodiscard]] bool supports_buffer_export() const noexcept override { return has_external_memory_; }
+    [[nodiscard]] bool supports_raytracing() const noexcept override { return has_rt_; }
+    [[nodiscard]] bool supports_int64_atomics() const noexcept override { return has_int64_atomics_; }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const override;
     void set_buffer_external_ownership(handle_ty handle, bool external) override;
     [[nodiscard]] handle_ty create_buffer(size_t size, const string &desc,

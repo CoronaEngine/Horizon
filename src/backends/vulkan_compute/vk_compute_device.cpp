@@ -180,6 +180,7 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         feats2.pNext = &pipeline_features;
     }
     vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    has_int64_atomics_ = f12.shaderBufferInt64Atomics != 0u;
     if (has_pipeline_statistics_ && !pipeline_features.pipelineExecutableInfo) {
         has_pipeline_statistics_ = false;
         feats2.pNext = &f11;

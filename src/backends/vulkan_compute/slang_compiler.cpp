@@ -3,6 +3,9 @@
 
 #include "slang_compiler.h"
 #include <chrono>
+#include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include "core/util/switch_profile.h"
 #include "vk_compute_device.h"
 #include "ast_to_slang_source.h"
@@ -18,7 +21,7 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 6u;
+constexpr unsigned slang_source_cache_version = 9u;
 
 void normalize_ray_query_extensions(vector<uint32_t> &spirv) noexcept {
     // Slang also declares SPV_KHR_ray_tracing when constructing an acceleration
@@ -53,6 +56,119 @@ void normalize_ray_query_extensions(vector<uint32_t> &spirv) noexcept {
         offset += count;
     }
 }
+
+#ifdef __APPLE__
+// MoltenVK translates SPIR-V through SPIRV-Cross, which folds an OpLoad from a
+// PhysicalStorageBuffer pointer into the expression at its use site. That
+// re-evaluates the load after any intervening store to an aliasing address and
+// breaks shaders that read and later write the same buffer (for example
+// `points[i].xz() = points[i].zx()` or a read/barrier/write sequence). SPIR-V
+// SSA semantics require the load to happen at its original program point, so
+// mark only the loads whose value is observed after a later physical store;
+// other loads keep full MSL optimization freedom.
+void mark_physical_storage_loads_volatile(vector<uint32_t> &spirv) noexcept {
+    constexpr uint32_t op_type_pointer = 32u;
+    constexpr uint32_t op_function_parameter = 55u;
+    constexpr uint32_t op_function_call = 57u;
+    constexpr uint32_t op_variable = 59u;
+    constexpr uint32_t op_load = 61u;
+    constexpr uint32_t op_store = 62u;
+    constexpr uint32_t op_access_chain = 65u;
+    constexpr uint32_t op_in_bounds_access_chain = 66u;
+    constexpr uint32_t op_ptr_access_chain = 67u;
+    constexpr uint32_t op_in_bounds_ptr_access_chain = 70u;
+    constexpr uint32_t op_copy_object = 83u;
+    constexpr uint32_t op_convert_u_to_ptr = 120u;
+    constexpr uint32_t op_bitcast = 124u;
+    constexpr uint32_t op_select = 169u;
+    constexpr uint32_t op_phi = 245u;
+    constexpr uint32_t storage_class_physical_storage_buffer = 5349u;
+    constexpr uint32_t memory_access_volatile = 0x1u;
+
+    if (spirv.size() < 5u || spirv[0] != 0x07230203u) return;
+
+    std::unordered_set<uint32_t> physical_pointer_types;
+    std::unordered_map<uint32_t, uint32_t> id_types;
+    for (size_t offset = 5u; offset < spirv.size();) {
+        const uint32_t count = spirv[offset] >> 16u;
+        const uint32_t op = spirv[offset] & 0xffffu;
+        if (count == 0u || count > spirv.size() - offset) return;
+        if (op == op_type_pointer && count >= 4u &&
+            spirv[offset + 2u] == storage_class_physical_storage_buffer)
+            physical_pointer_types.insert(spirv[offset + 1u]);
+        switch (op) {
+            case op_function_parameter:
+            case op_function_call:
+            case op_variable:
+            case op_load:
+            case op_access_chain:
+            case op_in_bounds_access_chain:
+            case op_ptr_access_chain:
+            case op_in_bounds_ptr_access_chain:
+            case op_copy_object:
+            case op_convert_u_to_ptr:
+            case op_bitcast:
+            case op_select:
+            case op_phi:
+                if (count >= 3u) id_types[spirv[offset + 2u]] = spirv[offset + 1u];
+                break;
+            default:
+                break;
+        }
+        offset += count;
+    }
+
+    if (physical_pointer_types.empty()) return;
+
+    struct PhysicalLoad {
+        size_t offset;
+        size_t last_use;
+    };
+    vector<PhysicalLoad> loads;
+    vector<size_t> stores;
+    std::unordered_map<uint32_t, size_t> load_by_result;
+    for (size_t offset = 5u; offset < spirv.size();) {
+        const uint32_t count = spirv[offset] >> 16u;
+        const uint32_t op = spirv[offset] & 0xffffu;
+        if (count == 0u || count > spirv.size() - offset) return;
+        if (op == op_load && count >= 5u) {
+            const auto pointer_type = id_types.find(spirv[offset + 3u]);
+            if (pointer_type != id_types.end() &&
+                physical_pointer_types.count(pointer_type->second) != 0u) {
+                load_by_result[spirv[offset + 2u]] = loads.size();
+                loads.push_back({offset, offset});
+            }
+        } else if (op == op_store && count >= 3u) {
+            const auto pointer_type = id_types.find(spirv[offset + 1u]);
+            if (pointer_type != id_types.end() &&
+                physical_pointer_types.count(pointer_type->second) != 0u)
+                stores.push_back(offset);
+        }
+        offset += count;
+    }
+    if (loads.empty() || stores.empty()) return;
+
+    // Record the last instruction that consumes each physical load's value.
+    for (size_t offset = 5u; offset < spirv.size();) {
+        const uint32_t count = spirv[offset] >> 16u;
+        const uint32_t op = spirv[offset] & 0xffffu;
+        if (count == 0u || count > spirv.size() - offset) return;
+        for (uint32_t word = 1u; word < count; ++word) {
+            const auto load = load_by_result.find(spirv[offset + word]);
+            if (load != load_by_result.end() && offset > loads[load->second].last_use)
+                loads[load->second].last_use = offset;
+        }
+        offset += count;
+    }
+
+    for (const PhysicalLoad &load : loads) {
+        const bool reordered = std::any_of(stores.begin(), stores.end(), [&](size_t store) {
+            return store > load.offset && store < load.last_use;
+        });
+        if (reordered) spirv[load.offset + 4u] |= memory_access_volatile;
+    }
+}
+#endif
 
 [[nodiscard]] string emit_slang_source(const Function &function) noexcept {
     AstToSlangSource emitter{Env::code_obfuscation()};
@@ -252,6 +368,9 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     const uint32_t *data = reinterpret_cast<const uint32_t *>(spirv_blob->getBufferPointer());
     vector<uint32_t> spirv(data, data + byte_size / 4);
     normalize_ray_query_extensions(spirv);
+#ifdef __APPLE__
+    mark_physical_storage_loads_volatile(spirv);
+#endif
     const double compile_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - compile_start).count();
     OC_INFO_FORMAT("task Slang compile {}.slang is take {} ms", cache_key, compile_ms);
