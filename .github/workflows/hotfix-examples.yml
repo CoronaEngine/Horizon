@@ -118,6 +118,7 @@ jobs:
           import shutil
           import subprocess
           import urllib.request
+          import winreg
 
           # Version-pinned Lavapipe with Win32 surface/swapchain support.
           version = "26.2.5"
@@ -135,6 +136,13 @@ jobs:
           icd = root / "lvp_icd.x86_64.json"
           if not icd.is_file() or not (root / "vulkan_lvp.dll").is_file():
               raise RuntimeError("Lavapipe archive is missing its ICD or driver")
+          # Hosted Windows runners are elevated, so the Vulkan loader ignores
+          # the ICD environment overrides. Register the software driver too.
+          with winreg.CreateKeyEx(
+              winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\Vulkan\Drivers", 0,
+              winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+          ) as key:
+              winreg.SetValueEx(key, str(icd.resolve(strict=True)), 0, winreg.REG_DWORD, 0)
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               output.write(f"VK_DRIVER_FILES={icd.as_posix()}\n")
               output.write(f"VK_ICD_FILENAMES={icd.as_posix()}\n")
