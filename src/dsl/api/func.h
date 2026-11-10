@@ -112,9 +112,12 @@ template<typename T, typename... A>
 template<typename Var, typename... RestVar, typename Tag, typename... RestTag>
 [[nodiscard]] auto create_argument_definition_impl(ocarina::tuple<Var, RestVar...> *var_tuple,
                                                    ocarina::tuple<Tag, RestTag...> *tag_tuple) {
-    return tuple_insert(create_argument_definition_impl(static_cast<tuple<RestVar...> *>(nullptr),
-                                                        static_cast<tuple<RestTag...> *>(nullptr)),
-                        Var{Tag{}});
+    // Construction registers the formal with Function::current(). Sequence it
+    // before recursion so every compiler uses the invocation's argument order.
+    Var first{Tag{}};
+    auto rest = create_argument_definition_impl(static_cast<tuple<RestVar...> *>(nullptr),
+                                                static_cast<tuple<RestTag...> *>(nullptr));
+    return tuple_insert(std::move(rest), std::move(first));
 }
 
 }// namespace detail
