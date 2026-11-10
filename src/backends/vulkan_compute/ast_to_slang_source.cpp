@@ -347,9 +347,9 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::ACOS:             OC_SLANG_FUNC(acos);            break;
         case CallOp::ASIN:             OC_SLANG_FUNC(asin);            break;
         case CallOp::ATAN:             OC_SLANG_FUNC(atan);            break;
-        case CallOp::ACOSH:            OC_SLANG_WRAP(acosh);           break;
-        case CallOp::ASINH:            OC_SLANG_WRAP(asinh);           break;
-        case CallOp::ATANH:            OC_SLANG_WRAP(atanh);           break;
+        case CallOp::ACOSH:            OC_SLANG_FUNC(acosh);           break;
+        case CallOp::ASINH:            OC_SLANG_FUNC(asinh);           break;
+        case CallOp::ATANH:            OC_SLANG_FUNC(atanh);           break;
         case CallOp::ATAN2:            OC_SLANG_FUNC(atan2);           break;
         case CallOp::COPYSIGN:         OC_SLANG_WRAP(copysign);        break;
         case CallOp::COS:              OC_SLANG_FUNC(cos);             break;

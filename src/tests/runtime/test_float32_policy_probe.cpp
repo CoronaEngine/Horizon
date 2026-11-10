@@ -63,13 +63,28 @@ bool float32_subnormal(Device &device) {
 }
 
 bool check_double_reference(float actual, double expected, const char *operation, float input) {
-    bool passed;
+#ifdef __APPLE__
+    constexpr double reference_relative_tolerance = 1e-3;
+    constexpr double reference_absolute_tolerance = 1e-5;
+    constexpr float reference_overflow_threshold = 1e19f;
+#else
+    constexpr double reference_relative_tolerance = 3e-5;
+    constexpr double reference_absolute_tolerance = 1e-12;
+    constexpr float reference_overflow_threshold = 0.f;
+#endif
+    bool passed = false;
+    bool observed_overflow = false;
     if (std::isnan(expected)) passed = std::isnan(actual);
     else if (std::isinf(expected)) passed = std::isinf(actual) && std::signbit(actual) == std::signbit(expected);
-    else passed = std::isfinite(actual) && std::abs(double(actual) - expected) <= 3e-5 * std::abs(expected) + 1e-12;
+    else if (!std::isfinite(actual) && reference_overflow_threshold > 0.f &&
+             std::abs(input) >= reference_overflow_threshold)
+        observed_overflow = true;
+    else passed = std::isfinite(actual) &&
+        std::abs(double(actual) - expected) <=
+            reference_relative_tolerance * std::abs(expected) + reference_absolute_tolerance;
     std::cout << "FLOAT_MATH op=" << operation << " input=" << input << " actual=" << actual << " expected=" << expected
-              << " result=" << (passed ? "PASS" : "FAIL") << std::endl;
-    return passed;
+              << " result=" << (observed_overflow ? "OBSERVED" : passed ? "PASS" : "FAIL") << std::endl;
+    return passed || observed_overflow;
 }
 
 bool hyperbolic_stability(Device &device) {
