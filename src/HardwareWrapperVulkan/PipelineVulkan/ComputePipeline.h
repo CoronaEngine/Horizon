@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include <ktm/ktm.h>
@@ -8,12 +8,13 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
+#include "PipelineSnapshot.h"
 
-struct ComputePipelineVulkan : public CommandRecordVulkan
+struct ComputePipelineVulkan
 {
   public:
     ComputePipelineVulkan();
-    ~ComputePipelineVulkan() override;
+    ~ComputePipelineVulkan();
 
     ComputePipelineVulkan(std::string shaderCode, EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
 
@@ -30,13 +31,19 @@ struct ComputePipelineVulkan : public CommandRecordVulkan
 
     ComputePipelineVulkan *operator()(uint16_t x, uint16_t y, uint16_t z);
 
-    ExecutorType getExecutorType() override
+    struct Dispatch : CommandRecordVulkan
     {
-        return CommandRecordVulkan::ExecutorType::Compute;
-    }
-
-    void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    RequiredBarriers getRequiredBarriers(HardwareExecutorVulkan &hardwareExecutor) override;
+        ComputePipelineVulkan* pipeline{}; // Must outlive command-buffer recording.
+        ktm::uvec3 groupCount{};
+        std::vector<uint8_t> pushConstant;
+        std::vector<uint8_t> uniformBytes;
+        std::shared_ptr<BindingSnapshot> bindings;
+        std::shared_ptr<UniformSnapshot> uniform;
+        ExecutorType getExecutorType() override { return ExecutorType::Compute; }
+        void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
+        void commitCommand(HardwareExecutorVulkan& executor) override;
+    };
+    std::shared_ptr<Dispatch> capture();
 
   private:
     void createComputePipeline();
@@ -49,14 +56,11 @@ struct ComputePipelineVulkan : public CommandRecordVulkan
 
     // Per-pipeline UBO support
     std::unique_ptr<uint8_t[]> tempUBO;
-    HardwareBuffer uboBuffer;
     uint32_t uboSize{0};
-    VkDescriptorPool uboDescriptorPool{VK_NULL_HANDLE};
     VkDescriptorSetLayout uboDescriptorSetLayout{VK_NULL_HANDLE};
-    VkDescriptorSet uboDescriptorSet{VK_NULL_HANDLE};
-    bool uboDescriptorDirty{true};
-    void createPerPipelineUBODescriptor();
-    void updateUBODescriptor();
+    PipelineBindings bindings;
+    UniformSnapshotPool uniformPool;
+    void commitCommand(HardwareExecutorVulkan& executor, Dispatch& dispatch);
 
     ktm::uvec3 groupCount = {0, 0, 0};
 };

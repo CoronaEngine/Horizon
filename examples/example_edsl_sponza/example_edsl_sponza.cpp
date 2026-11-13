@@ -6,9 +6,7 @@
 //     顺序多次 tex << value,location = 调用顺序)。历史上曾拆成单目标
 //     pass 规避 device lost,根因是引擎的 renderTargetLocation 跨管线残留
 //     (RasterizedPipelineObject::parse 已修复,解析前复位)。
-//   - 逐 draw 材质贴图:bindless 下 record() 时 auto-bind 把当前绑定纹理的
-//     描述符索引写进随 draw 深拷的 push constant,因此每次 record 前重新给
-//     Texture2D 代理赋值即可(等价 GLSL 版的 push constant 索引)。
+//   - 每个材质批次在 beginBatch 时冻结 Texture2D 描述符，连续子网格共享同一份绑定。
 //   - 无材质 flags:缺贴图的槽位绑 1x1 白图 / 平法线图,统一走"贴图 × 因子";
 //     Intel 资产无 MASK 材质,镂空路径整个省去。
 //   - 所有循环在 codegen 期用 C++ 循环展开成算术(RSM 24 采样、SSAO 16、
@@ -16,7 +14,6 @@
 //     一律换成 step()/mix() 掩码。
 //   - 只做太阳平行光(GLSL 版的点光源省略,白天场景默认也是 0 个);
 //     不做 G-buffer debug 视图切换。
-//   - 顶点输入用 Aggregate(多参数路径有 location 反转的历史问题)。
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -31,7 +28,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -325,20 +323,20 @@ constexpr std::array<uint8_t, 12> ktx1_identifier = {
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
 };
 
-horizon::Format ktx_format_from_gl(uint32_t gl_internal_format)
+ImageFormat ktx_format_from_gl(uint32_t gl_internal_format)
 {
     switch (gl_internal_format)
     {
-    case 0x8E8C: return horizon::Format::BC7_UNORM;
-    case 0x8E8D: return horizon::Format::BC7_UNORM_SRGB;
-    case 0x8058: return horizon::Format::RGBA8_UNORM;
-    case 0x8C43: return horizon::Format::SRGBA8_UNORM;
+    case 0x8E8C: return ImageFormat::BC7_UNORM;
+    case 0x8E8D: return ImageFormat::BC7_SRGB;
+    case 0x8058: return ImageFormat::RGBA8_UNORM;
+    case 0x8C43: return ImageFormat::RGBA8_SRGB;
     default:
         throw std::runtime_error("Unsupported KTX internal format: " + std::to_string(gl_internal_format));
     }
 }
 
-horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path, const std::string& name)
+HardwareImage create_ktx_texture(const std::filesystem::path& path, const std::string& name)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open())
@@ -389,46 +387,34 @@ horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path, con
         cursor += (4 - (image_size % 4)) % 4;
     }
 
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-        width, height, ktx_format_from_gl(gl_internal_format),
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = mip_count;
+    HardwareImageCreateInfo desc = example::imageInfo(width, height, ktx_format_from_gl(gl_internal_format), ImageUsage::SampledImage);
+    desc.mipLevels = mip_count;
 
-    horizon::HardwareImage image(desc);
+    HardwareImage image(desc);
 
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(payload));
 
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    auto staging = example::staging(std::span<const std::byte>(payload));
+
+    HardwareExecutor executor;
+    auto& stream = executor;
     for (uint32_t mip = 0; mip < mip_count; ++mip)
-        stream << image.copy_from(staging, level_offsets[mip], 0, mip);
-    (void)(stream << horizon::commit());
+        stream << staging.copyTo(image, level_offsets[mip], 0, mip);
+    stream.commit().waitForDeferredResources();
 
     return image;
 }
 
-horizon::HardwareImage create_solid_texture(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+HardwareImage create_solid_texture(uint8_t r, uint8_t g, uint8_t b, uint8_t a,
                                                     const std::string& name)
 {
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-        1, 1, horizon::Format::RGBA8_UNORM,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    horizon::HardwareImage image(desc);
+    HardwareImageCreateInfo desc = example::imageInfo(1, 1, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
+    HardwareImage image(desc);
     const std::array<uint8_t, 4> pixel = { r, g, b, a };
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = pixel.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(
-        staging_desc, std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
-    horizon::HardwareExecutor executor;
-    (void)(executor.stream() << image.copy_from(staging, 0, 0, 0) << horizon::commit());
+
+    auto staging = example::staging(std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
+    HardwareExecutor executor;
+    executor << staging.copyTo(image, 0, 0, 0);
+        executor.commit().waitForDeferredResources();
     return image;
 }
 
@@ -481,37 +467,31 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
 {
     constexpr uint32_t bytes_per_pixel = 8;
 
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
-        dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = dds.mip_count;
+    HardwareImageCreateInfo desc = example::cubeInfo(dds.size, ImageFormat::RGBA16_FLOAT);
+    desc.mipLevels = dds.mip_count;
 
-    horizon::HardwareImage image(desc);
+    HardwareImage image(desc);
 
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = dds.payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    auto staging = example::staging(std::span<const std::byte>(dds.payload));
+
+    HardwareExecutor executor;
+    auto& stream = executor;
     uint64_t offset = 0;
     for (uint32_t face = 0; face < 6; ++face)
     {
         for (uint32_t mip = 0; mip < dds.mip_count; ++mip)
         {
             const uint32_t dim = std::max(1u, dds.size >> mip);
-            stream << image.copy_from(staging, offset, face, mip);
+            stream << staging.copyTo(image, offset, face, mip);
             offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
         }
     }
-    (void)(stream << horizon::commit());
+    stream.commit().waitForDeferredResources();
 
     return image;
 }
@@ -733,10 +713,8 @@ void run_example_edsl_sponza()
                 asset.vertices.size(), asset.indices.size(), asset.submeshes.size(),
                 asset.materials.size());
 
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(spz_width, spz_height, "Horizon Sponza [EDSL]", nullptr, nullptr);
+    legacy_example::Window owner(spz_width, spz_height, "Horizon Sponza [EDSL]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_callback);
@@ -745,108 +723,79 @@ void run_example_edsl_sponza()
     // Vertex 之外补 Storage。仍保留 Vertex 用法与 record 时的 VB 绑定 —— pipeline 无
     // 顶点属性，绑定是空操作，但保住了自动 MDI 合批 key 里的 VB 项。
     const auto make_pullable_vb = [](const std::vector<SponzaVertex>& verts, std::string name) {
-        return horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(reinterpret_cast<const std::byte*>(verts.data()),
-                                       verts.size() * sizeof(SponzaVertex)),
-            static_cast<uint32_t>(sizeof(SponzaVertex)),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Vertex
-                | horizon::BufferUsage_Storage,
-            std::move(name));
+        return HardwareBuffer::uploadDeviceLocal(verts, BufferUsage::VertexBuffer);
     };
-    horizon::HardwareBuffer scene_vb = make_pullable_vb(asset.vertices, "edsl_sponza.scene.vb");
+    HardwareBuffer scene_vb = make_pullable_vb(asset.vertices, "edsl_sponza.scene.vb");
     // 16-bit 重基：索引写成 submesh 区间相对，vertex_offset 在 draw 时补回。
     std::vector<uint16_t> scene_indices_16;
     const std::vector<std::vector<SponzaDrawRange>> submesh_ranges =
         rebase_indices_to_16bit(asset.indices, asset.submeshes, scene_indices_16);
-    horizon::HardwareBuffer scene_ib =
-        horizon::HardwareBuffer::index(scene_indices_16, "edsl_sponza.scene.ib");
-    horizon::HardwareBuffer quad_vb =
-        horizon::HardwareBuffer::vertex(corner_vertices, "edsl_sponza.quad.vb");
-    horizon::HardwareBuffer quad_ib =
-        horizon::HardwareBuffer::index(corner_indices, "edsl_sponza.quad.ib");
+    HardwareBuffer scene_ib =
+        HardwareBuffer::uploadDeviceLocal(scene_indices_16, BufferUsage::IndexBuffer);
+    HardwareBuffer quad_vb =
+        HardwareBuffer::uploadDeviceLocal(corner_vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer quad_ib =
+        HardwareBuffer::uploadDeviceLocal(corner_indices, BufferUsage::IndexBuffer);
 
     // 材质贴图 + 缺省贴图(白 / 平法线)
-    std::vector<horizon::HardwareImage> textures;
+    std::vector<HardwareImage> textures;
     textures.reserve(asset.texture_names.size());
     for (const std::string& name : asset.texture_names)
         textures.push_back(create_ktx_texture(spz_asset_root / "textures" / name, "edsl_sponza." + name));
 
-    horizon::HardwareImage white_texture = create_solid_texture(255, 255, 255, 255, "edsl_sponza.white");
-    horizon::HardwareImage flat_normal_texture = create_solid_texture(128, 128, 255, 255, "edsl_sponza.flatn");
+    HardwareImage white_texture = create_solid_texture(255, 255, 255, 255, "edsl_sponza.white");
+    HardwareImage flat_normal_texture = create_solid_texture(128, 128, 255, 255, "edsl_sponza.flatn");
 
-    const auto texture_or = [&](int32_t index, horizon::HardwareImage& fallback) -> horizon::HardwareImage& {
+    const auto texture_or = [&](int32_t index, HardwareImage& fallback) -> HardwareImage& {
         if (index < 0 || static_cast<size_t>(index) >= textures.size())
             return fallback;
         return textures[static_cast<size_t>(index)];
     };
 
     // ---- 渲染目标 ----
-    const auto rt_usage =
-        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
 
     // RSM(单目标 ×3 共享深度)
-    horizon::HardwareImage rsm_depth_map(horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.rsm.depth"));
-    rsm_depth_map.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
-    horizon::HardwareImage rsm_normal_map(horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.rsm.normal"));
-    rsm_normal_map.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-    horizon::HardwareImage rsm_flux_map(horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.rsm.flux"));
-    rsm_flux_map.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
-    horizon::HardwareImage rsm_zbuffer(horizon::HardwareImageDesc::depth_attachment(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::D32, "edsl_sponza.rsm.z"));
-    rsm_zbuffer.set_clear_depth(1.0f, 0);
+    HardwareImage rsm_depth_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    rsm_depth_map.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage rsm_normal_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    rsm_normal_map.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    HardwareImage rsm_flux_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    rsm_flux_map.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage rsm_zbuffer(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // G-buffer(单目标 ×3 共享深度)
-    horizon::HardwareImage gbuffer_albedo(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.gb.albedo"));
-    gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
-    horizon::HardwareImage gbuffer_normal(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA8_UNORM, rt_usage, "edsl_sponza.gb.normal"));
-    gbuffer_normal.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-    horizon::HardwareImage gbuffer_depth_val(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.gb.depthval"));
-    gbuffer_depth_val.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
-    horizon::HardwareImage gbuffer_zbuffer(horizon::HardwareImageDesc::depth_attachment(
-        spz_width, spz_height, horizon::Format::D32, "edsl_sponza.gb.z"));
-    gbuffer_zbuffer.set_clear_depth(1.0f, 0);
+    HardwareImage gbuffer_albedo(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    gbuffer_albedo.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage gbuffer_normal(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    gbuffer_normal.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    HardwareImage gbuffer_depth_val(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    gbuffer_depth_val.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage gbuffer_zbuffer(example::imageInfo(spz_width, spz_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // SSAO / 光照 / HDR / SSR 中间图
-    horizon::HardwareImage ssao_raw(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssao.raw"));
-    ssao_raw.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
-    horizon::HardwareImage ssao_blurred(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssao.blur"));
-    ssao_blurred.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage ssao_raw(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    ssao_raw.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage ssao_blurred(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    ssao_blurred.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage light_buffer(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.light"));
-    light_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage light_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
+    light_buffer.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage hdr_buffer(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.hdr"));
-    hdr_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage hdr_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
+    hdr_buffer.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage ssr_linear_depth(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, rt_usage, "edsl_sponza.ssr.lin"));
-    horizon::HardwareImage ssr_buffer(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, rt_usage, "edsl_sponza.ssr.buf"));
+    HardwareImage ssr_linear_depth(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    HardwareImage ssr_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "edsl_sponza.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     // 环境 probe
     const std::filesystem::path env_root = spz_assets_dir / "env";
     const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_irr.dds");
     const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_lod.dds");
-    horizon::HardwareImage env_irradiance = create_cubemap_image(irradiance_dds, "edsl_sponza.env.irr");
-    horizon::HardwareImage env_radiance = create_cubemap_image(radiance_dds, "edsl_sponza.env.lod");
+    HardwareImage env_irradiance = create_cubemap_image(irradiance_dds, "edsl_sponza.env.irr");
+    HardwareImage env_radiance = create_cubemap_image(radiance_dds, "edsl_sponza.env.lod");
 
     // ========================================================================
     // EDSL:公共辅助
@@ -900,7 +849,6 @@ void run_example_edsl_sponza()
     Float4x4 rsm_light_view_proj;
 
     Float4 rsm_albedo_factor;
-    rsm_albedo_factor.as_push_constant();
 
     Texture2D<ktm::fvec4> rsm_base_color_tex; // 逐 draw 重新绑定
 
@@ -938,8 +886,6 @@ void run_example_edsl_sponza()
 
     Float4 gb_base_factor;   // rgb: baseColorFactor
     Float4 gb_mr_factor;     // x: metallicFactor, y: roughnessFactor
-    gb_base_factor.as_push_constant();
-    gb_mr_factor.as_push_constant();
 
     Texture2D<ktm::fvec4> gb_base_color_tex;
     Texture2D<ktm::fvec4> gb_normal_tex;
@@ -1803,38 +1749,23 @@ void run_example_edsl_sponza()
     // 管线
     // ========================================================================
 
-    horizon::RasterizerPipelineDesc geo_desc; // 混合状态一份即可,运行时复制到全部附件
-    geo_desc.blend_enabled = false;
+    example::ScenePass<example::NoDrawParameters> rsm_pipe(spz_shadow_map_size, spz_shadow_map_size, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, rsm_vert, rsm_frag, 1, example::shaderOptions());
+    rsm_pipe.setDepthImage(rsm_zbuffer);
 
-    horizon::RasterizerPipelineDesc fullscreen_desc;
-    fullscreen_desc.blend_enabled = false;
-    fullscreen_desc.depth_test_enabled = false;
-    fullscreen_desc.depth_write_enabled = false;
+    example::ScenePass<example::NoDrawParameters> gb_pipe(spz_width, spz_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, gb_vert, gb_frag, 1, example::shaderOptions());
+    gb_pipe.setDepthImage(gbuffer_zbuffer);
 
-    horizon::RasterizerPipeline rsm_pipe(rsm_vert, rsm_frag, geo_desc);
-    rsm_pipe.bind_depth_target(rsm_zbuffer);
+    example::ScenePass<example::NoDrawParameters> ssao_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, ssao_frag, 1, example::shaderOptions());
+    example::ScenePass<example::NoDrawParameters> ssao_blur_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, ssao_blur_frag, 1, example::shaderOptions());
+    example::ScenePass<example::NoDrawParameters> light_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, light_frag, 1, example::shaderOptions());
+    example::ScenePass<example::NoDrawParameters> combine_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, combine_frag, 1, example::shaderOptions());
+    example::ScenePass<example::NoDrawParameters> ssr_lin_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, ssr_lin_frag, 1, example::shaderOptions());
+    example::ScenePass<example::NoDrawParameters> ssr_trace_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, ssr_trace_frag, 1, example::shaderOptions());
+    example::ScenePass<example::NoDrawParameters> ssr_composite_pipe(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, quad_vert, ssr_composite_frag, 1, example::shaderOptions());
 
-    horizon::RasterizerPipeline gb_pipe(gb_vert, gb_frag, geo_desc);
-    gb_pipe.bind_depth_target(gbuffer_zbuffer);
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
-    horizon::RasterizerPipeline ssao_pipe(quad_vert, ssao_frag, fullscreen_desc);
-    horizon::RasterizerPipeline ssao_blur_pipe(quad_vert, ssao_blur_frag, fullscreen_desc);
-    horizon::RasterizerPipeline light_pipe(quad_vert, light_frag, fullscreen_desc);
-    horizon::RasterizerPipeline combine_pipe(quad_vert, combine_frag, fullscreen_desc);
-    horizon::RasterizerPipeline ssr_lin_pipe(quad_vert, ssr_lin_frag, fullscreen_desc);
-    horizon::RasterizerPipeline ssr_trace_pipe(quad_vert, ssr_trace_frag, fullscreen_desc);
-    horizon::RasterizerPipeline ssr_composite_pipe(quad_vert, ssr_composite_frag, fullscreen_desc);
-
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
-
-    horizon::DrawIndexedIndirectCommand quad_cmd_base;
-    quad_cmd_base.index_count = static_cast<uint32_t>(corner_indices.size());
-    quad_cmd_base.instance_count = 1;
-    quad_cmd_base.first_index = 0;
-    quad_cmd_base.vertex_offset = 0;
-    quad_cmd_base.first_instance = 0;
 
     // ---- 相机 / 太阳 / 场景尺度 ----
     const glm::vec3 scene_min = to_vec3(asset.scene.min);
@@ -1935,9 +1866,9 @@ void run_example_edsl_sponza()
     const MirrorRange mirror_pool_range { 0, 6 };
     const MirrorRange mirror_frame_range { 6, 6 };
 
-    horizon::HardwareBuffer mirror_vb = make_pullable_vb(mirror_vertices, "edsl_sponza.mirror.vb");
-    horizon::HardwareBuffer mirror_ib =
-        horizon::HardwareBuffer::index(mirror_indices, "edsl_sponza.mirror.ib");
+    HardwareBuffer mirror_vb = make_pullable_vb(mirror_vertices, "edsl_sponza.mirror.vb");
+    HardwareBuffer mirror_ib =
+        HardwareBuffer::uploadDeviceLocal(mirror_indices, BufferUsage::IndexBuffer);
 
     HorizonImGuiLayer ui(window, spz_width, spz_height);
 
@@ -2134,14 +2065,8 @@ void run_example_edsl_sponza()
         u_texel = to_edsl_vec4(glm::vec4(1.0f / spz_width, 1.0f / spz_height, 0.0f, 0.0f));
 
         // ---- 几何 pass 录制(RSM ×3 + G-buffer ×3) ----
-        // 材质纹理与 factor 都是 push constant（纹理是 bindless 索引），而 push constant
-        // 按 record_indirect 调用快照。所以每个 draw range 必须在写完自己的材质之后
-        // 单独 record 一次（draw_count=1 + 偏移），不能把整个场景合成一个多 draw 批次——
-        // 那样所有 submesh 都会用最后一个材质。
-        rsm_pipe.clear_records();
-        gb_pipe.clear_records();
-
-        std::vector<horizon::DrawIndexedIndirectCommand> scene_cmds;
+        // Snapshot one material for every range of its submesh.
+        std::vector<RasterDraw> scene_cmds;
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
             const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
@@ -2149,20 +2074,18 @@ void run_example_edsl_sponza()
                 continue;
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = range.index_count;
-                cmd.first_index = range.first_index;
-                cmd.vertex_offset = range.vertex_offset;
-                cmd.instance_count = 1;
-                cmd.first_instance = 0;
+                RasterDraw cmd;
+                cmd.indexCount = range.index_count;
+                cmd.firstIndex = range.first_index;
+                cmd.vertexOffset = range.vertex_offset;
+                cmd.instanceCount = 1;
+                cmd.firstInstance = 0;
                 scene_cmds.push_back(cmd);
             }
         }
 
         if (!scene_cmds.empty())
         {
-            horizon::HardwareBuffer scene_indirect = horizon::HardwareBuffer::indirect(scene_cmds, "example_edsl_sponza.scene_indirect");
-
             uint64_t cmd_index = 0;
             for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
             {
@@ -2186,24 +2109,19 @@ void run_example_edsl_sponza()
                 gb_base_factor = to_edsl_vec4(factor);
                 gb_mr_factor = to_edsl_vec4(glm::vec4(material.metallic, material.roughness, 0.0f, 0.0f));
 
-                for (size_t range_index = 0; range_index < submesh_ranges[submesh_index].size(); ++range_index)
-                {
-                    horizon::DrawIndexedIndirectParams params;
-                    params.draw_count = 1;
-                    params.indirect_offset = cmd_index++ * sizeof(horizon::DrawIndexedIndirectCommand);
-                    rsm_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, params);
-                    gb_pipe.record_indirect(scene_ib, scene_vb, scene_indirect, params);
-                }
+                auto ranges = std::span(scene_cmds).subspan(cmd_index, submesh_ranges[submesh_index].size());
+                rsm_pipe.draw({scene_vb, scene_ib}, ranges);
+                gb_pipe.draw({scene_vb, scene_ib}, ranges);
+                cmd_index += ranges.size();
             }
         }
 
         if (tuning.mirror_enable)
         {
-            const std::array<horizon::DrawIndexedIndirectCommand, 2> mirror_cmds = {
-                horizon::DrawIndexedIndirectCommand { mirror_pool_range.count, 1, mirror_pool_range.first, 0, 0 },
-                horizon::DrawIndexedIndirectCommand { mirror_frame_range.count, 1, mirror_frame_range.first, 0, 0 },
+            const std::array<RasterDraw, 2> mirror_cmds = {
+                RasterDraw{.indexCount = mirror_pool_range.count, .firstIndex = mirror_pool_range.first, .vertexOffset = 0, .firstInstance = 0},
+                RasterDraw{.indexCount = mirror_frame_range.count, .firstIndex = mirror_frame_range.first, .vertexOffset = 0, .firstInstance = 0},
             };
-            horizon::HardwareBuffer mirror_indirect = horizon::HardwareBuffer::indirect(mirror_cmds, "example_edsl_sponza.mirror_indirect");
 
             const auto record_mirror = [&](uint64_t cmd_index, const glm::vec4& color,
                                            float metallic, float roughness, const glm::vec4& rsm_color) {
@@ -2214,12 +2132,8 @@ void run_example_edsl_sponza()
                 rsm_albedo_factor = to_edsl_vec4(rsm_color);
                 gb_base_factor = to_edsl_vec4(color);
                 gb_mr_factor = to_edsl_vec4(glm::vec4(metallic, roughness, 0.0f, 0.0f));
-
-                horizon::DrawIndexedIndirectParams params;
-                params.draw_count = 1;
-                params.indirect_offset = cmd_index * sizeof(horizon::DrawIndexedIndirectCommand);
-                rsm_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, params);
-                gb_pipe.record_indirect(mirror_ib, mirror_vb, mirror_indirect, params);
+                rsm_pipe.draw({mirror_vb, mirror_ib}, std::span(mirror_cmds).subspan(cmd_index, 1));
+                gb_pipe.draw({mirror_vb, mirror_ib}, std::span(mirror_cmds).subspan(cmd_index, 1));
             };
 
             const glm::vec4 mirror_rsm_dark(0.12f, 0.12f, 0.12f, 1.0f);
@@ -2227,56 +2141,31 @@ void run_example_edsl_sponza()
             record_mirror(1, glm::vec4(0.055f, 0.045f, 0.038f, 1.0f), 0.0f, 0.72f, mirror_rsm_dark);
         }
 
-        // ---- 全屏 pass 录制 - Convert to indirect ----
-        horizon::DrawIndexedIndirectCommand quad_cmd = quad_cmd_base;
+        // ---- 全屏 pass 录制 ----
 
-        horizon::HardwareBuffer quad_indirect = horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(
-                reinterpret_cast<const std::byte*>(&quad_cmd),
-                sizeof(horizon::DrawIndexedIndirectCommand)),
-            sizeof(horizon::DrawIndexedIndirectCommand),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-            "example_edsl_sponza.quad_indirect");
+        ssao_pipe.draw({quad_vb, quad_ib});
+        ssao_blur_pipe.draw({quad_vb, quad_ib});
+        light_pipe.draw({quad_vb, quad_ib});
+        combine_pipe.draw({quad_vb, quad_ib});
+        ssr_lin_pipe.draw({quad_vb, quad_ib});
+        ssr_trace_pipe.draw({quad_vb, quad_ib});
+        ssr_composite_pipe.draw({quad_vb, quad_ib});
 
-        horizon::DrawIndexedIndirectParams quad_indirect_params;
-        quad_indirect_params.draw_count = 1;
-        quad_indirect_params.indirect_offset = 0;
-        quad_indirect_params.stride = 0;
+        render_executor << rsm_pipe
+                            << gb_pipe
+                            << ssao_pipe
+                            << ssao_blur_pipe
+                            << light_pipe
+                            << combine_pipe
+                            << ssr_lin_pipe
+                            << ssr_trace_pipe
+                            << ssr_composite_pipe;
+        render_executor.commit();
 
-        ssao_pipe.clear_records();
-        ssao_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-        ssao_blur_pipe.clear_records();
-        ssao_blur_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-        light_pipe.clear_records();
-        light_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-        combine_pipe.clear_records();
-        combine_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-        ssr_lin_pipe.clear_records();
-        ssr_lin_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-        ssr_trace_pipe.clear_records();
-        ssr_trace_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-        ssr_composite_pipe.clear_records();
-        ssr_composite_pipe.record_indirect(quad_ib, quad_vb, quad_indirect, quad_indirect_params);
-
-        horizon::SubmitReceipt render_receipt =
-            render_executor << rsm_pipe.extent(spz_shadow_map_size, spz_shadow_map_size)
-                            << gb_pipe.extent(spz_width, spz_height)
-                            << ssao_pipe.extent(spz_width, spz_height)
-                            << ssao_blur_pipe.extent(spz_width, spz_height)
-                            << light_pipe.extent(spz_width, spz_height)
-                            << combine_pipe.extent(spz_width, spz_height)
-                            << ssr_lin_pipe.extent(spz_width, spz_height)
-                            << ssr_trace_pipe.extent(spz_width, spz_height)
-                            << ssr_composite_pipe.extent(spz_width, spz_height)
-                            << horizon::commit();
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
         ++frame_index;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

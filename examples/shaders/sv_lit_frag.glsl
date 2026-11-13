@@ -16,20 +16,11 @@ layout(set = 3, binding = 0) uniform SvSceneShared {
     vec4 fog;
     vec4 color;
     vec4 params;
+    uint shadowCountIndex;
 } fsp;
 
-// bindless combined-image-sampler 表（set 0）+ 与 sv_scene_vert.glsl 共享的 push constant。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
-
-// 与 sv_scene_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 同时继承 vert/frag
-// 的 ResourceBindings，两 stage 实例名必须不同以避免 C++ 端二义（C2385）。
-// C++ 通过 vert 的 model_pc 写入，frag 用 model_pc_fs 只读。
-layout(push_constant) uniform SvScenePC {
-    mat4 model;
-    uint shadowCountIndex;
-} model_pc_fs;
-
-#define shadowCount combinedTextureSamplerHandles[model_pc_fs.shadowCountIndex]
+#define shadowCount combinedTextureSamplerHandles[fsp.shadowCountIndex]
 
 layout(location = 0) in vec3 v_normal;
 layout(location = 1) in vec3 v_view;

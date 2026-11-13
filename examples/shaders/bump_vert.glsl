@@ -1,11 +1,13 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint drawParameterWord;
 
 // 移植自参考示例 06-bump 的 vs_bump.sc（非实例化路径）：
 // 世界空间 TBN，view 向量转到切线空间。
 //
 // 拆分策略：
 //   - UBO  vsp：批次内共享（view_proj、eye_pos、4 组光源参数）208 bytes
-//   - PC   pc ：per-draw（model 矩阵，每个 cube 不同）          64 bytes
+//   - BDA 参数 ：per-draw（model 矩阵，每个 cube 不同）          64 bytes
 
 // set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
 layout(set = 3, binding = 0) uniform BumpShared {
@@ -21,18 +23,14 @@ layout(set = 3, binding = 0) uniform BumpShared {
     vec4 light3_rgb_inner_r;
 } vsp;
 
-// vert/frag 共享同一 push constant 块，布局必须一致。
+// vert/frag 共享同一 BDA 绘制参数，布局必须一致。
 // texColorIndex/texNormalIndex 为 bindless combined-texture 表（set 0）索引，仅 FS 使用。
-layout(push_constant) uniform BumpPC {
+struct BumpPC {
     mat4 model;
     uint texColorIndex;
     uint texNormalIndex;
-} model_pc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec4 inTangent; // w: bitangent 符号
-layout(location = 3) in vec2 inTexCoord;
+};
+#define model_pc (*(BumpPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) out vec3 v_wpos;
 layout(location = 1) out vec3 v_view;
@@ -43,6 +41,13 @@ layout(location = 5) out vec2 v_texcoord;
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    drawParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
+    vec4 inTangent = *(vec4*)(vertex + 6);
+    vec2 inTexCoord = *(vec2*)(vertex + 10);
     vec3 wpos = (model_pc.model * vec4(inPosition, 1.0)).xyz;
     v_wpos = wpos;
 

@@ -2,7 +2,7 @@
 #extension GL_EXT_nonuniform_qualifier : enable
 #extension GL_EXT_scalar_block_layout : enable
 
-// Stream compaction + fill VkDrawIndexedIndirectCommand buffer.
+// Stream compaction + fill HorizonDrawPacket buffer.
 // Based on Mark Harris parallel scan (bgfx cs_gdr_stream_compaction).
 
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
@@ -27,8 +27,8 @@ layout(set = 1, binding = 0) buffer CountSSBO
     uint data[];
 } countBuffers[];
 
-// Flat uints avoid std430 struct-array padding so stride stays 20 bytes
-// (VkDrawIndexedIndirectCommand).
+// Flat uints avoid std430 struct-array padding so stride stays 32 bytes
+// (HorizonDrawPacket).
 layout(set = 1, binding = 0) buffer IndirectSSBO
 {
     uint data[];
@@ -135,17 +135,15 @@ void main()
         uint startInstance = 0u;
         for (int k = 0; k < noofDrawcalls; ++k)
         {
-            uint base = uint(k) * 5u;
-            indirectBuffers[pc.indirectBufferID].data[base + 0u] =
-                constBuffers[pc.constBufferID].data[k * 3 + 0];
-            indirectBuffers[pc.indirectBufferID].data[base + 1u] =
-                countBuffers[pc.countBufferID].data[k];
-            indirectBuffers[pc.indirectBufferID].data[base + 2u] =
-                constBuffers[pc.constBufferID].data[k * 3 + 1];
-            indirectBuffers[pc.indirectBufferID].data[base + 3u] =
-                constBuffers[pc.constBufferID].data[k * 3 + 2];
-            indirectBuffers[pc.indirectBufferID].data[base + 4u] = startInstance;
-
+            uint base = uint(k) * 8u;
+            indirectBuffers[pc.indirectBufferID].data[base + 0u] = constBuffers[pc.constBufferID].data[k * 3];
+            indirectBuffers[pc.indirectBufferID].data[base + 1u] = countBuffers[pc.countBufferID].data[k];
+            indirectBuffers[pc.indirectBufferID].data[base + 2u] = 0u;
+            indirectBuffers[pc.indirectBufferID].data[base + 3u] = startInstance;
+            indirectBuffers[pc.indirectBufferID].data[base + 4u] = 0u;
+            indirectBuffers[pc.indirectBufferID].data[base + 5u] = constBuffers[pc.constBufferID].data[k * 3 + 1];
+            indirectBuffers[pc.indirectBufferID].data[base + 6u] = constBuffers[pc.constBufferID].data[k * 3 + 2];
+            indirectBuffers[pc.indirectBufferID].data[base + 7u] = 0u;
             startInstance += countBuffers[pc.countBufferID].data[k];
             countBuffers[pc.countBufferID].data[k] = 0u;
         }

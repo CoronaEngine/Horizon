@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // Cross-bilateral blur for the SSAO buffer.
 //
@@ -13,11 +15,12 @@ layout(set = 3, binding = 0) uniform SponzaSsaoBlurShared {
     vec4 depth_unpack; // viewZ = x / (deviceDepth + y)
 } fsp;
 
-layout(push_constant) uniform SponzaSsaoBlurPC {
+struct SponzaSsaoBlurPC {
     uint gAoIndex;
     uint gDepthIndex;
     uint gNormalIndex;
-} fpc;
+};
+#define fpc (*(SponzaSsaoBlurPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 

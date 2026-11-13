@@ -14,6 +14,7 @@ struct Benchmark::GpuTimer {
     struct Marker : CommandRecordVulkan {
         GpuTimer* timer{};
         uint32_t index{};
+        void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override {}
         ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
         void commitCommand(HardwareExecutorVulkan& executor) override {
             const auto* queue = executor.currentRecordQueue;
@@ -94,20 +95,20 @@ Benchmark::Benchmark(const char* mode, uint32_t width, uint32_t height)
         fixed_dt_ = std::stof(value);
         if (!std::isfinite(fixed_dt_) || fixed_dt_ < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
     }
-    std::cout << "[legacy] " << mode_ << " " << width_ << 'x' << height_
-              << "; direct indexed draws; UI=" << HORIZON_IMGUI_RENDER_ENABLED
+    std::cout << "[HorizonExamples] " << mode_ << " " << width_ << 'x' << height_
+              << "; indirect BDA raster; UI=" << HORIZON_IMGUI_RENDER_ENABLED
               << "; serialized=" << bool(gpu_timer_) << "; offscreen=" << offscreen_ << "; warmup=" << warmup_
               << "; measured_frames=" << limit_ << '\n';
 }
 Benchmark::~Benchmark() = default;
 void Benchmark::begin_scene() { scene_start_ = Clock::now(); }
-void Benchmark::submit(HardwareExecutor& executor, RasterizerPipelineBase& pipeline) {
+void Benchmark::submit(HardwareExecutor& executor, RasterBatch&& batch) {
     const auto start = Clock::now();
     record_ms_ = std::chrono::duration<double, std::milli>(start - scene_start_).count();
     auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
     const auto previous_point = backend->getSubmissionPoint();
     if (gpu_timer_) *backend << &gpu_timer_->begin;
-    executor << pipeline;
+    executor << std::move(batch);
     if (gpu_timer_) *backend << &gpu_timer_->end;
     executor.commit();
     submit_ms_ = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -147,7 +148,7 @@ void Benchmark::end_frame(GLFWwindow* window, uint64_t draws, const HardwareImag
     title_seconds_ += ms / 1000.0;
     ++title_frames_;
     if (title_seconds_ >= 0.5) {
-        const std::string title = "Horizon " + mode_ + " [Legacy] - " + std::to_string(draws)
+        const std::string title = "Horizon " + mode_ + " - " + std::to_string(draws)
             + " draws - " + std::to_string(title_frames_ / title_seconds_) + " FPS";
         glfwSetWindowTitle(window, title.c_str());
         title_seconds_ = 0;

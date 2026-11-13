@@ -1,8 +1,9 @@
-﻿#include "HardwareCommands_old.h"
+#include "HardwareCommands_old.h"
 #include "Horizon_old.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
+#include <optional>
 
 // ================= CopyCommandImpl 基类 =================
 // CopyCommandImpl definition moved to HardwareExecutorVulkan.h to allow shared usage
@@ -21,7 +22,7 @@ struct BufferCopyCommandImpl : CopyCommandImpl
     uint64_t dstOffset{0};
     uint64_t size{0};
 
-    std::unique_ptr<CopyBufferCommand> command;
+    std::optional<CopyBufferCommand> command;
 
     BufferCopyCommandImpl(const HardwareBuffer &src, const HardwareBuffer &dst)
         : srcBuffer(src), dstBuffer(dst)
@@ -30,6 +31,7 @@ struct BufferCopyCommandImpl : CopyCommandImpl
 
     CommandRecordVulkan *getCommandRecord() override
     {
+        if (command) return &*command;
         uint64_t srcBufferID = srcBuffer.getBufferID();
         uint64_t dstBufferID = dstBuffer.getBufferID();
 
@@ -38,10 +40,10 @@ struct BufferCopyCommandImpl : CopyCommandImpl
             return nullptr;
         }
 
-        command = std::make_unique<CopyBufferCommand>(*legacyBufferFromId(srcBufferID),
+        command.emplace(*legacyBufferFromId(srcBufferID),
             *legacyBufferFromId(dstBufferID), srcOffset, dstOffset, size);
 
-        return command.get();
+        return &*command;
     }
 };
 
@@ -54,7 +56,7 @@ struct BufferToImageCommandImpl : CopyCommandImpl
     uint32_t imageLayer{0};
     uint32_t imageMip{0};
 
-    std::unique_ptr<CopyBufferToImageCommand> command;
+    std::optional<CopyBufferToImageCommand> command;
 
     BufferToImageCommandImpl(const HardwareBuffer &src, const HardwareImage &dst)
         : srcBuffer(src), dstImage(dst)
@@ -63,6 +65,7 @@ struct BufferToImageCommandImpl : CopyCommandImpl
 
     CommandRecordVulkan *getCommandRecord() override
     {
+        if (command) return &*command;
         if (srcBuffer.getBufferID() == 0 || dstImage.getImageID() == 0)
         {
             return nullptr;
@@ -70,9 +73,9 @@ struct BufferToImageCommandImpl : CopyCommandImpl
 
         auto srcHandle = legacyBufferFromId(srcBuffer.getBufferID());
         auto dstHandle = legacyImageFromId(dstImage.getImageID());
-        command = std::make_unique<CopyBufferToImageCommand>(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
+        command.emplace(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
 
-        return command.get();
+        return &*command;
     }
 };
 
@@ -108,7 +111,7 @@ struct ImageCopyCommandImpl : CopyCommandImpl
     uint32_t srcMip{0};
     uint32_t dstMip{0};
 
-    std::unique_ptr<CopyImageCommand> command;
+    std::optional<CopyImageCommand> command;
 
     ImageCopyCommandImpl(const HardwareImage &src, const HardwareImage &dst)
         : srcImage(src), dstImage(dst)
@@ -117,6 +120,7 @@ struct ImageCopyCommandImpl : CopyCommandImpl
 
     CommandRecordVulkan *getCommandRecord() override
     {
+        if (command) return &*command;
         uint64_t srcImageID = srcImage.getImageID();
         uint64_t dstImageID = dstImage.getImageID();
 
@@ -128,10 +132,10 @@ struct ImageCopyCommandImpl : CopyCommandImpl
         if (srcImageID == dstImageID)
             throw std::invalid_argument("A legacy image copy requires distinct images");
 
-        command = std::make_unique<CopyImageCommand>(*legacyImageFromId(srcImageID),
+        command.emplace(*legacyImageFromId(srcImageID),
             *legacyImageFromId(dstImageID), srcLayer, dstLayer, srcMip, dstMip);
 
-        return command.get();
+        return &*command;
     }
 };
 
@@ -157,7 +161,7 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
     uint32_t imageMip{0};
     uint64_t bufferOffset{0};
 
-    std::unique_ptr<CopyImageToBufferCommand> command;
+    std::optional<CopyImageToBufferCommand> command;
 
     ImageToBufferCommandImpl(const HardwareImage &src, const HardwareBuffer &dst)
         : srcImage(src), dstBuffer(dst)
@@ -166,6 +170,7 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
 
     CommandRecordVulkan *getCommandRecord() override
     {
+        if (command) return &*command;
         if (srcImage.getImageID() == 0 || dstBuffer.getBufferID() == 0)
         {
             return nullptr;
@@ -173,9 +178,9 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
 
         auto srcHandle = legacyImageFromId(srcImage.getImageID());
         auto dstHandle = legacyBufferFromId(dstBuffer.getBufferID());
-        command = std::make_unique<CopyImageToBufferCommand>(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
+        command.emplace(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
 
-        return command.get();
+        return &*command;
     }
 };
 

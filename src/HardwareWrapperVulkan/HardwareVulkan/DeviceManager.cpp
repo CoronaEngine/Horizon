@@ -259,12 +259,30 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
-    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
     createInfo.enabledLayerCount = 0;
     createInfo.ppEnabledLayerNames = nullptr;
     createInfo.pEnabledFeatures = nullptr;
     createInfo.pNext = deviceFeaturesUtils.featuresChain.getChainHead();
+
+    // Implicit-LOD sampling in compute shaders uses quad derivatives. Other
+    // shaders and devices can continue using the ordinary device feature set.
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR derivatives{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
+    if (std::ranges::any_of(availableExtensions, [](const auto& extension) {
+            return strcmp(extension.extensionName, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME) == 0;
+        })) {
+        VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &derivatives};
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &query);
+        if (derivatives.computeDerivativeGroupQuads) {
+            deviceFeaturesUtils.computeDerivativeGroupQuads = true;
+            requiredExtensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+            derivatives.computeDerivativeGroupLinear = VK_FALSE;
+            derivatives.pNext = deviceFeaturesUtils.featuresChain.getChainHead();
+            createInfo.pNext = &derivatives;
+        }
+    }
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
+    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
 
     coronaHardwareCheck(vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice));
 }

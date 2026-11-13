@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint drawParameterWord;
 
 // 阴影体示例 pass 3：CPU 生成的世界空间阴影体（轮廓边挤出），只需 view_proj。
 
@@ -8,14 +10,17 @@ layout(set = 3, binding = 0) uniform SvVolumeParams {
     vec4 params; // xy: 屏幕分辨率
 } vvp;
 
-// vert/frag 共享同一 push constant 块。sceneDepthIndex 仅 FS 使用。
-layout(push_constant) uniform SvVolumePC {
+// vert/frag 共享同一 BDA 绘制参数。sceneDepthIndex 仅 FS 使用。
+struct SvVolumePC {
     uint sceneDepthIndex;
-} volume_pc;
-
-layout(location = 0) in vec3 inPosition;
+};
+#define volume_pc (*(SvVolumePC*)(drawRoot.parameters + drawParameterWord))
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    drawParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
     gl_Position = vvp.view_proj * vec4(inPosition, 1.0);
 }

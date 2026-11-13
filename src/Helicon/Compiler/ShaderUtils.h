@@ -10,6 +10,9 @@
 
 namespace EmbeddedShader
 {
+    // Match the indirect raster offset to the inputs of the selected fragment variant.
+    void linkRasterDrawParameter(ShaderCodeModule& vertex, ShaderCodeModule& fragment);
+
 	// ---- 路径清理 ----
 
 	// 将路径字符串中的特殊符号替换为下划线，返回可用作 C++ 标识符的字符串

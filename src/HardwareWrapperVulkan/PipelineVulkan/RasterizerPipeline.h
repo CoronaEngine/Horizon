@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
+#include <map>
 #include <vector>
 
 #include "Horizon_old.h"
@@ -8,12 +9,13 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
+#include "PipelineSnapshot.h"
 
-struct RasterizerPipelineVulkan : public CommandRecordVulkan
+struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelineVulkan>
 {
   public:
     RasterizerPipelineVulkan();
-    ~RasterizerPipelineVulkan() override;
+    ~RasterizerPipelineVulkan();
 
     RasterizerPipelineVulkan(std::string vertexShaderCode,
                              std::string fragmentShaderCode,
@@ -37,25 +39,13 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
     void setDepthImage(HardwareImage &depthImage)
     {
         this->depthImage = depthImage;
+        explicitDepthImage = static_cast<bool>(depthImage);
     }
 
-    void setDepthEnabled(bool enabled)
-    {
-        if (depthEnabled != enabled)
-        {
-            depthEnabled = enabled;
-            graphicsPipelineDirty = true;
-        }
-    }
-
-    //void setDepthWriteEnabled(bool enabled)
-    //{
-    //    if (depthWriteEnabled != enabled)
-    //    {
-    //        depthWriteEnabled = enabled;
-    //        graphicsPipelineDirty = true;
-    //    }
-    //}
+    void setDepthEnabled(bool enabled) { rasterState.depthTest = rasterState.depthWrite = enabled; }
+    void setRasterState(RasterState state) { rasterState = state; }
+    std::shared_ptr<RasterizerPipelineVulkan> variant(EmbeddedShader::ShaderCodeCompiler& vertex,
+                                                      EmbeddedShader::ShaderCodeCompiler& fragment) const;
 
     [[nodiscard]] HardwareImage &getDepthImage()
     {
@@ -67,50 +57,89 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location = 0);
 
-    RasterizerPipelineVulkan *operator()(uint16_t width, uint16_t height);
+    using Packet = RasterIndirectPacket;
+    struct GeometryEntry {
+        VkDeviceAddress vertices, indices;
+        uint32_t strideWords, indexBytes, vertexCount, reserved{};
+    };
+    struct Root {
+        VkDeviceAddress packets, geometries, parameters;
+        uint32_t groupBase, padding{};
+    };
+    static_assert(sizeof(Packet) == 32 && offsetof(Packet, geometryIndex) == sizeof(VkDrawIndirectCommand));
+    static_assert(offsetof(Packet, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
+    static_assert(sizeof(GeometryEntry) == 32 && sizeof(Root) == 32);
+    struct Run { VkRect2D scissor; uint32_t first, count; };
 
-    CommandRecordVulkan *record(const HardwareBuffer &indexBuffer, const HardwareBuffer &vertexBuffer);
-    CommandRecordVulkan *record(const HardwareBuffer &indexBuffer,
-                                const HardwareBuffer &vertexBuffer,
-                                const DrawIndexedParams &params);
-
-    ExecutorType getExecutorType() override
+    struct GraphicsState
     {
-        return CommandRecordVulkan::ExecutorType::Graphics;
-    }
-
-    void commitCommand(HardwareExecutorVulkan &hardwareExecutorVulkan) override;
-    RequiredBarriers getRequiredBarriers(HardwareExecutorVulkan &hardwareExecutorVulkan) override;
+        VkDevice device{};
+        VkRenderPass renderPass{};
+        VkPipeline pipeline{};
+        VkPipelineLayout layout{};
+        std::vector<VkFormat> colorFormats;
+        std::vector<VkImageLayout> finalLayouts;
+        VkFormat depthFormat{};
+        RasterState state;
+        RasterPass pass;
+        ~GraphicsState();
+    };
+    struct FramebufferState
+    {
+        VkDevice device{};
+        VkFramebuffer framebuffer{};
+        std::shared_ptr<GraphicsState> graphics;
+        std::vector<HardwareImage> targets;
+        HardwareImage depth;
+        ktm::uvec2 size{};
+        ~FramebufferState();
+    };
+    struct Batch : CommandRecordVulkan
+    {
+        std::shared_ptr<RasterizerPipelineVulkan> pipeline;
+        ktm::uvec2 imageSize{};
+        RasterState state;
+        RasterPass pass;
+        HardwareImage depthImage;
+        std::vector<HardwareImage> renderTargets;
+        std::vector<VkClearValue> clearValues;
+        std::vector<Packet> packets;
+        std::vector<RasterGeometry> geometries;
+        std::map<std::pair<uintptr_t, uintptr_t>, uint32_t> geometryIndices;
+        std::vector<uint8_t> parameters;
+        std::vector<Run> runs;
+        std::shared_ptr<HardwareBuffer> upload;
+        HardwareBuffer externalPackets;
+        void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t);
+        Root root{};
+        void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
+        void prepareUpload();
+        std::vector<uint8_t> uniformBytes;
+        std::shared_ptr<BindingSnapshot> bindings;
+        std::shared_ptr<UniformSnapshot> uniform;
+        std::shared_ptr<FramebufferState> framebuffer;
+        ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
+        void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
+        void commitCommand(HardwareExecutorVulkan& executor) override;
+    };
+    std::shared_ptr<Batch> capture(uint16_t width, uint16_t height, RasterPass pass);
 
   private:
-    struct TriangleGeomMesh
-    {
-        HardwareBuffer indexBuffer;
-        HardwareBuffer vertexBuffer;
-        DrawIndexedParams drawParams;
-        std::unique_ptr<uint8_t[]> pushConstant;
-    };
-    std::vector<TriangleGeomMesh> geomMeshesRecord;
+    std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
+    void initializeStageBindings(uint32_t viewCount);
+    void createRenderPass(GraphicsState& state);
+    void createGraphicsPipeline(GraphicsState& state);
+    void prepareDepth(Batch& batch);
+    void prepareFramebuffer(Batch& batch);
+    void commitCommand(HardwareExecutorVulkan& executor, Batch& batch);
 
-    void createRenderPass(int multiviewCount = 1);
-    void createGraphicsPipeline(EmbeddedShader::ShaderCodeModule &vertShaderCode,
-                                EmbeddedShader::ShaderCodeModule &fragShaderCode);
-    void createFramebuffers(ktm::uvec2 imageSize);
-
-    [[nodiscard]] VkFormat getVkFormatFromType(const std::string &typeName, uint32_t elementCount) const;
-
-    ktm::uvec2 imageSize = {0, 0};
-    uint32_t pushConstantSize{0};
     int multiviewCount{1};
 
-    VkRenderPass renderPass{VK_NULL_HANDLE};
-    VkPipeline graphicsPipeline{VK_NULL_HANDLE};
-    VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
-    VkFramebuffer frameBuffers{VK_NULL_HANDLE};
+    std::vector<std::shared_ptr<GraphicsState>> graphicsStates;
+    std::shared_ptr<FramebufferState> lastFramebuffer;
 
-    bool depthEnabled{true};
-    //bool depthWriteEnabled{true};
-    bool graphicsPipelineDirty{false};
+    RasterState rasterState;
+    bool explicitDepthImage{false};
 
     HardwareImage depthImage;
     std::vector<HardwareImage> renderTargets;
@@ -118,20 +147,12 @@ struct RasterizerPipelineVulkan : public CommandRecordVulkan
     EmbeddedShader::ShaderCodeModule vertShaderCode;
     EmbeddedShader::ShaderCodeModule fragShaderCode;
 
-    CommandRecordVulkan dumpCommandRecordVulkan;
-    std::unique_ptr<uint8_t[]> tempPushConstant;
-    // std::vector<HardwareBuffer> tempVertexBuffers;
-
     // Per-pipeline UBO support
     std::unique_ptr<uint8_t[]> tempUBO;
-    HardwareBuffer uboBuffer;
     uint32_t uboSize{0};
-    VkDescriptorPool uboDescriptorPool{VK_NULL_HANDLE};
     VkDescriptorSetLayout uboDescriptorSetLayout{VK_NULL_HANDLE};
-    VkDescriptorSet uboDescriptorSet{VK_NULL_HANDLE};
-    bool uboDescriptorDirty{true};
-    void createPerPipelineUBODescriptor();
-    void updateUBODescriptor();
+    PipelineBindings bindings;
+    UniformSnapshotPool uniformPool;
 
     std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> vertexStageInputs;
     std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> vertexStageOutputs;

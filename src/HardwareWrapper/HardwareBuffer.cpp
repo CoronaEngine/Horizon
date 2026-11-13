@@ -1,4 +1,4 @@
-﻿#include "Horizon_old.h"
+#include "Horizon_old.h"
 #include "HardwareCommands_old.h"
 #include "HardwareWrapperVulkan/HardwareContext.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
@@ -12,10 +12,11 @@ VkBufferUsageFlags convertBufferUsage(BufferUsage const usage)
     switch (usage)
     {
     case BufferUsage::VertexBuffer:
-        vkUsage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        break;
     case BufferUsage::IndexBuffer:
-        vkUsage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        vkUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        break;
+    case BufferUsage::RasterIndirect:
+        vkUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         break;
     case BufferUsage::UniformBuffer:
         vkUsage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
@@ -50,13 +51,33 @@ void releaseBuffer(uintptr_t id)
 
 HardwareBuffer::HardwareBuffer() = default;
 
+HardwareBuffer HardwareBuffer::uploadDeviceLocal(size_t count, size_t stride, BufferUsage usage, const void* data)
+{
+    if (count > UINT32_MAX || stride > UINT32_MAX)
+        throw std::length_error("Device-local buffer dimensions exceed the supported range");
+    const auto elementCount = static_cast<uint32_t>(count);
+    const auto elementSize = static_cast<uint32_t>(stride);
+    HardwareBuffer destination;
+    auto resource = std::make_unique<ResourceManager::BufferHardwareWrap>();
+    *resource = getHardwareContext().getMainDevice()->resourceManager.createBuffer(
+        elementCount, elementSize, convertBufferUsage(usage), false, true);
+    destination.bufferID = reinterpret_cast<uintptr_t>(resource.release());
+    if (elementCount) {
+        HardwareBuffer staging(elementCount, elementSize, BufferUsage::StorageBuffer, data);
+        HardwareExecutor upload;
+        upload << staging.copyTo(destination);
+        upload.commit().waitForDeferredResources();
+    }
+    return destination;
+}
+
 HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, BufferUsage usage, const void* data, bool useDedicated)
 {
     auto resource = std::make_unique<ResourceManager::BufferHardwareWrap>();
     *resource = getHardwareContext().getMainDevice()->resourceManager.createBuffer(
         bufferSize, elementSize, convertBufferUsage(usage), true, useDedicated);
     if (data && resource->bufferAllocInfo.pMappedData)
-        std::memcpy(resource->bufferAllocInfo.pMappedData, data, static_cast<size_t>(bufferSize) * elementSize);
+        resource->resourceManager->writeMapped(*resource, data, static_cast<size_t>(bufferSize) * elementSize);
     bufferID = reinterpret_cast<uintptr_t>(resource.release());
 }
 
@@ -145,7 +166,8 @@ bool HardwareBuffer::copyFromData(const void *inputData, const uint64_t size) co
     if (const auto handle = legacyBufferFromId(self_buffer_id);
         handle->bufferAllocInfo.pMappedData != nullptr)
     {
-        std::memcpy(handle->bufferAllocInfo.pMappedData, inputData, size);
+        if (size > uint64_t(handle->elementCount) * handle->elementSize) return false;
+        handle->resourceManager->writeMapped(*handle, inputData, size);
         return true;
     }
     return false;

@@ -23,7 +23,9 @@
 #include "example_rsm/example_rsm.h"
 #include "example_edsl_rsm/example_edsl_rsm.h"
 #include "example_edsl_sponza/example_edsl_sponza.h"
-#include "legacy_example_launcher.h"
+#include "example_edsl_drawstress/example_edsl_drawstress.h"
+#include <array>
+#include <exception>
 
 #include "horizon/core/logging.h"
 
@@ -58,162 +60,52 @@ int main(int argc, char **argv)
 
     const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("sponza");
 
-    if (mode == "baseline")
-    {
-        run_example_baseline();
+    struct Example { std::string_view name; void (*run)(); };
+    static constexpr Example examples[] = {
+        {"assao", run_example_assao},
+        {"baseline", run_example_baseline},
+        {"bump", run_example_bump},
+        {"deferred", run_example_deferred},
+        {"disney_pbr", [] { run_example_disney_pbr(); }},
+        {"drawstress", [] { run_example_drawstress(); }},
+        {"edsl", run_example_edsl},
+        {"edsl_compile", run_example_edsl_compile},
+        {"edsl_compile_comparison", run_example_edsl_compile_comparison},
+        {"edsl_disney_pbr", run_example_edsl_disney_pbr},
+        {"edsl_drawstress", run_example_edsl_drawstress},
+        {"edsl_ibl", run_example_edsl_ibl},
+        {"edsl_rsm", run_example_edsl_rsm},
+        {"edsl_shadowmaps", run_example_edsl_shadowmaps},
+        {"edsl_shadowvolumes", run_example_edsl_shadowvolumes},
+        {"edsl_sky", run_example_edsl_sky},
+        {"edsl_sponza", run_example_edsl_sponza},
+        {"edsl_ssr", run_example_edsl_ssr},
+        {"glsl", run_example_glsl},
+        {"gpudrivenrendering", run_example_gpudrivenrendering},
+        {"ibl", [] { run_example_ibl(); }},
+        {"raymarch", run_example_raymarch},
+        {"rsm", run_example_rsm},
+        {"shadowmaps", run_example_shadowmaps},
+        {"shadowvolumes", run_example_shadowvolumes},
+        {"sky", run_example_sky},
+        {"sponza", run_example_sponza},
+        {"ssr", run_example_ssr},
+    };
+    if (mode == "--list" || mode == "--help" || (argc > 2 && std::string_view(argv[2]) == "--help")) {
+        if (mode != "--list") std::cout << "Usage: HorizonExamples [mode] (default: sponza)\n";
+        for (const auto& example : examples) std::cout << example.name << '\n';
         return 0;
     }
-
-    if (mode == "edsl")
-    {
-        run_example_edsl();
-        return 0;
+    for (const auto& example : examples) {
+        if (example.name != mode) continue;
+        try {
+            example.run();
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << mode << ": " << error.what() << '\n';
+            return 1;
+        }
     }
-    if (mode == "glsl")
-    {
-        run_example_glsl();
-        return 0;
-    }
-
-    if (mode == "ibl")
-    {
-        run_example_ibl();
-        return 0;
-    }
-
-    if (mode == "ibl_old" || mode == "edsl_ibl_old")
-    {
-        return run_legacy_example(argc, argv);
-    }
-
-    if (mode == "edsl_ibl")
-    {
-        run_example_edsl_ibl();
-        return 0;
-    }
-
-    if (mode == "drawstress")
-    {
-        run_example_drawstress();
-        return 0;
-    }
-    if (mode == "drawstress_old" || mode == "edsl_drawstress_old")
-    {
-        return run_legacy_example(argc, argv);
-    }
-    if (mode == "raymarch")
-    {
-        run_example_raymarch();
-        return 0;
-    }
-    if (mode == "bump")
-    {
-        run_example_bump();
-        return 0;
-    }
-    if (mode == "deferred")
-    {
-        run_example_deferred();
-        return 0;
-    }
-    if (mode == "sponza")
-    {
-        run_example_sponza();
-        return 0;
-    }
-    if (mode == "shadowmaps")
-    {
-        run_example_shadowmaps();
-        return 0;
-    }
-    if (mode == "edsl_shadowmaps")
-    {
-        run_example_edsl_shadowmaps();
-        return 0;
-    }
-    if (mode == "shadowvolumes")
-    {
-        run_example_shadowvolumes();
-        return 0;
-    }
-    if (mode == "edsl_shadowvolumes")
-    {
-        run_example_edsl_shadowvolumes();
-        return 0;
-    }
-    if (mode == "assao")
-    {
-        run_example_assao();
-        return 0;
-    }
-
-    if (mode == "sky")
-    {
-        run_example_sky();
-        return 0;
-    }
-
-    if (mode == "ssr")
-    {
-        run_example_ssr();
-        return 0;
-    }
-    if (mode == "edsl_ssr")
-    {
-        run_example_edsl_ssr();
-        return 0;
-    }
-    if (mode == "edsl_sky")
-    {
-        run_example_edsl_sky();
-        return 0;
-    }
-    if (mode == "gpudrivenrendering")
-    {
-        run_example_gpudrivenrendering();
-        return 0;
-    }
-    if (mode == "disney_pbr")
-    {
-        run_example_disney_pbr();
-        return 0;
-    }
-    if (mode == "disney_pbr_old" || mode == "edsl_disney_pbr_old")
-    {
-        return run_legacy_example(argc, argv);
-    }
-    if (mode == "edsl_disney_pbr")
-    {
-        run_example_edsl_disney_pbr();
-        return 0;
-    }
-    if (mode == "rsm")
-    {
-        run_example_rsm();
-        return 0;
-    }
-    if (mode == "edsl_rsm")
-    {
-        run_example_edsl_rsm();
-        return 0;
-    }
-    if (mode == "edsl_sponza")
-    {
-        run_example_edsl_sponza();
-        return 0;
-    }
-
-    if (mode == "edsl_compile")
-    {
-        run_example_edsl_compile();
-        return 0;
-    }
-
-    if (mode == "edsl_compile_comparison")
-    {
-        run_example_edsl_compile_comparison();
-        return 0;
-    }
-
-    return 0;
+    std::cerr << "Unknown example " << mode << ". Use --list to see available modes.\n";
+    return 2;
 }

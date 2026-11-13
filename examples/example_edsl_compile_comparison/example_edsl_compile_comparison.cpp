@@ -11,13 +11,16 @@
 #include <Codegen/ControlFlows.h>
 #include <Codegen/CustomLibrary.h>
 #include <Codegen/TypeAlias.h>
-#include <horizon.h>
+#include "scene_pass.h"
+#include "legacy_common.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <span>
+#include <stdexcept>
+#include <vector>
 
 using namespace EmbeddedShader;
 using namespace ktm;
@@ -52,11 +55,8 @@ void run_example_edsl_compile_comparison()
 {
     using Clock = std::chrono::steady_clock;
 
-    horizon::HardwareImage output_image(horizon::HardwareImageDesc::texture_2d(
-        benchmark_size, benchmark_size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment,
-        "example_edsl_compile_comparison.output"));
-    output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage output_image(example::imageInfo(benchmark_size, benchmark_size, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage));
+    output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     Texture2D<fvec4> final_output = output_image;
 
     const std::array<BenchCpuVertex, 3> vertices {{
@@ -66,20 +66,11 @@ void run_example_edsl_compile_comparison()
     }};
     const std::array<uint16_t, 3> indices { 0, 1, 2 };
 
-    horizon::HardwareBuffer vertex_buffer =
-        horizon::HardwareBuffer::vertex(vertices, "example_edsl_compile_comparison.vb");
-    horizon::HardwareBuffer index_buffer =
-        horizon::HardwareBuffer::index(indices, "example_edsl_compile_comparison.ib");
+    HardwareBuffer vertex_buffer =
+        HardwareBuffer::uploadDeviceLocal(vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer index_buffer =
+        HardwareBuffer::uploadDeviceLocal(indices, BufferUsage::IndexBuffer);
 
-    horizon::DrawIndexedIndirectCommand indirect_command {};
-    indirect_command.index_count = static_cast<uint32_t>(indices.size());
-    indirect_command.instance_count = 1;
-    horizon::HardwareBuffer indirect_buffer = horizon::HardwareBuffer::from_bytes(
-        std::span<const std::byte>(reinterpret_cast<const std::byte*>(&indirect_command),
-                                   sizeof(indirect_command)),
-        static_cast<uint32_t>(sizeof(indirect_command)),
-        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-        "example_edsl_compile_comparison.indirect");
 
     auto vertex_shader = [](Aggregate<BenchEdslVertex> vertex) {
         position() = Float4(vertex->pos, Float(1.0));
@@ -113,59 +104,72 @@ void run_example_edsl_compile_comparison()
         final_output << Float4(color, Float(1.0));
     };
 
-    horizon::RasterizerPipelineDesc desc;
-    desc.depth_test_enabled = false;
-    desc.depth_write_enabled = false;
-    desc.blend_enabled = false;
 
-    horizon::HardwareExecutor executor;
+    HardwareExecutor executor;
     auto draw_once = [&](auto& pipeline) {
-        pipeline.clear_records();
-        horizon::DrawIndexedIndirectParams params;
-        params.draw_count = 1;
-        pipeline.record_indirect(index_buffer, vertex_buffer, indirect_buffer, params);
-        auto receipt = executor << pipeline.extent(benchmark_size, benchmark_size) << horizon::commit();
-        executor.wait(receipt);
+        pipeline.draw({vertex_buffer, index_buffer});
+        executor << pipeline;
+        executor.commit().waitForDeferredResources();
+    };
+
+    // Readback is outside the measured compile and submit interval.
+    auto verify_color = [&](bool red) {
+        using Pixel = std::array<uint16_t, 4>;
+        std::vector<Pixel> pixels(benchmark_size * benchmark_size);
+        HardwareBuffer readback(static_cast<uint32_t>(pixels.size() * sizeof(Pixel)), BufferUsage::StorageBuffer);
+        executor << output_image.copyTo(readback);
+        executor.commit().waitForDeferredResources();
+        constexpr uint16_t one = 0x3c00; // binary16
+        const Pixel expected = red ? Pixel{one, 0, 0, one} : Pixel{0, one, 0, one};
+        if (!readback.copyToData(pixels.data(), pixels.size() * sizeof(Pixel)) ||
+            !std::ranges::all_of(pixels, [&](const Pixel& pixel) { return pixel == expected; }))
+            throw std::runtime_error("Unexpected color from EDSL shader variant");
     };
 
     // Warm up the Vulkan device/command pool and Slang global session once;
     // otherwise the first measured variant would include one-time setup.
     {
-        horizon::RasterizerPipeline warmup(vertex_shader, fragment_cpu, desc);
+        example::ScenePass<example::NoDrawParameters> warmup(benchmark_size, benchmark_size, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, vertex_shader, fragment_cpu, 1, example::shaderOptions());
         draw_once(warmup);
     }
 
     // Full compile: one native C++ branch per pipeline.
     auto t0 = Clock::now();
-    horizon::RasterizerPipeline cpu_variant_a(vertex_shader, fragment_cpu, desc);
+    example::ScenePass<example::NoDrawParameters> cpu_variant_a(benchmark_size, benchmark_size, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, vertex_shader, fragment_cpu, 1, example::shaderOptions());
     draw_once(cpu_variant_a);
     auto t1 = Clock::now();
     std::printf("[compile-comparison] cpu-if full variant A (AST -> Vulkan pipeline): %.3f ms\n",
                 elapsed_ms(t1 - t0));
 
+    verify_color(true);
     cpu_red = false;
     t0 = Clock::now();
-    horizon::RasterizerPipeline cpu_variant_b(vertex_shader, fragment_cpu, desc);
+    example::ScenePass<example::NoDrawParameters> cpu_variant_b(benchmark_size, benchmark_size, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, vertex_shader, fragment_cpu, 1, example::shaderOptions());
     draw_once(cpu_variant_b);
     t1 = Clock::now();
     std::printf("[compile-comparison] cpu-if full variant B (AST -> Vulkan pipeline): %.3f ms\n",
                 elapsed_ms(t1 - t0));
 
+    verify_color(false);
+
     // $IF initial compile, then incremental combine for the second variant.
     if_red = true;
     t0 = Clock::now();
-    horizon::RasterizerPipeline if_pipeline(vertex_shader, fragment_if, desc);
+    example::ScenePass<example::NoDrawParameters> if_pipeline(benchmark_size, benchmark_size, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, vertex_shader, fragment_if, 1, example::shaderOptions());
     draw_once(if_pipeline);
     t1 = Clock::now();
     std::printf("[compile-comparison] $IF full initial (AST -> Vulkan pipeline): %.3f ms\n",
                 elapsed_ms(t1 - t0));
 
+    verify_color(true);
     if_red = false;
     t0 = Clock::now();
-    const bool switched = if_pipeline.sync_shader_conditions();
+    const bool switched = if_pipeline.syncShaderConditions();
     draw_once(if_pipeline);
     t1 = Clock::now();
     std::printf("[compile-comparison] $IF combine incremental (variant -> Vulkan pipeline): %.3f ms (switched=%d)\n",
                 elapsed_ms(t1 - t0), switched ? 1 : 0);
+    verify_color(false);
+    if (!switched) throw std::runtime_error("EDSL condition did not switch");
     std::fflush(stdout);
 }

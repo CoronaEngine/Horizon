@@ -1,10 +1,11 @@
 #version 450
+#include "raster_batch.slang"
 
 // 阴影体示例：场景通用 VS（ambient / depthval / lit 三个 pass 共用布局）。
 //
 // 拆分策略：
-//   - UBO  vsp：批次共享（相机矩阵 + 所有光源/材质参数）256 bytes
-//   - PC   pc ：per-draw（model，每个物体不同）                 64 bytes
+//   - UBO  vsp：批次共享的相机、光源、材质和阴影纹理索引
+//   - BDA 参数 ：per-draw（model，每个物体不同）                 64 bytes
 
 // set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
 layout(set = 3, binding = 0) uniform SvSceneShared {
@@ -18,23 +19,23 @@ layout(set = 3, binding = 0) uniform SvSceneShared {
     vec4 fog;
     vec4 color;
     vec4 params; // xy: 屏幕分辨率
+    uint shadowCountIndex;
 } vsp;
 
-// vert/frag 共享同一 push constant 块。shadowCountIndex 仅 lit pass 的 FS 使用，
-// ambient/depthval pass 忽略；三 pass 共用 vert，布局必须一致。
-layout(push_constant) uniform SvScenePC {
+struct SvScenePC {
     mat4 model;
-    uint shadowCountIndex;
-} model_pc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
+};
+#define model_pc (*(SvScenePC*)(drawRoot.parameters + packet.parameterWord))
 
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec3 v_view;
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
     mat4 mvp        = vsp.proj_view   * model_pc.model;
     mat4 model_view = vsp.view_matrix * model_pc.model;
 

@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint hzParameterWord;
 
 // 移植自 bgfx examples/18-ibl 的 vs_ibl_mesh.sc + vs_ibl_skybox.sc。
 // 单 shader 同时承担网格与天空盒两条路径（pc.misc.x 区分）。
@@ -6,7 +8,6 @@
 // 拆分策略：
 //   - UBO  vsp：批次共享（proj_view、skyEnvMtx、envMtx、camPos、flags、
 //               rgbDiff、rgbSpec、lightDir、lightCol）288 bytes
-//   - PC   vpc：per-draw（model、params0、misc）96 bytes（VS 用 vpc，FS 用 fpc 避免歧义）
 // mvp 在 VS 内由 vsp.proj_view * vpc.model 现场计算，不再存储。
 
 // set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
@@ -22,29 +23,31 @@ layout(set = 3, binding = 0) uniform IblShared {
     vec4 lightCol;
 } vsp;
 
-// vert/frag 共享同一 push constant 块，布局必须一致。
 // texCubeIndex/texCubeIrrIndex 为 bindless combined-texture 表（set 0）索引，仅 FS 使用。
-layout(push_constant) uniform IblPC {
+struct IblDraw {
     mat4 model;    // 网格：per-draw model；天空盒：identity（不使用）
     vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
     vec4 misc;     // x: isSkybox, y: viewport 宽高比(w/h), z: metalOrSpec, w: unused
     uint texCubeIndex;
     uint texCubeIrrIndex;
-} vpc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
+};
+#define vpc (*(IblDraw*)(drawRoot.parameters + hzParameterWord))
 
 layout(location = 0) out vec3 v_view;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec3 v_dir;
 
-void main()
-{
+void main() {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    hzParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
+
     if (vpc.misc.x > 0.5)
     {
         // 天空盒：全屏三角形顶点已是 NDC 坐标，钉在远平面 (z=1)。
-        gl_Position = vec4(inPosition.xy, 1.0, 1.0);
+        gl_Position = vec4(inPosition.xy, 0.999999, 1.0);
 
         float fovHeight = tan(radians(45.0) * 0.5);
         float aspect    = vpc.misc.y;

@@ -1,6 +1,6 @@
 #include "horizon/core/logging.h"
 #ifdef HORIZON_TEST_ENGINE_LOGGING
-#include "horizon.h"
+#include "Horizon_old.h"
 #endif
 
 #include <cstdio>

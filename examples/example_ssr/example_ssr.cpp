@@ -21,7 +21,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -46,6 +47,11 @@
 
 namespace
 {
+struct SsrGeomPC {
+    glm::mat4 model{};
+    glm::vec4 material{};
+};
+
 constexpr uint32_t ssr_width = 1280;
 constexpr uint32_t ssr_height = 720;
 constexpr float ssr_near = 0.1f;
@@ -132,89 +138,60 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_ssr()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(ssr_width, ssr_height, "Horizon SSR [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(ssr_width, ssr_height, "Horizon SSR [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     const std::vector<SsrVertex> cube_vertices = build_cube_vertices();
-    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_ssr.cube.vb");
-    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_ssr.cube.ib");
-    const std::array<horizon::DrawIndexedIndirectCommand, 1> cube_cmd { {
-        { static_cast<uint32_t>(cube_indices.size()), 1, 0, 0, 0 },
-    } };
-    horizon::HardwareBuffer cube_indirect = horizon::HardwareBuffer::indirect(cube_cmd, "example_ssr.cube_indirect");
+    auto cube_vb = HardwareBuffer::uploadDeviceLocal(cube_vertices, BufferUsage::VertexBuffer);
+    auto cube_ib = HardwareBuffer::uploadDeviceLocal(cube_indices, BufferUsage::IndexBuffer);
 
     // ---- G-buffer / 中间目标 ----
-    const auto rt_usage = horizon::ImageUsage_ColorAttachment |
-                          horizon::ImageUsage_Sampled |
-                          horizon::ImageUsage_Storage;
 
-    horizon::HardwareImage color_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_ssr.color"));
-    color_image.set_clear_color(0.14f, 0.19f, 0.28f, 0.0f);
+    HardwareImage color_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    color_image.setClearColor(0.14f, 0.19f, 0.28f, 0.0f);
 
-    horizon::HardwareImage normal_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.normal"));
-    normal_image.set_clear_color(0.5f, 0.5f, 1.0f, 1.0f);
+    HardwareImage normal_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledStorageImage));
+    normal_image.setClearColor(0.5f, 0.5f, 1.0f, 1.0f);
 
-    horizon::HardwareImage albedo_met_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_ssr.albedo_met"));
-    albedo_met_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage albedo_met_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledStorageImage));
+    albedo_met_image.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage depth_val_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::R32_FLOAT, rt_usage, "example_ssr.depthval"));
-    depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage depth_val_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
+    depth_val_image.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage linear_depth_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
-        "example_ssr.lineardepth"));
+    HardwareImage linear_depth_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
 
-    horizon::HardwareImage ssr_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
-        "example_ssr.ssr"));
+    HardwareImage ssr_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        ssr_width, ssr_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_ssr.output"));
+    HardwareImage final_output_image(example::imageInfo(ssr_width, ssr_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
 
-    horizon::HardwareImage scene_depth(horizon::HardwareImageDesc::depth_attachment(
-        ssr_width, ssr_height, horizon::Format::D32, "example_ssr.depth"));
-    scene_depth.set_clear_depth(1.0f, 0);
+    HardwareImage scene_depth(example::imageInfo(ssr_width, ssr_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // ---- 管线 ----
-    horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline geom_rasterizer(ssr_geom_vert_glsl, ssr_geom_mrt_frag_glsl, geom_desc);
+    example::ScenePass<SsrGeomPC, ssr_geom_vert_glsl_t, ssr_geom_mrt_frag_glsl_t> geom_rasterizer(ssr_width, ssr_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     geom_rasterizer.outColor      = color_image;
     geom_rasterizer.outNormal     = normal_image;
     geom_rasterizer.outDepthVal   = depth_val_image;
     geom_rasterizer.outAlbedoMet  = albedo_met_image;
-    geom_rasterizer.bind_depth_target(scene_depth);
+    geom_rasterizer.setDepthImage(scene_depth);
 
-    horizon::ComputePipeline linear_depth_compute(ssr_linear_depth_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline trace_compute(ssr_trace_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline composite_compute(ssr_composite_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline pathtrace_compute(ssr_pathtrace_compute_glsl, ktm::uvec3(8, 8, 1));
+    ComputePipeline<ssr_linear_depth_compute_glsl_t> linear_depth_compute;
+    ComputePipeline<ssr_trace_compute_glsl_t> trace_compute;
+    ComputePipeline<ssr_composite_compute_glsl_t> composite_compute;
+    ComputePipeline<ssr_pathtrace_compute_glsl_t> pathtrace_compute;
 
-    const uint32_t color_id        = color_image.store_descriptor();
-    const uint32_t normal_id       = normal_image.store_descriptor();
-    const uint32_t depth_val_id    = depth_val_image.store_descriptor();
-    const uint32_t albedo_met_id   = albedo_met_image.store_descriptor();
-    const uint32_t linear_depth_id = linear_depth_image.store_descriptor();
-    const uint32_t ssr_id          = ssr_image.store_descriptor();
-    const uint32_t output_id       = final_output_image.store_descriptor();
+    const uint32_t color_id        = color_image.storeDescriptor();
+    const uint32_t normal_id       = normal_image.storeDescriptor();
+    const uint32_t depth_val_id    = depth_val_image.storeDescriptor();
+    const uint32_t albedo_met_id   = albedo_met_image.storeDescriptor();
+    const uint32_t linear_depth_id = linear_depth_image.storeDescriptor();
+    const uint32_t ssr_id          = ssr_image.storeDescriptor();
+    const uint32_t output_id       = final_output_image.storeDescriptor();
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
 
     // ---- 相机 ----
@@ -271,6 +248,11 @@ void run_example_ssr()
     double fps_accum_seconds = 0.0;
     int    fps_frame_count   = 0;
     uint32_t frame_index     = 0;
+
+    linear_depth_compute.uses({{depth_val_image, ResourceAccess::Read}, {linear_depth_image, ResourceAccess::Write}});
+    trace_compute.uses({{linear_depth_image, ResourceAccess::Read}, {normal_image, ResourceAccess::Read}, {color_image, ResourceAccess::Read}, {albedo_met_image, ResourceAccess::Read}, {ssr_image, ResourceAccess::Write}});
+    composite_compute.uses({{color_image, ResourceAccess::Read}, {ssr_image, ResourceAccess::Read}, {final_output_image, ResourceAccess::Write}});
+    pathtrace_compute.uses({{final_output_image, ResourceAccess::Write}});
 
     while (!glfwWindowShouldClose(window))
     {
@@ -366,7 +348,6 @@ void run_example_ssr()
         }
 
         // Pass 1：几何 → G-buffer
-        geom_rasterizer.clear_records();
         geom_rasterizer.vsp.view_proj    = view_proj;
         geom_rasterizer.vsp.view         = view;
         geom_rasterizer.vsp.light_dir_vs = glm::vec4(light_dir_vs, ambient);
@@ -377,16 +358,11 @@ void run_example_ssr()
                                                   mat.sheen, mat.sheen_tint);
         geom_rasterizer.vsp.disney_c = glm::vec4(mat.clearcoat, mat.clearcoat_gloss, 0.0f, 0.0f);
 
-        // model / material 走 push constant，按 record_indirect 调用快照：每个实例写完
-        // 自己的参数后单独 record 一次（共用同一条 cube 命令）。合成一个多 draw 批次
-        // 会让所有实例用最后一个 model 叠在一处。
-        horizon::DrawIndexedIndirectParams indirect_params;
-        indirect_params.draw_count = 1;
         for (const Instance& inst : instances)
         {
-            geom_rasterizer.vpc.model    = inst.model;
-            geom_rasterizer.vpc.material = glm::vec4(inst.albedo, 0.0f);
-            geom_rasterizer.record_indirect(cube_ib, cube_vb, cube_indirect, indirect_params);
+            geom_rasterizer.parameters.model    = inst.model;
+            geom_rasterizer.parameters.material = glm::vec4(inst.albedo, 0.0f);
+            if (!pathtrace_mode) geom_rasterizer.draw({cube_vb, cube_ib});
         }
 
         // Pass 2：器件深度 → view 空间线性深度
@@ -429,29 +405,25 @@ void run_example_ssr()
         pathtrace_compute.pushConsts.pt2 = glm::vec4(pt_right, float(ssr_width));
         pathtrace_compute.pushConsts.pt3 = glm::vec4(pt_up, float(ssr_height));
 
-        horizon::SubmitReceipt render_receipt;
-        if (pathtrace_mode)
+            if (pathtrace_mode)
         {
-            render_receipt = render_executor.stream() << pathtrace_compute.dispatch_extent(ssr_width, ssr_height)
-                                                      << horizon::commit();
+            render_executor << pathtrace_compute((ssr_width + 7) / 8, (ssr_height + 7) / 8, 1);
+        render_executor.commit();
         }
         else
         {
-            render_receipt = render_executor << geom_rasterizer.extent(ssr_width, ssr_height)
-                                             << linear_depth_compute.dispatch_extent(ssr_width, ssr_height)
-                                             << trace_compute.dispatch_extent(ssr_width, ssr_height)
-                                             << composite_compute.dispatch_extent(ssr_width, ssr_height)
-                                             << horizon::commit();
+            render_executor << geom_rasterizer
+                                             << linear_depth_compute((ssr_width + 7) / 8, (ssr_height + 7) / 8, 1)
+                                             << trace_compute((ssr_width + 7) / 8, (ssr_height + 7) / 8, 1)
+                                             << composite_compute((ssr_width + 7) / 8, (ssr_height + 7) / 8, 1);
+        render_executor.commit();
         }
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
 
         ++frame_index;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

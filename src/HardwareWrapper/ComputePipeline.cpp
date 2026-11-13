@@ -37,7 +37,9 @@ ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule 
 }
 
 ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&& other) noexcept
-    : computePipelineID(std::exchange(other.computePipelineID, 0)), autoBindEntries_(std::move(other.autoBindEntries_))
+    : computePipelineID(std::exchange(other.computePipelineID, 0)),
+      autoBindEntries_(std::move(other.autoBindEntries_)),
+      resourceUses_(std::move(other.resourceUses_))
 {
 }
 
@@ -54,6 +56,7 @@ ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other)
     delete reinterpret_cast<ComputePipelineVulkan*>(computePipelineID);
     computePipelineID = std::exchange(other.computePipelineID, 0);
     autoBindEntries_ = std::move(other.autoBindEntries_);
+    resourceUses_ = std::move(other.resourceUses_);
     return *this;
 }
 

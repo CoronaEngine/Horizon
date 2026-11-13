@@ -11,7 +11,7 @@
 class DisplayManager
 {
   public:
-    DisplayManager();
+    explicit DisplayManager(PresentDevicePreference preference);
     ~DisplayManager();
 
     // 禁止拷贝和移动
@@ -33,6 +33,7 @@ class DisplayManager
     // 显示参数
     ktm::uvec2 displaySize{0, 0};
     void *displaySurface{nullptr};
+    PresentDevicePreference devicePreference;
     uint32_t currentFrame{0};
 
     // 交换链资源

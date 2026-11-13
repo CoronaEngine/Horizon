@@ -13,7 +13,8 @@
 #include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -53,47 +54,24 @@ ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
 
 void run_example_edsl()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(edsl_width, edsl_height, "Horizon Baseline [EDSL]", nullptr, nullptr);
+    legacy_example::Window owner(edsl_width, edsl_height, "Horizon Baseline [EDSL]");
+    auto* window = owner.get();
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
-    horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
+    HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        edsl_width, edsl_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_edsl.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(edsl_width, edsl_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    horizon::HardwareImage depth_image(
-        horizon::HardwareImageDesc::depth_attachment(edsl_width, edsl_height, horizon::Format::D32, "example_edsl.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(
+        example::imageInfo(edsl_width, edsl_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::HardwareBuffer vertex_buffer = horizon::HardwareBuffer::vertex(mesh.vertices, "example_edsl.vertex");
-    horizon::HardwareBuffer index_buffer = horizon::HardwareBuffer::index(mesh.indices, "example_edsl.index");
+    auto vertex_buffer = HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer);
+    auto index_buffer = HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer);
 
-    // 方案 A：构建静态 indirect args buffer（单个 draw command）
-    horizon::DrawIndexedIndirectCommand indirect_cmd;
-    indirect_cmd.index_count = static_cast<uint32_t>(mesh.indices.size());
-    indirect_cmd.instance_count = 1;
-    indirect_cmd.first_index = 0;
-    indirect_cmd.vertex_offset = 0;
-    indirect_cmd.first_instance = 0;
 
-    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
-        std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(&indirect_cmd),
-            sizeof(horizon::DrawIndexedIndirectCommand)),
-        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
-        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-        "example_edsl.indirect_args");
-
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     using namespace EmbeddedShader;
     using namespace ktm;
@@ -115,10 +93,9 @@ void run_example_edsl()
         final_output_proxy << color * Float4(input->z, input->z, input->z, 1.0f);
     };
 
-    horizon::RasterizerPipelineDesc desc;
 
-    horizon::RasterizerPipeline rasterizer(vertex_shader, fragment_shader, desc);
-    rasterizer.bind_depth_target(depth_image);
+    example::ScenePass<example::NoDrawParameters> rasterizer(edsl_width, edsl_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Alpha}, {false, false}}, vertex_shader, fragment_shader, 1, example::shaderOptions());
+    rasterizer.setDepthImage(depth_image);
 
 
     HorizonImGuiLayer ui(window, edsl_width, edsl_height);
@@ -141,7 +118,6 @@ void run_example_edsl()
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
 
-    horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -169,28 +145,19 @@ void run_example_edsl()
             fps_frame_count = 0;
         }
 
-        // Model 每帧更新（push constant）；VP 已在循环外绑定
+        // Model 每帧更新（逐 draw 参数）；VP 已在循环外绑定
         model = to_edsl_matrix(
             glm::rotate(glm::mat4(1.0f),
                         time_seconds * glm::pi<float>() * 0.5f,
                         glm::vec3(0.0f, 0.0f, 1.0f)));
 
-        rasterizer.clear_records();
+        rasterizer.draw({vertex_buffer, index_buffer});
 
-        // 单次 indirect draw 替代 record()
-        horizon::DrawIndexedIndirectParams indirect_params;
-        indirect_params.draw_count = 1;
-        indirect_params.indirect_offset = 0;
-        indirect_params.stride = 0;
-        rasterizer.record_indirect(index_buffer, vertex_buffer, indirect_args_buffer, indirect_params);
+        render_executor << rasterizer;
+        render_executor.commit();
 
-        render_receipt = render_executor << rasterizer.extent(edsl_width, edsl_height) << horizon::commit();
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image) << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
-    display_executor.wait_idle(render_receipt);
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

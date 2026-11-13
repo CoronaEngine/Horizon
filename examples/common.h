@@ -24,47 +24,7 @@
 #define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #include <tiny_obj_loader.h>
 
-#include "horizon.h"
-
-inline std::string resolveShaderPath()
-{
-    namespace fs = std::filesystem;
-
-    for (fs::path current = fs::current_path(); !current.empty(); current = current.parent_path())
-    {
-        const fs::path examplesPath = current / "examples";
-        if (fs::exists(examplesPath / "assets"))
-        {
-            std::string resultPath = examplesPath.string();
-            std::replace(resultPath.begin(), resultPath.end(), '\\', '/');
-            return resultPath;
-        }
-
-        if (current == current.parent_path())
-        {
-            break;
-        }
-    }
-
-    throw std::runtime_error("Failed to resolve shader path.");
-}
-
-inline const std::string shaderPath = resolveShaderPath();
-inline const std::string textureAssetPath = shaderPath + "/assets/textures";
-inline const std::string defaultTexturePath = textureAssetPath + "/awesomeface.png";
-
-inline std::string readStringFile(const std::string_view filePath)
-{
-    std::ifstream file{std::string(filePath)};
-    if (!file.is_open())
-    {
-        throw std::runtime_error("Could not open file: " + std::string(filePath));
-    }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
-}
+#include "Horizon_old.h"
 
 struct Vertex
 {
@@ -76,19 +36,12 @@ struct Vertex
 
 struct TextureLoadResult
 {
-    horizon::HardwareImage texture;
+    HardwareImage texture;
     uint32_t descriptorID = 0;
     bool success = false;
 };
 
-void testCompressedTextures();
-TextureLoadResult loadTexture(const std::string &texturePath);
-TextureLoadResult loadCompressedTexture(const std::string &texturePath, bool useSRGB = true);
-TextureLoadResult loadTextureWithMipmapAndLayers(const std::string &texturePath,
-                                                 int arrayLayers,
-                                                 int mipLevels,
-                                                 int viewLayer = 0,
-                                                 int viewMip = 0);
+TextureLoadResult loadTexture(const std::string& path);
 
 // =============================================================================
 // baseline 工具：example_edsl 与 example_glsl 共用的 CPU 端网格加载 / UBO。

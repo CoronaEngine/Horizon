@@ -1,12 +1,56 @@
 #include "ShaderUtils.h"
 #include <Compiler/ShaderCommon.h>
+#include <spirv-tools/optimizer.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <sstream>
+#include <unordered_set>
 
 namespace EmbeddedShader
 {
+    void linkRasterDrawParameter(ShaderCodeModule& vertex, ShaderCodeModule& fragment)
+    {
+        using Resources = ShaderCodeModule::ShaderResources;
+        constexpr uint32_t parameterLocation = 15;
+        const auto isParameter = [](const Resources::ShaderBindInfo& binding) {
+            return binding.location == parameterLocation && binding.typeName == "uint" && binding.variateName == "hzParameterWord";
+        };
+        const auto isOutput = [&](const auto& binding) {
+            return binding.bindType == Resources::stageOutputs && isParameter(binding);
+        };
+        if (!std::ranges::any_of(vertex.shaderResources.bindInfoPool, isOutput)) return;
+
+        // Slang layout includes declared inputs even when linking a $IF branch removed the read.
+        auto& fs = std::get<std::vector<uint32_t>>(fragment.shaderCode);
+        std::unordered_set<uint32_t> liveLocations, liveBuiltins;
+        spvtools::Optimizer analyze(SPV_ENV_VULKAN_1_4);
+        analyze.RegisterPass(spvtools::CreateAnalyzeLiveInputPass(&liveLocations, &liveBuiltins));
+        analyze.RegisterPass(spvtools::CreateRemoveUnusedInterfaceVariablesPass());
+        analyze.RegisterPass(spvtools::CreateDeadVariableEliminationPass());
+        if (!analyze.Run(fs.data(), fs.size(), &fs))
+            throw std::runtime_error("Could not analyze the fragment SPIR-V interface");
+        if (liveLocations.contains(parameterLocation)) return;
+
+        // The draw offset is the only output we own. Keep the other reflected varyings,
+        // including their full location ranges (for example, a matrix before location 15).
+        for (const auto& binding : vertex.shaderResources.bindInfoPool) {
+            if (binding.bindType == Resources::stageOutputs && binding.location != parameterLocation)
+                liveLocations.insert(binding.location);
+        }
+        auto& vs = std::get<std::vector<uint32_t>>(vertex.shaderCode);
+        spvtools::Optimizer prune(SPV_ENV_VULKAN_1_4);
+        prune.RegisterPass(spvtools::CreateEliminateDeadOutputStoresPass(&liveLocations, &liveBuiltins));
+        prune.RegisterPass(spvtools::CreateRemoveUnusedInterfaceVariablesPass());
+        prune.RegisterPass(spvtools::CreateDeadVariableEliminationPass());
+        if (!prune.Run(vs.data(), vs.size(), &vs))
+            throw std::runtime_error("Could not link the indirect raster vertex outputs");
+        std::erase_if(vertex.shaderResources.bindInfoPool, isOutput);
+        std::erase_if(fragment.shaderResources.bindInfoPool, [&](const auto& binding) {
+            return binding.bindType == Resources::stageInputs && isParameter(binding);
+        });
+    }
+
 	// ---- 路径清理 ----
 
 	std::string sanitizePath(const std::filesystem::path& p)

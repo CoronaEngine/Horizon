@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // Sponza G-buffer geometry pass, fragment stage: single-pass MRT writing
 // albedo / world normal / device depth (PBR metallic-roughness 版本)。
@@ -7,9 +9,7 @@
 //   albedo.a -> metallic  (glTF metallicRoughness 贴图 B 通道 × metallicFactor)
 //   normal.a -> roughness (G 通道 × roughnessFactor)
 //
-// 材质来自 bindless SSBO 而非 push constant:顶点阶段把 draw 序号
-// (gl_InstanceIndex)以 flat varying 传下来,这里据此取本 draw 的材质。
-// 这样 push constant 对整个 pass 恒定,数百次 submesh draw 能合并成一条 MDI。
+// flat 材质下标来自顶点阶段的 gl_InstanceIndex，用于查找每个子网格的材质。
 
 #extension GL_EXT_nonuniform_qualifier : enable
 
@@ -21,13 +21,11 @@ layout(set = 3, binding = 0) uniform SponzaGeomShared {
     mat4 view_proj;
 } fsp;
 
-// Shares the push constant block with sponza_geom_vert.glsl; the layout must
-// match exactly. The EDSL inherits ResourceBindings from both stages, so the
-// two instances need different names to stay unambiguous on the C++ side.
-layout(push_constant) uniform SponzaGeomPC {
+// Draw parameter layout shared with sponza_geom_vert.glsl.
+struct SponzaGeomPC {
     uint per_draw_ssbo_index;
-    uint vertex_ssbo_index; // 顶点阶段 pulling 用,片元阶段不读,但布局必须一致
-} model_pc_fs;
+};
+#define model_pc_fs (*(SponzaGeomPC*)(drawRoot.parameters + drawParameterWord))
 
 // 逐-draw 材质。std430 下 vec4 对齐 16,尾部显式补齐到 64 字节,
 // 让 C++ 侧的 PerDrawMaterial 能按同样步长打包(布局必须逐字段一致)。

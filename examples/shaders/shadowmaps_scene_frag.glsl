@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // 移植自参考示例 16-shadowmaps 的 fs_shadowmaps_color_lighting_hard.sc。
 // FS 不依赖 per-draw 数据，只使用共享的 vsp UBO。
@@ -23,16 +25,15 @@ layout(set = 3, binding = 0) uniform ShadowSceneShared {
     vec4 color;
 } fsp;
 
-// bindless combined-image-sampler 表（set 0）+ 与 shadowmaps_scene_vert.glsl 共享的 push constant。
+// bindless combined-image-sampler 表（set 0）+ 与 shadowmaps_scene_vert.glsl 共享的 BDA 绘制参数。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-// 与 shadowmaps_scene_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 同时继承
-// vert/frag 的 ResourceBindings，两 stage 实例名必须不同以避免 C++ 端二义（C2385）。
-// C++ 通过 vert 的 model_pc 写入，frag 用 model_pc_fs 只读。
-layout(push_constant) uniform ShadowScenePC {
+// 与 shadowmaps_scene_vert.glsl 共享 BDA 绘制参数布局。
+struct ShadowScenePC {
     mat4 model;
     uint shadowMapIndex;
-} model_pc_fs;
+};
+#define model_pc_fs (*(ShadowScenePC*)(drawRoot.parameters + drawParameterWord))
 
 #define shadowMap combinedTextureSamplerHandles[model_pc_fs.shadowMapIndex]
 

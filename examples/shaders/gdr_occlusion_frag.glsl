@@ -1,4 +1,9 @@
 #version 450
+layout(set = 3, binding = 0) uniform Scene {
+    mat4 view;
+    mat4 proj;
+    uint instanceBufferID;
+} vp;
 
 // Write device depth into R32F for Hi-Z mip0 (compute cannot sample D32).
 

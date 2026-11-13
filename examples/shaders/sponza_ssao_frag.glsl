@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // Sponza screen-space ambient occlusion.
 //
@@ -20,10 +22,11 @@ layout(set = 3, binding = 0) uniform SponzaSsaoShared {
     vec4 params; // x: radius (world units), y: bias, z: intensity, w: unused
 } fsp;
 
-layout(push_constant) uniform SponzaSsaoPC {
+struct SponzaSsaoPC {
     uint gNormalIndex;
     uint gDepthIndex;
-} fpc;
+};
+#define fpc (*(SponzaSsaoPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 

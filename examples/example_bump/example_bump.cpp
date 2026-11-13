@@ -16,7 +16,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -40,6 +41,12 @@
 
 namespace
 {
+struct BumpPC {
+    glm::mat4 model{};
+    uint32_t texColorIndex{};
+    uint32_t texNormalIndex{};
+};
+
 constexpr uint32_t bump_width = 1280;
 constexpr uint32_t bump_height = 720;
 
@@ -69,7 +76,7 @@ std::vector<std::byte> read_file_bytes(const std::filesystem::path& path)
 }
 
 // 传统 DDS 头（128 字节）+ BC 压缩 payload 直接上传（含全 mip 链）
-horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, const std::string& name)
+HardwareImage create_bc_texture(const std::filesystem::path& path, const std::string& name)
 {
     const std::vector<std::byte> bytes = read_file_bytes(path);
 
@@ -84,31 +91,25 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
 
     constexpr uint32_t fourcc_dxt3 = 0x33545844; // "DXT3" -> BC2
     constexpr uint32_t fourcc_ati2 = 0x32495441; // "ATI2" -> BC5
-    horizon::Format format;
+    ImageFormat format;
     if (four_cc == fourcc_dxt3)
-        format = horizon::Format::BC2_UNORM;
+        format = ImageFormat::BC2_RGBA_UNORM;
     else if (four_cc == fourcc_ati2)
-        format = horizon::Format::BC5_UNORM;
+        format = ImageFormat::BC5_RG_UNORM;
     else
         throw std::runtime_error("Unsupported DDS fourcc: " + path.string());
 
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-        width, height, format,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = mip_count;
+    HardwareImageCreateInfo desc = example::imageInfo(width, height, format, ImageUsage::SampledImage);
 
-    horizon::HardwareImage image(desc);
+    desc.mipLevels = mip_count;
+    HardwareImage image(desc);
 
     const std::span<const std::byte> payload(bytes.data() + 128, bytes.size() - 128);
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, payload);
 
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    auto staging = example::staging(payload);
+
+    HardwareExecutor executor;
+    auto& stream = executor;
     uint64_t offset = 0;
     for (uint32_t mip = 0; mip < mip_count; ++mip)
     {
@@ -116,10 +117,10 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
         const uint32_t mip_h = std::max(1u, height >> mip);
         const uint64_t blocks_x = (mip_w + 3) / 4;
         const uint64_t blocks_y = (mip_h + 3) / 4;
-        stream << image.copy_from(staging, offset, 0, mip);
+        stream << staging.copyTo(image, offset, 0, mip);
         offset += blocks_x * blocks_y * 16; // BC2/BC5 均为 16 字节/块
     }
-    (void)(stream << horizon::commit());
+    stream.commit().waitForDeferredResources();
 
     return image;
 }
@@ -239,53 +240,34 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_bump()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(bump_width, bump_height, "Horizon Bump [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(bump_width, bump_height, "Horizon Bump [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     std::vector<BumpVertex> cube_vertices = build_cube_vertices();
     calc_tangents(cube_vertices, cube_indices);
 
-    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_bump.vb");
-    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_bump.ib");
+    auto cube_vb = HardwareBuffer::uploadDeviceLocal(cube_vertices, BufferUsage::VertexBuffer);
+    auto cube_ib = HardwareBuffer::uploadDeviceLocal(cube_indices, BufferUsage::IndexBuffer);
 
-    // 9 个 cube 共用同一条 indirect 命令（逐 cube 只换 push constant 里的 model）。
-    const std::array<horizon::DrawIndexedIndirectCommand, 1> cube_cmd { {
-        { static_cast<uint32_t>(cube_indices.size()), 1, 0, 0, 0 },
-    } };
-    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::indirect(cube_cmd, "example_bump.indirect_args");
+    HardwareImage color_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-rgba.dds", "example_bump.texColor");
+    HardwareImage normal_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-n.dds", "example_bump.texNormal");
 
-    horizon::HardwareImage color_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-rgba.dds", "example_bump.texColor");
-    horizon::HardwareImage normal_image = create_bc_texture(bump_asset_root / "textures" / "fieldstone-n.dds", "example_bump.texNormal");
+    HardwareImage final_output_image(example::imageInfo(bump_width, bump_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0x30 / 255.0f, 0x30 / 255.0f, 0x30 / 255.0f, 1.0f); // 原版 0x303030ff
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        bump_width, bump_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_bump.output"));
-    final_output_image.set_clear_color(0x30 / 255.0f, 0x30 / 255.0f, 0x30 / 255.0f, 1.0f); // 原版 0x303030ff
+    HardwareImage depth_image(example::imageInfo(bump_width, bump_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        bump_width, bump_height, horizon::Format::D32, "example_bump.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
 
-    horizon::RasterizerPipelineDesc desc;
-    desc.blend_enabled = false;
-    desc.depth_compare_op = horizon::CompareOp::Less; // 原版 depth test 为严格 LESS
-
-    horizon::RasterizerPipeline rasterizer(bump_vert_glsl, bump_frag_glsl, desc);
+    example::ScenePass<BumpPC, bump_vert_glsl_t, bump_frag_glsl_t> rasterizer(bump_width, bump_height, {{true, true, RasterCompare::Less, RasterBlend::Opaque}, {false, false}});
     rasterizer.outColor = final_output_image;
-    rasterizer.bind_depth_target(depth_image);
-    // 纹理存入 bindless combined-texture 表（set 0），索引经 push constant 传入 shader。
-    rasterizer.model_pc.texColorIndex = color_image.store_descriptor();
-    rasterizer.model_pc.texNormalIndex = normal_image.store_descriptor();
+    rasterizer.setDepthImage(depth_image);
+    // 纹理存入 bindless combined-texture 表（set 0），索引经逐 draw 参数传入 shader。
+    rasterizer.parameters.texColorIndex = color_image.storeDescriptor();
+    rasterizer.parameters.texNormalIndex = normal_image.storeDescriptor();
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
 
     constexpr float aspect = static_cast<float>(bump_width) / static_cast<float>(bump_height);
@@ -348,7 +330,6 @@ void run_example_bump()
                 -2.5f, 3.0f);
         }
 
-        rasterizer.clear_records();
         rasterizer.vsp.view_proj = view_proj;
         rasterizer.vsp.eye_pos = glm::vec4(eye, 1.0f);
         rasterizer.vsp.light0_pos_radius = light_pos_radius[0];
@@ -360,9 +341,6 @@ void run_example_bump()
         rasterizer.vsp.light2_rgb_inner_r = light_rgb_inner_r[2];
         rasterizer.vsp.light3_rgb_inner_r = light_rgb_inner_r[3];
 
-        // model 走 push constant，而 push constant 按 record_indirect 调用快照：
-        // 每个 cube 必须在写完自己的 model 之后单独 record 一次，合成一个
-        // draw_count=9 的批次会让 9 个 cube 全部用最后一个 model 叠在一处。
         for (uint32_t yy = 0; yy < 3; ++yy)
         {
             for (uint32_t xx = 0; xx < 3; ++xx)
@@ -371,25 +349,17 @@ void run_example_bump()
                 glm::mat4 model = glm::eulerAngleYX(-(time * 0.03f + yy * 0.37f), -(time * 0.023f + xx * 0.21f));
                 model[3] = glm::vec4(-3.0f + xx * 3.0f, -3.0f + yy * 3.0f, 0.0f, 1.0f);
 
-                rasterizer.model_pc.model = model;
-
-                horizon::DrawIndexedIndirectParams indirect_params;
-                indirect_params.draw_count = 1;
-                indirect_params.indirect_offset = 0;
-                indirect_params.stride = 0;
-                rasterizer.record_indirect(cube_ib, cube_vb, indirect_args_buffer, indirect_params);
+                rasterizer.parameters.model = model;
+                rasterizer.draw({cube_vb, cube_ib});
             }
         }
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer.extent(bump_width, bump_height) << horizon::commit();
+        render_executor << rasterizer;
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

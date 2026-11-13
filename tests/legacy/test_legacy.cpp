@@ -1,20 +1,20 @@
 #include "Horizon_old.h"
+#include "Codegen/BuiltinVariate.h"
+#include "Codegen/ControlFlows.h"
+#include "Codegen/TypeAlias.h"
+#include "Compiler/ShaderUtils.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "HardwareWrapperVulkan/ResourcePool.h"
 
 #include <array>
 #include <cstdlib>
-#include <cstring>
+#include <utility>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <spirv-tools/libspirv.hpp>
 
 #if defined(_MSC_VER)
 #include <crtdbg.h>
-#endif
-
-#ifndef HORIZON_LEGACY_API
-#error "This test must be linked to the legacy Horizon target."
 #endif
 
 namespace
@@ -26,38 +26,63 @@ void expect(bool condition, const char* message)
 
 void test_cpu()
 {
+    using namespace EmbeddedShader;
+    auto vertex = [](Float3 pos) { position() = Float4(pos, Float(1)); };
+    auto fragment = [] { return Float4(1, 0, 0, 1); };
+    auto stages = RasterizedPipelineObject::compile(vertex, fragment);
+    auto spirv = stages.vertex->getShaderCode(ShaderLanguage::SpirV);
+    expect(!std::get<std::vector<uint32_t>>(spirv.shaderCode).empty() && spirv.shaderResources.pushConstantSize == 0,
+           "default Helicon vertex inputs compile without the indirect ABI");
+    if (CompilerOption{}.compileHLSL) {
+        auto hlsl = stages.vertex->getShaderCode(ShaderLanguage::HLSL);
+        expect(!std::get<std::string>(hlsl.shaderCode).empty(), "default HLSL target");
+    }
+
+    bool drawColor = false;
+    auto vertexWithDraw = [](Float3 pos) { position() = Float4(pos, rasterDrawParameter<float>(3)); };
+    auto conditionalColor = [&] {
+        Float4 color;
+        color = Float4(1, 1, 1, 1);
+        $IF(drawColor) { color = rasterDrawParameter<ktm::fvec4>(0); };
+        return color;
+    };
+    CompilerOption indirect;
+    indirect.horizonVulkan = true;
+    indirect.compileHLSL = false;
+    auto variants = RasterizedPipelineObject::compile(vertexWithDraw, conditionalColor, indirect);
+    for (bool bindless : {false, true}) {
+        for (bool reads : {false, true, false}) {
+            drawColor = reads;
+            auto vs = variants.vertex->getShaderCode(ShaderLanguage::SpirV, bindless);
+            auto fs = variants.fragment->getShaderCode(ShaderLanguage::SpirV, bindless);
+            linkRasterDrawParameter(vs, fs);
+            for (const auto* stage : {&vs, &fs}) {
+                std::string assembly;
+                spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_4);
+                expect(tools.Disassemble(std::get<std::vector<uint32_t>>(stage->shaderCode), &assembly),
+                       "disassemble linked raster stage");
+                expect((assembly.find(" Location 15\n") != std::string::npos) == reads,
+                       "location 15 in the linked SPIR-V must match the fragment read");
+            }
+            expect((vs.shaderResources.findShaderBindInfo("hzParameterWord") != nullptr) == reads &&
+                   (fs.shaderResources.findShaderBindInfo("hzParameterWord") != nullptr) == reads,
+                   "only fragment variants reading per-draw data receive location 15");
+        }
+    }
+
     HardwareBuffer empty;
     HardwareImage image;
     HardwareDisplayer displayer;
-    HardwareDisplayer displayCopy(displayer);
-    expect(displayCopy.getDisplayerID() == displayer.getDisplayerID(), "displayer copy shares ownership");
+    const auto displayerID = displayer.getDisplayerID();
+    HardwareDisplayer movedDisplayer(std::move(displayer));
+    expect(displayer.getDisplayerID() == 0 && movedDisplayer.getDisplayerID() == displayerID,
+           "displayer move construction transfers ownership");
+    displayer = std::move(movedDisplayer);
+    expect(movedDisplayer.getDisplayerID() == 0 && displayer.getDisplayerID() == displayerID,
+           "displayer move assignment transfers ownership");
     expect(!empty && !image, "default resources must be empty");
     auto command = empty.copyTo(empty);
     expect(command.impl->getCommandRecord() == nullptr, "empty copy must not record GPU work");
-
-    const std::array<uint32_t, 4> values{11, 22, 33, 44};
-    HardwarePushConstant original(values);
-    expect(original.getSize() == sizeof(values), "typed push constant size");
-    expect(std::memcmp(original.getData(), values.data(), sizeof(values)) == 0, "typed push constant bytes");
-    {
-        HardwarePushConstant alias(original);
-        alias = original; // Two wrappers for the same slot must not deadlock.
-        expect(alias.getPushConstantID() == original.getPushConstantID(), "copy shares ownership");
-        HardwarePushConstant moved(std::move(alias));
-        expect(alias.getSize() == 0 && alias.getData() == nullptr, "moved-from push constant is empty");
-        expect(moved.getSize() == sizeof(values), "move retains data");
-        moved = uint32_t{99};
-        expect(moved.getSize() == sizeof(uint32_t), "typed assignment replaces storage");
-    }
-    expect(std::memcmp(original.getData(), values.data(), sizeof(values)) == 0, "shared source survives replacement");
-    // Reuse storage slots repeatedly to catch stale refcounts and double frees.
-    for (unsigned i = 0; i < 300; ++i)
-    {
-        HardwarePushConstant value(i);
-        HardwarePushConstant copy;
-        copy = value;
-        expect(std::memcmp(copy.getData(), &i, sizeof(i)) == 0, "reused push constant slot");
-    }
 }
 
 bool has_vulkan_14_device()
@@ -84,6 +109,164 @@ bool has_vulkan_14_device()
     }
     vkDestroyInstance(instance, nullptr);
     return supported;
+}
+
+// Two scissor runs force DrawIndex to restart. Read both colors back after
+// the pipeline and geometry handles have gone out of scope.
+void test_raster_batch()
+{
+    using namespace EmbeddedShader;
+    HardwareExecutor executor;
+    HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    {
+        Texture2D<ktm::fvec4> color;
+        bool useDrawColor = true;
+        auto vs = [&](Float2 pos, Float scale) {
+            Float w;
+            w = Float(0);
+            $IF(useDrawColor) { w = rasterDrawParameter<float>(3); };
+            position() = Float4(pos, Float(0), w * scale);
+        };
+        auto fs = [&] {
+            Float4 value;
+            value = Float4(0, 0, 0, 1);
+            $IF(useDrawColor) { value = rasterDrawParameter<ktm::fvec4>(0); };
+            color << value;
+        };
+        RasterizerPipeline pipeline(vs, fs);
+        color = target;
+        pipeline.setDepthEnabled(false);
+        auto batch = pipeline.beginBatch(4, 2);
+        const std::array<std::array<float, 3>, 3> vertices{{{-1,-1,1}, {3,-1,1}, {-1,3,1}}};
+        HardwareBuffer vb(vertices, BufferUsage::VertexBuffer);
+        RasterGeometry left{vb, HardwareBuffer(std::array<uint16_t,3>{0,1,2}, BufferUsage::IndexBuffer)};
+        RasterGeometry right{vb, HardwareBuffer(std::array<uint32_t,4>{99,1,2,3}, BufferUsage::IndexBuffer)};
+        batch.draw(left, {.scissor = ScissorRect{0,0,2,2}}, std::array<float,4>{1,0,0,1});
+        batch.draw(right, {.indexCount=3, .firstIndex=1, .vertexOffset=-1, .instanceCount=2,
+                           .scissor = ScissorRect{2,0,2,2}}, std::array<float,4>{0,1,0,1});
+        executor << std::move(batch);
+    }
+    std::array<std::array<float,4>,8> pixels{};
+    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
+    executor << target.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)), "raster readback");
+    for (size_t i = 0; i < pixels.size(); ++i) {
+        const bool left = i % 4 < 2;
+        expect(pixels[i] == std::array<float,4>{float(left), float(!left), 0, 1},
+               "indirect scissor run, index range or per-fragment parameter mismatch");
+    }
+}
+
+// A compute-written packet draws the right half at the depth left by pass one.
+// Clearing either attachment or losing the packet between stages changes a pixel.
+void test_generated_packet_and_attachment_load()
+{
+    using namespace EmbeddedShader;
+    HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareImage depth(4, 2, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
+    Texture2D<ktm::fvec4> output = target;
+    auto vs = [] {
+        position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), Float(0.5), Float(1));
+    };
+    auto fs = [&] { output << rasterDrawParameter<ktm::fvec4>(0); };
+    RasterizerPipeline pipeline(vs, fs);
+    pipeline.setDepthImage(depth);
+    pipeline.setRasterState({true, true, RasterCompare::Less, RasterBlend::Opaque});
+
+    const std::array<std::array<float,2>,7> vertices{{{-1,-1},{3,-1},{-1,3},
+                                                       {0,-1},{1,-1},{1,1},{0,1}}};
+    const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
+    RasterGeometry mesh{HardwareBuffer::uploadDeviceLocal(vertices, BufferUsage::VertexBuffer),
+                        HardwareBuffer::uploadDeviceLocal(indices, BufferUsage::IndexBuffer)};
+    auto first = pipeline.beginBatch(4, 2);
+    first.draw(mesh, {.indexCount=3}, std::array<float,4>{1,0,0,1});
+    HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
+    EmbeddedShader::ArrayProxy<uint32_t> words(packets);
+    ComputePipelineBase generate([&] {
+        words[0] = Uint(6);
+        words[1] = Uint(1);
+        words[5] = Uint(3);
+        words[7] = Uint(4);
+    });
+    generate.uses({{packets, ResourceAccess::Write}});
+    pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
+    auto second = pipeline.beginBatch(4, 2, {true, true});
+    const std::array<float,8> colors{0,0,1,0, 0,1,0,0};
+    second.drawIndirect(mesh, packets, 1, std::span(colors));
+
+    HardwareExecutor executor;
+    std::array<std::array<float,4>,8> pixels{};
+    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
+    executor << std::move(first) << generate(1,1,1) << std::move(second) << target.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
+    for (size_t i = 0; i < pixels.size(); ++i) {
+        expect(pixels[i] == std::array<float,4>{1, float(i % 4 >= 2), 0, 1},
+               "GPU-generated range, attachment load, equal depth or additive blend failed");
+    }
+}
+
+void test_compute_sampling()
+{
+    using namespace EmbeddedShader;
+    using Pixel = std::array<float, 4>;
+    const std::array<Pixel, 4> source{{{1,0,0,1}, {0,1,0,1}, {0,0,1,1}, {1,1,0,1}}};
+    HardwareBuffer upload(source, BufferUsage::StorageBuffer);
+    std::array<Pixel, 16> base{};
+    HardwareBuffer uploadBase(base, BufferUsage::StorageBuffer);
+    HardwareImageCreateInfo info(4, 4, ImageFormat::RGBA32_FLOAT);
+    info.mipLevels = 2;
+    info.usage = ImageUsage::SampledStorageImage;
+    HardwareImage input(info);
+    HardwareImage result(2, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareBuffer readback(sizeof(source), BufferUsage::StorageBuffer);
+    Texture2D<ktm::fvec4> tex = input, dst = result;
+    Sampler sampler;
+    auto shader = [&] {
+        auto xy = dispatchThreadID()->xy();
+        dst[xy] = tex.sample(sampler, (Float2(xy) + Float2(0.5f)) / Float(2));
+    };
+    CompilerOption options;
+    options.compileHLSL = false;
+    (void)ComputePipelineObject::compile(shader, ktm::uvec3(2, 2, 1), options);
+    HardwareExecutor executor;
+    std::array<Pixel, 4> pixels{};
+    executor << uploadBase.copyTo(input) << upload.copyTo(input, 0, 0, 1);
+    if (getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils().computeDerivativeGroupQuads) {
+        // A 2x2 quad over a 4x4 image selects the colored mip.
+        ComputePipelineBase pipeline(shader, ktm::uvec3(2, 2, 1), options);
+        executor << pipeline(1, 1, 1) << result.copyTo(readback);
+        executor.commit().waitForDeferredResources();
+        expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == source, "explicit compute sampler mip readback");
+    } else {
+        std::cerr << "Skipping implicit-LOD readback on a device without compute quad derivatives\n";
+    }
+
+    auto mipZero = input[0];
+    tex = mipZero;
+    ComputePipelineBase load([&] {
+        auto xy = dispatchThreadID()->xy();
+        dst[xy] = tex[xy];
+    }, ktm::uvec3(2, 2, 1), options);
+    executor << load(1, 1, 1) << result.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == std::array<Pixel, 4>{},
+           "the same texture proxy can be used for storage reads in a later pipeline");
+
+    HardwareImageCreateInfo cubeInfo(2, 2, ImageFormat::RGBA32_FLOAT);
+    cubeInfo.cube = true;
+    cubeInfo.arrayLayers = 6;
+    cubeInfo.mipLevels = 2;
+    HardwareImage cubeImage(cubeInfo);
+    TextureCube<ktm::fvec4> cube = cubeImage;
+    ComputePipelineBase sampleCube([&] {
+        dst[dispatchThreadID()->xy()] = cube.sampleLevel(sampler, Float3(1, 0, 0), Float(1));
+    }, ktm::uvec3(2, 2, 1), options);
+    executor << upload.copyTo(cubeImage, 0, 0, 1) << sampleCube(1, 1, 1) << result.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    expect(readback.copyToData(pixels.data(), sizeof(pixels)) && std::ranges::all_of(pixels, [&](Pixel p) { return p == source[0]; }),
+           "explicit compute cube sampler reads the requested mip");
 }
 
 void test_gpu()
@@ -129,6 +312,15 @@ void test_gpu()
     imageInfo.mipLevels = 2;
     HardwareImage image(imageInfo);
     HardwareImage imageCopy(imageInfo);
+    EmbeddedShader::ParseHelper::beginNotInitNode();
+    EmbeddedShader::TextureCubeProxy<ktm::fvec4> cube;
+    EmbeddedShader::ParseHelper::endNotInitNode();
+    HardwareImageCreateInfo cubeInfo(4, 4);
+    cubeInfo.cube = true;
+    cubeInfo.arrayLayers = 6;
+    cube.createResource(cubeInfo);
+    expect(cube.resource() == &cube.image() && static_cast<bool>(cube.image()),
+           "cube proxy binds its owned Horizon image");
     {
         HardwareImage owner(imageInfo);
         auto view = owner[1];
@@ -193,6 +385,9 @@ int main(int argc, char** argv)
                 return 77;
             }
             test_gpu();
+            test_raster_batch();
+            test_generated_packet_and_attachment_load();
+            test_compute_sampling();
         }
         else
             test_cpu();

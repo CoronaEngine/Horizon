@@ -8,7 +8,7 @@
 //
 // 场景：shadowmaps 场景（550 地面 + bunny + hollowcube + cube + 环形柱子、
 // 聚光灯绕场景旋转）+ 两面彩色墙（橙 x=-35、蓝 z=+35，给间接光提供颜色源），
-// 每个物体带 albedo（push constant），相机固定 (0,60,-105) 俯视。
+// 每个物体带 albedo（逐 draw 参数），相机固定 (0,60,-105) 俯视。
 // imgui 可调：间接光强度 / 采样半径 / 光强 / debug 视图（Final|Direct|Indirect）。
 
 #if defined(_WIN32)
@@ -23,7 +23,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -49,6 +50,18 @@
 
 namespace
 {
+struct RsmPackPC {
+    glm::mat4 model{};
+    glm::vec4 albedo{};
+};
+struct RsmScenePC {
+    glm::mat4 model{};
+    glm::vec4 albedo{};
+    uint32_t rsmPositionIndex{};
+    uint32_t rsmNormalIndex{};
+    uint32_t rsmFluxIndex{};
+};
+
 constexpr uint32_t rsm_width = 1280;
 constexpr uint32_t rsm_height = 720;
 constexpr uint32_t rsm_map_size = 512; // RSM 分辨率（间接光照低频，从1024降低减少4倍开销）
@@ -231,29 +244,29 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    horizon::HardwareBuffer vb;
-    horizon::HardwareBuffer ib;
+    HardwareBuffer vb;
+    HardwareBuffer ib;
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
     // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
-    horizon::HardwareBuffer indirect;
+    std::vector<RasterDraw> indirect;
 };
 
-horizon::HardwareBuffer group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
+std::vector<RasterDraw> group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
 {
-    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    std::vector<RasterDraw> commands;
     commands.reserve(groups.size());
     for (const MeshGroup& group : groups)
-        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
-    return horizon::HardwareBuffer::indirect(commands, name + ".indirect");
+        commands.push_back(RasterDraw{.indexCount = group.index_count, .firstIndex = group.first_index, .vertexOffset = group.base_vertex, .firstInstance = 0});
+    return commands;
 }
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(mesh.indices.size()),
         mesh.groups,
         group_indirect(mesh.groups, name),
@@ -269,10 +282,10 @@ GpuMesh make_quad(const std::array<glm::vec3, 4>& corners, const glm::vec3& norm
         vertices.push_back({ { c.x, c.y, c.z }, { normal.x, normal.y, normal.z } });
     const std::vector<uint16_t> indices = { 0, 1, 2, 1, 3, 2 };
     std::vector<MeshGroup> groups = { MeshGroup { 0, static_cast<uint32_t>(indices.size()), 0 } };
-    horizon::HardwareBuffer indirect = group_indirect(groups, name);
+    std::vector<RasterDraw> indirect = group_indirect(groups, name);
     return GpuMesh {
-        horizon::HardwareBuffer::vertex(vertices, name + ".vb"),
-        horizon::HardwareBuffer::index(indices, name + ".ib"),
+        HardwareBuffer::uploadDeviceLocal(vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(indices.size()),
         std::move(groups),
         std::move(indirect),
@@ -289,10 +302,8 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_rsm()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(rsm_width, rsm_height, "Horizon RSM [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(rsm_width, rsm_height, "Horizon RSM [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     GpuMesh bunny = upload_mesh(load_bin_mesh(rsm_asset_root / "meshes" / "bunny.bin"), "example_rsm.bunny");
@@ -317,62 +328,43 @@ void run_example_rsm()
         glm::vec3(0.0f, 0.0f, -1.0f), "example_rsm.wall_blue");
 
     // Pass 1 目标：1024x1024 RSM 三附件 + D32
-    const auto rsm_rt_usage = horizon::ImageUsage_ColorAttachment |
-                              horizon::ImageUsage_Sampled;
 
     // xyz: 世界坐标, w: 光空间深度（清屏 w=1 → 最远，阴影比较视为无遮挡）
-    horizon::HardwareImage rsm_position_image(horizon::HardwareImageDesc::texture_2d(
-        rsm_map_size, rsm_map_size, horizon::Format::RGBA32_FLOAT, rsm_rt_usage, "example_rsm.position"));
-    rsm_position_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage rsm_position_image(example::imageInfo(rsm_map_size, rsm_map_size, ImageFormat::RGBA32_FLOAT, ImageUsage::SampledImage));
+    rsm_position_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    horizon::HardwareImage rsm_normal_image(horizon::HardwareImageDesc::texture_2d(
-        rsm_map_size, rsm_map_size, horizon::Format::RGBA16_FLOAT, rsm_rt_usage, "example_rsm.normal"));
-    rsm_normal_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // 零法线 → gather 无贡献
+    HardwareImage rsm_normal_image(example::imageInfo(rsm_map_size, rsm_map_size, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
+    rsm_normal_image.setClearColor(0.0f, 0.0f, 0.0f, 0.0f); // 零法线 → gather 无贡献
 
-    horizon::HardwareImage rsm_flux_image(horizon::HardwareImageDesc::texture_2d(
-        rsm_map_size, rsm_map_size, horizon::Format::RGBA16_FLOAT, rsm_rt_usage, "example_rsm.flux"));
-    rsm_flux_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // 零 flux → gather 无贡献
+    HardwareImage rsm_flux_image(example::imageInfo(rsm_map_size, rsm_map_size, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
+    rsm_flux_image.setClearColor(0.0f, 0.0f, 0.0f, 0.0f); // 零 flux → gather 无贡献
 
-    horizon::HardwareImage rsm_depth_image(horizon::HardwareImageDesc::depth_attachment(
-        rsm_map_size, rsm_map_size, horizon::Format::D32, "example_rsm.rsm_depth"));
-    rsm_depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage rsm_depth_image(example::imageInfo(rsm_map_size, rsm_map_size, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // Pass 2 目标：主输出
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        rsm_width, rsm_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_rsm.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(rsm_width, rsm_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        rsm_width, rsm_height, horizon::Format::D32, "example_rsm.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(example::imageInfo(rsm_width, rsm_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::RasterizerPipelineDesc pack_desc;
-    pack_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline pack_rasterizer(rsm_pack_vert_glsl, rsm_pack_frag_glsl, pack_desc);
+    example::ScenePass<RsmPackPC, rsm_pack_vert_glsl_t, rsm_pack_frag_glsl_t> pack_rasterizer(rsm_map_size, rsm_map_size, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     pack_rasterizer.outPosition = rsm_position_image;
     pack_rasterizer.outNormal = rsm_normal_image;
     pack_rasterizer.outFlux = rsm_flux_image;
-    pack_rasterizer.bind_depth_target(rsm_depth_image);
+    pack_rasterizer.setDepthImage(rsm_depth_image);
 
-    horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline scene_rasterizer(rsm_scene_vert_glsl, rsm_scene_frag_glsl, scene_desc);
+    example::ScenePass<RsmScenePC, rsm_scene_vert_glsl_t, rsm_scene_frag_glsl_t> scene_rasterizer(rsm_width, rsm_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     scene_rasterizer.outColor = final_output_image;
-    scene_rasterizer.bind_depth_target(depth_image);
-    // RSM 三张图存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
-    scene_rasterizer.model_pc.rsmPositionIndex = rsm_position_image.store_descriptor();
-    scene_rasterizer.model_pc.rsmNormalIndex = rsm_normal_image.store_descriptor();
-    scene_rasterizer.model_pc.rsmFluxIndex = rsm_flux_image.store_descriptor();
+    scene_rasterizer.setDepthImage(depth_image);
+    // RSM 三张图存入 bindless combined-texture 表（set 0），索引经逐 draw 参数传入。
+    scene_rasterizer.parameters.rsmPositionIndex = rsm_position_image.storeDescriptor();
+    scene_rasterizer.parameters.rsmNormalIndex = rsm_normal_image.storeDescriptor();
+    scene_rasterizer.parameters.rsmFluxIndex = rsm_flux_image.storeDescriptor();
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(rsm_width) / static_cast<float>(rsm_height);
     // 与 shadowmaps 相同的固定俯视相机
@@ -465,7 +457,7 @@ void run_example_rsm()
         const glm::mat4 light_view_proj = light_proj * light_view;
         const glm::mat4 shadow_mtx = shadow_bias_mtx * light_view_proj;
 
-        // 场景物体：albedo 走 push constant；白色物体等着被彩墙 bleed
+        // 场景物体：albedo 由 draw 参数传递；白色物体等着被彩墙 bleed
         struct DrawItem
         {
             const GpuMesh* mesh;
@@ -504,27 +496,20 @@ void run_example_rsm()
         const float cos_outer = std::cos(glm::radians(spot_outer_angle));
 
         // Pass 1：光源视角生成 RSM（MRT：position+depth / normal / flux）- Convert to indirect
-        pack_rasterizer.clear_records();
         pack_rasterizer.vsp.light_view_proj = light_view_proj;
         pack_rasterizer.vsp.light_pos_ws = glm::vec4(light_pos, 0.0f);
         pack_rasterizer.vsp.light_dir_ws = glm::vec4(spot_dir, 0.0f);
         pack_rasterizer.vsp.light_color = glm::vec4(light_color, 0.0f);
         pack_rasterizer.vsp.spot_params = glm::vec4(cos_inner, cos_outer, 0.0f, 0.0f);
 
-        // model / albedo 按 record_indirect 调用快照，且一次调用只绑一对 VB/IB：
-        // 每个物体写完自己的参数后，用它自己 mesh 的 VB/IB 单独 record 一次。
         for (const DrawItem& item : items)
         {
-            pack_rasterizer.pack_pc.model = item.model;
-            pack_rasterizer.pack_pc.albedo = item.albedo;
-
-            horizon::DrawIndexedIndirectParams pack_params;
-            pack_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
-            pack_rasterizer.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, pack_params);
+            pack_rasterizer.parameters.model = item.model;
+            pack_rasterizer.parameters.albedo = item.albedo;
+            pack_rasterizer.draw({item.mesh->vb, item.mesh->ib}, item.mesh->indirect);
         }
 
-        // Pass 2：场景直接光 + 硬阴影 + RSM 间接光 - Convert to indirect
-        scene_rasterizer.clear_records();
+        // Pass 2：场景直接光 + 硬阴影 + RSM 间接光
         scene_rasterizer.vsp.proj_view = view_proj;
         scene_rasterizer.vsp.light_proj_view = shadow_mtx; // bias * light_proj * light_view
         scene_rasterizer.vsp.light_pos_ws = glm::vec4(light_pos, light_power);
@@ -536,25 +521,18 @@ void run_example_rsm()
 
         for (const DrawItem& item : items)
         {
-            scene_rasterizer.model_pc.model = item.model;
-            scene_rasterizer.model_pc.albedo = item.albedo;
-
-            horizon::DrawIndexedIndirectParams scene_params;
-            scene_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
-            scene_rasterizer.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, scene_params);
+            scene_rasterizer.parameters.model = item.model;
+            scene_rasterizer.parameters.albedo = item.albedo;
+            scene_rasterizer.draw({item.mesh->vb, item.mesh->ib}, item.mesh->indirect);
         }
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << pack_rasterizer.extent(rsm_map_size, rsm_map_size)
-                            << scene_rasterizer.extent(rsm_width, rsm_height)
-                            << horizon::commit();
+        render_executor << pack_rasterizer
+                            << scene_rasterizer;
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

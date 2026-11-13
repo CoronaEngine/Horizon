@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint drawParameterWord;
 
 // RSM（Reflective Shadow Maps，Dachsbacher & Stamminger 2005）生成 pass VS：
 // 光源视角渲染场景，把世界坐标/法线传给 FS 写 MRT。
@@ -13,14 +15,12 @@ layout(set = 3, binding = 0) uniform RsmPackShared {
     vec4 spot_params;     // x: cos(inner), y: cos(outer)
 } vsp;
 
-// vert/frag 共享同一 push constant 块，布局必须一致。
-layout(push_constant) uniform RsmPackPC {
+// vert/frag 共享同一 BDA 绘制参数，布局必须一致。
+struct RsmPackPC {
     mat4 model;  // per-draw
     vec4 albedo; // rgb: 表面反照率（flux 用）
-} pack_pc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
+};
+#define pack_pc (*(RsmPackPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) out vec4 v_position;     // 光空间裁剪坐标（FS 取深度）
 layout(location = 1) out vec3 v_world_pos;
@@ -28,6 +28,11 @@ layout(location = 2) out vec3 v_world_normal;
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    drawParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
     vec4 world_pos = pack_pc.model * vec4(inPosition, 1.0);
     gl_Position = vsp.light_view_proj * world_pos;
     v_position = gl_Position;

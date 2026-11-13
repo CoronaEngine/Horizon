@@ -4,6 +4,21 @@
 
 namespace EmbeddedShader::BuiltinVariate
 {
+    // Word offsets address packed vertex attributes and per-draw parameters.
+    template<class T>
+    VariateProxy<T> rasterLoad(const char* name, uint32_t wordOffset)
+    {
+        auto type = Ast::AST::createType<T>();
+        auto offset = VariateProxy<uint32_t>(wordOffset);
+        return {Ast::AST::callFunc(std::string(name) + "<" + type->generate() + ">", type,
+            Ast::Node::accessAll({proxy_wrap(offset)}, Ast::AccessPermissions::ReadOnly))};
+    }
+    template<class T> VariateProxy<T> rasterVertexAttribute(uint32_t wordOffset) {
+        return rasterLoad<T>("hzVertexAttribute", wordOffset);
+    }
+    template<class T> VariateProxy<T> rasterDrawParameter(uint32_t wordOffset) {
+        return rasterLoad<T>("hzDrawParameter", wordOffset);
+    }
     inline VariateProxy<ktm::fvec4> position()
     {
         return VariateProxy<ktm::fvec4>{Ast::AST::getPositionOutput()};

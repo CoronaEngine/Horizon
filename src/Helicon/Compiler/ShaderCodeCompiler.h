@@ -171,6 +171,7 @@ struct ShaderCodeModule
         std::vector<SlangModule*> slangModules;
         std::vector<Ast::BranchOutput> branches;
         std::string typeHeader;
+        bool horizonVulkan = false; // Horizon's indirect raster ABI and Vulkan descriptor tables.
     };
 
     struct SlangBranchModule

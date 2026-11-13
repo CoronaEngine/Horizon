@@ -116,7 +116,7 @@ function(helicon_compile_shaders target_name)
     endif()
 
     # 解析可选参数
-    cmake_parse_arguments(_helicon_arg "" "OUTPUT_DIR" "" ${ARGN})
+    cmake_parse_arguments(_helicon_arg "" "OUTPUT_DIR" "DEPENDS" ${ARGN})
     
     if(NOT _helicon_arg_OUTPUT_DIR)
         set(_helicon_arg_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/helicon_generated/${target_name}")
@@ -233,7 +233,7 @@ function(helicon_compile_shaders target_name)
                 -o "${_helicon_output_subdir}"
                 -output-file-extension "${_helicon_shader_last_ext}.hpp"
                 ${_helicon_shader_stage_arg}
-            DEPENDS "${_helicon_shader_path}" ShaderCompileScripts
+            DEPENDS "${_helicon_shader_path}" ${_helicon_arg_DEPENDS} ShaderCompileScripts
             WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
             COMMENT "[Helicon] Compiling shader: ${_helicon_shader_rel_path}"
             VERBATIM

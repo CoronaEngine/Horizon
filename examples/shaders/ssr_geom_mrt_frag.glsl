@@ -1,9 +1,11 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // G-buffer MRT fragment shader（SSR/SSSR 版）。
 // 直接光照升级为完整 Disney Principled BRDF（对齐 example_disney_pbr），
 // 所有非 albedo 的材质参数从共享 UBO fsp.disney_a/b/c 读取，
-// 仅 albedo 随 per-draw push constant vpc_fs.material.rgb 变化。
+// 仅 albedo 随 per-draw BDA 绘制参数 vpc_fs.material.rgb 变化。
 
 layout(set = 3, binding = 0) uniform SsrGeomShared {
     mat4 view_proj;
@@ -14,11 +16,12 @@ layout(set = 3, binding = 0) uniform SsrGeomShared {
     vec4 disney_c;      // x=clearcoat, y=clearcoat_gloss
 } fsp;
 
-// vert/frag 共享同一 push constant 块（布局一致）。
-layout(push_constant) uniform SsrGeomPC {
+// vert/frag 共享同一 BDA 绘制参数（布局一致）。
+struct SsrGeomPC {
     mat4 model;
     vec4 material;  // rgb: albedo, w: 未用
-} vpc_fs;
+};
+#define vpc_fs (*(SsrGeomPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) in vec3 v_normal_vs;
 layout(location = 1) in vec3 v_pos_vs;

@@ -1,4 +1,5 @@
 #version 450
+#include "raster_batch.slang"
 
 // Port of bgfx examples/36-sky vs_sky.sc (Perez sky on a screen-space grid).
 // set 0-2 are Horizon bindless reserved sets; ordinary UBO goes at set 3.
@@ -16,8 +17,6 @@ layout(set = 3, binding = 0) uniform SkyShared {
     vec4 perez3;
     vec4 perez4;
 } sky;
-
-layout(location = 0) in vec2 inPosition;
 
 layout(location = 0) out vec3 v_skyColor;
 layout(location = 1) out vec2 v_screenPos;
@@ -43,6 +42,9 @@ vec3 Perez(vec3 A, vec3 B, vec3 C, vec3 D, vec3 E, float costeta, float cosgamma
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec2 inPosition = *(vec2*)(vertex + 0);
     v_screenPos = inPosition;
 
     vec4 rayStart = sky.invViewProj * vec4(inPosition, -1.0, 1.0);

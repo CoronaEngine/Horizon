@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // RSM 生成 pass FS，三附件 MRT（与 ssr_geom_mrt_frag 相同的 MRT 写法）：
 //   outPosition RGBA32F  xyz: 世界坐标, w: 光空间深度 z/w（硬阴影比较用）
@@ -14,12 +16,12 @@ layout(set = 3, binding = 0) uniform RsmPackShared {
     vec4 spot_params;
 } fsp;
 
-// 与 rsm_pack_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 同时继承
-// vert/frag 的 ResourceBindings，两 stage 实例名必须不同以避免 C++ 端二义（C2385）。
-layout(push_constant) uniform RsmPackPC {
+// 与 rsm_pack_vert.glsl 共享 BDA 绘制参数布局。
+struct RsmPackPC {
     mat4 model;
     vec4 albedo;
-} pack_pc_fs;
+};
+#define pack_pc_fs (*(RsmPackPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) in vec4 v_position;
 layout(location = 1) in vec3 v_world_pos;

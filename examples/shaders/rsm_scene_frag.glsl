@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // RSM 场景 pass FS：
 //   直接光：世界空间 Blinn-Phong 聚光 + 距离衰减 + 硬阴影
@@ -26,15 +28,15 @@ layout(set = 3, binding = 0) uniform RsmSceneShared {
 // bindless combined-image-sampler 表（set 0）
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-// 与 rsm_scene_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 同时继承
-// vert/frag 的 ResourceBindings，两 stage 实例名必须不同以避免 C++ 端二义（C2385）。
-layout(push_constant) uniform RsmScenePC {
+// 与 rsm_scene_vert.glsl 共享 BDA 绘制参数布局。
+struct RsmScenePC {
     mat4 model;
     vec4 albedo;
     uint rsmPositionIndex;
     uint rsmNormalIndex;
     uint rsmFluxIndex;
-} model_pc_fs;
+};
+#define model_pc_fs (*(RsmScenePC*)(drawRoot.parameters + drawParameterWord))
 
 #define rsmPositionMap combinedTextureSamplerHandles[model_pc_fs.rsmPositionIndex]
 #define rsmNormalMap   combinedTextureSamplerHandles[model_pc_fs.rsmNormalIndex]

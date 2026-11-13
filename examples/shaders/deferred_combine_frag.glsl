@@ -1,17 +1,20 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // 移植自参考示例 21-deferred 的 fs_deferred_combine.sc：
 // albedo × light（线性空间相乘再回 gamma）。
 
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// bindless combined-image-sampler 表（set 0）+ FS 专用 push constant（VS 无 PC）。
+// 材质纹理位于 set 0，索引来自片元阶段的 BDA 绘制参数。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-layout(push_constant) uniform DeferredCombinePC {
+struct DeferredCombinePC {
     uint gAlbedoIndex;
     uint gLightIndex;
-} fpc;
+};
+#define fpc (*(DeferredCombinePC*)(drawRoot.parameters + drawParameterWord))
 
 #define gAlbedo combinedTextureSamplerHandles[fpc.gAlbedoIndex]
 #define gLight  combinedTextureSamplerHandles[fpc.gLightIndex]

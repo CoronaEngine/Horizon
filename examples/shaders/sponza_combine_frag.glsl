@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // Sponza deferred combine —— PBR 版。
 //
@@ -24,7 +26,7 @@ layout(set = 3, binding = 0) uniform SponzaCombineShared {
                        // w: environment rotation around world Y (radians)
 } fsp;
 
-layout(push_constant) uniform SponzaCombinePC {
+struct SponzaCombinePC {
     vec4 ambient; // rgb: constant ambient floor, w: unused(曝光已移到 composite)
     uint gAlbedoIndex;
     uint gLightIndex;
@@ -34,7 +36,8 @@ layout(push_constant) uniform SponzaCombinePC {
     uint texCubeIrrIndex;
     uint texCubeLodIndex;
     uint debugMode;
-} fpc;
+};
+#define fpc (*(SponzaCombinePC*)(drawRoot.parameters + drawParameterWord))
 
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 // Cube views live in the same bindless table as the 2D views: the descriptor

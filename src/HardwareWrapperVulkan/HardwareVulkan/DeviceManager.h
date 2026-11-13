@@ -39,6 +39,7 @@ class DeviceManager
         VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties{};
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties{};
         VkPhysicalDeviceProperties2 supportedProperties{};
+        bool computeDerivativeGroupQuads{};
         DeviceFeaturesChain featuresChain;
     };
 

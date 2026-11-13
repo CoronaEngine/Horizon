@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <functional>
 #include <set>
@@ -12,6 +12,7 @@ struct DeviceFeaturesChain
     DeviceFeaturesChain();
 
     VkPhysicalDeviceFeatures2 *getChainHead();
+    bool supportsPulledRaster() const { return deviceFeatures11.shaderDrawParameters && deviceFeatures12.bufferDeviceAddress; }
 
     DeviceFeaturesChain operator&(const DeviceFeaturesChain &features) const;
     DeviceFeaturesChain operator&(const VkPhysicalDeviceFeatures &features) const;

@@ -85,14 +85,14 @@ class HorizonConan(ConanFile):
             self.requires("vulkan-loader/1.4.350.0", transitive_headers=True)
             self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
             self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
-            if bool(self.options.with_tracy):
-                self.requires("tracy/0.13.1", options={"on_demand": True})
 
         if bool(self.options.with_examples):
             self.requires("glfw/3.4")
             self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
             self.requires("imgui/1.92.8")
+            if bool(self.options.with_tracy):
+                self.requires("tracy/0.13.1", options={"on_demand": True})
 
     def validate(self):
         engine_features = {

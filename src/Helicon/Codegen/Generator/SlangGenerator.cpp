@@ -69,6 +69,8 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 )";
 	}
 
+    const bool pulling = structure.usesIndirectRaster() && structure.stage == Ast::ShaderStage::Vertex;
+    const bool shading = structure.usesIndirectRaster() && structure.stage == Ast::ShaderStage::Fragment;
     std::string mainContent;
     for (auto& statement: structure.localStatements)
     {
@@ -86,14 +88,31 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 	std::string inputStructName;
 
     std::string inputStruct;
+    std::string systemInputs, loadVertexInputs;
 	if (!structure.inputStatements.empty())
 	{
 		inputStructName = stageType + "_input";
 		inputStruct = "struct " + inputStructName +" {\n";
-		for (auto& statement: structure.inputStatements)
-		{
-			inputStruct += "\t" + statement->generate() + '\n';
-		}
+        for (auto& statement : structure.inputStatements) {
+            if (!pulling) {
+                inputStruct += "\t" + statement->generate() + '\n';
+                continue;
+            }
+            if (auto* field = dynamic_cast<Ast::DefineInputVariate*>(statement.get())) {
+                const auto type = field->variate->type->generate();
+                const auto& name = field->variate->name;
+                inputStruct += "\t" + type + " " + name + ";\n";
+                loadVertexInputs += "input." + name + " = hzVertexAttribute<" + type + ">(hzAttributeWord);\n";
+                loadVertexInputs += "hzAttributeWord += sizeof(" + type + ") / sizeof(uint);\n";
+            } else {
+                const auto& system = static_cast<const DefineSystemSemanticVariate&>(*statement);
+                const auto type = system.variate->type->generate();
+                const auto& name = system.variate->name;
+                inputStruct += "\t" + type + " " + name + ";\n";
+                systemInputs += ", " + type + " " + name + " : " + system.semanticName;
+                loadVertexInputs += "input." + name + " = " + name + ";\n";
+            }
+        }
 		inputStruct += "}\n";
 	}
 
@@ -106,17 +125,40 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 		{
 			outputStruct += "\t" + statement->generate() + '\n';
 		}
-		outputStruct += "}\n";
+        if (pulling) outputStruct += "[[vk::location(15)]] nointerpolation uint hzParameterWord : TEXCOORD15;\n";
+        outputStruct += "}\n";
 	}
 
-    if (Ast::Parser::getBranchOutputs().empty())
-    {
-        output += inputStruct + outputStruct;
+    // Specialization branches are separate Slang modules which import the type header.
+    auto& declarations = Ast::Parser::getBranchOutputs().empty() ? output : Ast::Parser::getTypeHeader();
+    if (structure.usesIndirectRaster()) {
+        declarations += R"(
+struct HorizonDrawPacket {
+    uint vertexCount, instanceCount, firstVertex, firstInstance;
+    uint geometryIndex, firstIndex;
+    int baseVertex;
+    uint parameterWord;
+};
+struct HorizonGeometry {
+    uint* vertices;
+    uint* indices;
+    uint strideWords, indexBytes, vertexCount, reserved;
+};
+struct HorizonRasterRoot {
+    HorizonDrawPacket* packets;
+    HorizonGeometry* geometries;
+    uint* parameters;
+    uint groupBase;
+};
+[[vk::push_constant]] ConstantBuffer<HorizonRasterRoot> hzRaster;
+static uint* hzParameterData;
+static uint* hzVertexData;
+static uint hzLogicalVertex, hzBatchDraw;
+T hzDrawParameter<T>(uint word) { return *(T*)(hzParameterData + word); }
+T hzVertexAttribute<T>(uint word) { return *(T*)(hzVertexData + word); }
+)";
     }
-    else
-    {
-        Ast::Parser::getTypeHeader() += inputStruct + outputStruct;
-    }
+    declarations += inputStruct + outputStruct;
 
     //Import Branch
     output += getBranchExternDeclaration(Ast::Parser::getBranchReferences().top());
@@ -129,12 +171,39 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 		numthreads = ktm::uvec3(1);
 	}
 	entrypoint += outputStructName + " main(";
-	if (!structure.inputStatements.empty())
+	if (!pulling && !structure.inputStatements.empty())
 		entrypoint += inputStructName + " input";
-	entrypoint += ") {\n";
+    if (pulling || shading) {
+        if (shading && !structure.inputStatements.empty()) entrypoint += ", ";
+        entrypoint += pulling ? "uint hzCorner : SV_VertexID, uint hzDraw : SV_DrawIndex" + systemInputs
+                              : "[[vk::location(15)]] nointerpolation uint hzParameterWord : TEXCOORD15";
+    }
+    entrypoint += ") {\n";
 	if (!structure.outputStatements.empty())
 		entrypoint += "\t" + outputStructName + " output;\n";
-	entrypoint += mainContent;
+    if (pulling) entrypoint += R"(
+    hzBatchDraw = hzRaster.groupBase + hzDraw;
+    HorizonDrawPacket packet = hzRaster.packets[hzBatchDraw];
+    HorizonGeometry geometry = hzRaster.geometries[packet.geometryIndex];
+    uint element = packet.firstIndex + hzCorner;
+    uint index;
+    if (geometry.indexBytes == 2) {
+        uint pair = geometry.indices[element >> 1];
+        index = (pair >> (16 * (element & 1))) & 0xffff;
+    } else {
+        index = geometry.indices[element];
+    }
+    hzLogicalVertex = index + uint(packet.baseVertex);
+    if (hzLogicalVertex >= geometry.vertexCount) hzLogicalVertex = 0;
+    hzVertexData = geometry.vertices + hzLogicalVertex * geometry.strideWords;
+    output.hzParameterWord = packet.parameterWord;
+    hzParameterData = hzRaster.parameters + packet.parameterWord;
+)";
+    if (pulling && !loadVertexInputs.empty()) {
+        entrypoint += inputStructName + " input;\nuint hzAttributeWord = 0;\n" + loadVertexInputs;
+    }
+    if (shading) entrypoint += "hzParameterData = hzRaster.parameters + hzParameterWord;\n";
+    entrypoint += mainContent;
 	if (!structure.outputStatements.empty())
 		entrypoint += "\t""return output;\n";
 	entrypoint += "}\n";
@@ -155,7 +224,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	}
 
 	// ① UBO — 始终生成为 ConstantBuffer，bindless 模式下显式绑定到 set=3
-	if (!uboMembers.empty())
+    if (structure.usesIndirectRaster()) {
+        if (!pushConstantMembers.empty())
+            throw std::invalid_argument("Use rasterDrawParameter for per-draw raster data");
+        uboMembers += bindlessHandleMembers;
+        bindlessHandleMembers.clear();
+    }
+    if (!uboMembers.empty())
 	{
 	    auto ubo = Ast::AST::getGlobalUBO();
 	    auto type = ubo->type->generate();
@@ -227,10 +302,20 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 		(node->value ? " = " + node->value->generate() : "") + ";";
 }
 
+namespace {
+std::string varyingField(const EmbeddedShader::Ast::Variate& value, size_t location)
+{
+    // Both shader dialects reserve location 15 for the flat parameter offset.
+    std::string declaration;
+    if (EmbeddedShader::Ast::AST::getEmbeddedShaderStructure().usesIndirectRaster())
+        declaration = "[[vk::location(" + std::to_string(location) + ")]] ";
+    return declaration + value.type->generate() + " " + value.name + " : LOCATION" + std::to_string(location) + ";";
+}
+}
+
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineInputVariate* node)
 {
-	//这段内容应放在Generator生成的input struct中
-	return node->variate->type->generate() + " " + node->variate->name + " : LOCATION" + std::to_string(node->variate->location) + ";";
+    return varyingField(*node->variate, node->variate->location);
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::Assign* node)
@@ -251,7 +336,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineOutputVariate* node)
 {
 	if (currentStage != Ast::ShaderStage::Fragment)
-		return node->variate->type->generate() + " " + node->variate->name + " : LOCATION" + std::to_string(node->variate->location) + ";";
+		return varyingField(*node->variate, node->variate->location);
 	return node->variate->type->generate() + " " + node->variate->name + " : SV_TARGET" + std::to_string(node->variate->location) + ";";
 }
 
@@ -458,26 +543,17 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniformVariate* node)
 {
-	if (node->pushConstant)
-		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
-	// bindless 模式下 SamplerType 在 push constant 中
-	if (bindless() && std::dynamic_pointer_cast<Ast::SamplerType>(node->type))
-		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
-	return  Ast::AST::getGlobalUBO()->name + "." + node->name;
+    return node->getRootVariate()->name + "." + node->name;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniversalTexture* node)
 {
-	if (bindless())
-		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
-	return Ast::AST::getGlobalParameterBlock()->name + "." + node->name;
+    return node->getRootVariate()->name + "." + node->name;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::UniversalArray* node)
 {
-	if (bindless())
-		return Ast::AST::getGlobalPushConstant()->name + "." + node->name;
-	return Ast::AST::getGlobalParameterBlock()->name + "." + node->name;
+    return node->getRootVariate()->name + "." + node->name;
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::DefineAggregateType* node)
@@ -515,10 +591,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 	auto result = node->texture->type->generate() + " " + node->texture->name + ";";
 
-    if (node->texture->permissions != Ast::AccessPermissions::ReadOnly)
-    {
-        result = "RW" + result;
-    }
+    bool storage = node->texture->permissions != Ast::AccessPermissions::ReadOnly;
+    // Unfiltered compute image loads and stores share the storage-image table at set 2.
+    // Filtered sampling uses a combined sampler handle from set 0.
+    auto texture = std::dynamic_pointer_cast<Ast::TextureType>(node->texture->type);
+    storage |= Ast::AST::getEmbeddedShaderStructure().horizonVulkan && bindless() &&
+               currentStage == Ast::ShaderStage::Compute && texture->name == "Texture2D";
+    if (storage) result = "RW" + result;
 
 	if (bindless())
 		bindlessHandleMembers += "\t" + result + "\n";
@@ -702,17 +781,30 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 	return id;
 }
 
+namespace {
+std::shared_ptr<EmbeddedShader::Ast::Variate> rasterIndex(const char* pulledName, const char* inputName, const char* semantic)
+{
+    using namespace EmbeddedShader;
+    if (Ast::AST::getEmbeddedShaderStructure().usesIndirectRaster()) {
+        auto index = std::make_shared<Ast::Variate>();
+        index->type = Ast::AST::createType<uint32_t>();
+        index->name = pulledName;
+        return index;
+    }
+    auto index = std::make_shared<Ast::InputVariate>();
+    index->type = Ast::AST::createType<uint32_t>();
+    index->name = inputName;
+    auto field = std::make_shared<Generator::DefineSystemSemanticVariate>();
+    field->variate = index;
+    field->semanticName = semantic;
+    Ast::AST::addInputStatement(field);
+    return index;
+}
+}
+
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getDrawIndexInput()
 {
-	auto drawIdx = std::make_shared<Ast::InputVariate>();
-	drawIdx->type = Ast::AST::createType<uint32_t>();
-	drawIdx->name = "draw_index_input";
-	drawIdx->location = 0;
-	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
-	defineNode->variate = drawIdx;
-	defineNode->semanticName = "SV_DrawIndex";
-	Ast::AST::addInputStatement(defineNode);
-	return drawIdx;
+    return rasterIndex("hzBatchDraw", "draw_index_input", "SV_DrawIndex");
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getInstanceIndexInput()
@@ -732,17 +824,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getVertexIndexInput()
 {
-	auto vertexIdx = std::make_shared<Ast::InputVariate>();
-	vertexIdx->type = Ast::AST::createType<uint32_t>();
-	vertexIdx->name = "vertex_index_input";
-	vertexIdx->location = 0;
-	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
-	defineNode->variate = vertexIdx;
-	// gl_VertexIndex:indexed draw 下等于 IB[i] + vertexOffset,即全局顶点下标,
-	// vertex pulling 用它索引顶点 SSBO。
-	defineNode->semanticName = "SV_VertexID";
-	Ast::AST::addInputStatement(defineNode);
-	return vertexIdx;
+    return rasterIndex("hzLogicalVertex", "vertex_index_input", "SV_VertexID");
 }
 
 bool EmbeddedShader::Generator::SlangGenerator::bindless()

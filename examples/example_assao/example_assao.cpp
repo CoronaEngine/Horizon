@@ -22,7 +22,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -50,6 +51,11 @@
 
 namespace
 {
+struct AssaoScenePC {
+    glm::mat4 model{};
+    glm::vec4 color{};
+};
+
 constexpr uint32_t ao_width = 1280;
 constexpr uint32_t ao_height = 720;
 
@@ -221,28 +227,28 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    horizon::HardwareBuffer vb;
-    horizon::HardwareBuffer ib;
+    HardwareBuffer vb;
+    HardwareBuffer ib;
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
     // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
-    horizon::HardwareBuffer indirect;
+    std::vector<RasterDraw> indirect;
 };
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
-    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    std::vector<RasterDraw> commands;
     commands.reserve(mesh.groups.size());
     for (const MeshGroup& group : mesh.groups)
-        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
+        commands.push_back(RasterDraw{.indexCount = group.index_count, .firstIndex = group.first_index, .vertexOffset = group.base_vertex, .firstInstance = 0});
 
     return GpuMesh {
-        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(mesh.indices.size()),
         mesh.groups,
-        horizon::HardwareBuffer::indirect(commands, name + ".indirect"),
+        std::move(commands),
     };
 }
 
@@ -256,10 +262,8 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_assao()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(ao_width, ao_height, "Horizon ASSAO [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(ao_width, ao_height, "Horizon ASSAO [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     GpuMesh ground = upload_mesh(load_bin_mesh(ao_asset_root / "meshes" / "cube.bin"), "example_assao.ground");
@@ -322,57 +326,37 @@ void run_example_assao()
     }
 
     // G-buffer 目标（compute 需 Storage）
-    const auto rt_usage = horizon::ImageUsage_ColorAttachment |
-                          horizon::ImageUsage_Sampled |
-                          horizon::ImageUsage_Storage;
-    horizon::HardwareImage scene_color_image(horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, horizon::Format::RGBA16_FLOAT, rt_usage, "example_assao.color"));
-    scene_color_image.set_clear_color(0.3f, 0.45f, 0.6f, 1.0f); // 天空底色
-    horizon::HardwareImage normal_image(horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, horizon::Format::RGBA8_UNORM, rt_usage, "example_assao.normal"));
-    normal_image.set_clear_color(0.5f, 0.5f, 1.0f, 1.0f);
-    horizon::HardwareImage depth_val_image(horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, horizon::Format::R32_FLOAT, rt_usage, "example_assao.depthval"));
-    depth_val_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage scene_color_image(example::imageInfo(ao_width, ao_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    scene_color_image.setClearColor(0.3f, 0.45f, 0.6f, 1.0f); // 天空底色
+    HardwareImage normal_image(example::imageInfo(ao_width, ao_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledStorageImage));
+    normal_image.setClearColor(0.5f, 0.5f, 1.0f, 1.0f);
+    HardwareImage depth_val_image(example::imageInfo(ao_width, ao_height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
+    depth_val_image.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage ao_image_a(horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled, "example_assao.ao_a"));
-    horizon::HardwareImage ao_image_b(horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled, "example_assao.ao_b"));
+    HardwareImage ao_image_a(example::imageInfo(ao_width, ao_height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
+    HardwareImage ao_image_b(example::imageInfo(ao_width, ao_height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        ao_width, ao_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_assao.output"));
+    HardwareImage final_output_image(example::imageInfo(ao_width, ao_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
 
     // MRT: 单个深度附件，一次 pass 输出三个 G-buffer RT
-    horizon::HardwareImage depth_attachment(horizon::HardwareImageDesc::depth_attachment(
-        ao_width, ao_height, horizon::Format::D32, "example_assao.depth"));
-    depth_attachment.set_clear_depth(1.0f, 0);
+    HardwareImage depth_attachment(example::imageInfo(ao_width, ao_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.blend_enabled = false;
 
     // MRT pipeline: 一个 fragment shader 输出 3 个 RT (color/normal/depthval)
-    horizon::RasterizerPipeline gbuffer_rasterizer(assao_scene_vert_glsl, assao_gbuffer_mrt_frag_glsl, scene_desc);
+    example::ScenePass<AssaoScenePC, assao_scene_vert_glsl_t, assao_gbuffer_mrt_frag_glsl_t> gbuffer_rasterizer(ao_width, ao_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     gbuffer_rasterizer.outColor = scene_color_image;
     gbuffer_rasterizer.outNormal = normal_image;
     gbuffer_rasterizer.outDepthVal = depth_val_image;
-    gbuffer_rasterizer.bind_depth_target(depth_attachment);
+    gbuffer_rasterizer.setDepthImage(depth_attachment);
 
     // compute 管线：generate → blur ×2（ping-pong 用两个实例）→ apply
-    horizon::ComputePipeline generate_compute(assao_generate_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline blur_compute_ab(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline blur_compute_ba(assao_blur_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline apply_compute(assao_apply_compute_glsl, ktm::uvec3(8, 8, 1));
+    ComputePipeline<assao_generate_compute_glsl_t> generate_compute;
+    ComputePipeline<assao_blur_compute_glsl_t> blur_compute_ab;
+    ComputePipeline<assao_blur_compute_glsl_t> blur_compute_ba;
+    ComputePipeline<assao_apply_compute_glsl_t> apply_compute;
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(ao_width) / static_cast<float>(ao_height);
     // 相机 (0,1.5,0) 前视稍向下（垂直角 -0.3 rad）、fovy 60°
@@ -399,6 +383,11 @@ void run_example_assao()
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
+
+    generate_compute.uses({{depth_val_image, ResourceAccess::Read}, {normal_image, ResourceAccess::Read}, {ao_image_a, ResourceAccess::Write}});
+    blur_compute_ab.uses({{ao_image_a, ResourceAccess::Read}, {depth_val_image, ResourceAccess::Read}, {ao_image_b, ResourceAccess::Write}});
+    blur_compute_ba.uses({{ao_image_b, ResourceAccess::Read}, {depth_val_image, ResourceAccess::Read}, {ao_image_a, ResourceAccess::Write}});
+    apply_compute.uses({{scene_color_image, ResourceAccess::Read}, {ao_image_a, ResourceAccess::Read}, {final_output_image, ResourceAccess::Write}});
 
     while (!glfwWindowShouldClose(window))
     {
@@ -428,22 +417,15 @@ void run_example_assao()
 
         // MRT: 单次 G-buffer pass，使用预计算的transform避免每帧重复计算
         auto record_scene = [&](auto& pipeline) {
-            pipeline.clear_records();
-            // 共享矩阵（UBO，batch 内不变）；per-draw 数据（model、color）走 push constant
+            // 共享矩阵（UBO，batch 内不变）；per-draw 数据（model、color）由 draw 参数传递
             pipeline.vsp.proj_view   = view_proj;
             pipeline.vsp.view_matrix = view;
 
-            // model / color 按 record_indirect 调用快照，且一次调用只绑一对 VB/IB：
-            // 每个物体写完自己的参数后，用它自己 mesh 的 VB/IB 单独 record 一次
-            // （draw_count = 该 mesh 的 group 数）。
             for (const StaticTransform& t : static_transforms)
             {
-                pipeline.vpc.model = t.model;
-                pipeline.vpc.color = t.color;
-
-                horizon::DrawIndexedIndirectParams indirect_params;
-                indirect_params.draw_count = static_cast<uint32_t>(t.mesh->groups.size());
-                pipeline.record_indirect(t.mesh->ib, t.mesh->vb, t.mesh->indirect, indirect_params);
+                pipeline.parameters.model = t.model;
+                pipeline.parameters.color = t.color;
+                pipeline.draw({t.mesh->vb, t.mesh->ib}, t.mesh->indirect);
             }
         };
         record_scene(gbuffer_rasterizer);
@@ -451,43 +433,39 @@ void run_example_assao()
         // compute 参数
         const glm::vec4 resolution(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
-        generate_compute.pushConsts.depthID = depth_val_image.store_descriptor();
-        generate_compute.pushConsts.normalID = normal_image.store_descriptor();
-        generate_compute.pushConsts.aoID = ao_image_a.store_descriptor();
+        generate_compute.pushConsts.depthID = depth_val_image.storeDescriptor();
+        generate_compute.pushConsts.normalID = normal_image.storeDescriptor();
+        generate_compute.pushConsts.aoID = ao_image_a.storeDescriptor();
         generate_compute.pushConsts.depth_unpack = glm::vec4(p32, -p22, 0.0f, 0.0f);
         generate_compute.pushConsts.ndc_to_view = glm::vec4(2.0f / p00, 2.0f / p11, -1.0f / p00, -1.0f / p11);
         generate_compute.pushConsts.params0 = glm::vec4(1.2f, 1.0f, 1.5f, 0.06f);
         generate_compute.pushConsts.params1 = glm::vec4(50.0f, 200.0f, float(ao_width), float(ao_height));
 
-        blur_compute_ab.pushConsts.srcID = ao_image_a.store_descriptor();
-        blur_compute_ab.pushConsts.dstID = ao_image_b.store_descriptor();
-        blur_compute_ab.pushConsts.depthID = depth_val_image.store_descriptor();
+        blur_compute_ab.pushConsts.srcID = ao_image_a.storeDescriptor();
+        blur_compute_ab.pushConsts.dstID = ao_image_b.storeDescriptor();
+        blur_compute_ab.pushConsts.depthID = depth_val_image.storeDescriptor();
         blur_compute_ab.pushConsts.params0 = glm::vec4(0.98f, float(ao_width), float(ao_height), 0.0f);
 
-        blur_compute_ba.pushConsts.srcID = ao_image_b.store_descriptor();
-        blur_compute_ba.pushConsts.dstID = ao_image_a.store_descriptor();
-        blur_compute_ba.pushConsts.depthID = depth_val_image.store_descriptor();
+        blur_compute_ba.pushConsts.srcID = ao_image_b.storeDescriptor();
+        blur_compute_ba.pushConsts.dstID = ao_image_a.storeDescriptor();
+        blur_compute_ba.pushConsts.depthID = depth_val_image.storeDescriptor();
         blur_compute_ba.pushConsts.params0 = glm::vec4(0.98f, float(ao_width), float(ao_height), 0.0f);
 
-        apply_compute.pushConsts.colorID = scene_color_image.store_descriptor();
-        apply_compute.pushConsts.aoID = ao_image_a.store_descriptor();
-        apply_compute.pushConsts.outputID = final_output_image.store_descriptor();
+        apply_compute.pushConsts.colorID = scene_color_image.storeDescriptor();
+        apply_compute.pushConsts.aoID = ao_image_a.storeDescriptor();
+        apply_compute.pushConsts.outputID = final_output_image.storeDescriptor();
         apply_compute.pushConsts.params0 = glm::vec4(float(ao_width), float(ao_height), 0.0f, 0.0f);
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << gbuffer_rasterizer.extent(ao_width, ao_height)
-                            << generate_compute.dispatch_extent(ao_width, ao_height)
-                            << blur_compute_ab.dispatch_extent(ao_width, ao_height)
-                            << blur_compute_ba.dispatch_extent(ao_width, ao_height)
-                            << apply_compute.dispatch_extent(ao_width, ao_height)
-                            << horizon::commit();
+        render_executor << gbuffer_rasterizer
+                            << generate_compute((ao_width + 7) / 8, (ao_height + 7) / 8, 1)
+                            << blur_compute_ab((ao_width + 7) / 8, (ao_height + 7) / 8, 1)
+                            << blur_compute_ba((ao_width + 7) / 8, (ao_height + 7) / 8, 1)
+                            << apply_compute((ao_width + 7) / 8, (ao_height + 7) / 8, 1);
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

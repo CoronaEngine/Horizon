@@ -1,17 +1,18 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 2) flat in uint drawParameterWord;
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// Horizon bindless combined-image-sampler 表（set 0）。纹理经 image.store_descriptor()
-// 存入该表后返回索引，通过 push constant 传入 shader 索引采样。
+// Horizon bindless combined-image-sampler 表（set 0）。纹理经 image.storeDescriptor()
+// 存入该表后返回索引，通过 BDA 绘制参数 传入 shader 索引采样。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-// 与 baseline_vert.glsl 共享同一 push constant 块（布局一致）。frag 仅用 texIndex。
-// EDSL 同时继承 vert/frag 的 ResourceBindings，两 stage 实例名必须不同以避免 C++ 端
-// 成员访问二义（C2385）。C++ 通过 vert 的 pc 写入，frag 用 pc_fs 只读。
-layout(push_constant) uniform PushConsts {
+// 与 baseline_vert.glsl 共享 BDA 绘制参数布局。
+struct PushConsts {
     mat4 model;
     uint texIndex;
-} pc_fs;
+};
+#define pc_fs (*(PushConsts*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;

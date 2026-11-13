@@ -1,4 +1,4 @@
-#include <horizon.h>
+#include <Horizon_old.h>
 #include <Codegen/BuiltinVariate.h>
 #include <Codegen/ControlFlows.h>
 #include <Codegen/RasterizedPipelineObject.h>

@@ -1,7 +1,52 @@
-﻿#include "HardwareExecutorVulkan.h"
+#include "HardwareExecutorVulkan.h"
 
 #include "horizon/core/logging.h"
+#include "ResourceAccess.h"
 #include <algorithm>
+
+namespace {
+void clearSubmitState(HardwareExecutorVulkan& executor)
+{
+    executor.waitSemaphores.clear();
+    executor.signalSemaphores.clear();
+    executor.waitFence = VK_NULL_HANDLE;
+}
+
+VkSemaphoreSubmitInfo timelineSubmitInfo(VkSemaphore semaphore, uint64_t value)
+{
+    VkSemaphoreSubmitInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+    info.semaphore = semaphore;
+    info.value = value;
+    info.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    return info;
+}
+
+VkResult waitForDeferredSubmissions(VkDevice device, std::span<const DeferredRelease> submissions, uint64_t timeout)
+{
+    std::unordered_map<VkSemaphore, uint64_t> maximumValues;
+    for (const auto& submission : submissions)
+    {
+        auto& value = maximumValues[submission.semaphore];
+        value = std::max(value, submission.timelineValue);
+    }
+    if (maximumValues.empty()) return VK_SUCCESS;
+
+    std::vector<VkSemaphore> semaphores;
+    std::vector<uint64_t> values;
+    semaphores.reserve(maximumValues.size());
+    values.reserve(maximumValues.size());
+    for (const auto& [semaphore, value] : maximumValues)
+    {
+        semaphores.push_back(semaphore);
+        values.push_back(value);
+    }
+    VkSemaphoreWaitInfo info{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+    info.semaphoreCount = static_cast<uint32_t>(semaphores.size());
+    info.pSemaphores = semaphores.data();
+    info.pValues = values.data();
+    return vkWaitSemaphores(device, &info, timeout);
+}
+}
 
 struct GraphicsSubmitChainState
 {
@@ -49,67 +94,13 @@ std::vector<VkSemaphoreSubmitInfo> mergeSemaphoreSubmitInfos(const std::vector<V
 // ========== 析构函数：等待所有延迟释放的资源完成 ==========
 HardwareExecutorVulkan::~HardwareExecutorVulkan()
 {
-    // ========== Step 1: 收集所有需要等待的 semaphore 和对应的 timeline 值 ==========
-    std::vector<VkSemaphore> semaphoresToWait;
-    std::vector<uint64_t> valuesToWait;
-
-    // 从 deferredReleaseQueue 中收集所有唯一的 semaphore 及其最大 timeline 值
-    std::unordered_map<VkSemaphore, uint64_t> semaphoreMaxValues;
-
-    for (const auto &entry : deferredReleaseQueue)
+    if (!deferredReleaseQueue.empty() && hardwareContext)
     {
-        auto it = semaphoreMaxValues.find(entry.semaphore);
-        if (it == semaphoreMaxValues.end())
-        {
-            semaphoreMaxValues[entry.semaphore] = entry.timelineValue;
-        }
-        else
-        {
-            // 取最大值，确保等待所有工作完成
-            it->second = std::max(it->second, entry.timelineValue);
-        }
-    }
-
-    // 如果有 pendingResources 但还未提交，需要考虑当前队列
-    // 注意：正常流程中 pendingResources 应该在 commit 后为空
-    if (!pendingResources.empty())
-    {
-        CFW_LOG_WARNING("HardwareExecutorVulkan destructor called with {} pending resources not committed",
-                        pendingResources.size());
-        // 这些资源没有被提交，直接释放是安全的（GPU 从未使用）
-        pendingResources.clear();
-    }
-
-    // ========== Step 2: 构建等待参数 ==========
-    for (const auto &[semaphore, maxValue] : semaphoreMaxValues)
-    {
-        semaphoresToWait.push_back(semaphore);
-        valuesToWait.push_back(maxValue);
-    }
-
-    // ========== Step 3: 等待所有 semaphore ==========
-    if (!semaphoresToWait.empty() && hardwareContext)
-    {
-        VkSemaphoreWaitInfo waitInfo{};
-        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-        waitInfo.pNext = nullptr;
-        waitInfo.flags = 0; // 等待所有 semaphore
-        waitInfo.semaphoreCount = static_cast<uint32_t>(semaphoresToWait.size());
-        waitInfo.pSemaphores = semaphoresToWait.data();
-        waitInfo.pValues = valuesToWait.data();
-
-        // 设置超时时间（5 秒），避免无限等待
-        constexpr uint64_t timeoutNs = 5'000'000'000ULL; // 5 seconds
-
-        VkResult result = vkWaitSemaphores(
-            hardwareContext->deviceManager.logicalDevice,
-            &waitInfo,
-            timeoutNs);
-
+        const auto result = waitForDeferredSubmissions(hardwareContext->deviceManager.logicalDevice,
+                                                       deferredReleaseQueue, 5'000'000'000ULL);
         if (result == VK_TIMEOUT)
         {
-            CFW_LOG_ERROR("HardwareExecutorVulkan destructor: timeout waiting for {} semaphores",
-                          semaphoresToWait.size());
+            CFW_LOG_ERROR("HardwareExecutorVulkan destructor: timeout waiting for deferred submissions");
         }
         else if (result != VK_SUCCESS)
         {
@@ -118,12 +109,10 @@ HardwareExecutorVulkan::~HardwareExecutorVulkan()
         }
         else
         {
-            CFW_LOG_TRACE("HardwareExecutorVulkan destructor: successfully waited for {} semaphores",
-                          semaphoresToWait.size());
+            CFW_LOG_TRACE("HardwareExecutorVulkan destructor: successfully waited for deferred submissions");
         }
     }
 
-    // ========== Step 4: 清空队列（此时 GPU 已完成，安全释放） ==========
     deferredReleaseQueue.clear();
 }
 
@@ -218,48 +207,8 @@ void HardwareExecutorVulkan::waitForAllDeferredResources()
         return;
     }
 
-    // 收集所有 semaphore 及最大 timeline 值
-    std::unordered_map<VkSemaphore, uint64_t> semaphoreMaxValues;
-
-    for (const auto &entry : deferredReleaseQueue)
-    {
-        auto it = semaphoreMaxValues.find(entry.semaphore);
-        if (it == semaphoreMaxValues.end())
-        {
-            semaphoreMaxValues[entry.semaphore] = entry.timelineValue;
-        }
-        else
-        {
-            it->second = std::max(it->second, entry.timelineValue);
-        }
-    }
-
-    std::vector<VkSemaphore> semaphores;
-    std::vector<uint64_t> values;
-
-    for (const auto &[sem, val] : semaphoreMaxValues)
-    {
-        semaphores.push_back(sem);
-        values.push_back(val);
-    }
-
-    if (semaphores.empty())
-    {
-        return;
-    }
-
-    VkSemaphoreWaitInfo waitInfo{};
-    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-    waitInfo.pNext = nullptr;
-    waitInfo.flags = 0;
-    waitInfo.semaphoreCount = static_cast<uint32_t>(semaphores.size());
-    waitInfo.pSemaphores = semaphores.data();
-    waitInfo.pValues = values.data();
-
-    VkResult result = vkWaitSemaphores(
-        hardwareContext->deviceManager.logicalDevice,
-        &waitInfo,
-        UINT64_MAX);
+    const auto result = waitForDeferredSubmissions(hardwareContext->deviceManager.logicalDevice,
+                                                   deferredReleaseQueue, UINT64_MAX);
 
     if (result != VK_SUCCESS)
     {
@@ -374,36 +323,16 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
         // std::this_thread::sleep_for(std::chrono::microseconds(10000));
     }
 
+    std::unique_lock<std::mutex> queueLock(*queue->queueMutex, std::adopt_lock);
     // ===== 首先清理已完成的资源 =====
     cleanupCompletedResources();
 
-    // 保存当前 pendingResources 的引用，在提交成功后使用
-    auto localPendingResources = std::move(pendingResources);
-    pendingResources.clear();
-    pendingResources.reserve(32);
+    // Keep the existing exception/retry behavior; ordinary submit exits share cleanup.
+    const bool submitted = [&] {
+        if (!commitCommand(queue)) return false;
 
-    if (!commitCommand(queue))
-    {
-        for (auto &resource : localPendingResources)
-        {
-            pendingResources.push_back(std::move(resource));
-        }
-        localPendingResources.clear();
-
-        waitSemaphores.clear();
-        signalSemaphores.clear();
-        waitFence = VK_NULL_HANDLE;
-        queue->queueMutex->unlock();
-        return nullptr;
-    }
-
-    // P0 修复：确保 currentRecordQueue 始终指向本次选出的队列
-    // commit() 的 lambda 已经设置了此值（幂等），但外部调用者（如 displayFrame 的 present lambda）
-    // 可能不会设置。统一在此处赋值，保证后续 timeline 管理和 vkQueueSubmit2 作用于正确的队列。
-    this->currentRecordQueue = queue;
-
-    {
-
+        // Direct callers (including present) also use the selected queue's timeline.
+        this->currentRecordQueue = queue;
         VkCommandBufferSubmitInfo commandBufferSubmitInfo{};
         commandBufferSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
         commandBufferSubmitInfo.commandBuffer = currentRecordQueue->commandBuffer;
@@ -411,20 +340,14 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
         // 用单次 fetch_add 同时获取 wait 和 signal 值，消除两次原子操作间的竞态窗口
         uint64_t waitValue = currentRecordQueue->timelineValue->fetch_add(1);
         uint64_t signalValue = waitValue + 1;
+        struct RollbackTimeline {
+            std::atomic_uint64_t& value;
+            bool submitted{false};
+            ~RollbackTimeline() { if (!submitted) value.fetch_sub(1); }
+        } rollbackTimeline{*currentRecordQueue->timelineValue};
 
-        VkSemaphoreSubmitInfo timelineWaitSemaphoreSubmitInfo{};
-        timelineWaitSemaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        timelineWaitSemaphoreSubmitInfo.semaphore = currentRecordQueue->timelineSemaphore;
-        timelineWaitSemaphoreSubmitInfo.value = waitValue;
-        timelineWaitSemaphoreSubmitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        waitSemaphores.push_back(timelineWaitSemaphoreSubmitInfo);
-
-        VkSemaphoreSubmitInfo timelineSignalSemaphoreSubmitInfo{};
-        timelineSignalSemaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-        timelineSignalSemaphoreSubmitInfo.semaphore = currentRecordQueue->timelineSemaphore;
-        timelineSignalSemaphoreSubmitInfo.value = signalValue;
-        timelineSignalSemaphoreSubmitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        signalSemaphores.push_back(timelineSignalSemaphoreSubmitInfo);
+        waitSemaphores.push_back(timelineSubmitInfo(currentRecordQueue->timelineSemaphore, waitValue));
+        signalSemaphores.push_back(timelineSubmitInfo(currentRecordQueue->timelineSemaphore, signalValue));
 
         std::vector<VkSemaphoreSubmitInfo> mergedWaitSemaphores = mergeSemaphoreSubmitInfos(waitSemaphores);
         std::vector<VkSemaphoreSubmitInfo> mergedSignalSemaphores = mergeSemaphoreSubmitInfos(signalSemaphores);
@@ -501,14 +424,7 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
         if (!semaphoreValid)
         {
             CFW_LOG_ERROR("[commit] Aborting submit due to invalid semaphore state");
-            // 回滚 fetch_add：提交未发生，timeline 值不应递增，
-            // 否则 semaphore counter 永远无法追上 timelineValue 导致死锁
-            currentRecordQueue->timelineValue->fetch_sub(1);
-            waitSemaphores.clear();
-            signalSemaphores.clear();
-            waitFence = VK_NULL_HANDLE;
-            queue->queueMutex->unlock();
-            return nullptr;
+            return false;
         }
 
         VkSubmitInfo2 submitInfo{};
@@ -524,66 +440,72 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
         if (result != VK_SUCCESS)
         {
             CFW_LOG_ERROR("Failed to submit command buffer! VkResult: {}", coronaHardwareResultStr(result));
-            // 提交失败：回滚 timeline 值，解锁 mutex，避免死锁
-            currentRecordQueue->timelineValue->fetch_sub(1);
-            waitSemaphores.clear();
-            signalSemaphores.clear();
-            waitFence = VK_NULL_HANDLE;
-            queue->queueMutex->unlock();
-            return nullptr;
+            return false;
         }
 
+        rollbackTimeline.submitted = true;
         // Publish this successful submission independently of later recording.
         lastSubmission = {currentRecordQueue, signalValue};
-
-        // ===== 将待释放资源绑定到此次提交的 timeline 值 =====
-        for (auto &resource : localPendingResources)
-        {
-            deferredReleaseQueue.push_back({signalValue,
-                                            std::move(resource),
-                                            currentRecordQueue->timelineSemaphore});
-        }
-        localPendingResources.clear();
-
-        // 处理在 commitCommand 期间新增的 pendingResources（例如 RasterizerPipeline 的保活资源）
-        for (auto &resource : pendingResources)
-        {
-            deferredReleaseQueue.push_back({signalValue,
-                                            std::move(resource),
-                                            currentRecordQueue->timelineSemaphore});
-        }
-        pendingResources.clear();
-    }
+        return true;
+    }();
 
     // 提交完成后清理已消费的 semaphore 状态，避免泄漏到后续的 pickQueueAndCommit 调用
-    waitSemaphores.clear();
-    signalSemaphores.clear();
-    waitFence = VK_NULL_HANDLE;
-
-    queue->queueMutex->unlock();
-
-    return queue;
+    clearSubmitState(*this);
+    return submitted ? queue : nullptr;
 }
 
 HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
 {
+    // Resolve recorded dependencies before locking a queue. A failed CPU bridge
+    // must leave the commands and submission points available for retry.
+    for (const auto point : pendingWaits)
+    {
+        const auto semaphore = hardwareContext->deviceManager.getOrImportTimelineSemaphore(*point.queue);
+        if (semaphore)
+        {
+            waitSemaphores.push_back(timelineSubmitInfo(semaphore, point.value));
+        }
+        else
+        {
+            // An incompatible device pair uses a host wait before local submit.
+            VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+            wait.semaphoreCount = 1;
+            wait.pSemaphores = &point.queue->timelineSemaphore;
+            wait.pValues = &point.value;
+            coronaHardwareCheck(vkWaitSemaphores(point.queue->deviceManager->getLogicalDevice(), &wait, 5'000'000'000ULL));
+        }
+    }
+    if (commandList.empty()) pendingWaits.clear();
+
     if (commandList.size() > 0)
     {
+        // Allocate before submission. On failure the queued commands stay in place;
+        // on success their vector moves into the completion queue without allocation.
+        deferredReleaseQueue.reserve(deferredReleaseQueue.size() + 1);
+        ResourceLayoutJournal layouts;
+        auto& commands = commandList;
 
         auto commitToQueue = [&](DeviceManager::QueueUtils *currentRecordQueue) -> bool {
             this->currentRecordQueue = currentRecordQueue;
 
-            vkResetCommandBuffer(currentRecordQueue->commandBuffer, 0);
+            coronaHardwareCheck(vkResetCommandBuffer(currentRecordQueue->commandBuffer, 0));
 
             VkCommandBufferBeginInfo beginInfo{};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-            vkBeginCommandBuffer(currentRecordQueue->commandBuffer, &beginInfo);
+            coronaHardwareCheck(vkBeginCommandBuffer(currentRecordQueue->commandBuffer, &beginInfo));
 
-            for (size_t i = 0; i < commandList.size(); i++)
+            ResourceBarrierPlanner planner;
+            ResourceAccessList accesses;
+            ResourceBarriers requiredBarriers;
+            for (size_t i = 0; i < commands.size(); i++)
             {
-                CommandRecordVulkan::RequiredBarriers requiredBarriers = commandList[i]->getRequiredBarriers(*this);
+                auto& recorded = commands[i];
+                accesses.clear();
+                recorded.command->resolveResourceUses(recorded.resourceUses, accesses);
+                layouts.capture(accesses);
+                planner.plan(accesses, requiredBarriers);
 
                 if (!requiredBarriers.memoryBarriers.empty() || !requiredBarriers.bufferBarriers.empty() || !requiredBarriers.imageBarriers.empty())
                 {
@@ -600,26 +522,23 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
                     vkCmdPipelineBarrier2(currentRecordQueue->commandBuffer, &dependencyInfo);
                 }
 
-                if (commandList[i]->getExecutorType() != CommandRecordVulkan::ExecutorType::Invalid)
-                {
-                    commandList[i]->commitCommand(*this);
-                }
+                recorded.command->commitCommand(*this);
             }
 
-            vkEndCommandBuffer(currentRecordQueue->commandBuffer);
+            coronaHardwareCheck(vkEndCommandBuffer(currentRecordQueue->commandBuffer));
 
             return true;
         };
 
         CommandRecordVulkan::ExecutorType queueType = CommandRecordVulkan::ExecutorType::Transfer;
-        for (size_t i = 0; i < commandList.size(); i++)
+        for (size_t i = 0; i < commands.size(); i++)
         {
-            if (commandList[i]->getExecutorType() == CommandRecordVulkan::ExecutorType::Graphics)
+            if (commands[i].type == CommandRecordVulkan::ExecutorType::Graphics)
             {
                 queueType = CommandRecordVulkan::ExecutorType::Graphics;
                 break;
             }
-            else if (commandList[i]->getExecutorType() == CommandRecordVulkan::ExecutorType::Compute)
+            else if (commands[i].type == CommandRecordVulkan::ExecutorType::Compute)
             {
                 queueType = CommandRecordVulkan::ExecutorType::Compute;
             }
@@ -637,12 +556,7 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
                 chainIt->second.semaphore != VK_NULL_HANDLE &&
                 chainIt->second.value > 0)
             {
-                VkSemaphoreSubmitInfo graphicsChainWait{};
-                graphicsChainWait.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-                graphicsChainWait.semaphore = chainIt->second.semaphore;
-                graphicsChainWait.value = chainIt->second.value;
-                graphicsChainWait.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-                waitSemaphores.push_back(graphicsChainWait);
+                waitSemaphores.push_back(timelineSubmitInfo(chainIt->second.semaphore, chainIt->second.value));
             }
         }
 
@@ -690,6 +604,12 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
             break;
         }
 
+        if (submittedQueue)
+        {
+            deferredReleaseQueue.push_back({lastSubmission.value, std::move(commandList), lastSubmission.queue->timelineSemaphore});
+            layouts.committed = true;
+            pendingWaits.clear();
+        }
         if (queueType == CommandRecordVulkan::ExecutorType::Graphics &&
             submittedQueue != nullptr &&
             graphicsSubmitChainDevice != VK_NULL_HANDLE &&
@@ -699,26 +619,12 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
                 {lastSubmission.queue->timelineSemaphore, lastSubmission.value};
         }
 
-        commandList.clear();
     }
 
-    {
-        waitSemaphores.clear();
-        signalSemaphores.clear();
-        waitFence = VK_NULL_HANDLE;
-
-        if (lastSubmission)
-        {
-            VkSemaphoreSubmitInfo timelineWaitSemaphoreSubmitInfo{};
-            timelineWaitSemaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-            timelineWaitSemaphoreSubmitInfo.semaphore = lastSubmission.queue->timelineSemaphore;
-            // 使用 pickQueueAndCommit 中记录的确切 signal 值，
-            // 避免在 mutex 释放后读取可能已被其他线程递增的 timelineValue
-            timelineWaitSemaphoreSubmitInfo.value = lastSubmission.value;
-            timelineWaitSemaphoreSubmitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            waitSemaphores.push_back(timelineWaitSemaphoreSubmitInfo);
-        }
-    }
+    clearSubmitState(*this);
+    // Use the published value, not a queue counter that another submit may have advanced.
+    if (lastSubmission)
+        waitSemaphores.push_back(timelineSubmitInfo(lastSubmission.queue->timelineSemaphore, lastSubmission.value));
 
     return *this;
 }

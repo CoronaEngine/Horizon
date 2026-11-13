@@ -12,7 +12,6 @@ include(horizon_image_dependencies)
 if(HORIZON_BUILD_ENGINE)
     include(horizon_engine_dependencies)
     include(horizon_slang)
-    include(horizon_tracy)
     include(horizon_runtime_deps)
 
     # ======================== Shader 自动编译模块 ========================
@@ -35,6 +34,7 @@ if(HORIZON_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.
 endif()
 
 if(HORIZON_BUILD_EXAMPLES)
+    include(horizon_tracy)
     include(horizon_example_dependencies)
     add_subdirectory(examples)
 endif()

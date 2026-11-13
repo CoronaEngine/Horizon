@@ -14,6 +14,7 @@ layout(set = 3, binding = 0) uniform SvSceneShared {
     vec4 fog;
     vec4 color;
     vec4 params;
+    uint shadowCountIndex;
 } fsp;
 
 layout(location = 0) in vec3 v_normal;

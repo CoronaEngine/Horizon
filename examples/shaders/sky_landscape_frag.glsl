@@ -9,12 +9,11 @@ layout(set = 3, binding = 0) uniform LandscapeShared {
     vec4 sunLuminance;
     vec4 skyLuminance;
     vec4 parameters; // z: exposure, w: time
-} ls_fs;
-
-layout(push_constant) uniform LandscapePC {
     mat4 model;
     uint lightmapIndex;
-} pc_fs;
+} ls_fs;
+
+
 
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
@@ -43,7 +42,7 @@ vec3 toGamma(vec3 color)
 void main()
 {
     vec3 normal = normalize(v_normal);
-    float occlusion = toLinear(texture(combinedTextureSamplerHandles[pc_fs.lightmapIndex], v_texcoord0).r);
+    float occlusion = toLinear(texture(combinedTextureSamplerHandles[ls_fs.lightmapIndex], v_texcoord0).r);
 
     // Match bgfx landscape hemisphere axis (Z-up in that shader).
     vec3 skyDirection = vec3(0.0, 0.0, 1.0);

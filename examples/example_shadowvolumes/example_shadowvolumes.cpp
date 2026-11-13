@@ -26,7 +26,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -59,6 +60,13 @@
 
 namespace
 {
+struct SvScenePC {
+    glm::mat4 model{};
+};
+struct SvVolumePC {
+    uint32_t sceneDepthIndex{};
+};
+
 constexpr uint32_t sv_width = 1280;
 constexpr uint32_t sv_height = 720;
 constexpr float volume_extrude = 400.0f;
@@ -357,22 +365,22 @@ void build_shadow_volume(const VolumeSource& src,
 
 struct GpuMesh
 {
-    horizon::HardwareBuffer vb;
-    horizon::HardwareBuffer ib;
+    HardwareBuffer vb;
+    HardwareBuffer ib;
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
     // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
-    horizon::HardwareBuffer indirect;
+    std::vector<RasterDraw> indirect;
 };
 
-horizon::HardwareBuffer group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
+std::vector<RasterDraw> group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
 {
-    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    std::vector<RasterDraw> commands;
     commands.reserve(groups.size());
     for (const MeshGroup& group : groups)
-        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
-    return horizon::HardwareBuffer::indirect(commands, name);
+        commands.push_back(RasterDraw{.indexCount = group.index_count, .firstIndex = group.first_index, .vertexOffset = group.base_vertex, .firstInstance = 0});
+    return commands;
 }
 
 void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
@@ -385,18 +393,16 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_shadowvolumes()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(sv_width, sv_height, "Horizon ShadowVolumes [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(sv_width, sv_height, "Horizon ShadowVolumes [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     const LoadedMesh bunny_mesh = load_bin_mesh(sv_asset_root / "meshes" / "bunny.bin");
     const VolumeSource bunny_volume = build_volume_source(bunny_mesh);
 
     GpuMesh bunny {
-        horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_shadowvolumes.bunny.vb"),
-        horizon::HardwareBuffer::index(bunny_mesh.indices, "example_shadowvolumes.bunny.ib"),
+        HardwareBuffer::uploadDeviceLocal(bunny_mesh.vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(bunny_mesh.indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(bunny_mesh.indices.size()),
         bunny_mesh.groups,
         group_indirect(bunny_mesh.groups, "example_shadowvolumes.bunny.indirect"),
@@ -411,8 +417,8 @@ void run_example_shadowvolumes()
     const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     const std::vector<MeshGroup> plane_groups = { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } };
     GpuMesh floor_plane {
-        horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowvolumes.floor.vb"),
-        horizon::HardwareBuffer::index(plane_indices, "example_shadowvolumes.floor.ib"),
+        HardwareBuffer::uploadDeviceLocal(plane_vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(plane_indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(plane_indices.size()),
         plane_groups,
         group_indirect(plane_groups, "example_shadowvolumes.floor.indirect"),
@@ -425,85 +431,47 @@ void run_example_shadowvolumes()
     constexpr uint32_t max_volume_vertices = 1 << 18;
     std::vector<uint16_t> identity_indices(volume_chunk_vertices);
     std::iota(identity_indices.begin(), identity_indices.end(), uint16_t { 0 });
-    horizon::HardwareBuffer volume_ib = horizon::HardwareBuffer::index(identity_indices, "example_shadowvolumes.volume.ib");
+    auto volume_ib = HardwareBuffer::uploadDeviceLocal(identity_indices, BufferUsage::IndexBuffer);
 
     // 渲染目标
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        sv_width, sv_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_shadowvolumes.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(sv_width, sv_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
-    horizon::HardwareImage depthval_depth_image(horizon::HardwareImageDesc::depth_attachment(
-        sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.depthval.depth"));
-    depthval_depth_image.set_clear_depth(1.0f, 0);
-    horizon::HardwareImage lit_depth_image(horizon::HardwareImageDesc::depth_attachment(
-        sv_width, sv_height, horizon::Format::D32, "example_shadowvolumes.lit.depth"));
-    lit_depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(example::imageInfo(sv_width, sv_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
+    HardwareImage depthval_depth_image(example::imageInfo(sv_width, sv_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
+    HardwareImage lit_depth_image(example::imageInfo(sv_width, sv_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    const auto rt_usage = horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
-    horizon::HardwareImage scene_depth_image(horizon::HardwareImageDesc::texture_2d(
-        sv_width, sv_height, horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.scenedepth"));
-    scene_depth_image.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage scene_depth_image(example::imageInfo(sv_width, sv_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    scene_depth_image.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage count_image(horizon::HardwareImageDesc::texture_2d(
-        sv_width, sv_height, horizon::Format::R32_FLOAT, rt_usage, "example_shadowvolumes.count"));
-    count_image.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage count_image(example::imageInfo(sv_width, sv_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    count_image.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
     // pass 1: ambient
-    horizon::RasterizerPipelineDesc ambient_desc;
-    ambient_desc.blend_enabled = false;
-    horizon::RasterizerPipeline ambient_rasterizer(sv_scene_vert_glsl, sv_ambient_frag_glsl, ambient_desc);
+    example::ScenePass<SvScenePC, sv_scene_vert_glsl_t, sv_ambient_frag_glsl_t> ambient_rasterizer(sv_width, sv_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     ambient_rasterizer.outColor = final_output_image;
-    ambient_rasterizer.bind_depth_target(depth_image);
+    ambient_rasterizer.setDepthImage(depth_image);
 
     // pass 2: depthval
-    horizon::RasterizerPipelineDesc depthval_desc;
-    depthval_desc.blend_enabled = false;
-    horizon::RasterizerPipeline depthval_rasterizer(sv_scene_vert_glsl, sv_depthval_frag_glsl, depthval_desc);
+    example::ScenePass<SvScenePC, sv_scene_vert_glsl_t, sv_depthval_frag_glsl_t> depthval_rasterizer(sv_width, sv_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     depthval_rasterizer.outColor = scene_depth_image;
-    depthval_rasterizer.bind_depth_target(depthval_depth_image);
+    depthval_rasterizer.setDepthImage(depthval_depth_image);
 
     // pass 3: volume（加法混合、无深度附件）
-    horizon::RasterizerPipelineDesc volume_desc;
-    volume_desc.depth_test_enabled = false;
-    volume_desc.depth_write_enabled = false;
-    volume_desc.blend_enabled = true;
-    volume_desc.src_color_blend_factor = horizon::BlendFactor::One;
-    volume_desc.dst_color_blend_factor = horizon::BlendFactor::One;
-    volume_desc.color_blend_op = horizon::BlendOp::Add;
-    volume_desc.src_alpha_blend_factor = horizon::BlendFactor::One;
-    volume_desc.dst_alpha_blend_factor = horizon::BlendFactor::One;
-    volume_desc.alpha_blend_op = horizon::BlendOp::Add;
-    horizon::RasterizerPipeline volume_rasterizer(sv_volume_vert_glsl, sv_volume_frag_glsl, volume_desc);
+    example::ScenePass<SvVolumePC, sv_volume_vert_glsl_t, sv_volume_frag_glsl_t> volume_rasterizer(sv_width, sv_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Additive}, {false, false}});
     volume_rasterizer.outColor = count_image;
-    // scene depth 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
-    volume_rasterizer.volume_pc.sceneDepthIndex = scene_depth_image.store_descriptor();
+    // scene depth 存入 bindless combined-texture 表（set 0），索引经逐 draw 参数传入。
+    volume_rasterizer.parameters.sceneDepthIndex = scene_depth_image.storeDescriptor();
 
     // pass 4: lit（不清屏、加法混合叠到 ambient 上）
-    horizon::RasterizerPipelineDesc lit_desc;
-    lit_desc.clear_color_target = false;
-    lit_desc.blend_enabled = true;
-    lit_desc.src_color_blend_factor = horizon::BlendFactor::One;
-    lit_desc.dst_color_blend_factor = horizon::BlendFactor::One;
-    lit_desc.color_blend_op = horizon::BlendOp::Add;
-    lit_desc.src_alpha_blend_factor = horizon::BlendFactor::One;
-    lit_desc.dst_alpha_blend_factor = horizon::BlendFactor::One;
-    lit_desc.alpha_blend_op = horizon::BlendOp::Add;
-    horizon::RasterizerPipeline lit_rasterizer(sv_scene_vert_glsl, sv_lit_frag_glsl, lit_desc);
+    example::ScenePass<SvScenePC, sv_scene_vert_glsl_t, sv_lit_frag_glsl_t> lit_rasterizer(sv_width, sv_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Additive}, {true, false}});
     lit_rasterizer.outColor = final_output_image;
-    lit_rasterizer.bind_depth_target(lit_depth_image);
-    // shadow count 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
-    lit_rasterizer.model_pc.shadowCountIndex = count_image.store_descriptor();
+    lit_rasterizer.setDepthImage(lit_depth_image);
+    // The count image is shared by every draw in the lit pass.
+    lit_rasterizer.vsp.shadowCountIndex = count_image.storeDescriptor();
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(sv_width) / static_cast<float>(sv_height);
     // 原版自由相机初始位姿：pos(3,20,-58)、垂直角 -0.25 rad、yaw 0
@@ -580,8 +548,7 @@ void run_example_shadowvolumes()
         };
 
         auto record_scene = [&](auto& pipeline) {
-            pipeline.clear_records();
-            // 共享矩阵（UBO）；per-draw model 走 push constant
+            // 共享矩阵（UBO）；per-draw model 由 draw 参数传递
             pipeline.vsp.proj_view   = view_proj;
             pipeline.vsp.view_matrix = view;
             pipeline.vsp.light_pos_vs = light_pos_vs;
@@ -593,15 +560,10 @@ void run_example_shadowvolumes()
             pipeline.vsp.color = glm::vec4(1.0f);
             pipeline.vsp.params = resolution;
 
-            // model 按 record_indirect 调用快照，且一次调用只绑一对 VB/IB：每个物体写完
-            // 自己的 model 后，用它自己 mesh 的 VB/IB 单独 record 一次。
             for (const DrawItem& item : items)
             {
-                pipeline.model_pc.model = item.model;
-
-                horizon::DrawIndexedIndirectParams indirect_params;
-                indirect_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
-                pipeline.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, indirect_params);
+                pipeline.parameters.model = item.model;
+                pipeline.draw({item.mesh->vb, item.mesh->ib}, item.mesh->indirect);
             }
         };
 
@@ -612,11 +574,10 @@ void run_example_shadowvolumes()
         // CPU 生成 bunny 阴影体
         build_shadow_volume(bunny_volume, mtx_bunny, light_pos, volume_positions);
 
-        volume_rasterizer.clear_records();
         if (!volume_positions.empty())
         {
-            horizon::HardwareBuffer volume_vb =
-                horizon::HardwareBuffer::vertex(volume_positions, "example_shadowvolumes.volume.vb");
+            HardwareBuffer volume_vb =
+                HardwareBuffer(volume_positions, BufferUsage::VertexBuffer);
 
             volume_rasterizer.vvp.view_proj = view_proj;
             volume_rasterizer.vvp.params = resolution;
@@ -624,49 +585,34 @@ void run_example_shadowvolumes()
             const uint32_t volume_vertices =
                 std::min<uint32_t>(static_cast<uint32_t>(volume_positions.size()), max_volume_vertices);
 
-            std::vector<horizon::DrawIndexedIndirectCommand> volume_indirect_cmds;
+            std::vector<RasterDraw> volume_indirect_cmds;
             for (uint32_t drawn = 0; drawn < volume_vertices; drawn += volume_chunk_vertices)
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = std::min(volume_chunk_vertices, volume_vertices - drawn);
-                cmd.first_index = 0;
-                cmd.vertex_offset = static_cast<int32_t>(drawn);
-                cmd.instance_count = 1;
-                cmd.first_instance = static_cast<uint32_t>(volume_indirect_cmds.size());
+                RasterDraw cmd;
+                cmd.indexCount = std::min(volume_chunk_vertices, volume_vertices - drawn);
+                cmd.firstIndex = 0;
+                cmd.vertexOffset = static_cast<int32_t>(drawn);
+                cmd.instanceCount = 1;
+                cmd.firstInstance = static_cast<uint32_t>(volume_indirect_cmds.size());
                 volume_indirect_cmds.push_back(cmd);
             }
 
             if (!volume_indirect_cmds.empty())
             {
-                horizon::HardwareBuffer volume_indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                    std::span<const std::byte>(
-                        reinterpret_cast<const std::byte*>(volume_indirect_cmds.data()),
-                        volume_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    static_cast<uint32_t>(volume_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                    "example_shadowvolumes.volume_indirect");
-
-                horizon::DrawIndexedIndirectParams volume_params;
-                volume_params.draw_count = static_cast<uint32_t>(volume_indirect_cmds.size());
-                volume_params.indirect_offset = 0;
-                volume_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-                volume_rasterizer.record_indirect(volume_ib, volume_vb, volume_indirect_buffer, volume_params);
+                auto volume_indirect_buffer = volume_indirect_cmds;
+                volume_rasterizer.draw({volume_vb, volume_ib}, volume_indirect_buffer);
             }
         }
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << ambient_rasterizer.extent(sv_width, sv_height)
-                            << depthval_rasterizer.extent(sv_width, sv_height)
-                            << volume_rasterizer.extent(sv_width, sv_height)
-                            << lit_rasterizer.extent(sv_width, sv_height)
-                            << horizon::commit();
+        render_executor << ambient_rasterizer
+                            << depthval_rasterizer
+                            << volume_rasterizer
+                            << lit_rasterizer;
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // 移植自参考示例 21-deferred 的 fs_deferred_light.sc。
 // uniform block 与 deferred_light_vert.glsl 完全一致（共用 binding=0）。
@@ -11,14 +13,15 @@ layout(set = 3, binding = 0) uniform DeferredLightShared {
     mat4 view;
 } fsp;
 
-// 与 deferred_light_vert.glsl 共享同一 push constant 块，布局必须一致。
-layout(push_constant) uniform DeferredLightPC {
+// 与 deferred_light_vert.glsl 共享同一 BDA 绘制参数，布局必须一致。
+struct DeferredLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect;
     uint gNormalIndex;
     uint gDepthIndex;
-} fpc;
+};
+#define fpc (*(DeferredLightPC*)(drawRoot.parameters + drawParameterWord))
 
 // bindless combined-image-sampler 表（set 0）。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];

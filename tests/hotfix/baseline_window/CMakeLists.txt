@@ -21,11 +21,12 @@ include(horizon_hotfix_manifest)
 horizon_register_hotfix_module(horizon-baseline-live-patch)
 
 add_executable(horizon-test-baseline-window main.cpp
-    "${baseline_dir}/example_baseline.cpp" "${original_source}")
+    native_window.cpp "${original_source}")
 target_include_directories(horizon-test-baseline-window PRIVATE
     "${example_dir}" "${PROJECT_SOURCE_DIR}/src/tests")
 target_compile_definitions(horizon-test-baseline-window PRIVATE
-    HORIZON_EXAMPLE_HOTFIX_ENABLED=1 HORIZON_BASELINE_HOTFIX_WINDOW_TEST=1)
+    HORIZON_EXAMPLE_HOTFIX_ENABLED=1 HORIZON_BASELINE_HOTFIX_WINDOW_TEST=1
+    HORIZON_TEST_EXAMPLES_DIR="${example_dir}")
 target_link_libraries(horizon-test-baseline-window PRIVATE
     glfw glm::glm volk::volk horizon::stb horizon-hotfix horizon-hotfix-build-cmake)
 if(WIN32)
@@ -36,7 +37,7 @@ endif()
 add_custom_command(TARGET horizon-test-baseline-window POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:horizon-test-baseline-window>/shaders"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${example_dir}/shaders/baseline_vert.spv" "${example_dir}/shaders/baseline_frag.spv"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/baseline_vert.spv" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/baseline_frag.spv"
         "$<TARGET_FILE_DIR:horizon-test-baseline-window>/shaders"
     VERBATIM)
 

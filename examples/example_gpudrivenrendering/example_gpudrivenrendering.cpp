@@ -1,3 +1,4 @@
+#include "scene_pass.h"
 // Port of bgfx example 37-gpudrivenrendering: Hi-Z occlusion culling, stream compaction,
 // and MultiDrawIndirect rendering on Horizon.
 
@@ -12,8 +13,9 @@
 #include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
-#include "common.h"
-#include "horizon.h"
+#include "legacy_common.h"
+#include <span>
+#include "Horizon_old.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -289,16 +291,9 @@ void pack_instance_row(std::array<glm::vec4, 4>& rows, const glm::mat4& world, f
     rows[3] = world[3];
 }
 
-horizon::HardwareImage make_hi_z_image(uint32_t width, uint32_t height, const std::string& name)
+HardwareImage make_hi_z_image(uint32_t width, uint32_t height, const std::string& name)
 {
-    return horizon::HardwareImage(horizon::HardwareImageDesc::texture_2d(
-        width,
-        height,
-        horizon::Format::R32_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        name));
+    return HardwareImage(example::imageInfo(width, height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
 }
 
 struct SceneData
@@ -434,11 +429,11 @@ SceneData build_scene(std::mt19937& rng)
 }
 
 template <typename OccludePipeline>
-void fill_hi_z_mip_ids(OccludePipeline& pipeline, const std::vector<horizon::HardwareImage>& hi_z_mips)
+void fill_hi_z_mip_ids(OccludePipeline& pipeline, const std::vector<HardwareImage>& hi_z_mips)
 {
     std::array<glm::uvec4, 4> packed {};
     for (uint32_t mip = 0; mip < hi_z_mips.size() && mip < 16u; ++mip)
-        packed[mip / 4u][mip % 4u] = hi_z_mips[mip].store_descriptor();
+        packed[mip / 4u][mip % 4u] = hi_z_mips[mip].storeSampledDescriptor();
 
     pipeline.u.hiZMipIDs0 = packed[0];
     pipeline.u.hiZMipIDs1 = packed[1];
@@ -450,11 +445,8 @@ void fill_hi_z_mip_ids(OccludePipeline& pipeline, const std::vector<horizon::Har
 
 void run_example_gpudrivenrendering()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window =
-        glfwCreateWindow(gdr_width, gdr_height, "Horizon GPUDrivenRendering [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(gdr_width, gdr_height, "Horizon GPU Driven Rendering");
+    auto* window = owner.get();
 
     std::mt19937 rng(12345u);
     const SceneData scene = build_scene(rng);
@@ -466,149 +458,67 @@ void run_example_gpudrivenrendering()
     const uint32_t instances_pow2 =
         1u << (static_cast<uint32_t>(std::floor(std::log2(static_cast<float>(k_total_instances)))) + 1u);
 
-    horizon::HardwareBuffer cube_vb =
-        horizon::HardwareBuffer::vertex(cube_vertices, "example_gpudrivenrendering.cube_vb");
-    horizon::HardwareBuffer cube_ib =
-        horizon::HardwareBuffer::index(cube_indices, "example_gpudrivenrendering.cube_ib");
+    auto cube_vb = HardwareBuffer::uploadDeviceLocal(cube_vertices, BufferUsage::VertexBuffer);
+    auto cube_ib = HardwareBuffer::uploadDeviceLocal(cube_indices, BufferUsage::IndexBuffer);
 
-    // Indirect args buffer for occlusion pass (wall cubes)
-    horizon::DrawIndexedIndirectCommand occlusion_indirect_cmd;
-    occlusion_indirect_cmd.index_count = static_cast<uint32_t>(cube_indices.size());
-    occlusion_indirect_cmd.instance_count = 0;  // Will be updated per-frame
-    occlusion_indirect_cmd.first_index = 0;
-    occlusion_indirect_cmd.vertex_offset = 0;
-    occlusion_indirect_cmd.first_instance = 0;
+    auto merged_vb = HardwareBuffer::uploadDeviceLocal(scene.merged_vertices, BufferUsage::VertexBuffer);
+    auto merged_ib = HardwareBuffer::uploadDeviceLocal(scene.merged_indices, BufferUsage::IndexBuffer);
 
-    horizon::HardwareBuffer occlusion_indirect_args = horizon::HardwareBuffer::from_bytes(
-        std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(&occlusion_indirect_cmd),
-            sizeof(horizon::DrawIndexedIndirectCommand)),
-        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
-        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-        "example_gpudrivenrendering.occlusion_indirect");
-
-    horizon::HardwareBuffer merged_vb =
-        horizon::HardwareBuffer::vertex(scene.merged_vertices, "example_gpudrivenrendering.merged_vb");
-    horizon::HardwareBuffer merged_ib =
-        horizon::HardwareBuffer::index(scene.merged_indices, "example_gpudrivenrendering.merged_ib");
-
-    horizon::HardwareBuffer instance_in_buffer(
-        horizon::HardwareBufferDesc::typed<glm::vec4>(
-            scene.instance_data.size(),
-            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-            "example_gpudrivenrendering.instances_in"),
-        std::as_bytes(std::span(scene.instance_data)));
-
-    horizon::HardwareBuffer instance_out_buffer(
-        horizon::HardwareBufferDesc::typed<glm::vec4>(
-            scene.instance_data.size(),
-            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-            "example_gpudrivenrendering.instances_out"),
-        {});
-
-    horizon::HardwareBuffer bbox_buffer(
-        horizon::HardwareBufferDesc::typed<glm::vec4>(
-            scene.bbox_data.size(),
-            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-            "example_gpudrivenrendering.bboxes"),
-        std::as_bytes(std::span(scene.bbox_data)));
-
-    std::vector<uint32_t> zero_counts(s_max_noof_props, 0u);
-    horizon::HardwareBuffer count_buffer(
-        horizon::HardwareBufferDesc::typed<uint32_t>(
-            s_max_noof_props,
-            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-            "example_gpudrivenrendering.counts"),
-        std::as_bytes(std::span(zero_counts)));
-
-    // Stream compaction scans a power-of-two range (and bgfx uses s_maxNoofInstances=2048).
-    constexpr uint32_t k_max_instances = 2048;
-    std::vector<uint32_t> zero_predicates(k_max_instances, 0u);
-    horizon::HardwareBuffer predicate_buffer(
-        horizon::HardwareBufferDesc::typed<uint32_t>(
-            k_max_instances,
-            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-            "example_gpudrivenrendering.predicates"),
-        std::as_bytes(std::span(zero_predicates)));
-
-    horizon::HardwareBuffer indirect_const_buffer(
-        horizon::HardwareBufferDesc::typed<uint32_t>(
-            scene.indirect_const.size(),
-            horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-            "example_gpudrivenrendering.indirect_const"),
-        std::as_bytes(std::span(scene.indirect_const)));
-
-    std::vector<horizon::DrawIndexedIndirectCommand> initial_indirect(k_num_props);
-    for (uint32_t i = 0; i < k_num_props; ++i)
-    {
-        initial_indirect[i].index_count = scene.props[i].index_count;
-        initial_indirect[i].instance_count = scene.props[i].instance_count;
-        initial_indirect[i].first_index = scene.props[i].first_index;
-        initial_indirect[i].vertex_offset = scene.props[i].base_vertex;
-        initial_indirect[i].first_instance = scene.props[i].first_instance;
+    const RasterGeometry walls{cube_vb, cube_ib}, merged{merged_vb, merged_ib};
+    HardwareBuffer instance_in_buffer(scene.instance_data, BufferUsage::StorageBuffer);
+    HardwareBuffer instance_out_buffer(scene.instance_data.size(), sizeof(glm::vec4), BufferUsage::StorageBuffer);
+    HardwareBuffer bbox_buffer(scene.bbox_data, BufferUsage::StorageBuffer);
+    HardwareBuffer count_buffer(std::vector<uint32_t>(s_max_noof_props), BufferUsage::StorageBuffer);
+    HardwareBuffer predicate_buffer(std::vector<uint32_t>(2048), BufferUsage::StorageBuffer);
+    HardwareBuffer indirect_const_buffer(scene.indirect_const, BufferUsage::StorageBuffer);
+    std::vector<RasterIndirectPacket> full;
+    for (const auto& prop : scene.props) {
+        full.push_back({prop.index_count, prop.instance_count, 0, prop.first_instance,
+                        0, prop.first_index, prop.base_vertex, 0});
     }
-    horizon::HardwareBuffer indirect_buffer =
-        horizon::HardwareBuffer::indirect(initial_indirect, "example_gpudrivenrendering.indirect");
-    // Untouched by stream compaction ΓÇö used when Hi-Z is disabled but indirect draw stays on.
-    horizon::HardwareBuffer indirect_full_buffer =
-        horizon::HardwareBuffer::indirect(initial_indirect, "example_gpudrivenrendering.indirect_full");
+    auto indirect_buffer = HardwareBuffer::uploadDeviceLocal(full, BufferUsage::RasterIndirect);
+    auto indirect_full_buffer = HardwareBuffer::uploadDeviceLocal(full, BufferUsage::RasterIndirect);
 
-    std::vector<horizon::HardwareImage> hi_z_mips;
+    std::vector<HardwareImage> hi_z_mips;
     hi_z_mips.reserve(num_hi_z_mips);
     uint32_t mip_w = hi_z_width;
     uint32_t mip_h = hi_z_height;
     for (uint32_t mip = 0; mip < num_hi_z_mips; ++mip)
     {
         hi_z_mips.push_back(make_hi_z_image(mip_w, mip_h, "example_gpudrivenrendering.hiz.mip" + std::to_string(mip)));
-        hi_z_mips.back().set_clear_color(1.0f, 1.0f, 1.0f, 1.0f);
+        hi_z_mips.back().setClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         mip_w = std::max(1u, mip_w / 2u);
         mip_h = std::max(1u, mip_h / 2u);
     }
 
-    horizon::HardwareImage hi_z_depth(horizon::HardwareImageDesc::depth_attachment(
-        hi_z_width, hi_z_height, horizon::Format::D32, "example_gpudrivenrendering.hiz.depth"));
-    hi_z_depth.set_clear_depth(1.0f, 0);
+    HardwareImage hi_z_depth(hi_z_width, hi_z_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        gdr_width,
-        gdr_height,
-        horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_gpudrivenrendering.output"));
-    final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
+    HardwareImage final_output_image(gdr_width, gdr_height, ImageFormat::RGBA16_FLOAT);
+    final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
 
-    horizon::HardwareImage main_depth(horizon::HardwareImageDesc::depth_attachment(
-        gdr_width, gdr_height, horizon::Format::D32, "example_gpudrivenrendering.depth"));
-    main_depth.set_clear_depth(1.0f, 0);
+    HardwareImage main_depth(gdr_width, gdr_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    horizon::RasterizerPipelineDesc opaque_desc;
-    opaque_desc.blend_enabled = false;
-
-    horizon::RasterizerPipelineDesc main_desc = opaque_desc;
-
-    horizon::RasterizerPipeline occlusion_rasterizer(
-        gdr_occlusion_vert_glsl, gdr_occlusion_frag_glsl, opaque_desc);
+    RasterizerPipeline<gdr_occlusion_vert_glsl_t, gdr_occlusion_frag_glsl_t> occlusion_rasterizer;
+    occlusion_rasterizer.setRasterState({true, true, RasterCompare::LessEqual, RasterBlend::Opaque});
     occlusion_rasterizer.outDepth = hi_z_mips[0];
-    occlusion_rasterizer.bind_depth_target(hi_z_depth);
+    occlusion_rasterizer.setDepthImage(hi_z_depth);
 
-    horizon::RasterizerPipeline main_rasterizer(gdr_main_vert_glsl, gdr_main_frag_glsl, main_desc);
+    RasterizerPipeline<gdr_main_vert_glsl_t, gdr_main_frag_glsl_t> main_rasterizer;
+    main_rasterizer.setRasterState({true, true, RasterCompare::LessEqual, RasterBlend::Opaque});
     main_rasterizer.outColor = final_output_image;
-    main_rasterizer.bind_depth_target(main_depth);
+    main_rasterizer.setDepthImage(main_depth);
 
-    main_rasterizer.materials.color0 = scene.props[0].material_color;
-    main_rasterizer.materials.color1 = scene.props[1].material_color;
-    main_rasterizer.materials.color2 = scene.props[2].material_color;
-    main_rasterizer.materials.color3 = scene.props[3].material_color;
+    main_rasterizer.vp.color0 = scene.props[0].material_color;
+    main_rasterizer.vp.color1 = scene.props[1].material_color;
+    main_rasterizer.vp.color2 = scene.props[2].material_color;
+    main_rasterizer.vp.color3 = scene.props[3].material_color;
 
-    horizon::ComputePipeline downscale(gdr_downscale_hi_z_glsl, ktm::uvec3(16, 16, 1));
-    horizon::ComputePipeline occlude(gdr_occlude_props_glsl, ktm::uvec3(64, 1, 1));
-    horizon::ComputePipeline compact(gdr_stream_compaction_glsl, ktm::uvec3(1024, 1, 1));
+    ComputePipeline<gdr_downscale_hi_z_glsl_t> downscale;
+    ComputePipeline<gdr_occlude_props_glsl_t> occlude;
+    ComputePipeline<gdr_stream_compaction_glsl_t> compact;
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     HorizonImGuiLayer ui(window, gdr_width, gdr_height);
 
@@ -649,17 +559,13 @@ void run_example_gpudrivenrendering()
     compact.u.cullingConfig =
         glm::vec4(float(k_total_instances), float(instances_pow2), 0.0f, float(k_num_props));
 
-    horizon::DrawIndexedIndirectParams indirect_params;
-    indirect_params.draw_count = k_num_props;
-
-    bool use_indirect = true;
+    bool use_compacted_instances = true;
     bool hiz_enable = true; // default: current full Hi-Z ΓåÆ occlude ΓåÆ compact path
     bool first_frame = true;
 
     auto prev_time = std::chrono::high_resolution_clock::now();
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
-    horizon::SubmitReceipt render_receipt;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -667,7 +573,7 @@ void run_example_gpudrivenrendering()
         ui.new_frame();
 
         ImGui::Begin("GPU Driven Rendering");
-        ImGui::Checkbox("Use Indirect", &use_indirect);
+        ImGui::Checkbox("Use GPU-culled instances", &use_compacted_instances);
         ImGui::Checkbox("Hi-Z Occlusion", &hiz_enable);
         ImGui::Text("Instances: ground %u, walls %u, short %u, tall %u (total %u)",
                     scene.props[0].instance_count,
@@ -731,96 +637,17 @@ void run_example_gpudrivenrendering()
         main_rasterizer.vp.view = view;
         occlude.u.viewProj = hi_z_proj * view;
 
-        const uint32_t instance_in_id = instance_in_buffer.store_descriptor();
-        const uint32_t instance_out_id = instance_out_buffer.store_descriptor();
-        const uint32_t bbox_id = bbox_buffer.store_descriptor();
-        const uint32_t count_id = count_buffer.store_descriptor();
-        const uint32_t predicate_id = predicate_buffer.store_descriptor();
-        const uint32_t indirect_const_id = indirect_const_buffer.store_descriptor();
-        const uint32_t indirect_id = indirect_buffer.store_descriptor();
+        const uint32_t instance_in_id = instance_in_buffer.storeDescriptor();
+        const uint32_t instance_out_id = instance_out_buffer.storeDescriptor();
+        const uint32_t bbox_id = bbox_buffer.storeDescriptor();
+        const uint32_t count_id = count_buffer.storeDescriptor();
+        const uint32_t predicate_id = predicate_buffer.storeDescriptor();
+        const uint32_t indirect_const_id = indirect_const_buffer.storeDescriptor();
+        const uint32_t indirect_id = indirect_buffer.storeDescriptor();
 
-        occlusion_rasterizer.pc.instanceBufferID = instance_in_id;
-        occlusion_rasterizer.clear_records();
-        if (hiz_enable)
-        {
-            // Update indirect command with current instance count
-            horizon::DrawIndexedIndirectCommand occlusion_cmd;
-            occlusion_cmd.index_count = static_cast<uint32_t>(cube_indices.size());
-            occlusion_cmd.instance_count = scene.props[1].instance_count;
-            occlusion_cmd.first_index = 0;
-            occlusion_cmd.vertex_offset = 0;
-            occlusion_cmd.first_instance = k_wall_start_instance;
-
-            // Upload updated command
-            horizon::HardwareBuffer occlusion_indirect_frame = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(&occlusion_cmd),
-                    sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_gpudrivenrendering.occlusion_indirect_frame");
-
-            horizon::DrawIndexedIndirectParams indirect_params;
-            indirect_params.draw_count = 1;
-            indirect_params.indirect_offset = 0;
-            indirect_params.stride = 0;
-            occlusion_rasterizer.record_indirect(cube_ib, cube_vb, occlusion_indirect_frame, indirect_params);
-        }
-
-        main_rasterizer.clear_records();
-        const bool indirect_ready = use_indirect && (!hiz_enable || !first_frame);
-        if (indirect_ready)
-        {
-            if (hiz_enable)
-            {
-                // Culled instances + compacted indirect args.
-                main_rasterizer.pc.instanceBufferID = instance_out_id;
-                main_rasterizer.record_indirect(merged_ib, merged_vb, indirect_buffer, indirect_params);
-            }
-            else
-            {
-                // Hi-Z off: still DrawIndirect, but use the full unculled instance/indirect buffers.
-                main_rasterizer.pc.instanceBufferID = instance_in_id;
-                main_rasterizer.record_indirect(merged_ib, merged_vb, indirect_full_buffer, indirect_params);
-            }
-        }
-        else
-        {
-            // Fallback path: convert loop to multi-draw indirect
-            std::vector<horizon::DrawIndexedIndirectCommand> fallback_commands;
-            main_rasterizer.pc.instanceBufferID = instance_in_id;
-
-            for (const PropDesc& prop : scene.props)
-            {
-                if (!prop.main_pass)
-                    continue;
-
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = prop.index_count;
-                cmd.first_index = prop.first_index;
-                cmd.vertex_offset = prop.base_vertex;
-                cmd.instance_count = prop.instance_count;
-                cmd.first_instance = prop.first_instance;
-                fallback_commands.push_back(cmd);
-            }
-
-            if (!fallback_commands.empty())
-            {
-                horizon::HardwareBuffer fallback_indirect = horizon::HardwareBuffer::from_bytes(
-                    std::span<const std::byte>(
-                        reinterpret_cast<const std::byte*>(fallback_commands.data()),
-                        fallback_commands.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    static_cast<uint32_t>(fallback_commands.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                    horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                    "example_gpudrivenrendering.fallback_indirect");
-
-                horizon::DrawIndexedIndirectParams indirect_params;
-                indirect_params.draw_count = static_cast<uint32_t>(fallback_commands.size());
-                indirect_params.indirect_offset = 0;
-                indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-                main_rasterizer.record_indirect(merged_ib, merged_vb, fallback_indirect, indirect_params);
-            }
-        }
+        occlusion_rasterizer.vp.instanceBufferID = instance_in_id;
+        const bool culled = use_compacted_instances && hiz_enable && !first_frame;
+        main_rasterizer.vp.instanceBufferID = culled ? instance_out_id : instance_in_id;
 
         occlude.pc.bboxBufferID = bbox_id;
         occlude.pc.countBufferID = count_id;
@@ -835,22 +662,24 @@ void run_example_gpudrivenrendering()
 
         const uint32_t occlude_groups_x = (k_total_instances + 63u) / 64u;
 
-        horizon::HardwareStream stream = render_executor.stream();
         if (hiz_enable)
         {
-            stream << occlusion_rasterizer.extent(hi_z_width, hi_z_height);
-
+            occlusion_rasterizer.uses({{instance_in_buffer, ResourceAccess::Read}});
+            auto depth = occlusion_rasterizer.beginBatch(hi_z_width, hi_z_height);
+            depth.draw(walls, {.instanceCount = scene.props[1].instance_count, .firstInstance = k_wall_start_instance});
+            render_executor << std::move(depth);
             uint32_t src_w = hi_z_width;
             uint32_t src_h = hi_z_height;
             uint32_t dst_w = std::max(1u, src_w / 2u);
             uint32_t dst_h = std::max(1u, src_h / 2u);
             for (uint32_t mip = 1; mip < num_hi_z_mips; ++mip)
             {
-                downscale.pc.srcID = hi_z_mips[mip - 1u].store_descriptor();
-                downscale.pc.dstID = hi_z_mips[mip].store_descriptor();
+                downscale.pc.srcID = hi_z_mips[mip - 1u].storeDescriptor();
+                downscale.pc.dstID = hi_z_mips[mip].storeDescriptor();
                 downscale.pc.srcWidth = src_w;
                 downscale.pc.srcHeight = src_h;
-                stream << downscale.dispatch_extent(dst_w, dst_h);
+                downscale.uses({{hi_z_mips[mip - 1], ResourceAccess::Read}, {hi_z_mips[mip], ResourceAccess::Write}});
+                render_executor << downscale((dst_w + 15) / 16, (dst_h + 15) / 16, 1);
 
                 src_w = dst_w;
                 src_h = dst_h;
@@ -858,21 +687,25 @@ void run_example_gpudrivenrendering()
                 dst_h = std::max(1u, src_h / 2u);
             }
 
-            stream << occlude.groups(occlude_groups_x, 1, 1) << compact.groups(1, 1, 1);
+            std::vector<ResourceUse> reads{{bbox_buffer, ResourceAccess::Read}, {count_buffer, ResourceAccess::ReadWrite},
+                                          {predicate_buffer, ResourceAccess::Write}};
+            for (const auto& mip : hi_z_mips) reads.push_back({mip, ResourceAccess::Read});
+            occlude.uses(reads);
+            compact.uses({{indirect_const_buffer, ResourceAccess::Read}, {instance_in_buffer, ResourceAccess::Read},
+                          {predicate_buffer, ResourceAccess::Read}, {count_buffer, ResourceAccess::ReadWrite},
+                          {indirect_buffer, ResourceAccess::Write}, {instance_out_buffer, ResourceAccess::Write}});
+            render_executor << occlude(occlude_groups_x, 1, 1) << compact(1, 1, 1);
         }
 
-        render_receipt = (stream << main_rasterizer.extent(gdr_width, gdr_height) << horizon::commit());
-
+        main_rasterizer.uses({{culled ? instance_out_buffer : instance_in_buffer, ResourceAccess::Read}});
+        auto batch = main_rasterizer.beginBatch(gdr_width, gdr_height);
+        batch.drawIndirect(merged, culled ? indirect_buffer : indirect_full_buffer, k_num_props);
+        render_executor << std::move(batch);
+        render_executor.commit();
         first_frame = false;
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        // Serialize CPU submit rate against the GPU (also covers IMGUI-render-off path
-        // where draw_overlay returns without waiting).
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto output = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*output.executor) << output.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

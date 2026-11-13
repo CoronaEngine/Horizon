@@ -43,15 +43,15 @@ HardwareExecutor& HardwareExecutor::operator<<(ComputePipelineBase& computePipel
 {
     auto* executor = execFromId(executorID);
     if (auto* pipeline = reinterpret_cast<ComputePipelineVulkan*>(computePipeline.getComputePipelineID()))
-        *executor << static_cast<CommandRecordVulkan*>(pipeline);
+        executor->recordOwned(pipeline->capture(), computePipeline.resourceUses_);
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::operator<<(RasterizerPipelineBase& rasterizerPipeline)
+HardwareExecutor& HardwareExecutor::operator<<(RasterBatch&& batch)
 {
-    auto* executor = execFromId(executorID);
-    if (auto* pipeline = reinterpret_cast<RasterizerPipelineVulkan*>(rasterizerPipeline.getRasterizerPipelineID()))
-        *executor << static_cast<CommandRecordVulkan*>(pipeline);
+    if (!batch.record_) throw std::logic_error("Raster batch already submitted");
+    execFromId(executorID)->recordOwned(batch.record_, batch.uses_);
+    batch.record_.reset();
     return *this;
 }
 
@@ -68,8 +68,7 @@ HardwareExecutor& HardwareExecutor::operator<<(const CopyCommand& cmd)
     auto* executor = execFromId(executorID);
     if (CommandRecordVulkan* record = cmd.impl->getCommandRecord())
     {
-        *executor << record;
-        executor->pendingResources.push_back(cmd.impl);
+        executor->record(record, {}, cmd.impl);
     }
     return *this;
 }

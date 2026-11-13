@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // Sponza deferred light accumulation, fragment stage —— Disney BRDF + RSM。
 //
@@ -33,8 +35,8 @@ layout(set = 3, binding = 0) uniform SponzaLightShared {
     vec4 disney1;       // x: clearcoat, y: clearcoatGloss, z: subsurface, w: anisotropic
 } fsp;
 
-// Shares the push constant block with sponza_light_vert.glsl.
-layout(push_constant) uniform SponzaLightPC {
+// Shares the draw parameter layout with sponza_light_vert.glsl.
+struct SponzaLightPC {
     vec4 light_pos_radius;
     vec4 light_rgb_inner_r;
     vec4 rect;
@@ -44,7 +46,8 @@ layout(push_constant) uniform SponzaLightPC {
     uint gShadowIndex;
     uint rsmNormalIndex;
     uint rsmFluxIndex;
-} fpc;
+};
+#define fpc (*(SponzaLightPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 

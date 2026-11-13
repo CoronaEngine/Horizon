@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint drawParameterWord;
 
 // Sponza 太阳 RSM(Reflective Shadow Map)pass,顶点阶段。
 //
@@ -9,23 +11,20 @@
 // 顶点布局必须与共享的 HZMS 缓冲一致(位置/法线/切线/uv 都在),因为同一份
 // 顶点缓冲也喂 G-buffer pass。
 //
-// 每-draw 材质走 bindless SSBO(由 gl_InstanceIndex 索引),push constant 因此
-// 对整个 pass 恒定,数百次 submesh draw 收敛成一条 MDI。详见 sponza_geom_vert.glsl。
+// firstInstance 选中子网格在材质 SSBO 中的条目。
 
 layout(set = 3, binding = 0) uniform SponzaShadowShared {
     mat4 light_view_proj;
     vec4 sun_color; // rgb: 太阳色(flux 用), w: 未用
 } vsp;
 
-// 与 sponza_shadow_frag.glsl 共享同一 push constant 块,布局必须一致。
-layout(push_constant) uniform SponzaShadowPC {
+// 与 sponza_shadow_frag.glsl 共享同一 BDA 绘制参数,布局必须一致。
+struct SponzaShadowPC {
     uint per_draw_ssbo_index;
-    uint vertex_ssbo_index;
-} model_pc;
+};
+#define model_pc (*(SponzaShadowPC*)(drawRoot.parameters + drawParameterWord))
 
-// vertex pulling:与 sponza_geom_vert.glsl 同一份顶点 SSBO 与同一套下标语义
-// (gl_VertexIndex == IB[i] + vertexOffset)。结构须与 C++ SponzaVertex 逐字节一致,
-// std430 下 vec3 会对齐到 16 撑坏步长,故逐标量声明。
+// BDA 读取紧凑的 SponzaVertex。逐标量字段确保 48 字节步长。
 struct PulledVertex {
     float px, py, pz;
     float nx, ny, nz;
@@ -33,17 +32,16 @@ struct PulledVertex {
     float u, v;
 };
 
-layout(set = 1, binding = 0) readonly buffer VertexSSBO {
-    PulledVertex verts[];
-} vertex_data[];
-
 layout(location = 0) out vec2 v_texcoord;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) flat out int v_draw_index;
 
 void main()
 {
-    PulledVertex vtx = vertex_data[model_pc.vertex_ssbo_index].verts[uint(gl_VertexIndex)];
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    drawParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    PulledVertex vtx = *(PulledVertex*)vertex;
 
     // 节点变换已烘焙进顶点,object space 即 world space。
     gl_Position = vsp.light_view_proj * vec4(vtx.px, vtx.py, vtx.pz, 1.0);

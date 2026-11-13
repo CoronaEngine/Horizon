@@ -1,4 +1,5 @@
 #version 450
+#include "raster_batch.slang"
 
 // Port of bgfx examples/36-sky vs_sky_landscape.sc
 
@@ -8,26 +9,24 @@ layout(set = 3, binding = 0) uniform LandscapeShared {
     vec4 sunLuminance;
     vec4 skyLuminance;
     vec4 parameters; // z: exposure, w: time
-} ls;
-
-layout(push_constant) uniform LandscapePC {
     mat4 model;
     uint lightmapIndex;
-} pc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inTexCoord;
+} ls;
 
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec2 v_texcoord0;
 
 void main()
 {
-    mat4 mvp = ls.viewProj * pc.model;
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
+    vec2 inTexCoord = *(vec2*)(vertex + 6);
+    mat4 mvp = ls.viewProj * ls.model;
     gl_Position = mvp * vec4(inPosition, 1.0);
 
     // bgfx mesh stores normals as uint8 in [0,1]; CPU loader already expands to [-1,1].
-    v_normal = (pc.model * vec4(inNormal, 0.0)).xyz;
+    v_normal = (ls.model * vec4(inNormal, 0.0)).xyz;
     v_texcoord0 = inTexCoord;
 }

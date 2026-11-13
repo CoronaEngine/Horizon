@@ -16,7 +16,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -66,54 +67,36 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_raymarch()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(rm_width, rm_height, "Horizon Raymarch [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(rm_width, rm_height, "Horizon Raymarch [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
-    horizon::HardwareBuffer quad_vb = horizon::HardwareBuffer::vertex(quad_vertices, "example_raymarch.vb");
-    horizon::HardwareBuffer quad_ib = horizon::HardwareBuffer::index(quad_indices, "example_raymarch.ib");
+    auto quad_vb = HardwareBuffer::uploadDeviceLocal(quad_vertices, BufferUsage::VertexBuffer);
+    auto quad_ib = HardwareBuffer::uploadDeviceLocal(quad_indices, BufferUsage::IndexBuffer);
 
     // 方案 A：构建静态 indirect args buffer（单个 draw command）
-    horizon::DrawIndexedIndirectCommand indirect_cmd;
-    indirect_cmd.index_count = static_cast<uint32_t>(quad_indices.size());
-    indirect_cmd.instance_count = 1;
-    indirect_cmd.first_index = 0;
-    indirect_cmd.vertex_offset = 0;
-    indirect_cmd.first_instance = 0;
+    RasterDraw indirect_cmd;
+    indirect_cmd.indexCount = static_cast<uint32_t>(quad_indices.size());
+    indirect_cmd.instanceCount = 1;
+    indirect_cmd.firstIndex = 0;
+    indirect_cmd.vertexOffset = 0;
+    indirect_cmd.firstInstance = 0;
 
-    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
-        std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(&indirect_cmd),
-            sizeof(horizon::DrawIndexedIndirectCommand)),
-        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
-        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-        "example_raymarch.indirect_args");
+    auto indirect_args_buffer = std::array{indirect_cmd};
 
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        rm_width, rm_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_raymarch.output"));
-    final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(rm_width, rm_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        rm_width, rm_height, horizon::Format::D32, "example_raymarch.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(example::imageInfo(rm_width, rm_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::RasterizerPipelineDesc desc;
-    desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline rasterizer(raymarch_vert_glsl, raymarch_frag_glsl, desc);
+    example::ScenePass<example::NoDrawParameters, raymarch_vert_glsl_t, raymarch_frag_glsl_t> rasterizer(rm_width, rm_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     rasterizer.outColor = final_output_image;
-    rasterizer.bind_depth_target(depth_image);
+    rasterizer.setDepthImage(depth_image);
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
 
     constexpr float aspect = static_cast<float>(rm_width) / static_cast<float>(rm_height);
@@ -167,26 +150,18 @@ void run_example_raymarch()
         const glm::vec3 light_world = glm::normalize(glm::vec3(-0.4f, -0.5f, -1.0f));
         const glm::vec3 light_model = glm::normalize(glm::vec3(glm::inverse(model) * glm::vec4(light_world, 0.0f)));
 
-        rasterizer.clear_records();
         rasterizer.rmp.inv_mvp = inv_mvp;
         rasterizer.rmp.light_dir_time = glm::vec4(light_model, time);
 
         // 单次 indirect draw 替代 record()
-        horizon::DrawIndexedIndirectParams indirect_params;
-        indirect_params.draw_count = 1;
-        indirect_params.indirect_offset = 0;
-        indirect_params.stride = 0;
-        rasterizer.record_indirect(quad_ib, quad_vb, indirect_args_buffer, indirect_params);
+        rasterizer.draw({quad_vb, quad_ib}, indirect_args_buffer);
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer.extent(rm_width, rm_height) << horizon::commit();
+        render_executor << rasterizer;
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

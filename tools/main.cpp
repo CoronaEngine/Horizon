@@ -450,8 +450,24 @@ void procParam(std::stringstream& ss, slang::FunctionReflection* reflection)
     ss << ")";
 }
 
+// Device pointers are valid in shaders, but have no C++ EDSL proxy type.
+static bool containsDevicePointer(slang::TypeReflection* type)
+{
+    using Kind = slang::TypeReflection::Kind;
+    if (type->getKind() == Kind::Pointer) return true;
+    if (type->getKind() == Kind::Array) return containsDevicePointer(type->getElementType());
+    if (type->getKind() == Kind::Struct) {
+        for (unsigned i = 0; i < type->getFieldCount(); ++i)
+            if (containsDevicePointer(type->getFieldByIndex(i)->getType())) return true;
+    }
+    return false;
+}
+
 void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection,std::string sourceModule)
 {
+    if (containsDevicePointer(reflection->getReturnType())) return;
+    for (unsigned i = 0; i < reflection->getParameterCount(); ++i)
+        if (containsDevicePointer(reflection->getParameterByIndex(i)->getType())) return;
     ss << "static inline ::EmbeddedShader::FunctionProxy<";
     auto retType = procType(reflection->getReturnType());
     if (retType == "void")
@@ -488,6 +504,7 @@ void procFunc(std::stringstream& ss, slang::FunctionReflection* reflection,std::
 
 void procStruct(std::stringstream& ss, slang::DeclReflection* reflection)
 {
+    if (containsDevicePointer(reflection->getType())) return;
     ss << "struct " << reflection->getName() << "\n{\n";
     for (auto member : reflection->getChildren())
     {
@@ -512,6 +529,7 @@ void procStructInstance(std::stringstream& ss, slang::DeclReflection* reflection
         return;
     }
     auto elementType = type->getElementType();
+    if (containsDevicePointer(elementType)) return;
     ss << "struct " << reflection->getName() << "\n{\n";
     for (int i = 0; i < elementType->getFieldCount(); ++i)
     {
@@ -692,6 +710,10 @@ int main(int argc, char** argv)
         shaderResourceArgs.stage = inputStage;
         resources = ShaderLanguageConverter::slangModuleReflectShaderResource(shaderResourceArgs);
     }
+
+    // The Vulkan recorder owns this root. Only expose application bindings in the C++ header.
+    if (!moduleOnly && inputStage != ShaderStage::ComputeShader)
+        resources.pushConstantName.clear();
 
     //提取成员名，删去路径前缀
     for (auto& info : resources.bindInfoPool)

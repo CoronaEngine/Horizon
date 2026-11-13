@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // 阴影体示例 pass 3：depth-pass 计数写入 R32F 计数目标（加法混合）。
 // 正面 +1 / 背面 -1（对应双面 stencil 的 incr/decr）；被场景遮挡的
@@ -12,15 +14,14 @@ layout(set = 3, binding = 0) uniform SvVolumeParams {
     vec4 params; // xy: 屏幕分辨率
 } fvp;
 
-// bindless combined-image-sampler 表（set 0）+ 与 sv_volume_vert.glsl 共享的 push constant。
+// bindless combined-image-sampler 表（set 0）+ 与 sv_volume_vert.glsl 共享的 BDA 绘制参数。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-// 与 sv_volume_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 同时继承 vert/frag
-// 的 ResourceBindings，两 stage 实例名必须不同以避免 C++ 端二义（C2385）。
-// C++ 通过 vert 的 volume_pc 写入，frag 用 volume_pc_fs 只读。
-layout(push_constant) uniform SvVolumePC {
+// 与 sv_volume_vert.glsl 共享 BDA 绘制参数布局。
+struct SvVolumePC {
     uint sceneDepthIndex;
-} volume_pc_fs;
+};
+#define volume_pc_fs (*(SvVolumePC*)(drawRoot.parameters + drawParameterWord))
 
 #define sceneDepth combinedTextureSamplerHandles[volume_pc_fs.sceneDepthIndex]
 

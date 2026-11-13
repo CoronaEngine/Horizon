@@ -1,17 +1,20 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // 39-assao G-buffer MRT pass：单次渲染输出 color/normal/depth 到三个 RT。
 // 合并原 assao_color_frag.glsl + assao_normal_frag.glsl + assao_depth_frag.glsl。
 
-layout(binding = 0) uniform AssaoSceneShared {
+layout(set = 3, binding = 0) uniform AssaoSceneShared {
     mat4 proj_view;
     mat4 view_matrix;
 } fsp;
 
-layout(push_constant) uniform AssaoScenePC {
+struct AssaoScenePC {
     mat4 model;
     vec4 color;
-} fpc;
+};
+#define fpc (*(AssaoScenePC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) in vec3 v_normal_vs;
 

@@ -37,8 +37,8 @@ namespace EmbeddedShader::Ast
 		friend class AST;
 		friend class Generator::SlangGenerator;
 	public:
-		static void beginShaderParse(ShaderStage stage);
-		static std::vector<ParseOutput> endPipelineParse();
+		static void beginShaderParse(ShaderStage stage, bool horizonVulkan = false);
+		static std::vector<ParseOutput> endPipelineParse(std::unordered_set<std::string>* sampledTextures = nullptr);
 		static void setBindless(bool bindless);
         static bool getBindless();
         static void setInputPush(bool push);

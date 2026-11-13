@@ -40,7 +40,8 @@ namespace EmbeddedShader
 		std::unique_ptr<ShaderCodeCompiler> compute;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
-		static std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode);
+		std::unordered_set<std::string> sampledTextures;
+		std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode, bool horizonVulkan);
 	};
 
     inline std::string ComputePipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& conditionInfo)
@@ -90,10 +91,8 @@ namespace EmbeddedShader
                             int32_t effectiveBindType = static_cast<int32_t>(bindInfo->bindType);
                             if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
                             {
-                                auto* texType = dynamic_cast<Ast::TextureType*>(def->texture->type.get());
-                                const bool isSampled = texType != nullptr && texType->name.rfind("Sampler", 0) == 0;
-                                effectiveBindType = static_cast<int32_t>(isSampled ? ShaderCodeModule::ShaderResources::sampledImages
-                                                                                   : ShaderCodeModule::ShaderResources::storageTexture);
+                                effectiveBindType = sampledTextures.contains(def->texture->name)
+                                    ? ShaderCodeModule::ShaderResources::sampledImages : ShaderCodeModule::ShaderResources::storageTexture;
                             }
                             autoBindEntries.push_back({
                                 def->texture->boundResourceRef,
@@ -144,13 +143,13 @@ namespace EmbeddedShader
 	{
 		Generator::SlangGenerator::numthreads = numthreads;
 		Ast::Parser::setBindless(false);
-		auto outputs = parse(computeShaderCode);
+		ComputePipelineObject result;
+		auto outputs = result.parse(computeShaderCode, compilerOption.horizonVulkan);
 
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
 	    compilerOption.branches.swap(outputs[0].branches);
 	    compilerOption.typeHeader = outputs[0].typeHeader;
-		ComputePipelineObject result;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, compilerOption, sourceLocation);
 
 		if (compilerOption.enableBindless)
@@ -159,7 +158,7 @@ namespace EmbeddedShader
 			// bindless 重新 parse 前必须再设一次，否则 bindless 变体全部变成单线程组。
 			Generator::SlangGenerator::numthreads = numthreads;
 			Ast::Parser::setBindless(true);
-			outputs = parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
+			outputs = result.parse(std::forward<decltype(computeShaderCode)>(computeShaderCode), compilerOption.horizonVulkan);
             compilerOption.branches.swap(outputs[0].branches);
             compilerOption.typeHeader = outputs[0].typeHeader;
             result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, compilerOption);
@@ -170,15 +169,15 @@ namespace EmbeddedShader
 		return result;
 	}
 
-	std::vector<Ast::ParseOutput> ComputePipelineObject::parse(auto&& computeShaderCode)
+	std::vector<Ast::ParseOutput> ComputePipelineObject::parse(auto&& computeShaderCode, bool horizonVulkan)
 	{
 		auto csFunc = std::function(std::forward<decltype(computeShaderCode)>(computeShaderCode));
 
-		Ast::Parser::beginShaderParse(Ast::ShaderStage::Compute);
+		Ast::Parser::beginShaderParse(Ast::ShaderStage::Compute, horizonVulkan);
 		if (ParseHelper::hasReturnValue(csFunc))
 			throw std::logic_error("Compute shader function doesn't have return value");
 		auto csParams = ParseHelper::createParamTuple(csFunc);
 		ParseHelper::callLambda(csFunc,std::move(csParams));
-		return Ast::Parser::endPipelineParse();
+		return Ast::Parser::endPipelineParse(Ast::Parser::getBindless() ? &sampledTextures : nullptr);
 	}
 }

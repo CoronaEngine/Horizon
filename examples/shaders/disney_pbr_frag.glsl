@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint hzParameterWord;
 
 // Disney Principled BRDF (wdas/brdf disney.brdf) + IBL from example_ibl environment maps.
 
@@ -15,7 +17,7 @@ layout(set = 3, binding = 0) uniform DisneyPbrShared {
     vec4 exposurePad;
 } fsp;
 
-layout(push_constant) uniform DisneyPbrPC {
+struct DisneyDraw {
     mat4 model;
     vec4 mat0;
     vec4 mat1;
@@ -23,7 +25,8 @@ layout(push_constant) uniform DisneyPbrPC {
     vec4 mat3;
     uint texCubeIndex;
     uint texCubeIrrIndex;
-} fpc;
+};
+#define fpc (*(DisneyDraw*)(drawRoot.parameters + hzParameterWord))
 
 layout(set = 0, binding = 0) uniform samplerCube combinedCubeSamplerHandles[];
 

@@ -8,7 +8,7 @@ endif()
 add_subdirectory(core)
 add_subdirectory(hotfix)
 
-if(HORIZON_BUILD_ENGINE AND HORIZON_USE_LEGACY_BACKEND)
+if(HORIZON_BUILD_ENGINE)
     add_subdirectory(legacy)
 endif()
 

@@ -153,20 +153,20 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 
 ---
 
-## 旧版 HardwareWrapper 的构建与验证
+## Horizon 渲染接口的构建与验证
 
-旧版接口位于 `include/Horizon_old.h`、`include/HardwareCommands_old.h`，实现位于
-`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。默认仍构建新版；使用独立构建目录启用旧版：
+消费端在 CMake 中链接 `Horizon`，在 C++ 中包含 `Horizon_old.h`。引擎与示例均使用
+`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。拷贝命令可单独包含 `HardwareCommands_old.h`。
 
 ```powershell
-cmake --preset engine-debug -B build/legacy-debug -DHORIZON_USE_LEGACY_BACKEND=ON -DHORIZON_BUILD_TESTS=ON
-cmake --build build/legacy-debug --config Debug --target horizon-test-legacy
-ctest --test-dir build/legacy-debug -C Debug -L legacy --output-on-failure
+cmake --preset engine-debug -DHORIZON_BUILD_TESTS=ON
+cmake --build --preset engine-debug --target horizon-test-legacy
+ctest --test-dir build/conan/engine/debug -C Debug -L legacy --output-on-failure
 ```
 
-消费端链接 `Horizon` 并包含 `Horizon_old.h`；目标会传递 `HORIZON_LEGACY_API=1`。
-不要手工定义该宏后链接新版库，也不要在同一个程序中混用两套头文件。
-当前 examples、Ocarina 和 hotfix 使用新版 API，不能与旧版开关同时启用。
+示例从 `HorizonExamples` 启动。运行 `HorizonExamples --list` 查看 28 个模式，使用
+`HorizonExamples sky` 或 `HorizonExamples gpudrivenrendering` 启动对应场景。
+
 源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
 
 旧代码原先未被 CMake 收集，两份公共头文件也被整体注释，因此默认构建成功并不能证明旧版可编译。
@@ -185,9 +185,10 @@ ctest --test-dir build/legacy-debug -C Debug -L legacy --output-on-failure
 
 旧版仍采用“原子 ID → Storage 槽位 → Vulkan 资源”的引用计数模型。
 拷贝命令持有资源包装对象，executor 通过 timeline semaphore 保留资源到 GPU 完成。
-测试覆盖头文件独立包含、push constant 的复制/移动/槽位复用、无窗口 displayer、
+测试覆盖头文件独立包含、无窗口 displayer 的移动语义、
 临时缓冲区保活、整块/局部/同缓冲区拷贝、越界拒绝、图像 mip/数组层/偏移往返和子视图保活，
 以及当前 Slang、EDSL 和预编译 Slang 模块的计算管线入口。
+光栅测试通过像素回读验证 GPU 生成的间接绘制命令和多 pass 的颜色、深度附件加载。
 CPU 测试不初始化 Vulkan；GPU 测试要求 Vulkan 1.4，无相应 loader/device 时明确返回 CTest 的 skip 状态。
 设备存在但初始化、编译或执行失败会报错，不会被当成跳过。
 
@@ -197,9 +198,7 @@ CPU 测试不初始化 Vulkan；GPU 测试要求 Vulkan 1.4，无相应 loader/d
 旧的仅包含 `spirv` 的生成头需要用当前 ShaderCompileScripts 重新生成。
 整个迁移不添加第三方库，也不恢复 SPIRV-Cross 或 Corona Kernel。
 
-此开关用于维护旧 API，并不把新版功能全部移植回来。Linux 窗口 surface 创建仍是旧实现中的未完成分支；
-GPU 测试不覆盖窗口呈现、跨 GPU 外部内存、所有压缩格式或完整光栅化渲染。
-新版公共头和新版后端没有改动；共享 Helicon 仅增加按宏选择资源前置声明的兼容分支。
+Linux 窗口 surface 创建尚未实现。
 
 ## tracy用法
 
@@ -218,36 +217,32 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
 ## Shader 资源使用与设计
 
-> 注：这是当前最终的设计方案，仍在持续调整中。
+### Vulkan 间接绘制的 shader 约定
 
-Horizon 的着色器资源绑定遵循一套统一约定，核心原则是**全面走 bindless，不再保留非 bindless 路径**。所有资源按数据的生命周期与共享粒度划分到不同的下发通道。
+Horizon 通过 `vkCmdDrawIndirect` 提交批次，顶点输入状态为空。手写 shader 自行声明所用字段、读取顶点，并决定各阶段之间传递什么。入口为 `main`。下面的字段名仅供对照，二进制接口由字节偏移、宽度和数组步长决定。
 
-### 数据下发通道
+EDSL 支持 `[](Float3 position, Float2 uv)` 这样的顶点 lambda，Helicon 按形参顺序自动从顶点记录读取属性。手写 shader 可参考 [baseline 顶点着色器](examples/shaders/baseline_vert.glsl) 与[片元着色器](examples/shaders/baseline_frag.glsl)。
 
-- **Per-object 数据走 Push Constant。**
-  每个物体独有、且随 draw 变化的数据（如 model 矩阵、bindless 纹理索引等）直接放进 Push Constant，随 draw call 下发，避免频繁的 descriptor 更新。
+| 数据 | 字节偏移与字段 | 大小 |
+| --- | --- | --- |
+| 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 `groupBase`（`uint32`），28 填充 | 32 字节 |
+| 命令表元素（`RasterIndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
+| 几何表元素 | 0 顶点地址、8 索引地址（均为 64 位设备地址），16 `strideWords`、20 `indexBytes`、24 `vertexCount`、28 保留（均为 `uint32`） | 32 字节 |
 
-- **Push Constant 塞不下时开 SSBO。**
-  当 per-object 数据超出 Push Constant 的大小限制时，将数据整体放入一个 SSBO，Push Constant 里只保留一个 **id / 索引**，shader 通过该 id 到 SSBO 中取出对应物体的数据。
-
-- **Per-pass 共享数据走 UBO + Push Descriptor。**
-  每个 pass 内部共享、不随单个物体变化的数据（如 view / projection 矩阵、光照参数等）放在 UBO 中，通过 **Push Descriptor** 下发，减少常规 descriptor set 的分配与绑定开销。
-
-- **纹理 / buffer / image 全部 bindless。**
-  所有纹理、storage buffer、storage image 均通过 bindless 表访问，shader 侧仅持有索引。已彻底移除非 bindless 的绑定路径。
+- **定位 draw**。命令表下标为 `groupBase + gl_DrawID`（Slang 使用 `SV_DrawIndex`）。后端按裁剪区域或设备的单次绘制数量上限拆批，每次 Vulkan 调用的 draw ID 都从零开始。
+- **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
+- **读取 draw 参数**。参数块字节地址为 `parameters + 4 × parameterWord`，内容和对齐由写入者与 shader 约定。`batch.draw()` 把每块起点对齐到 16 字节。使用外部命令缓冲的 `drawIndirect()` 时，命令使用几何表下标 0，写入者负责索引范围和参数偏移。
+- **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。baseline 使用 2，EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
+- **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
 
 ### Descriptor Set 约定
-
-Set 0–2 为 Horizon 保留的 bindless 集，普通 UBO 一律放在 set 3：
 
 | Set | 用途 |
 | --- | --- |
 | set 0 | bindless 纹理表（combined image sampler） |
 | set 1 | bindless storage buffer |
 | set 2 | bindless storage image |
-| set 3 | per-pass 共享 UBO（经 Push Descriptor 下发） |
-
-同一个 Push Constant 块在 vertex / fragment 等各阶段之间共享，布局必须严格一致。
+| set 3 | per-pass 共享 UBO |
 
 ### REBLUR GPU 时间戳诊断
 

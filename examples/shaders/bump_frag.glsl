@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // 移植自参考示例 06-bump 的 fs_bump.sc：法线贴图 + 4 点光源（切线空间光照）。
 // FS 只需要共享的 vsp（UBO），不依赖 per-draw 的 pc.model。
@@ -19,17 +21,16 @@ layout(set = 3, binding = 0) uniform BumpShared {
     vec4 light3_rgb_inner_r;
 } fsp;
 
-// bindless combined-image-sampler 表（set 0）+ 与 bump_vert.glsl 共享的 push constant。
+// bindless combined-image-sampler 表（set 0）+ 与 bump_vert.glsl 共享的 BDA 绘制参数。
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-// 与 bump_vert.glsl 共享同一 push constant 块（布局一致）。EDSL 将 vert/frag 的
-// ResourceBindings 一并继承，故两个 stage 的 push constant 实例名必须不同，否则 C++
-// 端成员访问二义（C2385）。C++ 通过 vert 的 model_pc 写入，frag 用 model_pc_fs 只读。
-layout(push_constant) uniform BumpPC {
+// 与 bump_vert.glsl 共享 BDA 绘制参数布局。
+struct BumpPC {
     mat4 model;
     uint texColorIndex;
     uint texNormalIndex;
-} model_pc_fs;
+};
+#define model_pc_fs (*(BumpPC*)(drawRoot.parameters + drawParameterWord))
 
 #define texColor  combinedTextureSamplerHandles[model_pc_fs.texColorIndex]
 #define texNormal combinedTextureSamplerHandles[model_pc_fs.texNormalIndex]

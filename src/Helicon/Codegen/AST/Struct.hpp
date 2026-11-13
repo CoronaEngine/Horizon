@@ -32,7 +32,9 @@ namespace EmbeddedShader::Ast
 
 	struct EmbeddedShaderStructure
 	{
-		ShaderStage stage;
+		ShaderStage stage{};
+		bool horizonVulkan = false;
+		bool usesIndirectRaster() const { return horizonVulkan && stage != ShaderStage::Compute; }
 		std::vector<std::shared_ptr<Statement>> globalStatements;
 		std::deque<std::shared_ptr<Statement>> inputStatements;
 		std::vector<std::shared_ptr<Statement>> outputStatements;

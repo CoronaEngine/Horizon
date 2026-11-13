@@ -19,7 +19,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -49,6 +50,7 @@
 
 namespace
 {
+
     ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
     {
         static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
@@ -240,29 +242,29 @@ LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 
 struct GpuMesh
 {
-    horizon::HardwareBuffer vb;
-    horizon::HardwareBuffer ib;
+    HardwareBuffer vb;
+    HardwareBuffer ib;
     uint32_t index_count = 0;
     // 一个 group 一次 draw：index 是 group 相对的，base_vertex 走 vertex_offset。
     std::vector<MeshGroup> groups;
     // 每个 group 一条 indirect 命令，启动时建好、逐帧复用。
-    horizon::HardwareBuffer indirect;
+    std::vector<RasterDraw> indirect;
 };
 
-horizon::HardwareBuffer group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
+std::vector<RasterDraw> group_indirect(const std::vector<MeshGroup>& groups, const std::string& name)
 {
-    std::vector<horizon::DrawIndexedIndirectCommand> commands;
+    std::vector<RasterDraw> commands;
     commands.reserve(groups.size());
     for (const MeshGroup& group : groups)
-        commands.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
-    return horizon::HardwareBuffer::indirect(commands, name + ".indirect");
+        commands.push_back(RasterDraw{.indexCount = group.index_count, .firstIndex = group.first_index, .vertexOffset = group.base_vertex, .firstInstance = 0});
+    return commands;
 }
 
 GpuMesh upload_mesh(const LoadedMesh& mesh, const std::string& name)
 {
     return GpuMesh {
-        horizon::HardwareBuffer::vertex(mesh.vertices, name + ".vb"),
-        horizon::HardwareBuffer::index(mesh.indices, name + ".ib"),
+        HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(mesh.indices.size()),
         mesh.groups,
         group_indirect(mesh.groups, name),
@@ -299,10 +301,8 @@ struct ShadowMapsSceneVertOut
 
 void run_example_edsl_shadowmaps()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(smx_width, smx_height, "Horizon Shadowmaps [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(smx_width, smx_height, "Horizon Shadowmaps [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     GpuMesh bunny = upload_mesh(load_bin_mesh(smx_asset_root / "meshes" / "bunny.bin"), "example_shadowmaps.bunny");
@@ -320,43 +320,28 @@ void run_example_edsl_shadowmaps()
     const std::vector<uint16_t> plane_indices = { 0, 1, 2, 1, 3, 2 };
     const std::vector<MeshGroup> plane_groups = { MeshGroup { 0, static_cast<uint32_t>(plane_indices.size()), 0 } };
     GpuMesh floor_plane {
-        horizon::HardwareBuffer::vertex(plane_vertices, "example_shadowmaps.floor.vb"),
-        horizon::HardwareBuffer::index(plane_indices, "example_shadowmaps.floor.ib"),
+        HardwareBuffer::uploadDeviceLocal(plane_vertices, BufferUsage::VertexBuffer),
+        HardwareBuffer::uploadDeviceLocal(plane_indices, BufferUsage::IndexBuffer),
         static_cast<uint32_t>(plane_indices.size()),
         plane_groups,
         group_indirect(plane_groups, "example_shadowmaps.floor"),
     };
 
     // Pass 1 目标：1024x1024 RGBA8 打包深度 + 独立 D32
-    horizon::HardwareImage shadow_map_image(horizon::HardwareImageDesc::texture_2d(
-        shadow_map_size, shadow_map_size, horizon::Format::RGBA8_UNORM,
-        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled,
-        "example_shadowmaps.shadowmap"));
-    shadow_map_image.set_clear_color(1.0f, 1.0f, 1.0f, 1.0f); // 白 = 最远深度
+    HardwareImage shadow_map_image(example::imageInfo(shadow_map_size, shadow_map_size, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    shadow_map_image.setClearColor(1.0f, 1.0f, 1.0f, 1.0f); // 白 = 最远深度
 
-    horizon::HardwareImage shadow_depth_image(horizon::HardwareImageDesc::depth_attachment(
-        shadow_map_size, shadow_map_size, horizon::Format::D32, "example_shadowmaps.shadow_depth"));
-    shadow_depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage shadow_depth_image(example::imageInfo(shadow_map_size, shadow_map_size, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // Pass 2 目标：主输出
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        smx_width, smx_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_shadowmaps.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f); // 雾色黑
+    HardwareImage final_output_image(example::imageInfo(smx_width, smx_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f); // 雾色黑
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        smx_width, smx_height, horizon::Format::D32, "example_shadowmaps.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(example::imageInfo(smx_width, smx_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::RasterizerPipelineDesc pack_desc;
-    pack_desc.blend_enabled = false;
 
     Texture2D<ktm::fvec4> pack_out_color = shadow_map_image;
     Float4x4 mvp;
-    mvp.as_push_constant();
     auto shadowmaps_pack_vert = [&](Float3 pos, Float3 normal) {
         position() = mul(mvp,Float4(pos, 1.f));
         return position();
@@ -393,7 +378,6 @@ void run_example_edsl_shadowmaps()
     Float4 color;
 
     Float4x4 model;
-    model.as_push_constant();
     auto shadowmaps_scene_vert = [&](Float3 pos, Float3 normal) {
         Aggregate<ShadowMapsSceneVertOut> out;
         Float3 inPosition = pos;
@@ -482,20 +466,17 @@ void run_example_edsl_shadowmaps()
         scene_out_color << Float4(mix(fogColor,final,fogFactor),1.f);
     };
 
-    horizon::RasterizerPipeline pack_rasterizer(shadowmaps_pack_vert, shadowmaps_pack_frag, pack_desc);
+    example::ScenePass<example::NoDrawParameters> pack_rasterizer(shadow_map_size, shadow_map_size, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, shadowmaps_pack_vert, shadowmaps_pack_frag, 1, example::shaderOptions());
     //pack_rasterizer.outColor = shadow_map_image;
-    pack_rasterizer.bind_depth_target(shadow_depth_image);
+    pack_rasterizer.setDepthImage(shadow_depth_image);
 
-    horizon::RasterizerPipelineDesc scene_desc;
-    scene_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline scene_rasterizer(shadowmaps_scene_vert, shadowmaps_scene_frag, scene_desc);
+    example::ScenePass<example::NoDrawParameters> scene_rasterizer(smx_width, smx_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, shadowmaps_scene_vert, shadowmaps_scene_frag, 1, example::shaderOptions());
     //scene_rasterizer.outColor = final_output_image;
-    scene_rasterizer.bind_depth_target(depth_image);
+    scene_rasterizer.setDepthImage(depth_image);
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(smx_width) / static_cast<float>(smx_height);
     // 原版 相机 (0,60,-105)、垂直角 -0.45 rad（俯视）
@@ -602,21 +583,13 @@ void run_example_edsl_shadowmaps()
         }
 
         // Pass 1：光源视角打包深度
-        // mvp 是 push constant，按 record_indirect 调用快照，且一次调用只绑一对 VB/IB：
-        // 每个物体写完自己的 mvp 后，用它自己 mesh 的 VB/IB 单独 record 一次。
-        pack_rasterizer.clear_records();
         for (const DrawItem& item : items)
         {
             mvp = to_edsl_matrix((light_view_proj * item.model));
-
-            horizon::DrawIndexedIndirectParams pack_params;
-            pack_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
-            pack_rasterizer.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, pack_params);
+            pack_rasterizer.draw({item.mesh->vb, item.mesh->ib}, item.mesh->indirect);
         }
 
         // Pass 2：场景光照 + 硬阴影
-        scene_rasterizer.clear_records();
-
         // 共享矩阵（batch 内不变）：VS 内用 proj_view * pc.model 等现场计算 mvp/model_view/light_mtx
         proj_view       = to_edsl_matrix(view_proj);
         view_matrix     = to_edsl_matrix(view);
@@ -638,23 +611,16 @@ void run_example_edsl_shadowmaps()
         for (const DrawItem& item : items)
         {
             model = to_edsl_matrix(item.model); // per-draw；VS 从中计算 mvp/model_view/light_mtx
-
-            horizon::DrawIndexedIndirectParams scene_params;
-            scene_params.draw_count = static_cast<uint32_t>(item.mesh->groups.size());
-            scene_rasterizer.record_indirect(item.mesh->ib, item.mesh->vb, item.mesh->indirect, scene_params);
+            scene_rasterizer.draw({item.mesh->vb, item.mesh->ib}, item.mesh->indirect);
         }
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << pack_rasterizer.extent(shadow_map_size, shadow_map_size)
-                            << scene_rasterizer.extent(smx_width, smx_height)
-                            << horizon::commit();
+        render_executor << pack_rasterizer
+                            << scene_rasterizer;
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

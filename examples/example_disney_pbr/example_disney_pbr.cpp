@@ -11,8 +11,9 @@
 #include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
-#include "common.h"
-#include "horizon.h"
+#include "legacy_common.h"
+#include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
+#include "Horizon_old.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -34,6 +35,13 @@
 
 namespace
 {
+struct DisneyDrawParameters {
+    glm::mat4 model;
+    glm::vec4 mat0, mat1, mat2, mat3;
+    uint32_t texCubeIndex, texCubeIrrIndex;
+};
+static_assert(offsetof(DisneyDrawParameters, texCubeIndex) == 128);
+
 constexpr uint32_t disney_width = 1280;
 constexpr uint32_t disney_height = 720;
 constexpr int chart_row_count = 10;
@@ -95,45 +103,35 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& /*name*/)
 {
-    constexpr uint32_t bytes_per_pixel = 8;
-
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
-        dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = dds.mip_count;
-
-    horizon::HardwareImage image(desc);
-
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = dds.payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
-
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    HardwareImageCreateInfo desc(dds.size, dds.size, ImageFormat::RGBA16_FLOAT);
+    desc.arrayLayers = 6;
+    desc.cube = true;
+    desc.linearFiltering = true;
+    desc.mipLevels = static_cast<int>(dds.mip_count);
+    desc.usage = ImageUsage::SampledImage;
+    HardwareImage image(desc);
+    HardwareBuffer staging(static_cast<uint32_t>(dds.payload.size()), BufferUsage::StorageBuffer, dds.payload.data());
+    HardwareExecutor executor;
     uint64_t offset = 0;
-    for (uint32_t face = 0; face < 6; ++face)
-    {
-        for (uint32_t mip = 0; mip < dds.mip_count; ++mip)
-        {
+    for (uint32_t face = 0; face < 6; ++face) {
+        for (uint32_t mip = 0; mip < dds.mip_count; ++mip) {
             const uint32_t dim = std::max(1u, dds.size >> mip);
-            stream << image.copy_from(staging, offset, face, mip);
-            offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
+            const uint64_t bytes = static_cast<uint64_t>(dim) * dim * 8;
+            if (offset + bytes > dds.payload.size()) throw std::runtime_error("Truncated DDS payload");
+            executor << staging.copyTo(image, offset, face, mip);
+            offset += bytes;
         }
     }
-    (void)(stream << horizon::commit());
-
+    executor.commit().waitForDeferredResources();
     return image;
 }
 
 struct LightProbe
 {
-    horizon::HardwareImage lod;
-    horizon::HardwareImage irr;
+    HardwareImage lod;
+    HardwareImage irr;
 };
 
 LightProbe load_light_probe(const std::string& name)
@@ -313,6 +311,11 @@ struct Settings
     bool do_specular = true;
     bool do_diffuse_ibl = true;
     bool do_specular_ibl = true;
+    bool auto_branch_switch = true;
+    float branch_switch_interval = 1.5f;
+    float branch_switch_accum = 0.0f;
+    int branch_switch_state = 0;
+
     int current_probe = 0;
     glm::vec3 light_dir { -0.35f, 0.55f, -0.75f };
     glm::vec3 light_col { 1.0f, 1.0f, 1.0f };
@@ -371,16 +374,14 @@ struct InputContext
     bool has_prev = false;
 };
 
-template <typename VertShader, typename FragShader>
-void apply_material_to_pipeline(horizon::RasterizerPipeline<VertShader, FragShader>& rasterizer,
-                                const DisneyMaterial& material, float aspect)
+void apply_material(DisneyDrawParameters& draw, const DisneyMaterial& material, float aspect)
 {
-    rasterizer.vpc.mat0 = glm::vec4(material.base_color, material.metallic);
-    rasterizer.vpc.mat1 =
+    draw.mat0 = glm::vec4(material.base_color, material.metallic);
+    draw.mat1 =
         glm::vec4(material.roughness, material.specular, material.specular_tint, material.subsurface);
-    rasterizer.vpc.mat2 =
+    draw.mat2 =
         glm::vec4(material.anisotropic, material.sheen, material.sheen_tint, material.clearcoat);
-    rasterizer.vpc.mat3 = glm::vec4(material.clearcoat_gloss, 0.0f, aspect, 0.0f);
+    draw.mat3 = glm::vec4(material.clearcoat_gloss, 0.0f, aspect, 0.0f);
 }
 
 void cursor_callback(GLFWwindow* window, double x, double y)
@@ -424,13 +425,12 @@ void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
 
 } // namespace
 
-void run_example_disney_pbr()
+template<bool Edsl>
+void run_disney_pbr_scene()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window =
-        glfwCreateWindow(disney_width, disney_height, "Horizon Disney PBR [Vulkan]", nullptr, nullptr);
+    const char* mode = Edsl ? "edsl_disney_pbr" : "disney_pbr";
+    legacy_example::Window window_owner(disney_width, disney_height, mode);
+    GLFWwindow* window = window_owner.get();
 
     InputContext input;
     const std::array<DisneyMaterial, chart_sphere_count> chart_materials = build_chart_materials();
@@ -442,49 +442,24 @@ void run_example_disney_pbr()
     LightProbe probes[2] = { load_light_probe("bolonga"), load_light_probe("kyoto") };
     IblMesh sphere_mesh = make_uv_sphere(48, 24);
 
-    horizon::HardwareBuffer sphere_vb =
-        horizon::HardwareBuffer::vertex(sphere_mesh.vertices, "example_disney_pbr.sphere.vb");
-    horizon::HardwareBuffer sphere_ib =
-        horizon::HardwareBuffer::index(sphere_mesh.indices, "example_disney_pbr.sphere.ib");
+    HardwareBuffer sphere_vb =
+        HardwareBuffer::uploadDeviceLocal(sphere_mesh.vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer sphere_ib =
+        HardwareBuffer::uploadDeviceLocal(sphere_mesh.indices, BufferUsage::IndexBuffer);
 
-    // Indirect args buffer for single draw
-    horizon::DrawIndexedIndirectCommand indirect_cmd;
-    indirect_cmd.index_count = static_cast<uint32_t>(sphere_mesh.indices.size());
-    indirect_cmd.instance_count = 1;
-    indirect_cmd.first_index = 0;
-    indirect_cmd.vertex_offset = 0;
-    indirect_cmd.first_instance = 0;
+    HardwareImage final_output_image(disney_width, disney_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+    final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
-    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
-        std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(&indirect_cmd),
-            sizeof(horizon::DrawIndexedIndirectCommand)),
-        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
-        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-        "example_disney_pbr.indirect_args");
+    HardwareImage depth_image(disney_width, disney_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        disney_width, disney_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_disney_pbr.output"));
-    final_output_image.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        disney_width, disney_height, horizon::Format::D32, "example_disney_pbr.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
-
-    horizon::RasterizerPipelineDesc desc;
-    desc.blend_enabled = false;
-
-    horizon::RasterizerPipeline rasterizer(disney_pbr_vert_glsl, disney_pbr_frag_glsl, desc);
+    const auto shader_start = std::chrono::steady_clock::now();
+    std::conditional_t<Edsl, DisneyEdslPipeline, RasterizerPipeline<disney_pbr_vert_glsl_t, disney_pbr_frag_glsl_t>> rasterizer;
+    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
     rasterizer.outColor = final_output_image;
-    rasterizer.bind_depth_target(depth_image);
+    rasterizer.setDepthImage(depth_image);
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(disney_width) / static_cast<float>(disney_height);
     constexpr float sphere_scale = 0.42f;
@@ -496,47 +471,63 @@ void run_example_disney_pbr()
 
     HorizonImGuiLayer ui(window, disney_width, disney_height);
 
-    auto prev_time = std::chrono::high_resolution_clock::now();
-    double fps_accum_seconds = 0.0;
-    int fps_frame_count = 0;
-
+    legacy_example::Benchmark benchmark(mode, disney_width, disney_height);
+    benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
     {
+        benchmark.begin_frame();
+        render_executor.waitForDeferredResources();
         glfwPollEvents();
-        ui.new_frame();
-
         Settings& s = input.settings;
-        ImGui::Begin("Disney PBR Chart");
-        ImGui::Text("10 rows (parameter) x 11 columns (0.0 .. 1.0)");
-        ImGui::Text("Rows: subsurface, metallic, specular, specularTint, roughness,");
-        ImGui::Text("      anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss");
-        const char* probe_names[] = { "Bolonga", "Kyoto" };
-        ImGui::Combo("Light Probe", &s.current_probe, probe_names, IM_ARRAYSIZE(probe_names));
-        ImGui::SliderFloat("Exposure", &s.exposure, -4.0f, 4.0f);
-        ImGui::Checkbox("Direct Diffuse", &s.do_diffuse);
-        ImGui::Checkbox("Direct Specular", &s.do_specular);
-        ImGui::Checkbox("IBL Diffuse", &s.do_diffuse_ibl);
-        ImGui::Checkbox("IBL Specular", &s.do_specular_ibl);
-        ImGui::ColorEdit3("Light Color", &s.light_col.x);
-        ImGui::SliderFloat3("Light Direction", &s.light_dir.x, -1.0f, 1.0f);
-        ImGui::Text("Camera: LMB orbit, RMB dolly, MMB rotate env, scroll zoom");
-        ImGui::End();
+        if (!benchmark.offscreen()) {
+            ui.new_frame();
+            ImGui::Begin(Edsl ? "Disney PBR Chart (EDSL)" : "Disney PBR Chart");
+            ImGui::Text("10 rows (parameter) x 11 columns (0.0 .. 1.0)");
+            ImGui::Text("Rows: subsurface, metallic, specular, specularTint, roughness,");
+            ImGui::Text("      anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss");
+            const char* probe_names[] = { "Bolonga", "Kyoto" };
+            ImGui::Combo("Light Probe", &s.current_probe, probe_names, IM_ARRAYSIZE(probe_names));
+            ImGui::SliderFloat("Exposure", &s.exposure, -4.0f, 4.0f);
+            ImGui::Checkbox("Direct Diffuse", &s.do_diffuse);
+            ImGui::Checkbox("Direct Specular", &s.do_specular);
+            ImGui::Checkbox("IBL Diffuse", &s.do_diffuse_ibl);
+            ImGui::Checkbox("IBL Specular", &s.do_specular_ibl);
+            if constexpr (Edsl) {
+                ImGui::Separator();
+                ImGui::Checkbox("Auto Branch Switch", &s.auto_branch_switch);
+                ImGui::SliderFloat("Branch Interval (s)", &s.branch_switch_interval, 0.25f, 5.0f);
+                ImGui::Text("Branch state: direct=%s ibl=%s",
+                            (s.do_diffuse || s.do_specular) ? "ON" : "OFF",
+                            (s.do_diffuse_ibl || s.do_specular_ibl) ? "ON" : "OFF");
+                ImGui::Text("Toggle the checkboxes or wait for the auto switch;");
+                ImGui::Text("the fragment shader must relink and swap its pipeline.");
+            }
+            ImGui::ColorEdit3("Light Color", &s.light_col.x);
+            ImGui::SliderFloat3("Light Direction", &s.light_dir.x, -1.0f, 1.0f);
+            ImGui::Text("Camera: LMB orbit, RMB dolly, MMB rotate env, scroll zoom");
+            ImGui::End();
+        }
 
-        const auto now = std::chrono::high_resolution_clock::now();
-        const float dt = std::chrono::duration<float>(now - prev_time).count();
-        prev_time = now;
-
-        fps_accum_seconds += dt;
-        ++fps_frame_count;
-        if (fps_accum_seconds >= 0.5)
-        {
-            const double fps = fps_frame_count / fps_accum_seconds;
-            char title[96];
-            std::snprintf(title, sizeof(title), "Horizon Disney PBR [Vulkan] - %.1f FPS (%.2f ms)", fps,
-                          1000.0 / fps);
-            glfwSetWindowTitle(window, title);
-            fps_accum_seconds = 0.0;
-            fps_frame_count = 0;
+        const float dt = benchmark.dt();
+        if constexpr (Edsl) {
+            if (s.auto_branch_switch)
+            {
+                s.branch_switch_accum += dt;
+                if (s.branch_switch_accum >= s.branch_switch_interval)
+                {
+                    s.branch_switch_accum = 0.0f;
+                    s.branch_switch_state = (s.branch_switch_state + 1) & 3;
+                    const bool direct_on = (s.branch_switch_state & 1) == 0;
+                    const bool ibl_on = (s.branch_switch_state & 2) == 0;
+                    s.do_diffuse = direct_on;
+                    s.do_specular = direct_on;
+                    s.do_diffuse_ibl = ibl_on;
+                    s.do_specular_ibl = ibl_on;
+                    std::printf("[edsl_branch_switch] state=%d direct=%d ibl=%d\n",
+                                s.branch_switch_state, direct_on ? 1 : 0, ibl_on ? 1 : 0);
+                    std::fflush(stdout);
+                }
+            }
         }
 
         OrbitCamera& camera = input.camera;
@@ -546,12 +537,12 @@ void run_example_disney_pbr()
         const glm::vec3 cam_pos = camera.position();
         const glm::mat4 view = glm::lookAtLH(cam_pos, camera.target, glm::vec3(0.0f, 1.0f, 0.0f));
         const glm::mat4 env_rot = glm::rotate(glm::mat4(1.0f), s.env_rot_curr, glm::vec3(0.0f, 1.0f, 0.0f));
-        const LightProbe& probe = probes[s.current_probe];
+        LightProbe& probe = probes[s.current_probe];
 
-        rasterizer.clear_records();
-
-        rasterizer.vpc.texCubeIndex = probe.lod.store_descriptor();
-        rasterizer.vpc.texCubeIrrIndex = probe.irr.store_descriptor();
+        benchmark.begin_scene();
+        if constexpr (Edsl) rasterizer.bind_textures(probe.lod, probe.irr);
+        const uint32_t cube_index = probe.lod.storeDescriptor();
+        const uint32_t irradiance_index = probe.irr.storeDescriptor();
         rasterizer.vsp.proj_view = proj * view;
         rasterizer.vsp.camPos = glm::vec4(cam_pos, 1.0f);
         rasterizer.vsp.flags = glm::vec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
@@ -561,11 +552,11 @@ void run_example_disney_pbr()
         rasterizer.vsp.envMtx = env_rot;
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
         rasterizer.vsp.exposurePad = glm::vec4(s.exposure, 0.0f, 0.0f, 0.0f);
+        if constexpr (!Edsl) rasterizer.uses({{probe.lod, ResourceAccess::Read}, {probe.irr, ResourceAccess::Read}});
+        auto batch = rasterizer.beginBatch(disney_width, disney_height);
 
-        // 材质与 model 走 push constant，按 record_indirect 调用快照：每个球写完自己的
-        // 参数后单独 record 一次。合成一个多 draw 批次会让 110 个球全部用最后一个材质叠在一处。
-        horizon::DrawIndexedIndirectParams indirect_params;
-        indirect_params.draw_count = 1;
+        RasterDraw draw_params;
+        draw_params.indexCount = static_cast<uint32_t>(sphere_mesh.indices.size());
         for (int row = 0; row < chart_row_count; ++row)
         {
             for (int col = 0; col < chart_col_count; ++col)
@@ -575,21 +566,29 @@ void run_example_disney_pbr()
                 const glm::mat4 model =
                     glm::translate(glm::mat4(1.0f), position) * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
 
-                rasterizer.vpc.model = model;
-                apply_material_to_pipeline(rasterizer, chart_materials[index], aspect);
-                rasterizer.record_indirect(sphere_ib, sphere_vb, indirect_args_buffer, indirect_params);
+                DisneyDrawParameters draw{};
+                draw.model = model;
+                apply_material(draw, chart_materials[index], aspect);
+                draw.texCubeIndex = cube_index;
+                draw.texCubeIrrIndex = irradiance_index;
+                batch.draw({sphere_vb, sphere_ib}, draw_params, draw);
             }
         }
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer.extent(disney_width, disney_height) << horizon::commit();
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        benchmark.submit(render_executor, std::move(batch));
+        if (benchmark.offscreen()) {
+            benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
+        } else {
+            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
+            display.wait(*frame_output.executor) << frame_output.image;
+            benchmark.end_frame(window, chart_sphere_count, frame_output.image, *frame_output.executor);
+        }
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
+}
+
+void run_example_disney_pbr(bool edsl) {
+    if (edsl) run_disney_pbr_scene<true>();
+    else run_disney_pbr_scene<false>();
 }

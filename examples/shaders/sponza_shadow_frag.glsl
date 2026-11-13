@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint drawParameterWord;
 
 // Sponza 太阳 RSM pass,片元阶段,三附件 MRT:
 //   outDepth  R32F   器件深度(阴影比较;世界坐标由 uv+depth 经 inv_sun_view_proj 重建)
@@ -17,10 +19,10 @@ layout(set = 3, binding = 0) uniform SponzaShadowShared {
     vec4 sun_color;
 } fsp;
 
-layout(push_constant) uniform SponzaShadowPC {
+struct SponzaShadowPC {
     uint per_draw_ssbo_index;
-    uint vertex_ssbo_index; // 顶点阶段 pulling 用;布局须与 vert 一致
-} model_pc_fs;
+};
+#define model_pc_fs (*(SponzaShadowPC*)(drawRoot.parameters + drawParameterWord))
 
 // 逐-draw 材质(RSM 只需 albedo 与镂空);尾部补齐到 32 字节,
 // C++ 侧 PerDrawShadowMaterial 必须逐字段一致。

@@ -11,12 +11,11 @@
 // "埋点宏是 API"。
 //
 // 埋点的目标必须自己声明 HORIZON_TRACY_ENABLED 并链 Tracy::TracyClient：
-// Horizon 库内部由 src/CMakeLists.txt 以 PRIVATE 给出，in-tree 消费方（如
-// example_drawstress）在自己的 CMakeLists 里显式 opt-in。
+// HorizonExamples 在 examples/CMakeLists.txt 中给 drawstress 启用这些埋点。
 //
 // ⚠️ 失败模式：若目标没拿到该 define，下面的宏会展开成空——**不产生任何编译
 // 错误**，埋点无声消失。改动 Tracy 的 CMake 连线后，务必在产物里 grep zone 名
-// 验证（例：Horizon::encode、drawstress::submit），别只看构建通过。
+// 验证（例：drawstress::submit），别只看构建通过。
 // ================================================================
 
 #if defined(HORIZON_TRACY_ENABLED)

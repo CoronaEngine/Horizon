@@ -22,7 +22,7 @@ endif()
 add_dependencies(horizon-tests horizon-test-core-public-headers)
 add_test(NAME horizon.core.public_headers COMMAND horizon-test-core-public-headers)
 
-if(HORIZON_BUILD_ENGINE AND NOT HORIZON_USE_LEGACY_BACKEND)
+if(HORIZON_BUILD_ENGINE)
     # Check the engine's public headers and transitive logging dependency.
     target_link_libraries(horizon-test-logging-configuration PRIVATE Horizon)
     target_compile_definitions(horizon-test-logging-configuration PRIVATE HORIZON_TEST_ENGINE_LOGGING)

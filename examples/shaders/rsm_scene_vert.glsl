@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint drawParameterWord;
 
 // RSM 场景 pass VS：间接光 gather 在世界空间做，故输出世界坐标/法线，
 // 外加光空间 shadowcoord（bias 矩阵已在 CPU 侧预乘，xy/w 即 RSM 采样 uv）。
@@ -15,18 +17,16 @@ layout(set = 3, binding = 0) uniform RsmSceneShared {
     vec4 camera_pos_ws;   // xyz: 相机位置（高光用）
 } vsp;
 
-// vert/frag 共享同一 push constant 块，布局必须一致。RSM 三张图的
+// vert/frag 共享同一 BDA 绘制参数，布局必须一致。RSM 三张图的
 // bindless 索引仅 FS 使用（同 shadowmaps 的 shadowMapIndex 传法）。
-layout(push_constant) uniform RsmScenePC {
+struct RsmScenePC {
     mat4 model;  // per-draw
     vec4 albedo; // rgb: 表面反照率
     uint rsmPositionIndex;
     uint rsmNormalIndex;
     uint rsmFluxIndex;
-} model_pc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
+};
+#define model_pc (*(RsmScenePC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) out vec3 v_world_pos;
 layout(location = 1) out vec3 v_world_normal;
@@ -34,6 +34,11 @@ layout(location = 2) out vec4 v_shadowcoord;
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    drawParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
     vec4 world_pos = model_pc.model * vec4(inPosition, 1.0);
     gl_Position = vsp.proj_view * world_pos;
 

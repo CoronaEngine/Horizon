@@ -1,13 +1,16 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint hzParameterWord;
+layout(set = 3, binding = 0) uniform UiTransform { vec2 scale; vec2 translate; } ubo;
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// Horizon bindless combined-image-sampler 表（set 0）。字体图集经
-// image.store_descriptor() 存入该表后返回索引，经 push constant 传入采样。
+// Font atlas in the bindless combined-image-sampler table.
 layout(set = 0, binding = 0) uniform sampler2D combinedTextureSamplerHandles[];
 
-layout(push_constant) uniform PushConsts {
+struct UiDraw {
     uint texIndex;
-} pc;
+};
+#define pc (*(UiDraw*)(drawRoot.parameters + hzParameterWord))
 
 layout(location = 0) in vec4 fragColor;
 layout(location = 1) in vec2 fragTexCoord;

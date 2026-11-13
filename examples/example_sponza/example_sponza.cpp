@@ -31,7 +31,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -65,6 +66,44 @@
 
 namespace
 {
+struct SponzaShadowPC {
+    uint32_t per_draw_ssbo_index{};
+};
+struct SponzaGeomPC {
+    uint32_t per_draw_ssbo_index{};
+};
+struct SponzaLightPC {
+    glm::vec4 light_pos_radius{};
+    glm::vec4 light_rgb_inner_r{};
+    glm::vec4 rect{};
+    uint32_t gAlbedoIndex{};
+    uint32_t gNormalIndex{};
+    uint32_t gDepthIndex{};
+    uint32_t gShadowIndex{};
+    uint32_t rsmNormalIndex{};
+    uint32_t rsmFluxIndex{};
+};
+struct SponzaSsaoPC {
+    uint32_t gNormalIndex{};
+    uint32_t gDepthIndex{};
+};
+struct SponzaSsaoBlurPC {
+    uint32_t gAoIndex{};
+    uint32_t gDepthIndex{};
+    uint32_t gNormalIndex{};
+};
+struct SponzaCombinePC {
+    glm::vec4 ambient{};
+    uint32_t gAlbedoIndex{};
+    uint32_t gLightIndex{};
+    uint32_t gNormalIndex{};
+    uint32_t gAoIndex{};
+    uint32_t gDepthIndex{};
+    uint32_t texCubeIrrIndex{};
+    uint32_t texCubeLodIndex{};
+    uint32_t debugMode{};
+};
+
 constexpr uint32_t spz_width = 1280;
 constexpr uint32_t spz_height = 720;
 constexpr int spz_max_lights = 128;
@@ -423,21 +462,21 @@ constexpr std::array<uint8_t, 12> ktx1_identifier = {
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
 };
 
-horizon::Format ktx_format_from_gl(uint32_t gl_internal_format)
+ImageFormat ktx_format_from_gl(uint32_t gl_internal_format)
 {
     switch (gl_internal_format)
     {
-    case 0x8E8C: return horizon::Format::BC7_UNORM;      // COMPRESSED_RGBA_BPTC_UNORM
-    case 0x8E8D: return horizon::Format::BC7_UNORM_SRGB; // COMPRESSED_SRGB_ALPHA_BPTC_UNORM
-    case 0x8058: return horizon::Format::RGBA8_UNORM;
-    case 0x8C43: return horizon::Format::SRGBA8_UNORM;
+    case 0x8E8C: return ImageFormat::BC7_UNORM;      // COMPRESSED_RGBA_BPTC_UNORM
+    case 0x8E8D: return ImageFormat::BC7_SRGB; // COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+    case 0x8058: return ImageFormat::RGBA8_UNORM;
+    case 0x8C43: return ImageFormat::RGBA8_SRGB;
     default:
         throw std::runtime_error("Unsupported KTX internal format: " +
                                  std::to_string(gl_internal_format));
     }
 }
 
-horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path,
+HardwareImage create_ktx_texture(const std::filesystem::path& path,
                                                   const std::string& name)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -491,26 +530,19 @@ horizon::HardwareImage create_ktx_texture(const std::filesystem::path& path,
         cursor += (4 - (image_size % 4)) % 4; // mipPadding
     }
 
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-        width, height, ktx_format_from_gl(gl_internal_format),
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
-        name);
-    desc.mip_levels = mip_count;
+    HardwareImageCreateInfo desc = example::imageInfo(width, height, ktx_format_from_gl(gl_internal_format), ImageUsage::SampledImage);
+    desc.mipLevels = mip_count;
 
-    horizon::HardwareImage image(desc);
+    HardwareImage image(desc);
 
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(payload));
 
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    auto staging = example::staging(std::span<const std::byte>(payload));
+
+    HardwareExecutor executor;
+    auto& stream = executor;
     for (uint32_t mip = 0; mip < mip_count; ++mip)
-        stream << image.copy_from(staging, level_offsets[mip], 0, mip);
-    (void)(stream << horizon::commit());
+        stream << staging.copyTo(image, level_offsets[mip], 0, mip);
+    stream.commit().waitForDeferredResources();
 
     return image;
 }
@@ -569,37 +601,31 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
 {
     constexpr uint32_t bytes_per_pixel = 8; // RGBA16F
 
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
-        dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = dds.mip_count;
+    HardwareImageCreateInfo desc = example::cubeInfo(dds.size, ImageFormat::RGBA16_FLOAT);
+    desc.mipLevels = dds.mip_count;
 
-    horizon::HardwareImage image(desc);
+    HardwareImage image(desc);
 
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = dds.payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
 
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    auto staging = example::staging(std::span<const std::byte>(dds.payload));
+
+    HardwareExecutor executor;
+    auto& stream = executor;
     uint64_t offset = 0;
     for (uint32_t face = 0; face < 6; ++face)
     {
         for (uint32_t mip = 0; mip < dds.mip_count; ++mip)
         {
             const uint32_t dim = std::max(1u, dds.size >> mip);
-            stream << image.copy_from(staging, offset, face, mip);
+            stream << staging.copyTo(image, offset, face, mip);
             offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
         }
     }
-    (void)(stream << horizon::commit());
+    stream.commit().waitForDeferredResources();
 
     return image;
 }
@@ -761,10 +787,8 @@ void run_example_sponza()
                 asset.vertices.size(), asset.indices.size(), asset.submeshes.size(),
                 asset.materials.size(), asset.texture_names.size());
 
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(spz_width, spz_height, "Horizon Sponza Deferred [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(spz_width, spz_height, "Horizon Sponza Deferred [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_callback);
@@ -773,29 +797,23 @@ void run_example_sponza()
     // Vertex 之外补 Storage。仍保留 Vertex 用法与 record 时的 VB 绑定 ——
     // pipeline 无顶点属性，绑定是空操作，但保住了自动 MDI 合批 key 里的 VB 项。
     const auto make_pullable_vb = [](const std::vector<SponzaVertex>& verts, std::string name) {
-        return horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(reinterpret_cast<const std::byte*>(verts.data()),
-                                       verts.size() * sizeof(SponzaVertex)),
-            static_cast<uint32_t>(sizeof(SponzaVertex)),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Vertex
-                | horizon::BufferUsage_Storage,
-            std::move(name));
+        return HardwareBuffer::uploadDeviceLocal(verts, BufferUsage::VertexBuffer);
     };
-    horizon::HardwareBuffer scene_vb = make_pullable_vb(asset.vertices, "example_sponza.scene.vb");
+    HardwareBuffer scene_vb = make_pullable_vb(asset.vertices, "example_sponza.scene.vb");
     // 16-bit 重基：索引写成 submesh 区间相对，vertex_offset 在 draw 时补回。
     std::vector<uint16_t> scene_indices_16;
     const std::vector<std::vector<SponzaDrawRange>> submesh_ranges =
         rebase_indices_to_16bit(asset.indices, asset.submeshes, scene_indices_16);
-    horizon::HardwareBuffer scene_ib =
-        horizon::HardwareBuffer::index(scene_indices_16, "example_sponza.scene.ib");
-    horizon::HardwareBuffer quad_vb =
-        horizon::HardwareBuffer::vertex(corner_vertices, "example_sponza.quad.vb");
-    horizon::HardwareBuffer quad_ib =
-        horizon::HardwareBuffer::index(corner_indices, "example_sponza.quad.ib");
+    HardwareBuffer scene_ib =
+        HardwareBuffer::uploadDeviceLocal(scene_indices_16, BufferUsage::IndexBuffer);
+    HardwareBuffer quad_vb =
+        HardwareBuffer::uploadDeviceLocal(corner_vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer quad_ib =
+        HardwareBuffer::uploadDeviceLocal(corner_indices, BufferUsage::IndexBuffer);
 
     // Every material texture stays resident in the bindless table; draws only
-    // switch the indices carried by the push constant.
-    std::vector<horizon::HardwareImage> textures;
+    // switch the indices in the draw parameters.
+    std::vector<HardwareImage> textures;
     std::vector<uint32_t> texture_descriptors;
     textures.reserve(asset.texture_names.size());
     texture_descriptors.reserve(asset.texture_names.size());
@@ -803,7 +821,7 @@ void run_example_sponza()
     {
         textures.push_back(create_ktx_texture(spz_asset_root / "textures" / name,
                                               "example_sponza." + name));
-        texture_descriptors.push_back(textures.back().store_descriptor());
+        texture_descriptors.push_back(textures.back().storeDescriptor());
     }
     const uint32_t fallback_descriptor = texture_descriptors.empty() ? 0 : texture_descriptors[0];
 
@@ -815,57 +833,35 @@ void run_example_sponza()
 
     // G-buffer: albedo+metallic / world normal+roughness / device depth。
     // normal 与 depthval 额外带 Storage:SSR compute 用 imageLoad 直接读。
-    const auto gbuffer_usage =
-        horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
-    const auto gbuffer_storage_usage = gbuffer_usage | horizon::ImageUsage_Storage;
-    horizon::HardwareImage gbuffer_albedo(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_sponza.gbuffer.albedo"));
-    gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // a=metallic,清 0
-    horizon::HardwareImage gbuffer_normal(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA8_UNORM, gbuffer_storage_usage, "example_sponza.gbuffer.normal"));
-    gbuffer_normal.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-    horizon::HardwareImage gbuffer_depth_val(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, gbuffer_storage_usage, "example_sponza.gbuffer.depthval"));
-    gbuffer_depth_val.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // far plane
+    HardwareImage gbuffer_albedo(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    gbuffer_albedo.setClearColor(0.0f, 0.0f, 0.0f, 0.0f); // a=metallic,清 0
+    HardwareImage gbuffer_normal(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA8_UNORM, ImageUsage::StorageImage));
+    gbuffer_normal.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    HardwareImage gbuffer_depth_val(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::StorageImage));
+    gbuffer_depth_val.setClearColor(1.0f, 0.0f, 0.0f, 0.0f); // far plane
 
-    horizon::HardwareImage gbuffer_depth(horizon::HardwareImageDesc::depth_attachment(
-        spz_width, spz_height, horizon::Format::D32, "example_sponza.gbuffer.depth"));
-    gbuffer_depth.set_clear_depth(1.0f, 0);
+    HardwareImage gbuffer_depth(example::imageInfo(spz_width, spz_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // RGBA16F rather than example_deferred's RGBA8: Sponza is large enough that
     // dozens of lights overlap across most of the frame, and an 8-bit target
     // clamps the additive accumulation to 1.0 almost everywhere, which flattens
     // the result and makes the sun and ambient terms have no visible effect.
-    horizon::HardwareImage light_buffer(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, gbuffer_usage, "example_sponza.lightbuffer"));
+    HardwareImage light_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
     // Alpha carries accumulated specular and the blend is additive on all four
     // channels, so it must clear to 0. Clearing it to 1 (as the other targets do)
     // seeds every pixel with a full-strength highlight.
-    light_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+    light_buffer.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
     // combine 的输出:线性 HDR(a=reflectivity),SSR 的采样源与合成底色。
-    horizon::HardwareImage hdr_buffer(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT, gbuffer_storage_usage,
-        "example_sponza.hdr"));
-    hdr_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage hdr_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage));
+    hdr_buffer.setClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
     // SSR 中间图:view 空间线性深度 + 反射色/权重
-    horizon::HardwareImage ssr_linear_depth(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
-        "example_sponza.ssr.lineardepth"));
-    horizon::HardwareImage ssr_buffer(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_Sampled,
-        "example_sponza.ssr.buffer"));
+    HardwareImage ssr_linear_depth(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledStorageImage));
+    HardwareImage ssr_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_sponza.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     // CC0 Poly Haven "Kloppenheim 03 (Pure Sky)",预卷积为 GGX radiance +
     // cosine-weighted irradiance。蓝天白云比旧 bolonga 城市 probe 更适合中庭。
@@ -873,146 +869,100 @@ void run_example_sponza()
         std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
     const CubeMapData irradiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_irr.dds");
     const CubeMapData radiance_dds = load_dds_cube_rgba16f(env_root / "day_clouds_lod.dds");
-    horizon::HardwareImage env_irradiance =
+    HardwareImage env_irradiance =
         create_cubemap_image(irradiance_dds, "example_sponza.env.irr");
-    horizon::HardwareImage env_radiance =
+    HardwareImage env_radiance =
         create_cubemap_image(radiance_dds, "example_sponza.env.lod");
 
     // Sun RSM: depth (R32F, 阴影比较) + 世界法线 + flux(albedo),三附件 MRT。
     // 深度存 R32F 颜色目标,免去 example_shadowmaps 的 RGBA8 打包。
-    horizon::HardwareImage shadow_map(horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::R32_FLOAT,
-        gbuffer_usage, "example_sponza.rsm.depth"));
-    shadow_map.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // far plane
+    HardwareImage shadow_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    shadow_map.setClearColor(1.0f, 0.0f, 0.0f, 0.0f); // far plane
 
-    horizon::HardwareImage rsm_normal_map(horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::RGBA8_UNORM,
-        gbuffer_usage, "example_sponza.rsm.normal"));
-    rsm_normal_map.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
+    HardwareImage rsm_normal_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    rsm_normal_map.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
-    horizon::HardwareImage rsm_flux_map(horizon::HardwareImageDesc::texture_2d(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::RGBA8_UNORM,
-        gbuffer_usage, "example_sponza.rsm.flux"));
-    rsm_flux_map.set_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // 零 flux → gather 无贡献
+    HardwareImage rsm_flux_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    rsm_flux_map.setClearColor(0.0f, 0.0f, 0.0f, 0.0f); // 零 flux → gather 无贡献
 
-    horizon::HardwareImage shadow_depth(horizon::HardwareImageDesc::depth_attachment(
-        spz_shadow_map_size, spz_shadow_map_size, horizon::Format::D32,
-        "example_sponza.rsm.zbuffer"));
-    shadow_depth.set_clear_depth(1.0f, 0);
+    HardwareImage shadow_depth(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // Pass 0: sun RSM (depth / normal / flux)
-    horizon::RasterizerPipelineDesc shadow_desc;
-    shadow_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline shadow_rasterizer(sponza_shadow_vert_glsl,
-                                                          sponza_shadow_frag_glsl, shadow_desc);
+    example::ScenePass<SponzaShadowPC, sponza_shadow_vert_glsl_t, sponza_shadow_frag_glsl_t> shadow_rasterizer(spz_shadow_map_size, spz_shadow_map_size, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     shadow_rasterizer.outDepth = shadow_map;
     shadow_rasterizer.outNormal = rsm_normal_map;
     shadow_rasterizer.outFlux = rsm_flux_map;
-    shadow_rasterizer.bind_depth_target(shadow_depth);
+    shadow_rasterizer.setDepthImage(shadow_depth);
 
     // Pass 1: geometry -> G-buffer (single MRT pass, three colour attachments)
-    horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline geom_rasterizer(sponza_geom_vert_glsl, sponza_geom_frag_glsl, geom_desc);
+    example::ScenePass<SponzaGeomPC, sponza_geom_vert_glsl_t, sponza_geom_frag_glsl_t> geom_rasterizer(spz_width, spz_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     geom_rasterizer.outAlbedo = gbuffer_albedo;
     geom_rasterizer.outNormal = gbuffer_normal;
     geom_rasterizer.outDepthVal = gbuffer_depth_val;
-    geom_rasterizer.bind_depth_target(gbuffer_depth);
+    geom_rasterizer.setDepthImage(gbuffer_depth);
 
     // Pass 2: light accumulation (additive blend, no depth)
-    horizon::RasterizerPipelineDesc light_desc;
-    light_desc.depth_test_enabled = false;
-    light_desc.depth_write_enabled = false;
-    light_desc.blend_enabled = true;
-    light_desc.src_color_blend_factor = horizon::BlendFactor::One;
-    light_desc.dst_color_blend_factor = horizon::BlendFactor::One;
-    light_desc.color_blend_op = horizon::BlendOp::Add;
-    light_desc.src_alpha_blend_factor = horizon::BlendFactor::One;
-    light_desc.dst_alpha_blend_factor = horizon::BlendFactor::One;
-    light_desc.alpha_blend_op = horizon::BlendOp::Add;
 
-    horizon::RasterizerPipeline light_rasterizer(sponza_light_vert_glsl, sponza_light_frag_glsl, light_desc);
+    example::ScenePass<SponzaLightPC, sponza_light_vert_glsl_t, sponza_light_frag_glsl_t> light_rasterizer(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Additive}, {false, false}});
     light_rasterizer.outColor = light_buffer;
-    light_rasterizer.vpc.gAlbedoIndex = gbuffer_albedo.store_descriptor();
-    light_rasterizer.vpc.gNormalIndex = gbuffer_normal.store_descriptor();
-    light_rasterizer.vpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
-    light_rasterizer.vpc.gShadowIndex = shadow_map.store_descriptor();
-    light_rasterizer.vpc.rsmNormalIndex = rsm_normal_map.store_descriptor();
-    light_rasterizer.vpc.rsmFluxIndex = rsm_flux_map.store_descriptor();
+    light_rasterizer.parameters.gAlbedoIndex = gbuffer_albedo.storeSampledDescriptor();
+    light_rasterizer.parameters.gNormalIndex = gbuffer_normal.storeSampledDescriptor();
+    light_rasterizer.parameters.gDepthIndex = gbuffer_depth_val.storeSampledDescriptor();
+    light_rasterizer.parameters.gShadowIndex = shadow_map.storeSampledDescriptor();
+    light_rasterizer.parameters.rsmNormalIndex = rsm_normal_map.storeSampledDescriptor();
+    light_rasterizer.parameters.rsmFluxIndex = rsm_flux_map.storeSampledDescriptor();
 
     // SSAO: raw occlusion then a cross-bilateral blur, both full screen.
-    horizon::HardwareImage ssao_raw(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, gbuffer_usage,
-        "example_sponza.ssao.raw"));
-    ssao_raw.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage ssao_raw(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    ssao_raw.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::HardwareImage ssao_blurred(horizon::HardwareImageDesc::texture_2d(
-        spz_width, spz_height, horizon::Format::R32_FLOAT, gbuffer_usage,
-        "example_sponza.ssao.blurred"));
-    ssao_blurred.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f);
+    HardwareImage ssao_blurred(example::imageInfo(spz_width, spz_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    ssao_blurred.setClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-    horizon::RasterizerPipelineDesc fullscreen_desc;
-    fullscreen_desc.depth_test_enabled = false;
-    fullscreen_desc.depth_write_enabled = false;
-    fullscreen_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline ssao_rasterizer(sponza_combine_vert_glsl,
-                                                        sponza_ssao_frag_glsl, fullscreen_desc);
+    example::ScenePass<SponzaSsaoPC, sponza_combine_vert_glsl_t, sponza_ssao_frag_glsl_t> ssao_rasterizer(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     ssao_rasterizer.outAo = ssao_raw;
-    ssao_rasterizer.fpc.gNormalIndex = gbuffer_normal.store_descriptor();
-    ssao_rasterizer.fpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
+    ssao_rasterizer.parameters.gNormalIndex = gbuffer_normal.storeSampledDescriptor();
+    ssao_rasterizer.parameters.gDepthIndex = gbuffer_depth_val.storeSampledDescriptor();
 
-    horizon::RasterizerPipeline ssao_blur_rasterizer(sponza_combine_vert_glsl,
-                                                              sponza_ssao_blur_frag_glsl,
-                                                              fullscreen_desc);
+    example::ScenePass<SponzaSsaoBlurPC, sponza_combine_vert_glsl_t, sponza_ssao_blur_frag_glsl_t> ssao_blur_rasterizer(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     ssao_blur_rasterizer.outAo = ssao_blurred;
-    ssao_blur_rasterizer.fpc.gAoIndex = ssao_raw.store_descriptor();
-    ssao_blur_rasterizer.fpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
-    ssao_blur_rasterizer.fpc.gNormalIndex = gbuffer_normal.store_descriptor();
+    ssao_blur_rasterizer.parameters.gAoIndex = ssao_raw.storeSampledDescriptor();
+    ssao_blur_rasterizer.parameters.gDepthIndex = gbuffer_depth_val.storeSampledDescriptor();
+    ssao_blur_rasterizer.parameters.gNormalIndex = gbuffer_normal.storeSampledDescriptor();
 
     // Pass 3: combine
-    horizon::RasterizerPipelineDesc combine_desc;
-    combine_desc.depth_test_enabled = false;
-    combine_desc.depth_write_enabled = false;
-    combine_desc.blend_enabled = false;
 
     // combine 渲染进线性 HDR(不再直接进 final output;SSR composite 收尾)
-    horizon::RasterizerPipeline combine_rasterizer(sponza_combine_vert_glsl, sponza_combine_frag_glsl, combine_desc);
+    example::ScenePass<SponzaCombinePC, sponza_combine_vert_glsl_t, sponza_combine_frag_glsl_t> combine_rasterizer(spz_width, spz_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     combine_rasterizer.outColor = hdr_buffer;
-    combine_rasterizer.fpc.gAlbedoIndex = gbuffer_albedo.store_descriptor();
-    combine_rasterizer.fpc.gLightIndex = light_buffer.store_descriptor();
-    combine_rasterizer.fpc.gNormalIndex = gbuffer_normal.store_descriptor();
-    combine_rasterizer.fpc.gAoIndex = ssao_blurred.store_descriptor();
-    combine_rasterizer.fpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
-    combine_rasterizer.fpc.texCubeIrrIndex = env_irradiance.store_descriptor();
-    combine_rasterizer.fpc.texCubeLodIndex = env_radiance.store_descriptor();
+    combine_rasterizer.parameters.gAlbedoIndex = gbuffer_albedo.storeSampledDescriptor();
+    combine_rasterizer.parameters.gLightIndex = light_buffer.storeSampledDescriptor();
+    combine_rasterizer.parameters.gNormalIndex = gbuffer_normal.storeSampledDescriptor();
+    combine_rasterizer.parameters.gAoIndex = ssao_blurred.storeSampledDescriptor();
+    combine_rasterizer.parameters.gDepthIndex = gbuffer_depth_val.storeSampledDescriptor();
+    combine_rasterizer.parameters.texCubeIrrIndex = env_irradiance.storeSampledDescriptor();
+    combine_rasterizer.parameters.texCubeLodIndex = env_radiance.storeSampledDescriptor();
     // fpc.ambient (rgb: ambient floor) is refreshed every frame from the ImGui
     // panel; see the combine block in the render loop.
 
     // SSR compute 链:线性深度 → 步进反射 → 合成+曝光+filmic
-    horizon::ComputePipeline ssr_linear_depth_compute(ssr_linear_depth_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline ssr_trace_compute(sponza_ssr_trace_compute_glsl, ktm::uvec3(8, 8, 1));
-    horizon::ComputePipeline ssr_composite_compute(sponza_ssr_composite_compute_glsl, ktm::uvec3(8, 8, 1));
+    ComputePipeline<ssr_linear_depth_compute_glsl_t> ssr_linear_depth_compute;
+    ComputePipeline<sponza_ssr_trace_compute_glsl_t> ssr_trace_compute;
+    ComputePipeline<sponza_ssr_composite_compute_glsl_t> ssr_composite_compute;
 
-    const uint32_t gbuffer_depth_val_id = gbuffer_depth_val.store_descriptor();
-    const uint32_t gbuffer_normal_id = gbuffer_normal.store_descriptor();
-    const uint32_t hdr_buffer_id = hdr_buffer.store_descriptor();
-    const uint32_t ssr_linear_depth_id = ssr_linear_depth.store_descriptor();
-    const uint32_t ssr_buffer_id = ssr_buffer.store_descriptor();
-    const uint32_t final_output_id = final_output_image.store_descriptor();
+    const uint32_t gbuffer_depth_val_id = gbuffer_depth_val.storeDescriptor();
+    const uint32_t gbuffer_normal_id = gbuffer_normal.storeDescriptor();
+    const uint32_t hdr_buffer_id = hdr_buffer.storeDescriptor();
+    const uint32_t ssr_linear_depth_id = ssr_linear_depth.storeDescriptor();
+    const uint32_t ssr_buffer_id = ssr_buffer.storeDescriptor();
+    const uint32_t final_output_id = final_output_image.storeDescriptor();
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
-    horizon::DrawIndexedIndirectCommand quad_cmd_base;
-    quad_cmd_base.index_count = static_cast<uint32_t>(corner_indices.size());
-    quad_cmd_base.instance_count = 1;
-    quad_cmd_base.first_index = 0;
-    quad_cmd_base.vertex_offset = 0;
-    quad_cmd_base.first_instance = 0;
 
     // Camera starts from the asset view, with a corrected hero shot for Intel
     // Sponza. The converted bounds include side buildings, so their midpoint
@@ -1096,35 +1046,26 @@ void run_example_sponza()
     const MirrorRange mirror_pool_range { 0, 6 };
     const MirrorRange mirror_frame_range { 6, 6 };
 
-    horizon::HardwareBuffer mirror_vb = make_pullable_vb(mirror_vertices, "example_sponza.mirror.vb");
-    horizon::HardwareBuffer mirror_ib =
-        horizon::HardwareBuffer::index(mirror_indices, "example_sponza.mirror.ib");
+    HardwareBuffer mirror_vb = make_pullable_vb(mirror_vertices, "example_sponza.mirror.vb");
+    HardwareBuffer mirror_ib =
+        HardwareBuffer::uploadDeviceLocal(mirror_indices, BufferUsage::IndexBuffer);
 
     // 无贴图材质用的 1x1 白图(geom/shadow FS 无条件采样 baseColor)
-    horizon::HardwareImage white_texture = [] {
-        horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-            1, 1, horizon::Format::RGBA8_UNORM,
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
-            "example_sponza.white");
-        horizon::HardwareImage image(desc);
+    HardwareImage white_texture = [] {
+        HardwareImageCreateInfo desc = example::imageInfo(1, 1, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
+        HardwareImage image(desc);
         const std::array<uint8_t, 4> pixel = { 255, 255, 255, 255 };
-        horizon::HardwareBufferDesc staging_desc;
-        staging_desc.element_count = pixel.size();
-        staging_desc.element_size = 1;
-        staging_desc.usage = horizon::BufferUsage_TransferSrc;
-        staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-        horizon::HardwareBuffer staging(staging_desc,
-                                                std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
-        horizon::HardwareExecutor executor;
-        (void)(executor.stream() << image.copy_from(staging, 0, 0, 0) << horizon::commit());
+
+        auto staging = example::staging(std::span<const std::byte>(reinterpret_cast<const std::byte*>(pixel.data()), pixel.size()));
+        HardwareExecutor executor;
+        executor << staging.copyTo(image, 0, 0, 0);
+        executor.commit().waitForDeferredResources();
         return image;
     }();
-    const uint32_t white_descriptor = white_texture.store_descriptor();
+    const uint32_t white_descriptor = white_texture.storeDescriptor();
 
     // ---- 逐-draw 材质 SSBO ----------------------------------------------
-    // 材质原本逐 submesh 写 push constant，使自动 MDI 的合批 key
-    // {pipeline, IB, VB, push constant} 每 draw 都变，数百次 draw 一条都合不了。
-    // 改为把材质放进 bindless SSBO、用 draw 序号索引，push constant 全 pass 恒定。
+    // 子网格的 firstInstance 选择材质 SSBO 条目。
     //
     // draw 序号靠 first_instance 携带（instance_count 恒为 1，故 shader 侧
     // gl_InstanceIndex == first_instance）。不用 gl_DrawID：它只在 indirect
@@ -1242,29 +1183,16 @@ void run_example_sponza()
         geom_materials[slot].material_flags = 0;
     }
 
-    horizon::HardwareBuffer geom_material_ssbo(horizon::HardwareBufferDesc::typed<PerDrawMaterial>(
-        total_draw_slots, horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-        "example_sponza.geom.per_draw_ssbo"));
-    horizon::HardwareBuffer shadow_material_ssbo(horizon::HardwareBufferDesc::typed<PerDrawShadowMaterial>(
-        total_draw_slots, horizon::BufferUsage_Storage | horizon::BufferUsage_TransferDst,
-        "example_sponza.shadow.per_draw_ssbo"));
-    const uint32_t geom_ssbo_descriptor = geom_material_ssbo.store_descriptor();
-    const uint32_t shadow_ssbo_descriptor = shadow_material_ssbo.store_descriptor();
-
-    // vertex pulling 用的顶点 SSBO descriptor。scene 与 mirror 是两份独立 VB，
-    // 顶点阶段靠 push constant 里的 vertex_ssbo_index 选表。
-    const uint32_t scene_vertex_descriptor = scene_vb.store_descriptor();
-    const uint32_t mirror_vertex_descriptor = mirror_vb.store_descriptor();
+    HardwareBuffer geom_material_ssbo(total_draw_slots, sizeof(PerDrawMaterial), BufferUsage::StorageBuffer);
+    HardwareBuffer shadow_material_ssbo(total_draw_slots, sizeof(PerDrawShadowMaterial), BufferUsage::StorageBuffer);
+    const uint32_t geom_ssbo_descriptor = geom_material_ssbo.storeDescriptor();
+    const uint32_t shadow_ssbo_descriptor = shadow_material_ssbo.storeDescriptor();
 
     // 静态部分先上传一次；镜面 roughness 变化时每帧重传（见渲染循环）。
     const auto upload_geom_materials = [&] {
-        return geom_material_ssbo.write_bytes(std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(geom_materials.data()),
-            geom_materials.size() * sizeof(PerDrawMaterial)), 0);
+        return geom_material_ssbo.copyFromData(geom_materials.data(), geom_materials.size() * sizeof(PerDrawMaterial));
     };
-    (void)shadow_material_ssbo.write_bytes(std::span<const std::byte>(
-        reinterpret_cast<const std::byte*>(shadow_materials.data()),
-        shadow_materials.size() * sizeof(PerDrawShadowMaterial)), 0);
+    (void)shadow_material_ssbo.copyFromData(shadow_materials.data(), shadow_materials.size() * sizeof(PerDrawShadowMaterial));
     (void)upload_geom_materials();
 
     constexpr float aspect = static_cast<float>(spz_width) / static_cast<float>(spz_height);
@@ -1339,6 +1267,10 @@ void run_example_sponza()
     int fps_frame_count = 0;
     int visible_lights = 0;
     float light_time_accum = 0.0f;
+
+    ssr_linear_depth_compute.uses({{gbuffer_depth_val, ResourceAccess::Read}, {ssr_linear_depth, ResourceAccess::Write}});
+    ssr_trace_compute.uses({{ssr_linear_depth, ResourceAccess::Read}, {gbuffer_normal, ResourceAccess::Read}, {hdr_buffer, ResourceAccess::Read}, {ssr_buffer, ResourceAccess::Write}});
+    ssr_composite_compute.uses({{hdr_buffer, ResourceAccess::Read}, {ssr_buffer, ResourceAccess::Read}, {final_output_image, ResourceAccess::Write}});
 
     while (!glfwWindowShouldClose(window))
     {
@@ -1485,14 +1417,12 @@ void run_example_sponza()
         const glm::mat4 sun_view_proj = build_sun_view_proj(sun_direction);
         const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
 
-        // Pass 0: sun RSM (depth/normal/flux) - Convert to indirect
-        shadow_rasterizer.clear_records();
+        // Pass 0: sun RSM (depth/normal/flux)
         shadow_rasterizer.vsp.light_view_proj = sun_view_proj;
         shadow_rasterizer.vsp.sun_color = glm::vec4(tuning.sun_color, 0.0f);
-        shadow_rasterizer.model_pc.per_draw_ssbo_index = shadow_ssbo_descriptor;
-        shadow_rasterizer.model_pc.vertex_ssbo_index = scene_vertex_descriptor;
+        shadow_rasterizer.parameters.per_draw_ssbo_index = shadow_ssbo_descriptor;
 
-        std::vector<horizon::DrawIndexedIndirectCommand> shadow_scene_cmds;
+        std::vector<RasterDraw> shadow_scene_cmds;
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
             const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
@@ -1502,73 +1432,46 @@ void run_example_sponza()
             uint32_t slot = submesh_draw_slot[submesh_index];
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = range.index_count;
-                cmd.first_index = range.first_index;
-                cmd.vertex_offset = range.vertex_offset;
-                cmd.instance_count = 1;
-                cmd.first_instance = slot++;
+                RasterDraw cmd;
+                cmd.indexCount = range.index_count;
+                cmd.firstIndex = range.first_index;
+                cmd.vertexOffset = range.vertex_offset;
+                cmd.instanceCount = 1;
+                cmd.firstInstance = slot++;
                 shadow_scene_cmds.push_back(cmd);
             }
         }
 
         if (!shadow_scene_cmds.empty())
         {
-            horizon::HardwareBuffer shadow_scene_indirect = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(shadow_scene_cmds.data()),
-                    shadow_scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(shadow_scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_sponza.shadow_scene_indirect");
-
-            horizon::DrawIndexedIndirectParams shadow_scene_params;
-            shadow_scene_params.draw_count = static_cast<uint32_t>(shadow_scene_cmds.size());
-            shadow_scene_params.indirect_offset = 0;
-            shadow_scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            shadow_rasterizer.record_indirect(scene_ib, scene_vb, shadow_scene_indirect, shadow_scene_params);
+            shadow_rasterizer.draw({scene_vb, scene_ib}, shadow_scene_cmds);
         }
 
         if (tuning.mirror_enable)
         {
-            shadow_rasterizer.model_pc.vertex_ssbo_index = mirror_vertex_descriptor;
             const MirrorRange mirror_ranges[2] = { mirror_pool_range, mirror_frame_range };
             const uint32_t mirror_slots[2] = { mirror_pool_slot, mirror_frame_slot };
 
-            std::vector<horizon::DrawIndexedIndirectCommand> shadow_mirror_cmds;
+            std::vector<RasterDraw> shadow_mirror_cmds;
             for (size_t i = 0; i < 2; ++i)
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = mirror_ranges[i].count;
-                cmd.first_index = mirror_ranges[i].first;
-                cmd.vertex_offset = 0;
-                cmd.instance_count = 1;
-                cmd.first_instance = mirror_slots[i];
+                RasterDraw cmd;
+                cmd.indexCount = mirror_ranges[i].count;
+                cmd.firstIndex = mirror_ranges[i].first;
+                cmd.vertexOffset = 0;
+                cmd.instanceCount = 1;
+                cmd.firstInstance = mirror_slots[i];
                 shadow_mirror_cmds.push_back(cmd);
             }
 
-            horizon::HardwareBuffer shadow_mirror_indirect = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(shadow_mirror_cmds.data()),
-                    shadow_mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(shadow_mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_sponza.shadow_mirror_indirect");
-
-            horizon::DrawIndexedIndirectParams shadow_mirror_params;
-            shadow_mirror_params.draw_count = static_cast<uint32_t>(shadow_mirror_cmds.size());
-            shadow_mirror_params.indirect_offset = 0;
-            shadow_mirror_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            shadow_rasterizer.record_indirect(mirror_ib, mirror_vb, shadow_mirror_indirect, shadow_mirror_params);
+            shadow_rasterizer.draw({mirror_vb, mirror_ib}, shadow_mirror_cmds);
         }
 
-        // Pass 1: one draw per submesh - Convert to indirect
-        geom_rasterizer.clear_records();
+        // Pass 1: one draw per submesh
         geom_rasterizer.vsp.view_proj = view_proj;
-        geom_rasterizer.model_pc.per_draw_ssbo_index = geom_ssbo_descriptor;
-        geom_rasterizer.model_pc.vertex_ssbo_index = scene_vertex_descriptor;
+        geom_rasterizer.parameters.per_draw_ssbo_index = geom_ssbo_descriptor;
 
-        std::vector<horizon::DrawIndexedIndirectCommand> geom_scene_cmds;
+        std::vector<RasterDraw> geom_scene_cmds;
         for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
         {
             const SponzaSubmesh& submesh = asset.submeshes[submesh_index];
@@ -1578,31 +1481,19 @@ void run_example_sponza()
             uint32_t slot = submesh_draw_slot[submesh_index];
             for (const SponzaDrawRange& range : submesh_ranges[submesh_index])
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = range.index_count;
-                cmd.first_index = range.first_index;
-                cmd.vertex_offset = range.vertex_offset;
-                cmd.instance_count = 1;
-                cmd.first_instance = slot++;
+                RasterDraw cmd;
+                cmd.indexCount = range.index_count;
+                cmd.firstIndex = range.first_index;
+                cmd.vertexOffset = range.vertex_offset;
+                cmd.instanceCount = 1;
+                cmd.firstInstance = slot++;
                 geom_scene_cmds.push_back(cmd);
             }
         }
 
         if (!geom_scene_cmds.empty())
         {
-            horizon::HardwareBuffer geom_scene_indirect = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(geom_scene_cmds.data()),
-                    geom_scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(geom_scene_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_sponza.geom_scene_indirect");
-
-            horizon::DrawIndexedIndirectParams geom_scene_params;
-            geom_scene_params.draw_count = static_cast<uint32_t>(geom_scene_cmds.size());
-            geom_scene_params.indirect_offset = 0;
-            geom_scene_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            geom_rasterizer.record_indirect(scene_ib, scene_vb, geom_scene_indirect, geom_scene_params);
+            geom_rasterizer.draw({scene_vb, scene_ib}, geom_scene_cmds);
         }
 
         if (tuning.mirror_enable)
@@ -1616,85 +1507,41 @@ void run_example_sponza()
             geom_materials[mirror_frame_slot].mr_factor = glm::vec4(0.0f, 0.72f, 0.0f, 0.0f);
             (void)upload_geom_materials();
 
-            geom_rasterizer.model_pc.vertex_ssbo_index = mirror_vertex_descriptor;
             const MirrorRange mirror_ranges[2] = { mirror_pool_range, mirror_frame_range };
             const uint32_t mirror_slots[2] = { mirror_pool_slot, mirror_frame_slot };
 
-            std::vector<horizon::DrawIndexedIndirectCommand> geom_mirror_cmds;
+            std::vector<RasterDraw> geom_mirror_cmds;
             for (size_t i = 0; i < 2; ++i)
             {
-                horizon::DrawIndexedIndirectCommand cmd;
-                cmd.index_count = mirror_ranges[i].count;
-                cmd.first_index = mirror_ranges[i].first;
-                cmd.vertex_offset = 0;
-                cmd.instance_count = 1;
-                cmd.first_instance = mirror_slots[i];
+                RasterDraw cmd;
+                cmd.indexCount = mirror_ranges[i].count;
+                cmd.firstIndex = mirror_ranges[i].first;
+                cmd.vertexOffset = 0;
+                cmd.instanceCount = 1;
+                cmd.firstInstance = mirror_slots[i];
                 geom_mirror_cmds.push_back(cmd);
             }
 
-            horizon::HardwareBuffer geom_mirror_indirect = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(geom_mirror_cmds.data()),
-                    geom_mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(geom_mirror_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_sponza.geom_mirror_indirect");
-
-            horizon::DrawIndexedIndirectParams geom_mirror_params;
-            geom_mirror_params.draw_count = static_cast<uint32_t>(geom_mirror_cmds.size());
-            geom_mirror_params.indirect_offset = 0;
-            geom_mirror_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            geom_rasterizer.record_indirect(mirror_ib, mirror_vb, geom_mirror_indirect, geom_mirror_params);
+            geom_rasterizer.draw({mirror_vb, mirror_ib}, geom_mirror_cmds);
         }
 
-        // Pass 1.5: SSAO over the G-buffer, then a cross-bilateral blur - Convert to indirect
-        ssao_rasterizer.clear_records();
+        // Pass 1.5: SSAO over the G-buffer, then a cross-bilateral blur
         ssao_rasterizer.fsp.inv_view_proj = inv_view_proj;
         ssao_rasterizer.fsp.view = view;
         ssao_rasterizer.fsp.proj = proj;
         ssao_rasterizer.fsp.params = glm::vec4(tuning.ssao_radius, tuning.ssao_bias,
                                                tuning.ssao_intensity, 0.0f);
 
-        horizon::DrawIndexedIndirectCommand ssao_cmd = quad_cmd_base;
+        ssao_rasterizer.draw({quad_vb, quad_ib});
 
-        horizon::HardwareBuffer ssao_indirect = horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(
-                reinterpret_cast<const std::byte*>(&ssao_cmd),
-                sizeof(horizon::DrawIndexedIndirectCommand)),
-            sizeof(horizon::DrawIndexedIndirectCommand),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-            "example_sponza.ssao_indirect");
-
-        horizon::DrawIndexedIndirectParams ssao_params;
-        ssao_params.draw_count = 1;
-        ssao_params.indirect_offset = 0;
-        ssao_params.stride = 0;
-        ssao_rasterizer.record_indirect(quad_ib, quad_vb, ssao_indirect, ssao_params);
-
-        ssao_blur_rasterizer.clear_records();
         ssao_blur_rasterizer.fsp.params = glm::vec4(1.0f / static_cast<float>(spz_width),
                                                      1.0f / static_cast<float>(spz_height),
                                                      tuning.ssao_blur_depth_sigma, 16.0f);
         ssao_blur_rasterizer.fsp.depth_unpack = ssr_depth_unpack;
 
-        horizon::DrawIndexedIndirectCommand ssao_blur_cmd = quad_cmd_base;
+        ssao_blur_rasterizer.draw({quad_vb, quad_ib});
 
-        horizon::HardwareBuffer ssao_blur_indirect = horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(
-                reinterpret_cast<const std::byte*>(&ssao_blur_cmd),
-                sizeof(horizon::DrawIndexedIndirectCommand)),
-            sizeof(horizon::DrawIndexedIndirectCommand),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-            "example_sponza.ssao_blur_indirect");
-
-        horizon::DrawIndexedIndirectParams ssao_blur_params;
-        ssao_blur_params.draw_count = 1;
-        ssao_blur_params.indirect_offset = 0;
-        ssao_blur_params.stride = 0;
-        ssao_blur_rasterizer.record_indirect(quad_ib, quad_vb, ssao_blur_indirect, ssao_blur_params);
-
-        // Pass 2: Disney 直接光累积 - Convert to indirect
-        light_rasterizer.clear_records();
+        // Pass 2: Disney 直接光累积
         light_rasterizer.vsp.inv_view_proj = inv_view_proj;
         light_rasterizer.vsp.view = view;
         light_rasterizer.vsp.camera_pos = glm::vec4(camera.position, 1.0f);
@@ -1711,16 +1558,13 @@ void run_example_sponza()
                                                  tuning.disney_subsurface, tuning.disney_anisotropic);
         visible_lights = 0;
 
-        std::vector<horizon::DrawIndexedIndirectCommand> light_cmds;
-
         // Directional sun
-        light_rasterizer.vpc.light_pos_radius = glm::vec4(sun_direction, -1.0f);
-        light_rasterizer.vpc.light_rgb_inner_r =
+        light_rasterizer.parameters.light_pos_radius = glm::vec4(sun_direction, -1.0f);
+        light_rasterizer.parameters.light_rgb_inner_r =
             glm::vec4(tuning.sun_color * tuning.sun_intensity, 0.0f);
-        light_rasterizer.vpc.rect = glm::vec4(-1.0f, -1.0f, 1.0f, 1.0f);
+        light_rasterizer.parameters.rect = glm::vec4(-1.0f, -1.0f, 1.0f, 1.0f);
 
-        horizon::DrawIndexedIndirectCommand sun_cmd = quad_cmd_base;
-        light_cmds.push_back(sun_cmd);
+        light_rasterizer.draw({quad_vb, quad_ib});
         ++visible_lights;
 
         for (int light = 0; light < tuning.point_light_count; ++light)
@@ -1762,63 +1606,30 @@ void run_example_sponza()
                 continue;
 
             const uint8_t val = light & 7;
-            light_rasterizer.vpc.light_pos_radius = glm::vec4(center, tuning.point_radius);
-            light_rasterizer.vpc.light_rgb_inner_r =
+            light_rasterizer.parameters.light_pos_radius = glm::vec4(center, tuning.point_radius);
+            light_rasterizer.parameters.light_rgb_inner_r =
                 glm::vec4(((val & 0x1) ? 1.0f : 0.25f) * tuning.point_intensity,
                           ((val & 0x2) ? 1.0f : 0.25f) * tuning.point_intensity,
                           ((val & 0x4) ? 1.0f : 0.25f) * tuning.point_intensity,
                           tuning.point_inner);
-            light_rasterizer.vpc.rect = glm::vec4(rect_min, rect_max);
+            light_rasterizer.parameters.rect = glm::vec4(rect_min, rect_max);
 
-            horizon::DrawIndexedIndirectCommand cmd = quad_cmd_base;
-            cmd.first_instance = static_cast<uint32_t>(light_cmds.size());
-            light_cmds.push_back(cmd);
+            light_rasterizer.draw({quad_vb, quad_ib});
             ++visible_lights;
         }
 
-        if (!light_cmds.empty())
-        {
-            horizon::HardwareBuffer light_indirect = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(light_cmds.data()),
-                    light_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(light_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_sponza.light_indirect");
 
-            horizon::DrawIndexedIndirectParams light_params;
-            light_params.draw_count = static_cast<uint32_t>(light_cmds.size());
-            light_params.indirect_offset = 0;
-            light_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            light_rasterizer.record_indirect(quad_ib, quad_vb, light_indirect, light_params);
-        }
-
-        // Pass 3: 直接光 + IBL/环境 × AO → 线性 HDR(a=reflectivity) - Convert to indirect
-        combine_rasterizer.clear_records();
-        combine_rasterizer.fpc.debugMode = g_input.debug_mode;
+        // Pass 3: 直接光 + IBL/环境 × AO → 线性 HDR(a=reflectivity)
+        combine_rasterizer.parameters.debugMode = g_input.debug_mode;
         combine_rasterizer.fsp.inv_view_proj = inv_view_proj;
         combine_rasterizer.fsp.camera_pos = glm::vec4(camera.position, 1.0f);
         combine_rasterizer.fsp.env_params = glm::vec4(
             tuning.irradiance_scale, tuning.radiance_scale,
             static_cast<float>(radiance_dds.mip_count),
             glm::radians(tuning.env_rotation_deg));
-        combine_rasterizer.fpc.ambient = glm::vec4(tuning.ambient_floor, 0.0f);
+        combine_rasterizer.parameters.ambient = glm::vec4(tuning.ambient_floor, 0.0f);
 
-        horizon::DrawIndexedIndirectCommand combine_cmd = quad_cmd_base;
-
-        horizon::HardwareBuffer combine_indirect = horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(
-                reinterpret_cast<const std::byte*>(&combine_cmd),
-                sizeof(horizon::DrawIndexedIndirectCommand)),
-            sizeof(horizon::DrawIndexedIndirectCommand),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-            "example_sponza.combine_indirect");
-
-        horizon::DrawIndexedIndirectParams combine_params;
-        combine_params.draw_count = 1;
-        combine_params.indirect_offset = 0;
-        combine_params.stride = 0;
-        combine_rasterizer.record_indirect(quad_ib, quad_vb, combine_indirect, combine_params);
+        combine_rasterizer.draw({quad_vb, quad_ib});
 
         // Pass 4-6: SSR compute 链
         ssr_linear_depth_compute.pushConsts.depthID = gbuffer_depth_val_id;
@@ -1861,25 +1672,21 @@ void run_example_sponza()
             glm::vec4(tuning.output_contrast, tuning.output_saturation,
                       tuning.output_temperature, 0.0f);
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << shadow_rasterizer.extent(spz_shadow_map_size, spz_shadow_map_size)
-                            << geom_rasterizer.extent(spz_width, spz_height)
-                            << ssao_rasterizer.extent(spz_width, spz_height)
-                            << ssao_blur_rasterizer.extent(spz_width, spz_height)
-                            << light_rasterizer.extent(spz_width, spz_height)
-                            << combine_rasterizer.extent(spz_width, spz_height)
-                            << ssr_linear_depth_compute.dispatch_extent(spz_width, spz_height)
-                            << ssr_trace_compute.dispatch_extent(spz_width, spz_height)
-                            << ssr_composite_compute.dispatch_extent(spz_width, spz_height)
-                            << horizon::commit();
+        render_executor << shadow_rasterizer
+                            << geom_rasterizer
+                            << ssao_rasterizer
+                            << ssao_blur_rasterizer
+                            << light_rasterizer
+                            << combine_rasterizer
+                            << ssr_linear_depth_compute((spz_width + 7) / 8, (spz_height + 7) / 8, 1)
+                            << ssr_trace_compute((spz_width + 7) / 8, (spz_height + 7) / 8, 1)
+                            << ssr_composite_compute((spz_width + 7) / 8, (spz_height + 7) / 8, 1);
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
         ++frame_index;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

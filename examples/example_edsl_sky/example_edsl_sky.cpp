@@ -18,7 +18,8 @@
 #include "Codegen/VariateProxy.h"
 #include "common.h"
 #include "example_edsl_sky.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -399,33 +400,27 @@ LandscapeMesh load_landscape_mesh(const std::filesystem::path& path)
     return mesh;
 }
 
-horizon::HardwareImage upload_rgba8_texture(uint32_t width,
+HardwareImage upload_rgba8_texture(uint32_t width,
                                                     uint32_t height,
                                                     std::span<const std::byte> rgba,
                                                     const std::string& debug_name)
 {
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-        width, height, horizon::Format::RGBA8_UNORM,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst,
-        debug_name);
+    HardwareImageCreateInfo desc = example::imageInfo(width, height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
 
-    horizon::HardwareImage image(desc);
+    HardwareImage image(desc);
     if (!rgba.empty())
     {
-        horizon::HardwareBufferDesc staging_desc;
-        staging_desc.element_count = rgba.size_bytes();
-        staging_desc.element_size = 1;
-        staging_desc.usage = horizon::BufferUsage_TransferSrc;
-        staging_desc.cpu_access = horizon::CpuAccessMode::Write;
 
-        horizon::HardwareBuffer staging(staging_desc, rgba);
-        horizon::HardwareExecutor executor;
-        (void)(executor.stream() << image.copy_from(staging) << horizon::commit());
+
+        auto staging = example::staging(rgba);
+        HardwareExecutor executor;
+        executor << staging.copyTo(image);
+        executor.commit().waitForDeferredResources();
     }
     return image;
 }
 
-horizon::HardwareImage load_ktx_rgba8_or_white(const std::filesystem::path& path)
+HardwareImage load_ktx_rgba8_or_white(const std::filesystem::path& path)
 {
     try
     {
@@ -614,10 +609,8 @@ void run_example_edsl_sky()
     using namespace EmbeddedShader;
     using namespace ktm;
 
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(sky_width, sky_height, "Horizon Sky [EDSL]", nullptr, nullptr);
+    legacy_example::Window owner(sky_width, sky_height, "Horizon Sky [EDSL]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     std::vector<ScreenPosVertex> sky_vertices;
@@ -625,29 +618,22 @@ void run_example_edsl_sky()
     build_sky_grid(sky_grid, sky_grid, sky_vertices, sky_indices);
 
     LandscapeMesh landscape = load_landscape_mesh(sky_asset_root / "meshes" / "test_scene.bin");
-    horizon::HardwareImage lightmap =
+    HardwareImage lightmap =
         load_ktx_rgba8_or_white(sky_asset_root / "textures" / "lightmap.ktx");
 
-    horizon::HardwareBuffer sky_vb =
-        horizon::HardwareBuffer::vertex(sky_vertices, "example_edsl_sky.sky.vb");
-    horizon::HardwareBuffer sky_ib =
-        horizon::HardwareBuffer::index(sky_indices, "example_edsl_sky.sky.ib");
-    horizon::HardwareBuffer landscape_vb =
-        horizon::HardwareBuffer::vertex(landscape.vertices, "example_edsl_sky.landscape.vb");
-    horizon::HardwareBuffer landscape_ib =
-        horizon::HardwareBuffer::index(landscape.indices, "example_edsl_sky.landscape.ib");
+    HardwareBuffer sky_vb =
+        HardwareBuffer::uploadDeviceLocal(sky_vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer sky_ib =
+        HardwareBuffer::uploadDeviceLocal(sky_indices, BufferUsage::IndexBuffer);
+    HardwareBuffer landscape_vb =
+        HardwareBuffer::uploadDeviceLocal(landscape.vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer landscape_ib =
+        HardwareBuffer::uploadDeviceLocal(landscape.indices, BufferUsage::IndexBuffer);
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        sky_width, sky_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_edsl_sky.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(sky_width, sky_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        sky_width, sky_height, horizon::Format::D32, "example_edsl_sky.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(example::imageInfo(sky_width, sky_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     Texture2D<fvec4> out_color = final_output_image;
     Texture2D<fvec4> lightmap_tex = lightmap;
@@ -658,7 +644,6 @@ void run_example_edsl_sky()
     SkyShared sky;
     LandscapeShared ls;
     Float4x4 ls_model;
-    ls_model.as_push_constant();
 
     auto perez_fn = [](Float3 A, Float3 B, Float3 C, Float3 D, Float3 E, Float costeta, Float cosgamma) {
         Float invCosteta = Float(1.0) / costeta;
@@ -799,47 +784,29 @@ void run_example_edsl_sky()
     };
 
     // Landscape first (clears color+depth), then sky into remaining far-plane pixels.
-    horizon::RasterizerPipelineDesc landscape_desc;
-    landscape_desc.blend_enabled = false;
-    landscape_desc.clear_color_target = true;
-    landscape_desc.clear_depth_target = true;
 
-    horizon::RasterizerPipeline landscape_pipeline(landscape_vs, landscape_fs, landscape_desc);
-    landscape_pipeline.bind_depth_target(depth_image);
+    example::ScenePass<example::NoDrawParameters> landscape_pipeline(sky_width, sky_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}}, landscape_vs, landscape_fs, 1, example::shaderOptions());
+    landscape_pipeline.setDepthImage(depth_image);
 
-    horizon::RasterizerPipelineDesc sky_desc;
-    sky_desc.blend_enabled = false;
-    sky_desc.depth_test_enabled = true;
-    sky_desc.depth_write_enabled = false;
     // Match bgfx: fill only uncleared depth (== 1) so landscape is preserved.
-    sky_desc.depth_compare_op = horizon::CompareOp::Equal;
-    sky_desc.clear_color_target = false;
-    sky_desc.clear_depth_target = false;
 
-    horizon::RasterizerPipeline sky_pipeline(sky_vs, sky_fs, sky_desc);
-    sky_pipeline.bind_depth_target(depth_image);
+    example::ScenePass<example::NoDrawParameters> sky_pipeline(sky_width, sky_height, {{true, false, RasterCompare::Equal, RasterBlend::Opaque}, {true, true}}, sky_vs, sky_fs, 1, example::shaderOptions());
+    sky_pipeline.setDepthImage(depth_image);
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
-    horizon::DrawIndexedIndirectCommand sky_cmd;
-    sky_cmd.index_count = static_cast<uint32_t>(sky_indices.size());
-    sky_cmd.instance_count = 1;
-    sky_cmd.first_index = 0;
-    sky_cmd.vertex_offset = 0;
-    sky_cmd.first_instance = 0;
 
-    std::vector<horizon::DrawIndexedIndirectCommand> landscape_commands;
+    std::vector<RasterDraw> landscape_commands;
     landscape_commands.reserve(landscape.groups.size());
     for (const MeshGroup& group : landscape.groups)
     {
-        horizon::DrawIndexedIndirectCommand cmd;
-        cmd.index_count = group.index_count;
-        cmd.instance_count = 1;
-        cmd.first_index = group.first_index;
-        cmd.vertex_offset = group.base_vertex;
-        cmd.first_instance = 0;
+        RasterDraw cmd;
+        cmd.indexCount = group.index_count;
+        cmd.instanceCount = 1;
+        cmd.firstIndex = group.first_index;
+        cmd.vertexOffset = group.base_vertex;
+        cmd.firstInstance = 0;
         landscape_commands.push_back(cmd);
     }
 
@@ -872,7 +839,6 @@ void run_example_edsl_sky()
     auto prev_time = std::chrono::high_resolution_clock::now();
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
-    horizon::SubmitReceipt render_receipt;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -938,59 +904,15 @@ void run_example_edsl_sky()
         ls_model = to_edsl_matrix(glm::mat4(1.0f));
         lightmap_tex = lightmap;
 
-        landscape_pipeline.clear_records();
-        std::vector<horizon::DrawIndexedIndirectCommand> landscape_indirect_cmds;
-        landscape_indirect_cmds.reserve(landscape_commands.size());
-        for (const horizon::DrawIndexedIndirectCommand& base_cmd : landscape_commands)
-        {
-            horizon::DrawIndexedIndirectCommand cmd = base_cmd;
-            cmd.first_instance = static_cast<uint32_t>(landscape_indirect_cmds.size());
-            landscape_indirect_cmds.push_back(cmd);
-        }
+        landscape_pipeline.draw({landscape_vb, landscape_ib}, landscape_commands);
+        sky_pipeline.draw({sky_vb, sky_ib});
 
-        if (!landscape_indirect_cmds.empty())
-        {
-            horizon::HardwareBuffer landscape_indirect_buffer = horizon::HardwareBuffer::from_bytes(
-                std::span<const std::byte>(
-                    reinterpret_cast<const std::byte*>(landscape_indirect_cmds.data()),
-                    landscape_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                static_cast<uint32_t>(landscape_indirect_cmds.size() * sizeof(horizon::DrawIndexedIndirectCommand)),
-                horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-                "example_edsl_sky.landscape_indirect");
+        render_executor << landscape_pipeline
+                                         << sky_pipeline;
+        render_executor.commit();
 
-            horizon::DrawIndexedIndirectParams landscape_indirect_params;
-            landscape_indirect_params.draw_count = static_cast<uint32_t>(landscape_indirect_cmds.size());
-            landscape_indirect_params.indirect_offset = 0;
-            landscape_indirect_params.stride = sizeof(horizon::DrawIndexedIndirectCommand);
-            landscape_pipeline.record_indirect(landscape_ib, landscape_vb, landscape_indirect_buffer, landscape_indirect_params);
-        }
-
-        sky_pipeline.clear_records();
-        horizon::HardwareBuffer sky_indirect_buffer = horizon::HardwareBuffer::from_bytes(
-            std::span<const std::byte>(
-                reinterpret_cast<const std::byte*>(&sky_cmd),
-                sizeof(horizon::DrawIndexedIndirectCommand)),
-            sizeof(horizon::DrawIndexedIndirectCommand),
-            horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-            "example_edsl_sky.sky_indirect");
-
-        horizon::DrawIndexedIndirectParams sky_indirect_params;
-        sky_indirect_params.draw_count = 1;
-        sky_indirect_params.indirect_offset = 0;
-        sky_indirect_params.stride = 0;
-        sky_pipeline.record_indirect(sky_ib, sky_vb, sky_indirect_buffer, sky_indirect_params);
-
-        render_receipt = render_executor << landscape_pipeline.extent(sky_width, sky_height)
-                                         << sky_pipeline.extent(sky_width, sky_height)
-                                         << horizon::commit();
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
-
-    display_executor.wait_idle(render_receipt);
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

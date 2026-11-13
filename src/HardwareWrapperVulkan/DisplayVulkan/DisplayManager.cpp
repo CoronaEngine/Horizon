@@ -7,9 +7,7 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include <new>
 
-//#define USE_SAME_DEVICE
-
-DisplayManager::DisplayManager() = default;
+DisplayManager::DisplayManager(PresentDevicePreference preference) : devicePreference(preference) {}
 
 DisplayManager::~DisplayManager()
 {
@@ -261,46 +259,19 @@ void DisplayManager::createVkSurface(void *surface)
 
 void DisplayManager::choosePresentDevice()
 {
-#ifdef USE_SAME_DEVICE
-    displayDevice = getHardwareContext().getMainDevice();
-
-    auto pickQueuesRoles = [&](const DeviceManager::QueueUtils &queues) -> bool {
-        VkBool32 presentSupport = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(displayDevice->deviceManager.getPhysicalDevice(),
-                                             queues.queueFamilyIndex,
-                                             vkSurface,
-                                             &presentSupport);
-        return presentSupport;
-    };
-
-    presentQueues = displayDevice->deviceManager.pickAvailableQueues(pickQueuesRoles);
-#else
-    // 优先选择与主设备不同的设备（如果支持）
-    for (const auto &device : getHardwareContext().getAllDevices())
+    const auto& renderDevice = getHardwareContext().getMainDevice();
+    for (const auto& device : getHardwareContext().getAllDevices())
     {
-        auto pickQueuesRoles = [&](const DeviceManager::QueueUtils &queues) -> bool {
-            VkBool32 presentSupport = false;
-            vkGetPhysicalDeviceSurfaceSupportKHR(device->deviceManager.getPhysicalDevice(),
-                                                 queues.queueFamilyIndex,
-                                                 vkSurface,
-                                                 &presentSupport);
-            return presentSupport;
-        };
-
-        auto queues = device->deviceManager.pickAvailableQueues(pickQueuesRoles);
-        if (!queues.empty())
-        {
-            displayDevice = device;
-            presentQueues = std::move(queues);
-
-            // 如果找到与主设备不同的设备，优先使用
-            if (displayDevice != getHardwareContext().getMainDevice())
-            {
-                break;
-            }
-        }
+        auto queues = device->deviceManager.pickAvailableQueues([&](const DeviceManager::QueueUtils& queue) {
+            VkBool32 supported = VK_FALSE;
+            return vkGetPhysicalDeviceSurfaceSupportKHR(device->deviceManager.getPhysicalDevice(),
+                       queue.queueFamilyIndex, vkSurface, &supported) == VK_SUCCESS && supported;
+        });
+        if (queues.empty()) continue;
+        displayDevice = device;
+        presentQueues = std::move(queues);
+        if ((device == renderDevice) == (devicePreference == PresentDevicePreference::RenderDevice)) break;
     }
-#endif
 
     if (!displayDevice || presentQueues.empty())
     {
@@ -555,17 +526,15 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
 
                 setupCrossDeviceTransfer(*handle);
             }
-            else
-            {
-                this->displayImage = *handle;
-            }
         }
 
         // 等待之前的执行器
         if (waitedSubmission)
         {
-            mainDeviceExecutor->wait(waitedSubmission);
-            displayDeviceExecutor->wait(waitedSubmission);
+            if (getHardwareContext().getMainDevice() == displayDevice)
+                displayDeviceExecutor->wait(waitedSubmission);
+            else
+                mainDeviceExecutor->wait(waitedSubmission);
         }
 
         // 检查交换链是否需要重建
@@ -655,7 +624,9 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         }
 
         // 执行 Blit 和转换布局
-        BlitImageCommand blitCmd(this->displayImage, swapChainImages[imageIndex]);
+        auto& source = getHardwareContext().getMainDevice() == displayDevice
+                         ? *legacyImageFromId(displayImage.getImageID()) : this->displayImage;
+        BlitImageCommand blitCmd(source, swapChainImages[imageIndex]);
         TransitionImageLayoutCommand transitionCmd(swapChainImages[imageIndex],
                                                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,

@@ -1,4 +1,4 @@
-﻿#include "HardwareContext.h"
+#include "HardwareContext.h"
 
 #include <algorithm>
 
@@ -143,6 +143,8 @@ void HardwareContext::prepareFeaturesChain()
 
     hardwareCreateInfos.requiredDeviceFeatures = [](const VkInstance &, const VkPhysicalDevice &) {
         VkPhysicalDeviceFeatures features{};
+        features.multiDrawIndirect = VK_TRUE;
+        features.drawIndirectFirstInstance = VK_TRUE;
         features.samplerAnisotropy = VK_TRUE;
         features.shaderInt16 = VK_TRUE;
         features.wideLines = VK_TRUE;
@@ -172,6 +174,7 @@ void HardwareContext::prepareFeaturesChain()
         features12.timelineSemaphore = VK_TRUE;
 
         VkPhysicalDeviceVulkan13Features features13{};
+        features13.shaderDemoteToHelperInvocation = VK_TRUE;
         features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         features13.synchronization2 = VK_TRUE;
 

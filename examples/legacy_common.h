@@ -37,7 +37,7 @@ public:
     ~Benchmark();
     void begin_frame();
     void begin_scene();
-    void submit(HardwareExecutor&, RasterizerPipelineBase&);
+    void submit(HardwareExecutor&, RasterBatch&&);
     bool offscreen() const { return offscreen_; }
     void set_shader_setup_ms(double value) { shader_setup_ms_ = value; }
     float dt() const;

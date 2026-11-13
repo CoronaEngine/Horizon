@@ -24,7 +24,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -53,6 +54,23 @@
 
 namespace
 {
+struct DeferredGeomPC {
+    glm::mat4 model{};
+    uint32_t texColorIndex{};
+    uint32_t texNormalIndex{};
+};
+struct DeferredLightPC {
+    glm::vec4 light_pos_radius{};
+    glm::vec4 light_rgb_inner_r{};
+    glm::vec4 rect{};
+    uint32_t gNormalIndex{};
+    uint32_t gDepthIndex{};
+};
+struct DeferredCombinePC {
+    uint32_t gAlbedoIndex{};
+    uint32_t gLightIndex{};
+};
+
 constexpr uint32_t dfr_width = 1280;
 constexpr uint32_t dfr_height = 720;
 constexpr int num_lights = 512;
@@ -85,7 +103,7 @@ std::vector<std::byte> read_file_bytes(const std::filesystem::path& path)
 }
 
 // 传统 DDS 头（128 字节）+ BC 压缩 payload 直接上传（含全 mip 链，与 example_bump 相同）
-horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, const std::string& name)
+HardwareImage create_bc_texture(const std::filesystem::path& path, const std::string& name)
 {
     const std::vector<std::byte> bytes = read_file_bytes(path);
 
@@ -100,31 +118,25 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
 
     constexpr uint32_t fourcc_dxt3 = 0x33545844; // "DXT3" -> BC2
     constexpr uint32_t fourcc_ati2 = 0x32495441; // "ATI2" -> BC5
-    horizon::Format format;
+    ImageFormat format;
     if (four_cc == fourcc_dxt3)
-        format = horizon::Format::BC2_UNORM;
+        format = ImageFormat::BC2_RGBA_UNORM;
     else if (four_cc == fourcc_ati2)
-        format = horizon::Format::BC5_UNORM;
+        format = ImageFormat::BC5_RG_UNORM;
     else
         throw std::runtime_error("Unsupported DDS fourcc: " + path.string());
 
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::texture_2d(
-        width, height, format,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = mip_count;
+    HardwareImageCreateInfo desc = example::imageInfo(width, height, format, ImageUsage::SampledImage);
+    desc.mipLevels = mip_count;
 
-    horizon::HardwareImage image(desc);
+    HardwareImage image(desc);
 
     const std::span<const std::byte> payload(bytes.data() + 128, bytes.size() - 128);
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, payload);
 
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    auto staging = example::staging(payload);
+
+    HardwareExecutor executor;
+    auto& stream = executor;
     uint64_t offset = 0;
     for (uint32_t mip = 0; mip < mip_count; ++mip)
     {
@@ -132,10 +144,10 @@ horizon::HardwareImage create_bc_texture(const std::filesystem::path& path, cons
         const uint32_t mip_h = std::max(1u, height >> mip);
         const uint64_t blocks_x = (mip_w + 3) / 4;
         const uint64_t blocks_y = (mip_h + 3) / 4;
-        stream << image.copy_from(staging, offset, 0, mip);
+        stream << staging.copyTo(image, offset, 0, mip);
         offset += blocks_x * blocks_y * 16; // BC2/BC5 均为 16 字节/块
     }
-    (void)(stream << horizon::commit());
+    stream.commit().waitForDeferredResources();
 
     return image;
 }
@@ -274,110 +286,68 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 void run_example_deferred()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(dfr_width, dfr_height, "Horizon Deferred [Vulkan]", nullptr, nullptr);
+    legacy_example::Window owner(dfr_width, dfr_height, "Horizon Deferred [Vulkan]");
+    auto* window = owner.get();
     glfwSetKeyCallback(window, key_callback);
 
     std::vector<GeomVertex> cube_vertices = build_cube_vertices();
     calc_tangents(cube_vertices, cube_indices);
 
-    horizon::HardwareBuffer cube_vb = horizon::HardwareBuffer::vertex(cube_vertices, "example_deferred.cube.vb");
-    horizon::HardwareBuffer cube_ib = horizon::HardwareBuffer::index(cube_indices, "example_deferred.cube.ib");
-    horizon::HardwareBuffer quad_vb = horizon::HardwareBuffer::vertex(corner_vertices, "example_deferred.quad.vb");
-    horizon::HardwareBuffer quad_ib = horizon::HardwareBuffer::index(corner_indices, "example_deferred.quad.ib");
+    auto cube_vb = HardwareBuffer::uploadDeviceLocal(cube_vertices, BufferUsage::VertexBuffer);
+    auto cube_ib = HardwareBuffer::uploadDeviceLocal(cube_indices, BufferUsage::IndexBuffer);
+    auto quad_vb = HardwareBuffer::uploadDeviceLocal(corner_vertices, BufferUsage::VertexBuffer);
+    auto quad_ib = HardwareBuffer::uploadDeviceLocal(corner_indices, BufferUsage::IndexBuffer);
 
-    horizon::HardwareImage color_image = create_bc_texture(dfr_asset_root / "textures" / "fieldstone-rgba.dds", "example_deferred.texColor");
-    horizon::HardwareImage normal_image = create_bc_texture(dfr_asset_root / "textures" / "fieldstone-n.dds", "example_deferred.texNormal");
+    HardwareImage color_image = create_bc_texture(dfr_asset_root / "textures" / "fieldstone-rgba.dds", "example_deferred.texColor");
+    HardwareImage normal_image = create_bc_texture(dfr_asset_root / "textures" / "fieldstone-n.dds", "example_deferred.texNormal");
 
     // G-buffer：albedo + 世界法线 + 器件深度（R32F 颜色目标）
-    const auto gbuffer_usage = horizon::ImageUsage_ColorAttachment | horizon::ImageUsage_Sampled;
-    horizon::HardwareImage gbuffer_albedo(horizon::HardwareImageDesc::texture_2d(
-        dfr_width, dfr_height, horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_deferred.gbuffer.albedo"));
-    gbuffer_albedo.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
-    horizon::HardwareImage gbuffer_normal(horizon::HardwareImageDesc::texture_2d(
-        dfr_width, dfr_height, horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_deferred.gbuffer.normal"));
-    gbuffer_normal.set_clear_color(0.5f, 0.5f, 0.5f, 1.0f);
-    horizon::HardwareImage gbuffer_depth_val(horizon::HardwareImageDesc::texture_2d(
-        dfr_width, dfr_height, horizon::Format::R32_FLOAT, gbuffer_usage, "example_deferred.gbuffer.depthval"));
-    gbuffer_depth_val.set_clear_color(1.0f, 0.0f, 0.0f, 0.0f); // 远平面
+    HardwareImage gbuffer_albedo(example::imageInfo(dfr_width, dfr_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    gbuffer_albedo.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage gbuffer_normal(example::imageInfo(dfr_width, dfr_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    gbuffer_normal.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    HardwareImage gbuffer_depth_val(example::imageInfo(dfr_width, dfr_height, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
+    gbuffer_depth_val.setClearColor(1.0f, 0.0f, 0.0f, 0.0f); // 远平面
 
-    horizon::HardwareImage gbuffer_depth(horizon::HardwareImageDesc::depth_attachment(
-        dfr_width, dfr_height, horizon::Format::D32, "example_deferred.gbuffer.depth"));
-    gbuffer_depth.set_clear_depth(1.0f, 0);
+    HardwareImage gbuffer_depth(example::imageInfo(dfr_width, dfr_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     // 光照累加缓冲
-    horizon::HardwareImage light_buffer(horizon::HardwareImageDesc::texture_2d(
-        dfr_width, dfr_height, horizon::Format::RGBA8_UNORM, gbuffer_usage, "example_deferred.lightbuffer"));
-    light_buffer.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage light_buffer(example::imageInfo(dfr_width, dfr_height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage));
+    light_buffer.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     // 最终输出
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        dfr_width, dfr_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_deferred.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(dfr_width, dfr_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     // Pass 1：几何 → G-buffer（MRT 单 pass：albedo/normal/depthval 三附件同时输出）
-    horizon::RasterizerPipelineDesc geom_desc;
-    geom_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline geom_rasterizer(deferred_geom_vert_glsl, deferred_geom_mrt_frag_glsl, geom_desc);
+    example::ScenePass<DeferredGeomPC, deferred_geom_vert_glsl_t, deferred_geom_mrt_frag_glsl_t> geom_rasterizer(dfr_width, dfr_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     geom_rasterizer.outAlbedo = gbuffer_albedo;
     geom_rasterizer.outNormal = gbuffer_normal;
     geom_rasterizer.outDepthVal = gbuffer_depth_val;
-    geom_rasterizer.bind_depth_target(gbuffer_depth);
-    // 纹理/ G-buffer 存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
-    geom_rasterizer.model_pc.texColorIndex = color_image.store_descriptor();
-    geom_rasterizer.model_pc.texNormalIndex = normal_image.store_descriptor();
+    geom_rasterizer.setDepthImage(gbuffer_depth);
+    // 纹理/ G-buffer 存入 bindless combined-texture 表（set 0），索引经逐 draw 参数传入。
+    geom_rasterizer.parameters.texColorIndex = color_image.storeDescriptor();
+    geom_rasterizer.parameters.texNormalIndex = normal_image.storeDescriptor();
 
     // Pass 2：光照累加（加法混合、无深度）
-    horizon::RasterizerPipelineDesc light_desc;
-    light_desc.depth_test_enabled = false;
-    light_desc.depth_write_enabled = false;
-    light_desc.blend_enabled = true;
-    light_desc.src_color_blend_factor = horizon::BlendFactor::One;
-    light_desc.dst_color_blend_factor = horizon::BlendFactor::One;
-    light_desc.color_blend_op = horizon::BlendOp::Add;
-    light_desc.src_alpha_blend_factor = horizon::BlendFactor::One;
-    light_desc.dst_alpha_blend_factor = horizon::BlendFactor::One;
-    light_desc.alpha_blend_op = horizon::BlendOp::Add;
 
-    horizon::RasterizerPipeline light_rasterizer(deferred_light_vert_glsl, deferred_light_frag_glsl, light_desc);
+    example::ScenePass<DeferredLightPC, deferred_light_vert_glsl_t, deferred_light_frag_glsl_t> light_rasterizer(dfr_width, dfr_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Additive}, {false, false}});
     light_rasterizer.outColor = light_buffer;
-    light_rasterizer.vpc.gNormalIndex = gbuffer_normal.store_descriptor();
-    light_rasterizer.vpc.gDepthIndex = gbuffer_depth_val.store_descriptor();
+    light_rasterizer.parameters.gNormalIndex = gbuffer_normal.storeDescriptor();
+    light_rasterizer.parameters.gDepthIndex = gbuffer_depth_val.storeDescriptor();
 
     // Pass 3：合成
-    horizon::RasterizerPipelineDesc combine_desc;
-    combine_desc.depth_test_enabled = false;
-    combine_desc.depth_write_enabled = false;
-    combine_desc.blend_enabled = false;
 
-    horizon::RasterizerPipeline combine_rasterizer(deferred_combine_vert_glsl, deferred_combine_frag_glsl, combine_desc);
+    example::ScenePass<DeferredCombinePC, deferred_combine_vert_glsl_t, deferred_combine_frag_glsl_t> combine_rasterizer(dfr_width, dfr_height, {{false, false, RasterCompare::LessEqual, RasterBlend::Opaque}, {false, false}});
     combine_rasterizer.outColor = final_output_image;
-    combine_rasterizer.fpc.gAlbedoIndex = gbuffer_albedo.store_descriptor();
-    combine_rasterizer.fpc.gLightIndex = light_buffer.store_descriptor();
+    combine_rasterizer.parameters.gAlbedoIndex = gbuffer_albedo.storeDescriptor();
+    combine_rasterizer.parameters.gLightIndex = light_buffer.storeDescriptor();
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     // 每个 draw 的参数都不随帧变化，启动时各建一条 indirect 命令即可复用。
-    const std::array<horizon::DrawIndexedIndirectCommand, 1> cube_cmd { {
-        { static_cast<uint32_t>(cube_indices.size()), 1, 0, 0, 0 },
-    } };
-    const std::array<horizon::DrawIndexedIndirectCommand, 1> quad_cmd { {
-        { static_cast<uint32_t>(corner_indices.size()), 1, 0, 0, 0 },
-    } };
-    horizon::HardwareBuffer cube_indirect = horizon::HardwareBuffer::indirect(cube_cmd, "example_deferred.cube_indirect");
-    horizon::HardwareBuffer quad_indirect = horizon::HardwareBuffer::indirect(quad_cmd, "example_deferred.quad_indirect");
-
-    horizon::DrawIndexedIndirectParams single_draw;
-    single_draw.draw_count = 1;
 
     constexpr float aspect = static_cast<float>(dfr_width) / static_cast<float>(dfr_height);
     // 原版 相机 (0,0,-15) 朝 +Z（垂直角 0）
@@ -427,10 +397,7 @@ void run_example_deferred()
         constexpr float offset = (float(dim - 1) * 3.0f) * 0.5f; // 15
 
         // Pass 1a/1b/1c：11x11 立方体分别写入三张 G-buffer
-        // model 是 push constant，按 record_indirect 调用快照：每个立方体写完 model 后
-        // 必须单独 record 一次，合成一个多 draw 批次会让 121 个立方体全部叠在最后一个位置。
         auto record_geometry = [&](auto& pipeline) {
-            pipeline.clear_records();
             pipeline.vsp.view_proj = view_proj;
             for (uint32_t yy = 0; yy < dim; ++yy)
             {
@@ -440,8 +407,8 @@ void run_example_deferred()
                     glm::mat4 model = glm::eulerAngleYX(-(time * 0.03f + yy * 0.37f), -(time * 1.023f + xx * 0.21f));
                     model[3] = glm::vec4(-offset + xx * 3.0f, -offset + yy * 3.0f, 0.0f, 1.0f);
 
-                    pipeline.model_pc.model = model;
-                    pipeline.record_indirect(cube_ib, cube_vb, cube_indirect, single_draw);
+                    pipeline.parameters.model = model;
+                    pipeline.draw({cube_vb, cube_ib});
                 }
             }
         };
@@ -449,7 +416,6 @@ void run_example_deferred()
 
         // Pass 2：512 光源逐个累加（quad 按光源包围盒 NDC rect 定位）
         // 同理，每个光源的 vpc 写完后立即 record。
-        light_rasterizer.clear_records();
         light_rasterizer.vsp.inv_mvp = inv_view_proj;
         light_rasterizer.vsp.view = view;
         for (int light = 0; light < num_lights; ++light)
@@ -494,32 +460,27 @@ void run_example_deferred()
                 continue;
 
             const uint8_t val = light & 7;
-            light_rasterizer.vpc.light_pos_radius = glm::vec4(center, radius);
-            light_rasterizer.vpc.light_rgb_inner_r = glm::vec4(
+            light_rasterizer.parameters.light_pos_radius = glm::vec4(center, radius);
+            light_rasterizer.parameters.light_rgb_inner_r = glm::vec4(
                 (val & 0x1) ? 1.0f : 0.25f,
                 (val & 0x2) ? 1.0f : 0.25f,
                 (val & 0x4) ? 1.0f : 0.25f,
                 0.8f);
-            light_rasterizer.vpc.rect = glm::vec4(rect_min, rect_max);
-            light_rasterizer.record_indirect(quad_ib, quad_vb, quad_indirect, single_draw);
+            light_rasterizer.parameters.rect = glm::vec4(rect_min, rect_max);
+            light_rasterizer.draw({quad_vb, quad_ib});
         }
 
         // Pass 3：albedo × light 合成
-        combine_rasterizer.clear_records();
-        combine_rasterizer.record_indirect(quad_ib, quad_vb, quad_indirect, single_draw);
+        combine_rasterizer.draw({quad_vb, quad_ib});
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << geom_rasterizer.extent(dfr_width, dfr_height)
-                            << light_rasterizer.extent(dfr_width, dfr_height)
-                            << combine_rasterizer.extent(dfr_width, dfr_height)
-                            << horizon::commit();
+        render_executor << geom_rasterizer
+                            << light_rasterizer
+                            << combine_rasterizer;
+        render_executor.commit();
 
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        auto frame = ui.draw_overlay(final_output_image, render_executor);
+        display.wait(*frame.executor) << frame.image;
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }

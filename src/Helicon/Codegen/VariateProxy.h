@@ -16,25 +16,10 @@
 #include <Codegen/ParseHelper.h>
 #include <Codegen/MathProxy.h>
 
-// Forward declarations for Level 2 resource binding (defined in horizon.h)
-#ifdef HORIZON_LEGACY_API
+// Forward declarations for Level 2 resource binding (defined in Horizon_old.h)
 struct HardwareImage;
 struct HardwareBuffer;
 struct HardwareImageCreateInfo;
-namespace Corona::Horizon
-{
-    using HardwareImage = ::HardwareImage;
-    using HardwareBuffer = ::HardwareBuffer;
-    using HardwareImageDesc = ::HardwareImageCreateInfo;
-}
-#else
-namespace Corona::Horizon
-{
-	class HardwareImage;
-	class HardwareBuffer;
-	struct HardwareImageDesc;
-}
-#endif
 
 namespace EmbeddedShader
 {
@@ -761,14 +746,14 @@ namespace EmbeddedShader
 		}
 
 		// 绑定既有 HardwareBuffer：Array<T> arr = existingBuffer;
-		ArrayProxy(Corona::Horizon::HardwareBuffer& buffer) : ArrayProxy()
+		ArrayProxy(::HardwareBuffer& buffer) : ArrayProxy()
 		{
 			boundResource_ = &buffer;
 		}
 
 		// 重新绑定(逐 draw 换 buffer 时用)。dirtyVersion 自增，
 		// 否则 bind_auto_resources 的脏检查会整批跳过。
-		ArrayProxy& operator=(Corona::Horizon::HardwareBuffer& buffer)
+		ArrayProxy& operator=(::HardwareBuffer& buffer)
 		{
 			boundResource_ = &buffer;
 			if (dirtyVersion)
@@ -835,6 +820,13 @@ namespace EmbeddedShader
 
 	struct SamplerProxy
 	{
+		static bool usesCombinedComputeDescriptor()
+		{
+			const auto& stage = Ast::AST::getEmbeddedShaderStructure();
+			// Horizon stores the image and its sampler together in descriptor set 0.
+			return stage.horizonVulkan && stage.stage == Ast::ShaderStage::Compute && Ast::Parser::getBindless();
+		}
+
 		SamplerProxy()
 		{
 			if (auto parent = ParseHelper::getAggregateParent())
@@ -891,19 +883,19 @@ namespace EmbeddedShader
 		}
 
 		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in horizon.h (after HardwareImage is complete).
-		void createResource(const Corona::Horizon::HardwareImageDesc& createInfo);
+		// Definition is in Horizon_old.h (after HardwareImage is complete).
+		void createResource(const ::HardwareImageCreateInfo& createInfo);
 
 		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
-		Texture2DProxy(Corona::Horizon::HardwareImage& img) : Texture2DProxy()
+		Texture2DProxy(::HardwareImage& img) : Texture2DProxy()
 		{
 			boundResource_ = &img;
 		}
 
 		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
-		Texture2DProxy(Corona::Horizon::HardwareImage&& img) : Texture2DProxy()
+		Texture2DProxy(::HardwareImage&& img) : Texture2DProxy()
 		{
-			ownedResource_ = std::make_unique<Corona::Horizon::HardwareImage>(std::move(img));
+			ownedResource_ = std::make_unique<::HardwareImage>(std::move(img));
 			boundResource_ = ownedResource_.get();
 		}
 
@@ -959,6 +951,8 @@ namespace EmbeddedShader
 		{
 			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
 			assert(!isHybrid);
+			if (SamplerProxy::usesCombinedComputeDescriptor())
+				return sample(location);
 			sampler.init("SamplerState");
 			sampler.node->access(Ast::AccessPermissions::ReadOnly);
 			node->access(Ast::AccessPermissions::ReadOnly);
@@ -987,7 +981,7 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		Texture2DProxy& operator=(Corona::Horizon::HardwareImage& img)
+		Texture2DProxy& operator=(::HardwareImage& img)
 	    {
 		    boundResource_ = &img;
 		    if (dirtyVersion)
@@ -995,7 +989,7 @@ namespace EmbeddedShader
 		    return *this;
 	    }
 
-		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
+		::HardwareImage* resource() const { return static_cast<::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
 		// Usage in FS lambda: outputImage << Float4(r, g, b, a);
@@ -1010,12 +1004,12 @@ namespace EmbeddedShader
 		}
 
 		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
-		Corona::Horizon::HardwareImage& image() const { return *static_cast<Corona::Horizon::HardwareImage*>(ownedResource_.get()); }
+		::HardwareImage& image() const { return *static_cast<::HardwareImage*>(ownedResource_.get()); }
 
 		std::shared_ptr<Ast::Value> node;
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
-		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
+		std::unique_ptr<::HardwareImage> ownedResource_;
 	    size_t* dirtyVersion = nullptr;
 	};
 
@@ -1047,19 +1041,19 @@ namespace EmbeddedShader
 		}
 
 		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in horizon.h (after HardwareImage is complete).
-		void createResource(const Corona::Horizon::HardwareImageDesc& createInfo);
+		// Definition is in Horizon_old.h (after HardwareImage is complete).
+		void createResource(const ::HardwareImageCreateInfo& createInfo);
 
 		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
-		TextureCubeProxy(Corona::Horizon::HardwareImage& img) : TextureCubeProxy()
+		TextureCubeProxy(::HardwareImage& img) : TextureCubeProxy()
 		{
 			boundResource_ = &img;
 		}
 
 		// Own a new HardwareImage at construction: Texture2D<fvec4> img = HardwareImage(createInfo);
-		TextureCubeProxy(Corona::Horizon::HardwareImage&& img) : TextureCubeProxy()
+		TextureCubeProxy(::HardwareImage&& img) : TextureCubeProxy()
 		{
-			ownedResource_ = std::make_unique<Corona::Horizon::HardwareImage>(std::move(img));
+			ownedResource_ = std::make_unique<::HardwareImage>(std::move(img));
 			boundResource_ = ownedResource_.get();
 		}
 
@@ -1087,6 +1081,8 @@ namespace EmbeddedShader
 		{
 			//Cannot sample texture with sampler in hybrid mode, use sample(location) instead.
 			assert(!isHybrid);
+			if (SamplerProxy::usesCombinedComputeDescriptor())
+				return sample(dir);
 			sampler.init("SamplerState");
 			sampler.node->access(Ast::AccessPermissions::ReadOnly);
 			node->access(Ast::AccessPermissions::ReadOnly);
@@ -1097,6 +1093,8 @@ namespace EmbeddedShader
         VariateProxy<Type> sampleLevel(SamplerProxy& sampler,const VariateProxy<ktm::fvec3>& dir, VariateProxy<float> lod)
 		{
 		    assert(!isHybrid);
+		    if (SamplerProxy::usesCombinedComputeDescriptor())
+		        return sampleLevel(dir, lod);
 		    sampler.init("SamplerState");
 		    sampler.node->access(Ast::AccessPermissions::ReadOnly);
 		    node->access(Ast::AccessPermissions::ReadOnly);
@@ -1137,13 +1135,13 @@ namespace EmbeddedShader
 		}
 
 		// --- Level 2/3: Resource binding ---
-		TextureCubeProxy& operator=(Corona::Horizon::HardwareImage& img) {
+		TextureCubeProxy& operator=(::HardwareImage& img) {
 		    boundResource_ = &img;
 		    if (dirtyVersion)
 		        ++*dirtyVersion;
 		    return *this;
 		}
-		Corona::Horizon::HardwareImage* resource() const { return static_cast<Corona::Horizon::HardwareImage*>(boundResource_); }
+		::HardwareImage* resource() const { return static_cast<::HardwareImage*>(boundResource_); }
 
 		// --- Render target output via operator<< ---
 		// Usage in FS lambda: outputImage << Float4(r, g, b, a);
@@ -1158,12 +1156,12 @@ namespace EmbeddedShader
 		}
 
 		// Access the owned HardwareImage (only valid if constructed with HardwareImageCreateInfo)
-		Corona::Horizon::HardwareImage& image() const { return *static_cast<Corona::Horizon::HardwareImage*>(ownedResource_.get()); }
+		::HardwareImage& image() const { return *static_cast<::HardwareImage*>(ownedResource_.get()); }
 
 		std::shared_ptr<Ast::Value> node;
 		bool isHybrid = false;
 		void* boundResource_ = nullptr;
-		std::unique_ptr<Corona::Horizon::HardwareImage> ownedResource_;
+		std::unique_ptr<::HardwareImage> ownedResource_;
         size_t* dirtyVersion = nullptr;
 	};
 
@@ -1275,19 +1273,19 @@ namespace EmbeddedShader
 		bool hasMetadata() const { return bindType >= 0; }
 
 		// --- Level 2: Resource binding ---
-		BindingKey& operator=(Corona::Horizon::HardwareImage& img) { boundImage_ = &img; boundBuffer_ = nullptr; return *this; }
-		BindingKey& operator=(Corona::Horizon::HardwareBuffer& buf) { boundBuffer_ = &buf; boundImage_ = nullptr; return *this; }
-		Corona::Horizon::HardwareImage* boundImage() const { return boundImage_; }
-		Corona::Horizon::HardwareBuffer* boundBuffer() const { return boundBuffer_; }
+		BindingKey& operator=(::HardwareImage& img) { boundImage_ = &img; boundBuffer_ = nullptr; return *this; }
+		BindingKey& operator=(::HardwareBuffer& buf) { boundBuffer_ = &buf; boundImage_ = nullptr; return *this; }
+		::HardwareImage* boundImage() const { return boundImage_; }
+		::HardwareBuffer* boundBuffer() const { return boundBuffer_; }
 
-		Corona::Horizon::HardwareImage* boundImage_ = nullptr;
-		Corona::Horizon::HardwareBuffer* boundBuffer_ = nullptr;
+		::HardwareImage* boundImage_ = nullptr;
+		::HardwareBuffer* boundBuffer_ = nullptr;
 	};
 
 	// Pipeline-bound field proxy for direct member access syntax:
 	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
 	// PipelineType is RasterizerPipeline or ComputePipeline.
-	// operator= implementation is supplied by the active Horizon API header.
+	// operator= implementation is supplied by Horizon_old.h.
 	template<typename PipelineType>
 	struct BoundField
 	{

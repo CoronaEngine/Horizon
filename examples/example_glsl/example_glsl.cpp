@@ -10,7 +10,8 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "horizon.h"
+#include "scene_pass.h"
+#include "legacy_common.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -20,10 +21,15 @@
 
 #include <chrono>
 #include <filesystem>
-#include <utility>
+#include <optional>
 
 namespace
 {
+struct PushConsts {
+    glm::mat4 model{};
+    uint32_t texIndex{};
+};
+
 constexpr uint32_t glsl_width = 800;
 constexpr uint32_t glsl_height = 600;
 
@@ -33,57 +39,32 @@ const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
 } // namespace
 
-void run_example_glsl()
+void run_viking_room(bool show_ui)
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(glsl_width, glsl_height, "Horizon Baseline [GLSL]", nullptr, nullptr);
+    legacy_example::Window owner(glsl_width, glsl_height, show_ui ? "Horizon Baseline [GLSL]" : "Horizon Baseline");
+    auto* window = owner.get();
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
-    horizon::HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
+    HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
 
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        glsl_width, glsl_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_glsl.output"));
-    final_output_image.set_clear_color(0.0f, 0.0f, 0.0f, 1.0f);
+    HardwareImage final_output_image(example::imageInfo(glsl_width, glsl_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    horizon::HardwareImage depth_image(
-        horizon::HardwareImageDesc::depth_attachment(glsl_width, glsl_height, horizon::Format::D32, "example_glsl.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(
+        example::imageInfo(glsl_width, glsl_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    horizon::HardwareBuffer vertex_buffer = horizon::HardwareBuffer::vertex(mesh.vertices, "example_glsl.vertex");
-    horizon::HardwareBuffer index_buffer = horizon::HardwareBuffer::index(mesh.indices, "example_glsl.index");
+    auto vertex_buffer = HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer);
+    auto index_buffer = HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer);
 
-    // Indirect args buffer for single draw
-    horizon::DrawIndexedIndirectCommand indirect_cmd;
-    indirect_cmd.index_count = static_cast<uint32_t>(mesh.indices.size());
-    indirect_cmd.instance_count = 1;
-    indirect_cmd.first_index = 0;
-    indirect_cmd.vertex_offset = 0;
-    indirect_cmd.first_instance = 0;
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
-    horizon::HardwareBuffer indirect_args_buffer = horizon::HardwareBuffer::from_bytes(
-        std::span<const std::byte>(
-            reinterpret_cast<const std::byte*>(&indirect_cmd),
-            sizeof(horizon::DrawIndexedIndirectCommand)),
-        static_cast<uint32_t>(sizeof(horizon::DrawIndexedIndirectCommand)),
-        horizon::BufferUsage_TransferDst | horizon::BufferUsage_Indirect,
-        "example_glsl.indirect_args");
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
-
-    horizon::RasterizerPipelineDesc desc;
-
-    horizon::RasterizerPipeline rasterizer(baseline_vert_glsl, baseline_frag_glsl, desc);
+    example::ScenePass<PushConsts, baseline_vert_glsl_t, baseline_frag_glsl_t> rasterizer(glsl_width, glsl_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Alpha}, {false, false}});
     rasterizer.outColor = final_output_image;
-    rasterizer.bind_depth_target(depth_image);
-    // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经 push constant 传入 shader。
-    rasterizer.pc.texIndex = texture_image.store_descriptor();
+    rasterizer.setDepthImage(depth_image);
+    // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
+    rasterizer.parameters.texIndex = texture_image.storeDescriptor();
 
     // VP 不随帧变化（相机固定），绑定一次即可
     rasterizer.vp.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
@@ -98,21 +79,23 @@ void run_example_glsl()
     }
 
 
-    HorizonImGuiLayer ui(window, glsl_width, glsl_height);
+    std::optional<HorizonImGuiLayer> ui;
+    if (show_ui) ui.emplace(window, glsl_width, glsl_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
 
-    horizon::SubmitReceipt render_receipt;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
+        if (ui) {
+            ui->new_frame();
+            ImGui::Begin("Hello");
+            ImGui::Text("hello world!");
+            ImGui::End();
+        }
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
@@ -133,27 +116,24 @@ void run_example_glsl()
             fps_frame_count = 0;
         }
 
-        // Model 每帧更新（push constant，64 bytes）；VP 已在循环外绑定
-        rasterizer.pc.model = glm::rotate(glm::mat4(1.0f),
+        // Model 每帧更新（逐 draw 的 BDA 参数）；VP 已在循环外绑定
+        rasterizer.parameters.model = glm::rotate(glm::mat4(1.0f),
                                           time_seconds * glm::pi<float>() * 0.5f,
                                           glm::vec3(0.0f, 0.0f, 1.0f));
 
-        rasterizer.clear_records();
+        rasterizer.draw({vertex_buffer, index_buffer});
 
-        // Converted to indirect draw
-        horizon::DrawIndexedIndirectParams indirect_params;
-        indirect_params.draw_count = 1;
-        indirect_params.indirect_offset = 0;
-        indirect_params.stride = 0;
-        rasterizer.record_indirect(index_buffer, vertex_buffer, indirect_args_buffer, indirect_params);
+        render_executor << rasterizer;
+        render_executor.commit();
 
-        render_receipt = render_executor << rasterizer.extent(glsl_width, glsl_height) << horizon::commit();
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image) << horizon::commit());
+        if (ui) {
+            auto frame = ui->draw_overlay(final_output_image, render_executor);
+            display.wait(*frame.executor) << frame.image;
+        } else {
+            display.wait(render_executor) << final_output_image;
+        }
     }
-    display_executor.wait_idle(render_receipt);
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
 }
+
+void run_example_glsl() { run_viking_room(true); }

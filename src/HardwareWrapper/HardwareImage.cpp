@@ -17,6 +17,10 @@ ImageFormatInfo convertImageFormat(ImageFormat format)
     switch (format)
     {
     // Uncompressed formats
+    case ImageFormat::RGBA8_UNORM: return {VK_FORMAT_R8G8B8A8_UNORM, 4, false};
+    case ImageFormat::R32_FLOAT: return {VK_FORMAT_R32_SFLOAT, 4, false};
+    case ImageFormat::BC7_UNORM: return {VK_FORMAT_BC7_UNORM_BLOCK, 1, true};
+    case ImageFormat::BC7_SRGB: return {VK_FORMAT_BC7_SRGB_BLOCK, 1, true};
     case ImageFormat::RGBA8_UINT:
         return {VK_FORMAT_R8G8B8A8_UINT, 4, false};
     case ImageFormat::RGBA8_SINT:
@@ -91,6 +95,9 @@ VkImageUsageFlags convertImageUsage(ImageUsage usage, bool isCompressed)
         }
         break;
 
+    case ImageUsage::SampledStorageImage:
+        vkUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        [[fallthrough]];
     case ImageUsage::StorageImage:
         // 修正：压缩纹理不支持 STORAGE_BIT (imageLoad/Store)
         // 如果强行请求 Storage 且是压缩格式，为了安全降级为 Sampled
@@ -138,11 +145,14 @@ HardwareImage::HardwareImage() = default;
 
 HardwareImage::HardwareImage(const HardwareImageCreateInfo& createInfo)
 {
+    if (createInfo.cube && (createInfo.width != createInfo.height || createInfo.arrayLayers != 6))
+        throw std::invalid_argument("A cubemap requires six square faces");
     const auto [vkFormat, pixelSize, isCompressed] = convertImageFormat(createInfo.format);
     auto resource = std::make_unique<ResourceManager::ImageHardwareWrap>();
     *resource = getHardwareContext().getMainDevice()->resourceManager.createImage(
         ktm::uvec2(createInfo.width, createInfo.height), vkFormat, pixelSize,
-        convertImageUsage(createInfo.usage, isCompressed), createInfo.arrayLayers, createInfo.mipLevels);
+        convertImageUsage(createInfo.usage, isCompressed), createInfo.arrayLayers, createInfo.mipLevels, VK_IMAGE_TILING_OPTIMAL, createInfo.cube);
+    resource->linearFiltering = createInfo.linearFiltering;
     imageID = reinterpret_cast<uintptr_t>(resource.release());
 }
 
@@ -204,6 +214,7 @@ HardwareImage HardwareImage::operator[](uint32_t index)
     view->device = parent->device;
     view->resourceManager = parent->resourceManager;
     view->imageFormat = parent->imageFormat;
+    view->linearFiltering = parent->linearFiltering;
     view->pixelSize = parent->pixelSize;
     view->imageLayout = parent->imageLayout;
     view->aspectMask = parent->aspectMask;
@@ -213,8 +224,12 @@ HardwareImage HardwareImage::operator[](uint32_t index)
     view->imageAlloc = parent->imageAlloc;
     view->imageAllocInfo = parent->imageAllocInfo;
     view->allocationOwner = parent->allocationOwner;
+    view->baseMipLevel = parent->baseMipLevel;
+    view->baseArrayLayer = parent->baseArrayLayer;
     if (parent->arrayLayers == 1)
     {
+        if (index >= parent->mipLevels) throw std::out_of_range("Image mip view exceeds its parent");
+        view->baseMipLevel += index;
         view->imageView = parent->resourceManager->createImageView(*parent, 0, index);
         view->imageSize = ktm::uvec2(std::max(1u, parent->imageSize.x >> index), std::max(1u, parent->imageSize.y >> index));
         view->arrayLayers = 1;
@@ -222,6 +237,8 @@ HardwareImage HardwareImage::operator[](uint32_t index)
     }
     else if (parent->arrayLayers > 1)
     {
+        if (index >= parent->arrayLayers) throw std::out_of_range("Image layer view exceeds its parent");
+        view->baseArrayLayer += index;
         view->imageView = parent->resourceManager->createImageView(*parent, index, static_cast<uint32_t>(-1));
         view->imageSize = parent->imageSize;
         view->arrayLayers = 1;
@@ -236,7 +253,13 @@ HardwareImage::operator bool() const
     return imageID && legacyImageFromId(imageID)->imageHandle != VK_NULL_HANDLE;
 }
 
-uint32_t HardwareImage::storeDescriptor()
+uint32_t HardwareImage::storeSampledDescriptor() const
+{
+    auto* image = legacyImageFromId(imageID);
+    return image->resourceManager->storeSampledDescriptor(*image);
+}
+
+uint32_t HardwareImage::storeDescriptor() const
 {
     auto imageHandle = legacyImageFromId(imageID);
     return imageHandle->resourceManager->storeDescriptor(*imageHandle);

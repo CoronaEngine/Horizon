@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <ktm/ktm.h>
 #include <stdexcept>
@@ -18,6 +18,8 @@ struct ResourceManager
         VkImage image{VK_NULL_HANDLE};
         VmaAllocation allocation{VK_NULL_HANDLE};
         std::vector<VkImageView> views;
+        uint32_t mipLevels{1};
+        std::vector<VkImageLayout> layouts;
         ~ImageAllocation();
     };
     struct ExternalMemoryHandle
@@ -62,6 +64,8 @@ struct ResourceManager
 
         uint32_t arrayLayers{1};
         uint32_t mipLevels{1};
+        uint32_t baseMipLevel{0};
+        uint32_t baseArrayLayer{0};
 
         VkClearValue clearValue{};
 
@@ -74,6 +78,9 @@ struct ResourceManager
         VmaAllocationInfo imageAllocInfo{};
 
         int32_t bindlessIndex{-1};
+        int32_t sampledIndex{-1};
+        bool cube{};
+        bool linearFiltering{};
 
         DeviceManager *device{nullptr};
         ResourceManager *resourceManager{nullptr};
@@ -105,7 +112,7 @@ struct ResourceManager
                                                 VkImageUsageFlags imageUsage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                                 uint32_t arrayLayers = 1,
                                                 uint32_t mipLevels = 1,
-                                                VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL);
+                                                VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL, bool cube = false);
     [[nodiscard]] VkImageView createImageView(ImageHardwareWrap &image, uint32_t layer = -1, uint32_t mipLevel = -1);
     void destroyImage(ImageHardwareWrap &image);
 
@@ -129,18 +136,19 @@ struct ResourceManager
     // Descriptor operations
     [[nodiscard]] int32_t storeDescriptor(ImageHardwareWrap &image);
     [[nodiscard]] int32_t storeDescriptor(BufferHardwareWrap &buffer);
-    [[nodiscard]] bool storeDescriptorAt(ImageHardwareWrap &image, uint32_t descriptorIndex);
+    [[nodiscard]] bool storeDescriptorAt(ImageHardwareWrap &image, uint32_t descriptorIndex, bool sampled = false);
+    int32_t storeSampledDescriptor(ImageHardwareWrap& image);
     [[nodiscard]] bool storeDescriptorAt(BufferHardwareWrap &buffer, uint32_t descriptorIndex);
 
     // Copy operations
     ResourceManager &copyBuffer(VkCommandBuffer &commandBuffer, BufferHardwareWrap &srcBuffer, BufferHardwareWrap &dstBuffer);
-    //ResourceManager &copyImage(VkCommandBuffer &commandBuffer, ImageHardwareWrap &source, ImageHardwareWrap &destination);
-    ResourceManager &copyImage(VkCommandBuffer &commandBuffer, ImageHardwareWrap &source, ImageHardwareWrap &destination, uint32_t srcLayer = 0, uint32_t dstLayer = 0, uint32_t srcMip = 0, uint32_t dstMip = 0);
 
     ResourceManager &copyBufferToImage(VkCommandBuffer &commandBuffer, BufferHardwareWrap &buffer, ImageHardwareWrap &image, uint32_t mipLevel = 0, uint32_t layerCount = 1);
     ResourceManager &copyImageToBuffer(VkCommandBuffer &commandBuffer, ImageHardwareWrap &image, BufferHardwareWrap &buffer);
     ResourceManager &blitImage(VkCommandBuffer &commandBuffer, ImageHardwareWrap &srcImage, ImageHardwareWrap &dstImage);
 
+    void flushMapped(BufferHardwareWrap& buffer, size_t bytes);
+    void writeMapped(BufferHardwareWrap& buffer, const void* data, size_t bytes);
     void copyBufferToHost(BufferHardwareWrap &buffer, void *cpuData, uint64_t size);
 
     // Layout transition
@@ -198,6 +206,7 @@ struct ResourceManager
     VmaAllocator vmaAllocator{VK_NULL_HANDLE};
     VmaPool exportBufferPool{VK_NULL_HANDLE};
     VkSampler textureSampler{VK_NULL_HANDLE};
+    VkSampler linearSampler{VK_NULL_HANDLE};
 
     const uint32_t textureBinding{0};
     const uint32_t storageBufferBinding{1};

@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint drawParameterWord;
 
 // Sponza deferred light accumulation, vertex stage.
 //
@@ -20,7 +22,7 @@ layout(set = 3, binding = 0) uniform SponzaLightShared {
 } vsp;
 
 // Shared with sponza_light_frag.glsl; the layout must stay identical.
-layout(push_constant) uniform SponzaLightPC {
+struct SponzaLightPC {
     vec4 light_pos_radius;  // xyz: position, or direction when w < 0
     vec4 light_rgb_inner_r; // rgb: colour, w: inner falloff
     vec4 rect;              // xy: NDC min, zw: NDC max
@@ -30,14 +32,17 @@ layout(push_constant) uniform SponzaLightPC {
     uint gShadowIndex;
     uint rsmNormalIndex;
     uint rsmFluxIndex;
-} vpc;
-
-layout(location = 0) in vec3 inCorner;
+};
+#define vpc (*(SponzaLightPC*)(drawRoot.parameters + drawParameterWord))
 
 layout(location = 0) out vec2 v_texcoord;
 
 void main()
 {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    drawParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inCorner = *(vec3*)(vertex + 0);
     vec2 ndc = mix(vpc.rect.xy, vpc.rect.zw, inCorner.xy);
     gl_Position = vec4(ndc, 0.0, 1.0);
     v_texcoord = ndc * 0.5 + 0.5;

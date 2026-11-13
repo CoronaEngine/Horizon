@@ -4,8 +4,7 @@
 // 与 bgfx 原版的结构差异：
 //  - Horizon 的每个 RasterizerPipeline pass 都会 clear 颜色附件，因此天空盒与
 //    网格共用同一个 pipeline（shader 内用 isSkybox 分支），单 pass 完成；
-//  - record() 会为每个 draw 快照当前 uniform 值，orbs 模式下 5x5 球体逐球
-//    改 glossiness / reflectivity 后各 record 一次即可；
+//  - 每个球的变换和材质随 draw 一起复制到批次的参数表。
 //  - imgui 面板换成键盘交互（启动时在控制台打印按键说明）。
 
 #if defined(_WIN32)
@@ -19,8 +18,9 @@
 #include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
-#include "common.h"
-#include "horizon.h"
+#include "legacy_common.h"
+#include "example_edsl_ibl/example_edsl_ibl.h"
+#include "Horizon_old.h"
 #include "imgui_horizon.h"
 
 #include <imgui.h>
@@ -43,6 +43,13 @@
 
 namespace
 {
+struct IblDrawParameters {
+    glm::mat4 model;
+    glm::vec4 params0, misc;
+    uint32_t texCubeIndex, texCubeIrrIndex;
+};
+static_assert(offsetof(IblDrawParameters, texCubeIndex) == 96);
+
 constexpr uint32_t ibl_width = 1280;
 constexpr uint32_t ibl_height = 720;
 
@@ -104,45 +111,35 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-horizon::HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& name)
+HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& /*name*/)
 {
-    constexpr uint32_t bytes_per_pixel = 8; // RGBA16F
-
-    horizon::HardwareImageDesc desc = horizon::HardwareImageDesc::cube(
-        dds.size, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferDst, name);
-    desc.mip_levels = dds.mip_count;
-
-    horizon::HardwareImage image(desc);
-
-    horizon::HardwareBufferDesc staging_desc;
-    staging_desc.element_count = dds.payload.size();
-    staging_desc.element_size = 1;
-    staging_desc.usage = horizon::BufferUsage_TransferSrc;
-    staging_desc.cpu_access = horizon::CpuAccessMode::Write;
-    horizon::HardwareBuffer staging(staging_desc, std::span<const std::byte>(dds.payload));
-
-    horizon::HardwareExecutor executor;
-    horizon::HardwareStream stream = executor.stream();
+    HardwareImageCreateInfo desc(dds.size, dds.size, ImageFormat::RGBA16_FLOAT);
+    desc.arrayLayers = 6;
+    desc.cube = true;
+    desc.linearFiltering = true;
+    desc.mipLevels = static_cast<int>(dds.mip_count);
+    desc.usage = ImageUsage::SampledImage;
+    HardwareImage image(desc);
+    HardwareBuffer staging(static_cast<uint32_t>(dds.payload.size()), BufferUsage::StorageBuffer, dds.payload.data());
+    HardwareExecutor executor;
     uint64_t offset = 0;
-    for (uint32_t face = 0; face < 6; ++face)
-    {
-        for (uint32_t mip = 0; mip < dds.mip_count; ++mip)
-        {
+    for (uint32_t face = 0; face < 6; ++face) {
+        for (uint32_t mip = 0; mip < dds.mip_count; ++mip) {
             const uint32_t dim = std::max(1u, dds.size >> mip);
-            stream << image.copy_from(staging, offset, face, mip);
-            offset += static_cast<uint64_t>(dim) * dim * bytes_per_pixel;
+            const uint64_t bytes = static_cast<uint64_t>(dim) * dim * 8;
+            if (offset + bytes > dds.payload.size()) throw std::runtime_error("Truncated DDS payload");
+            executor << staging.copyTo(image, offset, face, mip);
+            offset += bytes;
         }
     }
-    (void)(stream << horizon::commit());
-
+    executor.commit().waitForDeferredResources();
     return image;
 }
 
 struct LightProbe
 {
-    horizon::HardwareImage lod;
-    horizon::HardwareImage irr;
+    HardwareImage lod;
+    HardwareImage irr;
 };
 
 LightProbe load_light_probe(const std::string& name)
@@ -501,12 +498,12 @@ void print_controls()
 
 } // namespace
 
-void run_example_ibl()
+template<bool Edsl>
+void run_ibl_scene()
 {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(ibl_width, ibl_height, "Horizon IBL [Vulkan]", nullptr, nullptr);
+    const char* mode = Edsl ? "edsl_ibl" : "ibl";
+    legacy_example::Window window_owner(ibl_width, ibl_height, mode);
+    GLFWwindow* window = window_owner.get();
 
     InputContext input;
     glfwSetWindowUserPointer(window, &input);
@@ -529,62 +526,28 @@ void run_example_ibl()
     };
     const std::vector<uint16_t> sky_indices = { 0, 1, 2 };
 
-    horizon::HardwareBuffer bunny_vb = horizon::HardwareBuffer::vertex(bunny_mesh.vertices, "example_ibl.bunny.vb");
-    horizon::HardwareBuffer bunny_ib = horizon::HardwareBuffer::index(bunny_mesh.indices, "example_ibl.bunny.ib");
-    horizon::HardwareBuffer orb_vb = horizon::HardwareBuffer::vertex(orb_mesh.vertices, "example_ibl.orb.vb");
-    horizon::HardwareBuffer orb_ib = horizon::HardwareBuffer::index(orb_mesh.indices, "example_ibl.orb.ib");
-    horizon::HardwareBuffer sky_vb = horizon::HardwareBuffer::vertex(sky_vertices, "example_ibl.sky.vb");
-    horizon::HardwareBuffer sky_ib = horizon::HardwareBuffer::index(sky_indices, "example_ibl.sky.ib");
+    auto bunny_vb = HardwareBuffer::uploadDeviceLocal(bunny_mesh.vertices, BufferUsage::VertexBuffer);
+    auto bunny_ib = HardwareBuffer::uploadDeviceLocal(bunny_mesh.indices, BufferUsage::IndexBuffer);
+    auto orb_vb = HardwareBuffer::uploadDeviceLocal(orb_mesh.vertices, BufferUsage::VertexBuffer);
+    auto orb_ib = HardwareBuffer::uploadDeviceLocal(orb_mesh.indices, BufferUsage::IndexBuffer);
+    auto sky_vb = HardwareBuffer::uploadDeviceLocal(sky_vertices, BufferUsage::VertexBuffer);
+    auto sky_ib = HardwareBuffer::uploadDeviceLocal(sky_indices, BufferUsage::IndexBuffer);
 
     // ---- 渲染目标 ----
-    horizon::HardwareImage final_output_image(horizon::HardwareImageDesc::texture_2d(
-        ibl_width, ibl_height, horizon::Format::RGBA16_FLOAT,
-        horizon::ImageUsage_Storage | horizon::ImageUsage_ColorAttachment |
-            horizon::ImageUsage_Sampled | horizon::ImageUsage_TransferSrc |
-            horizon::ImageUsage_TransferDst,
-        "example_ibl.output"));
-    final_output_image.set_clear_color(0.19f, 0.19f, 0.19f, 1.0f);
+    HardwareImage final_output_image(ibl_width, ibl_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+    final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
 
-    horizon::HardwareImage depth_image(horizon::HardwareImageDesc::depth_attachment(
-        ibl_width, ibl_height, horizon::Format::D32, "example_ibl.depth"));
-    depth_image.set_clear_depth(1.0f, 0);
+    HardwareImage depth_image(ibl_width, ibl_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
     // ---- Pipeline ----
-    horizon::RasterizerPipelineDesc desc;
-    desc.blend_enabled = false;
-
-    horizon::RasterizerPipeline rasterizer(ibl_vert_glsl, ibl_frag_glsl, desc);
+    const auto shader_start = std::chrono::steady_clock::now();
+    std::conditional_t<Edsl, IblEdslPipeline, RasterizerPipeline<ibl_vert_glsl_t, ibl_frag_glsl_t>> rasterizer;
+    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
     rasterizer.outColor = final_output_image;
-    rasterizer.bind_depth_target(depth_image);
+    rasterizer.setDepthImage(depth_image);
 
-    horizon::HardwareExecutor render_executor;
-    horizon::HardwareExecutor display_executor;
-    horizon::HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window));
-
-    // 每个 bgfx group 一条 indirect command：索引是 group 相对的，base_vertex 走 vertex_offset。
-    // 命令不随帧变化，启动时建好、逐帧复用。
-    const auto group_commands = [](const IblMesh& mesh) {
-        std::vector<horizon::DrawIndexedIndirectCommand> out;
-        out.reserve(mesh.groups.size());
-        for (const MeshGroup& group : mesh.groups)
-            out.push_back({ group.index_count, 1, group.first_index, group.base_vertex, 0 });
-        return out;
-    };
-    horizon::HardwareBuffer bunny_indirect =
-        horizon::HardwareBuffer::indirect(group_commands(bunny_mesh), "example_ibl.bunny.indirect");
-    horizon::HardwareBuffer orb_indirect =
-        horizon::HardwareBuffer::indirect(group_commands(orb_mesh), "example_ibl.orb.indirect");
-    const std::array<horizon::DrawIndexedIndirectCommand, 1> sky_cmd { {
-        { static_cast<uint32_t>(sky_indices.size()), 1, 0, 0, 0 },
-    } };
-    horizon::HardwareBuffer sky_indirect = horizon::HardwareBuffer::indirect(sky_cmd, "example_ibl.sky.indirect");
-
-    horizon::DrawIndexedIndirectParams bunny_draws;
-    bunny_draws.draw_count = static_cast<uint32_t>(bunny_mesh.groups.size());
-    horizon::DrawIndexedIndirectParams orb_draws;
-    orb_draws.draw_count = static_cast<uint32_t>(orb_mesh.groups.size());
-    horizon::DrawIndexedIndirectParams sky_draw;
-    sky_draw.draw_count = 1;
+    HardwareExecutor render_executor;
+    HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(ibl_width) / static_cast<float>(ibl_height);
     // bgfx 是左手系（屏幕右 = 世界 +x），跟随之以保证天空盒方向基与网格反射一致。
@@ -596,33 +559,21 @@ void run_example_ibl()
 
     HorizonImGuiLayer ui(window, ibl_width, ibl_height);
 
-    auto prev_time = std::chrono::high_resolution_clock::now();
-    double fps_accum_seconds = 0.0;
-    int fps_frame_count = 0;
+    legacy_example::Benchmark benchmark(mode, ibl_width, ibl_height);
+    benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
     {
+        benchmark.begin_frame();
+        render_executor.waitForDeferredResources();
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
-
-        const auto now = std::chrono::high_resolution_clock::now();
-        const float dt = std::chrono::duration<float>(now - prev_time).count();
-        prev_time = now;
-
-        // 帧率显示：每 0.5s 刷新一次窗口标题。
-        fps_accum_seconds += dt;
-        ++fps_frame_count;
-        if (fps_accum_seconds >= 0.5)
-        {
-            const double fps = fps_frame_count / fps_accum_seconds;
-            char title[96];
-            std::snprintf(title, sizeof(title), "Horizon IBL [Vulkan] - %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
-            glfwSetWindowTitle(window, title);
-            fps_accum_seconds = 0.0;
-            fps_frame_count = 0;
+        if (!benchmark.offscreen()) {
+            ui.new_frame();
+            ImGui::Begin("Hello");
+            ImGui::Text("hello world!");
+            ImGui::End();
         }
+
+        const float dt = benchmark.dt();
 
         Settings& s = input.settings;
         OrbitCamera& camera = input.camera;
@@ -632,18 +583,16 @@ void run_example_ibl()
         const glm::vec3 cam_pos = camera.position();
         const glm::mat4 view = glm::lookAtLH(cam_pos, camera.target, glm::vec3(0.0f, 1.0f, 0.0f));
         const glm::mat4 env_rot = glm::rotate(glm::mat4(1.0f), s.env_rot_curr, glm::vec3(0.0f, 1.0f, 0.0f));
-        const LightProbe& probe = probes[s.current_probe];
+        LightProbe& probe = probes[s.current_probe];
 
-        rasterizer.clear_records();
-
-        // 帧内共享的绑定与 uniform（UBO，record 前写入一次即可）。
+        // Frame uniforms are captured by beginBatch.
         // VS/FS 共用同一个 binding=0 的 IblShared block，经 vsp 代理写入。
-        // per-draw 数据（model、params0、misc）通过 push constant pc 写入。
-        // cube 图存入 bindless combined-texture 表（set 0），索引经 push constant 传入。
-        // store_descriptor 幂等（首帧写入后缓存索引），逐帧调用无额外开销。
-        rasterizer.vpc.texCubeIndex = probe.lod.store_descriptor();
-        rasterizer.vpc.texCubeIrrIndex = probe.irr.store_descriptor();
-        rasterizer.vsp.proj_view = proj * view;   // NEW：VS 内算 mvp = proj_view * pc.model
+        // Each draw carries its model, material parameters and cube descriptor indices.
+        benchmark.begin_scene();
+        if constexpr (Edsl) rasterizer.bind_textures(probe.lod, probe.irr);
+        const uint32_t cube_index = probe.lod.storeDescriptor();
+        const uint32_t irradiance_index = probe.irr.storeDescriptor();
+        rasterizer.vsp.proj_view = proj * view;   // VS 内算 mvp = proj_view * pc.model
         rasterizer.vsp.camPos = glm::vec4(cam_pos, 1.0f);
         rasterizer.vsp.flags = glm::vec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
                                          s.do_diffuse_ibl ? 1.0f : 0.0f, s.do_specular_ibl ? 1.0f : 0.0f);
@@ -653,24 +602,40 @@ void run_example_ibl()
         rasterizer.vsp.lightCol = glm::vec4(s.light_col, 0.0f);
         rasterizer.vsp.envMtx = env_rot;
         rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
+        if constexpr (!Edsl) rasterizer.uses({{probe.lod, ResourceAccess::Read}, {probe.irr, ResourceAccess::Read}});
+        auto batch = rasterizer.beginBatch(ibl_width, ibl_height);
 
-        // per-draw 的 vpc 是 push constant，按 record_indirect 调用快照，且一次调用只绑一对
-        // VB/IB：每个物体写完自己的 vpc 后，用它自己的 VB/IB 单独 record 一次。
+        glm::mat4 draw_model(1.0f);
+        glm::vec4 draw_misc{}, draw_params{};
+        uint64_t draw_count = 0;
+        auto record = [&](const HardwareBuffer& ib, const HardwareBuffer& vb, const RasterDraw& params) {
+            IblDrawParameters draw{draw_model, draw_params, draw_misc, cube_index, irradiance_index};
+            batch.draw({vb, ib}, params, draw);
+            ++draw_count;
+        };
+        auto record_mesh = [&](const HardwareBuffer& ib, const HardwareBuffer& vb, const IblMesh& mesh) {
+            for (const auto& group : mesh.groups) {
+                RasterDraw params;
+                params.indexCount = group.index_count;
+                params.firstIndex = group.first_index;
+                params.vertexOffset = group.base_vertex;
+                record(ib, vb, params);
+            }
+        };
 
-        // ---- 网格 draw（先画，深度 LessOrEqual 下天空盒只补背景）----
         if (s.mesh_selection == 0)
         {
             // bunny：等价于 bgfx mtxSRT(1,1,1, 0,π,0, 0,-0.8,0)
             const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.8f, 0.0f)) *
                                     glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-            rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
-            rasterizer.vpc.model   = model;
-            rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-            rasterizer.record_indirect(bunny_ib, bunny_vb, bunny_indirect, bunny_draws);
+            draw_misc = glm::vec4(0.0f, aspect, static_cast<float>(s.metal_or_spec), 0.0f);
+            draw_model = model;
+            draw_params = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+            record_mesh(bunny_ib, bunny_vb, bunny_mesh);
         }
         else
         {
-            // orbs：5x5 球体阵列，逐球变化 glossiness / reflectivity（push constant per-draw）。
+            // orbs：5x5 球体阵列，逐球变化 glossiness / reflectivity。
             constexpr float grid = 5.0f;
             constexpr float scale = 1.2f;
             constexpr float spacing = 2.2f;
@@ -685,30 +650,35 @@ void run_example_ibl()
                     const glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(tx, ty, 0.0f)) *
                                             glm::scale(glm::mat4(1.0f), glm::vec3(scale / grid));
 
-                    rasterizer.vpc.misc    = glm::vec4(0.0f, aspect, 0.0f, 0.0f);
-                    rasterizer.vpc.model   = model;
-                    rasterizer.vpc.params0 =
+                    draw_misc = glm::vec4(0.0f, aspect, 0.0f, 0.0f);
+                    draw_model = model;
+                    draw_params =
                         glm::vec4(xx * (1.0f / grid), (grid - yy) * (1.0f / grid), s.exposure, s.bg_type);
-                    rasterizer.record_indirect(orb_ib, orb_vb, orb_indirect, orb_draws);
+                    record_mesh(orb_ib, orb_vb, orb_mesh);
                 }
             }
         }
 
         // ---- 天空盒 draw（pc.misc.x = 1 触发 skybox 路径）----
-        rasterizer.vpc.misc    = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
-        rasterizer.vpc.model   = glm::mat4(1.0f); // identity，skybox 路径不使用 model
-        rasterizer.vpc.params0 = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
-        rasterizer.record_indirect(sky_ib, sky_vb, sky_indirect, sky_draw);
+        draw_misc = glm::vec4(1.0f, aspect, 0.0f, 0.0f);
+        draw_model = glm::mat4(1.0f); // identity，skybox 路径不使用 model
+        draw_params = glm::vec4(s.glossiness, s.reflectivity, s.exposure, s.bg_type);
+        record(sky_ib, sky_vb, RasterDraw{.indexCount = 3});
 
-        horizon::SubmitReceipt render_receipt =
-            render_executor << rasterizer.extent(ibl_width, ibl_height) << horizon::commit();
-
-        ui.draw_overlay(display_executor, final_output_image, render_receipt);
-        display_executor.wait(render_receipt);
-        (void)(display_executor.stream() << horizon::present(display, final_output_image)
-                                         << horizon::commit());
+        benchmark.submit(render_executor, std::move(batch));
+        if (benchmark.offscreen()) {
+            benchmark.end_frame(window, draw_count, final_output_image, render_executor);
+        } else {
+            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
+            display.wait(*frame_output.executor) << frame_output.image;
+            benchmark.end_frame(window, draw_count, frame_output.image, *frame_output.executor);
+        }
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    render_executor.waitForDeferredResources();
+}
+
+void run_example_ibl(bool edsl) {
+    if (edsl) run_ibl_scene<true>();
+    else run_ibl_scene<false>();
 }

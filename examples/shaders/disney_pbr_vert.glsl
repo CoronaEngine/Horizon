@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat out uint hzParameterWord;
 
 // Same scene layout as ibl_vert.glsl: mesh + skybox in one pass (pc.mat3.y = isSkybox).
 
@@ -13,7 +15,7 @@ layout(set = 3, binding = 0) uniform DisneyPbrShared {
     vec4 exposurePad; // x: exposure
 } vsp;
 
-layout(push_constant) uniform DisneyPbrPC {
+struct DisneyDraw {
     mat4 model;
     vec4 mat0; // rgb: baseColor, a: metallic
     vec4 mat1; // x: roughness, y: specular, z: specularTint, w: subsurface
@@ -21,20 +23,23 @@ layout(push_constant) uniform DisneyPbrPC {
     vec4 mat3; // x: clearcoatGloss, y: isSkybox, z: aspect, w: bgType
     uint texCubeIndex;
     uint texCubeIrrIndex;
-} vpc;
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
+};
+#define vpc (*(DisneyDraw*)(drawRoot.parameters + hzParameterWord))
 
 layout(location = 0) out vec3 v_view;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec3 v_dir;
 
-void main()
-{
+void main() {
+    HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + gl_DrawID];
+    hzParameterWord = packet.parameterWord;
+    uint* vertex = hzPullVertex(packet, gl_VertexIndex);
+    vec3 inPosition = *(vec3*)(vertex + 0);
+    vec3 inNormal = *(vec3*)(vertex + 3);
+
     if (vpc.mat3.y > 0.5)
     {
-        gl_Position = vec4(inPosition.xy, 1.0, 1.0);
+        gl_Position = vec4(inPosition.xy, 0.999999, 1.0);
 
         float fovHeight = tan(radians(45.0) * 0.5);
         float aspect    = vpc.mat3.z;

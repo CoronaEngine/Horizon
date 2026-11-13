@@ -4,7 +4,7 @@
 // 球体追踪（sphere tracing）渲染圆角盒 + 6 球的 SDF 场景。
 // inv_mvp 把裁剪空间 (uv, z, 1) 反投影回模型空间得到光线起终点。
 
-layout(binding = 0) uniform RaymarchParams {
+layout(set = 3, binding = 0) uniform RaymarchParams {
     mat4 inv_mvp;
     vec4 light_dir_time; // xyz: 模型空间光方向, w: time
 } rmp;

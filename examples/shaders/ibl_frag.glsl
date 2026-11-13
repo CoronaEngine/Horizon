@@ -1,4 +1,6 @@
 #version 450
+#include "raster_batch.slang"
+layout(location = 15) flat in uint hzParameterWord;
 
 // 移植自 bgfx examples/18-ibl 的 fs_ibl_mesh.sc + fs_ibl_skybox.sc。
 // uniform block 与 ibl_vert.glsl 完全一致（共用 set 3 / binding 0，见 vert 注释）。
@@ -18,17 +20,15 @@ layout(set = 3, binding = 0) uniform IblShared {
     vec4 lightCol;
 } fsp;
 
-// 与 ibl_vert.glsl 共享同一 push constant 块，布局必须一致。
-layout(push_constant) uniform IblPC {
+struct IblDraw {
     mat4 model;
     vec4 params0;  // x: glossiness, y: reflectivity, z: exposure, w: bgType
     vec4 misc;     // x: isSkybox, y: aspect, z: metalOrSpec
     uint texCubeIndex;
     uint texCubeIrrIndex;
-} fpc;
+};
+#define fpc (*(IblDraw*)(drawRoot.parameters + hzParameterWord))
 
-// bindless 表（set 0 / binding 0）的 cube 别名：与 2D 表同一 descriptor（COMBINED_IMAGE_SAMPLER），
-// 视图类型由 VkImageView（cube）决定。cube 图与 2D 图共用同一索引空间。
 layout(set = 0, binding = 0) uniform samplerCube combinedCubeSamplerHandles[];
 
 #define texCube    combinedCubeSamplerHandles[fpc.texCubeIndex]
