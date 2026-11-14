@@ -7,7 +7,7 @@ layout(location = 15) flat out uint drawParameterWord;
 // SSR 的步进在 view 空间进行（同 44-sss 的 fs_screen_space_shadows.sc），
 // 因此 G-buffer 输出 view 空间法线，并把 view 空间坐标传给 FS 做基础光照。
 //
-// 拆分策略（同 deferred_geom_vert.glsl）：
+// 批次和逐 draw 参数的布局：
 //   - UBO vsp：view_proj + view + light_dir_vs + 完整 Disney 参数（批次共享）
 //   - BDA 参数：model + material.rgb（per-draw）96→80 bytes
 

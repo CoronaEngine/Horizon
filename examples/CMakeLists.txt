@@ -2,15 +2,10 @@ add_executable(HorizonExamples
     main.cpp
     common.cpp
     legacy_common.cpp
-    example_assao/example_assao.cpp
     example_baseline/indirect_baseline.cpp
-    example_bump/example_bump.cpp
-    example_deferred/example_deferred.cpp
     example_disney_pbr/example_disney_pbr.cpp
     example_drawstress/example_drawstress.cpp
     example_edsl/example_edsl.cpp
-    example_edsl_compile/example_edsl_compile.cpp
-    example_edsl_compile_comparison/example_edsl_compile_comparison.cpp
     example_edsl_disney_pbr/example_edsl_disney_pbr.cpp
     example_edsl_drawstress/example_edsl_drawstress.cpp
     example_edsl_ibl/example_edsl_ibl.cpp
@@ -21,9 +16,7 @@ add_executable(HorizonExamples
     example_edsl_sponza/example_edsl_sponza.cpp
     example_edsl_ssr/example_edsl_ssr.cpp
     example_glsl/example_glsl.cpp
-    example_gpudrivenrendering/example_gpudrivenrendering.cpp
     example_ibl/example_ibl.cpp
-    example_raymarch/example_raymarch.cpp
     example_rsm/example_rsm.cpp
     example_shadowmaps/example_shadowmaps.cpp
     example_shadowvolumes/example_shadowvolumes.cpp

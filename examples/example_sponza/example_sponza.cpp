@@ -448,9 +448,7 @@ SponzaAsset load_hzms(const std::filesystem::path& path)
 // ============================================================================
 // KTX1 texture loading (BC7 with a full mip chain, produced by the converter)
 //
-// common.cpp's loadTextureWithMipmapAndLayers only declares a mip count and
-// replicates level 0, so it cannot upload a real chain. This follows the
-// staging + per-mip copy_from pattern from example_deferred instead.
+// Each KTX mip level is uploaded from its own offset in the staging buffer.
 // ============================================================================
 
 constexpr std::array<uint8_t, 12> ktx1_identifier = {
@@ -837,10 +835,7 @@ void run_example_sponza()
 
     HardwareImage gbuffer_depth(example::imageInfo(spz_width, spz_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
-    // RGBA16F rather than example_deferred's RGBA8: Sponza is large enough that
-    // dozens of lights overlap across most of the frame, and an 8-bit target
-    // clamps the additive accumulation to 1.0 almost everywhere, which flattens
-    // the result and makes the sun and ambient terms have no visible effect.
+    // RGBA16F preserves the summed light intensity where many lights overlap.
     HardwareImage light_buffer(example::imageInfo(spz_width, spz_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledImage));
     // Alpha carries accumulated specular and the blend is additive on all four
     // channels, so it must clear to 0. Clearing it to 1 (as the other targets do)

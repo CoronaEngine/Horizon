@@ -4,9 +4,8 @@ layout(location = 15) flat out uint drawParameterWord;
 
 // Sponza deferred light accumulation, vertex stage.
 //
-// Same screen-rect trick as deferred_light_vert.glsl: the quad corners are
-// remapped onto the light's NDC bounding rect so each light only touches the
-// pixels it can influence. Directional lights pass a full-screen rect.
+// Map the quad corners onto the light's NDC bounding rect so each light only
+// touches the pixels it can influence. Directional lights pass a full-screen rect.
 
 // set 0-2 are reserved for Horizon bindless tables, so plain UBOs go in set 3.
 layout(set = 3, binding = 0) uniform SponzaLightShared {

@@ -4,11 +4,8 @@ layout(location = 15) flat in uint drawParameterWord;
 
 // Sponza screen-space ambient occlusion.
 //
-// A hemisphere-kernel SSAO over the existing G-buffer rather than a port of
-// example_assao: that example runs the full ASSAO compute chain, which needs its
-// own depth mip pyramid and half-resolution deinterleaving. Here the G-buffer
-// already carries world normals and a device-depth target, so a single
-// full-screen pass is enough and stays readable.
+// A single full-screen pass samples a hemisphere around each surface point
+// using the world normals and device depth from the G-buffer.
 //
 // Occlusion only ever modulates indirect light in the combine pass; direct light
 // is left alone, since darkening a directly lit surface by AO is not physical.

@@ -4,20 +4,15 @@
 #include "example_ibl/example_ibl.h"
 #include "example_drawstress/example_drawstress.h"
 #include "example_edsl_ibl/example_edsl_ibl.h"
-#include "example_raymarch/example_raymarch.h"
-#include "example_bump/example_bump.h"
-#include "example_deferred/example_deferred.h"
 #include "example_sponza/example_sponza.h"
 #include "example_shadowmaps/example_shadowmaps.h"
 #include "example_edsl_shadowmaps/example_edsl_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
-#include "example_assao/example_assao.h"
 #include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
 #include "example_sky/example_sky.h"
 #include "example_ssr/example_ssr.h"
 #include "example_edsl_ssr/example_edsl_ssr.h"
 #include "example_edsl_sky/example_edsl_sky.h"
-#include "example_gpudrivenrendering/example_gpudrivenrendering.h"
 #include "example_disney_pbr/example_disney_pbr.h"
 #include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
 #include "example_rsm/example_rsm.h"
@@ -34,8 +29,6 @@
 #include <iostream>
 #include <sstream>
 #include <string_view>
-#include <example_edsl_compile/example_edsl_compile.h>
-#include <example_edsl_compile_comparison/example_edsl_compile_comparison.h>
 
 int main(int argc, char **argv)
 {
@@ -62,15 +55,10 @@ int main(int argc, char **argv)
 
     struct Example { std::string_view name; void (*run)(); };
     static constexpr Example examples[] = {
-        {"assao", run_example_assao},
         {"baseline", run_example_baseline},
-        {"bump", run_example_bump},
-        {"deferred", run_example_deferred},
         {"disney_pbr", [] { run_example_disney_pbr(); }},
         {"drawstress", [] { run_example_drawstress(); }},
         {"edsl", run_example_edsl},
-        {"edsl_compile", run_example_edsl_compile},
-        {"edsl_compile_comparison", run_example_edsl_compile_comparison},
         {"edsl_disney_pbr", run_example_edsl_disney_pbr},
         {"edsl_drawstress", run_example_edsl_drawstress},
         {"edsl_ibl", run_example_edsl_ibl},
@@ -81,9 +69,7 @@ int main(int argc, char **argv)
         {"edsl_sponza", run_example_edsl_sponza},
         {"edsl_ssr", run_example_edsl_ssr},
         {"glsl", run_example_glsl},
-        {"gpudrivenrendering", run_example_gpudrivenrendering},
         {"ibl", [] { run_example_ibl(); }},
-        {"raymarch", run_example_raymarch},
         {"rsm", run_example_rsm},
         {"shadowmaps", run_example_shadowmaps},
         {"shadowvolumes", run_example_shadowvolumes},

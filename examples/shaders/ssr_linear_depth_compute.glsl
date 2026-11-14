@@ -6,7 +6,7 @@
 //
 // 原版用 near/far 手算 depthLinearizeMul/Add：
 //     viewZ = mul / (add - device_z),  mul = far*near/(far-near), add = far/(far-near)
-// 这里改成直接由投影矩阵取系数（同 example_assao 的做法），
+// 这里直接从投影矩阵取系数，
 //     device_z = p22 + p32/viewZ  ⇒  viewZ = p32 / (device_z - p22)
 // 与深度范围约定（0..1 或 -1..1）无关，比手算 near/far 稳。
 

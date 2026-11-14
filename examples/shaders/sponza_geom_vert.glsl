@@ -4,9 +4,8 @@ layout(location = 15) flat out uint drawParameterWord;
 
 // Sponza G-buffer geometry pass, vertex stage.
 //
-// Unlike deferred_geom_vert.glsl there is no per-draw model matrix: the node
-// transforms are already baked into the HZMS vertex data by
-// tools/sponza/convert_sponza.py, so object space is world space.
+// tools/sponza/convert_sponza.py bakes node transforms into the HZMS vertex
+// data, so the vertex positions are already in world space.
 //
 // firstInstance 是材质表的下标，由 gl_InstanceIndex 传给片元阶段。
 

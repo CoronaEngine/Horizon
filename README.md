@@ -164,8 +164,8 @@ cmake --build --preset engine-debug --target horizon-test-legacy
 ctest --test-dir build/conan/engine/debug -C Debug -L legacy --output-on-failure
 ```
 
-示例从 `HorizonExamples` 启动。运行 `HorizonExamples --list` 查看 28 个模式，使用
-`HorizonExamples sky` 或 `HorizonExamples gpudrivenrendering` 启动对应场景。
+示例从 `HorizonExamples` 启动。运行 `HorizonExamples --list` 查看 21 个模式，使用
+`HorizonExamples sky` 或 `HorizonExamples edsl_sky` 启动对应的天空示例。
 
 源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
 
