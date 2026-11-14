@@ -1,8 +1,10 @@
+add_subdirectory(example_baseline)
+
 add_executable(HorizonExamples
     main.cpp
     common.cpp
     legacy_common.cpp
-    example_baseline/indirect_baseline.cpp
+    example_baseline/launch.cpp
     example_disney_pbr/example_disney_pbr.cpp
     example_drawstress/example_drawstress.cpp
     example_edsl/example_edsl.cpp
@@ -22,8 +24,11 @@ add_executable(HorizonExamples
     example_sponza/example_sponza.cpp
     example_ssr/example_ssr.cpp
 )
+add_dependencies(HorizonExamples VulkanTutorialBaseline)
+target_compile_definitions(HorizonExamples PRIVATE
+    HORIZON_TUTORIAL_EXECUTABLE="$<TARGET_FILE:VulkanTutorialBaseline>")
 if(WIN32 AND HORIZON_BUILD_OCARINA)
-    # Run beside the shared logging provider and the Ocarina/hotfix DLLs.
+    # Run beside the shared logging provider and Ocarina DLLs.
     set_target_properties(HorizonExamples PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 target_include_directories(HorizonExamples PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src")

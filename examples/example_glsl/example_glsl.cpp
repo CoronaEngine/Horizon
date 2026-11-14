@@ -35,8 +35,9 @@ const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
 } // namespace
 
-void run_viking_room(const char* window_title)
+void run_example_glsl()
 {
+    constexpr auto window_title = "Horizon Viking Room [GLSL]";
     legacy_example::Window owner(glsl_width, glsl_height, window_title);
     auto* window = owner.get();
 
@@ -116,5 +117,3 @@ void run_viking_room(const char* window_title)
     }
     render_executor.waitForDeferredResources();
 }
-
-void run_example_glsl() { run_viking_room("Horizon Baseline [GLSL]"); }

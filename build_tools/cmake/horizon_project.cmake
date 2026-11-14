@@ -65,13 +65,4 @@ add_subdirectory(src/hotfix)
 
 if(HORIZON_BUILD_VISION_HOTFIX)
     target_link_libraries(ocarina-include INTERFACE horizon-hotfix)
-
-    if(TARGET HorizonExamples)
-        target_link_libraries(HorizonExamples PRIVATE horizon-hotfix-all)
-    endif()
-endif()
-
-if(HORIZON_BUILD_BASELINE_WINDOW_TEST)
-    enable_testing()
-    add_subdirectory(tests/hotfix/baseline_window)
 endif()
