@@ -111,7 +111,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
 
-构建 `HorizonExamples` 后，运行 `HorizonExamples baseline` 可启动 Vulkan Tutorial 的独立程序。它使用 [Loading models](https://vulkan-tutorial.com/Loading_models) 章末的原版 C++、着色器及 Viking Room 模型。也可以在 `VulkanTutorialBaseline` 可执行文件所在目录直接启动它。对比同一场景时，使用 `HorizonExamples glsl` 和 `HorizonExamples edsl` 分别运行 Horizon 的手写 GLSL 与 Helicon EDSL 实现。
+运行 `HorizonExamples baseline`、`HorizonExamples glsl` 或 `HorizonExamples edsl`，可在同一个可执行文件中选择 Viking Room 的三种实现。baseline 使用 Vulkan Tutorial 章末的渲染流程和着色器，另外两种使用 Horizon 的手写 GLSL 和 Helicon EDSL。三者共用模型、纹理及项目的 tinyobjloader 依赖。[Loading models](https://vulkan-tutorial.com/Loading_models)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。

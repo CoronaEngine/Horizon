@@ -323,7 +323,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("Helicon"), "engine")
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
-        self.assertEqual(target_family_for_target("VulkanTutorialBaseline"), "examples")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
         self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")

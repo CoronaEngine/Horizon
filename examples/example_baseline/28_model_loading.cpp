@@ -1,4 +1,7 @@
-#define GLFW_INCLUDE_VULKAN
+#include "example_baseline.h"
+
+#include <volk.h>
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
@@ -8,14 +11,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
 #include <iostream>
 #include <fstream>
+#include <filesystem>
 #include <stdexcept>
 #include <algorithm>
 #include <chrono>
@@ -29,11 +31,14 @@
 #include <set>
 #include <unordered_map>
 
+namespace {
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-const std::string MODEL_PATH = "models/viking_room.obj";
-const std::string TEXTURE_PATH = "textures/viking_room.png";
+const auto ASSETS_DIR = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
+const std::string MODEL_PATH = (ASSETS_DIR / "models/viking_room.obj").string();
+const std::string TEXTURE_PATH = (ASSETS_DIR / "textures/viking_room.png").string();
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -122,6 +127,8 @@ struct Vertex {
     }
 };
 
+} // namespace
+
 namespace std {
     template<> struct hash<Vertex> {
         size_t operator()(Vertex const& vertex) const {
@@ -129,6 +136,8 @@ namespace std {
         }
     };
 }
+
+namespace {
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -221,6 +230,7 @@ private:
 
     void initVulkan() {
         createInstance();
+        volkLoadInstance(instance);
         setupDebugMessenger();
         createSurface();
         pickPhysicalDevice();
@@ -615,8 +625,8 @@ private:
     }
 
     void createGraphicsPipeline() {
-        auto vertShaderCode = readFile("shaders/vert.spv");
-        auto fragShaderCode = readFile("shaders/frag.spv");
+        auto vertShaderCode = readFile(TUTORIAL_SHADER_DIR "/vert.spv");
+        auto fragShaderCode = readFile(TUTORIAL_SHADER_DIR "/frag.spv");
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -995,10 +1005,11 @@ private:
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
-        std::string err;
+        std::string warn, err;
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &err, MODEL_PATH.c_str())) {
-            throw std::runtime_error(err);
+        const std::string materialDir = (ASSETS_DIR / "models").string();
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str(), materialDir.c_str())) {
+            throw std::runtime_error(warn + err);
         }
 
         std::unordered_map<Vertex, uint32_t> uniqueVertices{};
@@ -1607,15 +1618,13 @@ private:
     }
 };
 
-int main() {
-    HelloTriangleApplication app;
+} // namespace
 
-    try {
-        app.run();
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << std::endl;
-        return EXIT_FAILURE;
+void run_example_baseline() {
+    if (volkInitialize() != VK_SUCCESS) {
+        throw std::runtime_error("failed to initialize the Vulkan loader!");
     }
-
-    return EXIT_SUCCESS;
+    HelloTriangleApplication app;
+    app.run();
+    volkFinalize();
 }

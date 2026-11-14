@@ -52,7 +52,7 @@ def target_family_for_target(target: str) -> str:
         return "engine"
     if target == "ShaderCompileScripts":
         return "tools"
-    if target in {"HorizonExamples", "VulkanTutorialBaseline"}:
+    if target == "HorizonExamples":
         return "examples"
     if target.startswith("test-"):
         return "ocarina-tests"
