@@ -166,8 +166,8 @@ cmake --build --preset engine-debug --target horizon-test-legacy
 ctest --test-dir build/conan/engine/debug -C Debug -L legacy --output-on-failure
 ```
 
-示例从 `HorizonExamples` 启动。运行 `HorizonExamples --list` 查看 19 个模式，使用
-`HorizonExamples ibl` 或 `HorizonExamples edsl_ibl` 启动对应的环境光照示例。
+运行 `HorizonExamples --list` 查看全部示例模式。使用 `HorizonExamples disney_pbr` 或
+`HorizonExamples edsl_disney_pbr` 启动 Disney PBR 材质示例的手写 GLSL 或 EDSL 版本。
 
 源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
 

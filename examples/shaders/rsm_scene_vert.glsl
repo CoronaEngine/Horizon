@@ -18,7 +18,7 @@ layout(set = 3, binding = 0) uniform RsmSceneShared {
 } vsp;
 
 // vert/frag 共享同一 BDA 绘制参数，布局必须一致。RSM 三张图的
-// bindless 索引仅 FS 使用（同 shadowmaps 的 shadowMapIndex 传法）。
+// bindless 索引仅 FS 使用。
 struct RsmScenePC {
     mat4 model;  // per-draw
     vec4 albedo; // rgb: 表面反照率

@@ -2,7 +2,7 @@
 #include "raster_batch.slang"
 layout(location = 15) flat in uint hzParameterWord;
 
-// Disney Principled BRDF (wdas/brdf disney.brdf) + IBL from example_ibl environment maps.
+// Disney Principled BRDF (wdas/brdf disney.brdf) + IBL from environment maps.
 
 #extension GL_EXT_nonuniform_qualifier : enable
 

@@ -542,7 +542,7 @@ HardwareImage create_ktx_texture(const std::filesystem::path& path,
 
 // ============================================================================
 // DDS cubemap loading for the IBL probe (DX10 header + RGBA16F + full mip
-// chain). Same layout as the loader in example_ibl, which these assets ship for.
+// chain).
 // ============================================================================
 
 struct CubeMapData
@@ -865,7 +865,7 @@ void run_example_sponza()
         create_cubemap_image(radiance_dds, "example_sponza.env.lod");
 
     // Sun RSM: depth (R32F, 阴影比较) + 世界法线 + flux(albedo),三附件 MRT。
-    // 深度存 R32F 颜色目标,免去 example_shadowmaps 的 RGBA8 打包。
+    // 阴影深度直接写入 R32F 颜色目标。
     HardwareImage shadow_map(example::imageInfo(spz_shadow_map_size, spz_shadow_map_size, ImageFormat::R32_FLOAT, ImageUsage::SampledImage));
     shadow_map.setClearColor(1.0f, 0.0f, 0.0f, 0.0f); // far plane
 

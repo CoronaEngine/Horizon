@@ -4,7 +4,6 @@ layout(location = 15) flat out uint drawParameterWord;
 
 // RSM（Reflective Shadow Maps，Dachsbacher & Stamminger 2005）生成 pass VS：
 // 光源视角渲染场景，把世界坐标/法线传给 FS 写 MRT。
-// 结构沿用 shadowmaps_pack_vert（光源视角 pass），额外输出世界空间量。
 
 // set 0-2 为 Horizon bindless 保留集，普通 UBO 必须放在 set 3。
 layout(set = 3, binding = 0) uniform RsmPackShared {

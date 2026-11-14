@@ -2,7 +2,7 @@
 #include "raster_batch.slang"
 layout(location = 15) flat out uint hzParameterWord;
 
-// Same scene layout as ibl_vert.glsl: mesh + skybox in one pass (pc.mat3.y = isSkybox).
+// Mesh and skybox share one pass (pc.mat3.y = isSkybox).
 
 layout(set = 3, binding = 0) uniform DisneyPbrShared {
     mat4 proj_view;

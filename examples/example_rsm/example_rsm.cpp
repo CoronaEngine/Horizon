@@ -1,13 +1,12 @@
 // RSM（Reflective Shadow Maps，Dachsbacher & Stamminger 2005）示例。
 //
-// 在 example_shadowmaps 的两 pass 结构上扩展：光源视角 pass 从单张打包深度
-// 变成 MRT 三附件（世界坐标+深度 / 世界法线 / flux），场景 pass 在硬阴影
+// 光源视角 pass 写入三个 MRT 附件（世界坐标+深度 / 世界法线 / flux），场景 pass 在硬阴影
 // 直接光之外，把 RSM 的每个 texel 当成一个像素光（VPL），围绕着色点在光空间
 // uv 上重要性采样 64 个，按论文式(1) 累加单次弹射间接光——彩墙的颜色会
 // bleed 到白色物体和地面上。
 //
-// 场景：shadowmaps 场景（550 地面 + bunny + hollowcube + cube + 环形柱子、
-// 聚光灯绕场景旋转）+ 两面彩色墙（橙 x=-35、蓝 z=+35，给间接光提供颜色源），
+// 场景包含地面、bunny、hollowcube、cube 和环形柱子，聚光灯绕场景旋转。
+// 两面彩色墙（橙 x=-35、蓝 z=+35）给间接光提供颜色源，
 // 每个物体带 albedo（逐 draw 参数），相机固定 (0,60,-105) 俯视。
 
 #if defined(_WIN32)
@@ -72,7 +71,7 @@ constexpr float spot_inner_angle = 30.0f;
 const std::filesystem::path rsm_asset_root = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
 
 // ============================================================================
-// 二进制网格加载（与 example_shadowmaps 相同的未压缩 VB/IB chunk 解析）
+// 二进制网格加载（未压缩的 VB/IB chunk）
 // ============================================================================
 
 struct RsmVertex
@@ -363,7 +362,7 @@ void run_example_rsm()
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(rsm_width) / static_cast<float>(rsm_height);
-    // 与 shadowmaps 相同的固定俯视相机
+    // 固定俯视相机
     const glm::vec3 eye(0.0f, 60.0f, -105.0f);
     const glm::vec3 forward(0.0f, std::sin(-0.45f), std::cos(-0.45f));
     const glm::mat4 view = glm::lookAtLH(eye, eye + forward, glm::vec3(0.0f, 1.0f, 0.0f));

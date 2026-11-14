@@ -1,12 +1,8 @@
 #include "example_baseline/example_baseline.h"
 #include "example_edsl/example_edsl.h"
 #include "example_glsl/example_glsl.h"
-#include "example_ibl/example_ibl.h"
 #include "example_drawstress/example_drawstress.h"
-#include "example_edsl_ibl/example_edsl_ibl.h"
 #include "example_sponza/example_sponza.h"
-#include "example_shadowmaps/example_shadowmaps.h"
-#include "example_edsl_shadowmaps/example_edsl_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
 #include "example_ssr/example_ssr.h"
@@ -59,16 +55,12 @@ int main(int argc, char **argv)
         {"edsl", run_example_edsl},
         {"edsl_disney_pbr", run_example_edsl_disney_pbr},
         {"edsl_drawstress", run_example_edsl_drawstress},
-        {"edsl_ibl", run_example_edsl_ibl},
         {"edsl_rsm", run_example_edsl_rsm},
-        {"edsl_shadowmaps", run_example_edsl_shadowmaps},
         {"edsl_shadowvolumes", run_example_edsl_shadowvolumes},
         {"edsl_sponza", run_example_edsl_sponza},
         {"edsl_ssr", run_example_edsl_ssr},
         {"glsl", run_example_glsl},
-        {"ibl", [] { run_example_ibl(); }},
         {"rsm", run_example_rsm},
-        {"shadowmaps", run_example_shadowmaps},
         {"shadowvolumes", run_example_shadowvolumes},
         {"sponza", run_example_sponza},
         {"ssr", run_example_ssr},

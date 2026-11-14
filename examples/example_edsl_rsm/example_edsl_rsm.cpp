@@ -70,7 +70,7 @@ constexpr float spot_inner_angle = 30.0f;
 const std::filesystem::path rsm_asset_root = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
 
 // ============================================================================
-// 二进制网格加载（与 example_shadowmaps 相同的未压缩 VB/IB chunk 解析）
+// 二进制网格加载（未压缩的 VB/IB chunk）
 // ============================================================================
 
 struct RsmVertex
@@ -536,7 +536,7 @@ void run_example_edsl_rsm()
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
     constexpr float aspect = static_cast<float>(rsm_width) / static_cast<float>(rsm_height);
-    // 与 shadowmaps 相同的固定俯视相机
+    // 固定俯视相机
     const glm::vec3 eye(0.0f, 60.0f, -105.0f);
     const glm::vec3 forward(0.0f, std::sin(-0.45f), std::cos(-0.45f));
     const glm::mat4 view = glm::lookAtLH(eye, eye + forward, glm::vec3(0.0f, 1.0f, 0.0f));

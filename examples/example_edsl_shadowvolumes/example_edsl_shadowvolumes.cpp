@@ -119,7 +119,7 @@ T read_pod(const std::vector<std::byte>& bytes, size_t& cursor)
     return value;
 }
 
-// 与 example_ibl 相同的 .bin 网格解析（未压缩 VB/IB chunk）
+// .bin 网格解析（未压缩 VB/IB chunk）
 LoadedMesh load_bin_mesh(const std::filesystem::path& path)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
