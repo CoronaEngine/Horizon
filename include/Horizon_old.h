@@ -35,7 +35,7 @@ struct HardwareExecutor;
 
 // Legacy resources and control objects are owner-thread objects.
 // Copying/releasing shared handles and modifying resource state require external serialization.
-// Pipeline, executor and displayer handles are move-only. Queued raster batches retain their pipeline.
+// Pipeline, executor and displayer handles are move-only. Queued work retains its pipeline.
 
 enum class ImageFormat : uint32_t
 {
@@ -316,7 +316,9 @@ struct RasterDraw {
 };
 
 struct CommandRecordVulkan;
+struct ComputePipelineVulkan;
 struct RasterizerPipelineVulkan;
+enum class IndirectFirstInstance { MayBeNonzero, AlwaysZero };
 class RasterBatch {
 public:
     RasterBatch(RasterBatch&&) noexcept = default;
@@ -330,18 +332,21 @@ public:
     }
     // Packets share geometry 0. firstVertex is zero for index pulling.
     // parameterWord indexes the shared parameter payload in four-byte words.
-    void drawIndirect(const RasterGeometry&, const HardwareBuffer& packets, uint32_t count);
+    // AlwaysZero is a promise about every packet, including GPU-written packets.
+    void drawIndirect(const RasterGeometry&, const HardwareBuffer& packets, uint32_t count,
+                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
     template<class T, size_t Extent> requires (std::is_trivially_copyable_v<T> && !std::is_volatile_v<T>)
     void drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
-                      std::span<T, Extent> parameters) {
-        appendIndirect(geometry, packets, count, parameters.data(), parameters.size_bytes());
+                      std::span<T, Extent> parameters, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
+        appendIndirect(geometry, packets, count, parameters.data(), parameters.size_bytes(), firstInstance);
     }
     template<class T> requires std::is_trivially_copyable_v<T>
-    void drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count, const T& parameters) {
-        appendIndirect(geometry, packets, count, &parameters, sizeof(T));
+    void drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count, const T& parameters,
+                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
+        appendIndirect(geometry, packets, count, &parameters, sizeof(T), firstInstance);
     }
 private:
-    void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t);
+    void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
     friend struct HardwareExecutor;
     friend struct RasterizerPipelineBase;
     RasterBatch(std::shared_ptr<CommandRecordVulkan> record, const std::vector<ResourceUse>& uses)
@@ -427,7 +432,7 @@ public:
 
     [[nodiscard]] uintptr_t getComputePipelineID() const
     {
-        return computePipelineID;
+        return reinterpret_cast<uintptr_t>(computePipeline_.get());
     }
 
 private:
@@ -440,7 +445,8 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType);
 
-    std::uintptr_t computePipelineID{0};
+    ComputePipelineVulkan& backend() const;
+    std::shared_ptr<ComputePipelineVulkan> computePipeline_;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
     std::vector<ResourceUse> resourceUses_;
 };
@@ -609,7 +615,7 @@ namespace EmbeddedShader
 
 // ================= ComputePipeline 模板构造函数实现 =================
 // 通过辅助函数创建后端 ComputePipelineVulkan 实现
-void computePipelineInitFromCompiler(std::uintptr_t& pipelineID,
+void computePipelineInitFromCompiler(std::shared_ptr<ComputePipelineVulkan>& pipeline,
                                      EmbeddedShader::ShaderCodeCompiler& compiler,
                                      const std::source_location& src);
 
@@ -631,7 +637,7 @@ ComputePipelineBase::ComputePipelineBase(F&& computeShaderCode,
     autoBindEntries_ = std::move(pipelineObj.autoBindEntries);
 
     // 调用辅助函数完成 Vulkan 管线创建
-    computePipelineInitFromCompiler(computePipelineID, *pipelineObj.compute, sourceLocation);
+    computePipelineInitFromCompiler(computePipeline_, *pipelineObj.compute, sourceLocation);
 }
 
 // ================= RasterizerPipeline 模板构造函数实现 =================

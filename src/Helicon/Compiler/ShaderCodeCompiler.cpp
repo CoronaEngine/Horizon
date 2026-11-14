@@ -227,7 +227,7 @@ namespace EmbeddedShader
         // 仅 Debug 下把 module 源码/IR 写入离线 hardcode 文件；运行时不需要这些
         // 序列化 module（combine 直接使用 ComPtr），所以不再放进 compiledOutputs_。
         auto storeModule = [&](const Slang::ComPtr<slang::IModule>& module, const std::string& itemName) {
-#ifdef CABBAGE_ENGINE_DEBUG
+#if defined(CABBAGE_ENGINE_DEBUG) && defined(HELICON_ENABLE_HARDCODE_SHADERS)
             ShaderHardcodeManager::addTarget(ShaderLanguageConverter::convertModule(module), stage, itemName);
 #else
             (void)module;
@@ -309,8 +309,8 @@ namespace EmbeddedShader
     {
         std::string reflectionStr = reflection ? "_Reflection" : "";
         auto languageStr = enumToString(language);
-        // Keep the existing bindless keys so older baked bind shaders cannot match.
-        auto prefixStr = languageStr + reflectionStr + "_Bindless";
+        // Old bindless raster shaders could still use fixed-function vertex inputs.
+        auto prefixStr = languageStr + reflectionStr + "_BindlessV2";
         for (size_t i = 0; i < conditionInfo.size(); ++i)
         {
             auto conditionStr = conditionInfo[i] ? "_True" : "_False";
@@ -398,14 +398,14 @@ namespace EmbeddedShader
         // hardcode sources. Runtime condition switches must not touch those files.
         auto storeCode = [&](const auto& code, const std::string& itemName) {
             compiledOutputs_[itemName] = code;
-#ifdef CABBAGE_ENGINE_DEBUG
+#if defined(CABBAGE_ENGINE_DEBUG) && defined(HELICON_ENABLE_HARDCODE_SHADERS)
             if (writeHardcode)
                 ShaderHardcodeManager::addTarget(code, stage, itemName);
 #endif
         };
         auto storeReflection = [&](const ShaderCodeModule::ShaderResources& res, const std::string& itemName) {
             compiledOutputs_[itemName] = res;
-#ifdef CABBAGE_ENGINE_DEBUG
+#if defined(CABBAGE_ENGINE_DEBUG) && defined(HELICON_ENABLE_HARDCODE_SHADERS)
             if (writeHardcode)
                 ShaderHardcodeManager::addTarget(res, stage, itemName);
 #endif

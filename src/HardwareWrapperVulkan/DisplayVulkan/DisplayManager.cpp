@@ -22,6 +22,8 @@ void DisplayManager::cleanUpDisplayManager()
     {
         vkDeviceWaitIdle(device);
     }
+    mainDeviceExecutor.reset();
+    displayDeviceExecutor.reset();
 
     // 按照正确的顺序清理资源
     cleanupSyncObjects();
@@ -52,9 +54,6 @@ void DisplayManager::cleanUpDisplayManager()
 
     // 清理状态
     presentQueues.clear();
-    mainDeviceExecutor.reset();
-    //displayDeviceExecutors.clear();
-    displayDeviceExecutor.reset();
     waitedSubmission = {};
     displaySurface = nullptr;
     displaySize = {0, 0};
@@ -435,6 +434,7 @@ void DisplayManager::recreateSwapChain()
 
     createSwapChain();
     createSyncObjects();
+    currentFrame = 0;
 }
 
 bool DisplayManager::needsSwapChainRecreation(const ktm::uvec2 &newSize) const
@@ -495,7 +495,7 @@ bool DisplayManager::waitExecutor(const HardwareExecutorVulkan &executor)
 
 bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
 {
-    if (surface == nullptr)
+    if (surface == nullptr || !displayImage)
     {
         return false;
     }
@@ -503,29 +503,31 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
     try
     {
         // 检查是否需要重新初始化
-        if (auto const handle = legacyImageFromId(displayImage.getImageID());
-            this->displaySurface != surface)
+        auto* handle = legacyImageFromId(displayImage.getImageID());
+        if (this->displaySurface != surface)
         {
-            this->displaySurface = surface;
-
             if (vkSurface != VK_NULL_HANDLE || swapChain != VK_NULL_HANDLE)
             {
+                auto submission = waitedSubmission;
                 cleanUpDisplayManager();
+                waitedSubmission = submission;
             }
 
             if (!initDisplayManager(surface))
             {
                 return false;
             }
-
-            // 设置跨设备传输
-            if (getHardwareContext().getMainDevice() != displayDevice)
-            // if (true)
-            {
-                this->displayImage = displayDevice->resourceManager.createImage(handle->imageSize, handle->imageFormat, handle->pixelSize, handle->imageUsage);
-
-                setupCrossDeviceTransfer(*handle);
-            }
+            this->displaySurface = surface;
+        }
+        if (getHardwareContext().getMainDevice() != displayDevice &&
+            (!this->displayImage.imageHandle || this->displayImage.imageSize != handle->imageSize ||
+             this->displayImage.imageFormat != handle->imageFormat))
+        {
+            mainDeviceExecutor->waitForAllDeferredResources();
+            displayDeviceExecutor->waitForAllDeferredResources();
+            cleanupDisplayImage();
+            this->displayImage = displayDevice->resourceManager.createImage(handle->imageSize, handle->imageFormat, handle->pixelSize, handle->imageUsage);
+            setupCrossDeviceTransfer(*handle);
         }
 
         // 等待之前的执行器
@@ -563,7 +565,6 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
             CFW_LOG_ERROR("Failed to wait for acquire fence: {}", static_cast<int>(fenceResult));
             return false;
         }
-        vkResetFences(device, 1, &acquireFences[currentFrame]);
 
         // 获取交换链图像（fence 不再传给 acquire，改为绑定到 queue submit 以保证 binary semaphore 的 wait 完成）
         uint32_t imageIndex;
@@ -587,10 +588,10 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         // 跨设备传输（如果需要）
         // copyCmd2 必须在 commit() 之前保持存活，提升到外层作用域
         std::optional<CopyBufferToImageCommand> copyCmd2;
-        if (auto const handle = legacyImageFromId(displayImage.getImageID());
-            getHardwareContext().getMainDevice() != displayDevice)
-        // if (true)
+        if (getHardwareContext().getMainDevice() != displayDevice)
         {
+            // Both devices import the same staging allocation. Finish the previous read before overwriting it.
+            mainDeviceExecutor->wait(*displayDeviceExecutor);
             CopyImageToBufferCommand copyCmd(*handle, srcStaging);
             (*mainDeviceExecutor) << &copyCmd << mainDeviceExecutor->commit();
 
@@ -637,6 +638,7 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
                                               << displayDeviceExecutors[currentFrame]->commit();*/
 
         displayDeviceExecutor->waitFence = acquireFences[currentFrame];
+        coronaHardwareCheck(vkResetFences(device, 1, &acquireFences[currentFrame]));
         *displayDeviceExecutor << &blitCmd << &transitionCmd
                                << displayDeviceExecutor->wait(waitSemaphoreInfos, signalSemaphoreInfos)
                                << displayDeviceExecutor->commit();
@@ -658,12 +660,13 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
         // presentFenceInfo.pNext = const_cast<void *>(presentInfo.pNext);
         // presentInfo.pNext = &presentFenceInfo;
 
+        VkResult presentResult = VK_SUCCESS;
         auto commitToQueue = [&](DeviceManager::QueueUtils *currentRecordQueue) -> bool {
             // 让 pickQueueAndCommit 后续提交使用正确的 present 队列
             displayDeviceExecutor->currentRecordQueue = currentRecordQueue;
 
             // 1. 先执行 Present（只依赖 binary semaphore）
-            VkResult presentResult = vkQueuePresentKHR(currentRecordQueue->vkQueue, &presentInfo);
+            presentResult = vkQueuePresentKHR(currentRecordQueue->vkQueue, &presentInfo);
 
             if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR)
             {
@@ -673,24 +676,31 @@ bool DisplayManager::displayFrame(void *surface, HardwareImage displayImage)
 
             // 2. 提交一个空的命令缓冲区来推进 timeline
             // 这确保 pickQueueAndCommit 增加的 timelineValue 能被 GPU signal
-            vkResetCommandBuffer(currentRecordQueue->commandBuffer, 0);
+            coronaHardwareCheck(vkResetCommandBuffer(currentRecordQueue->commandBuffer, 0));
 
             VkCommandBufferBeginInfo beginInfo{};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-            vkBeginCommandBuffer(currentRecordQueue->commandBuffer, &beginInfo);
-            vkEndCommandBuffer(currentRecordQueue->commandBuffer); // 空命令
+            coronaHardwareCheck(vkBeginCommandBuffer(currentRecordQueue->commandBuffer, &beginInfo));
+            coronaHardwareCheck(vkEndCommandBuffer(currentRecordQueue->commandBuffer));
 
             return true;
         };
 
-        displayDeviceExecutor->pickQueueAndCommit(currentQueueIndex, presentQueues, commitToQueue);
+        if (!displayDeviceExecutor->pickQueueAndCommit(currentQueueIndex, presentQueues, commitToQueue))
+        {
+            if (presentResult != VK_ERROR_OUT_OF_DATE_KHR) coronaHardwareCheck(presentResult);
+            recreateSwapChain();
+            return false;
+        }
         currentFrame = (currentFrame + 1) % swapChainImages.size();
         return true;
     }
     catch (const std::exception &e)
     {
+        CFW_LOG_ERROR("Display frame failed: {}", e.what());
+        cleanUpDisplayManager();
         return false;
     }
 }

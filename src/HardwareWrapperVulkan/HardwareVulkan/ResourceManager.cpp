@@ -668,8 +668,11 @@ VkImageView ResourceManager::createImageView(ImageHardwareWrap &image, uint32_t 
     }
     else
     {
-        // 无效组合
-        return VK_NULL_HANDLE;
+        // One framebuffer mip across the layers of this wrapper.
+        viewInfo.subresourceRange.baseMipLevel = image.baseMipLevel + mipLevel;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = image.baseArrayLayer;
+        viewInfo.subresourceRange.layerCount = image.arrayLayers;
     }
 
     coronaHardwareCheck(vkCreateImageView(device->getLogicalDevice(), &viewInfo, nullptr, &imageView));
@@ -1294,11 +1297,9 @@ void ResourceManager::reclaimDescriptorIndices()
 
 int32_t ResourceManager::storeDescriptor(ImageHardwareWrap &image)
 {
-    if (image.bindlessIndex < 0)
-    {
-        const uint32_t binding = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? storageImageBinding : textureBinding;
-        image.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(binding));
-    }
+    if (image.bindlessIndex >= 0) return image.bindlessIndex;
+    const uint32_t binding = (image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? storageImageBinding : textureBinding;
+    image.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(binding));
     if (!storeDescriptorAt(image, static_cast<uint32_t>(image.bindlessIndex)))
         throw std::runtime_error("Cannot store image descriptor without an initialized device");
 
@@ -1307,10 +1308,10 @@ int32_t ResourceManager::storeDescriptor(ImageHardwareWrap &image)
 
 int32_t ResourceManager::storeDescriptor(BufferHardwareWrap &buffer)
 {
-    if (buffer.bindlessIndex < 0)
-    {
-        buffer.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(storageBufferBinding));
-    }
+    if (buffer.bindlessIndex >= 0) return buffer.bindlessIndex;
+    if (!(buffer.bufferUsage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))
+        throw std::invalid_argument("A storage buffer descriptor requires storage buffer usage");
+    buffer.bindlessIndex = static_cast<int32_t>(allocateDescriptorIndex(storageBufferBinding));
     if (!storeDescriptorAt(buffer, static_cast<uint32_t>(buffer.bindlessIndex)))
         throw std::runtime_error("Cannot store buffer descriptor without an initialized device");
 
@@ -1321,7 +1322,8 @@ int32_t ResourceManager::storeSampledDescriptor(ImageHardwareWrap& image)
 {
     if (!(image.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT)) throw std::invalid_argument("Image is not sampleable");
     if (!(image.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) return storeDescriptor(image);
-    if (image.sampledIndex < 0) image.sampledIndex = static_cast<int32_t>(allocateDescriptorIndex(textureBinding));
+    if (image.sampledIndex >= 0) return image.sampledIndex;
+    image.sampledIndex = static_cast<int32_t>(allocateDescriptorIndex(textureBinding));
     if (!storeDescriptorAt(image, static_cast<uint32_t>(image.sampledIndex), true))
         throw std::runtime_error("Could not store sampled image descriptor");
     return image.sampledIndex;
@@ -1557,6 +1559,7 @@ void ResourceManager::transitionImageLayout(VkCommandBuffer& commandBuffer,
             barrier.dstStageMask = dstStageMask;
             barrier.dstAccessMask = dstAccessMask;
             barrier.oldLayout = imageSubresourceLayout(image, mip, layer);
+            if (barrier.oldLayout == newLayout) continue;
             barrier.newLayout = newLayout;
             barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             barrier.image = image.imageHandle;
@@ -1564,6 +1567,7 @@ void ResourceManager::transitionImageLayout(VkCommandBuffer& commandBuffer,
             barriers.push_back(barrier);
         }
     setImageSubresourceLayout(image, range, newLayout);
+    if (barriers.empty()) return;
     VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
     dependency.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
     dependency.pImageMemoryBarriers = barriers.data();

@@ -147,6 +147,7 @@ BufferToImageCommand HardwareBuffer::copyTo(const HardwareImage &dst,
 
 uint32_t HardwareBuffer::storeDescriptor() const
 {
+    if (!*this) throw std::invalid_argument("Cannot bind an empty buffer");
     auto bufferHandle = legacyBufferFromId(bufferID);
     return bufferHandle->resourceManager->storeDescriptor(*bufferHandle);
 }

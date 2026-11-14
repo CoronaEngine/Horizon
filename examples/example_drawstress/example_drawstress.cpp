@@ -207,7 +207,8 @@ void run_drawstress_scene()
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
-            batch.drawIndirect(cube, packets, static_cast<uint32_t>(matrices.size()), std::as_bytes(std::span(matrices)));
+            batch.drawIndirect(cube, packets, static_cast<uint32_t>(matrices.size()), std::as_bytes(std::span(matrices)),
+                               IndirectFirstInstance::AlwaysZero);
             benchmark.submit(render_executor, std::move(batch));
         }
         if (benchmark.offscreen()) {

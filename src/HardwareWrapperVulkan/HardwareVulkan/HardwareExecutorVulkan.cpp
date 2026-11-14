@@ -48,15 +48,6 @@ VkResult waitForDeferredSubmissions(VkDevice device, std::span<const DeferredRel
 }
 }
 
-struct GraphicsSubmitChainState
-{
-    VkSemaphore semaphore{VK_NULL_HANDLE};
-    uint64_t value{0};
-};
-
-std::mutex gGraphicsSubmitChainMutex;
-std::unordered_map<VkDevice, GraphicsSubmitChainState> gGraphicsSubmitChains;
-
 std::vector<VkSemaphoreSubmitInfo> mergeSemaphoreSubmitInfos(const std::vector<VkSemaphoreSubmitInfo> &infos)
 {
     std::vector<VkSemaphoreSubmitInfo> mergedInfos;
@@ -97,12 +88,8 @@ HardwareExecutorVulkan::~HardwareExecutorVulkan()
     if (!deferredReleaseQueue.empty() && hardwareContext)
     {
         const auto result = waitForDeferredSubmissions(hardwareContext->deviceManager.logicalDevice,
-                                                       deferredReleaseQueue, 5'000'000'000ULL);
-        if (result == VK_TIMEOUT)
-        {
-            CFW_LOG_ERROR("HardwareExecutorVulkan destructor: timeout waiting for deferred submissions");
-        }
-        else if (result != VK_SUCCESS)
+                                                       deferredReleaseQueue, UINT64_MAX);
+        if (result != VK_SUCCESS)
         {
             CFW_LOG_ERROR("HardwareExecutorVulkan destructor: vkWaitSemaphores failed with {}",
                           static_cast<int>(result));
@@ -212,9 +199,7 @@ void HardwareExecutorVulkan::waitForAllDeferredResources()
 
     if (result != VK_SUCCESS)
     {
-        CFW_LOG_ERROR("waitForAllDeferredResources: vkWaitSemaphores failed with {}",
-                      static_cast<int>(result));
-        return;
+        coronaHardwareCheck(result);
     }
 
     // 等待完成后，清理所有资源
@@ -258,72 +243,25 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
                                                                       std::vector<DeviceManager::QueueUtils> &currentQueues,
                                                                       std::function<bool(DeviceManager::QueueUtils *currentRecordQueue)> commitCommand)
 {
-    DeviceManager::QueueUtils *queue;
-
-    while (true)
+    if (currentQueues.empty()) throw std::runtime_error("No queue is available for submission");
+    DeviceManager::QueueUtils* queue;
+    std::unique_lock<std::mutex> queueLock;
+    for (;;)
     {
-        uint16_t queueIndex = currentQueueIndex.fetch_add(1) % currentQueues.size();
-        queue = &currentQueues[queueIndex];
-
-        if (queue->queueMutex->try_lock())
+        queue = &currentQueues[currentQueueIndex.fetch_add(1) % currentQueues.size()];
+        queueLock = std::unique_lock<std::mutex>(*queue->queueMutex, std::try_to_lock);
+        if (queueLock.owns_lock())
         {
-            // if (!needsCommandBuffer)
-            //{
-            //     if (queue->queueWaitFence != VK_NULL_HANDLE)
-            //     {
-            //         VkResult status = vkGetFenceStatus(queue->deviceManager->logicalDevice, queue->queueWaitFence);
-            //         if (status == VK_SUCCESS)
-            //         {
-            //             // fence已经是signaled状态
-            //             queue->queueWaitFence = VK_NULL_HANDLE;
-            //             break;
-            //         }
-            //         else if (status == VK_NOT_READY)
-            //         {
-            //             // fence还未signaled
-            //             queue->queueMutex->unlock();
-            //             std::this_thread::yield();
-            //             continue;
-            //         }
-            //     }
-            //     break;
-            // }
-
-            uint64_t timelineCounterValue = 0;
-            VkResult result = vkGetSemaphoreCounterValue(queue->deviceManager->logicalDevice, queue->timelineSemaphore, &timelineCounterValue);
-            if (result == VK_SUCCESS)
-            {
-                // ===== 修复3&4: 检测损坏的 semaphore 值 =====
-                if (timelineCounterValue == UINT64_MAX)
-                {
-                    queue->queueMutex->unlock();
-                    CFW_LOG_ERROR("[pickQueueAndCommit] Queue {} timeline semaphore has invalid value UINT64_MAX, skipping",
-                                  queueIndex);
-                    continue; // 跳过这个队列，尝试下一个
-                }
-
-                if (timelineCounterValue >= queue->timelineValue->load(std::memory_order_acquire))
-                {
-                    break;
-                }
-                else
-                {
-                    queue->queueMutex->unlock();
-                }
-            }
-            else
-            {
-                queue->queueMutex->unlock();
-                CFW_LOG_ERROR("Failed to get timeline semaphore counter value for queue index {}!", queueIndex);
-                return nullptr;
-            }
+            uint64_t completed = 0;
+            coronaHardwareCheck(vkGetSemaphoreCounterValue(queue->deviceManager->logicalDevice,
+                                                            queue->timelineSemaphore, &completed));
+            if (completed == UINT64_MAX)
+                throw std::runtime_error("Queue timeline is exhausted or the device is lost");
+            if (completed >= queue->timelineValue->load(std::memory_order_acquire)) break;
+            queueLock.unlock();
         }
-
         std::this_thread::yield();
-        // std::this_thread::sleep_for(std::chrono::microseconds(10000));
     }
-
-    std::unique_lock<std::mutex> queueLock(*queue->queueMutex, std::adopt_lock);
     // ===== 首先清理已完成的资源 =====
     cleanupCompletedResources();
 
@@ -346,86 +284,23 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
             ~RollbackTimeline() { if (!submitted) value.fetch_sub(1); }
         } rollbackTimeline{*currentRecordQueue->timelineValue};
 
-        waitSemaphores.push_back(timelineSubmitInfo(currentRecordQueue->timelineSemaphore, waitValue));
-        signalSemaphores.push_back(timelineSubmitInfo(currentRecordQueue->timelineSemaphore, signalValue));
-
-        std::vector<VkSemaphoreSubmitInfo> mergedWaitSemaphores = mergeSemaphoreSubmitInfos(waitSemaphores);
-        std::vector<VkSemaphoreSubmitInfo> mergedSignalSemaphores = mergeSemaphoreSubmitInfos(signalSemaphores);
-
-        // timeline semaphore 在同一次 submit 中 wait+signal 时，signal value 必须严格大于 wait value。
-        // binary semaphore 的 value 固定为 0，这里通过 value==0 直接跳过。
-        std::unordered_map<VkSemaphore, uint64_t> waitValueMap;
-        waitValueMap.reserve(mergedWaitSemaphores.size());
-        for (const auto &waitSem : mergedWaitSemaphores)
-        {
-            waitValueMap.emplace(waitSem.semaphore, waitSem.value);
-        }
-        for (auto &signalSem : mergedSignalSemaphores)
-        {
-            if (signalSem.value == 0)
+        auto mergedWaitSemaphores = mergeSemaphoreSubmitInfos(waitSemaphores);
+        auto mergedSignalSemaphores = mergeSemaphoreSubmitInfos(signalSemaphores);
+        auto appendQueuePoint = [&](auto& infos, uint64_t value) {
+            auto existing = std::find_if(infos.begin(), infos.end(), [&](const auto& info) {
+                return info.semaphore == queue->timelineSemaphore;
+            });
+            if (existing == infos.end())
+                infos.push_back(timelineSubmitInfo(queue->timelineSemaphore, value));
+            else
             {
-                continue;
+                if (existing->value > value) throw std::invalid_argument("Conflicting queue timeline value");
+                existing->value = value;
+                existing->stageMask |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
             }
-
-            auto it = waitValueMap.find(signalSem.semaphore);
-            if (it != waitValueMap.end() && signalSem.value <= it->second)
-            {
-                signalSem.value = it->second + 1;
-            }
-        }
-
-        // ===== 修复4: Semaphore 值验证 =====
-        // 在提交前验证所有 timeline semaphore 的当前值是否有效
-        // 如果 semaphore 值为 UINT64_MAX，说明 semaphore 已损坏或设备丢失
-        bool semaphoreValid = true;
-        for (const auto &waitSem : mergedWaitSemaphores)
-        {
-            // 跳过 Binary Semaphore（Binary Semaphore 的 value 固定为 0）
-            if (waitSem.value == 0)
-            {
-                continue;
-            }
-
-            if (waitSem.semaphore != VK_NULL_HANDLE)
-            {
-                uint64_t currentValue = 0;
-                VkResult queryResult = vkGetSemaphoreCounterValue(
-                    hardwareContext->deviceManager.logicalDevice,
-                    waitSem.semaphore,
-                    &currentValue);
-
-                if (queryResult != VK_SUCCESS)
-                {
-                    CFW_LOG_ERROR("[commit] Failed to query semaphore counter value, VkResult: {}",
-                                  static_cast<int>(queryResult));
-                    semaphoreValid = false;
-                    break;
-                }
-
-                // 检查 semaphore 值是否为无效的 UINT64_MAX
-                if (currentValue == UINT64_MAX)
-                {
-                    CFW_LOG_ERROR("[commit] Timeline semaphore {} has invalid value UINT64_MAX, device may be lost!",
-                                  reinterpret_cast<uintptr_t>(waitSem.semaphore));
-                    semaphoreValid = false;
-                    break;
-                }
-
-                // 检查等待值是否超出合理范围（maxTimelineSemaphoreValueDifference 通常是 UINT64_MAX）
-                // 但如果当前值和期望等待值差距过大，可能存在逻辑错误
-                if (waitSem.value > currentValue && (waitSem.value - currentValue) > 10000)
-                {
-                    CFW_LOG_WARNING("[commit] Semaphore wait value {} is far ahead of current value {}, potential sync issue",
-                                    waitSem.value, currentValue);
-                }
-            }
-        }
-
-        if (!semaphoreValid)
-        {
-            CFW_LOG_ERROR("[commit] Aborting submit due to invalid semaphore state");
-            return false;
-        }
+        };
+        appendQueuePoint(mergedWaitSemaphores, waitValue);
+        appendQueuePoint(mergedSignalSemaphores, signalValue);
 
         VkSubmitInfo2 submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
@@ -436,12 +311,7 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
         submitInfo.commandBufferInfoCount = 1;
         submitInfo.pCommandBufferInfos = &commandBufferSubmitInfo;
 
-        VkResult result = vkQueueSubmit2(currentRecordQueue->vkQueue, 1, &submitInfo, waitFence);
-        if (result != VK_SUCCESS)
-        {
-            CFW_LOG_ERROR("Failed to submit command buffer! VkResult: {}", coronaHardwareResultStr(result));
-            return false;
-        }
+        coronaHardwareCheck(vkQueueSubmit2(queue->vkQueue, 1, &submitInfo, waitFence));
 
         rollbackTimeline.submitted = true;
         // Publish this successful submission independently of later recording.
@@ -456,29 +326,35 @@ DeviceManager::QueueUtils *HardwareExecutorVulkan::pickQueueAndCommit(std::atomi
 
 HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
 {
+    if (commandList.empty()) return *this;
+    // Remove only the waits derived for this attempt if recording or submission throws.
+    struct AttemptWaits {
+        std::vector<VkSemaphoreSubmitInfo>& waits;
+        size_t originalSize;
+        ~AttemptWaits() { if (waits.size() > originalSize) waits.resize(originalSize); }
+    };
     // Resolve recorded dependencies before locking a queue. A failed CPU bridge
     // must leave the commands and submission points available for retry.
-    for (const auto point : pendingWaits)
     {
-        const auto semaphore = hardwareContext->deviceManager.getOrImportTimelineSemaphore(*point.queue);
-        if (semaphore)
+        AttemptWaits attempt{waitSemaphores, waitSemaphores.size()};
+        for (const auto point : pendingWaits)
         {
-            waitSemaphores.push_back(timelineSubmitInfo(semaphore, point.value));
+            const auto semaphore = hardwareContext->deviceManager.getOrImportTimelineSemaphore(*point.queue);
+            if (semaphore)
+            {
+                waitSemaphores.push_back(timelineSubmitInfo(semaphore, point.value));
+            }
+            else
+            {
+                // An incompatible device pair uses a host wait before local submit.
+                VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
+                wait.semaphoreCount = 1;
+                wait.pSemaphores = &point.queue->timelineSemaphore;
+                wait.pValues = &point.value;
+                coronaHardwareCheck(vkWaitSemaphores(point.queue->deviceManager->getLogicalDevice(), &wait, 5'000'000'000ULL));
+            }
         }
-        else
-        {
-            // An incompatible device pair uses a host wait before local submit.
-            VkSemaphoreWaitInfo wait{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
-            wait.semaphoreCount = 1;
-            wait.pSemaphores = &point.queue->timelineSemaphore;
-            wait.pValues = &point.value;
-            coronaHardwareCheck(vkWaitSemaphores(point.queue->deviceManager->getLogicalDevice(), &wait, 5'000'000'000ULL));
-        }
-    }
-    if (commandList.empty()) pendingWaits.clear();
 
-    if (commandList.size() > 0)
-    {
         // Allocate before submission. On failure the queued commands stay in place;
         // on success their vector moves into the completion queue without allocation.
         deferredReleaseQueue.reserve(deferredReleaseQueue.size() + 1);
@@ -545,20 +421,15 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
         }
 
         std::unique_lock<std::mutex> graphicsSubmitChainLock;
-        VkDevice graphicsSubmitChainDevice = VK_NULL_HANDLE;
+        auto& device = hardwareContext->deviceManager;
         if (queueType == CommandRecordVulkan::ExecutorType::Graphics)
         {
-            graphicsSubmitChainDevice = hardwareContext->deviceManager.getLogicalDevice();
-            graphicsSubmitChainLock = std::unique_lock<std::mutex>(gGraphicsSubmitChainMutex);
-
-            auto chainIt = gGraphicsSubmitChains.find(graphicsSubmitChainDevice);
-            if (chainIt != gGraphicsSubmitChains.end() &&
-                chainIt->second.semaphore != VK_NULL_HANDLE &&
-                chainIt->second.value > 0)
-            {
-                waitSemaphores.push_back(timelineSubmitInfo(chainIt->second.semaphore, chainIt->second.value));
-            }
+            graphicsSubmitChainLock = std::unique_lock<std::mutex>(device.graphicsSubmitMutex);
+            if (device.lastGraphicsSemaphore)
+                waitSemaphores.push_back(timelineSubmitInfo(device.lastGraphicsSemaphore, device.lastGraphicsValue));
         }
+        // Keep room for the completion point before submitting any GPU work.
+        waitSemaphores.reserve(std::max<size_t>(1, waitSemaphores.size()));
 
         DeviceManager::QueueUtils *submittedQueue = nullptr;
         switch (queueType)
@@ -604,19 +475,14 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
             break;
         }
 
-        if (submittedQueue)
+        if (!submittedQueue) throw std::runtime_error("The recorded commands were not submitted");
+        deferredReleaseQueue.push_back({lastSubmission.value, std::move(commandList), lastSubmission.queue->timelineSemaphore});
+        layouts.committed = true;
+        pendingWaits.clear();
+        if (queueType == CommandRecordVulkan::ExecutorType::Graphics)
         {
-            deferredReleaseQueue.push_back({lastSubmission.value, std::move(commandList), lastSubmission.queue->timelineSemaphore});
-            layouts.committed = true;
-            pendingWaits.clear();
-        }
-        if (queueType == CommandRecordVulkan::ExecutorType::Graphics &&
-            submittedQueue != nullptr &&
-            graphicsSubmitChainDevice != VK_NULL_HANDLE &&
-            lastSubmission)
-        {
-            gGraphicsSubmitChains[graphicsSubmitChainDevice] =
-                {lastSubmission.queue->timelineSemaphore, lastSubmission.value};
+            device.lastGraphicsSemaphore = lastSubmission.queue->timelineSemaphore;
+            device.lastGraphicsValue = lastSubmission.value;
         }
 
     }

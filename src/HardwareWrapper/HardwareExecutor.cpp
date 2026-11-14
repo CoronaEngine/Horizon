@@ -42,7 +42,7 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
 HardwareExecutor& HardwareExecutor::operator<<(ComputePipelineBase& computePipeline)
 {
     auto* executor = execFromId(executorID);
-    if (auto* pipeline = reinterpret_cast<ComputePipelineVulkan*>(computePipeline.getComputePipelineID()))
+    if (const auto& pipeline = computePipeline.computePipeline_)
         executor->recordOwned(pipeline->capture(), computePipeline.resourceUses_);
     return *this;
 }

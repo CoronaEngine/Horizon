@@ -79,6 +79,7 @@ ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ShaderCodeMod
 
 ComputePipelineVulkan::~ComputePipelineVulkan()
 {
+    if (!pipeline && !pipelineLayout && !uboDescriptorSetLayout) return;
     VkDevice device = VK_NULL_HANDLE;
     if (const auto mainDevice = getHardwareContext().getMainDevice())
     {
@@ -87,8 +88,6 @@ ComputePipelineVulkan::~ComputePipelineVulkan()
 
     if (device != VK_NULL_HANDLE)
     {
-        vkDeviceWaitIdle(device);
-
         if (pipeline != VK_NULL_HANDLE)
         {
             vkDestroyPipeline(device, pipeline, nullptr);
@@ -204,7 +203,7 @@ void ComputePipelineVulkan::createComputePipeline()
 std::shared_ptr<ComputePipelineVulkan::Dispatch> ComputePipelineVulkan::capture()
 {
     auto dispatch = std::make_shared<Dispatch>();
-    dispatch->pipeline = this;
+    dispatch->pipeline = shared_from_this();
     dispatch->groupCount = groupCount;
     dispatch->pushConstant = copyParameterBytes(pushConstant.get(), shaderCode.shaderResources.pushConstantSize);
     dispatch->uniformBytes = copyParameterBytes(tempUBO.get(), uboSize);

@@ -4,6 +4,7 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
+#include <bit>
 
 struct ImageFormatInfo
 {
@@ -124,6 +125,19 @@ VkImageUsageFlags convertImageUsage(ImageUsage usage, bool isCompressed)
 }
 
 namespace {
+uint32_t uploadByteCount(const ResourceManager::ImageHardwareWrap& image, uint32_t mip, uint32_t layers)
+{
+    const uint64_t width = std::max(1u, image.imageSize.x >> mip);
+    const uint64_t height = std::max(1u, image.imageSize.y >> mip);
+    const bool compressed = image.pixelSize < 2;
+    const uint64_t columns = compressed ? (width + 3) / 4 : width;
+    const uint64_t rows = compressed ? (height + 3) / 4 : height;
+    const auto blockBytes = static_cast<uint32_t>(image.pixelSize * (compressed ? 16 : 1));
+    if (!layers || !blockBytes || columns * rows > UINT32_MAX / blockBytes / layers)
+        throw std::length_error("Image upload exceeds the supported staging buffer size");
+    return static_cast<uint32_t>(columns * rows * blockBytes * layers);
+}
+
 void retainImage(uintptr_t id)
 {
     if (id) ++legacyImageFromId(id)->refCount;
@@ -145,6 +159,11 @@ HardwareImage::HardwareImage() = default;
 
 HardwareImage::HardwareImage(const HardwareImageCreateInfo& createInfo)
 {
+    if (!createInfo.width || !createInfo.height)
+        throw std::invalid_argument("Image extent must be nonzero");
+    if (createInfo.arrayLayers <= 0 || createInfo.mipLevels <= 0 ||
+        static_cast<unsigned>(createInfo.mipLevels) > std::bit_width(std::max(createInfo.width, createInfo.height)))
+        throw std::invalid_argument("Invalid image layer or mip count");
     if (createInfo.cube && (createInfo.width != createInfo.height || createInfo.arrayLayers != 6))
         throw std::invalid_argument("A cubemap requires six square faces");
     const auto [vkFormat, pixelSize, isCompressed] = convertImageFormat(createInfo.format);
@@ -166,11 +185,12 @@ HardwareImage::HardwareImage(uint32_t width, uint32_t height, ImageFormat format
 {
     if (imageData)
     {
-        HardwareExecutorVulkan executor;
         auto* image = legacyImageFromId(imageID);
-        HardwareBuffer staging(image->imageSize.x * image->imageSize.y * image->pixelSize,
+        HardwareBuffer staging(uploadByteCount(*image, 0, image->arrayLayers),
                                BufferUsage::StorageBuffer, imageData);
         CopyBufferToImageCommand command(*legacyBufferFromId(staging.getBufferID()), *image, 0);
+        // The executor must finish before the borrowed command and staging buffer are destroyed.
+        HardwareExecutorVulkan executor;
         executor << &command;
         executor.commit();
     }
@@ -255,12 +275,14 @@ HardwareImage::operator bool() const
 
 uint32_t HardwareImage::storeSampledDescriptor() const
 {
+    if (!*this) throw std::invalid_argument("Cannot bind an empty image");
     auto* image = legacyImageFromId(imageID);
     return image->resourceManager->storeSampledDescriptor(*image);
 }
 
 uint32_t HardwareImage::storeDescriptor() const
 {
+    if (!*this) throw std::invalid_argument("Cannot bind an empty image");
     auto imageHandle = legacyImageFromId(imageID);
     return imageHandle->resourceManager->storeDescriptor(*imageHandle);
 }
@@ -297,38 +319,10 @@ BufferToImageCommand HardwareImage::copyFrom(const void *inputData,
         return BufferToImageCommand();
     }
 
-    uint64_t bufferSize = 0;
-
-    {
-        auto const imageHandle = legacyImageFromId(imageID);
-        if (imageMip >= imageHandle->mipLevels)
-        {
-            return BufferToImageCommand();
-        }
-        const uint32_t width = std::max(1u, imageHandle->imageSize.x >> imageMip);
-        const uint32_t height = std::max(1u, imageHandle->imageSize.y >> imageMip);
-
-        // 判断是否是压缩格式 (压缩格式的 pixelSize < 2.0f)
-        const bool isCompressed = imageHandle->pixelSize < 2.0f;
-
-        if (isCompressed)
-        {
-            const uint32_t blockWidth = 4;
-            const uint32_t blockHeight = 4;
-            // 向上取整计算 Block 数量
-            uint32_t widthInBlocks = (width + blockWidth - 1) / blockWidth;
-            uint32_t heightInBlocks = (height + blockHeight - 1) / blockHeight;
-            // 计算每个 Block 的字节数 (例如 BC1: 0.5 * 16 = 8 bytes)
-            uint32_t bytesPerBlock = static_cast<uint32_t>(imageHandle->pixelSize * 16.0f);
-            bufferSize = widthInBlocks * heightInBlocks * bytesPerBlock;
-        }
-        else
-        {
-            bufferSize = width * height * static_cast<uint32_t>(imageHandle->pixelSize);
-        }
-    }
-
-    HardwareBuffer stagingBuffer(bufferSize, BufferUsage::StorageBuffer, inputData);
+    if (!*this) return {};
+    const auto* image = legacyImageFromId(imageID);
+    if (imageMip >= image->mipLevels) return {};
+    HardwareBuffer stagingBuffer(uploadByteCount(*image, imageMip, 1), BufferUsage::StorageBuffer, inputData);
     auto cmd = BufferToImageCommand(std::move(stagingBuffer), *this, 0, imageLayer, imageMip);
     return cmd;
 }

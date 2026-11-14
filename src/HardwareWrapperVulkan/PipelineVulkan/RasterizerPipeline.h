@@ -101,6 +101,7 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
         RasterState state;
         RasterPass pass;
         HardwareImage depthImage;
+        bool supportsIndirectFirstInstance{};
         std::vector<HardwareImage> renderTargets;
         std::vector<VkClearValue> clearValues;
         std::vector<Packet> packets;
@@ -110,7 +111,7 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
         std::vector<Run> runs;
         std::shared_ptr<HardwareBuffer> upload;
         HardwareBuffer externalPackets;
-        void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t);
+        void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
         Root root{};
         void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
         void prepareUpload();
@@ -129,7 +130,6 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
     void initializeStageBindings(uint32_t viewCount);
     void createRenderPass(GraphicsState& state);
     void createGraphicsPipeline(GraphicsState& state);
-    void prepareDepth(Batch& batch);
     void prepareFramebuffer(Batch& batch);
     void commitCommand(HardwareExecutorVulkan& executor, Batch& batch);
 

@@ -101,16 +101,17 @@ void RasterBatch::append(const RasterGeometry& geometry, const RasterDraw& range
     static_cast<RasterizerPipelineVulkan::Batch&>(*record_).append(geometry, range, data, size);
 }
 
-void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count)
+void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
+                               IndirectFirstInstance firstInstance)
 {
-    appendIndirect(geometry, packets, count, nullptr, 0);
+    appendIndirect(geometry, packets, count, nullptr, 0, firstInstance);
 }
 
 void RasterBatch::appendIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
-                                 const void* data, size_t size)
+                                 const void* data, size_t size, IndirectFirstInstance firstInstance)
 {
     if (!record_) throw std::logic_error("Raster batch already submitted");
-    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(geometry, packets, count, data, size);
+    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(geometry, packets, count, data, size, firstInstance);
 }
 
 bool RasterizerPipelineBase::syncShaderConditions()

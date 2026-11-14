@@ -68,6 +68,8 @@ void DeviceManager::initDeviceManager(const CreateCallback &createCallback, cons
 
 void DeviceManager::cleanUpDeviceManager()
 {
+    lastGraphicsSemaphore = VK_NULL_HANDLE;
+    lastGraphicsValue = 0;
     if (logicalDevice == VK_NULL_HANDLE)
     {
         graphicsQueues.clear();
@@ -204,7 +206,7 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
 
     deviceFeaturesUtils.rayTracingPipelineProperties.pNext = &deviceFeaturesUtils.accelerationStructureProperties;
     deviceFeaturesUtils.supportedProperties.pNext = &deviceFeaturesUtils.rayTracingPipelineProperties;
-    deviceFeaturesUtils.accelerationStructureProperties.pNext = nullptr;
+    deviceFeaturesUtils.accelerationStructureProperties.pNext = &deviceFeaturesUtils.multiviewProperties;
 
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceFeaturesUtils.supportedProperties);
     printDeviceInfo(deviceFeaturesUtils.supportedProperties.properties);

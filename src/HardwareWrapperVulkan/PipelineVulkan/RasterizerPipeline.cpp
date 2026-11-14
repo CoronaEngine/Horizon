@@ -83,6 +83,7 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(const EmbeddedShader::ShaderC
 
 void RasterizerPipelineVulkan::initializeStageBindings(uint32_t viewCount)
 {
+    if (viewCount == 0 || viewCount > 32) throw std::invalid_argument("Invalid multiview count");
     const auto& vertex = vertShaderCode.shaderResources;
     const auto& fragment = fragShaderCode.shaderResources;
     extractStageBindings(vertex, vertexStageInputs, vertexStageOutputs);
@@ -107,14 +108,9 @@ RasterizerPipelineVulkan::FramebufferState::~FramebufferState()
 
 RasterizerPipelineVulkan::~RasterizerPipelineVulkan()
 {
-    if (const auto mainDevice = getHardwareContext().getMainDevice())
-    {
-        const auto device = mainDevice->deviceManager.getLogicalDevice();
-        vkDeviceWaitIdle(device);
-        lastFramebuffer.reset();
-        graphicsStates.clear();
-        if (uboDescriptorSetLayout) vkDestroyDescriptorSetLayout(device, uboDescriptorSetLayout, nullptr);
-    }
+    if (uboDescriptorSetLayout)
+        vkDestroyDescriptorSetLayout(getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice(),
+                                     uboDescriptorSetLayout, nullptr);
 }
 
 void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
@@ -125,6 +121,11 @@ void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
     {
         throw std::runtime_error("No main device available");
     }
+
+    const auto& features = mainDevice->deviceManager.getFeaturesUtils();
+    if (multiviewCount > 1 && (!features.featuresChain.supportsMultiview() ||
+                              multiviewCount > features.multiviewProperties.maxMultiviewViewCount))
+        throw std::invalid_argument("Multiview count exceeds the enabled device capabilities");
 
     // 配置附件描述
     std::vector<VkAttachmentDescription> attachments;
@@ -190,7 +191,7 @@ void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
     dependency.dependencyFlags = 0;
 
     // 配置多视图
-    const uint32_t viewMask = (1u << multiviewCount) - 1;
+    const uint32_t viewMask = UINT32_MAX >> (32 - multiviewCount);
     VkRenderPassMultiviewCreateInfo multiviewCreateInfo{};
     multiviewCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO;
     multiviewCreateInfo.subpassCount = 1;
@@ -206,7 +207,7 @@ void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
     renderPassInfo.pSubpasses = &subpass;
     renderPassInfo.dependencyCount = 1;
     renderPassInfo.pDependencies = &dependency;
-    renderPassInfo.pNext = &multiviewCreateInfo;
+    renderPassInfo.pNext = multiviewCount > 1 ? &multiviewCreateInfo : nullptr;
 
     coronaHardwareCheck(vkCreateRenderPass(mainDevice->deviceManager.getLogicalDevice(), &renderPassInfo, nullptr, &renderPass));
 }
@@ -403,46 +404,37 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
 
 std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::capture(uint16_t width, uint16_t height, RasterPass pass)
 {
+    if (!width || !height) throw std::invalid_argument("Raster batch requires a nonzero extent");
     auto batch = std::make_shared<Batch>();
     batch->pipeline = shared_from_this();
     const ktm::uvec2 imageSize{width, height};
     batch->imageSize = imageSize;
     batch->state = rasterState;
+    batch->supportsIndirectFirstInstance = getHardwareContext().getMainDevice()->deviceManager
+        .getFeaturesUtils().featuresChain.getChainHead()->features.drawIndirectFirstInstance;
     batch->pass = pass;
     batch->renderTargets = renderTargets;
-    if (explicitDepthImage) batch->depthImage = depthImage;
-    else if (depthImage)
-    {
-        const auto* depth = legacyImageFromId(depthImage.getImageID());
-        if (depth->imageSize.x == imageSize.x && depth->imageSize.y == imageSize.y)
-            batch->depthImage = depthImage;
+    if (!explicitDepthImage) {
+        const auto* depth = depthImage ? legacyImageFromId(depthImage.getImageID()) : nullptr;
+        if (!depth || depth->imageSize.x != width || depth->imageSize.y != height) {
+            HardwareImageCreateInfo info(width, height, ImageFormat::D32_FLOAT);
+            info.usage = ImageUsage::DepthImage;
+            info.arrayLayers = multiviewCount;
+            depthImage = HardwareImage(info);
+        }
     }
+    batch->depthImage = depthImage;
     for (const auto& target : renderTargets)
         batch->clearValues.push_back(target ? legacyImageFromId(target.getImageID())->clearValue : VkClearValue{});
-    VkClearValue depthClear{};
-    depthClear.depthStencil = {1.0f, 0};
-    batch->clearValues.push_back(batch->depthImage ? legacyImageFromId(batch->depthImage.getImageID())->clearValue : depthClear);
+    batch->clearValues.push_back(legacyImageFromId(batch->depthImage.getImageID())->clearValue);
     batch->uniformBytes = copyParameterBytes(tempUBO.get(), uboSize);
     batch->bindings = bindings.snapshot();
     return batch;
 }
 
-void RasterizerPipelineVulkan::prepareDepth(Batch& batch)
-{
-    if (batch.depthImage || !batch.imageSize.x || !batch.imageSize.y) return;
-    HardwareImageCreateInfo info(batch.imageSize.x, batch.imageSize.y, ImageFormat::D32_FLOAT);
-    info.usage = ImageUsage::DepthImage;
-    info.arrayLayers = multiviewCount;
-    batch.depthImage = HardwareImage(info);
-    if (!explicitDepthImage) depthImage = batch.depthImage;
-}
-
 void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
 {
     if (batch.framebuffer) return;
-    prepareDepth(batch);
-    if (!batch.depthImage || !batch.imageSize.x || !batch.imageSize.y)
-        throw std::runtime_error("Rasterizer invocation requires a nonzero render extent");
     auto* depth = legacyImageFromId(batch.depthImage.getImageID());
     std::vector<VkFormat> formats;
     std::vector<VkImageLayout> finalLayouts;
@@ -452,17 +444,21 @@ void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
             image->arrayLayers < static_cast<uint32_t>(multiviewCount))
             throw std::runtime_error("Rasterizer attachment is smaller than the invocation extent or view count");
     };
+    const auto attachmentView = [](auto* image) {
+        if (image->mipLevels == 1 && !image->cube) return image->imageView;
+        return image->resourceManager->createImageView(*image, UINT32_MAX, 0);
+    };
     for (const auto& target : batch.renderTargets)
     {
         if (!target) throw std::runtime_error("Rasterizer invocation has an unbound color attachment");
-        const auto* image = legacyImageFromId(target.getImageID());
+        auto* image = legacyImageFromId(target.getImageID());
         checkExtent(image);
         formats.push_back(image->imageFormat);
         finalLayouts.push_back((image->imageUsage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-        views.push_back(image->imageView);
+        views.push_back(attachmentView(image));
     }
     checkExtent(depth);
-    views.push_back(depth->imageView);
+    views.push_back(attachmentView(depth));
     std::shared_ptr<GraphicsState> graphics;
     for (const auto& state : graphicsStates)
         if (state->colorFormats == formats && state->finalLayouts == finalLayouts &&
@@ -489,7 +485,8 @@ void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
     {
         bool same = true;
         for (size_t i = 0; i < batch.renderTargets.size(); ++i)
-            same &= legacyImageFromId(lastFramebuffer->targets[i].getImageID())->imageView == views[i];
+            same &= legacyImageFromId(lastFramebuffer->targets[i].getImageID())->imageView ==
+                    legacyImageFromId(batch.renderTargets[i].getImageID())->imageView;
         if (same) { batch.framebuffer = lastFramebuffer; return; }
     }
     auto framebuffer = std::make_shared<FramebufferState>();
@@ -535,12 +532,14 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
 namespace {
 VkDeviceAddress addressOf(const HardwareBuffer& handle)
 {
-    const auto* buffer = legacyBufferFromId(handle.getBufferID());
+    auto* buffer = legacyBufferFromId(handle.getBufferID());
+    if (buffer->deviceAddress) return buffer->deviceAddress;
     if (!(buffer->bufferUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT))
         throw std::invalid_argument("Raster buffer requires device-address usage");
     VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     info.buffer = buffer->bufferHandle;
-    return vkGetBufferDeviceAddress(buffer->device->getLogicalDevice(), &info);
+    buffer->deviceAddress = vkGetBufferDeviceAddress(buffer->device->getLogicalDevice(), &info);
+    return buffer->deviceAddress;
 }
 }
 
@@ -557,6 +556,8 @@ void RasterizerPipelineVulkan::Batch::append(const RasterGeometry& geometry, con
         throw std::out_of_range("Raster draw exceeds index buffer");
     const auto count = range.indexCount ? range.indexCount : uint32_t(available - range.firstIndex);
     if (!count || !range.instanceCount) return;
+    if (range.firstInstance && !supportsIndirectFirstInstance)
+        throw std::invalid_argument("Nonzero firstInstance requires drawIndirectFirstInstance");
     VkRect2D clip{{0, 0}, {imageSize.x, imageSize.y}};
     if (range.scissor) {
         const auto& rect = *range.scissor;
@@ -593,9 +594,11 @@ void RasterizerPipelineVulkan::Batch::append(const RasterGeometry& geometry, con
 }
 
 void RasterizerPipelineVulkan::Batch::appendIndirect(const RasterGeometry& geometry, const HardwareBuffer& buffer,
-                                                     uint32_t count, const void* data, size_t size)
+                                                     uint32_t count, const void* data, size_t size, IndirectFirstInstance firstInstance)
 {
     if (!count) return;
+    if (!supportsIndirectFirstInstance && firstInstance != IndirectFirstInstance::AlwaysZero)
+        throw std::invalid_argument("This device requires indirect packets with firstInstance always zero");
     if (!packets.empty() || externalPackets) throw std::logic_error("GPU packets require an empty batch");
     if (!buffer || buffer.getElementSize() != sizeof(Packet) || count > buffer.getElementCount() ||
         !(legacyBufferFromId(buffer.getBufferID())->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
@@ -652,7 +655,6 @@ void RasterizerPipelineVulkan::Batch::commitCommand(HardwareExecutorVulkan& exec
 
 void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
 {
-    pipeline->prepareDepth(*this);
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
     prepareUpload();

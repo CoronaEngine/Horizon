@@ -39,6 +39,7 @@ class DeviceManager
         VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties{};
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties{};
         VkPhysicalDeviceProperties2 supportedProperties{};
+        VkPhysicalDeviceMultiviewProperties multiviewProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES};
         bool computeDerivativeGroupQuads{};
         DeviceFeaturesChain featuresChain;
     };
@@ -110,6 +111,9 @@ class DeviceManager
     std::atomic_uint16_t currentGraphicsQueueIndex{0};
     std::atomic_uint16_t currentComputeQueueIndex{0};
     std::atomic_uint16_t currentTransferQueueIndex{0};
+    std::mutex graphicsSubmitMutex;
+    VkSemaphore lastGraphicsSemaphore{VK_NULL_HANDLE};
+    uint64_t lastGraphicsValue{0};
 
     std::vector<QueueUtils> graphicsQueues;
     std::vector<QueueUtils> computeQueues;

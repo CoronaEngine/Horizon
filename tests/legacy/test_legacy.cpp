@@ -26,6 +26,11 @@ void expect(bool condition, const char* message)
 
 void test_cpu()
 {
+    DeviceFeaturesChain original;
+    DeviceFeaturesChain copy = original;
+    expect(original.getChainHead()->pNext != copy.getChainHead()->pNext, "copied Vulkan features own their chain");
+    original = copy;
+    expect(original.getChainHead()->pNext != copy.getChainHead()->pNext, "assigned Vulkan features own their chain");
     using namespace EmbeddedShader;
     int vertexParses = 0, fragmentParses = 0, computeParses = 0;
     auto vertex = [&](Float3 pos) { ++vertexParses; position() = Float4(pos, Float(1)); };
@@ -193,10 +198,13 @@ void test_raster_sampled_storage_image()
 
 // A compute-written packet draws the right half at the depth left by pass one.
 // Clearing either attachment or losing the packet between stages changes a pixel.
-void test_generated_packet_and_attachment_load()
+void test_generated_packet_and_attachment_load(bool explicitDepth)
 {
     using namespace EmbeddedShader;
-    HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareImageCreateInfo targetInfo(4, 2, ImageFormat::RGBA32_FLOAT);
+    targetInfo.usage = ImageUsage::StorageImage;
+    targetInfo.mipLevels = 2;
+    HardwareImage target(targetInfo);
     HardwareImage depth(4, 2, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
     Texture2D<ktm::fvec4> output = target;
     auto vs = [] {
@@ -204,7 +212,7 @@ void test_generated_packet_and_attachment_load()
     };
     auto fs = [&] { output << rasterDrawParameter<ktm::fvec4>(0); };
     RasterizerPipeline pipeline(vs, fs);
-    pipeline.setDepthImage(depth);
+    if (explicitDepth) pipeline.setDepthImage(depth);
     pipeline.setRasterState({true, true, RasterCompare::Less, RasterBlend::Opaque});
 
     const std::array<std::array<float,2>,7> vertices{{{-1,-1},{3,-1},{-1,3},
@@ -212,26 +220,46 @@ void test_generated_packet_and_attachment_load()
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
     RasterGeometry mesh{HardwareBuffer::uploadDeviceLocal(vertices, BufferUsage::VertexBuffer),
                         HardwareBuffer::uploadDeviceLocal(indices, BufferUsage::IndexBuffer)};
+    // Exercise the public API on the restricted capability path even on a full-featured GPU.
+    auto& feature = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
+                        .featuresChain.getChainHead()->features.drawIndirectFirstInstance;
+    const auto supported = feature;
+    feature = VK_FALSE;
+    auto restricted = pipeline.beginBatch(4, 2);
+    feature = supported;
+    bool rejected = false;
+    try { restricted.draw(mesh, {.indexCount = 3, .firstInstance = 1}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    expect(rejected, "unsupported nonzero firstInstance rejected");
     auto first = pipeline.beginBatch(4, 2);
     first.draw(mesh, {.indexCount=3}, std::array<float,4>{1,0,0,1});
     HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
+    rejected = false;
+    try { restricted.drawIndirect(mesh, packets, 1); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    expect(rejected, "GPU packets must declare zero firstInstance on a restricted device");
+    restricted.drawIndirect(mesh, packets, 1, IndirectFirstInstance::AlwaysZero);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
-    ComputePipelineBase generate([&] {
-        words[0] = Uint(6);
-        words[1] = Uint(1);
-        words[5] = Uint(3);
-        words[7] = Uint(4);
-    });
-    generate.uses({{packets, ResourceAccess::Write}});
+    HardwareExecutor executor;
+    executor << std::move(first);
+    {
+        ComputePipelineBase generate([&] {
+            words[0] = Uint(6);
+            words[1] = Uint(1);
+            words[5] = Uint(3);
+            words[7] = Uint(4);
+        });
+        generate.uses({{packets, ResourceAccess::Write}});
+        executor << generate(1,1,1);
+    }
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
     auto second = pipeline.beginBatch(4, 2, {true, true});
     const std::array<float,8> colors{0,0,1,0, 0,1,0,0};
-    second.drawIndirect(mesh, packets, 1, std::span(colors));
+    second.drawIndirect(mesh, packets, 1, std::span(colors), IndirectFirstInstance::AlwaysZero);
 
-    HardwareExecutor executor;
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
-    executor << std::move(first) << generate(1,1,1) << std::move(second) << target.copyTo(readback);
+    executor << std::move(second) << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
     for (size_t i = 0; i < pixels.size(); ++i) {
@@ -340,6 +368,42 @@ void test_gpu()
     expect(rejected, "out of bounds copy must be rejected before recording");
 
     std::cerr << "GPU: image mip/layer round trip\n";
+    std::array<uint32_t, 2> layers{0x11223344, 0x55667788};
+    HardwareImage initialized(1, 1, ImageFormat::RGBA8_UINT, ImageUsage::SampledImage, 2, layers.data());
+    executor << initialized.copyTo(destination, 1);
+    executor.commit().waitForDeferredResources();
+    expect(destination.copyToData(output.data(), sizeof(output)) && output[0] == layers[1],
+           "initial image upload retains staging and copies the second array layer");
+    VkFormatProperties bc1{};
+    vkGetPhysicalDeviceFormatProperties(getHardwareContext().getMainDevice()->deviceManager.getPhysicalDevice(),
+                                        VK_FORMAT_BC1_RGB_UNORM_BLOCK, &bc1);
+    if (bc1.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
+        auto blocks = std::array<uint32_t,4>{1,2,3,4};
+        HardwareImage compressed(5, 3, ImageFormat::BC1_RGB_UNORM, ImageUsage::SampledImage, 1, blocks.data());
+        executor << compressed.copyTo(destination);
+        executor.commit().waitForDeferredResources();
+        expect(destination.copyToData(output.data(), sizeof(output)) && std::ranges::equal(blocks, std::span(output).first(4)),
+               "odd-sized BC1 upload rounds up to two whole blocks");
+    }
+    auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
+    struct RetryCommand : CommandRecordVulkan {
+        bool fail = true;
+        ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
+        void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override {}
+        void commitCommand(HardwareExecutorVulkan&) override {
+            if (fail) throw std::runtime_error("injected recording failure");
+        }
+    } retry;
+    const auto previous = backend->getSubmissionPoint();
+    const auto waitCount = backend->waitSemaphores.size();
+    backend->wait(previous).record(&retry);
+    try { backend->commit(); } catch (const std::runtime_error&) {}
+    expect(backend->commandList.size() == 1 && backend->getSubmissionPoint().queue == previous.queue &&
+           backend->getSubmissionPoint().value == previous.value && backend->waitSemaphores.size() == waitCount,
+           "failed recording preserves the previous completion point and does not duplicate waits");
+    retry.fail = false;
+    backend->commit().waitForAllDeferredResources();
+    expect(backend->commandList.empty(), "retry consumes the recorded command");
     HardwareImageCreateInfo imageInfo(4, 4, ImageFormat::RGBA8_UINT);
     imageInfo.arrayLayers = 2;
     imageInfo.mipLevels = 2;
@@ -420,7 +484,8 @@ int main(int argc, char** argv)
             test_gpu();
             test_raster_batch();
             test_raster_sampled_storage_image();
-            test_generated_packet_and_attachment_load();
+            test_generated_packet_and_attachment_load(true);
+            test_generated_packet_and_attachment_load(false);
             test_compute_sampling();
         }
         else

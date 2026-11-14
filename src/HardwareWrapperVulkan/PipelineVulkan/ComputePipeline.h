@@ -10,7 +10,7 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "PipelineSnapshot.h"
 
-struct ComputePipelineVulkan
+struct ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulkan>
 {
   public:
     ComputePipelineVulkan();
@@ -33,7 +33,7 @@ struct ComputePipelineVulkan
 
     struct Dispatch : CommandRecordVulkan
     {
-        ComputePipelineVulkan* pipeline{}; // Must outlive command-buffer recording.
+        std::shared_ptr<ComputePipelineVulkan> pipeline;
         ktm::uvec3 groupCount{};
         std::vector<uint8_t> pushConstant;
         std::vector<uint8_t> uniformBytes;

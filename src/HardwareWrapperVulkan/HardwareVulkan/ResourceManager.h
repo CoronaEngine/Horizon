@@ -38,6 +38,7 @@ struct ResourceManager
         uint64_t refCount{1};
 
         VkBuffer bufferHandle{VK_NULL_HANDLE};
+        VkDeviceAddress deviceAddress{};
         VkBufferUsageFlags bufferUsage{VK_BUFFER_USAGE_FLAG_BITS_MAX_ENUM};
 
         VmaAllocation bufferAlloc{VK_NULL_HANDLE};

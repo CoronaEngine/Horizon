@@ -4,78 +4,53 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include <stdexcept>
 
-namespace {
-ComputePipelineVulkan* computeFromId(uintptr_t id)
+ComputePipelineVulkan& ComputePipelineBase::backend() const
 {
-    if (!id)
+    if (!computePipeline_)
         throw std::runtime_error("Empty ComputePipelineBase handle");
-    return reinterpret_cast<ComputePipelineVulkan*>(id);
+    return *computePipeline_;
 }
-} // namespace
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 创建 ComputePipeline
-void computePipelineInitFromCompiler(std::uintptr_t &pipelineID,
+void computePipelineInitFromCompiler(std::shared_ptr<ComputePipelineVulkan>& pipeline,
                                       EmbeddedShader::ShaderCodeCompiler &compiler,
                                       const std::source_location &src)
 {
-    pipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan(compiler, src));
+    pipeline = std::make_shared<ComputePipelineVulkan>(compiler, src);
 }
 
 ComputePipelineBase::ComputePipelineBase()
 {
-    computePipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan());
+    computePipeline_ = std::make_shared<ComputePipelineVulkan>();
 }
 
 ComputePipelineBase::ComputePipelineBase(const std::string &shaderCode, EmbeddedShader::ShaderLanguage language, const std::source_location &src)
 {
-    computePipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan(shaderCode, language, src));
+    computePipeline_ = std::make_shared<ComputePipelineVulkan>(shaderCode, language, src);
 }
 
 ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)
 {
-    computePipelineID = reinterpret_cast<uintptr_t>(new ComputePipelineVulkan(spirV, src));
+    computePipeline_ = std::make_shared<ComputePipelineVulkan>(spirV, src);
 }
 
-ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&& other) noexcept
-    : computePipelineID(std::exchange(other.computePipelineID, 0)),
-      autoBindEntries_(std::move(other.autoBindEntries_)),
-      resourceUses_(std::move(other.resourceUses_))
-{
-}
-
-ComputePipelineBase::~ComputePipelineBase()
-{
-    delete reinterpret_cast<ComputePipelineVulkan*>(computePipelineID);
-}
-
-ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&& other) noexcept
-{
-    if (this == &other)
-        return *this;
-
-    delete reinterpret_cast<ComputePipelineVulkan*>(computePipelineID);
-    computePipelineID = std::exchange(other.computePipelineID, 0);
-    autoBindEntries_ = std::move(other.autoBindEntries_);
-    resourceUses_ = std::move(other.resourceUses_);
-    return *this;
-}
+ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&&) noexcept = default;
+ComputePipelineBase::~ComputePipelineBase() = default;
+ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&&) noexcept = default;
 
 void ComputePipelineBase::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
-    auto const handle = computeFromId(computePipelineID);
-    handle->setPushConstantDirect(byteOffset, data, size, bindType);
+    backend().setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
 void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
-    auto const handle = computeFromId(computePipelineID);
-    handle->setResourceDirect(byteOffset, typeSize, buffer, bindType);
+    backend().setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
 void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
 {
-    auto const handle = computeFromId(computePipelineID);
-    handle->setResourceDirect(byteOffset, typeSize, image, bindType);
+    backend().setResourceDirect(byteOffset, typeSize, image, bindType);
 }
 
 ComputePipelineBase &ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
@@ -96,7 +71,6 @@ ComputePipelineBase &ComputePipelineBase::operator()(uint16_t x, uint16_t y, uin
                 setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType);
         }
     }
-    auto const handle = computeFromId(computePipelineID);
-    (*handle)(x, y, z);
+    backend()(x, y, z);
     return *this;
 }

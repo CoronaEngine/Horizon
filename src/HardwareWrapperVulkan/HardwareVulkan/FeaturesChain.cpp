@@ -17,6 +17,26 @@ DeviceFeaturesChain::DeviceFeaturesChain()
     initializeChain();
 }
 
+DeviceFeaturesChain::DeviceFeaturesChain(const DeviceFeaturesChain& other)
+{
+    *this = other;
+}
+
+DeviceFeaturesChain& DeviceFeaturesChain::operator=(const DeviceFeaturesChain& other)
+{
+    deviceFeatures2 = other.deviceFeatures2;
+    deviceFeatures11 = other.deviceFeatures11;
+    deviceFeatures12 = other.deviceFeatures12;
+    deviceFeatures13 = other.deviceFeatures13;
+    deviceFeatures14 = other.deviceFeatures14;
+    swapchainMaintenance1Features = other.swapchainMaintenance1Features;
+    accelerationStructureFeatures = other.accelerationStructureFeatures;
+    rayTracingPipelineFeatures = other.rayTracingPipelineFeatures;
+    rayQueryFeatures = other.rayQueryFeatures;
+    initializeChain();
+    return *this;
+}
+
 void DeviceFeaturesChain::initializeChain()
 {
     // rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
