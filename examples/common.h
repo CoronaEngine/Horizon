@@ -44,7 +44,7 @@ struct TextureLoadResult
 TextureLoadResult loadTexture(const std::string& path);
 
 // =============================================================================
-// baseline 工具：example_edsl 与 example_glsl 共用的 CPU 端网格加载 / UBO。
+// Viking Room 的 Slang 和 EDSL 对照示例共用的 CPU 端网格加载。
 // 数学使用 glm（已是 HorizonExamples 的链接依赖），不再手写矩阵。
 // =============================================================================
 namespace baseline

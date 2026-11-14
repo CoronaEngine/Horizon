@@ -3,20 +3,12 @@ add_executable(HorizonExamples
     common.cpp
     legacy_common.cpp
     example_baseline/28_model_loading.cpp
-    example_disney_pbr/example_disney_pbr.cpp
-    example_drawstress/example_drawstress.cpp
-    example_edsl/example_edsl.cpp
-    example_edsl_disney_pbr/example_edsl_disney_pbr.cpp
-    example_edsl_drawstress/example_edsl_drawstress.cpp
-    example_edsl_rsm/example_edsl_rsm.cpp
-    example_edsl_shadowvolumes/example_edsl_shadowvolumes.cpp
-    example_edsl_sponza/example_edsl_sponza.cpp
-    example_edsl_ssr/example_edsl_ssr.cpp
-    example_glsl/example_glsl.cpp
-    example_rsm/example_rsm.cpp
-    example_shadowvolumes/example_shadowvolumes.cpp
-    example_sponza/example_sponza.cpp
-    example_ssr/example_ssr.cpp
+    example_baseline_edsl/example_baseline_edsl.cpp
+    example_baseline_slang/example_baseline_slang.cpp
+    example_disney_edsl/example_disney_edsl.cpp
+    example_disney_slang/example_disney_slang.cpp
+    example_drawstress_edsl/example_drawstress_edsl.cpp
+    example_drawstress_slang/example_drawstress_slang.cpp
 )
 find_program(TUTORIAL_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 set(baseline_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/example_baseline")
@@ -46,4 +38,7 @@ if(HORIZON_ENABLE_TRACY)
     target_compile_definitions(HorizonExamples PRIVATE HORIZON_TRACY_ENABLED=1)
 endif()
 helicon_install_runtime_deps(HorizonExamples)
-helicon_compile_shaders(HorizonExamples DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/raster_batch.slang")
+helicon_compile_shaders(HorizonExamples DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/raster_batch.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/example_baseline_slang/baseline_draw.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/example_disney_slang/disney_shared.slang")

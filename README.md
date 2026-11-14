@@ -111,7 +111,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
 
-运行 `HorizonExamples baseline`、`HorizonExamples glsl` 或 `HorizonExamples edsl`，可在同一个可执行文件中选择 Viking Room 的三种实现。baseline 使用 Vulkan Tutorial 章末的渲染流程和着色器，另外两种使用 Horizon 的手写 GLSL 和 Helicon EDSL。三者共用模型、纹理及项目的 tinyobjloader 依赖。[Loading models](https://vulkan-tutorial.com/Loading_models)
+直接运行 `HorizonExamples` 默认启动 `baseline`，使用 Vulkan Tutorial 章末的渲染流程和着色器绘制 Viking Room。运行 `HorizonExamples baseline_slang` 或 `HorizonExamples baseline_edsl` 可切换到手写 Slang 或 Helicon EDSL 实现。三者共用模型、纹理及项目的 tinyobjloader 依赖。[Loading models](https://vulkan-tutorial.com/Loading_models)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
@@ -166,8 +166,8 @@ cmake --build --preset engine-debug --target horizon-test-legacy
 ctest --test-dir build/conan/engine/debug -C Debug -L legacy --output-on-failure
 ```
 
-运行 `HorizonExamples --list` 查看全部示例模式。使用 `HorizonExamples disney_pbr` 或
-`HorizonExamples edsl_disney_pbr` 启动 Disney PBR 材质示例的手写 GLSL 或 EDSL 版本。
+运行 `HorizonExamples --list` 查看全部示例模式。使用 `HorizonExamples disney_slang` 或
+`HorizonExamples disney_edsl` 启动 Disney PBR 材质示例的手写 Slang 或 EDSL 版本。
 
 源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
 
@@ -223,7 +223,7 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
 Horizon 通过 `vkCmdDrawIndirect` 提交批次，顶点输入状态为空。手写 shader 自行声明所用字段、读取顶点，并决定各阶段之间传递什么。入口为 `main`。下面的字段名仅供对照，二进制接口由字节偏移、宽度和数组步长决定。
 
-Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，直接调用 `RasterizedPipelineObject::compile()` 也采用同一布局。顶点 lambda 可以写成 `[](Float3 position, Float2 uv)`，Helicon 按形参顺序从顶点记录读取属性。手写 shader 可参考 [手写 GLSL 顶点着色器](examples/shaders/baseline_vert.glsl) 与[片元着色器](examples/shaders/baseline_frag.glsl)。
+Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，直接调用 `RasterizedPipelineObject::compile()` 也采用同一布局。顶点 lambda 可以写成 `[](Float3 position, Float2 uv)`，Helicon 按形参顺序从顶点记录读取属性。手写 shader 可参考 [手写 Slang 顶点着色器](examples/example_baseline_slang/baseline_vert.slang) 与[片元着色器](examples/example_baseline_slang/baseline_frag.slang)。
 
 | 数据 | 字节偏移与字段 | 大小 |
 | --- | --- | --- |
@@ -235,7 +235,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
 - **读取 draw 参数**。参数块字节地址为 `parameters + 4 × parameterWord`，内容和对齐由写入者与 shader 约定。`batch.draw()` 把每块起点对齐到 16 字节。使用外部命令缓冲的 `drawIndirect()` 时，命令使用几何表下标 0，写入者负责索引范围和参数偏移。
 - **首实例**。缺少 `drawIndirectFirstInstance` 的设备只支持 `firstInstance = 0`。如果外部命令的生产者保证每个 packet 的该字段都为零，可在 `drawIndirect()` 末尾传入 `IndirectFirstInstance::AlwaysZero`，包括带参数区的重载。
-- **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。手写 GLSL 示例使用 2，EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
+- **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
 
 ### Descriptor Set 约定

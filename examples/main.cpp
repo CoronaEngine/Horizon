@@ -1,18 +1,10 @@
 #include "example_baseline/example_baseline.h"
-#include "example_edsl/example_edsl.h"
-#include "example_glsl/example_glsl.h"
-#include "example_drawstress/example_drawstress.h"
-#include "example_sponza/example_sponza.h"
-#include "example_shadowvolumes/example_shadowvolumes.h"
-#include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
-#include "example_ssr/example_ssr.h"
-#include "example_edsl_ssr/example_edsl_ssr.h"
-#include "example_disney_pbr/example_disney_pbr.h"
-#include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
-#include "example_rsm/example_rsm.h"
-#include "example_edsl_rsm/example_edsl_rsm.h"
-#include "example_edsl_sponza/example_edsl_sponza.h"
-#include "example_edsl_drawstress/example_edsl_drawstress.h"
+#include "example_baseline_edsl/example_baseline_edsl.h"
+#include "example_baseline_slang/example_baseline_slang.h"
+#include "example_disney_edsl/example_disney_edsl.h"
+#include "example_disney_slang/example_disney_slang.h"
+#include "example_drawstress_edsl/example_drawstress_edsl.h"
+#include "example_drawstress_slang/example_drawstress_slang.h"
 #include <array>
 #include <exception>
 
@@ -45,28 +37,21 @@ int main(int argc, char **argv)
 #endif
     horizon::core::initialize_logging(logging);
 
-    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : std::string_view("sponza");
+    constexpr std::string_view default_mode = "baseline";
+    const std::string_view mode = argc > 1 ? std::string_view(argv[1]) : default_mode;
 
     struct Example { std::string_view name; void (*run)(); };
     static constexpr Example examples[] = {
         {"baseline", run_example_baseline},
-        {"disney_pbr", [] { run_example_disney_pbr(); }},
-        {"drawstress", [] { run_example_drawstress(); }},
-        {"edsl", run_example_edsl},
-        {"edsl_disney_pbr", run_example_edsl_disney_pbr},
-        {"edsl_drawstress", run_example_edsl_drawstress},
-        {"edsl_rsm", run_example_edsl_rsm},
-        {"edsl_shadowvolumes", run_example_edsl_shadowvolumes},
-        {"edsl_sponza", run_example_edsl_sponza},
-        {"edsl_ssr", run_example_edsl_ssr},
-        {"glsl", run_example_glsl},
-        {"rsm", run_example_rsm},
-        {"shadowvolumes", run_example_shadowvolumes},
-        {"sponza", run_example_sponza},
-        {"ssr", run_example_ssr},
+        {"baseline_edsl", run_example_baseline_edsl},
+        {"baseline_slang", run_example_baseline_slang},
+        {"disney_edsl", run_example_disney_edsl},
+        {"disney_slang", run_example_disney_slang},
+        {"drawstress_edsl", run_example_drawstress_edsl},
+        {"drawstress_slang", run_example_drawstress_slang},
     };
     if (mode == "--list" || mode == "--help" || (argc > 2 && std::string_view(argv[2]) == "--help")) {
-        if (mode != "--list") std::cout << "Usage: HorizonExamples [mode] (default: sponza)\n";
+        if (mode != "--list") std::cout << "Usage: HorizonExamples [mode] (default: " << default_mode << ")\n";
         for (const auto& example : examples) std::cout << example.name << '\n';
         return 0;
     }
