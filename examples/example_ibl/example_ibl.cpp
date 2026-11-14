@@ -5,7 +5,7 @@
 //  - Horizon 的每个 RasterizerPipeline pass 都会 clear 颜色附件，因此天空盒与
 //    网格共用同一个 pipeline（shader 内用 isSkybox 分支），单 pass 完成；
 //  - 每个球的变换和材质随 draw 一起复制到批次的参数表。
-//  - imgui 面板换成键盘交互（启动时在控制台打印按键说明）。
+//  - 键盘控制光照和材质（启动时在控制台打印按键说明）。
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -21,9 +21,6 @@
 #include "legacy_common.h"
 #include "example_edsl_ibl/example_edsl_ibl.h"
 #include "Horizon_old.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/ibl_vert.glsl)
 #include GLSL(shaders/ibl_frag.glsl)
@@ -319,7 +316,7 @@ IblMesh load_bgfx_mesh(const std::filesystem::path& path)
 }
 
 // ============================================================================
-// 交互状态：轨道相机 + 设置（对应 bgfx 版的 imgui 面板）
+// 交互状态：轨道相机 + 设置
 // ============================================================================
 
 struct Settings
@@ -405,8 +402,6 @@ struct InputContext
 
 void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
 {
-    if (ImGui::GetIO().WantCaptureKeyboard)
-        return;
     if (action != GLFW_PRESS)
         return;
 
@@ -439,14 +434,6 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 void cursor_callback(GLFWwindow* window, double x, double y)
 {
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
-    // UI 捕获鼠标时不驱动相机，但仍更新 prev，避免离开 UI 后镜头跳变。
-    if (ImGui::GetIO().WantCaptureMouse)
-    {
-        context->prev_x = x;
-        context->prev_y = y;
-        context->has_prev = true;
-        return;
-    }
     if (!context->has_prev)
     {
         context->prev_x = x;
@@ -470,8 +457,6 @@ void cursor_callback(GLFWwindow* window, double x, double y)
 
 void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
 {
-    if (ImGui::GetIO().WantCaptureMouse)
-        return;
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
     context->camera.dolly(static_cast<float>(-dy) * 0.05f);
 }
@@ -557,8 +542,6 @@ void run_ibl_scene()
         return m;
     }();
 
-    HorizonImGuiLayer ui(window, ibl_width, ibl_height);
-
     legacy_example::Benchmark benchmark(mode, ibl_width, ibl_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
@@ -566,12 +549,6 @@ void run_ibl_scene()
         benchmark.begin_frame();
         render_executor.waitForDeferredResources();
         glfwPollEvents();
-        if (!benchmark.offscreen()) {
-            ui.new_frame();
-            ImGui::Begin("Hello");
-            ImGui::Text("hello world!");
-            ImGui::End();
-        }
 
         const float dt = benchmark.dt();
 
@@ -666,13 +643,9 @@ void run_ibl_scene()
         record(sky_ib, sky_vb, RasterDraw{.indexCount = 3});
 
         benchmark.submit(render_executor, std::move(batch));
-        if (benchmark.offscreen()) {
-            benchmark.end_frame(window, draw_count, final_output_image, render_executor);
-        } else {
-            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
-            display.wait(*frame_output.executor) << frame_output.image;
-            benchmark.end_frame(window, draw_count, frame_output.image, *frame_output.executor);
-        }
+        if (!benchmark.offscreen())
+            display.wait(render_executor) << final_output_image;
+        benchmark.end_frame(window, draw_count, final_output_image, render_executor);
     }
 
     render_executor.waitForDeferredResources();

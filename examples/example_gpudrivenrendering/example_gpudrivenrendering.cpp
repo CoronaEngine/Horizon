@@ -16,9 +16,6 @@
 #include "legacy_common.h"
 #include <span>
 #include "Horizon_old.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/gdr_occlusion_vert.glsl)
 #include GLSL(shaders/gdr_occlusion_frag.glsl)
@@ -180,7 +177,6 @@ struct CameraInput
     OrbitCamera camera;
     MouseState mouse;
     int32_t scroll_z = 0;
-    GLFWscrollfun imgui_scroll = nullptr;
 };
 
 struct PosVertex
@@ -520,21 +516,16 @@ void run_example_gpudrivenrendering()
     HardwareExecutor render_executor;
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
-    HorizonImGuiLayer ui(window, gdr_width, gdr_height);
-
     CameraInput camera_input;
     glfwSetWindowUserPointer(window, &camera_input);
-    // Chain onto ImGui's scroll callback so both UI and camera receive wheel events.
-    camera_input.imgui_scroll = glfwSetScrollCallback(
+    glfwSetScrollCallback(
         window,
-        [](GLFWwindow* win, double dx, double dy)
+        [](GLFWwindow* win, double, double dy)
         {
             auto* input = static_cast<CameraInput*>(glfwGetWindowUserPointer(win));
             if (input == nullptr)
                 return;
             input->scroll_z += static_cast<int32_t>(dy);
-            if (input->imgui_scroll != nullptr)
-                input->imgui_scroll(win, dx, dy);
         });
 
     const float main_aspect = static_cast<float>(gdr_width) / static_cast<float>(gdr_height);
@@ -559,8 +550,6 @@ void run_example_gpudrivenrendering()
     compact.u.cullingConfig =
         glm::vec4(float(k_total_instances), float(instances_pow2), 0.0f, float(k_num_props));
 
-    bool use_compacted_instances = true;
-    bool hiz_enable = true; // default: current full Hi-Z ΓåÆ occlude ΓåÆ compact path
     bool first_frame = true;
 
     auto prev_time = std::chrono::high_resolution_clock::now();
@@ -570,25 +559,6 @@ void run_example_gpudrivenrendering()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-
-        ImGui::Begin("GPU Driven Rendering");
-        ImGui::Checkbox("Use GPU-culled instances", &use_compacted_instances);
-        ImGui::Checkbox("Hi-Z Occlusion", &hiz_enable);
-        ImGui::Text("Instances: ground %u, walls %u, short %u, tall %u (total %u)",
-                    scene.props[0].instance_count,
-                    scene.props[1].instance_count,
-                    scene.props[2].instance_count,
-                    scene.props[3].instance_count,
-                    k_total_instances);
-        ImGui::Text("Hi-Z: %ux%u, mips %u, instancesPow2 %u%s",
-                    hi_z_width,
-                    hi_z_height,
-                    num_hi_z_mips,
-                    instances_pow2,
-                    hiz_enable ? "" : " (disabled)");
-        ImGui::TextUnformatted("LMB orbit  RMB/scroll dolly");
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -619,15 +589,12 @@ void run_example_gpudrivenrendering()
                                       gdr_width,
                                       gdr_height);
 
-            if (!ImGui::GetIO().WantCaptureMouse)
-            {
-                if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
-                    camera_input.camera.orbit(camera_input.mouse.dx, camera_input.mouse.dy);
-                else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
-                    camera_input.camera.dolly(camera_input.mouse.dx + camera_input.mouse.dy);
-                else if (camera_input.mouse.scroll != 0)
-                    camera_input.camera.dolly(static_cast<float>(camera_input.mouse.scroll) * 0.05f);
-            }
+            if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+                camera_input.camera.orbit(camera_input.mouse.dx, camera_input.mouse.dy);
+            else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+                camera_input.camera.dolly(camera_input.mouse.dx + camera_input.mouse.dy);
+            else if (camera_input.mouse.scroll != 0)
+                camera_input.camera.dolly(static_cast<float>(camera_input.mouse.scroll) * 0.05f);
 
             camera_input.camera.update(dt);
         }
@@ -646,7 +613,7 @@ void run_example_gpudrivenrendering()
         const uint32_t indirect_id = indirect_buffer.storeDescriptor();
 
         occlusion_rasterizer.vp.instanceBufferID = instance_in_id;
-        const bool culled = use_compacted_instances && hiz_enable && !first_frame;
+        const bool culled = !first_frame;
         main_rasterizer.vp.instanceBufferID = culled ? instance_out_id : instance_in_id;
 
         occlude.pc.bboxBufferID = bbox_id;
@@ -662,7 +629,6 @@ void run_example_gpudrivenrendering()
 
         const uint32_t occlude_groups_x = (k_total_instances + 63u) / 64u;
 
-        if (hiz_enable)
         {
             occlusion_rasterizer.uses({{instance_in_buffer, ResourceAccess::Read}});
             auto depth = occlusion_rasterizer.beginBatch(hi_z_width, hi_z_height);
@@ -703,8 +669,7 @@ void run_example_gpudrivenrendering()
         render_executor << std::move(batch);
         render_executor.commit();
         first_frame = false;
-        auto output = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*output.executor) << output.image;
+        display.wait(render_executor) << final_output_image;
     }
 
     render_executor.waitForDeferredResources();

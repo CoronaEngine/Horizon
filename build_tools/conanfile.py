@@ -1,5 +1,3 @@
-import os
-
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.cmake import CMakeDeps, CMakeToolchain, cmake_layout
@@ -34,7 +32,6 @@ class HorizonConan(ConanFile):
         "with_ocarina_tests": [True, False],
         "with_hardcode_shaders": [True, False],
         "with_tracy": [True, False],
-        "enable_imgui_render": [True, False],
     }
 
     default_options = {
@@ -49,7 +46,6 @@ class HorizonConan(ConanFile):
         "with_ocarina_tests": False,
         "with_hardcode_shaders": False,
         "with_tracy": True,
-        "enable_imgui_render": True,
         "spirv-tools/*:shared": False,
         "spirv-tools/*:build_executables": False,
         "glfw/*:shared": False,
@@ -90,7 +86,6 @@ class HorizonConan(ConanFile):
             self.requires("glfw/3.4")
             self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
-            self.requires("imgui/1.92.8")
             if bool(self.options.with_tracy):
                 self.requires("tracy/0.13.1", options={"on_demand": True})
 
@@ -127,11 +122,4 @@ class HorizonConan(ConanFile):
         variables["HORIZON_BUILD_OCARINA_TESTS"] = bool(self.options.with_ocarina_tests)
         variables["HORIZON_ENABLE_HARDCODE_SHADERS"] = bool(self.options.with_hardcode_shaders)
         variables["HORIZON_ENABLE_TRACY"] = bool(self.options.with_tracy)
-        variables["HORIZON_ENABLE_IMGUI_RENDER"] = bool(self.options.enable_imgui_render)
-        if bool(self.options.with_examples):
-            variables["HORIZON_IMGUI_BINDINGS_DIR"] = os.path.join(
-                self.dependencies["imgui"].package_folder,
-                "res",
-                "bindings",
-            ).replace("\\", "/")
         toolchain.generate()

@@ -14,9 +14,6 @@
 #include "legacy_common.h"
 #include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
 #include "Horizon_old.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/disney_pbr_vert.glsl)
 #include GLSL(shaders/disney_pbr_frag.glsl)
@@ -387,13 +384,6 @@ void apply_material(DisneyDrawParameters& draw, const DisneyMaterial& material, 
 void cursor_callback(GLFWwindow* window, double x, double y)
 {
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
-    if (ImGui::GetIO().WantCaptureMouse)
-    {
-        context->prev_x = x;
-        context->prev_y = y;
-        context->has_prev = true;
-        return;
-    }
     if (!context->has_prev)
     {
         context->prev_x = x;
@@ -417,8 +407,6 @@ void cursor_callback(GLFWwindow* window, double x, double y)
 
 void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
 {
-    if (ImGui::GetIO().WantCaptureMouse)
-        return;
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
     context->camera.dolly(static_cast<float>(-dy) * 0.05f);
 }
@@ -469,8 +457,6 @@ void run_disney_pbr_scene()
         return m;
     }();
 
-    HorizonImGuiLayer ui(window, disney_width, disney_height);
-
     legacy_example::Benchmark benchmark(mode, disney_width, disney_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
@@ -479,34 +465,6 @@ void run_disney_pbr_scene()
         render_executor.waitForDeferredResources();
         glfwPollEvents();
         Settings& s = input.settings;
-        if (!benchmark.offscreen()) {
-            ui.new_frame();
-            ImGui::Begin(Edsl ? "Disney PBR Chart (EDSL)" : "Disney PBR Chart");
-            ImGui::Text("10 rows (parameter) x 11 columns (0.0 .. 1.0)");
-            ImGui::Text("Rows: subsurface, metallic, specular, specularTint, roughness,");
-            ImGui::Text("      anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss");
-            const char* probe_names[] = { "Bolonga", "Kyoto" };
-            ImGui::Combo("Light Probe", &s.current_probe, probe_names, IM_ARRAYSIZE(probe_names));
-            ImGui::SliderFloat("Exposure", &s.exposure, -4.0f, 4.0f);
-            ImGui::Checkbox("Direct Diffuse", &s.do_diffuse);
-            ImGui::Checkbox("Direct Specular", &s.do_specular);
-            ImGui::Checkbox("IBL Diffuse", &s.do_diffuse_ibl);
-            ImGui::Checkbox("IBL Specular", &s.do_specular_ibl);
-            if constexpr (Edsl) {
-                ImGui::Separator();
-                ImGui::Checkbox("Auto Branch Switch", &s.auto_branch_switch);
-                ImGui::SliderFloat("Branch Interval (s)", &s.branch_switch_interval, 0.25f, 5.0f);
-                ImGui::Text("Branch state: direct=%s ibl=%s",
-                            (s.do_diffuse || s.do_specular) ? "ON" : "OFF",
-                            (s.do_diffuse_ibl || s.do_specular_ibl) ? "ON" : "OFF");
-                ImGui::Text("Toggle the checkboxes or wait for the auto switch;");
-                ImGui::Text("the fragment shader must relink and swap its pipeline.");
-            }
-            ImGui::ColorEdit3("Light Color", &s.light_col.x);
-            ImGui::SliderFloat3("Light Direction", &s.light_dir.x, -1.0f, 1.0f);
-            ImGui::Text("Camera: LMB orbit, RMB dolly, MMB rotate env, scroll zoom");
-            ImGui::End();
-        }
 
         const float dt = benchmark.dt();
         if constexpr (Edsl) {
@@ -576,13 +534,9 @@ void run_disney_pbr_scene()
         }
 
         benchmark.submit(render_executor, std::move(batch));
-        if (benchmark.offscreen()) {
-            benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
-        } else {
-            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
-            display.wait(*frame_output.executor) << frame_output.image;
-            benchmark.end_frame(window, chart_sphere_count, frame_output.image, *frame_output.executor);
-        }
+        if (!benchmark.offscreen())
+            display.wait(render_executor) << final_output_image;
+        benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
     }
 
     render_executor.waitForDeferredResources();

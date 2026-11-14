@@ -9,7 +9,6 @@
 // 场景：shadowmaps 场景（550 地面 + bunny + hollowcube + cube + 环形柱子、
 // 聚光灯绕场景旋转）+ 两面彩色墙（橙 x=-35、蓝 z=+35，给间接光提供颜色源），
 // 每个物体带 albedo（逐 draw 参数），相机固定 (0,60,-105) 俯视。
-// imgui 可调：间接光强度 / 采样半径 / 光强 / debug 视图（Final|Direct|Indirect）。
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -25,9 +24,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/rsm_pack_vert.glsl)
 #include GLSL(shaders/rsm_pack_frag.glsl)
@@ -391,14 +387,12 @@ void run_example_rsm()
 
     const glm::vec3 light_color(1.0f, 0.96f, 0.9f);
 
-    // ---- RSM 可调参数 ----
+    // ---- RSM 参数 ----
     float indirect_intensity = 4.0f;
     float sample_radius = 0.30f; // 光空间 uv 半径
     float light_power = 850.0f;
     float ambient = 0.03f;
     int debug_mode = 0;
-
-    HorizonImGuiLayer ui(window, rsm_width, rsm_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
@@ -417,14 +411,6 @@ void run_example_rsm()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("RSM");
-        ImGui::SliderFloat("Indirect Intensity", &indirect_intensity, 0.0f, 20.0f);
-        ImGui::SliderFloat("Sample Radius", &sample_radius, 0.02f, 0.6f);
-        ImGui::SliderFloat("Light Power", &light_power, 100.0f, 3000.0f);
-        ImGui::SliderFloat("Ambient", &ambient, 0.0f, 0.2f);
-        ImGui::Combo("Debug View", &debug_mode, "Final\0Direct Only\0Indirect Only\0");
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -530,8 +516,7 @@ void run_example_rsm()
                             << scene_rasterizer;
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
     }
 
     render_executor.waitForDeferredResources();

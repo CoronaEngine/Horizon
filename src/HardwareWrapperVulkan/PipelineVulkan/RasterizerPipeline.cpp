@@ -300,7 +300,7 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
 
-    // 配置颜色混合（ImGui 标准 Alpha 混合）
+    // 配置颜色混合
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;

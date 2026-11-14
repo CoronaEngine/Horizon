@@ -1,12 +1,10 @@
 // 屏幕空间反射（SSR）示例的 EDSL 版本，移植自 example_ssr（GLSL 版）。
 //
 // 材质参数升级：完整 Disney Principled BRDF（对齐 example_disney_pbr）。
-// 所有非 albedo 参数通过 imgui 实时可调，以 EDSL proxy 变量（shared uniform）
-// 传入 shader，不再是 constexpr 编译期常量。
+// 所有非 albedo 参数以 EDSL proxy 变量（shared uniform）传入 shader。
 //
 // EDSL 已知限制（与 GLSL 版的差异，不因本次升级改变）：
-// - trace/refine 步进循环仍为 C++ 侧定长展开（kTraceSteps/kRefineSteps）；
-//   Steps/Refine 因此仍不可通过 imgui 调节。
+// - trace/refine 步进循环仍为 C++ 侧定长展开（kTraceSteps/kRefineSteps）。
 // - VNDF 采样现已升级为各向异性 GGX（aniso 参数生效）。
 // - clearcoat lobe 已加入 trace 的三路 lobe 选择。
 
@@ -23,9 +21,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
@@ -679,7 +674,7 @@ void run_example_edsl_ssr()
     ComputePipeline trace_compute(trace_cs, ktm::uvec3(8, 8, 1), example::shaderOptions());
     ComputePipeline composite_compute(composite_cs, ktm::uvec3(8, 8, 1), example::shaderOptions());
 
-    const bool pathtrace_env = std::getenv("SSR_PATHTRACE") != nullptr;
+    const bool pathtrace_mode = std::getenv("SSR_PATHTRACE") != nullptr;
 
     HardwareExecutor render_executor;
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
@@ -704,20 +699,16 @@ void run_example_edsl_ssr()
     constexpr float ambient         = 0.22f;
 
 
-    // ---- Disney 材质（全局共享，imgui 可调）----
+    // ---- Disney 材质（全局共享）----
     DisneyMaterial mat;
 
-    // ---- SSR 可调参数 ----
+    // ---- SSR 参数 ----
     bool  ssr_enabled  = true;
     float max_distance = 12.0f;
     float thickness    = 0.55f;
     bool  use_jitter   = true;
     float intensity    = 1.0f;
     int   debug_mode   = 0;
-
-    bool pathtrace_mode = pathtrace_env;
-
-    HorizonImGuiLayer ui(window, essr_width, essr_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
@@ -733,32 +724,6 @@ void run_example_edsl_ssr()
         const float time = std::chrono::duration<float>(now - start_time).count();
         prev_time = now;
 
-        ui.new_frame();
-        ImGui::Begin("SSR (EDSL)");
-
-        ImGui::SeparatorText("SSR");
-        ImGui::Checkbox("Enable SSR", &ssr_enabled);
-        ImGui::SliderFloat("Max Distance", &max_distance, 1.0f, 40.0f);
-        ImGui::SliderFloat("Thickness",    &thickness,    0.02f, 3.0f);
-        ImGui::Checkbox("Jitter Start",    &use_jitter);
-        ImGui::SliderFloat("Intensity",    &intensity,    0.0f,  2.0f);
-        ImGui::Combo("Debug View", &debug_mode, "Final\0SSR Color\0SSR Weight\0Reflectivity\0");
-        ImGui::Checkbox("Path Trace (Disney)", &pathtrace_mode);
-        ImGui::Text("Steps: %d  Refine: %d (compiled in)", kTraceSteps, kRefineSteps);
-
-        ImGui::SeparatorText("Disney Material (shared)");
-        ImGui::SliderFloat("Metallic",        &mat.metallic,        0.0f, 1.0f);
-        ImGui::SliderFloat("Roughness",       &mat.roughness,       0.0f, 1.0f);
-        ImGui::SliderFloat("Specular",        &mat.specular,        0.0f, 1.0f);
-        ImGui::SliderFloat("Specular Tint",   &mat.specular_tint,   0.0f, 1.0f);
-        ImGui::SliderFloat("Subsurface",      &mat.subsurface,      0.0f, 1.0f);
-        ImGui::SliderFloat("Anisotropic",     &mat.anisotropic,     0.0f, 1.0f);
-        ImGui::SliderFloat("Sheen",           &mat.sheen,           0.0f, 1.0f);
-        ImGui::SliderFloat("Sheen Tint",      &mat.sheen_tint,      0.0f, 1.0f);
-        ImGui::SliderFloat("Clearcoat",       &mat.clearcoat,       0.0f, 1.0f);
-        ImGui::SliderFloat("Clearcoat Gloss", &mat.clearcoat_gloss, 0.0f, 1.0f);
-
-        ImGui::End();
 
         fps_accum_seconds += dt;
         ++fps_frame_count;
@@ -848,8 +813,7 @@ void run_example_edsl_ssr()
                             << composite_compute((essr_width + 7) / 8, (essr_height + 7) / 8, 1);
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
         ++frame_index;
     }
 

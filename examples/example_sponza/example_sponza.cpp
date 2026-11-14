@@ -10,13 +10,12 @@
 //   1  G-buffer       albedo+metallic / 世界法线+roughness / device depth
 //   1.5 SSAO + blur   (不变)
 //   2  光照累积       Disney Principled BRDF(G-buffer 取 baseColor/metallic/
-//                     roughness,其余参数全局滑条);太阳分支附加 RSM gather
+//                     roughness,其余参数全局共享);太阳分支附加 RSM gather
 //                     (32 采样,Dachsbacher & Stamminger 2005)与 3x3 PCF 阴影
 //   3  combine        直接光 + IBL/环境光×AO → 线性 HDR(a=reflectivity)
 //   4-6 SSR           线性深度 → 屏幕空间步进反射 → 合成 + 曝光 + filmic
 //
-// 交互:RMB 拖动视角,WASD/QE 移动,G 循环 debug 视图;imgui 全参数可调
-// (太阳方位/仰角、Disney 材质、RSM、SSR、IBL、SSAO、曝光)。
+// 交互:RMB 拖动视角,WASD/QE 移动,G 循环切换 debug 视图。
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -33,9 +32,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/sponza_shadow_vert.glsl)
 #include GLSL(shaders/sponza_shadow_frag.glsl)
@@ -109,13 +105,12 @@ constexpr uint32_t spz_height = 720;
 constexpr int spz_max_lights = 128;
 constexpr uint32_t spz_shadow_map_size = 1024;  // 从2048降低，减少4倍shadow pass开销
 
-// Everything the ImGui panel can drive. 默认值按"白天、斜射太阳"标定:
+// 场景默认值按"白天、斜射太阳"标定:
 // Disney 直接光是能量守恒的(diffuse 带 1/π),太阳强度要比旧 Blinn 版大一个
 // 量级;点光源默认关(白天场景)。
 struct Tuning
 {
     // --- sun(白天,斜射平行光)---
-    // Beauty preset captured from the live ImGui session.
     float sun_elevation_deg = 79.044f;
     float sun_azimuth_deg = -0.333f;
     float sun_intensity = 7.83f;
@@ -945,8 +940,6 @@ void run_example_sponza()
     combine_rasterizer.parameters.gDepthIndex = gbuffer_depth_val.storeSampledDescriptor();
     combine_rasterizer.parameters.texCubeIrrIndex = env_irradiance.storeSampledDescriptor();
     combine_rasterizer.parameters.texCubeLodIndex = env_radiance.storeSampledDescriptor();
-    // fpc.ambient (rgb: ambient floor) is refreshed every frame from the ImGui
-    // panel; see the combine block in the render loop.
 
     // SSR compute 链:线性深度 → 步进反射 → 合成+曝光+filmic
     ComputePipeline<ssr_linear_depth_compute_glsl_t> ssr_linear_depth_compute;
@@ -994,7 +987,6 @@ void run_example_sponza()
         camera.yaw = std::atan2(dir.x, dir.z);
     }
     camera.speed = glm::length(scene_extent) * 0.12f;
-    const FlyCamera default_camera = camera;
 
     // ---- SSR 演示镜:中殿反射池 ----
     // 水平镜面能稳定反射当前屏幕里的拱廊、二层和天空。旧版额外放置的
@@ -1112,7 +1104,7 @@ void run_example_sponza()
     const uint32_t mirror_frame_slot = scene_draw_count + 1;
     const uint32_t total_draw_slots = scene_draw_count + 2;
 
-    // 场景材质来自资产，是静态的；只有镜面两槽随 imgui 变，每帧改那两条即可。
+    // 场景材质来自资产，是静态的；最后两槽供镜面使用。
     std::vector<PerDrawMaterial> geom_materials(total_draw_slots);
     std::vector<PerDrawShadowMaterial> shadow_materials(total_draw_slots);
     for (size_t submesh_index = 0; submesh_index < asset.submeshes.size(); ++submesh_index)
@@ -1207,8 +1199,7 @@ void run_example_sponza()
     const glm::vec3 light_area(scene_extent.x * 0.40f, scene_extent.y * 0.22f, scene_extent.z * 0.16f);
     const glm::vec3 light_origin(scene_center.x, scene_min.y + scene_extent.y * 0.22f, scene_center.z);
 
-    // Sun matrices are rebuilt per frame: the direction is imgui-driven
-    // (azimuth/elevation, 白天斜射). Ortho projection over the whole scene.
+    // The orthographic sun projection covers the whole scene.
     const float scene_radius = glm::length(scene_extent) * 0.5f;
     const auto build_sun_view_proj = [&](const glm::vec3& sun_direction) {
         // Guard the up vector in case the sun ever points straight down.
@@ -1237,27 +1228,25 @@ void run_example_sponza()
     const glm::vec4 ssr_depth_unpack(p32, -p22, 0.0f, 0.0f);
     const glm::vec4 ssr_ndc_to_view(2.0f / p00, 2.0f / p11, -1.0f / p00, -1.0f / p11);
 
-    HorizonImGuiLayer ui(window, spz_width, spz_height);
-
     // 世界空间量按场景尺度初始化:旧 Khronos 资产是 cm 级(~3700 单位跨度),
     // Intel 资产是米级(~30 单位),写死的默认值只能对一个尺度成立。
     const float scene_diag = glm::length(scene_extent);
-    const auto make_default_tuning = [&] {
-        Tuning defaults;
-        // The Intel PBR scene uses the exact live beauty preset above. Legacy
-        // centimeter-scale assets still need world-space controls rescaled.
-        if (asset.version != hzms_version_pbr)
-        {
-            defaults.ssr_max_distance = scene_diag * 0.55f;
-            defaults.ssr_thickness = scene_diag * 0.0035f;
-            defaults.point_radius = scene_diag * 0.10f;
-            defaults.ssao_radius = scene_diag * 0.015f;
-            defaults.ssao_bias = scene_diag * 0.00025f;
-            defaults.ssao_blur_depth_sigma = scene_diag * 0.006f;
-        }
-        return defaults;
-    };
-    Tuning tuning = make_default_tuning();
+    Tuning tuning;
+    if (asset.version != hzms_version_pbr)
+    {
+        tuning.ssr_max_distance = scene_diag * 0.55f;
+        tuning.ssr_thickness = scene_diag * 0.0035f;
+        tuning.point_radius = scene_diag * 0.10f;
+        tuning.ssao_radius = scene_diag * 0.015f;
+        tuning.ssao_bias = scene_diag * 0.00025f;
+        tuning.ssao_blur_depth_sigma = scene_diag * 0.006f;
+    }
+    const float sun_el = glm::radians(tuning.sun_elevation_deg);
+    const float sun_az = glm::radians(tuning.sun_azimuth_deg);
+    const glm::vec3 sun_direction = glm::normalize(glm::vec3(
+        std::cos(sun_el) * std::sin(sun_az), -std::sin(sun_el), std::cos(sun_el) * std::cos(sun_az)));
+    const glm::mat4 sun_view_proj = build_sun_view_proj(sun_direction);
+    const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
     const float rsm_clamp_d2 = (scene_radius * 0.02f) * (scene_radius * 0.02f);
     uint32_t frame_index = 0;
 
@@ -1275,108 +1264,6 @@ void run_example_sponza()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::SetNextWindowSize(ImVec2(440.0f, 700.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Sponza");
-        ImGui::Text("RMB drag: look   WASD: move   Q/E: down/up   Shift: fast");
-        ImGui::Text("submeshes %zu   draw lights %d/%d",
-                    asset.submeshes.size(), visible_lights, tuning.point_light_count + 1);
-        ImGui::Separator();
-
-        int debug_mode = static_cast<int>(g_input.debug_mode);
-        if (ImGui::Combo("G-buffer view", &debug_mode, debug_mode_names.data(),
-                         static_cast<int>(debug_mode_names.size())))
-            g_input.debug_mode = static_cast<uint32_t>(debug_mode);
-
-        if (ImGui::CollapsingHeader("Sun (daylight)", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::SliderFloat("elevation", &tuning.sun_elevation_deg, 5.0f, 89.0f);
-            ImGui::SliderFloat("azimuth", &tuning.sun_azimuth_deg, -180.0f, 180.0f);
-            ImGui::SliderFloat("sun intensity", &tuning.sun_intensity, 0.0f, 10.0f);
-            ImGui::ColorEdit3("sun colour", &tuning.sun_color.x);
-            ImGui::Checkbox("cast shadows", &tuning.sun_shadow);
-            if (tuning.sun_shadow)
-                ImGui::SliderFloat("shadow bias", &tuning.shadow_bias, 0.0f, 0.01f, "%.4f");
-        }
-
-        if (ImGui::CollapsingHeader("RSM indirect (1-bounce)", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Checkbox("enable##rsm", &tuning.rsm_enable);
-            ImGui::SliderFloat("intensity##rsm", &tuning.rsm_intensity, 0.0f, 200.0f);
-            ImGui::SliderFloat("sample radius (uv)", &tuning.rsm_radius, 0.02f, 0.5f);
-        }
-
-        if (ImGui::CollapsingHeader("Disney BRDF"))
-        {
-            ImGui::TextWrapped("Sponza mesh: Disney diffuse only. Metallic, dielectric"
-                               " specular, sheen and clearcoat are disabled; the reflection"
-                               " pool is authored separately as a metal.");
-            ImGui::SliderFloat("subsurface", &tuning.disney_subsurface, 0.0f, 1.0f);
-        }
-
-        if (ImGui::CollapsingHeader("SSR", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Checkbox("enable##ssr", &tuning.ssr_enable);
-            ImGui::Checkbox("show mirrors", &tuning.mirror_enable);
-            ImGui::SliderFloat("mirror roughness", &tuning.mirror_roughness, 0.0f, 0.5f);
-            ImGui::SliderFloat("intensity##ssr", &tuning.ssr_intensity, 0.0f, 2.0f);
-            ImGui::SliderFloat("max distance", &tuning.ssr_max_distance, scene_diag * 0.02f, scene_diag * 1.5f);
-            ImGui::SliderInt("steps", &tuning.ssr_steps, 4, 128);
-            ImGui::SliderFloat("thickness", &tuning.ssr_thickness, scene_diag * 0.0005f, scene_diag * 0.05f);
-            ImGui::SliderInt("refine steps", &tuning.ssr_refine_steps, 0, 8);
-            ImGui::Checkbox("jitter", &tuning.ssr_jitter);
-            ImGui::SliderFloat("fresnel power", &tuning.ssr_fresnel_power, 1.0f, 8.0f);
-            ImGui::Combo("SSR debug", &tuning.ssr_debug, "off\0reflection\0weight\0reflectivity\0");
-        }
-
-        if (ImGui::CollapsingHeader("Point lights"))
-        {
-            ImGui::SliderInt("count", &tuning.point_light_count, 0, spz_max_lights);
-            ImGui::SliderFloat("intensity", &tuning.point_intensity, 0.0f, 1.0f);
-            ImGui::SliderFloat("radius", &tuning.point_radius, scene_diag * 0.01f, scene_diag * 0.4f);
-            ImGui::SliderFloat("falloff start", &tuning.point_inner, 0.0f, 0.95f);
-            ImGui::Checkbox("animate", &tuning.animate_lights);
-            ImGui::SameLine();
-            ImGui::SliderFloat("speed", &tuning.light_speed, 0.0f, 1.5f);
-        }
-
-        if (ImGui::CollapsingHeader("Indirect light (IBL)", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::SeparatorText("IBL probe");
-            ImGui::SliderFloat("irradiance (diffuse)", &tuning.irradiance_scale, 0.0f, 2.0f);
-            ImGui::SliderFloat("radiance (specular)", &tuning.radiance_scale, 0.0f, 2.0f);
-            ImGui::SliderFloat("environment rotation", &tuning.env_rotation_deg, -180.0f, 180.0f);
-            ImGui::ColorEdit3("ambient floor", &tuning.ambient_floor.x);
-
-            // The SSAO passes always run; strength 0 just makes the buffer
-            // uniform white, which is the visual equivalent of switching it off.
-            ImGui::SeparatorText("Ambient occlusion");
-            ImGui::SliderFloat("AO strength (0 = off)", &tuning.ssao_intensity, 0.0f, 2.0f);
-            ImGui::SliderFloat("AO radius", &tuning.ssao_radius, scene_diag * 0.001f, scene_diag * 0.06f);
-            ImGui::SliderFloat("AO bias", &tuning.ssao_bias, 0.0f, scene_diag * 0.003f);
-        }
-
-        if (ImGui::CollapsingHeader("Output", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::SliderFloat("exposure", &tuning.exposure, 0.1f, 4.0f);
-            ImGui::SeparatorText("Highlight bloom");
-            ImGui::SliderFloat("bloom intensity", &tuning.bloom_intensity, 0.0f, 0.35f);
-            ImGui::SliderFloat("bloom threshold", &tuning.bloom_threshold, 0.1f, 4.0f);
-            ImGui::SliderFloat("bloom radius", &tuning.bloom_radius, 1.0f, 8.0f);
-            ImGui::SeparatorText("Color grade");
-            ImGui::SliderFloat("contrast", &tuning.output_contrast, 0.8f, 1.25f);
-            ImGui::SliderFloat("saturation", &tuning.output_saturation, 0.0f, 1.35f);
-            ImGui::SliderFloat("temperature", &tuning.output_temperature, -0.25f, 0.25f);
-            ImGui::SliderFloat("vignette", &tuning.vignette, 0.0f, 0.35f);
-        }
-
-        if (ImGui::Button("Reset to defaults"))
-        {
-            tuning = make_default_tuning();
-            camera = default_camera;
-        }
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -1408,14 +1295,6 @@ void run_example_sponza()
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
         }
-
-        // 每帧由方位/仰角滑条重建太阳方向与正交矩阵(白天斜射平行光)。
-        const float sun_el = glm::radians(tuning.sun_elevation_deg);
-        const float sun_az = glm::radians(tuning.sun_azimuth_deg);
-        const glm::vec3 sun_direction = glm::normalize(glm::vec3(
-            std::cos(sun_el) * std::sin(sun_az), -std::sin(sun_el), std::cos(sun_el) * std::cos(sun_az)));
-        const glm::mat4 sun_view_proj = build_sun_view_proj(sun_direction);
-        const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
 
         // Pass 0: sun RSM (depth/normal/flux)
         shadow_rasterizer.vsp.light_view_proj = sun_view_proj;
@@ -1683,8 +1562,7 @@ void run_example_sponza()
                             << ssr_composite_compute((spz_width + 7) / 8, (spz_height + 7) / 8, 1);
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
         ++frame_index;
     }
 

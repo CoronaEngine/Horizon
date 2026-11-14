@@ -18,9 +18,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/bump_vert.glsl)
 #include GLSL(shaders/bump_frag.glsl)
@@ -289,8 +286,6 @@ void run_example_bump()
         { 1.0f, 0.4f, 0.2f, 0.8f },
     };
 
-    HorizonImGuiLayer ui(window, bump_width, bump_height);
-
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -299,10 +294,6 @@ void run_example_bump()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -357,8 +348,7 @@ void run_example_bump()
         render_executor << rasterizer;
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
     }
 
     render_executor.waitForDeferredResources();

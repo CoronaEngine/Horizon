@@ -96,8 +96,8 @@ Benchmark::Benchmark(const char* mode, uint32_t width, uint32_t height)
         if (!std::isfinite(fixed_dt_) || fixed_dt_ < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
     }
     std::cout << "[HorizonExamples] " << mode_ << " " << width_ << 'x' << height_
-              << "; indirect BDA raster; UI=" << HORIZON_IMGUI_RENDER_ENABLED
-              << "; serialized=" << bool(gpu_timer_) << "; offscreen=" << offscreen_ << "; warmup=" << warmup_
+              << "; indirect BDA raster; serialized=" << bool(gpu_timer_)
+              << "; offscreen=" << offscreen_ << "; warmup=" << warmup_
               << "; measured_frames=" << limit_ << '\n';
 }
 Benchmark::~Benchmark() = default;

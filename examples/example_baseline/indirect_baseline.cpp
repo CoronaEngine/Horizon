@@ -3,5 +3,5 @@
 
 void run_example_baseline()
 {
-    run_viking_room(false);
+    run_viking_room("Horizon Baseline");
 }

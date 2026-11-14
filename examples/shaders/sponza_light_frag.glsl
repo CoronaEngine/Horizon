@@ -9,7 +9,7 @@ layout(location = 15) flat in uint drawParameterWord;
 // disney_pbr_frag.glsl,wdas/brdf disney.brdf)的完整直接光 radiance:
 //   - baseColor/metallic 来自 G-buffer albedo(.a=metallic)
 //   - roughness 来自 G-buffer normal.a
-//   - 其余 Disney 参数(specular/sheen/clearcoat/...)是全场景 imgui 滑条
+//   - 其余 Disney 参数(specular/sheen/clearcoat/...)由全场景共享
 // 输出 rgb = 完整直接光 radiance(已含 albedo),a = 该光的亮度(调试用)。
 // 累加仍是 additive blend,radiance 线性可加。
 //

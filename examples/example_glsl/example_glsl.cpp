@@ -12,16 +12,12 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/baseline_vert.glsl)
 #include GLSL(shaders/baseline_frag.glsl)
 
 #include <chrono>
 #include <filesystem>
-#include <optional>
 
 namespace
 {
@@ -39,9 +35,9 @@ const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
 } // namespace
 
-void run_viking_room(bool show_ui)
+void run_viking_room(const char* window_title)
 {
-    legacy_example::Window owner(glsl_width, glsl_height, show_ui ? "Horizon Baseline [GLSL]" : "Horizon Baseline");
+    legacy_example::Window owner(glsl_width, glsl_height, window_title);
     auto* window = owner.get();
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
@@ -78,10 +74,6 @@ void run_viking_room(bool show_ui)
         rasterizer.vp.proj = proj;
     }
 
-
-    std::optional<HorizonImGuiLayer> ui;
-    if (show_ui) ui.emplace(window, glsl_width, glsl_height);
-
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -90,12 +82,6 @@ void run_viking_room(bool show_ui)
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        if (ui) {
-            ui->new_frame();
-            ImGui::Begin("Hello");
-            ImGui::Text("hello world!");
-            ImGui::End();
-        }
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
@@ -110,7 +96,7 @@ void run_viking_room(bool show_ui)
         {
             const double fps = fps_frame_count / fps_accum_seconds;
             char title[160];
-            std::snprintf(title, sizeof(title), "Horizon Baseline [GLSL] %.1f FPS (%.2f ms)", fps, 1000.0 / fps);
+            std::snprintf(title, sizeof(title), "%s %.1f FPS (%.2f ms)", window_title, fps, 1000.0 / fps);
             glfwSetWindowTitle(window, title);
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
@@ -126,14 +112,9 @@ void run_viking_room(bool show_ui)
         render_executor << rasterizer;
         render_executor.commit();
 
-        if (ui) {
-            auto frame = ui->draw_overlay(final_output_image, render_executor);
-            display.wait(*frame.executor) << frame.image;
-        } else {
-            display.wait(render_executor) << final_output_image;
-        }
+        display.wait(render_executor) << final_output_image;
     }
     render_executor.waitForDeferredResources();
 }
 
-void run_example_glsl() { run_viking_room(true); }
+void run_example_glsl() { run_viking_room("Horizon Baseline [GLSL]"); }

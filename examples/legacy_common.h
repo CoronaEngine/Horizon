@@ -30,7 +30,7 @@ private:
 };
 
 // Bounded runs measure serialized scene submissions with Vulkan timestamps.
-// Animation uses an independent fixed dt; UI/presentation can be excluded.
+// Animation uses an independent fixed dt; offscreen runs skip presentation.
 class Benchmark {
 public:
     Benchmark(const char* mode, uint32_t width, uint32_t height);

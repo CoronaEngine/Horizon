@@ -30,9 +30,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include <algorithm>
 #include <array>
@@ -609,7 +606,7 @@ void update_camera(GLFWwindow* window, FlyCamera& camera, float dt)
         camera.position.y -= step;
 }
 
-// 与 GLSL 版相同的"定妆参数"(live ImGui session 里调出的白天氛围)。
+// 与 GLSL 版相同的白天光照参数。
 struct Tuning
 {
     float sun_elevation_deg = 79.044f;
@@ -1413,7 +1410,7 @@ void run_example_edsl_sponza()
     // combine:直接光 + IBL × AO → 线性 HDR(a = SSR F0)
     // ========================================================================
 
-    // env 绕 Y 旋转(UI 正向转环境 → 采样用逆旋转;u_env_params.w = 弧度)
+    // env 绕 Y 旋转(正向旋转环境 → 采样用逆旋转;u_env_params.w = 弧度)
     auto environment_direction = [&](Float3 world_dir) {
         Float3 dir;
         dir = world_dir;
@@ -1793,7 +1790,6 @@ void run_example_edsl_sponza()
         camera.yaw = std::atan2(dir.x, dir.z);
     }
     camera.speed = glm::length(scene_extent) * 0.12f;
-    const FlyCamera default_camera = camera;
 
     constexpr float aspect = static_cast<float>(spz_width) / static_cast<float>(spz_height);
     const float z_far = glm::length(scene_extent) * 2.0f;
@@ -1870,8 +1866,6 @@ void run_example_edsl_sponza()
     HardwareBuffer mirror_ib =
         HardwareBuffer::uploadDeviceLocal(mirror_indices, BufferUsage::IndexBuffer);
 
-    HorizonImGuiLayer ui(window, spz_width, spz_height);
-
     // tuning 已在 shader lambda 之前声明(剪枝 detector 需要),这里只做资产相关的重标定。
     const float scene_diag = glm::length(scene_extent);
     if (asset.version != hzms_version_pbr)
@@ -1882,6 +1876,12 @@ void run_example_edsl_sponza()
         tuning.ssao_bias = scene_diag * 0.00025f;
         tuning.ssao_blur_depth_sigma = scene_diag * 0.006f;
     }
+    const float sun_el = glm::radians(tuning.sun_elevation_deg);
+    const float sun_az = glm::radians(tuning.sun_azimuth_deg);
+    const glm::vec3 sun_direction = glm::normalize(glm::vec3(
+        std::cos(sun_el) * std::sin(sun_az), -std::sin(sun_el), std::cos(sun_el) * std::cos(sun_az)));
+    const glm::mat4 sun_view_proj = build_sun_view_proj(sun_direction);
+    const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
     const float rsm_clamp_d2 = (scene_radius * 0.02f) * (scene_radius * 0.02f);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
@@ -1893,87 +1893,6 @@ void run_example_edsl_sponza()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::SetNextWindowSize(ImVec2(430.0f, 620.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Sponza EDSL");
-        ImGui::Text("RMB drag: look   WASD: move   Q/E: down/up   Shift: fast");
-        ImGui::Text("submeshes %zu", asset.submeshes.size());
-        ImGui::Separator();
-
-        if (ImGui::CollapsingHeader("Sun (daylight)", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::SliderFloat("elevation", &tuning.sun_elevation_deg, 5.0f, 89.0f);
-            ImGui::SliderFloat("azimuth", &tuning.sun_azimuth_deg, -180.0f, 180.0f);
-            ImGui::SliderFloat("sun intensity", &tuning.sun_intensity, 0.0f, 10.0f);
-            ImGui::ColorEdit3("sun colour", &tuning.sun_color.x);
-            ImGui::Checkbox("cast shadows", &tuning.sun_shadow);
-            ImGui::SliderFloat("shadow bias", &tuning.shadow_bias, 0.0f, 0.01f, "%.4f");
-        }
-        if (ImGui::CollapsingHeader("RSM indirect", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Checkbox("enable##rsm", &tuning.rsm_enable);
-            ImGui::SliderFloat("intensity##rsm", &tuning.rsm_intensity, 0.0f, 30.0f);
-            ImGui::SliderFloat("sample radius (uv)", &tuning.rsm_radius, 0.02f, 0.5f);
-        }
-        if (ImGui::CollapsingHeader("Disney BRDF"))
-        {
-            ImGui::SliderFloat("specular", &tuning.disney_specular, 0.0f, 1.0f);
-            ImGui::SliderFloat("specular tint", &tuning.disney_specular_tint, 0.0f, 1.0f);
-            ImGui::SliderFloat("sheen", &tuning.disney_sheen, 0.0f, 1.0f);
-            ImGui::SliderFloat("sheen tint", &tuning.disney_sheen_tint, 0.0f, 1.0f);
-            ImGui::SliderFloat("clearcoat", &tuning.disney_clearcoat, 0.0f, 1.0f);
-            ImGui::SliderFloat("clearcoat gloss", &tuning.disney_clearcoat_gloss, 0.0f, 1.0f);
-            ImGui::SliderFloat("subsurface", &tuning.disney_subsurface, 0.0f, 1.0f);
-            ImGui::SliderFloat("anisotropic", &tuning.disney_anisotropic, 0.0f, 1.0f);
-        }
-        if (ImGui::CollapsingHeader("SSR", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Checkbox("enable##ssr", &tuning.ssr_enable);
-            ImGui::Checkbox("show mirrors", &tuning.mirror_enable);
-            ImGui::SliderFloat("mirror roughness", &tuning.mirror_roughness, 0.0f, 0.5f);
-            ImGui::SliderFloat("intensity##ssr", &tuning.ssr_intensity, 0.0f, 2.0f);
-            ImGui::SliderFloat("max distance", &tuning.ssr_max_distance, scene_diag * 0.02f, scene_diag * 1.5f);
-            ImGui::SliderFloat("thickness", &tuning.ssr_thickness, scene_diag * 0.0005f, scene_diag * 0.05f);
-            ImGui::Checkbox("jitter", &tuning.ssr_jitter);
-            ImGui::SliderFloat("fresnel power", &tuning.ssr_fresnel_power, 1.0f, 8.0f);
-        }
-        if (ImGui::CollapsingHeader("Indirect light (IBL)", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::SliderFloat("irradiance", &tuning.irradiance_scale, 0.0f, 2.0f);
-            ImGui::SliderFloat("radiance", &tuning.radiance_scale, 0.0f, 2.0f);
-            ImGui::SliderFloat("environment rotation", &tuning.env_rotation_deg, -180.0f, 180.0f);
-            ImGui::ColorEdit3("ambient floor", &tuning.ambient_floor.x);
-            ImGui::SliderFloat("AO strength", &tuning.ssao_intensity, 0.0f, 2.0f);
-            ImGui::SliderFloat("AO radius", &tuning.ssao_radius, scene_diag * 0.001f, scene_diag * 0.06f);
-            ImGui::SliderFloat("AO bias", &tuning.ssao_bias, 0.0f, scene_diag * 0.003f);
-        }
-        if (ImGui::CollapsingHeader("Output"))
-        {
-            ImGui::SliderFloat("exposure", &tuning.exposure, 0.1f, 4.0f);
-            ImGui::SliderFloat("bloom intensity", &tuning.bloom_intensity, 0.0f, 0.35f);
-            ImGui::SliderFloat("bloom threshold", &tuning.bloom_threshold, 0.1f, 4.0f);
-            ImGui::SliderFloat("bloom radius", &tuning.bloom_radius, 1.0f, 8.0f);
-            ImGui::SliderFloat("contrast", &tuning.output_contrast, 0.8f, 1.25f);
-            ImGui::SliderFloat("saturation", &tuning.output_saturation, 0.0f, 1.35f);
-            ImGui::SliderFloat("temperature", &tuning.output_temperature, -0.25f, 0.25f);
-            ImGui::SliderFloat("vignette", &tuning.vignette, 0.0f, 0.35f);
-        }
-        if (ImGui::Button("Reset to defaults"))
-        {
-            Tuning defaults;
-            if (asset.version != hzms_version_pbr)
-            {
-                defaults.ssr_max_distance = scene_diag * 0.55f;
-                defaults.ssr_thickness = scene_diag * 0.0035f;
-                defaults.ssao_radius = scene_diag * 0.015f;
-                defaults.ssao_bias = scene_diag * 0.00025f;
-                defaults.ssao_blur_depth_sigma = scene_diag * 0.006f;
-            }
-            tuning = defaults;
-            camera = default_camera;
-        }
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -1997,13 +1916,6 @@ void run_example_edsl_sponza()
             fps_accum_seconds = 0.0;
             fps_frame_count = 0;
         }
-
-        const float sun_el = glm::radians(tuning.sun_elevation_deg);
-        const float sun_az = glm::radians(tuning.sun_azimuth_deg);
-        const glm::vec3 sun_direction = glm::normalize(glm::vec3(
-            std::cos(sun_el) * std::sin(sun_az), -std::sin(sun_el), std::cos(sun_el) * std::cos(sun_az)));
-        const glm::mat4 sun_view_proj = build_sun_view_proj(sun_direction);
-        const glm::mat4 inv_sun_view_proj = glm::inverse(sun_view_proj);
 
         // ---- uniforms ----
         rsm_light_view_proj = to_edsl_matrix(sun_view_proj);
@@ -2162,8 +2074,7 @@ void run_example_edsl_sponza()
                             << ssr_composite_pipe;
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
         ++frame_index;
     }
 

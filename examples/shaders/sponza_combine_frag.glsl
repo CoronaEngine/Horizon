@@ -87,7 +87,7 @@ vec3 worldFromDepth(vec2 uv, float deviceDepth)
 
 vec3 environmentDirection(vec3 worldDirection)
 {
-    // Positive UI rotation turns the environment in world space, therefore
+    // Positive rotation turns the environment in world space, therefore
     // sampling applies the inverse rotation.
     float c = cos(fsp.env_params.w);
     float s = sin(fsp.env_params.w);

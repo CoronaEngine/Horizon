@@ -7,7 +7,7 @@
 //   - 命中之后：44-sss 累加遮蔽量，这里精修交点并采样颜色图
 //
 // 材质参数升级：完整 Disney Principled BRDF（对齐 example_disney_pbr）。
-// 所有非 albedo 参数通过 imgui 实时可调，批次共享（每帧统一一套材质）。
+// 所有 draw 共享同一套非 albedo 材质参数。
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -23,9 +23,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/ssr_geom_vert.glsl)
 #include GLSL(shaders/ssr_geom_mrt_frag.glsl)
@@ -219,10 +216,10 @@ void run_example_ssr()
     constexpr float ambient         = 0.22f;
 
 
-    // ---- Disney 材质（全局共享，imgui 可调）----
+    // ---- Disney 材质（全局共享）----
     DisneyMaterial mat;
 
-    // ---- SSR 可调参数 ----
+    // ---- SSR 参数 ----
     bool  ssr_enabled  = true;
     float max_distance = 12.0f;
     int   num_steps    = 48;
@@ -240,8 +237,6 @@ void run_example_ssr()
     const glm::vec3 pt_right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), pt_fwd));
     const glm::vec3 pt_up    = glm::cross(pt_fwd, pt_right);
     constexpr float pt_focal = 1.6f;
-
-    HorizonImGuiLayer ui(window, ssr_width, ssr_height);
 
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
@@ -263,35 +258,6 @@ void run_example_ssr()
         const float time = std::chrono::duration<float>(now - start_time).count();
         prev_time = now;
 
-        ui.new_frame();
-        ImGui::Begin("SSR");
-
-        // SSR 参数
-        ImGui::SeparatorText("SSR");
-        ImGui::Checkbox("Enable SSR", &ssr_enabled);
-        ImGui::SliderFloat("Max Distance", &max_distance, 1.0f, 40.0f);
-        ImGui::SliderInt("Steps", &num_steps, 4, 128);
-        ImGui::SliderFloat("Thickness", &thickness, 0.02f, 3.0f);
-        ImGui::SliderInt("Refine Steps", &refine_steps, 0, 8);
-        ImGui::Checkbox("Jitter Start", &use_jitter);
-        ImGui::SliderFloat("Intensity", &intensity, 0.0f, 2.0f);
-        ImGui::Combo("Debug View", &debug_mode, "Final\0SSR Color\0SSR Weight\0Reflectivity\0");
-        ImGui::Checkbox("Path Trace (Disney)", &pathtrace_mode);
-
-        // 完整 Disney 材质参数
-        ImGui::SeparatorText("Disney Material (shared)");
-        ImGui::SliderFloat("Metallic",        &mat.metallic,        0.0f, 1.0f);
-        ImGui::SliderFloat("Roughness",       &mat.roughness,       0.0f, 1.0f);
-        ImGui::SliderFloat("Specular",        &mat.specular,        0.0f, 1.0f);
-        ImGui::SliderFloat("Specular Tint",   &mat.specular_tint,   0.0f, 1.0f);
-        ImGui::SliderFloat("Subsurface",      &mat.subsurface,      0.0f, 1.0f);
-        ImGui::SliderFloat("Anisotropic",     &mat.anisotropic,     0.0f, 1.0f);
-        ImGui::SliderFloat("Sheen",           &mat.sheen,           0.0f, 1.0f);
-        ImGui::SliderFloat("Sheen Tint",      &mat.sheen_tint,      0.0f, 1.0f);
-        ImGui::SliderFloat("Clearcoat",       &mat.clearcoat,       0.0f, 1.0f);
-        ImGui::SliderFloat("Clearcoat Gloss", &mat.clearcoat_gloss, 0.0f, 1.0f);
-
-        ImGui::End();
 
         fps_accum_seconds += dt;
         ++fps_frame_count;
@@ -419,8 +385,7 @@ void run_example_ssr()
         render_executor.commit();
         }
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
 
         ++frame_index;
     }

@@ -2,7 +2,6 @@ add_executable(HorizonExamples
     main.cpp
     common.cpp
     legacy_common.cpp
-    imgui_horizon.cpp
     example_assao/example_assao.cpp
     example_baseline/indirect_baseline.cpp
     example_bump/example_bump.cpp
@@ -38,9 +37,7 @@ if(WIN32 AND HORIZON_BUILD_OCARINA)
 endif()
 target_include_directories(HorizonExamples PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(HorizonExamples PRIVATE
-    Horizon horizon::glm horizon::glfw horizon::stb horizon::tinyobjloader horizon_imgui)
-target_compile_definitions(HorizonExamples PRIVATE
-    HORIZON_IMGUI_RENDER_ENABLED=$<BOOL:${HORIZON_ENABLE_IMGUI_RENDER}>)
+    Horizon horizon::glm horizon::glfw horizon::stb horizon::tinyobjloader)
 if(HORIZON_ENABLE_TRACY)
     target_link_libraries(HorizonExamples PRIVATE Tracy::TracyClient)
     target_compile_definitions(HorizonExamples PRIVATE HORIZON_TRACY_ENABLED=1)

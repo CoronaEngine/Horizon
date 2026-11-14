@@ -3,8 +3,7 @@
 // 与 原版 默认路径一致）。场景与原版对齐：550 地面 + bunny + hollowcube +
 // cube + 环形 10 根柱子、聚光灯绕场景旋转（pos=(cos t*20, 26, sin t*20)，
 // 方向指向原点）、Blinn-Phong 材质光照 + 距离衰减 + 锥形衰减 + 指数雾。
-// 差异：固定默认参数（无 imgui 技术切换面板：PCF/PCSS/VSM/ESM/CSM/omni 等
-// 变体不在本移植范围）、相机固定 (0,60,-105) 俯视、不画光源 billboard、
+// 差异：使用默认的硬阴影参数，相机固定 (0,60,-105) 俯视、不画光源 billboard、
 // 原版的 tree.bin 是 meshopt 压缩 chunk（VBC）加载器不支持，用 column.bin 替代。
 
 #if defined(_WIN32)
@@ -21,9 +20,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/shadowmaps_pack_vert.glsl)
 #include GLSL(shaders/shadowmaps_pack_frag.glsl)
@@ -358,8 +354,6 @@ void run_example_shadowmaps()
     const glm::vec4 light_specular(1.0f, 1.0f, 1.0f, 0.0f);
     const glm::vec3 light_attn(1.0f, 0.0f, 1.0f);
 
-    HorizonImGuiLayer ui(window, smx_width, smx_height);
-
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -368,10 +362,6 @@ void run_example_shadowmaps()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -464,8 +454,7 @@ void run_example_shadowmaps()
                             << scene_rasterizer;
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
     }
 
     render_executor.waitForDeferredResources();

@@ -9,7 +9,7 @@
 //   包围盒 NDC rect 定位（等价的填充率优化）；
 // - 原版 MRT 一次写三张 G-buffer → 框架动态渲染当前只绑定第一个颜色附件，
 //   拆成三个几何 pass（albedo / 法线 / 深度值）分别输出，几何画三遍；
-// - 固定默认设置（无 imgui）：animate=true、anim.speed=0.3、不显示 G-buffer
+// - 固定默认设置：animate=true、anim.speed=0.3、不显示 G-buffer
 //   调试视图/scissor 线框、不走 TArray/UAV 变体。
 
 #if defined(_WIN32)
@@ -26,9 +26,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/deferred_geom_vert.glsl)
 #include GLSL(shaders/deferred_geom_mrt_frag.glsl)
@@ -360,8 +357,6 @@ void run_example_deferred()
     const glm::mat4 view_proj = proj * view;
     const glm::mat4 inv_view_proj = glm::inverse(view_proj);
 
-    HorizonImGuiLayer ui(window, dfr_width, dfr_height);
-
     const auto start_time = std::chrono::high_resolution_clock::now();
     auto prev_time = start_time;
     double fps_accum_seconds = 0.0;
@@ -370,10 +365,6 @@ void run_example_deferred()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -478,8 +469,7 @@ void run_example_deferred()
                             << combine_rasterizer;
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
     }
 
     render_executor.waitForDeferredResources();

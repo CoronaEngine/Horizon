@@ -5,7 +5,7 @@
 // 与 bgfx 原版对齐的部分：同一套 8 顶点立方体、scale 0.25、step 0.6、
 // 逐立方体 rotXYZ(time + xx*0.21, time + yy*0.37, time + zz*0.13)、
 // 相机 (0,0,-35) 看原点、fovy 60°。差异：单线程 record（框架现状）、
-// 键盘调 dim（bgfx 是 imgui 滑块）、帧率显示在窗口标题。
+// 键盘调整 dim，窗口标题显示帧率。
 
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
@@ -22,9 +22,6 @@
 #include "example_edsl_drawstress/example_edsl_drawstress.h"
 #include "Horizon_old.h"
 #include "horizon_profiling.h"  // 内部头（src/），埋点需在 CMake 里 opt-in
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/drawstress_vert.glsl)
 #include GLSL(shaders/drawstress_frag.glsl)
@@ -161,8 +158,6 @@ void run_drawstress_scene()
     const glm::mat4 view_proj = proj * view;
     const glm::mat4 scale_mtx = glm::scale(glm::mat4(1.0f), glm::vec3(0.25f));
 
-    HorizonImGuiLayer ui(window, stress_width, stress_height);
-
     legacy_example::Benchmark benchmark(mode, stress_width, stress_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
@@ -170,12 +165,6 @@ void run_drawstress_scene()
         benchmark.begin_frame();
         render_executor.waitForDeferredResources();
         glfwPollEvents();
-        if (!benchmark.offscreen()) {
-            ui.new_frame();
-            ImGui::Begin("Hello");
-            ImGui::Text("hello world!");
-            ImGui::End();
-        }
 
         benchmark.begin_scene();
         const float time = benchmark.time();
@@ -211,14 +200,9 @@ void run_drawstress_scene()
                                IndirectFirstInstance::AlwaysZero);
             benchmark.submit(render_executor, std::move(batch));
         }
-        if (benchmark.offscreen()) {
-            benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim, final_output_image, render_executor);
-        } else {
-            auto frame_output = ui.draw_overlay(final_output_image, render_executor);
-            display.wait(*frame_output.executor) << frame_output.image;
-            benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim,
-                                frame_output.image, *frame_output.executor);
-        }
+        if (!benchmark.offscreen())
+            display.wait(render_executor) << final_output_image;
+        benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim, final_output_image, render_executor);
     }
 
     render_executor.waitForDeferredResources();

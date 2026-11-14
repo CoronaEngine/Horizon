@@ -17,9 +17,6 @@
 #include <span>
 #include "example_sky.h"
 #include "Horizon_old.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include GLSL(shaders/sky_vert.glsl)
 #include GLSL(shaders/sky_frag.glsl)
@@ -576,8 +573,6 @@ void run_example_sky()
     const glm::mat4 view_proj = proj * view;
     const glm::mat4 inv_view_proj = glm::inverse(view_proj);
 
-    HorizonImGuiLayer ui(window, sky_width, sky_height);
-
     auto prev_time = std::chrono::high_resolution_clock::now();
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
@@ -585,17 +580,6 @@ void run_example_sky()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-
-        ImGui::Begin("ProceduralSky");
-        ImGui::SliderFloat("Time scale", &time_scale, 0.0f, 1.0f);
-        ImGui::SliderFloat("Time", &time_of_day, 0.0f, 24.0f);
-        ImGui::SliderFloat("Latitude", &sun.latitude, -90.0f, 90.0f);
-        ImGui::SliderFloat("Turbidity", &turbidity, 1.9f, 10.0f);
-        const char* months[] = {"January", "February", "March",     "April",   "May",      "June",
-                                "July",    "August",   "September", "October", "November", "December"};
-        ImGui::Combo("Month", reinterpret_cast<int*>(&sun.month), months, 12);
-        ImGui::End();
 
         const auto now = std::chrono::high_resolution_clock::now();
         const float dt = std::chrono::duration<float>(now - prev_time).count();
@@ -652,8 +636,7 @@ void run_example_sky()
         sky.draw(sky_geometry);
         render_executor << std::move(land) << std::move(sky);
         render_executor.commit();
-        auto output = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*output.executor) << output.image;
+        display.wait(render_executor) << final_output_image;
     }
 
     render_executor.waitForDeferredResources();

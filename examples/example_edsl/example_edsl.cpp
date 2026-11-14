@@ -15,9 +15,6 @@
 #include "common.h"
 #include "scene_pass.h"
 #include "legacy_common.h"
-#include "imgui_horizon.h"
-
-#include <imgui.h>
 
 #include <chrono>
 #include <cstdint>
@@ -98,8 +95,6 @@ void run_example_edsl()
     rasterizer.setDepthImage(depth_image);
 
 
-    HorizonImGuiLayer ui(window, edsl_width, edsl_height);
-
     // VP 不随帧变化（相机固定），在循环外赋值一次
     view = to_edsl_matrix(
         glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
@@ -121,10 +116,6 @@ void run_example_edsl()
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-        ui.new_frame();
-        ImGui::Begin("Hello");
-        ImGui::Text("hello world!");
-        ImGui::End();
 
         const float time_seconds =
             std::chrono::duration<float>(std::chrono::high_resolution_clock::now() - start_time).count();
@@ -156,8 +147,7 @@ void run_example_edsl()
         render_executor << rasterizer;
         render_executor.commit();
 
-        auto frame = ui.draw_overlay(final_output_image, render_executor);
-        display.wait(*frame.executor) << frame.image;
+        display.wait(render_executor) << final_output_image;
     }
     render_executor.waitForDeferredResources();
 }
