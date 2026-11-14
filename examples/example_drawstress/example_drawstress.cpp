@@ -13,6 +13,9 @@
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
 #define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
+#define HORIZON_NATIVE_WINDOW(window) glfwGetX11Window(window)
 #endif
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>

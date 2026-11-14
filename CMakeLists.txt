@@ -1,5 +1,5 @@
 # Public CMake entry point. Implementation lives in build_tools/.
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/cmake/horizon_paths.cmake")
 list(APPEND CMAKE_MODULE_PATH "${HORIZON_BUILD_TOOLS_DIR}/cmake")
