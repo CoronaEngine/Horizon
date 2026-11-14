@@ -281,7 +281,7 @@ using namespace EmbeddedShader;
 // （VariateProxy.h:177 走 ParseHelper::getCurrentInputIndex()，递减）会把
 // vertex input location 分配反，position 和 normal 会互换。Aggregate 走的是
 // VariateProxy.h:213 那条显式递增的展开路径，location 与成员声明顺序一致。
-// 其它 edsl 例子（edsl / edsl_ibl / edsl_sky）都用 Aggregate，所以没踩到。
+// edsl 和 edsl_ibl 使用 Aggregate，所以没踩到。
 struct ShadowMapsVertexIn
 {
     Float3 pos;    // location 0 —— 与 AoVertex.position 对应

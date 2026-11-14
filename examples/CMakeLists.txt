@@ -12,7 +12,6 @@ add_executable(HorizonExamples
     example_edsl_rsm/example_edsl_rsm.cpp
     example_edsl_shadowmaps/example_edsl_shadowmaps.cpp
     example_edsl_shadowvolumes/example_edsl_shadowvolumes.cpp
-    example_edsl_sky/example_edsl_sky.cpp
     example_edsl_sponza/example_edsl_sponza.cpp
     example_edsl_ssr/example_edsl_ssr.cpp
     example_glsl/example_glsl.cpp
@@ -20,7 +19,6 @@ add_executable(HorizonExamples
     example_rsm/example_rsm.cpp
     example_shadowmaps/example_shadowmaps.cpp
     example_shadowvolumes/example_shadowvolumes.cpp
-    example_sky/example_sky.cpp
     example_sponza/example_sponza.cpp
     example_ssr/example_ssr.cpp
 )

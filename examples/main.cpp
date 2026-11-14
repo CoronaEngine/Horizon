@@ -9,10 +9,8 @@
 #include "example_edsl_shadowmaps/example_edsl_shadowmaps.h"
 #include "example_shadowvolumes/example_shadowvolumes.h"
 #include "example_edsl_shadowvolumes/example_edsl_shadowvolumes.h"
-#include "example_sky/example_sky.h"
 #include "example_ssr/example_ssr.h"
 #include "example_edsl_ssr/example_edsl_ssr.h"
-#include "example_edsl_sky/example_edsl_sky.h"
 #include "example_disney_pbr/example_disney_pbr.h"
 #include "example_edsl_disney_pbr/example_edsl_disney_pbr.h"
 #include "example_rsm/example_rsm.h"
@@ -65,7 +63,6 @@ int main(int argc, char **argv)
         {"edsl_rsm", run_example_edsl_rsm},
         {"edsl_shadowmaps", run_example_edsl_shadowmaps},
         {"edsl_shadowvolumes", run_example_edsl_shadowvolumes},
-        {"edsl_sky", run_example_edsl_sky},
         {"edsl_sponza", run_example_edsl_sponza},
         {"edsl_ssr", run_example_edsl_ssr},
         {"glsl", run_example_glsl},
@@ -73,7 +70,6 @@ int main(int argc, char **argv)
         {"rsm", run_example_rsm},
         {"shadowmaps", run_example_shadowmaps},
         {"shadowvolumes", run_example_shadowvolumes},
-        {"sky", run_example_sky},
         {"sponza", run_example_sponza},
         {"ssr", run_example_ssr},
     };
