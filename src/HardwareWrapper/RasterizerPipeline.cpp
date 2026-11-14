@@ -120,7 +120,7 @@ bool RasterizerPipelineBase::syncShaderConditions()
     auto fragment = variants_->fragment->getCurrentConditionInfo();
     if (vertex == vertexConditions_ && fragment == fragmentConditions_) return false;
     auto next = backend().variant(*variants_->vertex, *variants_->fragment);
-    variants_->updateAutoBind(variants_->vertex->getCompilerOption().enableBindless, vertex, fragment);
+    variants_->updateAutoBind(vertex, fragment);
     autoBindEntries_ = variants_->autoBindEntries;
     rasterizerPipeline_ = std::move(next);
     vertexConditions_ = std::move(vertex);

@@ -19,7 +19,7 @@ ComputePipelineVulkan::ComputePipelineVulkan(std::string shaderCode,
                                                 EmbeddedShader::CompilerOption(),
                                                 sourceLocation);
 
-    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, EmbeddedShader::Ast::Parser::getBindless());
+    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
 
     const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
     if (pushConstantSize > 0)
@@ -39,7 +39,7 @@ ComputePipelineVulkan::ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler 
                                              const std::source_location &sourceLocation)
     : ComputePipelineVulkan()
 {
-    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, compiler.getCompilerOption().enableBindless, compiler.getCurrentConditionInfo());
+    this->shaderCode = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
 
     const uint32_t pushConstantSize = this->shaderCode.shaderResources.pushConstantSize;
     if (pushConstantSize > 0)

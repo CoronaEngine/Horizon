@@ -15,7 +15,7 @@ namespace EmbeddedShader
 		RasterizedPipelineObject() = default;
 	public:
 		static RasterizedPipelineObject compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
-	    void updateAutoBind(bool bindless, ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo);
+	    void updateAutoBind(ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo);
 	    [[nodiscard]] static std::string getCombinedKey(const ShaderCodeCompiler::ConditionInfo& vertConditionInfo, const ShaderCodeCompiler::ConditionInfo& fragConditionInfo);
 		std::unique_ptr<ShaderCodeCompiler> vertex;
 		std::unique_ptr<ShaderCodeCompiler> fragment;
@@ -23,10 +23,10 @@ namespace EmbeddedShader
 	private:
 		std::vector<AutoBindEntry> outputBindings;
 		std::unordered_set<std::string> sampledTextures;
-		std::vector<Ast::ParseOutput> parse(auto&& vertexShaderCode, auto&& fragmentShaderCode, bool horizonVulkan);
+		std::vector<Ast::ParseOutput> parse(auto&& vertexShaderCode, auto&& fragmentShaderCode);
 	};
 
-    inline void RasterizedPipelineObject::updateAutoBind(bool bindless, ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
+    inline void RasterizedPipelineObject::updateAutoBind(ShaderCodeCompiler::ConditionInfo vertConditionInfo, ShaderCodeCompiler::ConditionInfo fragConditionInfo)
     {
         // 每次分支组合变化都会重新反射并重建这张表；先清空，避免旧变体的
         // offset/bindType 残留（否则切回旧条件时 bind_auto_resources 会写两套）。
@@ -36,8 +36,8 @@ namespace EmbeddedShader
 		// Walk all globally-defined textures and check if they have a back-pointer
 		// to a proxy's boundResource_. Match against both vertex and fragment shader's bindInfoPool.
 		{
-			auto vsCodeModule = vertex->getShaderCode(ShaderLanguage::SpirV, bindless,vertConditionInfo);
-			auto fsCodeModule = fragment->getShaderCode(ShaderLanguage::SpirV, bindless, fragConditionInfo);
+			auto vsCodeModule = vertex->getShaderCode(ShaderLanguage::SpirV, vertConditionInfo);
+			auto fsCodeModule = fragment->getShaderCode(ShaderLanguage::SpirV, fragConditionInfo);
 			auto& globals = Ast::Parser::getGlobalStatements();
 			for (auto& stmt : globals)
 			{
@@ -68,22 +68,18 @@ namespace EmbeddedShader
 				{
 					if (def->texture && def->texture->boundResourceRef)
 					{
-						auto effectiveBindType = [&](ShaderCodeModule::ShaderResources::BindType reflected) {
-							if (reflected != ShaderCodeModule::ShaderResources::pushConstantMembers)
-								return static_cast<int32_t>(reflected);
-							return static_cast<int32_t>(sampledTextures.contains(def->texture->name) ? ShaderCodeModule::ShaderResources::sampledImages
-							                                      : ShaderCodeModule::ShaderResources::storageTexture);
-						};
 					    auto* vsInfo = vsCodeModule.shaderResources.findShaderBindInfo(def->texture->name);
 					    auto* fsInfo = fsCodeModule.shaderResources.findShaderBindInfo(def->texture->name);
 						if (vsInfo || fsInfo)
 						{
 						    auto* bindInfo = vsInfo ? vsInfo : fsInfo;
+							const auto imageType = sampledTextures.contains(def->texture->name)
+								? ShaderCodeModule::ShaderResources::sampledImages : ShaderCodeModule::ShaderResources::storageTexture;
 							autoBindEntries.push_back({
 								def->texture->boundResourceRef,
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
-								effectiveBindType(bindInfo->bindType),
+								imageType,
 								bindInfo->location,
 							    nullptr,
 							    0,
@@ -93,8 +89,6 @@ namespace EmbeddedShader
 					}
 				}
 
-				// StructuredBuffer(EDSL 的 Array<T>)。bindless 下 handle 在 push
-				// constant 里,反射报 pushConstantMembers,重映射为 storageBuffer。
 				if (auto* def = dynamic_cast<Ast::DefineUniversalArray*>(stmt.get()))
 				{
 					if (def->array && def->array->boundResourceRef)
@@ -104,14 +98,11 @@ namespace EmbeddedShader
 						if (vsInfo || fsInfo)
 						{
 							auto* bindInfo = vsInfo ? vsInfo : fsInfo;
-							int32_t arrayBindType = static_cast<int32_t>(bindInfo->bindType);
-							if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
-								arrayBindType = static_cast<int32_t>(ShaderCodeModule::ShaderResources::storageBuffer);
 							autoBindEntries.push_back({
 								def->array->boundResourceRef,
 								bindInfo->byteOffset,
 								bindInfo->typeSize,
-								arrayBindType,
+								ShaderCodeModule::ShaderResources::storageBuffer,
 								bindInfo->location,
 								nullptr,
 								0,
@@ -135,39 +126,23 @@ namespace EmbeddedShader
 
     RasterizedPipelineObject RasterizedPipelineObject::compile(auto&& vertexShaderCode, auto&& fragmentShaderCode, CompilerOption compilerOption, std::source_location sourceLocation)
 	{
-		Ast::Parser::setBindless(false);
+		// Indirect raster shaders read draw packets through Vulkan device addresses.
+		compilerOption.compileSpirV = true;
+		compilerOption.compileGLSL = compilerOption.compileHLSL = false;
+		compilerOption.compileDXIL = compilerOption.compileDXBC = false;
 		RasterizedPipelineObject result;
-		auto outputs = result.parse(vertexShaderCode, fragmentShaderCode, compilerOption.horizonVulkan);
+		auto outputs = result.parse(std::forward<decltype(vertexShaderCode)>(vertexShaderCode),
+		                            std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode));
 
-        auto& vertSlangModules = compilerOption.slangModules;
-        vertSlangModules.insert(vertSlangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
-
-        auto fraqSlangModules = compilerOption.slangModules;
-        fraqSlangModules.insert(fraqSlangModules.end(),outputs[1].sourceModule.begin(), outputs[1].sourceModule.end());
-
-	    compilerOption.slangModules.swap(vertSlangModules);
-	    compilerOption.branches = outputs[0].branches;
-	    compilerOption.typeHeader = outputs[0].typeHeader;
-		result.vertex = std::make_unique<ShaderCodeCompiler>(outputs[0].output,ShaderStage::VertexShader, compilerOption, sourceLocation);
-	    compilerOption.slangModules.swap(fraqSlangModules);
-	    compilerOption.branches = outputs[1].branches;
-	    compilerOption.typeHeader = outputs[1].typeHeader;
-		result.fragment = std::make_unique<ShaderCodeCompiler>(outputs[1].output,ShaderStage::FragmentShader, compilerOption, sourceLocation);
-
-		if (compilerOption.enableBindless)
-		{
-			Ast::Parser::setBindless(true);
-			outputs = result.parse(std::forward<decltype(vertexShaderCode)>(vertexShaderCode),
-								std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode), compilerOption.horizonVulkan);
-		    compilerOption.slangModules.swap(vertSlangModules);
-		    compilerOption.branches = outputs[0].branches;
-		    compilerOption.typeHeader = outputs[0].typeHeader;
-			result.vertex->compile(outputs[0].output, ShaderStage::VertexShader, compilerOption);
-		    compilerOption.slangModules.swap(fraqSlangModules);
-		    compilerOption.branches = outputs[1].branches;
-		    compilerOption.typeHeader = outputs[1].typeHeader;
-			result.fragment->compile(outputs[1].output, ShaderStage::FragmentShader, compilerOption);
-		}
+		auto compileStage = [&](Ast::ParseOutput& output, ShaderStage stage) {
+			auto options = compilerOption;
+			options.slangModules.insert(options.slangModules.end(), output.sourceModule.begin(), output.sourceModule.end());
+			options.branches = std::move(output.branches);
+			options.typeHeader = std::move(output.typeHeader);
+			return std::make_unique<ShaderCodeCompiler>(output.output, stage, std::move(options), sourceLocation);
+		};
+		result.vertex = compileStage(outputs[0], ShaderStage::VertexShader);
+		result.fragment = compileStage(outputs[1], ShaderStage::FragmentShader);
 
 		// Capture output locations before another pipeline reuses the shared proxies.
 		for (auto& stmt : Ast::Parser::getGlobalStatements())
@@ -186,7 +161,7 @@ namespace EmbeddedShader
 				}
 			}
 		}
-		result.updateAutoBind(compilerOption.enableBindless, result.vertex->getCurrentConditionInfo(), result.fragment->getCurrentConditionInfo());
+		result.updateAutoBind(result.vertex->getCurrentConditionInfo(), result.fragment->getCurrentConditionInfo());
 
 		return result;
 	}
@@ -229,7 +204,7 @@ namespace EmbeddedShader
 		}
 	}
 
-	std::vector<Ast::ParseOutput> RasterizedPipelineObject::parse(auto&& vertexShaderCode, auto&& fragmentShaderCode, bool horizonVulkan)
+	std::vector<Ast::ParseOutput> RasterizedPipelineObject::parse(auto&& vertexShaderCode, auto&& fragmentShaderCode)
 	{
 		auto vsFunc = std::function(std::forward<decltype(vertexShaderCode)>(vertexShaderCode));
 		auto fsFunc = std::function(std::forward<decltype(fragmentShaderCode)>(fragmentShaderCode));
@@ -246,7 +221,7 @@ namespace EmbeddedShader
 			}
 		}
 
-		Ast::Parser::beginShaderParse(Ast::ShaderStage::Vertex, horizonVulkan);
+		Ast::Parser::beginShaderParse(Ast::ShaderStage::Vertex);
 		auto vsParams = ParseHelper::createParamTuple(vsFunc);
 		if constexpr (ParseHelper::hasReturnValue(vsFunc))
 		{
@@ -256,7 +231,7 @@ namespace EmbeddedShader
 			auto outputVar = Ast::AST::defineOutputVariate(reinterpret_cast<Ast::Variate*>(vsOutput.node.get())->type,0);
 			Ast::AST::assign(outputVar,vsOutput.node);
 
-			Ast::Parser::beginShaderParse(Ast::ShaderStage::Fragment, horizonVulkan);
+			Ast::Parser::beginShaderParse(Ast::ShaderStage::Fragment);
 			auto fsParam = ParseHelper::createParam(fsFunc);
 			if constexpr (!ParseHelper::hasReturnValue(fsFunc))
 				ParseHelper::callLambda(fsFunc, std::move(fsParam));
@@ -270,7 +245,7 @@ namespace EmbeddedShader
 		else
 		{
 			ParseHelper::callLambda(vsFunc,std::move(vsParams));
-			Ast::Parser::beginShaderParse(Ast::ShaderStage::Fragment, horizonVulkan);
+			Ast::Parser::beginShaderParse(Ast::ShaderStage::Fragment);
 			if constexpr (!ParseHelper::hasReturnValue(fsFunc))
 				ParseHelper::callLambda(fsFunc);
 			else
@@ -280,6 +255,6 @@ namespace EmbeddedShader
 				handleFragmentOutput(fsOutput);
 			}
 		}
-		return Ast::Parser::endPipelineParse(Ast::Parser::getBindless() ? &sampledTextures : nullptr);
+		return Ast::Parser::endPipelineParse(sampledTextures);
 	}
 }

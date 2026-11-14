@@ -11,9 +11,9 @@ namespace {
 const EmbeddedShader::Ast::Variate* bindlessHandleRoot()
 {
     using namespace EmbeddedShader::Ast;
-    if (AST::getEmbeddedShaderStructure().usesIndirectRaster())
-        return AST::getGlobalUBO().get();
-    return AST::getGlobalPushConstant().get();
+    if (AST::getEmbeddedShaderStructure().stage == ShaderStage::Compute)
+        return AST::getGlobalPushConstant().get();
+    return AST::getGlobalUBO().get();
 }
 }
 
@@ -218,9 +218,7 @@ std::string EmbeddedShader::Ast::UniversalArray::parse()
 }
 const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalArray::getRootVariate() const
 {
-    if (Parser::getBindless())
-        return bindlessHandleRoot();
-    return AST::getGlobalParameterBlock().get();
+    return bindlessHandleRoot();
 }
 
 void EmbeddedShader::Ast::ElementValue::access(AccessPermissions permissions)
@@ -264,8 +262,7 @@ const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniformVariate::getRoot
 {
     if (pushConstant)
         return AST::getGlobalPushConstant().get();
-    // bindless 模式下 SamplerType 在 push constant 中
-    if (Parser::getBindless() && std::dynamic_pointer_cast<Ast::SamplerType>(type))
+    if (std::dynamic_pointer_cast<Ast::SamplerType>(type))
         return bindlessHandleRoot();
     return AST::getGlobalUBO().get();
 }
@@ -313,9 +310,7 @@ std::string EmbeddedShader::Ast::UniversalTexture::parse()
 
 const EmbeddedShader::Ast::Variate* EmbeddedShader::Ast::UniversalTexture::getRootVariate() const
 {
-    if (Parser::getBindless())
-        return bindlessHandleRoot();
-    return AST::getGlobalParameterBlock().get();
+    return bindlessHandleRoot();
 }
 std::string EmbeddedShader::Ast::DefineUniversalTexture::parse()
 {

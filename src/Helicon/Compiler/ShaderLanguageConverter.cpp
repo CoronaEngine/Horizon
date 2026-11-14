@@ -1064,19 +1064,8 @@ namespace EmbeddedShader
             cursor.m_varLayout = param;
             cursor.m_typeLayout = param->getTypeLayout();
 
-            // 顶层参数的 descriptor set 取法(已实测 SpirV target 逐 compile/逐字段确认):
-            //   - ParameterBlock(kind=11): 其内容独占一个寄存器空间, set 来自
-            //     getOffset(SubElementRegisterSpace)。non-bindless 的 global_parameter_block 由此得 set=1。
-            //   - 其余全部(ConstantBuffer UBO + 普通纹理/采样器/buffer + bindless 句柄数组 __DynamicResource[]):
-            //     set 来自 getBindingSpace(DescriptorTableSlot)。
-            //       · bindless global_ubo([[vk::binding(0,3)]] ConstantBuffer) → 3
-            //       · textureHandles([vk::binding(0,2)]) → 2, bufferHandles → 1, combinedTextureSamplerHandles → 0
-            //       · non-bindless global_ubo(无显式 binding) → 0
-            //       · 真 push_constant(getParameterCategory==PushConstantBuffer)DTS=0, 但 set 对 push constant 无意义
-            //         (collectBindings 走 PushConstantBuffer 分支, 进 VkPushConstantRange 而非 descriptor set)。
-            // 旧代码对非 ParameterBlock 统一用 getOffset(RegisterSpace) 恒返回 0 → set 2/3 资源全被误报到 set 0。
-            // 注意: ConstantBuffer 不能并入 ParameterBlock 用 SubElementRegisterSpace —— 那对 global_ubo 返回 0,
-            // 会让 bindless UBO 落到 set 0(bindless 保留集)从而崩溃(rasterizer add_descriptor_binding 抛异常)。
+            // Slang assigns a separate register space to a ParameterBlock in handwritten shaders.
+            // Other globals, including descriptor tables and the set-3 UBO, use their binding space.
             if (param->getTypeLayout()->getKind() == slang::TypeReflection::Kind::ParameterBlock)
             {
                 cursor.m_offset.set = param->getOffset(slang::ParameterCategory::SubElementRegisterSpace);

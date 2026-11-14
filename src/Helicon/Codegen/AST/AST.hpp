@@ -122,7 +122,6 @@ namespace EmbeddedShader::Ast
 		static std::stack<std::vector<std::shared_ptr<Statement>>*>& getLocalStatementStack();
 		static EmbeddedShaderStructure& getEmbeddedShaderStructure();
 	    static std::shared_ptr<Variate> getGlobalUBO();
-	    static std::shared_ptr<Variate> getGlobalParameterBlock();
 	    static std::shared_ptr<Variate> getGlobalPushConstant();
 	    static std::shared_ptr<Variate> getStageInput();
 	    static std::shared_ptr<Variate> getStageOutput();

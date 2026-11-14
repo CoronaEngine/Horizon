@@ -824,7 +824,7 @@ namespace EmbeddedShader
 		{
 			const auto& stage = Ast::AST::getEmbeddedShaderStructure();
 			// Horizon stores the image and its sampler together in descriptor set 0.
-			return stage.horizonVulkan && stage.stage == Ast::ShaderStage::Compute && Ast::Parser::getBindless();
+			return stage.stage == Ast::ShaderStage::Compute;
 		}
 
 		SamplerProxy()

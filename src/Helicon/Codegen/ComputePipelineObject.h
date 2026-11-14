@@ -36,12 +36,12 @@ namespace EmbeddedShader
 	public:
 		static ComputePipelineObject compile(auto&& computeShaderCode, ktm::uvec3 numthreads = ktm::uvec3(1), CompilerOption compilerOption = {}, std::source_location sourceLocation = std::source_location::current());
 	    [[nodiscard]] static std::string getCombinedKey(const ShaderCodeCompiler::ConditionInfo& conditionInfo);
-	    void updateAutoBind(bool bindless, const ShaderCodeCompiler::ConditionInfo& compConditionInfo);
+	    void updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo);
 		std::unique_ptr<ShaderCodeCompiler> compute;
 		std::vector<AutoBindEntry> autoBindEntries;
 	private:
 		std::unordered_set<std::string> sampledTextures;
-		std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode, bool horizonVulkan);
+		std::vector<Ast::ParseOutput> parse(auto&& computeShaderCode);
 	};
 
     inline std::string ComputePipelineObject::getCombinedKey(const ShaderCodeCompiler::ConditionInfo& conditionInfo)
@@ -49,7 +49,7 @@ namespace EmbeddedShader
         return "compute" + ShaderCodeCompiler::getCombinedKey(conditionInfo);
     }
 
-    inline void ComputePipelineObject::updateAutoBind(bool bindless, const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
+    inline void ComputePipelineObject::updateAutoBind(const ShaderCodeCompiler::ConditionInfo& compConditionInfo)
     {
         // 分支组合变化时重新反射；清空旧表，避免旧 offset 残留。
         autoBindEntries.clear();
@@ -58,7 +58,7 @@ namespace EmbeddedShader
         // Walk all globally-defined textures and check if they have a back-pointer
         // to a proxy's boundResource_. Filter by membership in the compiled shader's bindInfoPool.
         {
-            auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, bindless, compConditionInfo);
+            auto codeModule = compute->getShaderCode(ShaderLanguage::SpirV, compConditionInfo);
             auto& globals = Ast::Parser::getGlobalStatements();
             for (auto& stmt : globals)
             {
@@ -88,17 +88,13 @@ namespace EmbeddedShader
                     {
                         if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->texture->name))
                         {
-                            int32_t effectiveBindType = static_cast<int32_t>(bindInfo->bindType);
-                            if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
-                            {
-                                effectiveBindType = sampledTextures.contains(def->texture->name)
-                                    ? ShaderCodeModule::ShaderResources::sampledImages : ShaderCodeModule::ShaderResources::storageTexture;
-                            }
+                            const auto imageType = sampledTextures.contains(def->texture->name)
+                                ? ShaderCodeModule::ShaderResources::sampledImages : ShaderCodeModule::ShaderResources::storageTexture;
                             autoBindEntries.push_back({
                                 def->texture->boundResourceRef,
                                 bindInfo->byteOffset,
                                 bindInfo->typeSize,
-                                effectiveBindType,
+                                imageType,
                                 bindInfo->location,
                                 nullptr,
                                 0,
@@ -108,23 +104,17 @@ namespace EmbeddedShader
                     }
                 }
 
-                // StructuredBuffer(EDSL 的 Array<T>)。bindless 下 handle 落在
-                // push constant 里,反射报的是 pushConstantMembers,需重映射成
-                // storageBuffer,引擎才会走 store_storage_buffer_descriptor。
                 if (auto* def = dynamic_cast<Ast::DefineUniversalArray*>(stmt.get()))
                 {
                     if (def->array && def->array->boundResourceRef)
                     {
                         if (auto* bindInfo = codeModule.shaderResources.findShaderBindInfo(def->array->name))
                         {
-                            int32_t effectiveBindType = static_cast<int32_t>(bindInfo->bindType);
-                            if (bindInfo->bindType == ShaderCodeModule::ShaderResources::pushConstantMembers)
-                                effectiveBindType = static_cast<int32_t>(ShaderCodeModule::ShaderResources::storageBuffer);
                             autoBindEntries.push_back({
                                 def->array->boundResourceRef,
                                 bindInfo->byteOffset,
                                 bindInfo->typeSize,
-                                effectiveBindType,
+                                ShaderCodeModule::ShaderResources::storageBuffer,
                                 bindInfo->location,
                                 nullptr,
                                 0,
@@ -141,10 +131,11 @@ namespace EmbeddedShader
 
     ComputePipelineObject ComputePipelineObject::compile(auto&& computeShaderCode, ktm::uvec3 numthreads,CompilerOption compilerOption,std::source_location sourceLocation)
 	{
+		// DXBC shader model 5 has no descriptor heap handles.
+		compilerOption.compileDXBC = false;
 		Generator::SlangGenerator::numthreads = numthreads;
-		Ast::Parser::setBindless(false);
 		ComputePipelineObject result;
-		auto outputs = result.parse(computeShaderCode, compilerOption.horizonVulkan);
+		auto outputs = result.parse(std::forward<decltype(computeShaderCode)>(computeShaderCode));
 
 	    compilerOption.slangModules.insert(compilerOption.slangModules.end(),outputs[0].sourceModule.begin(), outputs[0].sourceModule.end());
 
@@ -152,32 +143,20 @@ namespace EmbeddedShader
 	    compilerOption.typeHeader = outputs[0].typeHeader;
 		result.compute = std::make_unique<ShaderCodeCompiler>(outputs[0].output, ShaderStage::ComputeShader, compilerOption, sourceLocation);
 
-		if (compilerOption.enableBindless)
-		{
-			// SlangGenerator 生成一次后会把 numthreads 复位成 (1,1,1)，
-			// bindless 重新 parse 前必须再设一次，否则 bindless 变体全部变成单线程组。
-			Generator::SlangGenerator::numthreads = numthreads;
-			Ast::Parser::setBindless(true);
-			outputs = result.parse(std::forward<decltype(computeShaderCode)>(computeShaderCode), compilerOption.horizonVulkan);
-            compilerOption.branches.swap(outputs[0].branches);
-            compilerOption.typeHeader = outputs[0].typeHeader;
-            result.compute->compile(outputs[0].output, ShaderStage::ComputeShader, compilerOption);
-		}
-
-		result.updateAutoBind(compilerOption.enableBindless, result.compute->getCurrentConditionInfo());
+		result.updateAutoBind(result.compute->getCurrentConditionInfo());
 
 		return result;
 	}
 
-	std::vector<Ast::ParseOutput> ComputePipelineObject::parse(auto&& computeShaderCode, bool horizonVulkan)
+	std::vector<Ast::ParseOutput> ComputePipelineObject::parse(auto&& computeShaderCode)
 	{
 		auto csFunc = std::function(std::forward<decltype(computeShaderCode)>(computeShaderCode));
 
-		Ast::Parser::beginShaderParse(Ast::ShaderStage::Compute, horizonVulkan);
+		Ast::Parser::beginShaderParse(Ast::ShaderStage::Compute);
 		if (ParseHelper::hasReturnValue(csFunc))
 			throw std::logic_error("Compute shader function doesn't have return value");
 		auto csParams = ParseHelper::createParamTuple(csFunc);
 		ParseHelper::callLambda(csFunc,std::move(csParams));
-		return Ast::Parser::endPipelineParse(Ast::Parser::getBindless() ? &sampledTextures : nullptr);
+		return Ast::Parser::endPipelineParse(sampledTextures);
 	}
 }

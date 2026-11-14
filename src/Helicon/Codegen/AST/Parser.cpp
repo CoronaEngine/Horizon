@@ -4,16 +4,15 @@
 
 thread_local std::unique_ptr<EmbeddedShader::Ast::Parser> EmbeddedShader::Ast::Parser::currentParser = std::unique_ptr<Parser>(new Parser);
 
-void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage, bool horizonVulkan)
+void EmbeddedShader::Ast::Parser::beginShaderParse(ShaderStage stage)
 {
 	endShaderParse();
 	currentParser->structure.stage = stage;
-	currentParser->structure.horizonVulkan = horizonVulkan;
 	currentParser->localStatementStack.push(&currentParser->structure.localStatements);
 	currentParser->isInShaderParse = true;
 }
 
-std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPipelineParse(std::unordered_set<std::string>* sampledTextures)
+std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPipelineParse(std::unordered_set<std::string>& sampledTextures)
 {
     endShaderParse();
 
@@ -33,7 +32,7 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
         if (auto* def = dynamic_cast<DefineUniversalTexture*>(global.get())) {
             auto& type = static_cast<TextureType&>(*def->texture->type);
             if (type.name.starts_with("Sampler")) {
-                if (sampledTextures) sampledTextures->insert(def->texture->name);
+                sampledTextures.insert(def->texture->name);
                 // A shared proxy can be sampled here and used for storage in the next pipeline.
                 type.name.replace(0, sizeof("Sampler") - 1, "Texture");
             }
@@ -44,16 +43,6 @@ std::vector<EmbeddedShader::Ast::ParseOutput> EmbeddedShader::Ast::Parser::endPi
     std::vector<ParseOutput> result;
 	currentParser->parseOutputs.swap(result);
 	return result;
-}
-
-void EmbeddedShader::Ast::Parser::setBindless(bool bindless)
-{
-	currentParser->bindless = bindless;
-}
-
-bool EmbeddedShader::Ast::Parser::getBindless()
-{
-	return currentParser->bindless;
 }
 
 void EmbeddedShader::Ast::Parser::setInputPush(bool push)

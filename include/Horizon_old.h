@@ -620,7 +620,6 @@ ComputePipelineBase::ComputePipelineBase(F&& computeShaderCode,
                                          EmbeddedShader::CompilerOption compilerOption,
                                          std::source_location sourceLocation)
 {
-    compilerOption.horizonVulkan = true;
     // 使用 helicon 编译 DSL lambda 到着色器代码
     auto pipelineObj = EmbeddedShader::ComputePipelineObject::compile(
         std::forward<F>(computeShaderCode),
@@ -650,11 +649,6 @@ RasterizerPipelineBase::RasterizerPipelineBase(VF&& vertexShaderCode,
                                                EmbeddedShader::CompilerOption compilerOption,
                                                std::source_location sourceLocation)
 {
-    // Physical storage buffer pointers are part of the Vulkan raster ABI.
-    compilerOption.horizonVulkan = true;
-    compilerOption.compileGLSL = compilerOption.compileHLSL = false;
-    compilerOption.compileDXIL = compilerOption.compileDXBC = false;
-    compilerOption.compileSpirV = true;
     // 使用 helicon 编译 DSL lambda 到着色器代码
     auto pipelineObj = EmbeddedShader::RasterizedPipelineObject::compile(
         std::forward<VF>(vertexShaderCode),

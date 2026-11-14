@@ -52,8 +52,8 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(std::string vertexShaderCode,
                                                         sourceLocation);
 
     // 获取 SPIR-V 代码
-    vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, EmbeddedShader::Ast::Parser::getBindless());
-    fragShaderCode = fragmentCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, EmbeddedShader::Ast::Parser::getBindless());
+    vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
+    fragShaderCode = fragmentCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
     initializeStageBindings(multiviewCount);
 }
 
@@ -64,10 +64,9 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan(EmbeddedShader::ShaderCodeCom
     : RasterizerPipelineVulkan()
 {
     // 直接从已编译的 ShaderCodeCompiler 获取 SPIR-V 代码
-    vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertexCompiler.getCompilerOption().enableBindless, vertexCompiler.getCurrentConditionInfo());
-    fragShaderCode = fragmentCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragmentCompiler.getCompilerOption().enableBindless, fragmentCompiler.getCurrentConditionInfo());
-    if (vertexCompiler.getCompilerOption().horizonVulkan && fragmentCompiler.getCompilerOption().horizonVulkan)
-        EmbeddedShader::linkRasterDrawParameter(vertShaderCode, fragShaderCode);
+    vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
+    fragShaderCode = fragmentCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
+    EmbeddedShader::linkRasterDrawParameter(vertShaderCode, fragShaderCode);
     initializeStageBindings(multiviewCount);
 }
 

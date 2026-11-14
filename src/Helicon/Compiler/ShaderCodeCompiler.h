@@ -166,12 +166,10 @@ struct ShaderCodeModule
         bool compileDXIL = false;
         bool compileDXBC = false;
         bool compileSpirV = true;
-        bool enableBindless = true;
         bool enableMatrixColumnMajor = false;
         std::vector<SlangModule*> slangModules;
         std::vector<Ast::BranchOutput> branches;
         std::string typeHeader;
-        bool horizonVulkan = false; // Horizon's indirect raster ABI and Vulkan descriptor tables.
     };
 
     struct SlangBranchModule
@@ -202,7 +200,7 @@ struct ShaderCodeModule
         ShaderCodeCompiler(const std::string &shaderCode, ShaderStage inputStage, CompilerOption option = {}, const std::source_location &sourceLocation = std::source_location::current());
         ~ShaderCodeCompiler() = default;
 
-        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, bool bindless = false, ConditionInfo conditionInfo = {});
+        [[nodiscard]] ShaderCodeModule getShaderCode(ShaderLanguage language, ConditionInfo conditionInfo = {});
         void compile(const std::string& shaderCode, ShaderStage inputStage, CompilerOption option = {});
         CompilerOption getCompilerOption() const;
         static std::string getCombinedKey(const ConditionInfo& conditionInfo);
@@ -210,17 +208,17 @@ struct ShaderCodeModule
         ConditionInfo getCurrentConditionInfo() const;
 
     private:
-        std::string getCurrentCombinationKey(ShaderLanguage language, bool bindless, bool reflection, ConditionInfo conditionInfo) const;
+        std::string getCurrentCombinationKey(ShaderLanguage language, bool reflection, const ConditionInfo& conditionInfo) const;
 
         // 用首次编译时缓存的 session / IModule / IEntryPoint 重新 compose + link
         // 指定条件组合，并按 language 过滤目标（nullopt = 首次编译，全 target）。
         // 调用方必须持有 threadMutex 独占锁。writeHardcode 仅在首次 compile()
         // 时为 true；运行时切分支不再往 HardcodeShaders 源码追加字面量。
-        void combineLocked(bool bindless, ConditionInfo conditionInfo,
+        void combineLocked(const ConditionInfo& conditionInfo,
                            std::optional<ShaderLanguage> language, bool writeHardcode);
 
         // 把一次 link 的结果按 target language/条件组合写入 compiledOutputs_。
-        void storeCompileResultLocked(bool bindless, const ConditionInfo& conditionInfo,
+        void storeCompileResultLocked(const ConditionInfo& conditionInfo,
                                       const SlangCompileResult& result, bool writeHardcode);
 
         std::string sourceLocationStr;
@@ -229,17 +227,12 @@ struct ShaderCodeModule
         CompilerOption compilerOption;
 
         Slang::ComPtr<slang::ISession> session;
-        Slang::ComPtr<slang::ISession> bindlessSession;
 
         SlangStageModules stageModules;
-        SlangStageModules bindlessStageModules;
         std::vector<slang::TargetDesc> targets;
-        std::vector<slang::TargetDesc> bindlessTargets;
 
         std::vector<SlangBranchModule> branchModules;
-        std::vector<SlangBranchModule> bindlessBranchModules;
         std::vector<Slang::ComPtr<slang::IModule>> dependencyModules;
-        std::vector<Slang::ComPtr<slang::IModule>> bindlessDependencyModules;
 
         // Per-instance compiled output storage (replaces debugHardcodeShaders)
         using CompiledVariant = std::variant<ShaderCodeModule::ShaderResources, std::variant<std::vector<uint32_t>, std::string>>;

@@ -221,7 +221,7 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
 Horizon 通过 `vkCmdDrawIndirect` 提交批次，顶点输入状态为空。手写 shader 自行声明所用字段、读取顶点，并决定各阶段之间传递什么。入口为 `main`。下面的字段名仅供对照，二进制接口由字节偏移、宽度和数组步长决定。
 
-EDSL 支持 `[](Float3 position, Float2 uv)` 这样的顶点 lambda，Helicon 按形参顺序自动从顶点记录读取属性。手写 shader 可参考 [baseline 顶点着色器](examples/shaders/baseline_vert.glsl) 与[片元着色器](examples/shaders/baseline_frag.glsl)。
+Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，直接调用 `RasterizedPipelineObject::compile()` 也采用同一布局。顶点 lambda 可以写成 `[](Float3 position, Float2 uv)`，Helicon 按形参顺序从顶点记录读取属性。手写 shader 可参考 [baseline 顶点着色器](examples/shaders/baseline_vert.glsl) 与[片元着色器](examples/shaders/baseline_frag.glsl)。
 
 | 数据 | 字节偏移与字段 | 大小 |
 | --- | --- | --- |
@@ -236,6 +236,8 @@ EDSL 支持 `[](Float3 position, Float2 uv)` 这样的顶点 lambda，Helicon �
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
 
 ### Descriptor Set 约定
+
+Helicon 的光栅和计算 EDSL 都通过 bindless 描述符表访问纹理和 `Array<T>` 资源。每个阶段只生成一份绑定布局，使用 `getShaderCode(language)` 取得编译结果。计算 shader 的资源句柄写入 push constant，光栅 shader 的共享资源句柄写入 set 3 的 UBO。间接绘制的顶点、索引和逐 draw 参数通过上节的设备地址读取。
 
 | Set | 用途 |
 | --- | --- |

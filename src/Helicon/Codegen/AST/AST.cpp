@@ -369,19 +369,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGloba
 	}
 	return ubo;
 }
-std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalParameterBlock()
-{
-    auto& pb = Parser::currentParser->globalParameterBlock;
-    if (!pb)
-    {
-        auto type = std::make_shared<NameType>();
-        pb = std::make_shared<Variate>();
-        pb->type = type;
-        type->name = "ParameterBlock<parameter_block_struct>";
-        pb->name = "global_parameter_block";
-    }
-    return pb;
-}std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalPushConstant(){
+std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Ast::AST::getGlobalPushConstant(){
     auto& pc = Parser::currentParser->globalPushConstant;
     if (!pc)
     {

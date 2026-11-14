@@ -27,16 +27,28 @@ void expect(bool condition, const char* message)
 void test_cpu()
 {
     using namespace EmbeddedShader;
-    auto vertex = [](Float3 pos) { position() = Float4(pos, Float(1)); };
-    auto fragment = [] { return Float4(1, 0, 0, 1); };
+    int vertexParses = 0, fragmentParses = 0, computeParses = 0;
+    auto vertex = [&](Float3 pos) { ++vertexParses; position() = Float4(pos, Float(1)); };
+    auto fragment = [&] { ++fragmentParses; return Float4(1, 0, 0, 1); };
     auto stages = RasterizedPipelineObject::compile(vertex, fragment);
+    Texture2D<ktm::fvec4> target;
+    auto compute = ComputePipelineObject::compile([&] {
+        ++computeParses;
+        target[dispatchThreadID()->xy()] = Float4(1, 0, 0, 1);
+    }, ktm::uvec3(4, 2, 1));
+    expect(vertexParses == 1 && fragmentParses == 1 && computeParses == 1, "each EDSL stage is parsed once");
+    auto cs = compute.compute->getShaderCode(ShaderLanguage::SpirV);
+    auto* storageTable = cs.shaderResources.findShaderBindInfo("textureHandles");
+    expect(storageTable && storageTable->set == 2 && storageTable->binding == 0 &&
+           cs.shaderResources.pushConstantSize > 0, "default compute SPIR-V uses the bindless storage image table");
     auto spirv = stages.vertex->getShaderCode(ShaderLanguage::SpirV);
-    expect(!std::get<std::vector<uint32_t>>(spirv.shaderCode).empty() && spirv.shaderResources.pushConstantSize == 0,
-           "default Helicon vertex inputs compile without the indirect ABI");
-    if (CompilerOption{}.compileHLSL) {
-        auto hlsl = stages.vertex->getShaderCode(ShaderLanguage::HLSL);
-        expect(!std::get<std::string>(hlsl.shaderCode).empty(), "default HLSL target");
-    }
+    std::string vertexAssembly;
+    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_4);
+    expect(tools.Disassemble(std::get<std::vector<uint32_t>>(spirv.shaderCode), &vertexAssembly) &&
+           vertexAssembly.find("BuiltIn DrawIndex") != std::string::npos &&
+           vertexAssembly.find("BuiltIn VertexIndex") != std::string::npos &&
+           vertexAssembly.find("PhysicalStorageBufferAddresses") != std::string::npos,
+           "default raster compilation pulls typed vertices from the indirect draw packet");
 
     bool drawColor = false;
     auto vertexWithDraw = [](Float3 pos) { position() = Float4(pos, rasterDrawParameter<float>(3)); };
@@ -46,28 +58,22 @@ void test_cpu()
         $IF(drawColor) { color = rasterDrawParameter<ktm::fvec4>(0); };
         return color;
     };
-    CompilerOption indirect;
-    indirect.horizonVulkan = true;
-    indirect.compileHLSL = false;
-    auto variants = RasterizedPipelineObject::compile(vertexWithDraw, conditionalColor, indirect);
-    for (bool bindless : {false, true}) {
-        for (bool reads : {false, true, false}) {
-            drawColor = reads;
-            auto vs = variants.vertex->getShaderCode(ShaderLanguage::SpirV, bindless);
-            auto fs = variants.fragment->getShaderCode(ShaderLanguage::SpirV, bindless);
-            linkRasterDrawParameter(vs, fs);
-            for (const auto* stage : {&vs, &fs}) {
-                std::string assembly;
-                spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_4);
-                expect(tools.Disassemble(std::get<std::vector<uint32_t>>(stage->shaderCode), &assembly),
-                       "disassemble linked raster stage");
-                expect((assembly.find(" Location 15\n") != std::string::npos) == reads,
-                       "location 15 in the linked SPIR-V must match the fragment read");
-            }
-            expect((vs.shaderResources.findShaderBindInfo("hzParameterWord") != nullptr) == reads &&
-                   (fs.shaderResources.findShaderBindInfo("hzParameterWord") != nullptr) == reads,
-                   "only fragment variants reading per-draw data receive location 15");
+    auto variants = RasterizedPipelineObject::compile(vertexWithDraw, conditionalColor);
+    for (bool reads : {false, true, false}) {
+        drawColor = reads;
+        auto vs = variants.vertex->getShaderCode(ShaderLanguage::SpirV);
+        auto fs = variants.fragment->getShaderCode(ShaderLanguage::SpirV);
+        linkRasterDrawParameter(vs, fs);
+        for (const auto* stage : {&vs, &fs}) {
+            std::string assembly;
+            expect(tools.Disassemble(std::get<std::vector<uint32_t>>(stage->shaderCode), &assembly),
+                   "disassemble linked raster stage");
+            expect((assembly.find(" Location 15\n") != std::string::npos) == reads,
+                   "location 15 in the linked SPIR-V must match the fragment read");
         }
+        expect((vs.shaderResources.findShaderBindInfo("hzParameterWord") != nullptr) == reads &&
+               (fs.shaderResources.findShaderBindInfo("hzParameterWord") != nullptr) == reads,
+               "only fragment variants reading per-draw data receive location 15");
     }
 
     HardwareBuffer empty;
@@ -156,6 +162,33 @@ void test_raster_batch()
         expect(pixels[i] == std::array<float,4>{float(left), float(!left), 0, 1},
                "indirect scissor run, index range or per-fragment parameter mismatch");
     }
+}
+
+void test_raster_sampled_storage_image()
+{
+    using namespace EmbeddedShader;
+    using Pixel = std::array<float, 4>;
+    const std::array<Pixel, 1> source{{{0.25f, 0.5f, 0.75f, 1.0f}}};
+    HardwareImage input(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::SampledStorageImage);
+    HardwareImage target(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareBuffer upload(source, BufferUsage::StorageBuffer);
+    HardwareBuffer readback(sizeof(source), BufferUsage::StorageBuffer);
+    Texture2D<ktm::fvec4> texture = input, output = target;
+    auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
+    auto fs = [&] { output << texture.sample(Float2(0.5f)); };
+    RasterizerPipeline pipeline(vs, fs);
+    pipeline.setDepthEnabled(false);
+    const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
+    RasterGeometry mesh{HardwareBuffer(vertices, BufferUsage::VertexBuffer),
+                        HardwareBuffer(std::array<uint16_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer)};
+    auto batch = pipeline.beginBatch(1, 1);
+    batch.draw(mesh);
+    HardwareExecutor executor;
+    executor << upload.copyTo(input) << std::move(batch) << target.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    std::array<Pixel, 1> pixel{};
+    expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == source,
+           "fragment UBO handle samples a sampled/storage image from set 0");
 }
 
 // A compute-written packet draws the right half at the depth left by pass one.
@@ -386,6 +419,7 @@ int main(int argc, char** argv)
             }
             test_gpu();
             test_raster_batch();
+            test_raster_sampled_storage_image();
             test_generated_packet_and_attachment_load();
             test_compute_sampling();
         }

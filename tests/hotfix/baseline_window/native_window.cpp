@@ -1371,7 +1371,10 @@ private:
 
     void createIndexBuffer()
     {
-        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+        // Upload one immutable indirect command followed by its uint32 indices.
+        const VkDrawIndexedIndirectCommand draw{static_cast<uint32_t>(indices.size()), 1, 0, 0, 0};
+        const auto indexBytes = sizeof(indices[0]) * indices.size();
+        const VkDeviceSize bufferSize = sizeof(draw) + indexBytes;
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1379,10 +1382,12 @@ private:
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, indices.data(), (size_t)bufferSize);
+        memcpy(data, &draw, sizeof(draw));
+        memcpy(static_cast<char*>(data) + sizeof(draw), indices.data(), indexBytes);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
 
         copyBuffer(stagingBuffer, indexBuffer, bufferSize);
 
@@ -1547,6 +1552,13 @@ private:
         copyRegion.size = size;
         vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
+        VkMemoryBarrier uploaded{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        uploaded.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        uploaded.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                             0, 1, &uploaded, 0, nullptr, 0, nullptr);
+
         endSingleTimeCommands(commandBuffer);
     }
 
@@ -1628,11 +1640,11 @@ private:
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, sizeof(VkDrawIndexedIndirectCommand), VK_INDEX_TYPE_UINT32);
 
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        vkCmdDrawIndexedIndirect(commandBuffer, indexBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 
         vkCmdEndRenderPass(commandBuffer);
 

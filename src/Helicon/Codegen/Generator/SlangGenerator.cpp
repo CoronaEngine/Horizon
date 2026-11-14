@@ -36,10 +36,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getShaderOutput(const Ast
         output += "import " + slangModule->name + ";\n";
     }
 
-	if (Ast::Parser::getBindless())
-	{
-		output += // Vulkan Bindless Process - sets 0-2 match Horizon bindless descriptors, set 3 reserved for UBO
-		R"([vk::binding(0, 0)]
+	// Sets 0-2 contain resource tables. Set 3 is reserved for the shared UBO.
+	output += R"([vk::binding(0, 0)]
 __DynamicResource<__DynamicResourceKind.General> combinedTextureSamplerHandles[];
 
 [vk::binding(0, 1)]
@@ -67,10 +65,9 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 	}
 }
 )";
-	}
 
-    const bool pulling = structure.usesIndirectRaster() && structure.stage == Ast::ShaderStage::Vertex;
-    const bool shading = structure.usesIndirectRaster() && structure.stage == Ast::ShaderStage::Fragment;
+    const bool pulling = structure.stage == Ast::ShaderStage::Vertex;
+    const bool shading = structure.stage == Ast::ShaderStage::Fragment;
     std::string mainContent;
     for (auto& statement: structure.localStatements)
     {
@@ -131,7 +128,7 @@ export T getDescriptorFromHandle<T>(DescriptorHandle<T> handle) where T : IOpaqu
 
     // Specialization branches are separate Slang modules which import the type header.
     auto& declarations = Ast::Parser::getBranchOutputs().empty() ? output : Ast::Parser::getTypeHeader();
-    if (structure.usesIndirectRaster()) {
+    if (structure.stage != Ast::ShaderStage::Compute) {
         declarations += R"(
 struct HorizonDrawPacket {
     uint vertexCount, instanceCount, firstVertex, firstInstance;
@@ -224,7 +221,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	}
 
 	// ① UBO — 始终生成为 ConstantBuffer，bindless 模式下显式绑定到 set=3
-    if (structure.usesIndirectRaster()) {
+    if (structure.stage != Ast::ShaderStage::Compute) {
         if (!pushConstantMembers.empty())
             throw std::invalid_argument("Use rasterDrawParameter for per-draw raster data");
         uboMembers += bindlessHandleMembers;
@@ -237,10 +234,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	    auto begin = type.find_last_of('<') + 1;
 	    std::string uboStructName = type.substr(begin,type.find_first_of('>') - begin);
 		output += "struct " + uboStructName + " {\n" + uboMembers + "}\n";
-		if (bindless())
-	        output += "[[vk::binding(0, 3)]]" + type + " " + ubo->generate() + ";\n";
-		else
-		    output += type + " " + ubo->generate() + ";\n";
+		output += "[[vk::binding(0, 3)]]" + type + " " + ubo->generate() + ";\n";
 		uboMembers.clear();
 	}
 
@@ -249,31 +243,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getGlobalOutput(const Ast
 	{
 	    auto pc = Ast::AST::getGlobalPushConstant();
 	    auto type = pc->type->generate();
-	    // push constant 现为裸 struct 名(无 <>),不能再依赖 <> 提取。兼容仍带 <...> 的写法。
-	    std::string pushConstantStructName;
-	    if (auto lt = type.find_last_of('<'); lt != std::string::npos)
-	        pushConstantStructName = type.substr(lt + 1, type.find_first_of('>') - (lt + 1));
-	    else
-	        pushConstantStructName = type;
+	    const auto& pushConstantStructName = static_cast<const Ast::PushConstantType&>(*pc->type).name;
 		auto pushConstantStruct = "struct " + pushConstantStructName + " {\n"
 			+ pushConstantMembers + bindlessHandleMembers + "}\n";
-		auto pushConstant = "[[vk::push_constant]] " + type + " " + pc->generate() + ";\n";
+		auto pushConstant = type + " " + pc->generate() + ";\n";
 		output += pushConstantStruct + pushConstant;
 		pushConstantMembers.clear();
 		bindlessHandleMembers.clear();
-	}
-
-	// ③ ParameterBlock — non-bindless 模式下的资源容器
-	if (!parameterBlockMembers.empty())
-	{
-	    auto pb = Ast::AST::getGlobalParameterBlock();
-	    auto type = pb->type->generate();
-	    auto begin = type.find_last_of('<') + 1;
-	    std::string parameterBlockStructName = type.substr(begin,type.find_first_of('>') - begin);
-		auto parameterBlockStruct = "struct " + parameterBlockStructName + " {\n" + parameterBlockMembers + "}\n";
-		auto parameterBlock = type + " " + pb->generate() + ";\n";
-		output += parameterBlockStruct + parameterBlock;
-		parameterBlockMembers.clear();
 	}
 
 	return output;
@@ -305,11 +281,8 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 namespace {
 std::string varyingField(const EmbeddedShader::Ast::Variate& value, size_t location)
 {
-    // Both shader dialects reserve location 15 for the flat parameter offset.
-    std::string declaration;
-    if (EmbeddedShader::Ast::AST::getEmbeddedShaderStructure().usesIndirectRaster())
-        declaration = "[[vk::location(" + std::to_string(location) + ")]] ";
-    return declaration + value.type->generate() + " " + value.name + " : LOCATION" + std::to_string(location) + ";";
+    const auto slot = std::to_string(location);
+    return "[[vk::location(" + slot + ")]] " + value.type->generate() + " " + value.name + " : LOCATION" + slot + ";";
 }
 }
 
@@ -515,10 +488,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 	if (node->array->permissions != Ast::AccessPermissions::ReadOnly)
 		result = "RW" + result;
 
-	if (bindless())
-		bindlessHandleMembers += "\t" + result + "\n";
-	else
-		parameterBlockMembers += "\t" + result + "\n";
+	bindlessHandleMembers += "\t" + result + "\n";
 	return "";
 }
 
@@ -532,7 +502,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 		return "";
 	}
 	// bindless 模式下，资源类型 (Sampler) 走 push constant handle
-	if (bindless() && std::dynamic_pointer_cast<Ast::SamplerType>(node->variate->type))
+	if (std::dynamic_pointer_cast<Ast::SamplerType>(node->variate->type))
 	{
 		bindlessHandleMembers += "\t" + node->variate->type->generate() + " " + node->variate->name + ";\n";
 		return "";
@@ -595,14 +565,10 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
     // Unfiltered compute image loads and stores share the storage-image table at set 2.
     // Filtered sampling uses a combined sampler handle from set 0.
     auto texture = std::dynamic_pointer_cast<Ast::TextureType>(node->texture->type);
-    storage |= Ast::AST::getEmbeddedShaderStructure().horizonVulkan && bindless() &&
-               currentStage == Ast::ShaderStage::Compute && texture->name == "Texture2D";
+    storage |= currentStage == Ast::ShaderStage::Compute && texture->name == "Texture2D";
     if (storage) result = "RW" + result;
 
-	if (bindless())
-		bindlessHandleMembers += "\t" + result + "\n";
-	else
-		parameterBlockMembers += "\t" + result + "\n";
+	bindlessHandleMembers += "\t" + result + "\n";
 	return "";
 }
 
@@ -617,13 +583,13 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::ArrayType* node)
 {
 	if ((node->permissions & Ast::AccessPermissions::WriteOnly) != Ast::AccessPermissions::None && std::dynamic_pointer_cast<Ast::TextureType>(node->elementType))
-		return "StructuredBuffer<RW" + node->elementType->generate() + ">" + (bindless() ?  ".Handle" : "");
-	return "StructuredBuffer<" + node->elementType->generate() + ">" + (bindless() ?  ".Handle" : "");
+		return "StructuredBuffer<RW" + node->elementType->generate() + ">.Handle";
+	return "StructuredBuffer<" + node->elementType->generate() + ">.Handle";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::TextureType* node)
 {
-	return node->name + "<" + node->texelType->generate() + ">" + (bindless() ?  ".Handle" : "");
+	return node->name + "<" + node->texelType->generate() + ">.Handle";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::CallFunc* node)
@@ -644,7 +610,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::SamplerType* node)
 {
-	return node->name + (bindless() ?  ".Handle" : "");
+	return node->name + ".Handle";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::FunctionDeclaration* node)
@@ -671,11 +637,7 @@ std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast:
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::PushConstantType* node)
 {
-    if (bindless())
-    {
-        return "[[vk::push_constant]] ConstantBuffer<" + node->name + ">";
-    }
-    return node->name;
+    return "[[vk::push_constant]] ConstantBuffer<" + node->name + ">";
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getParseOutput(const Ast::StageType* node)
@@ -782,29 +744,19 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 }
 
 namespace {
-std::shared_ptr<EmbeddedShader::Ast::Variate> rasterIndex(const char* pulledName, const char* inputName, const char* semantic)
+std::shared_ptr<EmbeddedShader::Ast::Variate> rasterIndex(const char* name)
 {
     using namespace EmbeddedShader;
-    if (Ast::AST::getEmbeddedShaderStructure().usesIndirectRaster()) {
-        auto index = std::make_shared<Ast::Variate>();
-        index->type = Ast::AST::createType<uint32_t>();
-        index->name = pulledName;
-        return index;
-    }
-    auto index = std::make_shared<Ast::InputVariate>();
+    auto index = std::make_shared<Ast::Variate>();
     index->type = Ast::AST::createType<uint32_t>();
-    index->name = inputName;
-    auto field = std::make_shared<Generator::DefineSystemSemanticVariate>();
-    field->variate = index;
-    field->semanticName = semantic;
-    Ast::AST::addInputStatement(field);
+    index->name = name;
     return index;
 }
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getDrawIndexInput()
 {
-    return rasterIndex("hzBatchDraw", "draw_index_input", "SV_DrawIndex");
+    return rasterIndex("hzBatchDraw");
 }
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getInstanceIndexInput()
@@ -824,12 +776,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 
 std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGenerator::getVertexIndexInput()
 {
-    return rasterIndex("hzLogicalVertex", "vertex_index_input", "SV_VertexID");
-}
-
-bool EmbeddedShader::Generator::SlangGenerator::bindless()
-{
-	return Ast::Parser::getBindless();
+    return rasterIndex("hzLogicalVertex");
 }
 
 std::string EmbeddedShader::Generator::SlangGenerator::getCodeIndentation()

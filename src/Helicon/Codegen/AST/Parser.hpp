@@ -37,10 +37,8 @@ namespace EmbeddedShader::Ast
 		friend class AST;
 		friend class Generator::SlangGenerator;
 	public:
-		static void beginShaderParse(ShaderStage stage, bool horizonVulkan = false);
-		static std::vector<ParseOutput> endPipelineParse(std::unordered_set<std::string>* sampledTextures = nullptr);
-		static void setBindless(bool bindless);
-        static bool getBindless();
+		static void beginShaderParse(ShaderStage stage);
+		static std::vector<ParseOutput> endPipelineParse(std::unordered_set<std::string>& sampledTextures);
         static void setInputPush(bool push);
         static bool getInputPush();
     private:
@@ -69,7 +67,6 @@ namespace EmbeddedShader::Ast
 		std::shared_ptr<Variate> vertexIndexInput;
 
 		std::shared_ptr<Variate> globalUBO;
-		std::shared_ptr<Variate> globalParameterBlock;
 		std::shared_ptr<Variate> globalPushConstant;
 
 	    std::shared_ptr<Variate> stageInput;
@@ -86,8 +83,6 @@ namespace EmbeddedShader::Ast
 	    //////////////Branch Pruning///////////////
 
 		bool isInShaderParse = false;
-
-		bool bindless = false;
 
         static thread_local std::unique_ptr<Parser> currentParser;
 	public:
