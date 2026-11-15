@@ -7,7 +7,6 @@ DisneyVaryings main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + drawID];
     uint* vertex = hzPullVertex(packet, vertexID);
     float3 inPosition = *(float3*)vertex;
-    float3 inNormal = *(float3*)(vertex + 3);
     DisneyDraw* draw = getDisneyDraw(packet.parameterWord);
 
     DisneyVaryings output;
@@ -24,7 +23,7 @@ DisneyVaryings main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
         output.position = mul(mvp, float4(inPosition, 1.0));
         float3 worldPos = mul(draw->model, float4(inPosition, 1.0)).xyz;
         output.view = vsp.camPos.xyz - worldPos;
-        output.normal = mul(draw->model, float4(inNormal, 0.0)).xyz;
+        output.normal = mul(draw->model, float4(inPosition, 0.0)).xyz;
         output.dir = float3(0.0);
     }
     return output;

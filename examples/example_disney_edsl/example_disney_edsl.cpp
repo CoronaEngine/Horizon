@@ -5,12 +5,6 @@ using namespace legacy_example::edsl;
 
 namespace legacy_disney_edsl {
 
-struct DisneyEdslVertexProxy
-{
-    Float3 pos;
-    Float3 normal;
-};
-
 struct DisneyEdslVaryings
 {
     Float3 v_view;
@@ -41,7 +35,7 @@ struct DisneyEdslPipeline::State {
     bool iblEnabled = true;
     State() {
         const float fov_height = std::tan(glm::radians(45.0f) * 0.5f);
-        auto edsl_vertex = [&](Aggregate<DisneyEdslVertexProxy> vertex) {
+        auto edsl_vertex = [&](Float3 pos) {
             auto per_model = rasterDrawParameter<fmat4x4>(0);
             auto per_mat3 = rasterDrawParameter<fvec4>(28);
 
@@ -50,21 +44,21 @@ struct DisneyEdslPipeline::State {
             $IF(per_mat3->y > Float(0.5))
             {
                 // skybox：把网格顶点当全屏坐标用，方向由 skyEnvMtx 还原
-                position() = Float4(vertex->pos->x, vertex->pos->y, Float(0.999999), Float(1.0));
+                position() = Float4(pos->x, pos->y, Float(0.999999), Float(1.0));
                 Float sky_aspect = per_mat3->z;
-                Float2 tex = Float2(vertex->pos->x * (Float(fov_height) * sky_aspect),
-                                    vertex->pos->y * Float(-fov_height));
+                Float2 tex = Float2(pos->x * (Float(fov_height) * sky_aspect),
+                                    pos->y * Float(-fov_height));
                 out->v_dir = mul(shared.skyEnvMtx, Float4(tex, Float(1.0), Float(0.0)))->xyz();
                 out->v_view = Float3(Float(0.0), Float(0.0), Float(0.0));
                 out->v_normal = Float3(Float(0.0), Float(0.0), Float(1.0));
             }
             $ELSE
             {
-                Float4 local_pos = Float4(vertex->pos, Float(1.0));
+                Float4 local_pos = Float4(pos, Float(1.0));
                 Float4 world_pos = mul(per_model, local_pos);
                 position() = mul(mul(shared.proj_view, per_model), local_pos);
                 out->v_view = shared.camPos->xyz() - world_pos->xyz();
-                out->v_normal = mul(per_model, Float4(vertex->normal, Float(0.0)))->xyz();
+                out->v_normal = mul(per_model, Float4(pos, Float(0.0)))->xyz();
                 out->v_dir = Float3(Float(0.0), Float(0.0), Float(0.0));
             };
             return out;

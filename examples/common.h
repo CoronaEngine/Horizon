@@ -52,14 +52,11 @@ namespace baseline
 struct Vertex
 {
     std::array<float, 3> pos {};
-    std::array<float, 3> color {};
     std::array<float, 2> tex_coord {};
 
-    bool operator==(const Vertex& other) const
-    {
-        return pos == other.pos && color == other.color && tex_coord == other.tex_coord;
-    }
+    bool operator==(const Vertex&) const = default;
 };
+static_assert(sizeof(Vertex) == 5 * sizeof(float));
 
 struct VertexHash
 {
@@ -71,8 +68,6 @@ struct VertexHash
         };
 
         for (float value : vertex.pos)
-            combine(value);
-        for (float value : vertex.color)
             combine(value);
         for (float value : vertex.tex_coord)
             combine(value);
@@ -116,8 +111,6 @@ inline Mesh load_mesh(const std::filesystem::path& model_path)
                 attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
                 attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
             };
-            vertex.color = { 1.0f, 1.0f, 1.0f };
-
             if (index.texcoord_index >= 0)
             {
                 vertex.tex_coord = {

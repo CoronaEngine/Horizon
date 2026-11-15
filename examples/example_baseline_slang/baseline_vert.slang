@@ -23,8 +23,8 @@ VertexOutput main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     VertexOutput output;
     float4x4 mvp = mul(mul(vp.proj, vp.view), model);
     output.position = mul(mvp, float4(position, 1.0));
-    output.color = *(float3*)(vertex + 3);
-    output.texCoord = *(float2*)(vertex + 6);
+    output.color = float3(1.0);
+    output.texCoord = *(float2*)(vertex + 3);
     output.parameterWord = packet.parameterWord;
     return output;
 }

@@ -12,11 +12,13 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + drawID];
-    uint* vertex = hzPullVertex(packet, vertexID);
+    uint corner = *hzPullVertex(packet, vertexID);
+    float3 color = float3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
+    float3 position = color * float3(2, -2, -2) + float3(-1, 1, 1);
     DrawParameters* draw = (DrawParameters*)(drawRoot.parameters + packet.parameterWord);
 
     VertexOutput output;
-    output.position = mul(draw->mvp, float4(*(float3*)vertex, 1.0));
-    output.color = *(float3*)(vertex + 3);
+    output.position = mul(draw->mvp, float4(position, 1.0));
+    output.color = color;
     return output;
 }

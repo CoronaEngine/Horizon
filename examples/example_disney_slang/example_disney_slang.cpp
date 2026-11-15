@@ -142,15 +142,10 @@ LightProbe load_light_probe(const std::string& name)
     return probe;
 }
 
-struct IblVertex
-{
-    std::array<float, 3> position {};
-    std::array<float, 3> normal {};
-};
-
 struct IblMesh
 {
-    std::vector<IblVertex> vertices;
+    // Each unit-sphere position also supplies its original object-space normal.
+    std::vector<std::array<float, 3>> vertices;
     std::vector<uint16_t> indices;
 };
 
@@ -174,10 +169,7 @@ IblMesh make_uv_sphere(int slices, int stacks)
             const float sin_theta = std::sin(theta);
             const float cos_theta = std::cos(theta);
 
-            IblVertex vertex;
-            vertex.normal = { sin_phi * cos_theta, cos_phi, sin_phi * sin_theta };
-            vertex.position = vertex.normal;
-            mesh.vertices.push_back(vertex);
+            mesh.vertices.push_back({ sin_phi * cos_theta, cos_phi, sin_phi * sin_theta });
         }
     }
 

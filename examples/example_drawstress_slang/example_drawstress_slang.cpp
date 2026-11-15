@@ -28,7 +28,6 @@
 #include SLANG(example_drawstress_slang/drawstress_frag.slang)
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -46,23 +45,9 @@ constexpr uint32_t stress_height = 720;
 constexpr int dim_min = 2;
 constexpr int dim_max = 40;
 
-struct StressVertex
-{
-    std::array<float, 3> position;
-    std::array<float, 3> color;
-};
-
-// bgfx s_cubeVertices 的 abgr 顶点色解码为 float3
-const std::vector<StressVertex> cube_vertices = {
-    { { -1.0f, 1.0f, 1.0f }, { 0.0f, 0.0f, 0.0f } },   // 0xff000000
-    { { 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } },    // 0xff0000ff
-    { { -1.0f, -1.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } },  // 0xff00ff00
-    { { 1.0f, -1.0f, 1.0f }, { 1.0f, 1.0f, 0.0f } },   // 0xff00ffff
-    { { -1.0f, 1.0f, -1.0f }, { 0.0f, 0.0f, 1.0f } },  // 0xffff0000
-    { { 1.0f, 1.0f, -1.0f }, { 1.0f, 0.0f, 1.0f } },   // 0xffff00ff
-    { { -1.0f, -1.0f, -1.0f }, { 0.0f, 1.0f, 1.0f } }, // 0xffffff00
-    { { 1.0f, -1.0f, -1.0f }, { 1.0f, 1.0f, 1.0f } },  // 0xffffffff
-};
+// Bits 0..2 are R/G/B and select the +X/-Y/-Z endpoints of the cube.
+// Vertex pulling uses a word-aligned stride, so each corner occupies one word.
+const std::vector<uint32_t> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
 const std::vector<uint16_t> cube_indices = {
     0, 1, 2, 1, 3, 2,

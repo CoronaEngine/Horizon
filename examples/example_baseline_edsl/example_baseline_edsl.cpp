@@ -25,7 +25,6 @@
 struct BaselineEdslVertexProxy
 {
     EmbeddedShader::Float3 pos;
-    EmbeddedShader::Float3 color;
     EmbeddedShader::Float2 tex_coord;
 };
 
@@ -81,8 +80,7 @@ void run_example_baseline_edsl()
 
     auto vertex_shader = [&](Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
         position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-        Float color_weight = (vertex->color->x + vertex->color->y + vertex->color->z) / Float(3.0f);
-        return Float4(vertex->tex_coord, color_weight, 1.0f);
+        return Float4(vertex->tex_coord, 1.0f, 1.0f);
     };
 
     auto fragment_shader = [&](Float4 input) {
