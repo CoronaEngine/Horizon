@@ -115,12 +115,9 @@ void *dynamic_module_find_symbol(void *handle, ocarina::string_view name_view) n
 }
 
 ocarina::string dynamic_module_name(ocarina::string_view name) noexcept {
-#if defined(_WIN32)
-    return ocarina::string(name) + ".dll";
-#else
-    // Backends are CMake MODULE libraries, whose macOS suffix is .so.
+    // CMake supplies the MODULE prefix/suffix on every platform, including
+    // Windows' empty prefix and .dll suffix and macOS' lib prefix and .so suffix.
     return string{OC_SHARED_MODULE_PREFIX} + string{name} + OC_SHARED_MODULE_SUFFIX;
-#endif
 }
 
 string demangle(const char *name) noexcept {

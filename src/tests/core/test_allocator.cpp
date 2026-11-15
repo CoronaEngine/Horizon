@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <clocale>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -29,7 +30,7 @@ void expect(bool condition, const char *message) {
     }
 }
 
-struct alignas(256) Item {
+struct alignas(16) Item {
     static inline std::atomic<int> live{};
     int value;
 
@@ -37,8 +38,29 @@ struct alignas(256) Item {
     ~Item() { --live; }
 };
 
+template<typename T, bool UseAllocator>
+concept CanAllocate = requires { ocarina::allocate<T>(1, UseAllocator); };
+
+template<typename T>
+concept CanUseAllocator = requires(ocarina::allocator<T> allocator) { allocator.allocate(1); };
+
+struct alignas(32) UnsupportedItem {};
+static_assert(CanAllocate<ocarina::float4, true> && CanAllocate<ocarina::float4, false>);
+static_assert(CanUseAllocator<ocarina::float4>);
+static_assert(!CanAllocate<UnsupportedItem, true> && !CanAllocate<UnsupportedItem, false>);
+static_assert(!CanUseAllocator<UnsupportedItem>);
+
+template<typename T>
+constexpr bool cannot_allocate = !CanAllocate<T, true> && !CanAllocate<T, false> && !CanUseAllocator<T>;
+
+static_assert(cannot_allocate<const int>);
+static_assert(cannot_allocate<volatile int>);
+static_assert(cannot_allocate<const volatile int>);
+static_assert(CanAllocate<const int *, true> && CanAllocate<const int *, false>);
+static_assert(CanUseAllocator<const int *>);
+
 void test_aligned_allocations() {
-    for (size_t alignment : std::array<size_t, 8>{1, 2, 8, 16, 32, 64, 256, 4096}) {
+    for (size_t alignment : std::array<size_t, 4>{1, 2, 8, 16}) {
         // The byte count need not be a multiple of the requested alignment.
         const size_t size = alignment * 3 + 1;
         void *pointer = ocarina::detail::allocator_allocate(size, alignment);
@@ -48,12 +70,12 @@ void test_aligned_allocations() {
         }
         expect(reinterpret_cast<uintptr_t>(pointer) % alignment == 0, "requested alignment is preserved");
         std::memset(pointer, 0x5a, size);
-        ocarina::detail::allocator_deallocate(pointer, alignment);
+        std::free(pointer);
 
         void *empty = ocarina::detail::allocator_allocate(0, alignment);
         expect(empty != nullptr && reinterpret_cast<uintptr_t>(empty) % alignment == 0,
                "zero-sized allocation remains non-null and aligned");
-        ocarina::detail::allocator_deallocate(empty, alignment);
+        std::free(empty);
         ocarina::detail::allocator_deallocate(nullptr, alignment);
     }
     ocarina::detail::allocator_deallocate(nullptr, 1);
@@ -63,22 +85,68 @@ void test_aligned_allocations() {
     ocarina::delete_with_allocator(item);
     expect(Item::live == 0, "typed deletion runs the destructor");
 
-    auto *crt = std::construct_at(ocarina::allocate<Item>(1, false), 23);
-    expect(crt->value == 23, "explicit CRT allocation mode remains usable");
-    ocarina::delete_with_allocator(crt, false);
-    expect(Item::live == 0, "CRT deletion runs the destructor");
+    auto *direct = std::construct_at(ocarina::allocate<Item>(1, false), 23);
+    expect(direct->value == 23 && reinterpret_cast<uintptr_t>(direct) % alignof(Item) == 0,
+           "direct standard allocation preserves values and alignment");
+    ocarina::delete_with_allocator(direct, false);
+    expect(Item::live == 0, "direct deletion runs the destructor");
+
+    auto *raw = ocarina::allocate<unsigned char>(37);
+    raw[0] = 17;
+    raw[36] = 29;
+    expect(raw[0] == 17 && raw[36] == 29, "core malloc storage retains its payload");
+    std::free(raw);
 }
 
-void test_small_crt_allocations_and_wide_strings() {
+void test_small_direct_allocations() {
     auto *value = std::construct_at(ocarina::allocate<unsigned char>(1, false), 7);
-    expect(*value == 7, "CRT allocation supports alignments smaller than a pointer");
+    expect(*value == 7, "direct standard allocation supports alignments smaller than a pointer");
     ocarina::delete_with_allocator(value, false);
     auto *empty = std::construct_at(ocarina::allocate<unsigned char>(0, false), 3);
-    expect(*empty == 3, "zero-sized CRT allocation remains usable");
+    expect(*empty == 3, "zero-sized direct allocation remains usable");
     ocarina::delete_with_allocator(empty, false);
+
+    auto *raw = ocarina::allocate<unsigned char>(37, false);
+    raw[0] = 17;
+    raw[36] = 29;
+    expect(raw[0] == 17 && raw[36] == 29, "direct malloc storage retains its payload");
+    std::free(raw);
+}
+
+template<size_t Alignment>
+void test_malloc_alignment() {
+    struct alignas(Alignment) Block { std::array<unsigned char, 37> bytes; };
+    for (bool use_allocator : {false, true}) {
+        auto *block = std::construct_at(ocarina::allocate<Block>(1, use_allocator));
+        expect(reinterpret_cast<uintptr_t>(block) % Alignment == 0,
+               "malloc storage preserves the requested type alignment");
+        std::fill(block->bytes.begin(), block->bytes.end(), 0x5a);
+        expect(std::all_of(block->bytes.begin(), block->bytes.end(),
+                           [](unsigned char byte) { return byte == 0x5a; }),
+               "malloc storage retains all payload bytes");
+        std::destroy_at(block);
+        std::free(block);
+
+        auto *empty = ocarina::allocate<Block>(0, use_allocator);
+        expect(empty != nullptr && reinterpret_cast<uintptr_t>(empty) % Alignment == 0,
+               "zero-count allocation remains non-null and aligned");
+        std::free(empty);
+    }
+}
+
+void test_wide_string_conversion() {
+    const std::string original_locale = std::setlocale(LC_CTYPE, nullptr);
+    expect(std::setlocale(LC_CTYPE, "C") != nullptr, "the standard C locale is available");
     expect(ocarina::wstring_to_string(L"portable ASCII") == "portable ASCII",
            "wide string conversion preserves ASCII");
     expect(ocarina::wstring_to_string(L"").empty(), "empty wide string conversion stays empty");
+    expect(ocarina::wstring_to_string(nullptr).empty(), "null wide string conversion stays empty");
+    expect(ocarina::wstring_to_string(L"prefix \u4e2d").empty(),
+           "unrepresentable characters fail without returning a partial conversion");
+    expect(ocarina::wstring_to_string(L"after failure") == "after failure",
+           "a failed conversion does not affect the next call");
+    expect(std::setlocale(LC_CTYPE, original_locale.c_str()) != nullptr,
+           "the original character conversion locale is restored");
 }
 
 void test_function_temporary_lifetimes() {
@@ -88,7 +156,7 @@ void test_function_temporary_lifetimes() {
         for (int i = 0; i < 80; ++i) {
             auto *item = function.create_temp_obj<Item>(i);
             expect(item->value == i && reinterpret_cast<uintptr_t>(item) % alignof(Item) == 0,
-                   "Function temporaries preserve values and extended alignment");
+                   "Function temporaries preserve values and alignment");
         }
         expect(Item::live == 80, "Function owns every temporary until destruction");
     }
@@ -97,7 +165,7 @@ void test_function_temporary_lifetimes() {
 
 void test_constructor_failure() {
     struct ConstructionFailure {};
-    struct alignas(256) ThrowingItem {
+    struct alignas(16) ThrowingItem {
         ThrowingItem() { throw ConstructionFailure{}; }
     };
     bool caught = false;
@@ -141,8 +209,7 @@ void test_cross_thread_allocation_lifetimes() {
         bool contents_preserved = true;
         auto allocate_blocks = [&] {
             for (size_t i = 0; i < blocks.size(); ++i) {
-                blocks[i] = static_cast<unsigned char *>(
-                    ocarina::detail::allocator_allocate(block_size, 64));
+                blocks[i] = ocarina::allocate<unsigned char>(block_size);
                 if (blocks[i] != nullptr) {
                     std::memset(blocks[i], static_cast<int>(i), block_size);
                 }
@@ -157,7 +224,7 @@ void test_cross_thread_allocation_lifetimes() {
                 }
                 contents_preserved &= std::all_of(pointer, pointer + block_size,
                                                   [i](unsigned char byte) { return byte == i; });
-                ocarina::detail::allocator_deallocate(pointer, 64);
+                std::free(pointer);
             }
         };
         if (allocate_on_worker) {
@@ -240,12 +307,12 @@ int probe_allocation_failure(const char *probe) {
         ocarina::detail::allocator_deallocate(pointer, 16);
     } else if (std::strcmp(probe, "--probe-size-overflow") == 0) {
         ocarina::deallocate(ocarina::allocate<Item>(excessive_count));
-    } else if (std::strcmp(probe, "--probe-crt-size-overflow") == 0) {
-#ifdef _WIN32
-        _aligned_free(ocarina::allocate<Item>(excessive_count, false));
-#else
-        std::free(ocarina::allocate<Item>(excessive_count, false));
-#endif
+    } else if (std::strcmp(probe, "--probe-direct-size-overflow") == 0) {
+        (void)ocarina::allocate<Item>(excessive_count, false);
+    } else if (std::strcmp(probe, "--probe-unsupported-alignment") == 0) {
+        (void)ocarina::detail::allocator_allocate(32, 256);
+    } else if (std::strcmp(probe, "--probe-direct-unsupported-alignment") == 0) {
+        (void)ocarina::detail::malloc_allocate(32, 256);
     } else if (std::strcmp(probe, "--probe-invalid-alignment") == 0) {
         (void)ocarina::detail::allocator_allocate(32, 3);
     } else if (std::strcmp(probe, "--probe-zero-alignment") == 0) {
@@ -273,7 +340,11 @@ int main(int argc, char **argv) {
         return 2;
     }
     test_aligned_allocations();
-    test_small_crt_allocations_and_wide_strings();
+    test_small_direct_allocations();
+    test_malloc_alignment<1>();
+    test_malloc_alignment<alignof(std::max_align_t)>();
+    test_malloc_alignment<16>();
+    test_wide_string_conversion();
     test_function_temporary_lifetimes();
     test_constructor_failure();
     test_image_data_ownership();

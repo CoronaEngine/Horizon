@@ -68,3 +68,13 @@ jobs:
 
       - name: Run all registered infrastructure tests
         run: ctest --test-dir build/conan/core/debug -C Debug --output-on-failure
+
+      - name: Build Release allocator CRT regression
+        run: >-
+          python build_tools/dev.py build horizon-test-core-allocator-crt
+          --configuration Release --target-family core
+
+      - name: Run Release allocator CRT regression
+        run: >-
+          ctest --test-dir build/conan/core/release -C Release
+          -R '^horizon\.core\.allocator_crt$' --no-tests=error --output-on-failure

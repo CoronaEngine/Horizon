@@ -57,14 +57,33 @@ namespace ocarina {
 
 namespace detail {
 OC_CORE_API void *allocator_allocate(size_t size, size_t alignment) noexcept;
-// Pass the original allocation alignment, including after type erasure.
 OC_CORE_API void allocator_deallocate(void *p, size_t alignment) noexcept;
+
+#if defined(_WIN64) || defined(__APPLE__)
+// These platforms guarantee 16-byte malloc alignment, while max_align_t can
+// have only 8-byte alignment (MSVC and Apple ARM64).
+inline constexpr size_t malloc_alignment = 16;
+#else
+inline constexpr size_t malloc_alignment = alignof(std::max_align_t);
+#endif
 
 [[nodiscard]] inline size_t checked_allocation_size(size_t count, size_t element_size) noexcept {
     if (element_size != 0 && count > (std::numeric_limits<size_t>::max)() / element_size) {
         std::abort();
     }
     return count * element_size;
+}
+
+[[nodiscard]] inline void *malloc_allocate(size_t size, size_t alignment) noexcept {
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0 || alignment > malloc_alignment) {
+        std::abort();
+    }
+    // Keep even zero-sized storage aligned, and return the original pointer.
+    void *allocation = std::malloc(size < alignment ? alignment : size);
+    if (allocation == nullptr) {
+        std::abort();
+    }
+    return allocation;
 }
 }// namespace detail
 
@@ -86,7 +105,8 @@ struct allocator {
     constexpr allocator() noexcept = default;
     template<typename U>
     constexpr explicit allocator(allocator<U>) noexcept {}
-    [[nodiscard]] auto allocate(std::size_t n) const noexcept {
+    [[nodiscard]] auto allocate(std::size_t n) const noexcept
+        requires(std::is_convertible_v<T *, void *> && alignof(T) <= detail::malloc_alignment) {
         return static_cast<T *>(detail::allocator_allocate(detail::checked_allocation_size(n, sizeof(T)), alignof(T)));
     }
     void deallocate(T *p, size_t) const noexcept {
@@ -98,27 +118,18 @@ struct allocator {
     }
 };
 
+// Returns raw malloc storage, including for zero-count allocations. The result
+// can be released directly with std::free; destroy constructed objects first.
+// T must have no top-level const/volatile qualifiers.
+// Direct free across the core DLL boundary requires a shared CRT.
 template<typename T = std::byte>
+requires(std::is_convertible_v<T *, void *> && alignof(T) <= detail::malloc_alignment)
 [[nodiscard]] inline auto allocate(size_t n = 1u, bool use_allocator = true) noexcept {
     if (use_allocator) {
         return allocator<T>{}.allocate(n);
-    } else {
-        const size_t size = detail::checked_allocation_size(n, sizeof(T));
-#ifdef _WIN32
-        auto *p = static_cast<T *>(_aligned_malloc(size == 0 ? 1 : size, alignof(T)));
-#else
-        void *allocation = nullptr;
-        constexpr size_t alignment = alignof(T) < sizeof(void *) ? sizeof(void *) : alignof(T);
-        if (posix_memalign(&allocation, alignment, size == 0 ? 1 : size) != 0) {
-            std::abort();
-        }
-        auto *p = static_cast<T *>(allocation);
-#endif
-        if (p == nullptr) {
-            std::abort();
-        }
-        return p;
     }
+    // Keep direct allocation in the caller and the default path in the core DLL.
+    return static_cast<T *>(detail::malloc_allocate(detail::checked_allocation_size(n, sizeof(T)), alignof(T)));
 }
 
 template<typename T>
@@ -153,11 +164,7 @@ inline void delete_with_allocator(T *p, bool use_allocator = true) noexcept {
     if (use_allocator) {
         deallocate(p);
     } else {
-#ifdef _WIN32
-        _aligned_free(p);
-#else
-        std::free(p);
-#endif
+        std::free(const_cast<std::remove_cvref_t<T> *>(p));
     }
 }
 
@@ -395,6 +402,8 @@ inline std::string get_file_directory(const std::string &file_path) {
     return file_path.substr(0, file_path.length() - file_name.length());
 }
 
+// Convert using the current LC_CTYPE locale. Null/empty input and conversion
+// failures produce an empty string.
 [[nodiscard]] std::string wstring_to_string(const wchar_t *source);
 
 inline std::wstring string_to_wstring(const std::string &source) {

@@ -32,22 +32,13 @@ void clear_directory(const std::filesystem::path &dir_path) {
 }
 
 std::string wstring_to_string(const wchar_t *source) {
-#ifdef _WIN32
-    size_t len = 0;
-    wcstombs_s(&len, nullptr, 0, source, 0);
-    std::string str(len > 0 ? len - 1 : 0, '\0');
-    if (len > 0) {
-        wcstombs_s(&len, str.data(), str.size() + 1, source, str.size());
-    }
-    return str;
-#else
     if (source == nullptr) {
         return {};
     }
     std::mbstate_t state{};
     const wchar_t *cursor = source;
     const size_t length = std::wcsrtombs(nullptr, &cursor, 0, &state);
-    if (length == static_cast<size_t>(-1)) {
+    if (length == 0 || length == static_cast<size_t>(-1)) {
         return {};
     }
     std::string str(length, '\0');
@@ -57,7 +48,6 @@ std::string wstring_to_string(const wchar_t *source) {
         return {};
     }
     return str;
-#endif
 }
 
 std::string get_file_name(const std::string &file_path) {
@@ -73,29 +63,11 @@ std::string get_file_name(const std::string &file_path) {
 
 namespace detail {
 void *allocator_allocate(size_t size, size_t alignment) noexcept {
-    if (alignment == 0 || (alignment & (alignment - 1)) != 0) {
-        std::abort();
-    }
-    // Keep zero-sized allocations usable and preserve the fail-fast contract.
-    const size_t bytes = size == 0 ? 1 : size;
-    void *p = alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__
-                  ? ::operator new(bytes, std::align_val_t(alignment), std::nothrow)
-                  : ::operator new(bytes, std::nothrow);
-    if (p == nullptr) {
-        std::abort();
-    }
-    return p;
+    return malloc_allocate(size, alignment);
 }
 
-void allocator_deallocate(void *p, size_t alignment) noexcept {
-    if (p == nullptr) {
-        return;
-    }
-    if (alignment > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
-        ::operator delete(p, std::align_val_t(alignment));
-    } else {
-        ::operator delete(p);
-    }
+void allocator_deallocate(void *p, size_t) noexcept {
+    std::free(p);
 }
 }// namespace detail
 }// namespace ocarina
