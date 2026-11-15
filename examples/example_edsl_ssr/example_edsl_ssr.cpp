@@ -10,18 +10,7 @@
 // - VNDF 采样现已升级为各向异性 GGX（aniso 参数生效）。
 // - clearcoat lobe 已加入 trace 的三路 lobe 选择。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#define HORIZON_NATIVE_WINDOW(window) glfwGetX11Window(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "common.h"
 #include "horizon.h"

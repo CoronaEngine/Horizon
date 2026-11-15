@@ -7,6 +7,14 @@
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
+#if defined(__linux__)
+#undef Always
+#undef None
+#undef Bool
+#undef Status
+#undef Success
+#endif
+
 #include <array>
 #include <cstdint>
 #include <mutex>

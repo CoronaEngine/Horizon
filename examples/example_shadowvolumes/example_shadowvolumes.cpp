@@ -14,18 +14,7 @@
 //   3 volume    -> R32F 计数目标（加法混合，无深度附件）
 //   4 lit       -> 主目标（clear_color_target=false，加法混合叠加漫反射×可见性）
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#define HORIZON_NATIVE_WINDOW(window) glfwGetX11Window(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

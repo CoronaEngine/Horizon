@@ -19,8 +19,23 @@ namespace EmbeddedShader::Generator
 	class SlangGenerator final
 	{
 		friend class EmbeddedShader::ComputePipelineObject;
+
 		template<typename T>
-		static constexpr std::string_view variateBasicTypeNameMap = "unknown";
+		static constexpr std::string_view variateBasicTypeName()
+		{
+			if constexpr (std::is_same_v<T, bool>) return "bool";
+			else if constexpr (std::is_same_v<T, int8_t>) return "int8_t";
+			else if constexpr (std::is_same_v<T, int16_t>) return "int16_t";
+			else if constexpr (std::is_same_v<T, int>) return "int";
+			else if constexpr (std::is_same_v<T, int64_t>) return "int64_t";
+			else if constexpr (std::is_same_v<T, uint8_t>) return "uint8_t";
+			else if constexpr (std::is_same_v<T, uint16_t>) return "uint16_t";
+			else if constexpr (std::is_same_v<T, uint32_t>) return "uint";
+			else if constexpr (std::is_same_v<T, uint64_t>) return "uint64_t";
+			else if constexpr (std::is_same_v<T, float>) return "float";
+			else if constexpr (std::is_same_v<T, double>) return "double";
+			else return "unknown";
+		}
 	public:
 		static std::string getShaderOutput(const Ast::EmbeddedShaderStructure& structure);
 		static std::string getGlobalOutput(const Ast::EmbeddedShaderStructure& structure);
@@ -28,7 +43,7 @@ namespace EmbeddedShader::Generator
 		template<typename T>
 		static std::string getVariateTypeName() {return "unknown";}
 		template<typename T> requires std::is_arithmetic_v<T>
-		static std::string getVariateTypeName() {return std::string(variateBasicTypeNameMap<T>);}
+		static std::string getVariateTypeName() {return std::string(variateBasicTypeName<T>());}
 		template<typename T> requires ktm::is_vector_v<T>
 		static std::string getVariateTypeName();
 		template<typename T> requires ktm::is_matrix_v<T>
@@ -172,22 +187,6 @@ namespace EmbeddedShader::Generator
 			using scalar_type = T;
 		};
 	};
-
-#define DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(type, name) \
-	template<> inline constexpr std::string_view SlangGenerator::variateBasicTypeNameMap<type> = #name
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(int8_t, int8_t);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(int16_t, int16_t);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(int, int);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(int64_t, int64_t);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(uint8_t, uint8_t);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(uint16_t, uint16_t);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(uint32_t, uint);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(uint64_t, uint64_t);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(float, float);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(double, double);
-	DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(bool, bool);
-	//DEFINE_VARIATE_BASIC_TYPE_NAME_MAP(std::float16_t, half);
-#undef DEFINE_VARIATE_BASIC_TYPE_NAME_MAP
 
 	template<typename T> requires ktm::is_vector_v<T>
 	std::string SlangGenerator::getVariateTypeName()

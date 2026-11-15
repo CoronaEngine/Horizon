@@ -1,17 +1,6 @@
 // Disney Principled PBR chart: 10 parameter rows x 11 value columns (0.0 .. 1.0).
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#define HORIZON_NATIVE_WINDOW(window) glfwGetX11Window(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

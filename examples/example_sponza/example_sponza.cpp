@@ -18,19 +18,8 @@
 // 交互:RMB 拖动视角,WASD/QE 移动,G 循环 debug 视图;imgui 全参数可调
 // (太阳方位/仰角、Disney 材质、RSM、SSR、IBL、SSAO、曝光)。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#define HORIZON_NATIVE_WINDOW(window) glfwGetX11Window(window)
-#endif
-#include <GLFW/glfw3.h>
+#include "glfw_native.h"
 #include <limits>
-#include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
