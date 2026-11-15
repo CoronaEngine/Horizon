@@ -80,29 +80,3 @@ struct CopyImageToBufferCommand : public CommandRecordVulkan
     void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
     void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
 };
-
-struct BlitImageCommand : public CommandRecordVulkan
-{
-    ResourceManager::ImageHardwareWrap &srcImage;
-    ResourceManager::ImageHardwareWrap &dstImage;
-
-    BlitImageCommand(ResourceManager::ImageHardwareWrap &srcImg, ResourceManager::ImageHardwareWrap &dstImg);
-
-    ExecutorType getExecutorType() override;
-    void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
-};
-
-struct TransitionImageLayoutCommand : public CommandRecordVulkan
-{
-    ResourceManager::ImageHardwareWrap &image;
-    VkImageLayout imageLayout;
-    VkPipelineStageFlags2 dstStageMask;
-    VkAccessFlags2 dstAccessMask;
-
-    TransitionImageLayoutCommand(ResourceManager::ImageHardwareWrap &image, VkImageLayout imageLayout, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask);
-
-    ExecutorType getExecutorType() override;
-    void commitCommand(HardwareExecutorVulkan &hardwareExecutor) override;
-    void resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList&) override;
-};

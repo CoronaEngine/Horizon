@@ -47,14 +47,6 @@ struct RecordedCommand
     CommandRecordVulkan::ExecutorType type;
 };
 
-// One submitted batch retains its commands and resources until GPU completion.
-struct DeferredRelease
-{
-    uint64_t timelineValue;
-    std::vector<RecordedCommand> commands;
-    VkSemaphore semaphore;
-};
-
 // A borrowed completion point. Queue storage and its device must outlive use;
 // public executors use DeviceManager queues, which remain stable after initialization.
 struct SubmissionPoint
@@ -63,6 +55,13 @@ struct SubmissionPoint
     uint64_t value{0};
 
     explicit operator bool() const noexcept { return queue != nullptr && value != 0; }
+};
+
+// One submitted batch retains its commands and resources until GPU completion.
+struct DeferredRelease
+{
+    SubmissionPoint point;
+    std::vector<RecordedCommand> commands;
 };
 
 struct HardwareExecutorVulkan
@@ -125,15 +124,6 @@ struct HardwareExecutorVulkan
         return other;
     }
 
-    HardwareExecutorVulkan &wait(const std::vector<VkSemaphoreSubmitInfo> &waitInfos = {},
-                                 const std::vector<VkSemaphoreSubmitInfo> &signalInfos = {})
-    {
-        // waitFence = fence;
-        waitSemaphores.insert(waitSemaphores.end(), waitInfos.begin(), waitInfos.end());
-        signalSemaphores.insert(signalSemaphores.end(), signalInfos.begin(), signalInfos.end());
-        return *this;
-    }
-
     HardwareExecutorVulkan &wait(const HardwareExecutorVulkan &other)
     {
         return wait(other.getSubmissionPoint());
@@ -181,19 +171,11 @@ struct HardwareExecutorVulkan
     // void disposeWhenCommitCompletes(std::shared_ptr<Buffer> buffer);
     // void disposeWhenCommitCompletes(std::function<void()> &&deallocator);
 
-    DeviceManager::QueueUtils *pickQueueAndCommit(std::atomic_uint16_t &queueIndex,
-                                                  std::vector<DeviceManager::QueueUtils> &queues,
-                                                  std::function<bool(DeviceManager::QueueUtils *currentRecordQueue)> commitCommand);
-
     DeviceManager::QueueUtils *currentRecordQueue{nullptr};
     std::shared_ptr<HardwareContext::HardwareUtils> hardwareContext;
     std::vector<RecordedCommand> commandList;
     std::vector<VkSemaphoreSubmitInfo> waitSemaphores;
     std::vector<VkSemaphoreSubmitInfo> signalSemaphores;
-    // std::vector<VkFence> prentFences;
-    VkFence waitFence{VK_NULL_HANDLE};
-    // std::unordered_map<VkFence, DeviceManager::QueueUtils*> fenceToPresent;
-    // std::vector<std::vector<std::shared_ptr<Buffer>>> buffer_to_dispose_;
 
     // ========== 延迟释放成员 ==========
     std::vector<DeferredRelease> deferredReleaseQueue;
@@ -201,4 +183,5 @@ struct HardwareExecutorVulkan
   private:
     std::vector<SubmissionPoint> pendingWaits; // Freeze the exact submissions at wait() time.
     SubmissionPoint lastSubmission; // Published only after a successful queue submission.
+    SubmissionPoint lastCompleted;  // Observed from the device or a successful host wait.
 };

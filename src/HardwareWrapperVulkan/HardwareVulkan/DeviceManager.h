@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <array>
 #include <mutex>
 #include <set>
 #include <unordered_map>
@@ -28,6 +29,7 @@ class DeviceManager
         uint32_t queueFamilyIndex = -1;
         VkQueue vkQueue{VK_NULL_HANDLE};
         VkCommandPool commandPool{VK_NULL_HANDLE};
+        std::array<VkCommandBuffer, 3> commandBuffers{};
         VkCommandBuffer commandBuffer{VK_NULL_HANDLE};
         DeviceManager *deviceManager{nullptr};
     };
@@ -65,7 +67,7 @@ class DeviceManager
     /// 同设备直接返回原 semaphore；跨设备从预导入缓存查表（初始化阶段已填充）。
     VkSemaphore getOrImportTimelineSemaphore(const QueueUtils &foreignQueue) const;
 
-    std::vector<QueueUtils> pickAvailableQueues(std::function<bool(const QueueUtils &)> predicate) const;
+    const QueueUtils* findPresentQueue(VkSurfaceKHR surface, uint32_t& graphicsFamily) const;
 
     VkPhysicalDevice getPhysicalDevice() const
     {
@@ -108,12 +110,8 @@ class DeviceManager
     VkDevice logicalDevice{VK_NULL_HANDLE};
     FeaturesUtils deviceFeaturesUtils;
 
-    std::atomic_uint16_t currentGraphicsQueueIndex{0};
     std::atomic_uint16_t currentComputeQueueIndex{0};
     std::atomic_uint16_t currentTransferQueueIndex{0};
-    std::mutex graphicsSubmitMutex;
-    VkSemaphore lastGraphicsSemaphore{VK_NULL_HANDLE};
-    uint64_t lastGraphicsValue{0};
 
     std::vector<QueueUtils> graphicsQueues;
     std::vector<QueueUtils> computeQueues;

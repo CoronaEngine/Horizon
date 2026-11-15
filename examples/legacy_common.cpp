@@ -102,7 +102,7 @@ Benchmark::Benchmark(const char* mode, uint32_t width, uint32_t height)
 }
 Benchmark::~Benchmark() = default;
 void Benchmark::begin_scene() { scene_start_ = Clock::now(); }
-void Benchmark::submit(HardwareExecutor& executor, RasterBatch&& batch) {
+void Benchmark::submit(HardwareExecutor& executor, RasterBatch&& batch, HardwareDisplayer& display, const HardwareImage& image) {
     const auto start = Clock::now();
     record_ms_ = std::chrono::duration<double, std::milli>(start - scene_start_).count();
     auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
@@ -110,7 +110,8 @@ void Benchmark::submit(HardwareExecutor& executor, RasterBatch&& batch) {
     if (gpu_timer_) *backend << &gpu_timer_->begin;
     executor << std::move(batch);
     if (gpu_timer_) *backend << &gpu_timer_->end;
-    executor.commit();
+    if (gpu_timer_ || offscreen_) executor.commit();
+    else display.present(executor, image);
     submit_ms_ = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
     if (frame_ == 0) first_submit_ms_ = submit_ms_;
     if (gpu_timer_) {
@@ -124,6 +125,7 @@ void Benchmark::submit(HardwareExecutor& executor, RasterBatch&& batch) {
         wait.pValues = &point.value;
         coronaHardwareCheck(vkWaitSemaphores(gpu_timer_->device, &wait, 30'000'000'000ULL));
         gpu_ms_ = gpu_timer_->read();
+        if (!offscreen_) display.wait(executor) << image;
     }
 }
 void Benchmark::begin_frame() {

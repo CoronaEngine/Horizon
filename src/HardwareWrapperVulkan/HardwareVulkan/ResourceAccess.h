@@ -52,7 +52,7 @@ struct ResourceBarriers
 class ResourceBarrierPlanner
 {
 public:
-    void plan(const ResourceAccessList& accesses, ResourceBarriers& result);
+    void plan(const ResourceAccessList& accesses, ResourceBarriers& result, bool finalCommand);
     void invalidate(); // An opaque command is a conservative boundary on both sides.
 
 private:

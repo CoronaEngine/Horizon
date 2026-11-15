@@ -51,3 +51,13 @@ HardwareDisplayer &HardwareDisplayer::operator<<(const HardwareImage &image)
         reinterpret_cast<DisplayManager*>(displaySurfaceID)->displayFrame(displaySurface, image);
     return *this;
 }
+
+bool HardwareDisplayer::present(HardwareExecutor& executor, const HardwareImage& image)
+{
+    auto* pending = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
+    if (!pending) return false;
+    const bool shown = displaySurfaceID && displaySurface &&
+        reinterpret_cast<DisplayManager*>(displaySurfaceID)->displayFrame(displaySurface, image, pending);
+    if (!pending->commandList.empty()) pending->commit(); // Minimized, out of date or no surface.
+    return shown;
+}

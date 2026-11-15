@@ -51,6 +51,15 @@ void releaseBuffer(uintptr_t id)
 
 HardwareBuffer::HardwareBuffer() = default;
 
+HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
+{
+    HardwareBuffer buffer;
+    auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    buffer.bufferID = reinterpret_cast<uintptr_t>(new ResourceManager::BufferHardwareWrap(
+        manager.createBuffer(1, bytes, convertBufferUsage(BufferUsage::RasterIndirect), true, true, true)));
+    return buffer;
+}
+
 HardwareBuffer HardwareBuffer::uploadDeviceLocal(size_t count, size_t stride, BufferUsage usage, const void* data)
 {
     if (count > UINT32_MAX || stride > UINT32_MAX)

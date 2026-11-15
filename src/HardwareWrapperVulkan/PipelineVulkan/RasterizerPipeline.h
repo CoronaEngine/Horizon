@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <map>
+#include <mutex>
 #include <vector>
 
 #include "Horizon_old.h"
@@ -114,7 +115,7 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
         void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
         Root root{};
         void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
-        void prepareUpload();
+        void prepareUpload(std::span<const uint8_t> parameterData);
         std::vector<uint8_t> uniformBytes;
         std::shared_ptr<BindingSnapshot> bindings;
         std::shared_ptr<UniformSnapshot> uniform;
@@ -127,6 +128,7 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
 
   private:
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
+    std::mutex uploadMutex;
     void initializeStageBindings(uint32_t viewCount);
     void createRenderPass(GraphicsState& state);
     void createGraphicsPipeline(GraphicsState& state);

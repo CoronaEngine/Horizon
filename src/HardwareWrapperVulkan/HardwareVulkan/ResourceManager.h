@@ -122,7 +122,8 @@ struct ResourceManager
                                                   uint32_t elementSize,
                                                   VkBufferUsageFlags usage,
                                                   bool hostVisibleMapped = true,
-                                                  bool useDedicated = false);
+                                                  bool useDedicated = false,
+                                                  bool privateUpload = false);
     void destroyBuffer(BufferHardwareWrap &buffer);
 
     // External memory operations
@@ -146,7 +147,6 @@ struct ResourceManager
 
     ResourceManager &copyBufferToImage(VkCommandBuffer &commandBuffer, BufferHardwareWrap &buffer, ImageHardwareWrap &image, uint32_t mipLevel = 0, uint32_t layerCount = 1);
     ResourceManager &copyImageToBuffer(VkCommandBuffer &commandBuffer, ImageHardwareWrap &image, BufferHardwareWrap &buffer);
-    ResourceManager &blitImage(VkCommandBuffer &commandBuffer, ImageHardwareWrap &srcImage, ImageHardwareWrap &dstImage);
 
     void flushMapped(BufferHardwareWrap& buffer, size_t bytes);
     void writeMapped(BufferHardwareWrap& buffer, const void* data, size_t bytes);

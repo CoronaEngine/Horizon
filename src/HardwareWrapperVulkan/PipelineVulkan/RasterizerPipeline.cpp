@@ -1,6 +1,7 @@
 #include "RasterizerPipeline.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <span>
 
@@ -424,6 +425,7 @@ std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::captu
         }
     }
     batch->depthImage = depthImage;
+    batch->clearValues.reserve(renderTargets.size() + 1);
     for (const auto& target : renderTargets)
         batch->clearValues.push_back(target ? legacyImageFromId(target.getImageID())->clearValue : VkClearValue{});
     batch->clearValues.push_back(legacyImageFromId(batch->depthImage.getImageID())->clearValue);
@@ -435,6 +437,19 @@ std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::captu
 void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
 {
     if (batch.framebuffer) return;
+    const auto sameView = [](const HardwareImage& a, const HardwareImage& b) {
+        return a.getImageID() == b.getImageID() || (a && b &&
+            legacyImageFromId(a.getImageID())->imageView == legacyImageFromId(b.getImageID())->imageView);
+    };
+    if (lastFramebuffer && lastFramebuffer->graphics->state == batch.state &&
+        lastFramebuffer->graphics->pass == batch.pass &&
+        lastFramebuffer->size.x == batch.imageSize.x && lastFramebuffer->size.y == batch.imageSize.y &&
+        sameView(lastFramebuffer->depth, batch.depthImage) &&
+        std::equal(lastFramebuffer->targets.begin(), lastFramebuffer->targets.end(),
+                   batch.renderTargets.begin(), batch.renderTargets.end(), sameView)) {
+        batch.framebuffer = lastFramebuffer;
+        return;
+    }
     auto* depth = legacyImageFromId(batch.depthImage.getImageID());
     std::vector<VkFormat> formats;
     std::vector<VkImageLayout> finalLayouts;
@@ -477,17 +492,6 @@ void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
         createRenderPass(*graphics);
         createGraphicsPipeline(*graphics);
         graphicsStates.push_back(graphics);
-    }
-    if (lastFramebuffer && lastFramebuffer->graphics == graphics &&
-        lastFramebuffer->size.x == batch.imageSize.x && lastFramebuffer->size.y == batch.imageSize.y &&
-        legacyImageFromId(lastFramebuffer->depth.getImageID())->imageView == depth->imageView &&
-        lastFramebuffer->targets.size() == batch.renderTargets.size())
-    {
-        bool same = true;
-        for (size_t i = 0; i < batch.renderTargets.size(); ++i)
-            same &= legacyImageFromId(lastFramebuffer->targets[i].getImageID())->imageView ==
-                    legacyImageFromId(batch.renderTargets[i].getImageID())->imageView;
-        if (same) { batch.framebuffer = lastFramebuffer; return; }
     }
     auto framebuffer = std::make_shared<FramebufferState>();
     framebuffer->device = device;
@@ -533,13 +537,15 @@ namespace {
 VkDeviceAddress addressOf(const HardwareBuffer& handle)
 {
     auto* buffer = legacyBufferFromId(handle.getBufferID());
-    if (buffer->deviceAddress) return buffer->deviceAddress;
+    std::atomic_ref cached(buffer->deviceAddress);
+    if (auto address = cached.load(std::memory_order_relaxed)) return address;
     if (!(buffer->bufferUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT))
         throw std::invalid_argument("Raster buffer requires device-address usage");
     VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     info.buffer = buffer->bufferHandle;
-    buffer->deviceAddress = vkGetBufferDeviceAddress(buffer->device->getLogicalDevice(), &info);
-    return buffer->deviceAddress;
+    const auto address = vkGetBufferDeviceAddress(buffer->device->getLogicalDevice(), &info);
+    cached.store(address, std::memory_order_relaxed);
+    return address;
 }
 }
 
@@ -607,31 +613,33 @@ void RasterizerPipelineVulkan::Batch::appendIndirect(const RasterGeometry& geome
         (geometry.indices.getElementSize() != 2 && geometry.indices.getElementSize() != 4))
         throw std::invalid_argument("Invalid GPU raster geometry");
     if (size > UINT32_MAX) throw std::length_error("Draw parameters exceed 4 GiB");
-    std::vector<uint8_t> bytes(size);
-    if (size) std::memcpy(bytes.data(), data, size);
     geometries.reserve(1);
     runs.reserve(1);
     geometries.push_back(geometry);
     runs.push_back({{{0, 0}, {imageSize.x, imageSize.y}}, 0, count});
-    parameters = std::move(bytes);
     externalPackets = buffer;
+    // Snapshot caller-owned bytes directly into the batch's GPU-visible slot.
+    try { prepareUpload({static_cast<const uint8_t*>(data), size}); }
+    catch (...) { externalPackets = {}; geometries.clear(); runs.clear(); throw; }
 }
 
-void RasterizerPipelineVulkan::Batch::prepareUpload()
+void RasterizerPipelineVulkan::Batch::prepareUpload(std::span<const uint8_t> parameterData)
 {
     if ((packets.empty() && !externalPackets) || upload) return;
     const size_t geometryOffset = packets.size() * sizeof(Packet);
     const size_t parameterOffset = (geometryOffset + geometries.size() * sizeof(GeometryEntry) + 15) & ~size_t(15);
-    const size_t bytes = parameterOffset + std::max<size_t>(parameters.size(), 4);
+    const size_t bytes = parameterOffset + std::max<size_t>(parameterData.size(), 4);
     if (bytes > UINT32_MAX) throw std::length_error("Raster batch exceeds 4 GiB");
     auto& pool = pipeline->uploadPool;
+    std::unique_lock lock(pipeline->uploadMutex);
     auto free = std::find_if(pool.begin(), pool.end(), [](const auto& buffer) { return buffer.use_count() == 1; });
     if (free == pool.end() || (*free)->getElementSize() < bytes) {
-        auto buffer = std::make_shared<HardwareBuffer>(uint32_t(bytes), BufferUsage::RasterIndirect);
+        auto buffer = std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(uint32_t(bytes)));
         if (free == pool.end()) free = pool.insert(free, buffer);
         else *free = std::move(buffer);
     }
     auto buffer = *free;
+    lock.unlock();
     auto* mapped = static_cast<uint8_t*>(buffer->getMappedData());
     if (!mapped) throw std::runtime_error("Raster upload requires host-visible memory");
     if (geometryOffset) std::memcpy(mapped, packets.data(), geometryOffset);
@@ -640,7 +648,7 @@ void RasterizerPipelineVulkan::Batch::prepareUpload()
         *entries++ = {addressOf(geometry.vertices), addressOf(geometry.indices),
                       uint32_t(geometry.vertices.getElementSize() / 4), uint32_t(geometry.indices.getElementSize()),
                       uint32_t(geometry.vertices.getElementCount())};
-    if (!parameters.empty()) std::memcpy(mapped + parameterOffset, parameters.data(), parameters.size());
+    if (!parameterData.empty()) std::memcpy(mapped + parameterOffset, parameterData.data(), parameterData.size());
     auto* native = legacyBufferFromId(buffer->getBufferID());
     native->resourceManager->flushMapped(*native, bytes);
     const auto base = addressOf(*buffer);
@@ -657,7 +665,7 @@ void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const Resour
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
-    prepareUpload();
+    prepareUpload(parameters);
     if (upload)
         result.buffer(*legacyBufferFromId(upload->getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);

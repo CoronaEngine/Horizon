@@ -28,15 +28,13 @@
 #include SLANG(example_drawstress_slang/drawstress_frag.slang)
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <span>
 #include <vector>
-
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/euler_angles.hpp>
 
 namespace
 {
@@ -142,14 +140,12 @@ void run_drawstress_scene()
         return m;
     }();
     const glm::mat4 view_proj = proj * view;
-    const glm::mat4 scale_mtx = glm::scale(glm::mat4(1.0f), glm::vec3(0.25f));
 
     legacy_example::Benchmark benchmark(mode, stress_width, stress_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
     while (!glfwWindowShouldClose(window))
     {
         benchmark.begin_frame();
-        render_executor.waitForDeferredResources();
         glfwPollEvents();
 
         benchmark.begin_scene();
@@ -160,34 +156,43 @@ void run_drawstress_scene()
 
         HORIZON_PROFILE_PLOT("draw calls", dim * dim * dim);
 
-        matrices.clear();
+        matrices.resize(dim * dim * dim);
         auto batch = rasterizer.beginBatch(stress_width, stress_height);
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::build_records");
-            for (int zz = 0; zz < dim; ++zz)
-            {
+            // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
+            std::array<glm::vec3, dim_max> sine, cosine;
+            for (int i = 0; i < dim; ++i) {
+                const glm::vec3 angles = time + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
+                sine[i] = glm::sin(angles);
+                cosine[i] = glm::cos(angles);
+            }
+            auto* dst = matrices.data();
+            for (int zz = 0; zz < dim; ++zz) {
+                const float sz = sine[zz].z, cz = cosine[zz].z;
                 for (int yy = 0; yy < dim; ++yy)
                 {
+                    const float sy = sine[yy].y, cy = cosine[yy].y;
+                    const glm::vec4 axisX = 0.25f * glm::vec4(cz * cy, cy * sz, -sy, 0.0f);
                     for (int xx = 0; xx < dim; ++xx)
                     {
-                        glm::mat4 model = glm::eulerAngleZYX(time + zz * 0.13f, time + yy * 0.37f, time + xx * 0.21f) * scale_mtx;
-                        model[3] = glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f);
-
-                        matrices.push_back(view_proj * model);
+                        const float sx = sine[xx].x, cx = cosine[xx].x;
+                        const glm::mat4 model(axisX,
+                            0.25f * glm::vec4(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx, 0.0f),
+                            0.25f * glm::vec4(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx, 0.0f),
+                            glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f));
+                        *dst++ = view_proj * model;
                     }
                 }
             }
-
         }
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
             batch.drawIndirect(cube, packets, static_cast<uint32_t>(matrices.size()), std::as_bytes(std::span(matrices)),
                                IndirectFirstInstance::AlwaysZero);
-            benchmark.submit(render_executor, std::move(batch));
+            benchmark.submit(render_executor, std::move(batch), display, final_output_image);
         }
-        if (!benchmark.offscreen())
-            display.wait(render_executor) << final_output_image;
         benchmark.end_frame(window, static_cast<uint64_t>(dim) * dim * dim, final_output_image, render_executor);
     }
 

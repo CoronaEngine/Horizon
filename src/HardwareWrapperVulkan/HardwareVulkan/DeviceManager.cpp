@@ -68,8 +68,6 @@ void DeviceManager::initDeviceManager(const CreateCallback &createCallback, cons
 
 void DeviceManager::cleanUpDeviceManager()
 {
-    lastGraphicsSemaphore = VK_NULL_HANDLE;
-    lastGraphicsValue = 0;
     if (logicalDevice == VK_NULL_HANDLE)
     {
         graphicsQueues.clear();
@@ -77,7 +75,6 @@ void DeviceManager::cleanUpDeviceManager()
         transferQueues.clear();
         queueFamilies.clear();
         physicalDevice = VK_NULL_HANDLE;
-        currentGraphicsQueueIndex = 0;
         currentComputeQueueIndex = 0;
         currentTransferQueueIndex = 0;
         return;
@@ -111,7 +108,6 @@ void DeviceManager::cleanUpDeviceManager()
     logicalDevice = VK_NULL_HANDLE;
     physicalDevice = VK_NULL_HANDLE;
 
-    currentGraphicsQueueIndex = 0;
     currentComputeQueueIndex = 0;
     currentTransferQueueIndex = 0;
 }
@@ -133,12 +129,6 @@ void DeviceManager::destroyQueueResources(std::vector<QueueUtils> &queues)
             queue.queueMutex.reset();
             queue.deviceManager = nullptr;
             continue;
-        }
-
-        if (queue.commandBuffer != VK_NULL_HANDLE && queue.commandPool != VK_NULL_HANDLE)
-        {
-            vkFreeCommandBuffers(logicalDevice, queue.commandPool, 1, &queue.commandBuffer);
-            queue.commandBuffer = VK_NULL_HANDLE;
         }
 
         if (queue.commandPool != VK_NULL_HANDLE)
@@ -246,6 +236,9 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
 
     for (int i = 0; i < queueFamilies.size(); i++)
     {
+        // Graphics recording and presentation use queue zero of a supported family.
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            queueFamilies[i].queueCount = 1;
         queuePriorities[i].resize(queueFamilies[i].queueCount, 1.0f);
 
         VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -337,9 +330,8 @@ void DeviceManager::createQueueUtils()
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = queue.commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
-
-        coronaHardwareCheck(vkAllocateCommandBuffers(logicalDevice, &allocInfo, &queue.commandBuffer));
+        allocInfo.commandBufferCount = static_cast<uint32_t>(queue.commandBuffers.size());
+        coronaHardwareCheck(vkAllocateCommandBuffers(logicalDevice, &allocInfo, queue.commandBuffers.data()));
     };
 
     int queue_count = 0;
@@ -409,25 +401,20 @@ void DeviceManager::createQueueUtils()
 //     return true;
 // }
 
-std::vector<DeviceManager::QueueUtils> DeviceManager::pickAvailableQueues(std::function<bool(const QueueUtils &)> predicate) const
+const DeviceManager::QueueUtils* DeviceManager::findPresentQueue(VkSurfaceKHR surface, uint32_t& graphicsFamily) const
 {
-    std::vector<QueueUtils> result;
-
-    auto addMatchingQueues = [&](const std::vector<QueueUtils> &queues) {
-        for (const auto &queue : queues)
+    if (graphicsQueues.empty()) return nullptr; // Presentation uses a graphics blit on this device.
+    for (const auto* queues : {&graphicsQueues, &computeQueues, &transferQueues})
+        for (const auto& queue : *queues)
         {
-            if (predicate(queue))
+            VkBool32 supported = VK_FALSE;
+            if (vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queue.queueFamilyIndex, surface, &supported) == VK_SUCCESS && supported)
             {
-                result.push_back(queue);
+                graphicsFamily = graphicsQueues.front().queueFamilyIndex;
+                return &queue;
             }
         }
-    };
-
-    addMatchingQueues(graphicsQueues);
-    addMatchingQueues(computeQueues);
-    addMatchingQueues(transferQueues);
-
-    return result;
+    return nullptr;
 }
 
 DeviceManager::ExternalSemaphoreHandle DeviceManager::exportSemaphore(VkSemaphore &semaphore)

@@ -111,9 +111,7 @@ void run_example_baseline_slang()
         rasterizer.draw({vertex_buffer, index_buffer});
 
         render_executor << rasterizer;
-        render_executor.commit();
-
-        display.wait(render_executor) << final_output_image;
+        display.present(render_executor, final_output_image);
     }
     render_executor.waitForDeferredResources();
 }

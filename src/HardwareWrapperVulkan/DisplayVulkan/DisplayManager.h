@@ -22,7 +22,7 @@ class DisplayManager
 
     bool initDisplayManager(void *surface);
     bool waitExecutor(const HardwareExecutorVulkan &executor);
-    bool displayFrame(void *surface, HardwareImage displayImage);
+    bool displayFrame(void *surface, const HardwareImage& displayImage, HardwareExecutorVulkan* producer = nullptr);
 
   private:
     // Vulkan 核心资源
@@ -37,17 +37,17 @@ class DisplayManager
     uint32_t currentFrame{0};
 
     // 交换链资源
-    std::vector<ResourceManager::ImageHardwareWrap> swapChainImages;
+    std::vector<VkImage> swapChainImages;
     ResourceManager::ImageHardwareWrap displayImage{};
 
     // 同步对象
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
-    std::vector<VkFence> acquireFences;
+    std::vector<SubmissionPoint> acquireConsumed;
 
     // 队列和设备
-    std::atomic_uint16_t currentQueueIndex{0};
-    std::vector<DeviceManager::QueueUtils> presentQueues;
+    const DeviceManager::QueueUtils* presentQueue{};
+    uint32_t blitQueueFamily{};
     std::shared_ptr<HardwareContext::HardwareUtils> displayDevice;
 
     // 跨设备传输资源
@@ -70,10 +70,8 @@ class DisplayManager
     void recreateSwapChain();
 
     void cleanupSyncObjects();
-    void cleanupSwapChainImages();
     void cleanupStagingBuffers();
     void cleanupDisplayImage();
 
-    bool needsSwapChainRecreation(const ktm::uvec2 &newSize) const;
     void setupCrossDeviceTransfer(const ResourceManager::ImageHardwareWrap &sourceImage);
 };

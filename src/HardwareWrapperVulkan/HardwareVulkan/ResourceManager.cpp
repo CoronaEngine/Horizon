@@ -701,7 +701,8 @@ ResourceManager::BufferHardwareWrap ResourceManager::createBuffer(uint32_t eleme
                                                                   uint32_t elementSize,
                                                                   VkBufferUsageFlags usage,
                                                                   bool hostVisibleMapped,
-                                                                  bool useDedicated)
+                                                                  bool useDedicated,
+                                                                  bool privateUpload)
 {
     BufferHardwareWrap resultBuffer{};
     resultBuffer.device = device;
@@ -760,6 +761,19 @@ ResourceManager::BufferHardwareWrap ResourceManager::createBuffer(uint32_t eleme
     if (hostVisibleMapped)
     {
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    }
+
+    if (privateUpload)
+    {
+        // Exportable Win32 buffers can exclude the CPU-visible VRAM heap.
+        // Let VMA suballocate the private upload within budget, including on UMA.
+        auto privateInfo = bufferInfo;
+        privateInfo.pNext = nullptr;
+        auto mapped = allocInfo;
+        mapped.flags |= VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+        if (vmaCreateBuffer(vmaAllocator, &privateInfo, &mapped, &resultBuffer.bufferHandle,
+                            &resultBuffer.bufferAlloc, &resultBuffer.bufferAllocInfo) == VK_SUCCESS)
+            return resultBuffer;
     }
 
     if (useDedicated)
@@ -1501,36 +1515,6 @@ ResourceManager &ResourceManager::copyImageToBuffer(VkCommandBuffer &commandBuff
                            buffer.bufferHandle,
                            1,
                            &region);
-
-    return *this;
-}
-
-ResourceManager &ResourceManager::blitImage(VkCommandBuffer &commandBuffer,
-                                            ImageHardwareWrap &srcImage,
-                                            ImageHardwareWrap &dstImage)
-{
-    VkImageBlit blitRegion{};
-    blitRegion.srcSubresource.aspectMask = srcImage.aspectMask;
-    blitRegion.srcSubresource.layerCount = 1;
-    blitRegion.srcSubresource.mipLevel = srcImage.baseMipLevel;
-    blitRegion.srcSubresource.baseArrayLayer = srcImage.baseArrayLayer;
-    blitRegion.srcOffsets[1] = {static_cast<int32_t>(srcImage.imageSize.x),
-                                static_cast<int32_t>(srcImage.imageSize.y), 1};
-    blitRegion.dstSubresource.aspectMask = dstImage.aspectMask;
-    blitRegion.dstSubresource.layerCount = 1;
-    blitRegion.dstSubresource.mipLevel = dstImage.baseMipLevel;
-    blitRegion.dstSubresource.baseArrayLayer = dstImage.baseArrayLayer;
-    blitRegion.dstOffsets[1] = {static_cast<int32_t>(dstImage.imageSize.x),
-                                static_cast<int32_t>(dstImage.imageSize.y), 1};
-
-    vkCmdBlitImage(commandBuffer,
-                   srcImage.imageHandle,
-                   srcImage.imageLayout,
-                   dstImage.imageHandle,
-                   dstImage.imageLayout,
-                   1,
-                   &blitRegion,
-                   VK_FILTER_LINEAR);
 
     return *this;
 }

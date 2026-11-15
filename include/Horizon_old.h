@@ -177,9 +177,11 @@ public:
 
 private:
     static HardwareBuffer uploadDeviceLocal(size_t count, size_t stride, BufferUsage usage, const void* data);
+    static HardwareBuffer rasterUpload(uint32_t bytes);
     std::uintptr_t bufferID{0};
 
     friend class HardwareImage;
+    friend struct RasterizerPipelineVulkan;
 };
 
 // ================= HardwareImage 参数结构体 =================
@@ -371,6 +373,8 @@ public:
     HardwareDisplayer& operator=(const HardwareDisplayer& other) = delete;
     HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept;
     HardwareDisplayer& operator<<(const HardwareImage& image);
+    // Commit pending work and present its output. A skipped presentation still commits the work.
+    bool present(HardwareExecutor& pending, const HardwareImage& image);
 
     HardwareDisplayer& wait(const HardwareExecutor& executor);
 

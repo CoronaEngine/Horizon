@@ -145,18 +145,28 @@ bool ResourceBarrierPlanner::dependency(AccessState& state, VkPipelineStageFlags
     return needed;
 }
 
-void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBarriers& result)
+void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBarriers& result, bool finalCommand)
 {
     result.clear();
-    if (accesses.uses.empty() && !accesses.conservative) return;
+    // The first barrier also orders prior submissions on this queue, including opaque commands.
+    if (!boundary && accesses.uses.empty() && !accesses.conservative) return;
+    const bool isolated = accesses.conservative || (finalCommand && boundary);
     if (boundary || accesses.conservative)
     {
         VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
         barrier.srcStageMask = barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         barrier.srcAccessMask = barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        if (finalCommand && !accesses.conservative)
+        {
+            // Only the declared stages of the last command consume this dependency.
+            VkPipelineStageFlags2 stages{};
+            for (const auto& use : accesses.uses) stages |= use.stages | use.declaredStages;
+            if (stages) barrier.dstStageMask = stages;
+        }
         result.memoryBarriers.push_back(barrier);
         buffers.clear(); images.clear();
-        boundary = false;
+        // Keep the original boundary after a leading command with no declared accesses.
+        boundary = accesses.uses.empty() && !accesses.conservative;
     }
     // Merge overlapping view aliases before querying history. A single command
     // cannot require two different layouts for the same image subresource.
@@ -173,6 +183,7 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
     {
         if (!use.image)
         {
+            if (isolated) continue; // The boundary barrier covers all prior accesses.
             const auto stages = use.stages | use.declaredStages;
             const auto access = applyDeclaration(use.access, use.declaredAccess);
             VkPipelineStageFlags2 sourceStages{};
@@ -190,6 +201,24 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
                 result.bufferBarriers.push_back(barrier);
             }
             continue;
+        }
+        // A sampled cubemap can cover dozens of subresources. At a synchronized
+        // boundary whose history is discarded there is no per-subresource state to keep.
+        if (isolated && (use.range.levelCount > 1 || use.range.layerCount > 1) &&
+            std::none_of(accesses.uses.begin(), accesses.uses.end(), [&](const auto& other) {
+                return &other != &use && other.image && other.image->imageHandle == use.image->imageHandle;
+            }))
+        {
+            const auto layout = use.layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_GENERAL : use.layout;
+            bool unchanged = true;
+            for (uint32_t layer = use.range.baseArrayLayer; unchanged && layer < use.range.baseArrayLayer + use.range.layerCount; ++layer)
+                for (uint32_t mip = use.range.baseMipLevel; unchanged && mip < use.range.baseMipLevel + use.range.levelCount; ++mip)
+                    unchanged = imageSubresourceLayout(*use.image, mip, layer) == layout;
+            if (unchanged)
+            {
+                use.image->imageLayout = layout;
+                continue;
+            }
         }
         for (uint32_t layer = use.range.baseArrayLayer; layer < use.range.baseArrayLayer + use.range.layerCount; ++layer)
             for (uint32_t mip = use.range.baseMipLevel; mip < use.range.baseMipLevel + use.range.levelCount; ++mip)

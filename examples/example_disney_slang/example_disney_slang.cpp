@@ -455,7 +455,6 @@ void run_disney_scene()
     while (!glfwWindowShouldClose(window))
     {
         benchmark.begin_frame();
-        render_executor.waitForDeferredResources();
         glfwPollEvents();
         Settings& s = input.settings;
 
@@ -526,9 +525,7 @@ void run_disney_scene()
             }
         }
 
-        benchmark.submit(render_executor, std::move(batch));
-        if (!benchmark.offscreen())
-            display.wait(render_executor) << final_output_image;
+        benchmark.submit(render_executor, std::move(batch), display, final_output_image);
         benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
     }
 
