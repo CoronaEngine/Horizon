@@ -208,6 +208,95 @@ float oc_half_minor(float a, float b, float c, float d) {
     return oc_half_fma(a, b, -oc_half_mul(c, d));
 }
 
+// Binary32 round-to-nearest-even FMA. GLSL.std.450 Fma is not guaranteed to be
+// fused by Vulkan, even with NoContraction. Integer significands retain the
+// exact 48-bit product and enough low bits to round the sum only once.
+uint oc_fma32_msb(uint64_t value) {
+    uint high = uint(value >> 32u);
+    return high != 0u ? 32u + uint(firstbithigh(high)) : uint(firstbithigh(uint(value)));
+}
+uint64_t oc_fma32_shift_jam(uint64_t value, uint distance) {
+    if (distance == 0u) return value;
+    if (distance < 64u)
+        return (value >> distance) | uint64_t((value & ((uint64_t(1) << distance) - 1u)) != 0u);
+    return uint64_t(value != 0u);
+}
+uint64_t oc_fma32_round_shift(uint64_t value, uint distance) {
+    if (distance == 0u) return value;
+    if (distance < 64u) {
+        uint64_t whole = value >> distance;
+        uint64_t remainder = value & ((uint64_t(1) << distance) - 1u);
+        uint64_t halfway = uint64_t(1) << (distance - 1u);
+        return whole + uint64_t(remainder > halfway || (remainder == halfway && (whole & 1u) != 0u));
+    }
+    // Exactly halfway rounds to the even zero. Never shift by the type width.
+    return distance == 64u && value > (uint64_t(1) << 63u) ? uint64_t(1) : uint64_t(0);
+}
+uint oc_fma32_bits(uint a, uint b, uint c) {
+    uint magnitude_a = a & 0x7fffffffu, magnitude_b = b & 0x7fffffffu, magnitude_c = c & 0x7fffffffu;
+    uint product_sign = (a ^ b) & 0x80000000u, c_sign = c & 0x80000000u;
+    if (magnitude_a > 0x7f800000u || magnitude_b > 0x7f800000u || magnitude_c > 0x7f800000u)
+        return 0x7fc00000u;
+    if (magnitude_a == 0x7f800000u || magnitude_b == 0x7f800000u) {
+        if (magnitude_a == 0u || magnitude_b == 0u ||
+            (magnitude_c == 0x7f800000u && product_sign != c_sign)) return 0x7fc00000u;
+        return product_sign | 0x7f800000u;
+    }
+    if (magnitude_c == 0x7f800000u) return c;
+    uint exponent_a = magnitude_a >> 23u, exponent_b = magnitude_b >> 23u, exponent_c = magnitude_c >> 23u;
+    uint sig_a = (magnitude_a & 0x7fffffu) | (exponent_a != 0u ? 0x800000u : 0u);
+    uint sig_b = (magnitude_b & 0x7fffffu) | (exponent_b != 0u ? 0x800000u : 0u);
+    uint sig_c = (magnitude_c & 0x7fffffu) | (exponent_c != 0u ? 0x800000u : 0u);
+    if (sig_a == 0u || sig_b == 0u) return magnitude_c == 0u ? (product_sign & c_sign) : c;
+    int power_a = exponent_a != 0u ? int(exponent_a) - 150 : -149;
+    int power_b = exponent_b != 0u ? int(exponent_b) - 150 : -149;
+    uint64_t product = uint64_t(sig_a) * uint64_t(sig_b);
+    uint product_msb = oc_fma32_msb(product);
+    uint64_t large = product << (62u - product_msb), small = 0u;
+    int top_exponent = power_a + power_b + int(product_msb);
+    uint sign = product_sign;
+    if (sig_c != 0u) {
+        uint c_msb = oc_fma32_msb(uint64_t(sig_c));
+        uint64_t c_value = uint64_t(sig_c) << (62u - c_msb);
+        int c_exponent = (exponent_c != 0u ? int(exponent_c) - 150 : -149) + int(c_msb);
+        if (c_exponent > top_exponent || (c_exponent == top_exponent && c_value > large)) {
+            small = oc_fma32_shift_jam(large, uint(c_exponent - top_exponent));
+            large = c_value;
+            top_exponent = c_exponent;
+            sign = c_sign;
+        } else small = oc_fma32_shift_jam(c_value, uint(top_exponent - c_exponent));
+    }
+    // Normalized product/C have at least 15/39 trailing zeros. Alignment is
+    // exact whenever cancellation can be deep; otherwise the jammed odd low
+    // bit preserves which side of any binary32 rounding midpoint the sum lies.
+    // The same-sign sum may use bit 63, so keep it unsigned throughout.
+    uint64_t sum = product_sign == c_sign ? large + small : large - small;
+    if (sum == 0u) return 0u;
+    uint sum_msb = oc_fma32_msb(sum);
+    int result_exponent = top_exponent + int(sum_msb) - 62;
+    if (result_exponent > 127) return sign | 0x7f800000u;
+    if (result_exponent < -126) {
+        int distance = -top_exponent - 87;
+        uint64_t subnormal = distance > 0 ? oc_fma32_round_shift(sum, uint(distance)) : sum << uint(-distance);
+        return sign | uint(subnormal);
+    }
+    uint64_t significand = sum_msb > 23u ? oc_fma32_round_shift(sum, sum_msb - 23u) : sum << (23u - sum_msb);
+    if (significand == 0x1000000u) { significand >>= 1u; ++result_exponent; }
+    if (result_exponent > 127) return sign | 0x7f800000u;
+    return sign | (uint(result_exponent + 127) << 23u) | (uint(significand) & 0x7fffffu);
+}
+float oc_fma(float a, float b, float c) { return asfloat(oc_fma32_bits(asuint(a), asuint(b), asuint(c))); }
+vector<float,N> oc_fma<uint N>(vector<float,N> a, vector<float,N> b, vector<float,N> c) {
+    vector<float,N> result;
+    for (uint i=0u;i<N;++i) result[i] = oc_fma(a[i],b[i],c[i]);
+    return result;
+}
+matrix<float,R,C> oc_fma<uint R,uint C>(matrix<float,R,C> a, matrix<float,R,C> b, matrix<float,R,C> c) {
+    matrix<float,R,C> result;
+    for (uint i=0u;i<R;++i) result[i] = oc_fma(a[i],b[i],c[i]);
+    return result;
+}
+
 float oc_fmod(float a, float b) { return fmod(a, b); }
 float oc_mod(float a, float b) { return a - b * floor(a / b); }
 float16_t oc_fmod(float16_t a, float16_t b) {

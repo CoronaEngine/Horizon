@@ -62,9 +62,10 @@ void preserve_float32_special_values(vector<uint32_t> &spirv) noexcept {
         spirv.insert(spirv.begin() + capability_end, {(2u << 16u) | op_capability, preserve_capability});
 }
 
-void preserve_fused_multiply_add(vector<uint32_t> &spirv) noexcept {
-    // GLSL.std.450 permits Fma to become a multiply followed by an add unless
-    // its result has NoContraction. The DSL fma promises a single rounding.
+void decorate_native_fma(vector<uint32_t> &spirv) noexcept {
+    // Retain NoContraction on remaining native Fma calls, including half.
+    // This decoration does not guarantee correctly rounded fusion in Vulkan;
+    // binary32 DSL calls use the integer oc_fma implementation instead.
     constexpr uint32_t op_ext_inst_import = 11u, op_ext_inst = 12u, op_decorate = 71u;
     constexpr uint32_t glsl_fma = 50u, no_contraction = 42u;
     uint32_t glsl_set = 0u;
@@ -451,7 +452,7 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     vector<uint32_t> spirv(data, data + byte_size / 4);
     normalize_ray_query_extensions(spirv);
     if (preserve_float32_) preserve_float32_special_values(spirv);
-    preserve_fused_multiply_add(spirv);
+    decorate_native_fma(spirv);
 #ifdef __APPLE__
     mark_physical_storage_loads_volatile(spirv);
 #endif

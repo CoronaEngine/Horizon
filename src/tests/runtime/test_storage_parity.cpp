@@ -295,14 +295,124 @@ void test_math_edges(Device &device) {
         if (inputs[i] == 0.f)
             require(std::signbit(host[i].y) == std::signbit(inputs[i]), "round lost signed zero");
     }
-    require(host[8].x == -0.000000059604644775390625f && host[8].y == -0.000244140625f,
-            "fma did not preserve fused multiplication and addition");
+    std::cout << "FMA_EDGE scalar_bits=" << std::bit_cast<uint>(host[8].x)
+              << " half_bits=" << std::bit_cast<uint>(host[8].y) << std::endl;
+    require(host[8].x == -0.000000059604644775390625f,
+            "binary32 fma did not preserve fused multiplication and addition");
+    require(host[8].y == -0.000244140625f,
+            "half fma did not preserve fused multiplication and addition");
     require(host[8].z == 1.f && host[8].w == 8388609.f, "integer sign or large floating-point round differs");
     array<uint4, 2> expected_integers{make_uint4(4097u * 4097u, 65535u * 65535u, 4097u * 4097u, 4099u * 4099u),
                                     make_uint4(4097u * 4097u, 65535u * 65535u, 4099u * 4099u, 65533u * 65533u)};
     for (uint i = 0; i < 2; ++i)
         for (uint j = 0; j < 4; ++j)
             require(integer_host[i][j] == expected_integers[i][j], "integer square lost precision by converting through float");
+}
+
+void test_fma32_rounding(Device &device) {
+    // Compare bits, including signed zero and gradual underflow. A double
+    // multiply/add is not an independent FMA oracle near binary32 midpoints.
+    const array<uint, 21> edges{0u, 0x80000000u, 1u, 0x80000001u, 0x007fffffu, 0x807fffffu,
+        0x00800000u, 0x80800000u, 0x00800001u, 0x3f000000u, 0xbf000000u,
+        0x3f800000u, 0xbf800000u, 0x3f800001u, 0x3f7fffffu, 0x7f7fffffu,
+        0xff7fffffu, 0x7f800000u, 0xff800000u, 0x7fc12345u, 0x7f812345u};
+    vector<uint4> inputs;
+    auto append = [&](uint a, uint b, uint c) { inputs.push_back(make_uint4(a, b, c, 0u)); };
+    for (uint a : edges) for (uint b : edges) for (uint c : edges) append(a, b, c);
+    append(0x7f7fffffu, 0x40000000u, 0xff7fffffu); // finite result after overflowing product
+    append(0x3f800001u, 0x3f7ffffeu, 0xbf800000u);
+    append(0x2b800001u, 0x2afffffeu, 0x97000000u); // deep cancellation needs a left shift
+
+    uint state = 0x7a9b3c51u;
+    auto random_bits = [&] { state ^= state << 13u; state ^= state >> 17u; state ^= state << 5u; return state; };
+    for (uint i = 0u; i < 512u; ++i) {
+        uint a = random_bits(), b = random_bits(), c = random_bits();
+        append(a, b, c);
+        if ((a & 0x7f800000u) != 0x7f800000u && (b & 0x7f800000u) != 0x7f800000u) {
+            const float opposite_product = float(-double(std::bit_cast<float>(a)) * double(std::bit_cast<float>(b)));
+            append(a, b, std::bit_cast<uint>(opposite_product));
+        }
+        uint exponent = 1u + random_bits() % 253u;
+        a = (a & 0x807fffffu) | (exponent << 23u);
+        c = std::bit_cast<uint>(float(std::ldexp(1.0, int(exponent) - 151)));
+        c += random_bits() % 3u - 1u;
+        append(a, 0x3f800000u, c | (random_bits() & 0x80000000u));
+    }
+    // (1+2^-k)*(1-2^-k)-1 has an exact residual of -2^-2k. Sweep
+    // all scales through subnormal/zero rounding and every significand split.
+    for (int power = -149; power <= 127; ++power) for (uint k = 1u; k <= 23u; ++k) {
+        int power_a = power / 2, power_b = power - power_a;
+        uint a = (uint(power_a + 127) << 23u) | (1u << (23u - k));
+        uint b = (uint(power_b + 126) << 23u) | (0x800000u - (1u << (24u - k)));
+        uint c = power >= -126 ? uint(power + 127) << 23u : 1u << uint(power + 149);
+        append(a, b, c ^ 0x80000000u);
+        append(a ^ 0x80000000u, b, c);
+    }
+    // Random odd mantissas with a product one unit either side of an exactly
+    // representable addend exercise cancellation beyond the symmetric family.
+    for (uint pair = 0u; pair < 8u; ++pair) {
+        uint mantissa_a = 0x800001u | (random_bits() & 0x7fffffu);
+        uint inverse = mantissa_a;
+        for (uint step = 0u; step < 5u; ++step) inverse *= 2u - mantissa_a * inverse;
+        inverse &= 0xffffffu;
+        bool positive_residual = inverse >= 0x800000u;
+        uint mantissa_b = positive_residual ? inverse : (0x1000000u - inverse);
+        uint64_t product = uint64_t(mantissa_a) * uint64_t(mantissa_b);
+        uint64_t addend = positive_residual ? product - 1u : product + 1u;
+        for (int scale = -110; scale < -64; ++scale) {
+            int power_a = scale / 2, power_b = scale - power_a;
+            uint a = (uint(power_a + 127) << 23u) | (mantissa_a & 0x7fffffu);
+            uint b = (uint(power_b + 127) << 23u) | (mantissa_b & 0x7fffffu);
+            uint c = std::bit_cast<uint>(float(-std::ldexp(double(addend), scale - 46)));
+            append(a, b, c);
+            append(a ^ 0x80000000u, b, c ^ 0x80000000u);
+            append(a, b ^ 0x80000000u, c ^ 0x80000000u);
+            append(a ^ 0x80000000u, b ^ 0x80000000u, c);
+        }
+    }
+    static constexpr uint rows = 3u;
+    auto source = device.create_buffer<uint4>(inputs.size());
+    auto destination = device.create_buffer<uint4>(inputs.size() * rows);
+    Kernel kernel = [](BufferVar<uint4> in, BufferVar<uint4> out) {
+        Uint i = dispatch_id();
+        Uint4 bits = in.read(i);
+        Float a = as<float>(bits.x), b = as<float>(bits.y), c = as<float>(bits.z);
+        Float4 left = as<float4>(make_uint4(bits.x, bits.y, bits.z, bits.x ^ 0x80000000u));
+        Float4 right = as<float4>(make_uint4(bits.y, bits.z, bits.x, bits.y));
+        Float4 addend = as<float4>(make_uint4(bits.z, bits.x, bits.y, bits.z));
+        out.write(i * rows, make_uint4(as<uint>(fma(a, b, c)), 0u, 0u, 0u));
+        out.write(i * rows + 1u, as<uint4>(fma(left, right, addend)));
+        Float2x2 matrix_a = make_float2x2(left.x, left.y, left.z, left.w);
+        Float2x2 matrix_b = make_float2x2(right.x, right.y, right.z, right.w);
+        Float2x2 matrix_c = make_float2x2(addend.x, addend.y, addend.z, addend.w);
+        auto result = fma(matrix_a, matrix_b, matrix_c);
+        out.write(i * rows + 2u, as<uint4>(make_float4(result[0u], result[1u])));
+    };
+    auto shader = device.compile(kernel, "storage-parity-fma32-rne");
+    vector<uint4> actual(inputs.size() * rows);
+    auto stream = device.create_stream();
+    stream << source.upload(inputs.data()) << shader(source, destination).dispatch(uint(inputs.size()))
+           << destination.download(actual.data()) << synchronize() << commit();
+    uint failures = 0u;
+    auto check = [&](uint result, uint a, uint b, uint c, uint index, const char *shape) {
+        uint expected = std::bit_cast<uint>(std::fma(std::bit_cast<float>(a), std::bit_cast<float>(b), std::bit_cast<float>(c)));
+        if (result == expected || ((result & 0x7fffffffu) > 0x7f800000u && (expected & 0x7fffffffu) > 0x7f800000u)) return;
+        if (failures++ < 16u)
+            std::cerr << "FMA32_RNE shape=" << shape << " row=" << index << " a=" << a << " b=" << b << " c=" << c
+                      << " actual=" << result << " expected=" << expected << std::endl;
+    };
+    for (uint i = 0u; i < inputs.size(); ++i) {
+        const auto v = inputs[i];
+        check(actual[i * rows].x, v.x, v.y, v.z, i, "scalar");
+        const uint4 a = make_uint4(v.x, v.y, v.z, v.x ^ 0x80000000u);
+        const uint4 b = make_uint4(v.y, v.z, v.x, v.y), c = make_uint4(v.z, v.x, v.y, v.z);
+        for (uint j = 0u; j < 4u; ++j) {
+            check(actual[i * rows + 1u][j], a[j], b[j], c[j], i, "vector");
+            check(actual[i * rows + 2u][j], a[j], b[j], c[j], i, "matrix");
+        }
+    }
+    std::cout << "FMA32_RNE inputs=" << inputs.size() << " comparisons=" << inputs.size() * 9u << " mismatches=" << failures << std::endl;
+    require(failures == 0u, "binary32 fma must round the exact product and sum once");
 }
 
 void test_64bit_buffer_metadata(Device &device) {
@@ -356,6 +466,7 @@ int main() {
     test_bool_vectors<4>(device);
     test_half_vectors(device);
     test_math_edges(device);
+    test_fma32_rounding(device);
     test_64bit_buffer_metadata(device);
     test_global_block_barrier(device);
     std::cout << "storage and math parity checks passed" << std::endl;

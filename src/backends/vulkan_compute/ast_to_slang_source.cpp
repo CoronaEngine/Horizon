@@ -405,7 +405,10 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::CEIL:             OC_SLANG_FUNC(ceil);            break;
         case CallOp::FLOOR:            OC_SLANG_FUNC(floor);           break;
         case CallOp::ROUND:            OC_SLANG_WRAP(round);           break;
-        case CallOp::FMA:              OC_SLANG_FUNC(fma);             break;
+        case CallOp::FMA:
+            if (is_half_value(expr->type())) { OC_SLANG_FUNC(fma); }
+            else { OC_SLANG_WRAP(fma); }
+            break;
         case CallOp::CROSS:            OC_SLANG_FUNC(cross);           break;
         case CallOp::DOT:              OC_SLANG_FUNC(dot);             break;
         case CallOp::LENGTH:           OC_SLANG_FUNC(length);          break;
