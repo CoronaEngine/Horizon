@@ -12,15 +12,7 @@
 // - 固定默认设置（无 imgui）：animate=true、anim.speed=0.3、不显示 G-buffer
 //   调试视图/scissor 线框、不走 TArray/UAV 变体。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

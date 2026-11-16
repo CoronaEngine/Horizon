@@ -8,15 +8,7 @@
 //    改 glossiness / reflectivity 后各 record 一次即可；
 //  - imgui 面板换成键盘交互（启动时在控制台打印按键说明）。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

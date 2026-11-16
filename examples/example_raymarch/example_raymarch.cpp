@@ -4,15 +4,7 @@
 // 渐变背景（红/绿/蓝/白）。差异：全屏四边形直接给 NDC 坐标（省掉 原版的
 // ortho pass），帧率显示在窗口标题。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

@@ -7,15 +7,7 @@
 // 变体不在本移植范围）、相机固定 (0,60,-105) 俯视、不画光源 billboard、
 // 原版的 tree.bin 是 meshopt 压缩 chunk（VBC）加载器不支持，用 column.bin 替代。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include "glfw_native.h"
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

@@ -31,6 +31,14 @@ class SlangConan(ConanFile):
             "macos-aarch64",
             "70c63b66448d1d4d3ae770f3cdacdb00674e0f81ee44b52bd0dde6f2f49273db",
         ),
+        ("Linux", "x86_64"): (
+            "linux-x86_64",
+            "709bd134c74bc56aa8101ebb0d3cc0bb15e154fbf1bab63e7e7fae112803d22e",
+        ),
+        ("Linux", "armv8"): (
+            "linux-aarch64",
+            "6eeecae871758e3e5593090cf831c0fa57bbc4c0882c4620eec14b0f45dec431",
+        ),
     }
 
     def _asset(self):
@@ -39,7 +47,8 @@ class SlangConan(ConanFile):
     def validate(self):
         if not self._asset():
             raise ConanInvalidConfiguration(
-                f"slang/{self.version} binary SDK is only configured for Windows/Macos x86_64 and armv8"
+                f"slang/{self.version} binary SDK is not configured for "
+                f"{self.settings.os}/{self.settings.arch}"
             )
 
     def _repair_package(self):

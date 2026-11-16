@@ -18,16 +18,8 @@
 //     不做 G-buffer debug 视图切换。
 //   - 顶点输入用 Aggregate(多参数路径有 location 反转的历史问题)。
 
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#define HORIZON_NATIVE_WINDOW(window) glfwGetWin32Window(window)
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#define HORIZON_NATIVE_WINDOW(window) glfwGetCocoaView(window)
-#endif
-#include <GLFW/glfw3.h>
+#include "glfw_native.h"
 #include <limits>
-#include <GLFW/glfw3native.h>
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"

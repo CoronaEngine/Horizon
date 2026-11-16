@@ -38,6 +38,7 @@ endif()
 
 set(HORIZON_EXAMPLE_HEADERS
     common.h
+    glfw_native.h
     imgui_horizon.h
     example_baseline/example_baseline.h
     example_glsl/example_glsl.h
