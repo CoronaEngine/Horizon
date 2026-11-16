@@ -65,7 +65,7 @@ void test_float_special_values(Device &device) {
         make_float4(infinity, -2.f, 2.f, nan),
         make_float4(-infinity, 2.f, -2.f, nan),
         make_float4(-1.75f, 0.625f, 1.75f, -0.625f)};
-    static constexpr uint rows = 8u;
+    static constexpr uint rows = 14u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     Kernel kernel = [](BufferVar<float4> in, BufferVar<float4> out) {
@@ -81,6 +81,19 @@ void test_float_special_values(Device &device) {
         out.write(i * rows + 5u, round(v));
         out.write(i * rows + 6u, select(ocarina::isnan(v), make_float4(42.f), v));
         out.write(i * rows + 7u, min(v, make_float4(0.25f)));
+        Float2x2 matrix = make_float2x2(v.x, v.y, v.z, v.w);
+        Float2x2 reference = make_float2x2(0.25f, 0.25f, 0.25f, 0.25f);
+        Float2x2 lower = make_float2x2(0.f, 0.f, 0.f, 0.f);
+        Float2x2 upper = make_float2x2(1.f, 1.f, 1.f, 1.f);
+        auto minimum = min(matrix, reference), maximum = max(matrix, reference);
+        auto clamped = clamp(matrix, lower, upper);
+        out.write(i * rows + 8u, make_float4(minimum[0u], minimum[1u]));
+        out.write(i * rows + 9u, make_float4(maximum[0u], maximum[1u]));
+        out.write(i * rows + 10u, make_float4(clamped[0u], clamped[1u]));
+        Half4 half_values = make_half4(v);
+        out.write(i * rows + 11u, make_float4(min(half_values, make_half4(0.25f))));
+        out.write(i * rows + 12u, make_float4(max(half_values, make_half4(0.25f))));
+        out.write(i * rows + 13u, make_float4(clamp(half_values, make_half4(0.f), make_half4(1.f))));
     };
     auto shader = device.compile(kernel, "compute-math-special-values");
     vector<float4> actual(input.size() * rows);
@@ -103,6 +116,13 @@ void test_float_special_values(Device &device) {
             expected[5u][c] = std::round(input[i][c]);
             expected[6u][c] = std::isnan(input[i][c]) ? 42.f : input[i][c];
             expected[7u][c] = std::fmin(input[i][c], 0.25f);
+            expected[8u][c] = std::fmin(input[i][c], 0.25f);
+            expected[9u][c] = std::fmax(input[i][c], 0.25f);
+            expected[10u][c] = std::fmin(1.f, std::fmax(0.f, input[i][c]));
+            const float half_value = half_roundtrip_reference(input[i][c]);
+            expected[11u][c] = std::fmin(half_value, 0.25f);
+            expected[12u][c] = std::fmax(half_value, 0.25f);
+            expected[13u][c] = std::fmin(1.f, std::fmax(0.f, half_value));
         }
         for (uint row = 0u; row < rows; ++row)
             for (uint c = 0u; c < 4u; ++c)

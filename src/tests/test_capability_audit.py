@@ -73,6 +73,16 @@ class CapabilityAuditTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(report["observations"][0]["rows"], 9)
 
+    def test_hyperbolic_observations_include_scalar_vector_and_matrix_results(self):
+        # 22 inputs, each producing four scalar, sixteen vector and sixteen
+        # matrix observations. Both a truncated and a duplicated log must fail.
+        for count in (791, 792, 793):
+            with self.subTest(count=count):
+                rows = [f"FLOAT_MATH op=asinh input={i} actual=1" for i in range(count)]
+                status, report = self.run_audit("hyperbolic-stability", rows)
+                self.assertEqual(status, 0 if count == 792 else 1)
+                self.assertEqual(report["observations"][0]["expected_rows"], 792)
+
     def test_probe_or_validation_failure_fails_audit(self):
         for lines, returncode in (((), 1), (("Validation Error: VUID-test",), 0)):
             with self.subTest(lines=lines, returncode=returncode):

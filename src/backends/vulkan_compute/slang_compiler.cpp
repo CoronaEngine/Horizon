@@ -21,7 +21,79 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 9u;
+constexpr unsigned slang_source_cache_version = 10u;
+
+void preserve_float32_special_values(vector<uint32_t> &spirv) noexcept {
+    // SPIR-V 1.5 includes shader float controls. Without this execution mode a
+    // Vulkan driver may discard signed zero or assume that NaN/Inf never occur,
+    // even when Slang has retained the original conversion/arithmetic itself.
+    constexpr uint32_t op_capability = 17u, op_entry_point = 15u;
+    constexpr uint32_t op_execution_mode = 16u, op_execution_mode_id = 331u;
+    constexpr uint32_t preserve_capability = 4466u, preserve_mode = 4461u;
+    vector<uint32_t> entry_points, preserved_entry_points;
+    size_t capability_end = 5u, execution_modes_end = 5u;
+    bool has_capability = false;
+    for (size_t offset = 5u; offset < spirv.size();) {
+        const uint32_t count = spirv[offset] >> 16u, op = spirv[offset] & 0xffffu;
+        OC_ERROR_IF(count == 0u || count > spirv.size() - offset, "Malformed Slang SPIR-V instruction");
+        if (op == op_capability) {
+            capability_end = offset + count;
+            has_capability |= count == 2u && spirv[offset + 1u] == preserve_capability;
+        } else if (op == op_entry_point) {
+            OC_ERROR_IF(count < 4u, "Malformed Slang SPIR-V entry point");
+            entry_points.push_back(spirv[offset + 2u]);
+            execution_modes_end = offset + count;
+        } else if (op == op_execution_mode || op == op_execution_mode_id) {
+            execution_modes_end = offset + count;
+            if (op == op_execution_mode && count == 4u &&
+                spirv[offset + 2u] == preserve_mode && spirv[offset + 3u] == 32u)
+                preserved_entry_points.push_back(spirv[offset + 1u]);
+        }
+        offset += count;
+    }
+    vector<uint32_t> modes;
+    for (uint32_t entry : entry_points) {
+        if (std::find(preserved_entry_points.begin(), preserved_entry_points.end(), entry) == preserved_entry_points.end())
+            modes.insert(modes.end(), {(4u << 16u) | op_execution_mode, entry, preserve_mode, 32u});
+    }
+    if (modes.empty()) return;
+    spirv.insert(spirv.begin() + execution_modes_end, modes.begin(), modes.end());
+    if (!has_capability)
+        spirv.insert(spirv.begin() + capability_end, {(2u << 16u) | op_capability, preserve_capability});
+}
+
+void preserve_fused_multiply_add(vector<uint32_t> &spirv) noexcept {
+    // GLSL.std.450 permits Fma to become a multiply followed by an add unless
+    // its result has NoContraction. The DSL fma promises a single rounding.
+    constexpr uint32_t op_ext_inst_import = 11u, op_ext_inst = 12u, op_decorate = 71u;
+    constexpr uint32_t glsl_fma = 50u, no_contraction = 42u;
+    uint32_t glsl_set = 0u;
+    size_t annotation_end = 0u;
+    vector<uint32_t> fused_results, decorated_results;
+    for (size_t offset = 5u; offset < spirv.size();) {
+        const uint32_t count = spirv[offset] >> 16u, op = spirv[offset] & 0xffffu;
+        OC_ERROR_IF(count == 0u || count > spirv.size() - offset, "Malformed Slang SPIR-V instruction");
+        if (op == op_ext_inst_import && count >= 3u) {
+            string_view name(reinterpret_cast<const char *>(spirv.data() + offset + 2u), (count - 2u) * 4u);
+            if (name.substr(0u, name.find('\0')) == "GLSL.std.450") glsl_set = spirv[offset + 1u];
+        } else if (op == op_decorate && count == 3u && spirv[offset + 2u] == no_contraction)
+            decorated_results.push_back(spirv[offset + 1u]);
+        else if (op == op_ext_inst && count >= 5u && glsl_set != 0u &&
+                 spirv[offset + 3u] == glsl_set && spirv[offset + 4u] == glsl_fma)
+            fused_results.push_back(spirv[offset + 2u]);
+        // Types follow the complete annotations section in the logical layout.
+        if (annotation_end == 0u && op >= 19u && op <= 39u) annotation_end = offset;
+        offset += count;
+    }
+    vector<uint32_t> decorations;
+    for (uint32_t result : fused_results) {
+        if (std::find(decorated_results.begin(), decorated_results.end(), result) == decorated_results.end())
+            decorations.insert(decorations.end(), {(3u << 16u) | op_decorate, result, no_contraction});
+    }
+    if (decorations.empty()) return;
+    OC_ERROR_IF(annotation_end == 0u, "Slang SPIR-V has no type declarations");
+    spirv.insert(spirv.begin() + annotation_end, decorations.begin(), decorations.end());
+}
 
 void normalize_ray_query_extensions(vector<uint32_t> &spirv) noexcept {
     // Slang also declares SPV_KHR_ray_tracing when constructing an acceleration
@@ -208,6 +280,13 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     slang::TargetDesc target{};
     target.format  = SLANG_SPIRV;
     target.profile = global_com->findProfile("spirv_1_5");
+    target.floatingPointMode = SLANG_FLOATING_POINT_MODE_PRECISE;
+    VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    properties.pNext = &float_controls;
+    vkGetPhysicalDeviceProperties2(device_->physical_device(), &properties);
+    preserve_float32_ = float_controls.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
+    OC_INFO_FORMAT("Slang FP32 signed-zero/NaN/Inf preservation: {}", preserve_float32_);
 
     // Slang's texture intrinsics carry these standard-library requirements even
     // when they only emit ordinary image operations. Declaring them avoids an
@@ -277,7 +356,7 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     auto source_hash = hash64(source,
         RHIContext::read_file(runtime_dir / "slang/slang_device_math.slang"),
         RHIContext::read_file(runtime_dir / "slang/slang_device_resource.slang"),
-        string_view(global_session_->getBuildTagString()), slang_source_cache_version);
+        string_view(global_session_->getBuildTagString()), slang_source_cache_version, preserve_float32_);
     const string cache_key = ocarina::format("{}_{}_{}_{}_{}", function.func_name(),
         source_hash, workgroup_size.x, workgroup_size.y, workgroup_size.z);
     const string cache_path = ocarina::format("{}/slang_cache/{}.spv",
@@ -371,6 +450,8 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     const uint32_t *data = reinterpret_cast<const uint32_t *>(spirv_blob->getBufferPointer());
     vector<uint32_t> spirv(data, data + byte_size / 4);
     normalize_ray_query_extensions(spirv);
+    if (preserve_float32_) preserve_float32_special_values(spirv);
+    preserve_fused_multiply_add(spirv);
 #ifdef __APPLE__
     mark_physical_storage_loads_volatile(spirv);
 #endif

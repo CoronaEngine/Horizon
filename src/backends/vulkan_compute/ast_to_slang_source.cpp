@@ -129,6 +129,11 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
     return type->tag() == Type::Tag::HALF;
 }
 
+[[nodiscard]] bool is_floating_value(const Type *type) noexcept {
+    while (type->is_vector() || type->is_matrix() || type->is_array()) type = type->element();
+    return type->tag() == Type::Tag::FLOAT || type->tag() == Type::Tag::REAL || type->tag() == Type::Tag::HALF;
+}
+
 // Encode binary16 through integer bits: a final native float-to-half cast may
 // flush half subnormals even when the preceding float value was rounded.
 [[nodiscard]] string half_conversion_prefix(const Type *type) noexcept {
@@ -349,21 +354,30 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::ANY:              OC_SLANG_FUNC(any);             break;
         case CallOp::NONE:             OC_SLANG_WRAP(none);            break;
         case CallOp::SELECT:           OC_SLANG_FUNC(select);          break;
-        case CallOp::CLAMP:            OC_SLANG_FUNC(clamp);           break;
+        case CallOp::CLAMP:
+            if (is_floating_value(expr->type())) { OC_SLANG_WRAP(clamp); }
+            else { OC_SLANG_FUNC(clamp); }
+            break;
         // ocarina lerp is pbrt-style (t, a, b); Slang lerp is (a, b, t).
         case CallOp::LERP:             OC_SLANG_WRAP(lerp);            break;
         case CallOp::INVERSE_LERP:     OC_SLANG_WRAP(inverse_lerp);    break;
         case CallOp::ABS:              OC_SLANG_FUNC(abs);             break;
-        case CallOp::MIN:              OC_SLANG_FUNC(min);             break;
-        case CallOp::MAX:              OC_SLANG_FUNC(max);             break;
+        case CallOp::MIN:
+            if (is_floating_value(expr->type())) { OC_SLANG_WRAP(min); }
+            else { OC_SLANG_FUNC(min); }
+            break;
+        case CallOp::MAX:
+            if (is_floating_value(expr->type())) { OC_SLANG_WRAP(max); }
+            else { OC_SLANG_FUNC(max); }
+            break;
         case CallOp::IS_INF:           OC_SLANG_FUNC(isinf);           break;
         case CallOp::IS_NAN:           OC_SLANG_FUNC(isnan);           break;
         case CallOp::ACOS:             OC_SLANG_FUNC(acos);            break;
         case CallOp::ASIN:             OC_SLANG_FUNC(asin);            break;
         case CallOp::ATAN:             OC_SLANG_FUNC(atan);            break;
-        case CallOp::ACOSH:            OC_SLANG_FUNC(acosh);           break;
-        case CallOp::ASINH:            OC_SLANG_FUNC(asinh);           break;
-        case CallOp::ATANH:            OC_SLANG_FUNC(atanh);           break;
+        case CallOp::ACOSH:            OC_SLANG_WRAP(acosh);           break;
+        case CallOp::ASINH:            OC_SLANG_WRAP(asinh);           break;
+        case CallOp::ATANH:            OC_SLANG_WRAP(atanh);           break;
         case CallOp::ATAN2:            OC_SLANG_FUNC(atan2);           break;
         case CallOp::COPYSIGN:         OC_SLANG_WRAP(copysign);        break;
         case CallOp::COS:              OC_SLANG_FUNC(cos);             break;
@@ -371,7 +385,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::TAN:              OC_SLANG_FUNC(tan);             break;
         case CallOp::SINH:             OC_SLANG_FUNC(sinh);            break;
         case CallOp::COSH:             OC_SLANG_FUNC(cosh);            break;
-        case CallOp::TANH:             OC_SLANG_FUNC(tanh);            break;
+        case CallOp::TANH:             OC_SLANG_WRAP(tanh);            break;
         case CallOp::EXP:              OC_SLANG_FUNC(exp);             break;
         case CallOp::EXP2:             OC_SLANG_FUNC(exp2);            break;
         case CallOp::EXP10:            OC_SLANG_WRAP(exp10);           break;
@@ -407,7 +421,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::FRACT:            OC_SLANG_FUNC(frac);            break;
         case CallOp::DEGREES:          OC_SLANG_FUNC(degrees);         break;
         case CallOp::RADIANS:          OC_SLANG_FUNC(radians);         break;
-        case CallOp::SATURATE:         OC_SLANG_FUNC(saturate);        break;
+        case CallOp::SATURATE:         OC_SLANG_WRAP(saturate);        break;
 
         case CallOp::SYNCHRONIZE_BLOCK:         OC_SLANG_WRAP(synchronize_block);         break;
         case CallOp::WARP_ACTIVE_BIT_MASK:      OC_SLANG_WRAP(warp_active_bit_mask);      break;

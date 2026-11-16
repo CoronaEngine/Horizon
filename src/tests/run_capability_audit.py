@@ -38,7 +38,7 @@ OBSERVATIONS = {"NARROW": ("direct", "bindless"), "FILTER": ("direct", "bindless
                 "FLOAT_BITS": ("actual",), "FLOAT_MATH": ("actual",), "HALF_MATH": ("actual", "actual_bits"),
                 "HALF_INVERSE": ("actual", "actual_bits"), "REINTERPRET": ("tested_words", "oracle_failures")}
 EXPECTED_ROWS = {"texture-narrow-channels": 192, "texture-linear-fraction": 80,
-                 "float32-subnormal": 80, "hyperbolic-stability": 40,
+                 "float32-subnormal": 80, "hyperbolic-stability": 792,
                  "half-intermediate": 9, "half-inverse": 727, "texture-uint-reinterpret": 54}
 
 

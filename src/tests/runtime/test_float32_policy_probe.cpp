@@ -63,28 +63,19 @@ bool float32_subnormal(Device &device) {
 }
 
 bool check_double_reference(float actual, double expected, const char *operation, float input) {
-#ifdef __APPLE__
-    constexpr double reference_relative_tolerance = 1e-3;
-    constexpr double reference_absolute_tolerance = 1e-5;
-    constexpr float reference_overflow_threshold = 1e19f;
-#else
     constexpr double reference_relative_tolerance = 3e-5;
     constexpr double reference_absolute_tolerance = 1e-12;
-    constexpr float reference_overflow_threshold = 0.f;
-#endif
     bool passed = false;
-    bool observed_overflow = false;
     if (std::isnan(expected)) passed = std::isnan(actual);
     else if (std::isinf(expected)) passed = std::isinf(actual) && std::signbit(actual) == std::signbit(expected);
-    else if (!std::isfinite(actual) && reference_overflow_threshold > 0.f &&
-             std::abs(input) >= reference_overflow_threshold)
-        observed_overflow = true;
     else passed = std::isfinite(actual) &&
         std::abs(double(actual) - expected) <=
             reference_relative_tolerance * std::abs(expected) + reference_absolute_tolerance;
+    if (passed && expected == 0.0)
+        passed = std::signbit(actual) == std::signbit(expected);
     std::cout << "FLOAT_MATH op=" << operation << " input=" << input << " actual=" << actual << " expected=" << expected
-              << " result=" << (observed_overflow ? "OBSERVED" : passed ? "PASS" : "FAIL") << std::endl;
-    return passed || observed_overflow;
+              << " result=" << (passed ? "PASS" : "FAIL") << std::endl;
+    return passed;
 }
 
 bool hyperbolic_stability(Device &device) {
@@ -93,17 +84,39 @@ bool hyperbolic_stability(Device &device) {
         make_float2(1e-4f, 1e-4f), make_float2(-1e-4f, -1e-4f),
         make_float2(100.f, 0.9999f), make_float2(-100.f, -0.9999f),
         make_float2(1e20f, 0.5f), make_float2(-1e20f, -0.5f),
-        make_float2(0.f, 0.f), make_float2(-0.f, -0.f)};
+        make_float2(0.f, 0.f), make_float2(-0.f, -0.f),
+        make_float2(0x1p-23f, 0x1p-23f), make_float2(-0x1p-23f, -0x1p-23f),
+        make_float2(0.001f, 0.001f), make_float2(-0.001f, -0.001f),
+        make_float2(0.125f, 0.125f), make_float2(-0.125f, -0.125f),
+        make_float2(0.5f, 0.5f), make_float2(-0.5f, -0.5f),
+        make_float2(1e19f, 1.f), make_float2(-1e19f, -1.f),
+        make_float2(std::numeric_limits<float>::max(), 1.1f),
+        make_float2(-std::numeric_limits<float>::max(), -1.1f)};
     auto source = device.create_buffer<float2>(input.size());
-    auto output = device.create_buffer<float4>(input.size());
+    static constexpr uint rows = 9u;
+    auto output = device.create_buffer<float4>(input.size() * rows);
     Kernel kernel = [](BufferVar<float2> in, BufferVar<float4> out) {
         Uint i = dispatch_id();
         Float2 v = in.read(i);
-        out.write(i, make_float4(ocarina::asinh(v.x), ocarina::acosh(abs(v.x) + 1.f),
+        out.write(i * rows, make_float4(ocarina::asinh(v.x), ocarina::acosh(abs(v.x) + 1.f),
                                 ocarina::tanh(v.x), ocarina::atanh(v.y)));
+        Float4 arguments = make_float4(v.x, -v.x, v.y, -v.y);
+        out.write(i * rows + 1u, ocarina::asinh(arguments));
+        out.write(i * rows + 2u, ocarina::acosh(abs(arguments) + 1.f));
+        out.write(i * rows + 3u, ocarina::tanh(arguments));
+        out.write(i * rows + 4u, ocarina::atanh(arguments));
+        Float2x2 matrix = make_float2x2(v.x, -v.x, v.y, -v.y);
+        auto matrix_asinh = ocarina::asinh(matrix);
+        auto matrix_acosh = ocarina::acosh(abs(matrix) + make_float2x2(1.f, 1.f, 1.f, 1.f));
+        auto matrix_tanh = ocarina::tanh(matrix);
+        auto matrix_atanh = ocarina::atanh(matrix);
+        out.write(i * rows + 5u, make_float4(matrix_asinh[0u], matrix_asinh[1u]));
+        out.write(i * rows + 6u, make_float4(matrix_acosh[0u], matrix_acosh[1u]));
+        out.write(i * rows + 7u, make_float4(matrix_tanh[0u], matrix_tanh[1u]));
+        out.write(i * rows + 8u, make_float4(matrix_atanh[0u], matrix_atanh[1u]));
     };
     auto shader = device.compile(kernel, "policy-hyperbolic-stability");
-    vector<float4> actual(input.size());
+    vector<float4> actual(input.size() * rows);
     auto stream = device.create_stream();
     stream << source.upload(input.data()) << shader(source, output).dispatch(uint(input.size()))
            << output.download(actual.data()) << synchronize() << commit();
@@ -112,10 +125,22 @@ bool hyperbolic_stability(Device &device) {
         // The argument expression is evaluated in float on the GPU too; round
         // abs(x)+1 before evaluating the independent double acosh reference.
         const float acosh_argument = std::abs(input[i].x) + 1.f;
-        passed &= check_double_reference(actual[i].x, std::asinh(double(input[i].x)), "asinh", input[i].x);
-        passed &= check_double_reference(actual[i].y, std::acosh(double(acosh_argument)), "acosh", acosh_argument);
-        passed &= check_double_reference(actual[i].z, std::tanh(double(input[i].x)), "tanh", input[i].x);
-        passed &= check_double_reference(actual[i].w, std::atanh(double(input[i].y)), "atanh", input[i].y);
+        passed &= check_double_reference(actual[i * rows].x, std::asinh(double(input[i].x)), "asinh", input[i].x);
+        passed &= check_double_reference(actual[i * rows].y, std::acosh(double(acosh_argument)), "acosh", acosh_argument);
+        passed &= check_double_reference(actual[i * rows].z, std::tanh(double(input[i].x)), "tanh", input[i].x);
+        passed &= check_double_reference(actual[i * rows].w, std::atanh(double(input[i].y)), "atanh", input[i].y);
+        const float4 arguments = make_float4(input[i].x, -input[i].x, input[i].y, -input[i].y);
+        for (uint c = 0u; c < 4u; ++c) {
+            const float x = arguments[c], acosh_x = std::abs(x) + 1.f;
+            passed &= check_double_reference(actual[i * rows + 1u][c], std::asinh(double(x)), "asinh-vector", x);
+            passed &= check_double_reference(actual[i * rows + 2u][c], std::acosh(double(acosh_x)), "acosh-vector", acosh_x);
+            passed &= check_double_reference(actual[i * rows + 3u][c], std::tanh(double(x)), "tanh-vector", x);
+            passed &= check_double_reference(actual[i * rows + 4u][c], std::atanh(double(x)), "atanh-vector", x);
+            passed &= check_double_reference(actual[i * rows + 5u][c], std::asinh(double(x)), "asinh-matrix", x);
+            passed &= check_double_reference(actual[i * rows + 6u][c], std::acosh(double(acosh_x)), "acosh-matrix", acosh_x);
+            passed &= check_double_reference(actual[i * rows + 7u][c], std::tanh(double(x)), "tanh-matrix", x);
+            passed &= check_double_reference(actual[i * rows + 8u][c], std::atanh(double(x)), "atanh-matrix", x);
+        }
     }
     return passed;
 }

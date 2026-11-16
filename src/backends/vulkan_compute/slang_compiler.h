@@ -23,6 +23,7 @@ private:
     // raw pointers and manage AddRef/Release explicitly in the .cpp.
     mutable slang::IGlobalSession *global_session_{nullptr};
     mutable slang::ISession       *session_{nullptr};
+    mutable bool preserve_float32_{false};
 
     void ensure_session() const noexcept;
 

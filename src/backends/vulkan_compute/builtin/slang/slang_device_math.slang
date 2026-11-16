@@ -394,6 +394,95 @@ vector<uint, 3> oc_sqr(vector<uint, 3> x) { return x*x; }
 vector<uint, 4> oc_sqr(vector<uint, 4> x) { return x*x; }
 uint[N] oc_sqr<uint N>(uint x[N]) { uint result[N]; for(uint i=0;i<N;++i) result[i]=oc_sqr(x[i]); return result; }
 
+// GLSL FMin/FMax leave a NaN operand unspecified. The DSL chooses the numeric
+// operand when exactly one input is NaN, including inside clamp/saturate.
+// Widen classification to float32, whose preservation mode also covers half
+// inputs. toFloat is the unambiguous conversion on Slang's IFloat interface.
+T oc_min<T : __BuiltinFloatingPointType>(T a, T b) { return isnan(a.toFloat()) ? b : isnan(b.toFloat()) ? a : min(a,b); }
+T oc_max<T : __BuiltinFloatingPointType>(T a, T b) { return isnan(a.toFloat()) ? b : isnan(b.toFloat()) ? a : max(a,b); }
+vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, vector<T, N> b) { vector<T, N> result; for (uint i=0;i<N;++i) result[i]=oc_min(a[i],b[i]); return result; }
+vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, vector<T, N> b) { vector<T, N> result; for (uint i=0;i<N;++i) result[i]=oc_max(a[i],b[i]); return result; }
+vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, T b) { return oc_min(a,vector<T,N>(b)); }
+vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(T a, vector<T, N> b) { return oc_min(vector<T,N>(a),b); }
+vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, T b) { return oc_max(a,vector<T,N>(b)); }
+vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(T a, vector<T, N> b) { return oc_max(vector<T,N>(a),b); }
+T oc_clamp<T : __BuiltinFloatingPointType>(T x, T a, T b) { return oc_min(b,oc_max(a,x)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, vector<T,N> a, vector<T,N> b) { return oc_min(b,oc_max(a,x)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, T a, T b) { return oc_clamp(x,vector<T,N>(a),vector<T,N>(b)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, vector<T,N> a, T b) { return oc_clamp(x,a,vector<T,N>(b)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, T a, vector<T,N> b) { return oc_clamp(x,vector<T,N>(a),b); }
+matrix<T,R,C> oc_min<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> a, matrix<T,R,C> b) { matrix<T,R,C> result; for(uint i=0;i<R;++i) result[i]=oc_min(a[i],b[i]); return result; }
+matrix<T,R,C> oc_max<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> a, matrix<T,R,C> b) { matrix<T,R,C> result; for(uint i=0;i<R;++i) result[i]=oc_max(a[i],b[i]); return result; }
+matrix<T,R,C> oc_clamp<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> x, matrix<T,R,C> a, matrix<T,R,C> b) { return oc_min(b,oc_max(a,x)); }
+float oc_saturate(float x) { return oc_clamp(x,0.f,1.f); }
+float16_t oc_saturate(float16_t x) { return oc_clamp(x,float16_t(0),float16_t(1)); }
+vector<T,N> oc_saturate<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x) { return oc_clamp(x,T(0),T(1)); }
+matrix<T,R,C> oc_saturate<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> x) { matrix<T,R,C> result; for(uint i=0;i<R;++i) result[i]=oc_saturate(x[i]); return result; }
+
+// Only small arguments need a log1p series. Ordinary hyperbolic inputs retain
+// the native intrinsics; large inverse inputs avoid overflowing their square.
+float oc_log1p_positive(float x) {
+    float y = x / (2.f + x);
+    if (y < 0.25f) {
+        float y2 = y * y;
+        return 2.f * y * (1.f + y2 * (1.f/3.f + y2 * (1.f/5.f +
+            y2 * (1.f/7.f + y2 * (1.f/9.f + y2 * (1.f/11.f))))));
+    }
+    return log(1.f + x);
+}
+float oc_asinh(float x) {
+    float ax = abs(x), value;
+    if (ax < 0.5f) {
+        float square = ax * ax;
+        value = oc_log1p_positive(ax + square / (1.f + sqrt(1.f + square)));
+    } else if (ax > 1e19f) value = log(ax) + 0.6931471805599453f;
+    else value = asinh(ax);
+    return oc_copysign(value,x);
+}
+float oc_acosh(float x) {
+    if (x < 1.f) return asfloat(0x7fc00000u);
+    if (x > 1e19f) return log(x) + 0.6931471805599453f;
+    if (x < 1.5f) {
+        // Keep the caller's float-rounded argument. Slang otherwise cancels a
+        // caller's (v + 1) with this subtraction even in precise FP mode.
+        float one = 1.f;
+        float offset = spirv_asm {
+            %difference : $$float = OpFSub $x $one;
+            OpDecorate %difference NoContraction;
+            result : $$float = OpCopyObject %difference
+        };
+        return oc_log1p_positive(offset + sqrt(offset * (x + 1.f)));
+    }
+    return acosh(x);
+}
+float oc_atanh(float x) {
+    float ax = abs(x);
+    if (ax > 1.f) return asfloat(0x7fc00000u);
+    if (ax == 1.f) return oc_copysign(asfloat(0x7f800000u),x);
+    float value = ax < 0.5f ? 0.5f * oc_log1p_positive(2.f * ax / (1.f - ax)) : atanh(ax);
+    return oc_copysign(value,x);
+}
+float oc_tanh(float x) {
+    if (abs(x) < 0.125f) {
+        float square = x * x;
+        return x * (1.f + square * (-1.f/3.f + square * (2.f/15.f - square * (17.f/315.f))));
+    }
+    return tanh(x);
+}
+#define OC_HYPERBOLIC_OVERLOADS(name) \
+float16_t name(float16_t x) { return float16_t(name(float(x))); } \
+vector<float,N> name<uint N>(vector<float,N> x) { vector<float,N> result; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; } \
+vector<float16_t,N> name<uint N>(vector<float16_t,N> x) { vector<float16_t,N> result; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; } \
+matrix<float,R,C> name<uint R, uint C>(matrix<float,R,C> x) { matrix<float,R,C> result; for(uint i=0;i<R;++i) result[i]=name(x[i]); return result; } \
+matrix<float16_t,R,C> name<uint R, uint C>(matrix<float16_t,R,C> x) { matrix<float16_t,R,C> result; for(uint i=0;i<R;++i) result[i]=name(x[i]); return result; } \
+float[N] name<uint N>(float x[N]) { float result[N]; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; } \
+float16_t[N] name<uint N>(float16_t x[N]) { float16_t result[N]; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; }
+OC_HYPERBOLIC_OVERLOADS(oc_asinh)
+OC_HYPERBOLIC_OVERLOADS(oc_acosh)
+OC_HYPERBOLIC_OVERLOADS(oc_atanh)
+OC_HYPERBOLIC_OVERLOADS(oc_tanh)
+#undef OC_HYPERBOLIC_OVERLOADS
+
 // DSL sign returns +1 for both signed zero values. DSL round rounds ties away
 // from zero, whereas the Slang native round operation uses ties-to-even.
 float oc_round(float x) {
