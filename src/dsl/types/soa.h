@@ -217,9 +217,9 @@ OC_MAKE_ATOMIC_SOA_VAR_VIEW(template<typename TBuffer>, ocarina::uint)
 OC_MAKE_ATOMIC_SOA_VAR_VIEW(template<typename TBuffer>, ocarina::ulong)
 OC_MAKE_ATOMIC_SOA_VAR_VIEW(template<typename TBuffer>, float)
 OC_MAKE_ATOMIC_SOA_VAR_VIEW(template<typename TBuffer>, int)
-OC_MAKE_ATOMIC_SOA_VAR(template<typename T OC_COMMA ocarina::uint N OC_COMMA typename TBuffer>,
+OC_MAKE_ATOMIC_SOA_VAR(template<typename T OC_COMMA std::size_t N OC_COMMA typename TBuffer>,
                        ocarina::Vector<T OC_COMMA N>)
-OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA ocarina::uint N OC_COMMA typename TBuffer>,
+OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA std::size_t N OC_COMMA typename TBuffer>,
                         ocarina::Vector<T OC_COMMA N>)
 
 ///#region make structure soa
@@ -378,7 +378,7 @@ OC_MAKE_ATOMIC_SOA_VIEW(template<typename T OC_COMMA ocarina::uint N OC_COMMA ty
 
 namespace ocarina {
 
-template<typename T, uint N, uint M, typename TBuffer>
+template<typename T, std::size_t N, std::size_t M, typename TBuffer>
 struct SOAViewVar<Matrix<T, N, M>, TBuffer> {
 public:
     using struct_type = Matrix<T, N, M>;
@@ -450,7 +450,7 @@ public:
     }
 };
 
-template<typename T, uint N, uint M, typename TBuffer>
+template<typename T, std::size_t N, std::size_t M, typename TBuffer>
 requires is_byte_buffer_view_v<TBuffer>
 struct SOAView<Matrix<T, N, M>, TBuffer> {
 public:
@@ -498,7 +498,7 @@ public:
 
 }// namespace ocarina
 
-OC_MAKE_ARRAY_SOA_VIEW(template<ocarina::uint N OC_COMMA typename T OC_COMMA typename TBuffer>,
+OC_MAKE_ARRAY_SOA_VIEW(template<std::size_t N OC_COMMA typename T OC_COMMA typename TBuffer>,
                        ocarina::array<T OC_COMMA N>, T)
 
 namespace ocarina {

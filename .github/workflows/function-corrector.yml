@@ -145,9 +145,23 @@ jobs:
               output.write(sysconfig.get_path("scripts") + "\n")
 
       - name: Build all 53 Ocarina test and benchmark executables
+        id: build-suite
         run: >-
           python build_tools/dev.py build ocarina-tests
           --configuration RelWithDebInfo --target-family ocarina-tests
+
+      - name: Collect remaining compiler diagnostics after a failed build
+        if: failure() && steps.build-suite.outcome == 'failure'
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+          build = Path("build/conan/ocarina-tests/relwithdebinfo")
+          if (build / "CMakeCache.txt").is_file():
+              result = subprocess.run([
+                  "cmake", "--build", str(build), "--config", "RelWithDebInfo",
+                  "--target", "ocarina-tests", "--", "-k", "0"])
+              print(f"Diagnostic build exited {result.returncode}; the original build failure is retained")
 
       - name: Execute and verify the complete Ocarina suite
         run: >-
