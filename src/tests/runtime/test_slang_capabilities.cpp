@@ -30,7 +30,9 @@ int main(int argc, char **argv) {
     const auto cache = ocarina::format(".cache-slang-capabilities-{}", stamp);
     const auto diagnostics_path = std::filesystem::path{cache} / "diagnostics.log";
     horizon::core::LoggingOptions logging;
-    logging.console = false;
+    // Keep fatal compiler diagnostics visible in CTest as well as the file
+    // inspected below, including failures before the final file read.
+    logging.console = true;
     logging.file_path = diagnostics_path;
     horizon::core::initialize_logging(logging);
     RHIContext::instance().init(argv[0], cache);

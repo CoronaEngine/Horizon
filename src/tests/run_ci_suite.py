@@ -109,7 +109,10 @@ def read_results(path, tests, output):
             log_path = logs / f"{index:03d}-{re.sub(r'[^a-zA-Z0-9_.-]', '_', name)}.log"
             log_path.write_text(stdout, encoding="utf-8")
             result.update(log=str(log_path.resolve()), junit_status=entry.get("status"))
-            result["executed"] = entry.get("status") == "run" and entry.find("skipped") is None
+            # CTest marks a started process with a nonzero exit as "fail";
+            # commands that could not start are "notrun". A failed execution
+            # must remain distinguishable from missing execution.
+            result["executed"] = entry.get("status") in ("run", "fail") and entry.find("skipped") is None
             try:
                 result["seconds"] = float(entry.get("time", "nan"))
                 if not math.isfinite(result["seconds"]) or result["seconds"] < 0:

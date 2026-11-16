@@ -153,6 +153,35 @@ class CiEvidenceTests(unittest.TestCase):
 
 
 class RealCTestEvidenceTests(unittest.TestCase):
+    def test_real_ctest_failure_counts_as_executed_but_missing_command_does_not(self):
+        cmake, ctest = (shutil.which(name) for name in ("cmake", "ctest"))
+        if not all((cmake, ctest)):
+            self.skipTest("CMake and CTest required")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 4.0)\nproject(FailureEvidence LANGUAGES NONE)\n'
+                'enable_testing()\n'
+                'add_test(NAME ocarina.failed COMMAND "${CMAKE_COMMAND}" -E false)\n'
+                'add_test(NAME ocarina.missing COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/absent-executable")\n',
+                encoding="utf-8")
+            build, junit = root / "build", root / "results.xml"
+            configured = subprocess.run([cmake, "-S", str(root), "-B", str(build)],
+                                        capture_output=True, text=True, timeout=60)
+            self.assertEqual(configured.returncode, 0, configured.stdout + configured.stderr)
+            result = subprocess.run([ctest, "--test-dir", str(build), "--output-junit", str(junit)],
+                                    capture_output=True, text=True, timeout=60)
+            self.assertNotEqual(result.returncode, 0)
+            tests = [{"name": "ocarina.failed", "command": [cmake, "-E", "false"]},
+                     {"name": "ocarina.missing", "command": [str(root / "absent-executable")]}]
+            cases, errors = suite.read_results(junit, tests, root)
+            by_name = {case["name"]: case for case in cases}
+            self.assertTrue(by_name["ocarina.failed"]["executed"])
+            self.assertEqual(by_name["ocarina.failed"]["status"], "failed")
+            self.assertFalse(by_name["ocarina.missing"]["executed"])
+            self.assertNotEqual(by_name["ocarina.missing"]["status"], "passed")
+            self.assertEqual(len(errors), 2)
+
     def test_real_ctest_produces_complete_target_and_case_evidence(self):
         cmake, ctest, ninja = (shutil.which(name) for name in ("cmake", "ctest", "ninja"))
         if not all((cmake, ctest, ninja)):
