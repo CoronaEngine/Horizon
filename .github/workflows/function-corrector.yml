@@ -1,4 +1,4 @@
-name: Function Corrector
+name: Ocarina Tests and Benchmarks
 
 on:
   push:
@@ -13,9 +13,11 @@ env:
 
 jobs:
   corrector:
-    name: ${{ matrix.name }} Corrector and GPU Regression Tests
+    name: ${{ matrix.name }} Ocarina Tests and Benchmarks
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +35,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # The pinned MoltenVK source fallback uses distutils on macOS.
+          python-version: ${{ runner.os == 'macOS' && '3.11' || '3.12' }}
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -101,16 +104,33 @@ jobs:
               output.write(f"VK_DRIVER_FILES={icd.as_posix()}\n")
               output.write(f"VK_ICD_FILENAMES={icd.as_posix()}\n")
 
-      - name: Install macOS MoltenVK
+      - name: Determine macOS Metal toolchain
+        if: runner.os == 'macOS'
+        id: metal-toolchain
+        shell: python
+        run: |
+          import os
+          import re
+          import subprocess
+          version = subprocess.check_output(["xcodebuild", "-version"], text=True)
+          version = re.sub(r"[^A-Za-z0-9._-]+", "-", version).strip("-")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+
+      - name: Cache pinned macOS ray-query driver
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/horizon-moltenvk-rt
+          key: moltenvk-rt-176926b4-${{ runner.os }}-${{ runner.arch }}-${{ steps.metal-toolchain.outputs.version }}
+
+      - name: Install pinned macOS ray-query driver
         if: runner.os == 'macOS'
         env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
+          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          brew install molten-vk
-          icd="$(find -H "$(brew --prefix molten-vk)" -name MoltenVK_icd.json -print -quit)"
-          test -f "$icd"
-          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          python build_tools/scripts/setup_moltenvk_ci.py --output "$RUNNER_TEMP/horizon-moltenvk-rt"
 
       - name: Install build tools
         run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
@@ -124,47 +144,29 @@ jobs:
           with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
               output.write(sysconfig.get_path("scripts") + "\n")
 
-      - name: Build Corrector and Vulkan regression executables
+      - name: Build all 53 Ocarina test and benchmark executables
         run: >-
-          python build_tools/dev.py build
-          test-core-function-corrector test-runtime-outline-equivalence
-          test-runtime-codegen-capability-probe test-debug-printer
-          test-debug-printer-bytebuffer-debug test-debug-printer-bindless-buffer-debug
+          python build_tools/dev.py build ocarina-tests
           --configuration RelWithDebInfo --target-family ocarina-tests
 
-      - name: Run Corrector AST and rejected-capture tests
+      - name: Execute and verify the complete Ocarina suite
         run: >-
-          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo
-          -C RelWithDebInfo -R '^ocarina\.test-core-function-corrector($|\.)'
-          --no-tests=error --output-on-failure
+          python src/tests/run_ci_suite.py
+          --build-dir build/conan/ocarina-tests/relwithdebinfo
+          --configuration RelWithDebInfo
+          --output build/verification/ocarina-ci
 
-      - name: Run all 13 Vulkan GPU regression cases
-        shell: bash
-        run: |
-          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo -C RelWithDebInfo \
-            -R '^ocarina\.(test-runtime-(outline-equivalence|codegen-capability-probe)|test-debug-printer(-bytebuffer-debug|-bindless-buffer-debug)?)\.vulkan-compute($|\.)' \
-            --no-tests=error --verbose --output-on-failure \
-            --output-junit "$GITHUB_WORKSPACE/build/gpu-regressions.xml"
-
-      - name: Verify all GPU regression cases actually ran
-        shell: python
-        run: |
-          import xml.etree.ElementTree as ET
-          cases = ET.parse("build/gpu-regressions.xml").getroot().findall("testcase")
-          if len(cases) != 13:
-              raise RuntimeError(f"Expected 13 GPU regression cases, got {len(cases)}")
-          for case in cases:
-              if case.get("status") != "run" or any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
-                  raise RuntimeError(f"GPU regression did not pass: {case.attrib}")
-          print("All 13 GPU regression cases executed and passed")
-
-      - name: Upload GPU regression results
+      - name: Upload complete Ocarina execution evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gpu-regressions-${{ matrix.os }}
+          name: ocarina-execution-${{ matrix.os }}
           path: |
-            build/gpu-regressions.xml
+            build/verification/ocarina-ci
+            build/conan/ocarina-tests/relwithdebinfo/src/tests/ci/RelWithDebInfo/targets.json
             build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTest.log
             build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTestsFailed.log
+            ${{ runner.temp }}/horizon-moltenvk-rt/driver-metadata.json
+            ${{ runner.temp }}/horizon-moltenvk-rt/source-build.log
+            ${{ runner.temp }}/horizon-moltenvk-rt/source-diagnostics
           if-no-files-found: warn

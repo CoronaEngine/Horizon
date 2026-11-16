@@ -1,3 +1,5 @@
+add_custom_target(ocarina-tests)
+
 function(ocarina_add_test name)
     cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK" "CATEGORY" "SOURCES;CASES" ${ARGN})
     set(_test_target ${name})
@@ -9,6 +11,8 @@ function(ocarina_add_test name)
         endif ()
     endif ()
     add_executable(${_test_target} ${_ocarina_test_SOURCES})
+    add_dependencies(ocarina-tests ${_test_target})
+    set_property(GLOBAL APPEND PROPERTY HORIZON_OCARINA_TEST_TARGETS ${_test_target})
     target_link_libraries(${_test_target} PRIVATE ocarina-native)
     set(_test_folder "ocarina/test")
     if (_ocarina_test_CATEGORY)
@@ -20,7 +24,19 @@ function(ocarina_add_test name)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
             WINDOWS_EXPORT_ALL_SYMBOLS ON
             FOLDER "${_test_folder}")
-    if(NOT _ocarina_test_BENCHMARK)
+    if(_ocarina_test_BENCHMARK)
+        set_property(TARGET ${_test_target} PROPERTY HORIZON_TEST_BENCHMARK true)
+        if(_ocarina_test_CATEGORY STREQUAL "runtime")
+            add_test(NAME ocarina.${_test_target}.benchmark
+                COMMAND $<TARGET_FILE:${_test_target}> --ci)
+        else()
+            add_test(NAME ocarina.${_test_target}.benchmark COMMAND $<TARGET_FILE:${_test_target}>)
+        endif()
+        set_tests_properties(ocarina.${_test_target}.benchmark PROPERTIES
+            WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
+            LABELS "ocarina;benchmark" RUN_SERIAL TRUE TIMEOUT 300)
+    else()
+        set_property(TARGET ${_test_target} PROPERTY HORIZON_TEST_BENCHMARK false)
         if(_ocarina_test_GPU)
             if(TARGET ocarina-backend-vulkan-compute)
                 set(_cases ${_ocarina_test_CASES})
@@ -158,3 +174,15 @@ ocarina_add_test(test-printer-bindless-buffer-debug GPU CATEGORY debug SOURCES d
 
 # IO tests.
 ocarina_add_test(test-imageio BENCHMARK CATEGORY io SOURCES io/test_image_io.cpp)
+
+# Use the same CMake inventory for compilation and per-platform execution proof.
+get_property(_ci_targets GLOBAL PROPERTY HORIZON_OCARINA_TEST_TARGETS)
+set(_ci_manifest_entries)
+foreach(_target IN LISTS _ci_targets)
+    get_property(_benchmark TARGET ${_target} PROPERTY HORIZON_TEST_BENCHMARK)
+    list(APPEND _ci_manifest_entries
+        "{\"target\":\"${_target}\",\"path\":\"$<TARGET_FILE:${_target}>\",\"benchmark\":${_benchmark}}")
+endforeach()
+list(JOIN _ci_manifest_entries ",\n" _ci_manifest)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ci/$<CONFIG>/targets.json"
+    CONTENT "[\n${_ci_manifest}\n]\n")
