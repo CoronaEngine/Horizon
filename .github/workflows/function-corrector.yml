@@ -13,9 +13,19 @@ env:
 
 jobs:
   corrector:
-    name: Windows Corrector Tests and Vulkan Build
-    runs-on: windows-latest
+    name: ${{ matrix.name }} Corrector Tests and Vulkan Build
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-26.04
+          - name: macOS
+            os: macos-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -27,6 +37,22 @@ jobs:
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Install Linux Vulkan build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libx11-xcb-dev libfontenc-dev libice-dev libsm-dev libxau-dev libxaw7-dev \
+            libxcomposite-dev libxcursor-dev libxdamage-dev libxdmcp-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbfile-dev libxmu-dev libxmuu-dev libxpm-dev libxrandr-dev \
+            libxrender-dev libxres-dev libxss-dev libxt-dev libxtst-dev libxv-dev libxxf86vm-dev \
+            libxcb-glx0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-xkb-dev \
+            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev \
+            libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxcb-dri3-dev libxcb-cursor-dev libxcb-dri2-0-dev libxcb-present-dev \
+            libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-util-dev uuid-dev libgl-dev
 
       - name: Install build tools
         run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
@@ -48,8 +74,8 @@ jobs:
           test-debug-printer-bytebuffer-debug test-debug-printer-bindless-buffer-debug
           --configuration RelWithDebInfo --target-family ocarina-tests
 
-      # The Vulkan tests require a device with compute ballot subgroups of at least
-      # 32 lanes. Hosted Windows runners compile these tests without executing them.
+      # Keep the existing GPU regression targets as build checks on every OS.
+      # This workflow executes the CPU Corrector tests on all three platforms.
       - name: Run Corrector AST and rejected-capture tests
         run: >-
           ctest --test-dir build/conan/ocarina-tests/relwithdebinfo
