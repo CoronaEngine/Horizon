@@ -1,8 +1,14 @@
 #include "horizon/hotfix/cmake_build_backend.h"
+
+#if defined(_WIN32)
 #include "horizon/hotfix/windows_process_runner.h"
-
 #include <windows.h>
+#else
+#include "horizon/hotfix/posix_process_runner.h"
+#include <dlfcn.h>
+#endif
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -17,7 +23,13 @@ using namespace horizon::hotfix;
 namespace fs = std::filesystem;
 
 constexpr std::string_view original_source =
-    "extern \"C\" __declspec(dllexport) int fixture_value() { return 17; }\n";
+    "extern \"C\" int fixture_value() { return 17; }\n";
+
+#if defined(_WIN32)
+using NativeProcessRunner = WindowsProcessRunner;
+#else
+using NativeProcessRunner = PosixProcessRunner;
+#endif
 
 void require(bool condition, std::string_view message) {
     if (!condition) {
@@ -26,11 +38,26 @@ void require(bool condition, std::string_view message) {
 }
 
 class FixtureDirectory {
+    static fs::path create(const fs::path &parent) {
+        const auto root = fs::canonical(parent);
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (unsigned attempt = 0; attempt < 100; ++attempt) {
+            const auto candidate = root / ("cmake backend fixture " + std::to_string(stamp) +
+                                            "-" + std::to_string(attempt));
+            std::error_code error;
+            if (fs::create_directory(candidate, error)) {
+                return candidate;
+            }
+            if (error) {
+                throw fs::filesystem_error("create an isolated fixture directory", candidate, error);
+            }
+        }
+        throw std::runtime_error("could not create an isolated fixture directory");
+    }
+
 public:
     explicit FixtureDirectory(const fs::path &parent)
-        : path(fs::canonical(parent) / (L"cmake backend fixture " + std::to_wstring(GetCurrentProcessId()))) {
-        require(fs::create_directory(path), "create an isolated fixture directory");
-    }
+        : path(create(parent)) {}
 
     ~FixtureDirectory() {
         std::error_code error;
@@ -85,7 +112,19 @@ void require_module(const BuildResult &result, const fs::path &expected) {
             "the module uses the manifest's configured output name and location");
 }
 
+fs::path expected_module(const fs::path &build_directory, std::string_view configuration) {
+    // The fixture records CMake's platform-selected filename independently of
+    // the hotfix manifest whose validation is exercised by this test.
+    std::ifstream stream(build_directory / "expected-module-names" /
+                         (std::string(configuration) + ".txt"));
+    std::string filename;
+    require(static_cast<bool>(std::getline(stream, filename)) && !filename.empty(),
+            "read the fixture's configured module filename");
+    return build_directory / "published modules" / std::string(configuration) / filename;
+}
+
 int module_value(const fs::path &path) {
+#if defined(_WIN32)
     const auto module = LoadLibraryW(path.c_str());
     require(module != nullptr, "load the fixture module");
     auto symbol = GetProcAddress(module, "fixture_value");
@@ -96,8 +135,24 @@ int module_value(const fs::path &path) {
         FreeLibrary(module);
         throw std::runtime_error("locate the fixture_value export");
     }
+#else
+    void *module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!module) {
+        const char *error = dlerror();
+        throw std::runtime_error(std::string("load the fixture module: ") + (error ? error : "unknown error"));
+    }
+    void *symbol = dlsym(module, "fixture_value");
+    if (!symbol) {
+        dlclose(module);
+        throw std::runtime_error("locate the fixture_value export");
+    }
+#endif
     const auto value = reinterpret_cast<int (*)()>(symbol)();
+#if defined(_WIN32)
     require(FreeLibrary(module) != 0, "release the fixture module before rebuilding");
+#else
+    require(dlclose(module) == 0, "release the fixture module before rebuilding");
+#endif
     return value;
 }
 
@@ -108,7 +163,7 @@ void test_reconfigured_tree(IProcessRunner &process, IBuildBackend &backend, con
 
     const BuildRequest debug{.build_directory = build_directory, .target = "fixture_module",
                              .configuration = "Debug"};
-    const auto debug_module = build_directory / "published modules" / "Debug" / "actual module.dll";
+    const auto debug_module = expected_module(build_directory, "Debug");
     require_module(backend.build(debug), debug_module);
 
     configure_fixture(process, tools, source_directory, build_directory, "Ninja", {"-DCMAKE_BUILD_TYPE=Release"});
@@ -121,7 +176,7 @@ void test_reconfigured_tree(IProcessRunner &process, IBuildBackend &backend, con
 
     auto release = debug;
     release.configuration = "Release";
-    require_module(backend.build(release), build_directory / "published modules" / "Release" / "actual module.dll");
+    require_module(backend.build(release), expected_module(build_directory, "Release"));
 }
 
 void test_builds(const FixtureToolchain &tools, const fs::path &fixture_project, const fs::path &test_root) {
@@ -129,14 +184,14 @@ void test_builds(const FixtureToolchain &tools, const fs::path &fixture_project,
     const auto source_directory = fixture.path / "source tree";
     const auto build_directory = fixture.path / "build tree";
     const auto source = source_directory / "fixture.cpp";
-    const auto expected = build_directory / "published modules" / "Debug" / "actual module.dll";
     fs::create_directory(source_directory);
     fs::copy_file(fixture_project, source_directory / "CMakeLists.txt");
     write_source(source, original_source);
 
-    WindowsProcessRunner process;
+    NativeProcessRunner process;
     configure_fixture(process, tools, source_directory, build_directory, "Ninja Multi-Config",
                       {"-DCMAKE_CONFIGURATION_TYPES:STRING=Release;Debug", "-DCMAKE_DEFAULT_BUILD_TYPE:STRING=Release"});
+    const auto expected = expected_module(build_directory, "Debug");
 
     CMakeBuildBackend cmake_backend(process, tools.cmake);
     IBuildBackend &backend = cmake_backend;
@@ -161,7 +216,7 @@ void test_builds(const FixtureToolchain &tools, const fs::path &fixture_project,
                 !missing_manifest.diagnostics.empty() && fs::is_regular_file(expected),
             "an existing module without its manifest is not published");
 
-    write_source(source, "extern \"C\" __declspec(dllexport) int fixture_value() { return 42; }\n");
+    write_source(source, "extern \"C\" int fixture_value() { return 42; }\n");
     const auto rebuilt = backend.build(request);
     require_module(rebuilt, expected);
     require(module_value(rebuilt.artifacts.module_path) == 42, "editing the source rebuilds the module");
@@ -182,7 +237,11 @@ void test_builds(const FixtureToolchain &tools, const fs::path &fixture_project,
 
 }// namespace
 
+#if defined(_WIN32)
 int wmain(int argc, wchar_t **argv) {
+#else
+int main(int argc, char **argv) {
+#endif
     if (argc != 7) {
         std::cerr << "Expected CMake, Ninja, compiler, manifest module, fixture project, and test directory paths\n";
         return 1;
