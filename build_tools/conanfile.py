@@ -80,7 +80,7 @@ class HorizonConan(ConanFile):
             self.requires("pfr/1.91.0", transitive_headers=True)
             self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
             self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
-            self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
+            self.requires("slang/2026.11", transitive_headers=True, transitive_libs=True)
             if bool(self.options.with_tracy):
                 self.requires("tracy/0.13.1", options={"on_demand": True})
 

@@ -1,6 +1,7 @@
 include_guard(GLOBAL)
 
-set(HORIZON_SLANG_VERSION "2026.10" CACHE STRING "Slang binary distribution version")
+# Includes the nonuniform resource-operand fix from shader-slang/slang#10656.
+set(HORIZON_SLANG_VERSION "2026.11" CACHE STRING "Slang binary distribution version")
 
 find_package(slang ${HORIZON_SLANG_VERSION} CONFIG REQUIRED)
 
