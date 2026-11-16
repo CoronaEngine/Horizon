@@ -18,6 +18,12 @@ OC_STRUCT(, CapabilityRecord, guard, points, matrix) {};
 
 namespace {
 
+// The CPU oracle must preserve the same binary16 values at compile time and
+// runtime, including subnormals. An aliasing-based bit cast breaks this on GCC.
+static_assert(float_to_half(1.5f) == 0x3e00u);
+static_assert(half_to_float(0x3e00u) == 1.5f);
+static_assert(bit_cast<uint>(half_to_float(0x0001u)) == 0x33800000u);
+
 bool check(float actual, float expected, std::string_view operation, uint index) {
     const bool passed = std::isfinite(actual) && std::abs(actual - expected) <= 2e-6f * std::max(1.f, std::abs(expected));
     std::cout << operation << " index=" << index << " actual=" << actual

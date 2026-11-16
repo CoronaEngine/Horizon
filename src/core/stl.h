@@ -6,6 +6,7 @@
 
 #include "header.h"
 #include "core/tuple.h"
+#include <bit>
 #include <functional>
 #include <deque>
 #include <stack>
@@ -287,7 +288,7 @@ requires(sizeof(To) == sizeof(From) &&
          std::is_trivially_copyable_v<From> &&
          std::is_trivially_copyable_v<To>)
 [[nodiscard]] constexpr To bit_cast(const From &src) noexcept {
-    return *reinterpret_cast<const To *>(&src);
+    return std::bit_cast<To>(src);
 }
 
 inline size_t substr_count(string_view str, string_view target) noexcept {
