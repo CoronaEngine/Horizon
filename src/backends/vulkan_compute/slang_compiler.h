@@ -24,6 +24,9 @@ private:
     mutable slang::IGlobalSession *global_session_{nullptr};
     mutable slang::ISession       *session_{nullptr};
     mutable bool preserve_float32_{false};
+    mutable bool preserve_float16_{false};
+    mutable uint32_t rte_widths_{0u};
+    mutable uint32_t rounding_independence_{0u};
 
     void ensure_session() const noexcept;
 

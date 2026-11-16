@@ -164,6 +164,15 @@ float oc_half_mul(float a, float b) { return oc_half_value(a * b); }
 // exact half midpoint before rounding, avoiding float32 -> binary16 double
 // rounding while retaining DSL HFMA's single binary16 rounding.
 float oc_half_fma(float a, float b, float c) {
+    uint a_bits = asuint(a), b_bits = asuint(b), c_bits = asuint(c);
+    uint a_magnitude = a_bits & 0x7fffffffu, b_magnitude = b_bits & 0x7fffffffu;
+    // For a finite zero product plus zero, RNE retains -0 only if both
+    // addends are negative zero. Materialize that sign as bits rather than
+    // relying on floating-point zero-product simplifications.
+    if ((c_bits & 0x7fffffffu) == 0u &&
+        (a_magnitude == 0u || b_magnitude == 0u) &&
+        a_magnitude < 0x7f800000u && b_magnitude < 0x7f800000u)
+        return asfloat((a_bits ^ b_bits) & c_bits & 0x80000000u);
     // Slang 2026.10 ignores local precise on SPIR-V. Explicit decorations
     // preserve TwoSum's operation order without changing other shader math.
     float2 sum_residual = spirv_asm {
@@ -286,6 +295,13 @@ uint oc_fma32_bits(uint a, uint b, uint c) {
     return sign | (uint(result_exponent + 127) << 23u) | (uint(significand) & 0x7fffffu);
 }
 float oc_fma(float a, float b, float c) { return asfloat(oc_fma32_bits(asuint(a), asuint(b), asuint(c))); }
+// A binary16 product is exact in float32. The existing Half helper retains the
+// sum's residual and corrects Half midpoints before its single Half rounding.
+// Kernels using this path declare RTE32 (and other widths where required by
+// the device's rounding independence), including Half matrix inverse kernels.
+float16_t oc_fma(float16_t a, float16_t b, float16_t c) {
+    return oc_float2half(oc_half_fma(oc_half2float(a), oc_half2float(b), oc_half2float(c)));
+}
 vector<float,N> oc_fma<uint N>(vector<float,N> a, vector<float,N> b, vector<float,N> c) {
     vector<float,N> result;
     for (uint i=0u;i<N;++i) result[i] = oc_fma(a[i],b[i],c[i]);
@@ -293,6 +309,14 @@ vector<float,N> oc_fma<uint N>(vector<float,N> a, vector<float,N> b, vector<floa
 }
 matrix<float,R,C> oc_fma<uint R,uint C>(matrix<float,R,C> a, matrix<float,R,C> b, matrix<float,R,C> c) {
     matrix<float,R,C> result;
+    for (uint i=0u;i<R;++i) result[i] = oc_fma(a[i],b[i],c[i]);
+    return result;
+}
+vector<float16_t,N> oc_fma<uint N>(vector<float16_t,N> a, vector<float16_t,N> b, vector<float16_t,N> c) {
+    return oc_float2half(oc_half_fma(oc_half2float(a), oc_half2float(b), oc_half2float(c)));
+}
+matrix<float16_t,R,C> oc_fma<uint R,uint C>(matrix<float16_t,R,C> a, matrix<float16_t,R,C> b, matrix<float16_t,R,C> c) {
+    matrix<float16_t,R,C> result;
     for (uint i=0u;i<R;++i) result[i] = oc_fma(a[i],b[i],c[i]);
     return result;
 }

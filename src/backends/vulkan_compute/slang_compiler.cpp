@@ -21,16 +21,19 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 10u;
+constexpr unsigned slang_source_cache_version = 11u;
 
-void preserve_float32_special_values(vector<uint32_t> &spirv) noexcept {
-    // SPIR-V 1.5 includes shader float controls. Without this execution mode a
-    // Vulkan driver may discard signed zero or assume that NaN/Inf never occur,
-    // even when Slang has retained the original conversion/arithmetic itself.
+constexpr uint32_t float_width_mask(uint32_t width) noexcept {
+    return width == 16u ? 1u : width == 32u ? 2u : width == 64u ? 4u : 0u;
+}
+
+void set_float_control_mode(vector<uint32_t> &spirv, uint32_t capability,
+                            uint32_t mode, uint32_t widths) noexcept {
+    // Capabilities precede entry points; execution modes precede debug/types.
     constexpr uint32_t op_capability = 17u, op_entry_point = 15u;
     constexpr uint32_t op_execution_mode = 16u, op_execution_mode_id = 331u;
-    constexpr uint32_t preserve_capability = 4466u, preserve_mode = 4461u;
-    vector<uint32_t> entry_points, preserved_entry_points;
+    vector<uint32_t> entry_points;
+    vector<uint64_t> preserved_entries;
     size_t capability_end = 5u, execution_modes_end = 5u;
     bool has_capability = false;
     for (size_t offset = 5u; offset < spirv.size();) {
@@ -38,28 +41,56 @@ void preserve_float32_special_values(vector<uint32_t> &spirv) noexcept {
         OC_ERROR_IF(count == 0u || count > spirv.size() - offset, "Malformed Slang SPIR-V instruction");
         if (op == op_capability) {
             capability_end = offset + count;
-            has_capability |= count == 2u && spirv[offset + 1u] == preserve_capability;
+            has_capability |= count == 2u && spirv[offset + 1u] == capability;
         } else if (op == op_entry_point) {
             OC_ERROR_IF(count < 4u, "Malformed Slang SPIR-V entry point");
             entry_points.push_back(spirv[offset + 2u]);
             execution_modes_end = offset + count;
         } else if (op == op_execution_mode || op == op_execution_mode_id) {
             execution_modes_end = offset + count;
-            if (op == op_execution_mode && count == 4u &&
-                spirv[offset + 2u] == preserve_mode && spirv[offset + 3u] == 32u)
-                preserved_entry_points.push_back(spirv[offset + 1u]);
+            if (op == op_execution_mode && count == 4u) {
+                uint32_t existing_mode = spirv[offset + 2u], width = spirv[offset + 3u];
+                if (existing_mode == mode)
+                    preserved_entries.push_back((uint64_t(spirv[offset + 1u]) << 32u) | width);
+                OC_ERROR_IF(mode == 4462u && existing_mode == 4463u && (widths & float_width_mask(width)),
+                            "Half fused operations require RTE but the shader requests RTZ");
+            }
         }
         offset += count;
     }
     vector<uint32_t> modes;
-    for (uint32_t entry : entry_points) {
-        if (std::find(preserved_entry_points.begin(), preserved_entry_points.end(), entry) == preserved_entry_points.end())
-            modes.insert(modes.end(), {(4u << 16u) | op_execution_mode, entry, preserve_mode, 32u});
+    for (uint32_t entry : entry_points) for (uint32_t width : {16u, 32u, 64u}) {
+        uint64_t key = (uint64_t(entry) << 32u) | width;
+        if ((widths & float_width_mask(width)) &&
+            std::find(preserved_entries.begin(), preserved_entries.end(), key) == preserved_entries.end())
+            modes.insert(modes.end(), {(4u << 16u) | op_execution_mode, entry, mode, width});
     }
     if (modes.empty()) return;
     spirv.insert(spirv.begin() + execution_modes_end, modes.begin(), modes.end());
     if (!has_capability)
-        spirv.insert(spirv.begin() + capability_end, {(2u << 16u) | op_capability, preserve_capability});
+        spirv.insert(spirv.begin() + capability_end, {(2u << 16u) | op_capability, capability});
+}
+
+void require_half_rounding(vector<uint32_t> &spirv, uint32_t supported_widths,
+                           uint32_t independence, bool preserve_float16) noexcept {
+    uint32_t required_widths = 2u; // Half TwoSum arithmetic operates in float32.
+    uint32_t used_widths = 0u;
+    for (size_t offset = 5u; offset < spirv.size();) {
+        uint32_t count = spirv[offset] >> 16u, op = spirv[offset] & 0xffffu;
+        OC_ERROR_IF(count == 0u || count > spirv.size() - offset, "Malformed Slang SPIR-V instruction");
+        if (op == 22u && count >= 3u) used_widths |= float_width_mask(spirv[offset + 2u]);
+        offset += count;
+    }
+    if (independence == VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE) required_widths = used_widths;
+    OC_ERROR_IF((required_widths & supported_widths) != required_widths,
+                "Half fused operations require RTE for every dependent floating-point width used by the shader");
+    set_float_control_mode(spirv, 4467u, 4462u, required_widths);
+    // Half adapters transfer their input/output bits through real float16 values.
+    // RTE alone does not preserve the sign of zero at those typed boundaries.
+    if (used_widths & 1u) {
+        OC_ERROR_IF(!preserve_float16, "Half fused operations require float16 signed-zero/NaN/Inf preservation");
+        set_float_control_mode(spirv, 4466u, 4461u, 1u);
+    }
 }
 
 void decorate_native_fma(vector<uint32_t> &spirv) noexcept {
@@ -243,9 +274,10 @@ void mark_physical_storage_loads_volatile(vector<uint32_t> &spirv) noexcept {
 }
 #endif
 
-[[nodiscard]] string emit_slang_source(const Function &function, bool supports_warp32) noexcept {
+[[nodiscard]] string emit_slang_source(const Function &function, bool supports_warp32, bool &requires_half_rte) noexcept {
     AstToSlangSource emitter{Env::code_obfuscation(), supports_warp32};
     emitter.emit(function);
+    requires_half_rte = emitter.requires_half_rte();
     return emitter.scratch().c_str();
 }
 
@@ -287,6 +319,11 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     properties.pNext = &float_controls;
     vkGetPhysicalDeviceProperties2(device_->physical_device(), &properties);
     preserve_float32_ = float_controls.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
+    preserve_float16_ = float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
+    rte_widths_ = (float_controls.shaderRoundingModeRTEFloat16 ? 1u : 0u) |
+                  (float_controls.shaderRoundingModeRTEFloat32 ? 2u : 0u) |
+                  (float_controls.shaderRoundingModeRTEFloat64 ? 4u : 0u);
+    rounding_independence_ = float_controls.roundingModeIndependence;
     OC_INFO_FORMAT("Slang FP32 signed-zero/NaN/Inf preservation: {}", preserve_float32_);
 
     // Slang's texture intrinsics carry these standard-library requirements even
@@ -345,7 +382,10 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
 
     // Emit before looking in the SPIR-V cache so cached shaders obey the same
     // device capability checks, including operations inside custom callables.
-    string source = emit_slang_source(function, device_->supports_warp32());
+    bool requires_half_rte = false;
+    string source = emit_slang_source(function, device_->supports_warp32(), requires_half_rte);
+    OC_ERROR_IF(requires_half_rte && (!preserve_float32_ || !(rte_widths_ & 2u)),
+                "Half fused operations require float32 RTE and signed-zero/NaN/Inf preservation on this device");
     if (source.empty()) {
         OC_ERROR("Slang: empty source for function '{}'", function.func_name());
         return {};
@@ -357,7 +397,8 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     auto source_hash = hash64(source,
         RHIContext::read_file(runtime_dir / "slang/slang_device_math.slang"),
         RHIContext::read_file(runtime_dir / "slang/slang_device_resource.slang"),
-        string_view(global_session_->getBuildTagString()), slang_source_cache_version, preserve_float32_);
+        string_view(global_session_->getBuildTagString()), slang_source_cache_version, preserve_float32_,
+        requires_half_rte, preserve_float16_, rte_widths_, rounding_independence_);
     const string cache_key = ocarina::format("{}_{}_{}_{}_{}", function.func_name(),
         source_hash, workgroup_size.x, workgroup_size.y, workgroup_size.z);
     const string cache_path = ocarina::format("{}/slang_cache/{}.spv",
@@ -451,7 +492,8 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     const uint32_t *data = reinterpret_cast<const uint32_t *>(spirv_blob->getBufferPointer());
     vector<uint32_t> spirv(data, data + byte_size / 4);
     normalize_ray_query_extensions(spirv);
-    if (preserve_float32_) preserve_float32_special_values(spirv);
+    if (preserve_float32_) set_float_control_mode(spirv, 4466u, 4461u, 2u);
+    if (requires_half_rte) require_half_rounding(spirv, rte_widths_, rounding_independence_, preserve_float16_);
     decorate_native_fma(spirv);
 #ifdef __APPLE__
     mark_physical_storage_loads_volatile(spirv);

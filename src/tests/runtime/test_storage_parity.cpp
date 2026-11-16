@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 using namespace ocarina;
 
@@ -415,6 +416,102 @@ void test_fma32_rounding(Device &device) {
     require(failures == 0u, "binary32 fma must round the exact product and sum once");
 }
 
+double fma_half_value(uint bits) {
+    uint exponent = (bits >> 10u) & 31u, fraction = bits & 1023u;
+    double value = exponent == 31u ? (fraction ? std::numeric_limits<double>::quiet_NaN() : std::numeric_limits<double>::infinity())
+        : std::ldexp(double(exponent ? 1024u + fraction : fraction), exponent ? int(exponent) - 25 : -24);
+    return std::copysign(value, (bits & 0x8000u) ? -1.0 : 1.0);
+}
+
+uint fma_half_reference(double value) {
+    if (std::isnan(value)) return 0x7e00u;
+    uint sign = std::signbit(value) ? 0x8000u : 0u;
+    double magnitude = std::abs(value);
+    if (magnitude >= 65520.0) return sign | 0x7c00u;
+    if (magnitude == 0.0) return sign;
+    int exponent = std::ilogb(magnitude), quantum = std::max(exponent - 10, -24);
+    double units = std::ldexp(magnitude, -quantum);
+    uint significand = uint(std::floor(units));
+    double remainder = units - double(significand);
+    if (remainder > 0.5 || (remainder == 0.5 && (significand & 1u))) ++significand;
+    if (exponent < -14) return sign | significand;
+    if (significand == 2048u) { significand = 1024u; ++exponent; }
+    return sign | (uint(exponent + 15) << 10u) | (significand & 1023u);
+}
+
+void test_fma16_rounding(Device &device) {
+    // Binary64 retains every relevant bit of a binary16 product/addend near a
+    // Half rounding boundary; this oracle never rounds through binary32.
+    const array<uint, 23> edges{0u, 0x8000u, 1u, 0x8001u, 0x3ffu, 0x83ffu,
+        0x400u, 0x8400u, 0x401u, 0x8401u, 0x3800u, 0xb800u, 0x3c00u, 0xbc00u,
+        0x3c01u, 0x3bffu, 0x3e00u, 0x7bffu, 0xfbffu, 0x7c00u, 0xfc00u, 0x7e01u, 0x7c01u};
+    vector<uint4> inputs;
+    auto append = [&](uint a, uint b, uint c) { inputs.push_back(make_uint4(a, b, c, 0u)); };
+    for (uint a : edges) for (uint b : edges) for (uint c : edges) append(a, b, c);
+    // Exact Half midpoint nudged by a smaller addend that float32 RNE loses.
+    append(0x3c01u, 0x3e00u, 0x8001u); append(0x3c01u, 0x3e00u, 1u);
+    append(0xbc01u, 0x3e00u, 1u); append(0xbc01u, 0x3e00u, 0x8001u);
+    for (uint bits = 0u; bits < 65536u; ++bits) {
+        append(bits, 0x3e00u, 0x8001u);
+        append(bits, 0x3800u, 1u);
+    }
+    uint state = 0xf16a2026u;
+    auto random_bits = [&] { state ^= state << 13u; state ^= state >> 17u; state ^= state << 5u; return state & 0xffffu; };
+    for (uint i = 0u; i < 4096u; ++i) {
+        uint a = random_bits(), b = random_bits(), c = random_bits();
+        if (i % 3u == 0u && (a & 0x7c00u) != 0x7c00u && (b & 0x7c00u) != 0x7c00u) {
+            c = fma_half_reference(-fma_half_value(a) * fma_half_value(b));
+            if ((c & 0x7c00u) != 0x7c00u) c = (c + random_bits() % 3u - 1u) & 0xffffu;
+        }
+        append(a, b, c);
+    }
+    static constexpr uint rows = 3u;
+    auto source = device.create_buffer<uint4>(inputs.size());
+    auto destination = device.create_buffer<uint4>(inputs.size() * rows);
+    Kernel kernel = [](BufferVar<uint4> in, BufferVar<uint4> out) {
+        Uint i = dispatch_id();
+        Uint4 bits = in.read(i);
+        Half a = as<half2>(bits.x).x, b = as<half2>(bits.y).x, c = as<half2>(bits.z).x;
+        Half4 left = make_half4(a, b, c, as<half2>(bits.x ^ 0x8000u).x);
+        Half4 right = make_half4(b, c, a, b), addend = make_half4(c, a, b, c);
+        out.write(i * rows, make_uint4(as<uint>(make_half2(fma(a, b, c), Half(0.f))) & 0xffffu, 0u, 0u, 0u));
+        Uint2 packed = as<uint2>(fma(left, right, addend));
+        out.write(i * rows + 1u, make_uint4(packed.x & 0xffffu, packed.x >> 16u, packed.y & 0xffffu, packed.y >> 16u));
+        Half2x2 matrix_a = make_half2x2(left.x, left.y, left.z, left.w);
+        Half2x2 matrix_b = make_half2x2(right.x, right.y, right.z, right.w);
+        Half2x2 matrix_c = make_half2x2(addend.x, addend.y, addend.z, addend.w);
+        auto result = fma(matrix_a, matrix_b, matrix_c);
+        Uint2 matrix_packed = as<uint2>(make_half4(result[0u], result[1u]));
+        out.write(i * rows + 2u, make_uint4(matrix_packed.x & 0xffffu, matrix_packed.x >> 16u,
+                                         matrix_packed.y & 0xffffu, matrix_packed.y >> 16u));
+    };
+    auto shader = device.compile(kernel, "storage-parity-fma16-rne");
+    vector<uint4> actual(inputs.size() * rows);
+    auto stream = device.create_stream();
+    stream << source.upload(inputs.data()) << shader(source, destination).dispatch(uint(inputs.size()))
+           << destination.download(actual.data()) << synchronize() << commit();
+    uint failures = 0u;
+    auto check = [&](uint result, uint a, uint b, uint c, uint index, const char *shape) {
+        uint expected = fma_half_reference(std::fma(fma_half_value(a), fma_half_value(b), fma_half_value(c)));
+        if (result == expected || ((result & 0x7fffu) > 0x7c00u && (expected & 0x7fffu) > 0x7c00u)) return;
+        if (failures++ < 16u)
+            std::cerr << "FMA16_RNE shape=" << shape << " row=" << index << " a=" << a << " b=" << b << " c=" << c
+                      << " actual=" << result << " expected=" << expected << std::endl;
+    };
+    for (uint i = 0u; i < inputs.size(); ++i) {
+        auto v = inputs[i];
+        check(actual[i * rows].x, v.x, v.y, v.z, i, "scalar");
+        const uint4 a = make_uint4(v.x, v.y, v.z, v.x ^ 0x8000u);
+        const uint4 b = make_uint4(v.y, v.z, v.x, v.y), c = make_uint4(v.z, v.x, v.y, v.z);
+        for (uint j = 0u; j < 4u; ++j) {
+            check(actual[i * rows + 1u][j], a[j], b[j], c[j], i, "vector");
+            check(actual[i * rows + 2u][j], a[j], b[j], c[j], i, "matrix");
+        }
+    }
+    std::cout << "FMA16_RNE inputs=" << inputs.size() << " comparisons=" << inputs.size() * 9u << " mismatches=" << failures << std::endl;
+    require(failures == 0u, "binary16 fma must round the exact product and sum once");
+}
+
 void test_64bit_buffer_metadata(Device &device) {
     constexpr ulong large_size = (ulong(1) << 32u) + 17u;
     auto backing = device.create_buffer<uint>(1u);
@@ -467,6 +564,7 @@ int main() {
     test_half_vectors(device);
     test_math_edges(device);
     test_fma32_rounding(device);
+    test_fma16_rounding(device);
     test_64bit_buffer_metadata(device);
     test_global_block_barrier(device);
     std::cout << "storage and math parity checks passed" << std::endl;

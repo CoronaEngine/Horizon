@@ -169,6 +169,7 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
         case Expression::Tag::CALL: {
             const auto op = static_cast<const CallExpr *>(value)->call_op();
             return !(is_half_constructor(op) || op == CallOp::FLOAT2HALF ||
+                     op == CallOp::FMA || op == CallOp::INVERSE ||
                      op == CallOp::CUSTOM || op == CallOp::SELECT ||
                      op == CallOp::BYTE_BUFFER_READ ||
                      op == CallOp::BINDLESS_ARRAY_BUFFER_READ || op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ);
@@ -227,6 +228,7 @@ void AstToSlangSource::emit(const Function &function) noexcept {
 
 void AstToSlangSource::visit(const CallExpr *expr) noexcept {
     const auto op = expr->call_op();
+    requires_half_rte_ |= (op == CallOp::FMA || op == CallOp::INVERSE) && is_half_value(expr->type());
     OC_ERROR_IF(!supports_warp32_ && op >= CallOp::WARP_ACTIVE_COUNT_BITS && op <= CallOp::WARP_IS_FIRST_ACTIVE_LANE,
                 "Vulkan warp operations require compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
     auto emit_args = [this](const CallExpr *e) {
@@ -405,10 +407,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::CEIL:             OC_SLANG_FUNC(ceil);            break;
         case CallOp::FLOOR:            OC_SLANG_FUNC(floor);           break;
         case CallOp::ROUND:            OC_SLANG_WRAP(round);           break;
-        case CallOp::FMA:
-            if (is_half_value(expr->type())) { OC_SLANG_FUNC(fma); }
-            else { OC_SLANG_WRAP(fma); }
-            break;
+        case CallOp::FMA:              OC_SLANG_WRAP(fma);             break;
         case CallOp::CROSS:            OC_SLANG_FUNC(cross);           break;
         case CallOp::DOT:              OC_SLANG_FUNC(dot);             break;
         case CallOp::LENGTH:           OC_SLANG_FUNC(length);          break;
