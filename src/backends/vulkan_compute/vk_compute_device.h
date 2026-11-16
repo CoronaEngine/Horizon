@@ -77,6 +77,7 @@ private:
 
     // ── RT extension support ─────────────────────────────────────────────────
     bool has_rt_{false};
+    bool supports_warp32_{false};
     bool has_int64_atomics_{false};
     bool has_external_memory_{false};
     // Opt-in, host-side pipeline diagnostics; disabled unless an output path is set.
@@ -135,6 +136,7 @@ public:
     [[nodiscard]] VkQueue          compute_queue()    const noexcept { return compute_queue_; }
     [[nodiscard]] uint32_t         queue_family()     const noexcept { return compute_queue_family_; }
     [[nodiscard]] bool             has_rt()           const noexcept { return has_rt_; }
+    [[nodiscard]] bool supports_warp32() const noexcept { return supports_warp32_; }
     [[nodiscard]] bool has_pipeline_statistics() const noexcept { return has_pipeline_statistics_; }
     void report_pipeline_statistics(VkPipeline pipeline, const string &description) noexcept;
     [[nodiscard]] VkDeviceSize scratch_alignment() const noexcept { return scratch_alignment_; }

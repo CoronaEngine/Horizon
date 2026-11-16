@@ -205,7 +205,20 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
 
 // ── visit(CallExpr) ──────────────────────────────────────────────────────────
 
+void AstToSlangSource::emit(const Function &function) noexcept {
+    if (!supports_warp32_) {
+        // Native source can hide subgroup operations from the AST checks.
+        function.for_each_header([](string_view) {
+            OC_ERROR("Vulkan device without warp32 support cannot validate custom shader headers");
+        });
+    }
+    AstToCppSource::emit(function);
+}
+
 void AstToSlangSource::visit(const CallExpr *expr) noexcept {
+    const auto op = expr->call_op();
+    OC_ERROR_IF(!supports_warp32_ && op >= CallOp::WARP_ACTIVE_COUNT_BITS && op <= CallOp::WARP_IS_FIRST_ACTIVE_LANE,
+                "Vulkan warp operations require compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
     auto emit_args = [this](const CallExpr *e) {
         const auto op = e->call_op();
         const bool atomic = op == CallOp::ATOMIC_ADD || op == CallOp::ATOMIC_SUB ||
@@ -244,12 +257,13 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 
     string_view func_name = expr->function_name();
     if (!func_name.empty()) {
+        OC_ERROR_IF(!supports_warp32_,
+                    "Vulkan device without warp32 support cannot validate native shader calls");
         current_scratch() << func_name;
         emit_args(expr);
         return;
     }
 
-    const auto op = expr->call_op();
     if (op == CallOp::CUSTOM) {
         _emit_custom_call(expr);
         return;

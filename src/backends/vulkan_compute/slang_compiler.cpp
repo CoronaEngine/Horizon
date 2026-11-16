@@ -170,8 +170,8 @@ void mark_physical_storage_loads_volatile(vector<uint32_t> &spirv) noexcept {
 }
 #endif
 
-[[nodiscard]] string emit_slang_source(const Function &function) noexcept {
-    AstToSlangSource emitter{Env::code_obfuscation()};
+[[nodiscard]] string emit_slang_source(const Function &function, bool supports_warp32) noexcept {
+    AstToSlangSource emitter{Env::code_obfuscation(), supports_warp32};
     emitter.emit(function);
     return emitter.scratch().c_str();
 }
@@ -212,7 +212,8 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     // Slang's texture intrinsics carry these standard-library requirements even
     // when they only emit ordinary image operations. Declaring them avoids an
     // implicit profile upgrade; SPIR-V still declares only capabilities in use.
-    // The backend requires ballot subgroups and enables ray queries separately.
+    // Warp operations validate ballot subgroup support during source emission;
+    // ray queries are enabled separately.
     const char *capabilities[] = {
         "SPV_KHR_non_semantic_info", "SPV_GOOGLE_user_type",
         "spvDerivativeControl", "spvImageQuery", "spvImageGatherExtended",
@@ -262,7 +263,9 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     std::lock_guard lock(compile_mutex_);
     ensure_session();
 
-    string source = emit_slang_source(function);
+    // Emit before looking in the SPIR-V cache so cached shaders obey the same
+    // device capability checks, including operations inside custom callables.
+    string source = emit_slang_source(function, device_->supports_warp32());
     if (source.empty()) {
         OC_ERROR("Slang: empty source for function '{}'", function.func_name());
         return {};

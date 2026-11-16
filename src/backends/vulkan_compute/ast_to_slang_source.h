@@ -15,6 +15,7 @@ protected:
     // Set once an emitted function uses THREAD_ID; the oc_thread_id helper is
     // only emitted then, with the compiled workgroup dimensions.
     bool uses_thread_id_{false};
+    bool supports_warp32_{true};
     bool inline_parameters_{false};
     uint32_t uniform_parameter_bytes_{};
     Scratch storage_functions_;
@@ -76,7 +77,9 @@ protected:
     void _emit_statements(span<const Statement *const> statements) noexcept override;
 
 public:
-    explicit AstToSlangSource(bool obfuscation) : AstToCppSource(obfuscation) {}
+    explicit AstToSlangSource(bool obfuscation, bool supports_warp32 = true)
+        : AstToCppSource(obfuscation), supports_warp32_(supports_warp32) {}
+    void emit(const Function &function) noexcept override;
 };
 
 }// namespace ocarina

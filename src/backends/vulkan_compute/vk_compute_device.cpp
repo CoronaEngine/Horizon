@@ -89,10 +89,14 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     VkPhysicalDeviceProperties2 subgroup_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     subgroup_properties.pNext = &subgroup;
     vkGetPhysicalDeviceProperties2(phys_device_, &subgroup_properties);
-    OC_ERROR_IF(subgroup.subgroupSize < 32u || subgroup.subgroupSize > 128u || subgroup.subgroupSize % 32u != 0u ||
-                !(subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) ||
-                !(subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT),
-        "Vulkan backend requires compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
+    // Ordinary compute kernels do not require the DSL's 32-lane warp contract.
+    // Validate that contract when a shader actually emits a warp operation.
+    supports_warp32_ = subgroup.subgroupSize >= 32u && subgroup.subgroupSize <= 128u &&
+                      subgroup.subgroupSize % 32u == 0u &&
+                      (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
+                      (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT);
+    OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; DSL warp32 support: {}",
+                   subgroup.subgroupSize, supports_warp32_);
 
     // RT support probe
     uint32_t ec = 0;

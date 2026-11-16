@@ -13,7 +13,7 @@ env:
 
 jobs:
   corrector:
-    name: ${{ matrix.name }} Corrector Tests and Vulkan Build
+    name: ${{ matrix.name }} Corrector and GPU Regression Tests
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -52,7 +52,65 @@ jobs:
             libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev \
             libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
             libxcb-dri3-dev libxcb-cursor-dev libxcb-dri2-0-dev libxcb-present-dev \
-            libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-util-dev uuid-dev libgl-dev
+            libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-util-dev uuid-dev libgl-dev \
+            mesa-vulkan-drivers
+
+      - name: Select Linux Lavapipe
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          test -f "${icds[0]}"
+          echo "VK_DRIVER_FILES=${icds[0]}" >> "$GITHUB_ENV"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Install Windows Lavapipe
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import urllib.request
+          import winreg
+
+          version = "26.2.5"
+          name = f"mesa-lavapipe-x64-{version}.7z"
+          root = Path(os.environ["RUNNER_TEMP"]) / "horizon-lavapipe"
+          root.mkdir(parents=True, exist_ok=True)
+          archive = root / name
+          url = f"https://github.com/mmozeiko/build-mesa/releases/download/{version}/{name}"
+          with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as output:
+              shutil.copyfileobj(response, output)
+          expected = "57ebaa70c16edf11edc9dbba1c5db40169dd86cb50cdd700eb2f4442bb410682"
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise RuntimeError("Lavapipe archive SHA-256 mismatch")
+          subprocess.run(["7z", "x", str(archive), f"-o{root}", "-y"], check=True)
+          icd = root / "lvp_icd.x86_64.json"
+          if not icd.is_file() or not (root / "vulkan_lvp.dll").is_file():
+              raise RuntimeError("Lavapipe archive is missing its ICD or driver")
+          # Elevated hosted runners ignore Vulkan's ICD environment overrides.
+          with winreg.CreateKeyEx(
+              winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\Vulkan\Drivers", 0,
+              winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+          ) as key:
+              winreg.SetValueEx(key, str(icd.resolve(strict=True)), 0, winreg.REG_DWORD, 0)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"VK_DRIVER_FILES={icd.as_posix()}\n")
+              output.write(f"VK_ICD_FILENAMES={icd.as_posix()}\n")
+
+      - name: Install macOS MoltenVK
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        shell: bash
+        run: |
+          brew install molten-vk
+          icd="$(find -H "$(brew --prefix molten-vk)" -name MoltenVK_icd.json -print -quit)"
+          test -f "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
 
       - name: Install build tools
         run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
@@ -74,10 +132,39 @@ jobs:
           test-debug-printer-bytebuffer-debug test-debug-printer-bindless-buffer-debug
           --configuration RelWithDebInfo --target-family ocarina-tests
 
-      # Keep the existing GPU regression targets as build checks on every OS.
-      # This workflow executes the CPU Corrector tests on all three platforms.
       - name: Run Corrector AST and rejected-capture tests
         run: >-
           ctest --test-dir build/conan/ocarina-tests/relwithdebinfo
           -C RelWithDebInfo -R '^ocarina\.test-core-function-corrector($|\.)'
           --no-tests=error --output-on-failure
+
+      - name: Run all 13 Vulkan GPU regression cases
+        shell: bash
+        run: |
+          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo -C RelWithDebInfo \
+            -R '^ocarina\.(test-runtime-(outline-equivalence|codegen-capability-probe)|test-debug-printer(-bytebuffer-debug|-bindless-buffer-debug)?)\.vulkan-compute($|\.)' \
+            --no-tests=error --verbose --output-on-failure \
+            --output-junit "$GITHUB_WORKSPACE/build/gpu-regressions.xml"
+
+      - name: Verify all GPU regression cases actually ran
+        shell: python
+        run: |
+          import xml.etree.ElementTree as ET
+          cases = ET.parse("build/gpu-regressions.xml").getroot().findall("testcase")
+          if len(cases) != 13:
+              raise RuntimeError(f"Expected 13 GPU regression cases, got {len(cases)}")
+          for case in cases:
+              if case.get("status") != "run" or any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
+                  raise RuntimeError(f"GPU regression did not pass: {case.attrib}")
+          print("All 13 GPU regression cases executed and passed")
+
+      - name: Upload GPU regression results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-regressions-${{ matrix.os }}
+          path: |
+            build/gpu-regressions.xml
+            build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTest.log
+            build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: warn
