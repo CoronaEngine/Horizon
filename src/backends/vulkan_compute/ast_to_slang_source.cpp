@@ -134,6 +134,11 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
     return type->tag() == Type::Tag::FLOAT || type->tag() == Type::Tag::REAL || type->tag() == Type::Tag::HALF;
 }
 
+[[nodiscard]] bool is_integer_value(const Type *type) noexcept {
+    while (type->is_vector()) type = type->element();
+    return type->tag() == Type::Tag::INT || type->tag() == Type::Tag::UINT || type->tag() == Type::Tag::ULONG;
+}
+
 // Encode binary16 through integer bits: a final native float-to-half cast may
 // flush half subnormals even when the preceding float value was rounded.
 [[nodiscard]] string half_conversion_prefix(const Type *type) noexcept {
@@ -1258,7 +1263,9 @@ void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
 void AstToSlangSource::visit(const CastExpr *expr) noexcept {
     if (expr->cast_op() == CastOp::STATIC && is_half_value(expr->type()) && !is_half_value(expr->expression()->type())) {
         current_scratch() << half_conversion_prefix(expr->type());
+        if (is_integer_value(expr->expression()->type())) current_scratch() << "oc_integer_to_float(";
         expr->expression()->accept(*this);
+        if (is_integer_value(expr->expression()->type())) current_scratch() << ")";
         current_scratch() << ")))";
         return;
     }
@@ -1266,6 +1273,13 @@ void AstToSlangSource::visit(const CastExpr *expr) noexcept {
         case CastOp::STATIC:
             _emit_type_name(expr->type());
             current_scratch() << "(";
+            if (is_floating_value(expr->type()) && !is_half_value(expr->type()) &&
+                is_integer_value(expr->expression()->type())) {
+                current_scratch() << "oc_integer_to_float(";
+                expr->expression()->accept(*this);
+                current_scratch() << "))";
+                return;
+            }
             if (!is_half_value(expr->type()) && is_half_value(expr->expression()->type())) {
                 current_scratch() << "oc_half2float(";
                 expr->expression()->accept(*this);

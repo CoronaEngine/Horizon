@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <type_traits>
 
 using namespace ocarina;
 
@@ -188,6 +189,47 @@ void test_finite_math_and_conversions(Device &device) {
                                                 std::bit_cast<uint>(float(int(x))), std::bit_cast<uint>(x));
         for (uint c = 0u; c < 4u; ++c) check_uint(converted[i][c], expected_bits[c], "conversion bits", i, c);
     }
+}
+
+template<typename T>
+void test_integer_float_casts(Device &device, const char *name) {
+    // A negative fraction truncates to signed integer zero. Converting any
+    // integer zero back to float or half must produce +0 in every lane.
+    vector<float4> input{make_float4(-0.75f, -0.5f, -0.25f, -0.f),
+                         make_float4(0.f, 0.25f, 0.5f, 0.75f),
+                         make_float4(1.f, 2.f, 126.f, 127.f)};
+    if constexpr (!std::is_signed_v<T>) input[0] = make_float4(0.f, -0.f, 0.25f, 0.75f);
+    static constexpr bool scalar_half_cast = concepts::static_convertible<half, T>;
+    static constexpr uint rows = scalar_half_cast ? 4u : 3u;
+    auto source = device.create_buffer<float4>(input.size());
+    auto destination = device.create_buffer<uint4>(input.size() * rows);
+    Kernel kernel = [](BufferVar<float4> in, BufferVar<uint4> out) {
+        Uint i = dispatch_id();
+        Float4 value = in.read(i);
+        Float4 scalar = make_float4(cast<float>(cast<T>(value.x)), cast<float>(cast<T>(value.y)),
+                                    cast<float>(cast<T>(value.z)), cast<float>(cast<T>(value.w)));
+        auto vector_value = cast<float4>(cast<Vector<T, 4>>(value));
+        Float4 half_vector = make_float4(cast<half4>(cast<Vector<T, 4>>(value)));
+        out.write(i * rows, as<uint4>(scalar));
+        out.write(i * rows + 1u, as<uint4>(vector_value));
+        out.write(i * rows + 2u, as<uint4>(half_vector));
+        if constexpr (scalar_half_cast) {
+            Float4 half_scalar = make_float4(cast<half>(cast<T>(value.x)), cast<half>(cast<T>(value.y)),
+                                             cast<half>(cast<T>(value.z)), cast<half>(cast<T>(value.w)));
+            out.write(i * rows + 3u, as<uint4>(half_scalar));
+        }
+    };
+    auto shader = device.compile(kernel, string("integer-float-casts-") + name);
+    vector<uint4> actual(input.size() * rows);
+    auto stream = device.create_stream();
+    stream << source.upload(input.data()) << shader(source, destination).dispatch(uint(input.size()))
+           << destination.download(actual.data()) << synchronize() << commit();
+    for (uint i = 0u; i < input.size(); ++i)
+        for (uint row = 0u; row < rows; ++row)
+            for (uint component = 0u; component < 4u; ++component)
+                check_uint(actual[i * rows + row][component],
+                           std::bit_cast<uint>(float(static_cast<T>(input[i][component]))),
+                           name, i * rows + row, component);
 }
 
 void test_integer_bits(Device &device) {
@@ -542,6 +584,9 @@ int main() {
     test_integer_bits(device);
     test_control_flow(device);
     test_finite_math_and_conversions(device);
+    test_integer_float_casts<int>(device, "int-float");
+    test_integer_float_casts<uint>(device, "uint-float");
+    test_integer_float_casts<ulong>(device, "ulong-float");
     test_half_conversion_boundaries(device);
     test_half_conversion_exhaustive(device);
     test_half_conversion_midpoints(device);

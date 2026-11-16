@@ -483,6 +483,25 @@ OC_HYPERBOLIC_OVERLOADS(oc_atanh)
 OC_HYPERBOLIC_OVERLOADS(oc_tanh)
 #undef OC_HYPERBOLIC_OVERLOADS
 
+// An integer zero converts to +0. Keep its bit pattern explicit, including
+// after a float-to-integer conversion that a driver may combine with this one.
+#define OC_INTEGER_TO_FLOAT(type) \
+float oc_integer_to_float(type value) { \
+    uint bits = asuint(float(value)); \
+    uint mask = value == type(0) ? 0u : 0xffffffffu; \
+    uint canonical = spirv_asm { result : $$uint = OpBitwiseAnd $bits $mask }; \
+    return asfloat(canonical); \
+} \
+vector<float,N> oc_integer_to_float<uint N>(vector<type,N> value) { \
+    vector<float,N> result; \
+    for(uint i=0;i<N;++i) result[i]=oc_integer_to_float(value[i]); \
+    return result; \
+}
+OC_INTEGER_TO_FLOAT(int)
+OC_INTEGER_TO_FLOAT(uint)
+OC_INTEGER_TO_FLOAT(uint64_t)
+#undef OC_INTEGER_TO_FLOAT
+
 // DSL sign returns +1 for both signed zero values. DSL round rounds ties away
 // from zero, whereas the Slang native round operation uses ties-to-even.
 float oc_round(float x) {
