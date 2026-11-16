@@ -1,4 +1,5 @@
-foreach(failure IN ITEMS allocation-failure size-overflow crt-size-overflow
+foreach(failure IN ITEMS allocation-failure size-overflow direct-size-overflow
+                         unsupported-alignment direct-unsupported-alignment
                          invalid-alignment zero-alignment image-size-overflow)
     execute_process(
         COMMAND "${ALLOCATOR_TEST}" "--probe-${failure}"

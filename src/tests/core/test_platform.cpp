@@ -75,11 +75,7 @@ void test_traceback() {
 void test_backend_module_name() {
     // RHIContext passes this platform-neutral backend basename to the loader.
     const auto module_name = ocarina::dynamic_module_name("ocarina-backend-vulkan-compute");
-#if defined(_WIN32)
-    constexpr auto expected = "ocarina-backend-vulkan-compute.dll";
-#else
-    constexpr auto expected = "libocarina-backend-vulkan-compute.so";
-#endif
+    constexpr auto expected = OC_PLATFORM_BACKEND_FILENAME;
     expect(module_name == expected, "the requested RHI backend filename matches the MODULE artifact");
 }
 

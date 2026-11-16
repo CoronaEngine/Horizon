@@ -4,6 +4,22 @@ target_compile_features(horizon-test-core-tuple PRIVATE cxx_std_20)
 add_dependencies(horizon-tests horizon-test-core-tuple)
 add_test(NAME horizon.core.tuple COMMAND horizon-test-core-tuple)
 
+# Exercise the real allocator across a DLL boundary without engine dependencies.
+add_library(horizon-allocator-crt-fixture SHARED
+    allocator_crt_fixture.cpp "${PROJECT_SOURCE_DIR}/src/core/stl.cpp")
+target_include_directories(horizon-allocator-crt-fixture PUBLIC "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-allocator-crt-fixture PUBLIC cxx_std_20)
+target_compile_definitions(horizon-allocator-crt-fixture PRIVATE OC_CORE_EXPORT_DLL=1)
+
+add_executable(horizon-test-core-allocator-crt test_allocator_crt.cpp)
+target_link_libraries(horizon-test-core-allocator-crt PRIVATE horizon-allocator-crt-fixture)
+set_target_properties(horizon-allocator-crt-fixture horizon-test-core-allocator-crt PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/allocator-crt"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/allocator-crt")
+add_dependencies(horizon-tests horizon-test-core-allocator-crt)
+add_test(NAME horizon.core.allocator_crt COMMAND horizon-test-core-allocator-crt)
+set_tests_properties(horizon.core.allocator_crt PROPERTIES LABELS "horizon;cpu" TIMEOUT 30)
+
 add_executable(horizon-test-logging-configuration test_logging_configuration.cpp)
 target_link_libraries(horizon-test-logging-configuration PRIVATE horizon-logging)
 add_dependencies(horizon-tests horizon-test-logging-configuration)

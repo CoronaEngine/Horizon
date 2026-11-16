@@ -63,7 +63,8 @@ add_library(ocarina-platform-fixture MODULE core/platform_fixture.cpp)
 set_target_properties(ocarina-platform-fixture PROPERTIES FOLDER "ocarina/test/core")
 ocarina_add_test(test-platform CATEGORY core SOURCES core/test_platform.cpp)
 target_compile_definitions(test-core-platform PRIVATE
-    OC_PLATFORM_FIXTURE_PATH="$<TARGET_FILE:ocarina-platform-fixture>")
+    OC_PLATFORM_FIXTURE_PATH="$<TARGET_FILE:ocarina-platform-fixture>"
+    OC_PLATFORM_BACKEND_FILENAME="$<TARGET_FILE_NAME:ocarina-backend-vulkan-compute>")
 add_dependencies(test-core-platform ocarina-platform-fixture)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
 ocarina_add_test(test-precision-caps CATEGORY core SOURCES core/test_precision_caps.cpp)

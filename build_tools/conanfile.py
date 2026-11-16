@@ -98,6 +98,18 @@ class HorizonConan(ConanFile):
             self.requires("imgui/1.92.8")
 
     def validate(self):
+        runtime = self.settings.get_safe("compiler.runtime")
+        if self.settings.os == "Windows" and runtime is not None:
+            if runtime != "dynamic":
+                raise ConanInvalidConfiguration(
+                    "Horizon requires compiler.runtime=dynamic to share the CRT across DLLs."
+                )
+            expected_type = "Debug" if self.settings.build_type == "Debug" else "Release"
+            if self.settings.get_safe("compiler.runtime_type") != expected_type:
+                raise ConanInvalidConfiguration(
+                    f"Horizon {self.settings.build_type} requires compiler.runtime_type={expected_type} "
+                    "so all DLLs use the same CRT."
+                )
         engine_features = {
             "with_tools": bool(self.options.with_tools),
             "with_examples": bool(self.options.with_examples),
