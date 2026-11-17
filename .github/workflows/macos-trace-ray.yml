@@ -1,0 +1,71 @@
+name: macOS TraceRay Execution
+
+on:
+  push:
+    paths:
+      - .github/workflows/macos-trace-ray.yml
+      - src/tests/probes/**
+      - src/tests/CMakeLists.txt
+      - build_tools/scripts/setup_moltenvk_ci.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
+
+jobs:
+  trace-ray:
+    name: macOS native traceRay closest-hit and occlusion
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Determine Metal toolchain
+        id: metal-toolchain
+        shell: python
+        run: |
+          import os, re, subprocess
+          version = re.sub(r"[^A-Za-z0-9._-]+", "-", subprocess.check_output(["xcodebuild", "-version"], text=True)).strip("-")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+      - name: Cache pinned experimental ray-tracing driver
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/horizon-moltenvk-rt
+          key: moltenvk-rt-176926b4-${{ runner.os }}-${{ runner.arch }}-${{ steps.metal-toolchain.outputs.version }}
+      - name: Install pinned experimental ray-tracing driver
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python build_tools/scripts/setup_moltenvk_ci.py --output "$RUNNER_TEMP/horizon-moltenvk-rt"
+      - name: Install build tools
+        run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
+      - name: Prefer pip build tools
+        shell: python
+        run: |
+          import os, sysconfig
+          with open(os.environ["GITHUB_PATH"], "a") as output:
+              output.write(sysconfig.get_path("scripts") + "\n")
+      - name: Build the standalone traceRay probe
+        run: >-
+          python build_tools/dev.py build horizon-trace-ray-probe
+          --configuration RelWithDebInfo --target-family ocarina-tests
+      - name: Execute native traceRay and verify GPU readback
+        run: >-
+          python src/tests/probes/run_trace_ray_probe.py
+          --executable build/conan/ocarina-tests/relwithdebinfo/bin/RelWithDebInfo/horizon-trace-ray-probe
+          --output build/verification/trace-ray-ci
+      - name: Upload traceRay execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-trace-ray-execution
+          path: |
+            build/verification/trace-ray-ci
+            ${{ runner.temp }}/horizon-moltenvk-rt/driver-metadata.json
+            ${{ runner.temp }}/horizon-moltenvk-rt/source-build.log
+          if-no-files-found: warn
