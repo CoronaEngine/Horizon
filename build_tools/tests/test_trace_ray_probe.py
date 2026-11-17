@@ -30,6 +30,33 @@ class TraceRayEvidenceTests(unittest.TestCase):
         report.update(status="unsupported", submitted=False, completed=False)
         self.assertTrue(self.module.validate_result(report, 2))
 
+    def unsupported_report(self):
+        return {"status": "unsupported", "phase": "query-physical-device-capabilities",
+                "ray_query_enabled": False, "submitted": False, "completed": False,
+                "extensions": {"acceleration_structure": False, "ray_tracing_pipeline": False,
+                               "deferred_host_operations": True},
+                "features": {"accelerationStructure": False, "rayTracingPipeline": False,
+                             "bufferDeviceAddress": True},
+                "cases": [{"name": name, "status": "not-run", "verified_rays": 0}
+                          for name in ("closest-hit", "occlusion")]}
+
+    def test_accepts_unsupported_device_before_dispatch(self):
+        self.assertEqual(self.module.validate_result(self.unsupported_report(), 2), [])
+
+    def test_unsupported_report_does_not_hide_process_failure(self):
+        self.assertTrue(self.module.validate_result(self.unsupported_report(), 1))
+
+    def test_unsupported_report_does_not_hide_dispatch_failure(self):
+        report = self.unsupported_report()
+        report.update(phase="submit-vkCmdTraceRaysKHR", submitted=True)
+        self.assertTrue(self.module.validate_result(report, 2))
+
+    def test_unsupported_report_requires_missing_capability(self):
+        report = self.unsupported_report()
+        report["extensions"] = dict.fromkeys(report["extensions"], True)
+        report["features"] = dict.fromkeys(report["features"], True)
+        self.assertTrue(self.module.validate_result(report, 2))
+
     def test_rejects_ray_query_substitution(self):
         report = self.passing_report()
         report["ray_query_enabled"] = True

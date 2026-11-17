@@ -1,4 +1,4 @@
-"""Run the native traceRay probe; capability-only results never count as passing."""
+"""Run native traceRay, accepting unsupported devices with an explicit CI warning."""
 
 import argparse
 import hashlib
@@ -12,7 +12,34 @@ import subprocess
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def unsupported_device_capabilities(report, returncode):
+    if (not isinstance(report, dict) or returncode != 2 or report.get("status") != "unsupported"
+            or report.get("phase") != "query-physical-device-capabilities"
+            or report.get("ray_query_enabled") is not False
+            or report.get("submitted") is not False or report.get("completed") is not False):
+        return []
+    cases = report.get("cases")
+    if (not isinstance(cases, list) or len(cases) != 2
+            or any(not isinstance(case, dict) for case in cases)
+            or {case.get("name") for case in cases} != {"closest-hit", "occlusion"}
+            or any(case.get("status") != "not-run" or case.get("verified_rays") != 0 for case in cases)):
+        return []
+    required = {
+        "extensions": ("acceleration_structure", "ray_tracing_pipeline", "deferred_host_operations"),
+        "features": ("accelerationStructure", "rayTracingPipeline", "bufferDeviceAddress"),
+    }
+    missing = []
+    for group, names in required.items():
+        values = report.get(group)
+        if not isinstance(values, dict) or any(not isinstance(values.get(name), bool) for name in names):
+            return []
+        missing.extend(f"{group}.{name}" for name in names if not values[name])
+    return missing
+
+
 def validate_result(report, returncode):
+    if unsupported_device_capabilities(report, returncode):
+        return []
     errors = []
     if returncode != 0:
         errors.append(f"probe exited with {returncode}")
@@ -64,13 +91,19 @@ def main():
     errors = validate_result(report, returncode)
     if process_error:
         errors.append(process_error)
+    missing = unsupported_device_capabilities(report, returncode)
+    warnings = ([f"Native traceRay was not executed on {report.get('device', 'this device')}: "
+                 f"missing {', '.join(missing)}. CI accepts this unsupported device with a warning."]
+                if missing and not errors else [])
     checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
-    result = {"verification_status": "failed" if errors else "passed", "source_revision": os.getenv("GITHUB_SHA") or checkout,
+    result = {"ci_status": "failed" if errors else "passed",
+              "verification_status": "failed" if errors else ("not-run" if warnings else "passed"),
+              "source_revision": os.getenv("GITHUB_SHA") or checkout,
               "checkout_revision": checkout, "tracked_worktree_dirty": bool(subprocess.check_output(
                   ["git", "status", "--porcelain", "--untracked-files=no"], cwd=REPO_ROOT, text=True).strip()),
               "platform": platform.platform(), "machine": platform.machine(),
               "github_run_id": os.getenv("GITHUB_RUN_ID"), "github_run_attempt": os.getenv("GITHUB_RUN_ATTEMPT"),
-              "probe": report, "returncode": returncode, "errors": errors,
+              "probe": report, "returncode": returncode, "errors": errors, "warnings": warnings,
               "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest() if executable.is_file() else None,
               "spirv_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in output.glob("*.spv")}}
     metadata = os.getenv("HORIZON_CI_DRIVER_METADATA")
@@ -78,7 +111,13 @@ def main():
         result["driver"] = json.loads(Path(metadata).read_text(encoding="utf-8"))
     (output / "summary.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(log.read_text(encoding="utf-8", errors="replace") if log.exists() else "Probe did not produce a log")
-    print(f"TraceRay CI verification: {result['verification_status']}; evidence: {output}")
+    print(f"TraceRay CI: {result['ci_status']}; execution verification: {result['verification_status']}; evidence: {output}")
+    for warning in warnings:
+        if os.getenv("GITHUB_ACTIONS") == "true":
+            escaped = warning.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::warning title=Native traceRay unsupported::{escaped}")
+        else:
+            print(f"WARNING: {warning}")
     for error in errors:
         print(f"ERROR: {error}")
     return bool(errors)
