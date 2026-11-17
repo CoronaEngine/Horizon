@@ -17,6 +17,10 @@ protected:
     bool uses_thread_id_{false};
     bool requires_half_rte_{false};
     bool supports_warp32_{true};
+    bool warp32_fallback_{false};
+    uint warp32_temporary_{};
+    string warp32_mask_{"true"};
+    map<const CallExpr *, string> warp32_values_;
     bool inline_parameters_{false};
     uint32_t uniform_parameter_bytes_{};
     Scratch storage_functions_;
@@ -44,6 +48,14 @@ protected:
     [[nodiscard]] bool _is_storage_reference(const Expression *expr) const noexcept;
     void _emit_storage_address(const Expression *expr) noexcept;
     void _emit_storage_load(const Expression *expr) noexcept;
+    [[nodiscard]] static bool _contains_warp32(const Expression *expr) noexcept;
+    [[nodiscard]] static bool _contains_warp32(const Statement *stmt) noexcept;
+    [[nodiscard]] bool _in_warp32_fallback() noexcept;
+    [[nodiscard]] string _warp32_participation() const noexcept;
+    void _prepare_warp32_expression(const Expression *expr) noexcept;
+    void _emit_warp32_statements(span<const Statement *const> statements) noexcept;
+    void _emit_warp32_if(const IfStmt *stmt) noexcept;
+    void _emit_regular_statements(span<const Statement *const> statements) noexcept;
 
     // Emit the push-constant block, argument-blob accessors and workgroup
     // statics for one kernel. Called once per kernel from _emit_function().
@@ -62,6 +74,7 @@ protected:
     void visit(const AssignStmt *stmt) noexcept override;
     void visit(const IfStmt *stmt) noexcept override;
     void visit(const LoopStmt *stmt) noexcept override;
+    void visit(const ReturnStmt *stmt) noexcept override;
     void visit(const CallExpr *expr) noexcept override;
     void visit(const CastExpr *expr) noexcept override;
     void visit(const LiteralExpr *expr) noexcept override;
@@ -82,6 +95,7 @@ public:
         : AstToCppSource(obfuscation), supports_warp32_(supports_warp32) {}
     void emit(const Function &function) noexcept override;
     [[nodiscard]] bool requires_half_rte() const noexcept { return requires_half_rte_; }
+    [[nodiscard]] bool uses_warp32_fallback() const noexcept { return warp32_fallback_; }
 };
 
 }// namespace ocarina

@@ -5,7 +5,8 @@ file(GLOB_RECURSE SOURCE_FILES "*.cpp")
 # This library needs Vulkan headers, but never calls the Vulkan loader.
 set(_slang_compiler_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/slang_compiler.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ast_to_slang_source.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/ast_to_slang_source.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/warp32_fallback.cpp")
 list(REMOVE_ITEM SOURCE_FILES ${_slang_compiler_sources})
 add_library(ocarina-slang-compiler STATIC ${_slang_compiler_sources})
 set_target_properties(ocarina-slang-compiler PROPERTIES

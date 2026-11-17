@@ -274,10 +274,12 @@ void mark_physical_storage_loads_volatile(vector<uint32_t> &spirv) noexcept {
 }
 #endif
 
-[[nodiscard]] string emit_slang_source(const Function &function, bool supports_warp32, bool &requires_half_rte) noexcept {
+[[nodiscard]] string emit_slang_source(const Function &function, bool supports_warp32,
+                                      bool &requires_half_rte, bool &warp32_fallback) noexcept {
     AstToSlangSource emitter{Env::code_obfuscation(), supports_warp32};
     emitter.emit(function);
     requires_half_rte = emitter.requires_half_rte();
+    warp32_fallback = emitter.uses_warp32_fallback();
     return emitter.scratch().c_str();
 }
 
@@ -373,7 +375,8 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     // Emit before looking in the SPIR-V cache so cached shaders obey the same
     // target capability checks, including operations inside custom callables.
     bool requires_half_rte = false;
-    string source = emit_slang_source(function, target_.warp32, requires_half_rte);
+    bool warp32_fallback = false;
+    string source = emit_slang_source(function, target_.warp32, requires_half_rte, warp32_fallback);
     OC_ERROR_IF(requires_half_rte && (!target_.preserve_float32 || !(target_.rte_widths & 2u)),
                 "Half fused operations require float32 RTE and signed-zero/NaN/Inf preservation on this device");
     if (source.empty()) {
@@ -388,7 +391,7 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
         RHIContext::read_file(runtime_dir / "slang/slang_device_math.slang"),
         RHIContext::read_file(runtime_dir / "slang/slang_device_resource.slang"),
         string_view(global_session_->getBuildTagString()), slang_source_cache_version, target_.preserve_float32,
-        requires_half_rte, target_.preserve_float16, target_.rte_widths, target_.rounding_independence);
+        requires_half_rte, target_.preserve_float16, target_.rte_widths, target_.rounding_independence, warp32_fallback);
     const string cache_key = ocarina::format("{}_{}_{}_{}_{}", function.func_name(),
         source_hash, workgroup_size.x, workgroup_size.y, workgroup_size.z);
     const string cache_path = ocarina::format("{}/slang_cache/{}.spv",
@@ -427,8 +430,10 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     const string preamble = ocarina::format(
         "#define OC_WORKGROUP_X {}\n#define OC_WORKGROUP_Y {}\n#define OC_WORKGROUP_Z {}\n",
         workgroup_size.x, workgroup_size.y, workgroup_size.z) +
+        (warp32_fallback ? "#define OC_WARP32_FALLBACK 1\n" : "") +
         "#include \"slang_device_resource.slang\"\n#include \"slang_device_math.slang\"\n";
     source = preamble + source;
+    if (warp32_fallback) OC_INFO_FORMAT("Vulkan warp32 fallback: shared-memory collectives for {}", function.func_name());
     context_->write_global_cache(function.func_name() + ".slang", source);
 
     // Compile via Slang ISession

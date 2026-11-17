@@ -145,6 +145,17 @@ ocarina_add_test(test-outline-equivalence GPU CATEGORY runtime SOURCES runtime/t
     CASES repeated-output returned-output control-flow-resources)
 ocarina_add_test(test-runtime-parity-extended GPU CATEGORY runtime SOURCES runtime/test_runtime_parity_extended.cpp)
 ocarina_add_test(test-compute-dispatch-parity GPU CATEGORY runtime SOURCES runtime/test_compute_dispatch_parity.cpp)
+ocarina_add_test(test-warp32-fallback GPU CATEGORY runtime SOURCES runtime/test_warp32_fallback.cpp)
+if(TARGET ocarina-backend-vulkan-compute)
+    set_tests_properties(ocarina.test-runtime-warp32-fallback.vulkan-compute PROPERTIES
+        ENVIRONMENT "HORIZON_FORCE_WARP32_FALLBACK=1")
+    add_test(NAME ocarina.test-runtime-warp32-fallback.rejections
+        COMMAND "${CMAKE_COMMAND}" "-DWARP32_TEST=$<TARGET_FILE:test-runtime-warp32-fallback>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/runtime/check_warp32_rejections.cmake")
+    set_tests_properties(ocarina.test-runtime-warp32-fallback.rejections PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:test-runtime-warp32-fallback>"
+        LABELS "ocarina;vulkan-compute" RUN_SERIAL TRUE TIMEOUT 90)
+endif()
 ocarina_add_test(test-compute-math-parity GPU CATEGORY runtime SOURCES runtime/test_compute_math_parity.cpp)
 ocarina_add_test(test-compute-atomic-parity GPU CATEGORY runtime SOURCES runtime/test_compute_atomic_parity.cpp)
 ocarina_add_test(test-storage-parity GPU CATEGORY runtime SOURCES runtime/test_storage_parity.cpp)

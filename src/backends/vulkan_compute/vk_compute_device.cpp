@@ -46,7 +46,10 @@ VulkanComputeDevice::VulkanComputeDevice(RHIContext *context)
     properties.pNext = &float_controls;
     vkGetPhysicalDeviceProperties2(phys_device_, &properties);
     SlangCompileTarget target;
-    target.warp32 = supports_warp32_;
+    // Force only executable device targets; offline compiler validation keeps
+    // the capabilities it explicitly declares, independently of the host.
+    const char *force_fallback = std::getenv("HORIZON_FORCE_WARP32_FALLBACK");
+    target.warp32 = supports_warp32_ && !(force_fallback && string_view(force_fallback) == "1");
     target.ray_query = has_rt_;
     target.preserve_float32 = float_controls.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
     target.preserve_float16 = float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
@@ -108,7 +111,7 @@ void VulkanComputeDevice::init_physical_device() noexcept {
                       subgroup.subgroupSize % 32u == 0u &&
                       (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
                       (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT);
-    OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; DSL warp32 support: {}",
+    OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; native DSL warp32 support: {}",
                    subgroup.subgroupSize, supports_warp32_);
 
     // RT support probe

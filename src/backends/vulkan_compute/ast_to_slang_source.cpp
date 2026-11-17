@@ -217,6 +217,8 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
 // ── visit(CallExpr) ──────────────────────────────────────────────────────────
 
 void AstToSlangSource::emit(const Function &function) noexcept {
+    if (!supports_warp32_ && function.is_kernel() && _contains_warp32(function.body()))
+        warp32_fallback_ = true;
     if (!supports_warp32_) {
         // Native source can hide subgroup operations from the AST checks.
         function.for_each_header([](string_view) {
@@ -228,9 +230,17 @@ void AstToSlangSource::emit(const Function &function) noexcept {
 
 void AstToSlangSource::visit(const CallExpr *expr) noexcept {
     const auto op = expr->call_op();
+    OC_ERROR_IF(warp32_fallback_ && current_function().is_callable() && op == CallOp::SYNCHRONIZE_BLOCK,
+                "warp32 fallback does not support block barriers inside callable bodies");
+    if (_in_warp32_fallback()) {
+        if (auto value = warp32_values_.find(expr); value != warp32_values_.end()) {
+            current_scratch() << value->second;
+            return;
+        }
+    }
     requires_half_rte_ |= (op == CallOp::FMA || op == CallOp::INVERSE) && is_half_value(expr->type());
     OC_ERROR_IF(!supports_warp32_ && op >= CallOp::WARP_ACTIVE_COUNT_BITS && op <= CallOp::WARP_IS_FIRST_ACTIVE_LANE,
-                "Vulkan warp operations require compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
+                "warp32 fallback does not support warp operations inside callable bodies or unlowered expressions");
     auto emit_args = [this](const CallExpr *e) {
         const auto op = e->call_op();
         const bool atomic = op == CallOp::ATOMIC_ADD || op == CallOp::ATOMIC_SUB ||
@@ -623,6 +633,14 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 // ── Expressions ──────────────────────────────────────────────────────────────
 
 void AstToSlangSource::_emit_statements(span<const Statement *const> statements) noexcept {
+    if (_in_warp32_fallback()) {
+        _emit_warp32_statements(statements);
+        return;
+    }
+    _emit_regular_statements(statements);
+}
+
+void AstToSlangSource::_emit_regular_statements(span<const Statement *const> statements) noexcept {
     for (const Statement *stmt : statements) {
         if (!_should_emit_statement(stmt)) continue;
         const Expression *expr = nullptr;
@@ -1045,6 +1063,10 @@ void AstToSlangSource::_emit_converted_value(const Type *target, const Expressio
 }
 
 void AstToSlangSource::visit(const IfStmt *stmt) noexcept {
+    if (_in_warp32_fallback() && _contains_warp32(stmt)) {
+        _emit_warp32_if(stmt);
+        return;
+    }
     current_scratch() << "if (";
     _emit_converted_value(Type::of<bool>(), stmt->condition());
     current_scratch() << ") ";
@@ -1068,6 +1090,15 @@ void AstToSlangSource::visit(const IfStmt *stmt) noexcept {
 void AstToSlangSource::visit(const LoopStmt *stmt) noexcept {
     current_scratch() << "while (true) ";
     stmt->body()->accept(*this);
+}
+
+void AstToSlangSource::visit(const ReturnStmt *stmt) noexcept {
+    if (_in_warp32_fallback()) {
+        OC_ERROR_IF(stmt->expression(), "warp32 fallback does not support value returns from kernels");
+        current_scratch() << "oc_warp32_live = false";
+        return;
+    }
+    AstToCppSource::visit(stmt);
 }
 
 void AstToSlangSource::visit(const AssignStmt *stmt) noexcept {
@@ -1678,7 +1709,13 @@ void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
         current_scratch() << "uint3 d_idx = oc_dispatch_thread_id + oc_group_base * uint3(OC_WORKGROUP_X, OC_WORKGROUP_Y, OC_WORKGROUP_Z);";
         _emit_newline();
         _emit_indent();
-        current_scratch() << "if (any(d_idx >= d_dim)) { return; }";
+        if (_in_warp32_fallback()) {
+            current_scratch() << "bool oc_warp32_live = all(d_idx < d_dim);";
+            _emit_newline();
+            _emit_indent();
+            current_scratch() << "uint oc_warp32_index = oc_group_thread_id.x + OC_WORKGROUP_X * "
+                                 "(oc_group_thread_id.y + OC_WORKGROUP_Y * oc_group_thread_id.z);";
+        } else current_scratch() << "if (any(d_idx >= d_dim)) { return; }";
         _emit_newline();
         _emit_kernel_argument_loads(f);
     } else if (f.is_raytracing_kernel()) {

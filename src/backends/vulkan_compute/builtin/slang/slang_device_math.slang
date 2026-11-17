@@ -3,6 +3,25 @@
 
 // ── Wave / warp intrinsic wrappers ────────────────────────────────────────────
 
+#ifdef OC_WARP32_FALLBACK
+// All physical invocations call this helper, including logical tails and
+// inactive branches. Only participating lanes contribute a bit. The second
+// barrier prevents a subsequent collective from overwriting slots still read
+// by another subgroup in this workgroup.
+groupshared uint oc_warp32_votes[OC_WORKGROUP_X * OC_WORKGROUP_Y * OC_WORKGROUP_Z];
+uint oc_warp32_ballot(bool predicate, uint local_index) {
+    oc_warp32_votes[local_index] = predicate ? 1u : 0u;
+    GroupMemoryBarrierWithGroupSync();
+    uint first = local_index / 32u * 32u;
+    uint end = min(first + 32u, uint(OC_WORKGROUP_X * OC_WORKGROUP_Y * OC_WORKGROUP_Z));
+    uint bits = 0u;
+    for (uint i = first; i < end; ++i)
+        bits |= oc_warp32_votes[i] << (i - first);
+    GroupMemoryBarrierWithGroupSync();
+    return bits;
+}
+#endif
+
 // The public warp contract is DSL's 32 lanes, also on native 64/128-lane waves.
 uint oc_warp_ballot_word(bool pred) { return WaveActiveBallot(pred)[WaveGetLaneIndex() / 32u]; }
 uint4 oc_warp_active_bit_mask(bool pred) { return uint4(oc_warp_ballot_word(pred), 0, 0, 0); }

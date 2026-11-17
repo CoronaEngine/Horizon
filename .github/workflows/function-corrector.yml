@@ -144,7 +144,7 @@ jobs:
           with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
               output.write(sysconfig.get_path("scripts") + "\n")
 
-      - name: Build all 53 Ocarina test and benchmark executables
+      - name: Build all 54 Ocarina test and benchmark executables
         id: build-suite
         run: >-
           python build_tools/dev.py build ocarina-tests
