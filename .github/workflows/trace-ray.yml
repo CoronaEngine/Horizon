@@ -27,6 +27,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Windows
+            os: windows-latest
           - name: Linux
             os: ubuntu-26.04
           - name: macOS
@@ -36,6 +38,48 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install pinned Windows Lavapipe and record driver provenance
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import hashlib, json, os, shutil, subprocess, urllib.request, winreg
+          from pathlib import Path
+          version = "26.2.5"
+          name = f"mesa-lavapipe-x64-{version}.7z"
+          root = Path(os.environ["RUNNER_TEMP"]) / "horizon-lavapipe"
+          root.mkdir(parents=True, exist_ok=True)
+          archive = root / name
+          url = f"https://github.com/mmozeiko/build-mesa/releases/download/{version}/{name}"
+          with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as output:
+              shutil.copyfileobj(response, output)
+          expected = "57ebaa70c16edf11edc9dbba1c5db40169dd86cb50cdd700eb2f4442bb410682"
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise RuntimeError("Lavapipe archive SHA-256 mismatch")
+          subprocess.run(["7z", "x", str(archive), f"-o{root}", "-y"], check=True)
+          icd = root / "lvp_icd.x86_64.json"
+          driver = root / "vulkan_lvp.dll"
+          if not icd.is_file() or not driver.is_file():
+              raise RuntimeError("Lavapipe archive is missing its ICD or driver")
+          # Elevated hosted runners ignore Vulkan's ICD environment overrides.
+          with winreg.CreateKeyEx(
+              winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\Vulkan\Drivers", 0,
+              winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+          ) as key:
+              winreg.SetValueEx(key, str(icd.resolve(strict=True)), 0, winreg.REG_DWORD, 0)
+          metadata = Path("build/verification/trace-ray-ci/driver-metadata.json").resolve()
+          metadata.parent.mkdir(parents=True, exist_ok=True)
+          metadata.write_text(json.dumps({
+              "driver": "Mesa Lavapipe", "version": version,
+              "archive_url": url, "archive_sha256": expected,
+              "driver_sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
+              "icd_manifest": json.loads(icd.read_text()),
+          }, indent=2) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"VK_DRIVER_FILES={icd.as_posix()}\nVK_ICD_FILENAMES={icd.as_posix()}\n")
+              output.write(f"HORIZON_CI_DRIVER_METADATA={metadata.as_posix()}\n")
       - name: Determine Metal toolchain
         if: runner.os == 'macOS'
         id: metal-toolchain
@@ -111,7 +155,7 @@ jobs:
       - name: Execute native traceRay and verify GPU readback
         run: >-
           python src/tests/probes/run_trace_ray_probe.py
-          --executable build/conan/ocarina-tests/relwithdebinfo/bin/RelWithDebInfo/horizon-trace-ray-probe
+          --executable build/conan/ocarina-tests/relwithdebinfo/bin/RelWithDebInfo/horizon-trace-ray-probe${{ runner.os == 'Windows' && '.exe' || '' }}
           --output build/verification/trace-ray-ci
       - name: Upload traceRay execution evidence
         if: always()

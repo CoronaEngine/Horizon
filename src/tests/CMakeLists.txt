@@ -2,13 +2,11 @@ add_custom_target(ocarina-tests)
 
 # Independent native-pipeline capability probe: deliberately does not construct
 # a Horizon device or require/enable VK_KHR_ray_query. Executed by its own CI job.
-if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(horizon-trace-ray-probe probes/trace_ray_probe.cpp)
-    target_link_libraries(horizon-trace-ray-probe PRIVATE Vulkan::Loader slang::slang)
-    set_target_properties(horizon-trace-ray-probe PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" FOLDER "ocarina/probes")
-    helicon_install_runtime_deps(horizon-trace-ray-probe)
-endif()
+add_executable(horizon-trace-ray-probe probes/trace_ray_probe.cpp)
+target_link_libraries(horizon-trace-ray-probe PRIVATE Vulkan::Loader slang::slang)
+set_target_properties(horizon-trace-ray-probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" FOLDER "ocarina/probes")
+helicon_install_runtime_deps(horizon-trace-ray-probe)
 
 function(ocarina_add_test name)
     cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK" "CATEGORY" "SOURCES;CASES" ${ARGN})
