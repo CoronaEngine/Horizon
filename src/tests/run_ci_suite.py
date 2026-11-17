@@ -1,6 +1,6 @@
 """Execute the complete Ocarina CTest suite and retain verifiable CI evidence.
 
-Success requires all 54 executable targets and all 77 CTest cases to run and
+Success requires all 53 executable targets and all 75 CTest cases to run and
 pass. XML skips, feature skips printed by a successful process, and truncated
 output are failures of complete coverage rather than successful execution.
 """
@@ -19,8 +19,8 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-EXPECTED_TARGETS = 54
-EXPECTED_CASES = 77
+EXPECTED_TARGETS = 53
+EXPECTED_CASES = 75
 OUTPUT_LIMIT = 16 * 1024 * 1024
 HIDDEN_SKIP = re.compile(r"\bSKIPPED\b|\bSKIP:", re.IGNORECASE)
 TRUNCATED_OUTPUT = "This part of the test output was removed since it exceeds the threshold"

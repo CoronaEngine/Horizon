@@ -41,23 +41,7 @@ VulkanComputeDevice::VulkanComputeDevice(RHIContext *context)
     init_vma();
     init_descriptor_pool();
     init_samplers();
-    VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
-    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-    properties.pNext = &float_controls;
-    vkGetPhysicalDeviceProperties2(phys_device_, &properties);
-    SlangCompileTarget target;
-    // Force only executable device targets; offline compiler validation keeps
-    // the capabilities it explicitly declares, independently of the host.
-    const char *force_fallback = std::getenv("HORIZON_FORCE_WARP32_FALLBACK");
-    target.warp32 = supports_warp32_ && !(force_fallback && string_view(force_fallback) == "1");
-    target.ray_query = has_rt_;
-    target.preserve_float32 = float_controls.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
-    target.preserve_float16 = float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
-    target.rte_widths = (float_controls.shaderRoundingModeRTEFloat16 ? 1u : 0u) |
-                       (float_controls.shaderRoundingModeRTEFloat32 ? 2u : 0u) |
-                       (float_controls.shaderRoundingModeRTEFloat64 ? 4u : 0u);
-    target.rounding_independence = float_controls.roundingModeIndependence;
-    compiler_     = std::make_unique<SlangShaderCompiler>(context, target);
+    compiler_     = std::make_unique<SlangShaderCompiler>(this);
     cmd_visitor_  = std::make_unique<VkComputeCommandVisitor>(this);
 }
 
@@ -111,7 +95,7 @@ void VulkanComputeDevice::init_physical_device() noexcept {
                       subgroup.subgroupSize % 32u == 0u &&
                       (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
                       (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT);
-    OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; native DSL warp32 support: {}",
+    OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; DSL warp32 support: {}",
                    subgroup.subgroupSize, supports_warp32_);
 
     // RT support probe

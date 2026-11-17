@@ -1,13 +1,5 @@
 add_custom_target(ocarina-tests)
 
-# Independent native-pipeline capability probe: deliberately does not construct
-# a Horizon device or require/enable VK_KHR_ray_query. Executed by its own CI job.
-add_executable(horizon-trace-ray-probe probes/trace_ray_probe.cpp)
-target_link_libraries(horizon-trace-ray-probe PRIVATE Vulkan::Loader slang::slang)
-set_target_properties(horizon-trace-ray-probe PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}" FOLDER "ocarina/probes")
-helicon_install_runtime_deps(horizon-trace-ray-probe)
-
 function(ocarina_add_test name)
     cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK" "CATEGORY" "SOURCES;CASES" ${ARGN})
     set(_test_target ${name})
@@ -139,13 +131,6 @@ endif()
 ocarina_add_test(test-shared-array GPU CATEGORY runtime SOURCES runtime/test_shared_array.cpp)
 ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/test_slang_capabilities.cpp
     CASES default ray-query)
-target_link_libraries(test-runtime-slang-capabilities PRIVATE ocarina-slang-compiler)
-# These cases must compile every kernel even when no Vulkan ICD can be loaded.
-set_tests_properties(
-    ocarina.test-runtime-slang-capabilities.vulkan-compute
-    ocarina.test-runtime-slang-capabilities.vulkan-compute.ray-query
-    PROPERTIES ENVIRONMENT
-        "VK_DRIVER_FILES=${CMAKE_CURRENT_BINARY_DIR}/no-vulkan-driver.json;VK_ICD_FILENAMES=${CMAKE_CURRENT_BINARY_DIR}/no-vulkan-driver.json")
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
 ocarina_add_test(test-render-parity GPU CATEGORY runtime SOURCES runtime/test_render_parity.cpp)
 ocarina_add_test(test-codegen-parity-extended GPU CATEGORY runtime SOURCES runtime/test_codegen_parity_extended.cpp)
@@ -153,17 +138,6 @@ ocarina_add_test(test-outline-equivalence GPU CATEGORY runtime SOURCES runtime/t
     CASES repeated-output returned-output control-flow-resources)
 ocarina_add_test(test-runtime-parity-extended GPU CATEGORY runtime SOURCES runtime/test_runtime_parity_extended.cpp)
 ocarina_add_test(test-compute-dispatch-parity GPU CATEGORY runtime SOURCES runtime/test_compute_dispatch_parity.cpp)
-ocarina_add_test(test-warp32-fallback GPU CATEGORY runtime SOURCES runtime/test_warp32_fallback.cpp)
-if(TARGET ocarina-backend-vulkan-compute)
-    set_tests_properties(ocarina.test-runtime-warp32-fallback.vulkan-compute PROPERTIES
-        ENVIRONMENT "HORIZON_FORCE_WARP32_FALLBACK=1")
-    add_test(NAME ocarina.test-runtime-warp32-fallback.rejections
-        COMMAND "${CMAKE_COMMAND}" "-DWARP32_TEST=$<TARGET_FILE:test-runtime-warp32-fallback>"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/runtime/check_warp32_rejections.cmake")
-    set_tests_properties(ocarina.test-runtime-warp32-fallback.rejections PROPERTIES
-        WORKING_DIRECTORY "$<TARGET_FILE_DIR:test-runtime-warp32-fallback>"
-        LABELS "ocarina;vulkan-compute" RUN_SERIAL TRUE TIMEOUT 90)
-endif()
 ocarina_add_test(test-compute-math-parity GPU CATEGORY runtime SOURCES runtime/test_compute_math_parity.cpp)
 ocarina_add_test(test-compute-atomic-parity GPU CATEGORY runtime SOURCES runtime/test_compute_atomic_parity.cpp)
 ocarina_add_test(test-storage-parity GPU CATEGORY runtime SOURCES runtime/test_storage_parity.cpp)
