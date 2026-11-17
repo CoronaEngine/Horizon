@@ -12,26 +12,34 @@ namespace slang { struct IGlobalSession; struct ISession; }
 
 namespace ocarina {
 
-class VulkanComputeDevice;
+class RHIContext;
+
+// Describes the compilation target, not the machine running the compiler.
+// Runtime callers must populate this from the device that will execute SPIR-V.
+struct SlangCompileTarget {
+    bool warp32{false};
+    bool ray_query{false};
+    bool preserve_float32{false};
+    bool preserve_float16{false};
+    uint32_t rte_widths{0u};
+    uint32_t rounding_independence{0u};
+};
 
 class SlangShaderCompiler {
 private:
-    VulkanComputeDevice     *device_;
+    RHIContext *context_;
+    const SlangCompileTarget target_;
     mutable std::mutex compile_mutex_;
     // global_session_ owns the Slang context; session_ is a child session scoped
     // to a single target profile.  Both are ref-counted COM-like objects; we hold
     // raw pointers and manage AddRef/Release explicitly in the .cpp.
     mutable slang::IGlobalSession *global_session_{nullptr};
     mutable slang::ISession       *session_{nullptr};
-    mutable bool preserve_float32_{false};
-    mutable bool preserve_float16_{false};
-    mutable uint32_t rte_widths_{0u};
-    mutable uint32_t rounding_independence_{0u};
 
     void ensure_session() const noexcept;
 
 public:
-    explicit SlangShaderCompiler(VulkanComputeDevice *device) noexcept;
+    SlangShaderCompiler(RHIContext *context, SlangCompileTarget target) noexcept;
     ~SlangShaderCompiler() noexcept;
 
     // Compile an EDSL Function to SPIR-V.  workgroup_size is the desired

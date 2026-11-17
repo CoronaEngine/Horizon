@@ -131,6 +131,13 @@ endif()
 ocarina_add_test(test-shared-array GPU CATEGORY runtime SOURCES runtime/test_shared_array.cpp)
 ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/test_slang_capabilities.cpp
     CASES default ray-query)
+target_link_libraries(test-runtime-slang-capabilities PRIVATE ocarina-slang-compiler)
+# These cases must compile every kernel even when no Vulkan ICD can be loaded.
+set_tests_properties(
+    ocarina.test-runtime-slang-capabilities.vulkan-compute
+    ocarina.test-runtime-slang-capabilities.vulkan-compute.ray-query
+    PROPERTIES ENVIRONMENT
+        "VK_DRIVER_FILES=${CMAKE_CURRENT_BINARY_DIR}/no-vulkan-driver.json;VK_ICD_FILENAMES=${CMAKE_CURRENT_BINARY_DIR}/no-vulkan-driver.json")
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
 ocarina_add_test(test-render-parity GPU CATEGORY runtime SOURCES runtime/test_render_parity.cpp)
 ocarina_add_test(test-codegen-parity-extended GPU CATEGORY runtime SOURCES runtime/test_codegen_parity_extended.cpp)

@@ -41,7 +41,20 @@ VulkanComputeDevice::VulkanComputeDevice(RHIContext *context)
     init_vma();
     init_descriptor_pool();
     init_samplers();
-    compiler_     = std::make_unique<SlangShaderCompiler>(this);
+    VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
+    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    properties.pNext = &float_controls;
+    vkGetPhysicalDeviceProperties2(phys_device_, &properties);
+    SlangCompileTarget target;
+    target.warp32 = supports_warp32_;
+    target.ray_query = has_rt_;
+    target.preserve_float32 = float_controls.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
+    target.preserve_float16 = float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
+    target.rte_widths = (float_controls.shaderRoundingModeRTEFloat16 ? 1u : 0u) |
+                       (float_controls.shaderRoundingModeRTEFloat32 ? 2u : 0u) |
+                       (float_controls.shaderRoundingModeRTEFloat64 ? 4u : 0u);
+    target.rounding_independence = float_controls.roundingModeIndependence;
+    compiler_     = std::make_unique<SlangShaderCompiler>(context, target);
     cmd_visitor_  = std::make_unique<VkComputeCommandVisitor>(this);
 }
 

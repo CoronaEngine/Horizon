@@ -1,10 +1,25 @@
 file(GLOB_RECURSE HEADER_FILES "*.h")
 file(GLOB_RECURSE SOURCE_FILES "*.cpp")
 
+# Compile-only validation and executable pipelines share the production compiler.
+# This library needs Vulkan headers, but never calls the Vulkan loader.
+set(_slang_compiler_sources
+    "${CMAKE_CURRENT_SOURCE_DIR}/slang_compiler.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ast_to_slang_source.cpp")
+list(REMOVE_ITEM SOURCE_FILES ${_slang_compiler_sources})
+add_library(ocarina-slang-compiler STATIC ${_slang_compiler_sources})
+set_target_properties(ocarina-slang-compiler PROPERTIES
+    POSITION_INDEPENDENT_CODE ON FOLDER "ocarina")
+target_link_libraries(ocarina-slang-compiler PRIVATE
+    ocarina-dsl ocarina-generator ocarina-rhi
+    slang::slang horizon::vulkan_headers
+    vulkan-memory-allocator::vulkan-memory-allocator)
+
 ocarina_add_backend(vulkan-compute SOURCES ${HEADER_FILES} ${SOURCE_FILES})
 
 target_link_libraries(ocarina-backend-vulkan-compute PRIVATE
     Vulkan::Loader
+    ocarina-slang-compiler
     slang::slang
     vulkan-memory-allocator::vulkan-memory-allocator
 )

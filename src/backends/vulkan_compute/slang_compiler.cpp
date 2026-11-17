@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include "core/util/switch_profile.h"
-#include "vk_compute_device.h"
+#include <vulkan/vulkan.h>
 #include "ast_to_slang_source.h"
 #include "rhi/context.h"
 #include "core/util/util.h"
@@ -285,8 +285,8 @@ void mark_physical_storage_loads_volatile(vector<uint32_t> &spirv) noexcept {
 
 // ── SlangShaderCompiler ───────────────────────────────────────────────────────
 
-SlangShaderCompiler::SlangShaderCompiler(VulkanComputeDevice *device) noexcept
-    : device_(device) {}
+SlangShaderCompiler::SlangShaderCompiler(RHIContext *context, SlangCompileTarget target) noexcept
+    : context_(context), target_(target) {}
 
 SlangShaderCompiler::~SlangShaderCompiler() noexcept {
     if (session_) {
@@ -314,17 +314,7 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     target.format  = SLANG_SPIRV;
     target.profile = global_com->findProfile("spirv_1_5");
     target.floatingPointMode = SLANG_FLOATING_POINT_MODE_PRECISE;
-    VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
-    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-    properties.pNext = &float_controls;
-    vkGetPhysicalDeviceProperties2(device_->physical_device(), &properties);
-    preserve_float32_ = float_controls.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
-    preserve_float16_ = float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
-    rte_widths_ = (float_controls.shaderRoundingModeRTEFloat16 ? 1u : 0u) |
-                  (float_controls.shaderRoundingModeRTEFloat32 ? 2u : 0u) |
-                  (float_controls.shaderRoundingModeRTEFloat64 ? 4u : 0u);
-    rounding_independence_ = float_controls.roundingModeIndependence;
-    OC_INFO_FORMAT("Slang FP32 signed-zero/NaN/Inf preservation: {}", preserve_float32_);
+    OC_INFO_FORMAT("Slang FP32 signed-zero/NaN/Inf preservation: {}", target_.preserve_float32);
 
     // Slang's texture intrinsics carry these standard-library requirements even
     // when they only emit ordinary image operations. Declaring them avoids an
@@ -338,7 +328,7 @@ void SlangShaderCompiler::ensure_session() const noexcept {
         "spvGroupNonUniform", "spvGroupNonUniformBallot",
         "spvRayQueryKHR"};
     slang::CompilerOptionEntry target_options[std::size(capabilities)]{};
-    const uint32_t capability_count = uint32_t(std::size(capabilities)) - (device_->has_rt() ? 0u : 1u);
+    const uint32_t capability_count = uint32_t(std::size(capabilities)) - (target_.ray_query ? 0u : 1u);
     for (uint32_t i = 0; i < capability_count; ++i) {
         auto capability = global_com->findCapability(capabilities[i]);
         OC_ERROR_IF(capability == SLANG_CAPABILITY_UNKNOWN,
@@ -350,7 +340,7 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     target.compilerOptionEntryCount = capability_count;
 
     // Search paths for builtin .slang files copied next to the backend DLL.
-    string builtin_dir = (device_->context()->runtime_directory() / "slang").string();
+    string builtin_dir = (context_->runtime_directory() / "slang").string();
     const char *search_paths[] = {builtin_dir.c_str()};
 
     slang::SessionDesc session_desc{};
@@ -381,10 +371,10 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     ensure_session();
 
     // Emit before looking in the SPIR-V cache so cached shaders obey the same
-    // device capability checks, including operations inside custom callables.
+    // target capability checks, including operations inside custom callables.
     bool requires_half_rte = false;
-    string source = emit_slang_source(function, device_->supports_warp32(), requires_half_rte);
-    OC_ERROR_IF(requires_half_rte && (!preserve_float32_ || !(rte_widths_ & 2u)),
+    string source = emit_slang_source(function, target_.warp32, requires_half_rte);
+    OC_ERROR_IF(requires_half_rte && (!target_.preserve_float32 || !(target_.rte_widths & 2u)),
                 "Half fused operations require float32 RTE and signed-zero/NaN/Inf preservation on this device");
     if (source.empty()) {
         OC_ERROR("Slang: empty source for function '{}'", function.func_name());
@@ -393,16 +383,16 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
 
     // Include builtins and compiler version, so replacing a runtime DLL or a
     // device header cannot silently reuse SPIR-V from a different compilation.
-    auto runtime_dir = device_->context()->runtime_directory();
+    auto runtime_dir = context_->runtime_directory();
     auto source_hash = hash64(source,
         RHIContext::read_file(runtime_dir / "slang/slang_device_math.slang"),
         RHIContext::read_file(runtime_dir / "slang/slang_device_resource.slang"),
-        string_view(global_session_->getBuildTagString()), slang_source_cache_version, preserve_float32_,
-        requires_half_rte, preserve_float16_, rte_widths_, rounding_independence_);
+        string_view(global_session_->getBuildTagString()), slang_source_cache_version, target_.preserve_float32,
+        requires_half_rte, target_.preserve_float16, target_.rte_widths, target_.rounding_independence);
     const string cache_key = ocarina::format("{}_{}_{}_{}_{}", function.func_name(),
         source_hash, workgroup_size.x, workgroup_size.y, workgroup_size.z);
     const string cache_path = ocarina::format("{}/slang_cache/{}.spv",
-                                               device_->context()->cache_directory().string(), cache_key);
+                                               context_->cache_directory().string(), cache_key);
 
     // Try loading from disk cache
     if (std::filesystem::exists(cache_path)) {
@@ -439,7 +429,7 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
         workgroup_size.x, workgroup_size.y, workgroup_size.z) +
         "#include \"slang_device_resource.slang\"\n#include \"slang_device_math.slang\"\n";
     source = preamble + source;
-    device_->context()->write_global_cache(function.func_name() + ".slang", source);
+    context_->write_global_cache(function.func_name() + ".slang", source);
 
     // Compile via Slang ISession
     Slang::ComPtr<slang::IBlob> diag;
@@ -492,8 +482,8 @@ vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
     const uint32_t *data = reinterpret_cast<const uint32_t *>(spirv_blob->getBufferPointer());
     vector<uint32_t> spirv(data, data + byte_size / 4);
     normalize_ray_query_extensions(spirv);
-    if (preserve_float32_) set_float_control_mode(spirv, 4466u, 4461u, 2u);
-    if (requires_half_rte) require_half_rounding(spirv, rte_widths_, rounding_independence_, preserve_float16_);
+    if (target_.preserve_float32) set_float_control_mode(spirv, 4466u, 4461u, 2u);
+    if (requires_half_rte) require_half_rounding(spirv, target_.rte_widths, target_.rounding_independence, target_.preserve_float16);
     decorate_native_fma(spirv);
 #ifdef __APPLE__
     mark_physical_storage_loads_volatile(spirv);
