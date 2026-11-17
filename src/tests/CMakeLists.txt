@@ -2,7 +2,7 @@ add_custom_target(ocarina-tests)
 
 # Independent native-pipeline capability probe: deliberately does not construct
 # a Horizon device or require/enable VK_KHR_ray_query. Executed by its own CI job.
-if(APPLE)
+if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(horizon-trace-ray-probe probes/trace_ray_probe.cpp)
     target_link_libraries(horizon-trace-ray-probe PRIVATE Vulkan::Loader slang::slang)
     set_target_properties(horizon-trace-ray-probe PROPERTIES

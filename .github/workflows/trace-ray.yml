@@ -1,0 +1,125 @@
+name: Native TraceRay Execution
+
+on:
+  push:
+    paths:
+      - .github/workflows/trace-ray.yml
+      - src/tests/probes/**
+      - src/tests/CMakeLists.txt
+      - build_tools/tests/test_trace_ray_probe.py
+      - build_tools/scripts/setup_moltenvk_ci.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
+
+jobs:
+  trace-ray:
+    name: ${{ matrix.name }} native traceRay closest-hit and occlusion
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-26.04
+          - name: macOS
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Determine Metal toolchain
+        if: runner.os == 'macOS'
+        id: metal-toolchain
+        shell: python
+        run: |
+          import os, re, subprocess
+          version = re.sub(r"[^A-Za-z0-9._-]+", "-", subprocess.check_output(["xcodebuild", "-version"], text=True)).strip("-")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+      - name: Cache pinned experimental ray-tracing driver
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/horizon-moltenvk-rt
+          key: moltenvk-rt-176926b4-${{ runner.os }}-${{ runner.arch }}-${{ steps.metal-toolchain.outputs.version }}
+      - name: Install pinned experimental ray-tracing driver
+        if: runner.os == 'macOS'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python build_tools/scripts/setup_moltenvk_ci.py --output "$RUNNER_TEMP/horizon-moltenvk-rt"
+      - name: Install Linux Vulkan build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libx11-xcb-dev libfontenc-dev libice-dev libsm-dev libxau-dev libxaw7-dev \
+            libxcomposite-dev libxcursor-dev libxdamage-dev libxdmcp-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbfile-dev libxmu-dev libxmuu-dev libxpm-dev libxrandr-dev \
+            libxrender-dev libxres-dev libxss-dev libxt-dev libxtst-dev libxv-dev libxxf86vm-dev \
+            libxcb-glx0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-xkb-dev \
+            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev \
+            libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxcb-dri3-dev libxcb-cursor-dev libxcb-dri2-0-dev libxcb-present-dev \
+            libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-util-dev uuid-dev libgl-dev \
+            mesa-vulkan-drivers
+      - name: Select Linux Lavapipe and record driver provenance
+        if: runner.os == 'Linux'
+        shell: python
+        run: |
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          candidates = sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json"))
+          if len(candidates) != 1:
+              raise RuntimeError(f"Expected one Lavapipe ICD, found {candidates}")
+          icd = candidates[0].resolve(strict=True)
+          metadata = Path("build/verification/trace-ray-ci/driver-metadata.json").resolve()
+          metadata.parent.mkdir(parents=True, exist_ok=True)
+          metadata.write_text(json.dumps({
+              "driver": "Mesa Lavapipe",
+              "version": subprocess.check_output([
+                  "dpkg-query", "-W", "-f=${Version}", "mesa-vulkan-drivers"], text=True).strip(),
+              "icd_manifest": json.loads(icd.read_text()),
+              "icd_sha256": hashlib.sha256(icd.read_bytes()).hexdigest(),
+          }, indent=2) + "\n")
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"VK_DRIVER_FILES={icd}\nVK_ICD_FILENAMES={icd}\n")
+              output.write(f"XDG_RUNTIME_DIR={os.environ['RUNNER_TEMP']}\n")
+              output.write(f"HORIZON_CI_DRIVER_METADATA={metadata}\n")
+      - name: Install build tools
+        run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
+      - name: Prefer pip build tools
+        shell: python
+        run: |
+          import os, sysconfig
+          with open(os.environ["GITHUB_PATH"], "a") as output:
+              output.write(sysconfig.get_path("scripts") + "\n")
+      - name: Test execution and unsupported-device policy
+        run: python -m unittest discover -s build_tools/tests -p test_trace_ray_probe.py
+      - name: Build the standalone traceRay probe
+        run: >-
+          python build_tools/dev.py build horizon-trace-ray-probe
+          --configuration RelWithDebInfo --target-family ocarina-tests
+      - name: Execute native traceRay and verify GPU readback
+        run: >-
+          python src/tests/probes/run_trace_ray_probe.py
+          --executable build/conan/ocarina-tests/relwithdebinfo/bin/RelWithDebInfo/horizon-trace-ray-probe
+          --output build/verification/trace-ray-ci
+      - name: Upload traceRay execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-ray-execution-${{ runner.os }}
+          path: |
+            build/verification/trace-ray-ci
+            ${{ runner.temp }}/horizon-moltenvk-rt/driver-metadata.json
+            ${{ runner.temp }}/horizon-moltenvk-rt/source-build.log
+          if-no-files-found: warn

@@ -214,12 +214,20 @@ class Probe {
         VkApplicationInfo application{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         application.pApplicationName = "Horizon standalone traceRay probe";
         application.apiVersion = VK_API_VERSION_1_2;
-        const char *instance_extensions[]{VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-                                          VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
+        uint32_t extension_count = 0;
+        check(vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr), "enumerate instance extensions");
+        std::vector<VkExtensionProperties> available(extension_count);
+        check(vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, available.data()), "enumerate instance extensions");
+        const bool portability = std::any_of(available.begin(), available.end(), [](const auto &e) {
+            return std::strcmp(e.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0;
+        });
+        const char *instance_extensions[]{VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
         VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         info.pApplicationInfo = &application;
-        info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-        info.enabledExtensionCount = 2; info.ppEnabledExtensionNames = instance_extensions;
+        if (portability) {
+            info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+            info.enabledExtensionCount = 1; info.ppEnabledExtensionNames = instance_extensions;
+        }
         check(vkCreateInstance(&info, nullptr, &instance_), "vkCreateInstance");
         uint32_t count = 0;
         check(vkEnumeratePhysicalDevices(instance_, &count, nullptr), "vkEnumeratePhysicalDevices");
