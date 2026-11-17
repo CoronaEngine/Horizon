@@ -74,6 +74,7 @@ protected:
     void visit(const AssignStmt *stmt) noexcept override;
     void visit(const IfStmt *stmt) noexcept override;
     void visit(const LoopStmt *stmt) noexcept override;
+    void visit(const ForStmt *stmt) noexcept override;
     void visit(const ReturnStmt *stmt) noexcept override;
     void visit(const CallExpr *expr) noexcept override;
     void visit(const CastExpr *expr) noexcept override;

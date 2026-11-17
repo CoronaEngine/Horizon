@@ -1,4 +1,4 @@
-foreach(case loop callable barrier short-circuit)
+foreach(case loop callable barrier short-circuit plain-loop callable-loop)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env HORIZON_FORCE_WARP32_FALLBACK=1
                 "${WARP32_TEST}" --case "${case}"

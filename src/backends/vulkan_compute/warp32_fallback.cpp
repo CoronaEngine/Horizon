@@ -219,9 +219,14 @@ void AstToSlangSource::_emit_warp32_statements(span<const Statement *const> stat
         Scan scan;
         scan.statement(stmt);
         const auto tag = stmt->tag();
-        if (tag == Statement::Tag::LOOP || tag == Statement::Tag::FOR || tag == Statement::Tag::SWITCH)
+        // A loop without collectives can still wait on a different logical
+        // warp that is parked at a workgroup-wide fallback barrier. Until a
+        // progress-preserving loop lowering exists, reject all user AST loops.
+        OC_ERROR_IF(tag == Statement::Tag::LOOP || tag == Statement::Tag::FOR,
+                    "warp32 fallback does not support loop control flow, including callable loops");
+        if (tag == Statement::Tag::SWITCH)
             OC_ERROR_IF(scan.warp || scan.returns || scan.barrier,
-                        "warp32 fallback does not support loops or switches containing collectives, barriers or kernel returns");
+                        "warp32 fallback does not support switches containing collectives, barriers or kernel returns");
         OC_ERROR_IF(tag == Statement::Tag::IF && scan.barrier,
                     "warp32 fallback does not support explicit block barriers inside conditionals");
         // A collective-bearing scope or branch must be visited by every physical

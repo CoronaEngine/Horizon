@@ -1088,8 +1088,14 @@ void AstToSlangSource::visit(const IfStmt *stmt) noexcept {
 }
 
 void AstToSlangSource::visit(const LoopStmt *stmt) noexcept {
+    OC_ERROR_IF(warp32_fallback_, "warp32 fallback does not support loop control flow, including callable loops");
     current_scratch() << "while (true) ";
     stmt->body()->accept(*this);
+}
+
+void AstToSlangSource::visit(const ForStmt *stmt) noexcept {
+    OC_ERROR_IF(warp32_fallback_, "warp32 fallback does not support loop control flow, including callable loops");
+    AstToCppSource::visit(stmt);
 }
 
 void AstToSlangSource::visit(const ReturnStmt *stmt) noexcept {

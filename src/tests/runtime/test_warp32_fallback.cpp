@@ -127,6 +127,27 @@ int main(int argc, char **argv) {
             Callable collective = [] { return warp_active_count_bits(Bool(true)); };
             Kernel kernel = [&collective](BufferVar<uint> out) { out.write(dispatch_id(), collective()); };
             [[maybe_unused]] auto shader = device.compile(kernel, "warp32-unsupported-callable");
+        } else if (name == "plain-loop") {
+            Kernel kernel = [](BufferVar<uint> out) {
+                Uint count = warp_active_count_bits(Bool(true));
+                Uint n = 0u;
+                $loop {
+                    n += 1u;
+                    $if(n == 2u) { $break; };
+                };
+                out.write(dispatch_id(), count + n);
+            };
+            [[maybe_unused]] auto shader = device.compile(kernel, "warp32-unsupported-plain-loop");
+        } else if (name == "callable-loop") {
+            Callable loop = [] {
+                Uint n = 0u;
+                $for(i, 2u) { n += i; };
+                return n;
+            };
+            Kernel kernel = [&loop](BufferVar<uint> out) {
+                out.write(dispatch_id(), warp_active_count_bits(Bool(true)) + loop());
+            };
+            [[maybe_unused]] auto shader = device.compile(kernel, "warp32-unsupported-callable-loop");
         } else if (name == "barrier") {
             Kernel kernel = [](BufferVar<uint> out) {
                 out.write(dispatch_id(), warp_active_count_bits(Bool(true)));
@@ -151,8 +172,8 @@ int main(int argc, char **argv) {
         }
         require(false, "unsupported fallback shader was accepted");
     }
-    require(argc == 1, "usage: test-runtime-warp32-fallback [--case loop|callable|barrier|short-circuit]");
-    for (uint3 block : {make_uint3(8u, 1u, 1u), make_uint3(32u, 1u, 1u), make_uint3(64u, 1u, 1u),
+    require(argc == 1, "usage: test-runtime-warp32-fallback [--case loop|plain-loop|callable|callable-loop|barrier|short-circuit]");
+    for (uint3 block : {make_uint3(8u, 1u, 1u), make_uint3(32u, 1u, 1u), make_uint3(40u, 1u, 1u), make_uint3(64u, 1u, 1u),
                         make_uint3(8u, 4u, 2u)}) run_case(device, block);
     std::cout << "warp32 fallback checks passed" << std::endl;
 }
