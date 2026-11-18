@@ -939,16 +939,9 @@ ResourceManager::BufferHardwareWrap ResourceManager::importBufferMemory(const Ex
     {
         throw std::runtime_error("Cannot import buffer with invalid memory handle!");
     }
-#endif
 
-#if _WIN32 || _WIN64
     constexpr VkExternalMemoryHandleTypeFlagBits EXTERNAL_MEMORY_HANDLE_TYPE =
         VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
-#else
-    // 其他平台略
-    constexpr VkExternalMemoryHandleTypeFlagBits EXTERNAL_MEMORY_HANDLE_TYPE =
-        VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-#endif
 
     BufferHardwareWrap importedBuffer{};
     importedBuffer.device = device;
@@ -1001,13 +994,11 @@ ResourceManager::BufferHardwareWrap ResourceManager::importBufferMemory(const Ex
         throw std::runtime_error("Import failed: buffer not importable (features=" + std::to_string(feats) + ").");
     }
 
-#if _WIN32 || _WIN64
     VkImportMemoryWin32HandleInfoKHR importInfo{};
     importInfo.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
     importInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
     importInfo.handle = memHandle.handle;
     importInfo.name = nullptr;
-#endif
 
     // 使用专用 + 设备本地，不再请求映射
     VmaAllocationCreateInfo allocInfo{};
@@ -1037,6 +1028,9 @@ ResourceManager::BufferHardwareWrap ResourceManager::importBufferMemory(const Ex
         feats);
 
     return importedBuffer;
+#else
+    throw std::runtime_error("External buffer import is only implemented on Windows.");
+#endif
 }
 
 ResourceManager::BufferHardwareWrap ResourceManager::importHostBuffer(void *hostPtr, uint64_t size)
