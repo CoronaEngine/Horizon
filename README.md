@@ -187,6 +187,33 @@ ctest --test-dir build/conan/ocarina-tests/release -C Release -L trace-mode-loca
 
 `horizon.trace_mode.performance` 在同一设备、同一场景、同一批射线和输出上报告两条路径的 shader 创建耗时、Vulkan timestamp 平均每次 dispatch 耗时，以及批次从提交 16 次 dispatch 到读回完成的耗时。后两项均在预热后测量。保留 CTest 的详细日志，记录因缺少设备能力而跳过的用例。
 
+### 在 CLion 运行 All CTest
+
+选择 `ocarina-tests-local-release` CMake preset，构建后运行 **All CTest**。这个配置会注册新版 Core、Hotfix、Python、Ocarina，以及本地光追和 warp32 测试。已有个人 profile 可以设置 `HORIZON_BUILD_TRACE_MODE_TESTS=ON` 和 `HORIZON_BUILD_WARP32_TESTS=ON`。命令行可以使用同一套配置：
+
+```sh
+cmake --preset ocarina-tests-local-release
+cmake --build --preset ocarina-tests-local-release
+ctest --preset ocarina-tests-local-release
+```
+
+修改光追或 warp32 相关代码时，在支持对应能力的实体 GPU 上运行专项测试。保留运行记录，并标明因缺少能力而跳过的用例。
+
+```sh
+ctest --preset ocarina-tests-local-release -L '^(trace-mode-local|warp32-local)$' -V
+```
+
+CI 的 Ocarina 配置默认关闭这两个开关。普通计算、编译检查和 CPU 侧的 trace 分析仍在 CI 中运行。64 位 buffer atomics 在 Linux 和 Windows CI 运行，macOS 托管 runner 的驱动缺少此能力。使用相同的本地 CTest 用例和参数复现 CI：
+
+```sh
+python build_tools/dev.py build ocarina-tests horizon-tests --configuration RelWithDebInfo --target-family ocarina-tests --with-tests
+python src/tests/run_ci_suite.py --build-dir build/conan/ocarina-tests/relwithdebinfo --configuration RelWithDebInfo --output build/verification/ocarina-ci
+```
+
+复现 macOS CI 时，给第二条命令加上 `--without-int64-atomics`。
+
+窗口热更新测试需要可用的 Vulkan 驱动和图形会话。Linux 和 macOS 还需要系统提供 GLFW、GLM、volk 和 Vulkan 开发包，可参考仓库的 `hotfix-examples.yml` 安装依赖。给该 CMake 配置加上 `-DHORIZON_BUILD_BASELINE_WINDOW_TEST=ON` 并重新构建后，`horizon.hotfix.baseline_window` 也会出现在 **All CTest**。旧版 HardwareWrapper 的测试在下文所示的 Legacy 构建配置中运行。
+
 ### 常见问题
 
 - **VS Code 中找不到标准头文件**：确认 `cmake.useVsDeveloperEnvironment` 已手动设置为 `always`，然后重新打开 VS Code 并重新 Configure。

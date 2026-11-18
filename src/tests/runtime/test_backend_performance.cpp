@@ -371,23 +371,28 @@ void benchmark_rays(Device &device, Stream &stream, const Options &options,
 
 int main(int argc, char *argv[]) {
     Options options;
+    bool raytracing_only = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
         if (arg == "--quick") options.quick = true;
         else if (arg == "--ci") options.ci = true;
         else if (arg == "--no-raytracing") options.raytracing = false;
+        else if (arg == "--raytracing-only") raytracing_only = true;
         else {
-            std::cerr << "Usage: test-runtime-backend-performance [--quick] [--ci] [--no-raytracing]\n";
+            std::cerr << "Usage: test-runtime-backend-performance [--quick] [--ci] "
+                         "[--no-raytracing | --raytracing-only]\n";
             return EXIT_FAILURE;
         }
     }
+    require(!raytracing_only || options.raytracing, "--no-raytracing and --raytracing-only are mutually exclusive");
     const char *backend = test_backend_name();
     constexpr const char *codegen = "ast";
     auto &context = RHIContext::instance();
     auto device = context.create_device();
     if (options.raytracing && !device.supports_raytracing()) {
-        require(!options.ci, "--ci requires ray tracing unless --no-raytracing was explicitly selected");
+        require(!options.ci || raytracing_only, "--ci requires ray tracing unless --no-raytracing was explicitly selected");
         std::cerr << "SKIPPED raytracing benchmark: device does not support ray tracing" << std::endl;
+        if (raytracing_only) return 77;
         options.raytracing = false;
     }
     if (options.raytracing) device.init_rtx();
@@ -401,8 +406,10 @@ int main(int argc, char *argv[]) {
              << ",raytracing=" << options.raytracing << '\n';
     write_record(metadata.str());
     write_record("PERF_HEADER,backend,codegen,workload,unit,median,p95,rounds,iterations,batch,elements\n");
-    benchmark_launch(device, stream, options, backend, codegen);
-    benchmark_buffers(device, stream, options, backend, codegen);
+    if (!raytracing_only) {
+        benchmark_launch(device, stream, options, backend, codegen);
+        benchmark_buffers(device, stream, options, backend, codegen);
+    }
     if (options.raytracing) benchmark_rays(device, stream, options, backend, codegen);
     std::ostringstream verified;
     verified << "PERF_VERIFIED," << backend << ',' << codegen << '\n';

@@ -1,7 +1,8 @@
 """Run isolated Vulkan EDSL capability regressions and capture observations.
 
-Build the four *-capability-probe / *-float32-policy-probe executables first.
+Build the compute capability and float32 policy probes first.
 Example: python run_capability_audit.py --runtime <bin/Release> --output <logs>
+Use --ray-tracing with the local backend capability probe for the AS cases.
 GPU work is deliberately serialized. Validation can be enabled with the usual
 VK_INSTANCE_LAYERS / VK_LAYER_PATH / VK_LAYER_SETTINGS_PATH environment variables.
 Each selected case runs once. Probe executables check their CPU oracles;
@@ -23,10 +24,11 @@ import sys
 import time
 
 
+RAY_TARGET = "test-runtime-backend-capability-probe"
 CASES = {
     "test-runtime-codegen-capability-probe": (
         "inverse2", "determinant2", "callable-storage", "callable-alias", "fmod-mod", "ulong-makers"),
-    "test-runtime-backend-capability-probe": (
+    RAY_TARGET: (
         "empty-accel", "fast-build", "mesh-rebuild", "same-batch-accel", "multistream-ray-params"),
     "test-resources-resource-capability-probe": (
         "texture-buffer-view-offset", "texture-narrow-channels", "texture-linear-fraction", "texture-uint-reinterpret"),
@@ -70,13 +72,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--case", action="append", dest="cases",
-                        choices=[case for cases in CASES.values() for case in cases])
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--case", action="append", dest="cases",
+                           choices=[case for cases in CASES.values() for case in cases])
+    selection.add_argument("--ray-tracing", action="store_true", help="Run only the local AS probes")
     parser.add_argument("--timeout", type=float, default=300)
     args = parser.parse_args()
     runtime, output = args.runtime.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    selected = set(args.cases or [case for cases in CASES.values() for case in cases])
+    if args.ray_tracing:
+        selected = set(CASES[RAY_TARGET])
+    else:
+        selected = set(args.cases or [case for target, cases in CASES.items()
+                                      if target != RAY_TARGET for case in cases])
     if os.name == "nt":
         # Shader compilation regressions can abort. Do not leave modal Windows
         # crash dialogs hanging after the isolated child process exits.
@@ -121,16 +129,21 @@ def main():
             report["results"].append(result)
             result_file.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
             print(json.dumps(result), flush=True)
-    failed = sum(item["returncode"] != 0 or item["validation_messages"] != 0 for item in report["results"])
+    skipped = sum(item["returncode"] == 77 for item in report["results"])
+    failed = sum(item["returncode"] not in (0, 77) or item["validation_messages"] != 0
+                 for item in report["results"])
     report["finished_utc"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     report["processes"] = len(report["results"])
+    report["skipped_processes"] = skipped
     report["failed_or_validation_processes"] = failed
     report["observations"] = collect_observations(report["results"])
     report["incomplete_observations"] = sum(
         bool(c["parse_errors"]) or (c["expected_rows"] is not None and c["rows"] != c["expected_rows"])
         for c in report["observations"])
     result_file.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    if failed or report["incomplete_observations"]:
+    if selected <= set(CASES[RAY_TARGET]) and skipped == report["processes"] and not failed:
+        return 77
+    if failed or skipped or report["incomplete_observations"]:
         return 1
     return 0
 

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <string_view>
 #include <thread>
 
 using namespace ocarina;
@@ -227,14 +228,21 @@ void test_async_compile_and_stream_destruction(Device &device) {
 }
 }
 
-int main() {
+int main(int argc, char **argv) {
+    const auto selected = argc == 3 && std::string_view(argv[1]) == "--case"
+                              ? std::string_view(argv[2]) : std::string_view{};
+    require(argc == 1 || selected == "compute" || selected == "ray-tracing",
+            "usage: test-runtime-parity-extended [--case compute|ray-tracing]");
     auto device = create_test_device();
-    const bool raytracing = !skip_without_feature(device.supports_raytracing(), "ray tracing");
-    if (raytracing) {
-        device.init_rtx();
-        test_ray_scene_and_clear(device);
-        test_accept_all_triangle_queries(device);
+    if (selected != "compute") {
+        if (skip_without_feature(device.supports_raytracing(), "ray tracing")) {
+            if (selected == "ray-tracing") return 77;
+        } else {
+            device.init_rtx();
+            test_ray_scene_and_clear(device);
+            test_accept_all_triangle_queries(device);
+        }
     }
-    test_async_compile_and_stream_destruction(device);
+    if (selected != "ray-tracing") test_async_compile_and_stream_destruction(device);
     std::cout << "extended runtime parity checks passed" << std::endl;
 }

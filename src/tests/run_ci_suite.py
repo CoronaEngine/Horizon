@@ -1,8 +1,7 @@
-"""Execute the complete Ocarina CTest suite and retain verifiable CI evidence.
+"""Execute the Ocarina CI CTest suite and retain verifiable execution evidence.
 
-Success requires all 54 executable targets and all 76 CTest cases to run and
-pass. XML skips, feature skips printed by a successful process, and truncated
-output are failures of complete coverage rather than successful execution.
+Every selected case must execute and pass. XML skips, feature skips printed by
+a successful process, and truncated output are failures of complete coverage.
 """
 
 import argparse
@@ -19,8 +18,8 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-EXPECTED_TARGETS = 54
-EXPECTED_CASES = 76
+EXPECTED_TARGETS = 51
+EXPECTED_CASES = 70
 OUTPUT_LIMIT = 16 * 1024 * 1024
 HIDDEN_SKIP = re.compile(r"\bSKIPPED\b|\bSKIP:", re.IGNORECASE)
 TRUNCATED_OUTPUT = "This part of the test output was removed since it exceeds the threshold"
@@ -192,13 +191,18 @@ def write_report(output, report):
 
 
 def run_suite(build_dir, configuration, output, manifest_path, *,
-              expected_targets=EXPECTED_TARGETS, expected_cases=EXPECTED_CASES, ctest="ctest"):
+              expected_targets=EXPECTED_TARGETS, expected_cases=None, ctest="ctest",
+              without_int64_atomics=False):
+    if expected_cases is None:
+        expected_cases = EXPECTED_CASES - int(without_int64_atomics)
     build_dir, output, manifest_path = (Path(path).resolve() for path in (build_dir, output, manifest_path))
     output.mkdir(parents=True, exist_ok=True)
     # A previous successful run must not supply results after an early failure.
     junit = output / "results.xml"
     junit.unlink(missing_ok=True)
     base = [str(ctest), "--test-dir", str(build_dir), "-C", configuration, "-R", r"^ocarina\."]
+    if without_int64_atomics:
+        base += ["-LE", "^int64-atomics$"]
     inventory_command = base + ["--show-only=json-v1"]
     run_command = base + ["--no-tests=error", "--verbose", "--output-on-failure",
                           "--test-output-size-passed", str(OUTPUT_LIMIT),
@@ -257,9 +261,12 @@ def main():
     parser.add_argument("--configuration", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--without-int64-atomics", action="store_true",
+                        help="Exclude the int64 buffer atomics case on runners lacking that capability")
     args = parser.parse_args()
     manifest = args.manifest or args.build_dir / "src/tests/ci" / args.configuration / "targets.json"
-    report = run_suite(args.build_dir, args.configuration, args.output, manifest)
+    report = run_suite(args.build_dir, args.configuration, args.output, manifest,
+                       without_int64_atomics=args.without_int64_atomics)
     return 0 if report["status"] == "passed" else 1
 
 

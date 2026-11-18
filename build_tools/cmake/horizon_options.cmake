@@ -8,6 +8,7 @@ option(HORIZON_BUILD_BASELINE_WINDOW_TEST "Build the rendered baseline hotfix te
 option(HORIZON_BUILD_OCARINA "Build the bundled ocarina module and Vulkan compute backend" OFF)
 option(HORIZON_BUILD_OCARINA_TESTS "Build bundled ocarina test executables" OFF)
 option(HORIZON_BUILD_TRACE_MODE_TESTS "Build local Ocarina GPU trace-mode comparisons" OFF)
+option(HORIZON_BUILD_WARP32_TESTS "Register local Ocarina GPU warp32 tests" OFF)
 option(HORIZON_ENABLE_EXAMPLE_HOTFIX "Enable portable CMake hot reload in the baseline example" OFF)
 option(HORIZON_ENABLE_HARDCODE_SHADERS "Compile and use generated Helicon hardcoded shader cache" OFF)
 option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)

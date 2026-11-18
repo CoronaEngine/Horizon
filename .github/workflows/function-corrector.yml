@@ -28,6 +28,7 @@ jobs:
             os: ubuntu-26.04
           - name: macOS
             os: macos-latest
+            suite_args: --without-int64-atomics
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -35,8 +36,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # The pinned MoltenVK source fallback uses distutils on macOS.
-          python-version: ${{ runner.os == 'macOS' && '3.11' || '3.12' }}
+          python-version: '3.12'
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -104,33 +104,15 @@ jobs:
               output.write(f"VK_DRIVER_FILES={icd.as_posix()}\n")
               output.write(f"VK_ICD_FILENAMES={icd.as_posix()}\n")
 
-      - name: Determine macOS Metal toolchain
+      - name: Install macOS MoltenVK for compute tests
         if: runner.os == 'macOS'
-        id: metal-toolchain
-        shell: python
-        run: |
-          import os
-          import re
-          import subprocess
-          version = subprocess.check_output(["xcodebuild", "-version"], text=True)
-          version = re.sub(r"[^A-Za-z0-9._-]+", "-", version).strip("-")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={version}\n")
-
-      - name: Cache pinned macOS ray-query driver
-        if: runner.os == 'macOS'
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/horizon-moltenvk-rt
-          key: moltenvk-rt-176926b4-${{ runner.os }}-${{ runner.arch }}-${{ steps.metal-toolchain.outputs.version }}
-
-      - name: Install pinned macOS ray-query driver
-        if: runner.os == 'macOS'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          python build_tools/scripts/setup_moltenvk_ci.py --output "$RUNNER_TEMP/horizon-moltenvk-rt"
+          brew install molten-vk
+          icd="$(find -H "$(brew --prefix molten-vk)" -name MoltenVK_icd.json -print -quit)"
+          test -f "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
 
       - name: Install build tools
         run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
@@ -144,11 +126,11 @@ jobs:
           with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
               output.write(sysconfig.get_path("scripts") + "\n")
 
-      - name: Build all 54 Ocarina test and benchmark executables
+      - name: Build Ocarina CI and Horizon tests
         id: build-suite
         run: >-
-          python build_tools/dev.py build ocarina-tests
-          --configuration RelWithDebInfo --target-family ocarina-tests
+          python build_tools/dev.py build ocarina-tests horizon-tests
+          --configuration RelWithDebInfo --target-family ocarina-tests --with-tests
 
       - name: Collect remaining compiler diagnostics after a failed build
         if: failure() && steps.build-suite.outcome == 'failure'
@@ -160,15 +142,36 @@ jobs:
           if (build / "CMakeCache.txt").is_file():
               result = subprocess.run([
                   "cmake", "--build", str(build), "--config", "RelWithDebInfo",
-                  "--target", "ocarina-tests", "--", "-k", "0"])
+                  "--target", "ocarina-tests", "horizon-tests", "--", "-k", "0"])
               print(f"Diagnostic build exited {result.returncode}; the original build failure is retained")
 
-      - name: Execute and verify all 76 Ocarina test cases
+      - name: Run Horizon checks that require Ocarina
+        run: >-
+          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo -C RelWithDebInfo
+          -R '^horizon\.core\.(function_requirements|shader_options_api)$' --no-tests=error --output-on-failure
+
+      - name: Execute and verify the Ocarina CI cases
         run: >-
           python src/tests/run_ci_suite.py
           --build-dir build/conan/ocarina-tests/relwithdebinfo
           --configuration RelWithDebInfo
           --output build/verification/ocarina-ci
+          ${{ matrix.suite_args }}
+
+      - name: Report local GPU checks
+        if: always()
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as output:
+              output.write("### Local GPU tests\n\n"
+                           "Run the `trace-mode-local` and `warp32-local` CTest labels on a supported GPU. "
+                           "Use the `ocarina-tests-local-release` preset and record any capability skips.\n")
+              if os.environ["RUNNER_OS"] == "macOS":
+                  output.write("\nThe int64 buffer atomics case runs on the Linux and Windows CI lanes.\n")
 
       - name: Upload complete Ocarina execution evidence
         if: always()
@@ -180,7 +183,4 @@ jobs:
             build/conan/ocarina-tests/relwithdebinfo/src/tests/ci/RelWithDebInfo/targets.json
             build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTest.log
             build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTestsFailed.log
-            ${{ runner.temp }}/horizon-moltenvk-rt/driver-metadata.json
-            ${{ runner.temp }}/horizon-moltenvk-rt/source-build.log
-            ${{ runner.temp }}/horizon-moltenvk-rt/source-diagnostics
           if-no-files-found: warn

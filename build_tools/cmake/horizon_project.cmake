@@ -6,6 +6,11 @@ include(horizon_options)
 include(horizon_compile_config)
 include(horizon_dependencies)
 
+# IDEs may discover the OS Python before the bootstrapped developer Python.
+if(HORIZON_DEV_PYTHON AND NOT DEFINED Python_EXECUTABLE)
+    set(Python_EXECUTABLE "${HORIZON_DEV_PYTHON}")
+endif()
+
 include(horizon_core_dependencies)
 include(horizon_image_dependencies)
 

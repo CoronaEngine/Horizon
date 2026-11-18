@@ -6,6 +6,11 @@
 #include "core/stl.h"
 #include "core/type_system/type_desc.h"
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <cstdlib>
+#include <crtdbg.h>
+#endif
+
 using namespace ocarina;
 
 struct ParseLeaf {
@@ -147,17 +152,17 @@ static int run_invalid_case(string_view case_name) {
         std::cerr << "unknown invalid case: " << case_name << std::endl;
         return 2;
     }
+#if defined(_MSC_VER) && defined(_DEBUG)
+    // Report the expected assertion to the CTest subprocess without opening a dialog.
+    _set_error_mode(_OUT_TO_STDERR);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
     const Type *type = Type::from(desc);
     (void)type;
     std::cerr << "invalid case unexpectedly succeeded: " << case_name << std::endl;
-    return 3;
-}
-
-static bool expect_invalid_parse_failure(const char *exe_path, string_view case_name) {
-    string command = ocarina::format("\"{}\" --invalid-case {} >nul 2>&1", exe_path, case_name);
-    int exit_code = std::system(command.c_str());
-    CHECK(exit_code != 0);
-    return true;
+    return 0;
 }
 
 static bool test_void_and_scalar_types() {
@@ -496,13 +501,6 @@ static bool test_layout_resolver() {
     return true;
 }
 
-static bool test_invalid_descriptions(const char *exe_path) {
-    CHECK(expect_invalid_parse_failure(exe_path, "invalid-data-type"));
-    CHECK(expect_invalid_parse_failure(exe_path, "invalid-vector-element"));
-    CHECK(expect_invalid_parse_failure(exe_path, "invalid-matrix-dimension"));
-    return true;
-}
-
 int main(int argc, char **argv) {
     if (argc == 3 && string_view(argv[1]) == "--invalid-case") {
         return run_invalid_case(argv[2]);
@@ -514,7 +512,6 @@ int main(int argc, char **argv) {
     passed = test_array_and_resource_types() && passed;
     passed = test_tuple_and_struct_types() && passed;
     passed = test_layout_resolver() && passed;
-    // passed = test_invalid_descriptions(argv[0]) && passed;
 
     if (!passed) {
         std::cerr << "type parse test failed" << std::endl;

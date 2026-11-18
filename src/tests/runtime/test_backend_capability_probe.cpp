@@ -358,7 +358,7 @@ int main(int argc, char **argv) {
     const auto caps = device.trace_capabilities();
     if ((compile_options.trace_mode == TraceMode::RayQuery && !caps.ray_query) ||
         (compile_options.trace_mode == TraceMode::RayTracingPipeline && !caps.ray_tracing_pipeline)) return 77;
-    if (skip_without_feature(device.supports_raytracing(), "ray tracing")) return 0;
+    if (skip_without_feature(device.supports_raytracing(), "ray tracing")) return 77;
     device.init_rtx();
     if (name == "empty-accel") probe_empty_accel(device);
     else if (name == "fast-build") probe_fast_build(device);

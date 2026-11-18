@@ -37,6 +37,11 @@ if(HORIZON_BUILD_OCARINA)
     add_library(horizon-test-core-shader-options-api OBJECT test_shader_compile_options_api.cpp)
     target_link_libraries(horizon-test-core-shader-options-api PRIVATE ocarina-include ocarina-rhi)
     add_dependencies(horizon-tests horizon-test-core-shader-options-api)
+    add_test(NAME horizon.core.shader_options_api
+        COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --config "$<CONFIG>"
+                --target horizon-test-core-shader-options-api)
+    set_tests_properties(horizon.core.shader_options_api PROPERTIES
+        LABELS "horizon;cpu;compile" RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 
 # Exercise the real allocator across a DLL boundary without engine dependencies.

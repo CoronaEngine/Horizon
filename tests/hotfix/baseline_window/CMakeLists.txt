@@ -51,3 +51,6 @@ add_test(NAME horizon.hotfix.baseline_window COMMAND "${Python3_EXECUTABLE}"
     "${patch_source}" "${original_source}" "${CMAKE_COMMAND}")
 set_tests_properties(horizon.hotfix.baseline_window PROPERTIES
     LABELS "hotfix;integration;window" RESOURCE_LOCK horizon-baseline-window TIMEOUT 240)
+if(TARGET horizon-tests)
+    add_dependencies(horizon-tests horizon-test-baseline-window)
+endif()

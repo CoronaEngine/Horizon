@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string_view>
 #include <type_traits>
 
 using namespace ocarina;
@@ -280,28 +281,51 @@ void test_wide_literal_diagnostic(Device &device) {
     std::cout << "wide literal subtraction diagnostic passed" << std::endl;
 }
 
-}// namespace
-
-int main() {
-    auto device = create_test_device();
-    const bool int64_atomics = !skip_without_feature(device.supports_int64_atomics(),
-                                                     "64-bit buffer atomics");
-    const char *wide_literal = std::getenv("OCARINA_TEST_ATOMIC_WIDE_LITERAL");
-    if (wide_literal && std::strcmp(wide_literal, "1") == 0) {
-        if (!int64_atomics) return 0;
-        test_wide_literal_diagnostic(device);
-        return 0;
-    }
+void test_compute_atomics(Device &device) {
     test_atomic_views<int>(device, "int");
     test_atomic_views<uint>(device, "uint");
-    if (int64_atomics) test_atomic_views<ulong>(device, "ulong");
     test_atomic_views<float>(device, "float");
     test_contended_add<uint>(device, "uint");
-    if (int64_atomics) test_contended_add<ulong>(device, "ulong");
     test_contended_add<float>(device, "float");
     test_contended_cas<uint>(device, "uint");
-    if (int64_atomics) test_contended_cas<ulong>(device, "ulong");
     test_bindless_byte_atomics(device);
-    if (int64_atomics) test_wide_literal_diagnostic(device);
+}
+
+void test_int64_atomics(Device &device) {
+    test_atomic_views<ulong>(device, "ulong");
+    test_contended_add<ulong>(device, "ulong");
+    test_contended_cas<ulong>(device, "ulong");
+    test_wide_literal_diagnostic(device);
+}
+
+}// namespace
+
+int main(int argc, char **argv) {
+    const bool named_case = argc == 3 && std::string_view(argv[1]) == "--case";
+    const std::string_view test_case = named_case ? argv[2] : "";
+    if (argc != 1 && test_case != "compute" && test_case != "int64") {
+        std::cerr << "usage: test-compute-atomic-parity [--case compute|int64]" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    auto device = create_test_device();
+    if (test_case == "int64") {
+        if (skip_without_feature(device.supports_int64_atomics(), "64-bit buffer atomics")) return 77;
+        test_int64_atomics(device);
+        std::cout << "64-bit buffer atomic parity checks passed" << std::endl;
+        return EXIT_SUCCESS;
+    }
+
+    bool int64_atomics = false;
+    if (!named_case) {
+        int64_atomics = !skip_without_feature(device.supports_int64_atomics(), "64-bit buffer atomics");
+        const char *wide_literal = std::getenv("OCARINA_TEST_ATOMIC_WIDE_LITERAL");
+        if (wide_literal && std::strcmp(wide_literal, "1") == 0) {
+            if (int64_atomics) test_wide_literal_diagnostic(device);
+            return EXIT_SUCCESS;
+        }
+    }
+    test_compute_atomics(device);
+    if (int64_atomics) test_int64_atomics(device);
     std::cout << "compute atomic parity checks passed" << std::endl;
 }

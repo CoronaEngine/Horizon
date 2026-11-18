@@ -245,6 +245,17 @@
         "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
         "HORIZON_DEV_TARGET_FAMILY": "ocarina-tests"
       }
+    },
+    {
+      "name": "ocarina-tests-local-release",
+      "displayName": "Ocarina Tests and Local GPU Tests - Release",
+      "inherits": "ocarina-tests-release",
+      "binaryDir": "${sourceDir}/build/conan/ocarina-tests/local-release",
+      "cacheVariables": {
+        "HORIZON_BUILD_TESTS": true,
+        "HORIZON_BUILD_TRACE_MODE_TESTS": true,
+        "HORIZON_BUILD_WARP32_TESTS": true
+      }
     }
   ],
   "buildPresets": [
@@ -367,6 +378,21 @@
       "name": "ocarina-tests-minsizerel",
       "configurePreset": "ocarina-tests-minsizerel",
       "configuration": "MinSizeRel"
+    },
+    {
+      "name": "ocarina-tests-local-release",
+      "configurePreset": "ocarina-tests-local-release",
+      "configuration": "Release",
+      "targets": ["horizon-tests", "ocarina-tests"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "ocarina-tests-local-release",
+      "configurePreset": "ocarina-tests-local-release",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
     }
   ]
 }

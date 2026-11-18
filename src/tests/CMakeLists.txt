@@ -1,7 +1,7 @@
 add_custom_target(ocarina-tests)
 
 function(ocarina_add_test name)
-    cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK" "CATEGORY" "SOURCES;CASES" ${ARGN})
+    cmake_parse_arguments(_ocarina_test "GPU;BENCHMARK;LOCAL_TRACE" "CATEGORY" "SOURCES;CASES;ARGS" ${ARGN})
     set(_test_target ${name})
     if (_ocarina_test_CATEGORY)
         if (${name} MATCHES "^test-")
@@ -11,8 +11,16 @@ function(ocarina_add_test name)
         endif ()
     endif ()
     add_executable(${_test_target} ${_ocarina_test_SOURCES})
-    add_dependencies(ocarina-tests ${_test_target})
-    set_property(GLOBAL APPEND PROPERTY HORIZON_OCARINA_TEST_TARGETS ${_test_target})
+    if(_ocarina_test_LOCAL_TRACE)
+        add_dependencies(ocarina-trace-mode-tests ${_test_target})
+        set(_test_prefix horizon.trace_mode)
+        set(_test_label trace-mode-local)
+    else()
+        add_dependencies(ocarina-tests ${_test_target})
+        set_property(GLOBAL APPEND PROPERTY HORIZON_OCARINA_TEST_TARGETS ${_test_target})
+        set(_test_prefix ocarina)
+        set(_test_label ocarina)
+    endif()
     target_link_libraries(${_test_target} PRIVATE ocarina-native)
     set(_test_folder "ocarina/test")
     if (_ocarina_test_CATEGORY)
@@ -28,7 +36,7 @@ function(ocarina_add_test name)
         set_property(TARGET ${_test_target} PROPERTY HORIZON_TEST_BENCHMARK true)
         if(_ocarina_test_CATEGORY STREQUAL "runtime")
             add_test(NAME ocarina.${_test_target}.benchmark
-                COMMAND $<TARGET_FILE:${_test_target}> --ci)
+                COMMAND $<TARGET_FILE:${_test_target}> --ci ${_ocarina_test_ARGS})
         else()
             add_test(NAME ocarina.${_test_target}.benchmark COMMAND $<TARGET_FILE:${_test_target}>)
         endif()
@@ -44,7 +52,7 @@ function(ocarina_add_test name)
                     set(_cases default)
                 endif()
                 foreach(_case ${_cases})
-                    set(_test_name "ocarina.${_test_target}.vulkan-compute")
+                    set(_test_name "${_test_prefix}.${_test_target}.vulkan-compute")
                     if(_case STREQUAL "default")
                         add_test(NAME ${_test_name} COMMAND $<TARGET_FILE:${_test_target}>)
                     else()
@@ -53,8 +61,11 @@ function(ocarina_add_test name)
                     endif()
                     set_tests_properties(${_test_name} PROPERTIES
                         WORKING_DIRECTORY "$<TARGET_FILE_DIR:${_test_target}>"
-                        LABELS "ocarina;vulkan-compute"
+                        LABELS "${_test_label};vulkan-compute"
                         RUN_SERIAL TRUE TIMEOUT 300)
+                    if(_ocarina_test_LOCAL_TRACE)
+                        set_tests_properties(${_test_name} PROPERTIES SKIP_RETURN_CODE 77)
+                    endif()
                 endforeach()
             endif()
         else()
@@ -83,6 +94,11 @@ target_compile_definitions(test-core-platform PRIVATE
     OC_PLATFORM_BACKEND_FILENAME="$<TARGET_FILE_NAME:ocarina-backend-vulkan-compute>")
 add_dependencies(test-core-platform ocarina-platform-fixture)
 ocarina_add_test(test-parsetype CATEGORY core SOURCES core/test_parse_type.cpp)
+add_test(NAME ocarina.test-core-parsetype.rejections
+    COMMAND "${CMAKE_COMMAND}" "-DPARSE_TYPE_TEST=$<TARGET_FILE:test-core-parsetype>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/core/check_parse_type_rejections.cmake")
+set_tests_properties(ocarina.test-core-parsetype.rejections PROPERTIES
+    LABELS "ocarina" RUN_SERIAL TRUE TIMEOUT 60)
 ocarina_add_test(test-precision-caps CATEGORY core SOURCES core/test_precision_caps.cpp)
 ocarina_add_test(test-half GPU CATEGORY core SOURCES core/test_half.cpp)
 ocarina_add_test(test-function-corrector CATEGORY core SOURCES
@@ -135,33 +151,39 @@ if(TARGET ocarina-backend-vulkan-compute)
 endif()
 ocarina_add_test(test-shared-array GPU CATEGORY runtime SOURCES runtime/test_shared_array.cpp)
 ocarina_add_test(test-slang-capabilities GPU CATEGORY runtime SOURCES runtime/test_slang_capabilities.cpp
-    CASES default ray-query)
+    CASES compute)
+target_link_libraries(test-runtime-slang-capabilities PRIVATE horizon::vulkan_headers)
 ocarina_add_test(test-backend-parity GPU CATEGORY runtime SOURCES runtime/test_backend_parity.cpp)
-ocarina_add_test(test-render-parity GPU CATEGORY runtime SOURCES runtime/test_render_parity.cpp)
 ocarina_add_test(test-codegen-parity-extended GPU CATEGORY runtime SOURCES runtime/test_codegen_parity_extended.cpp)
 ocarina_add_test(test-outline-equivalence GPU CATEGORY runtime SOURCES runtime/test_outline_equivalence.cpp
     CASES repeated-output returned-output control-flow-resources)
-ocarina_add_test(test-runtime-parity-extended GPU CATEGORY runtime SOURCES runtime/test_runtime_parity_extended.cpp)
-ocarina_add_test(test-compute-dispatch-parity GPU CATEGORY runtime SOURCES runtime/test_compute_dispatch_parity.cpp)
+ocarina_add_test(test-runtime-parity-extended GPU CATEGORY runtime SOURCES runtime/test_runtime_parity_extended.cpp
+    CASES compute)
+ocarina_add_test(test-compute-dispatch-parity GPU CATEGORY runtime SOURCES runtime/test_compute_dispatch_parity.cpp
+    CASES compute)
+target_link_libraries(test-runtime-compute-dispatch-parity PRIVATE horizon::vulkan_headers)
 ocarina_add_test(test-compute-math-parity GPU CATEGORY runtime SOURCES runtime/test_compute_math_parity.cpp)
-ocarina_add_test(test-compute-atomic-parity GPU CATEGORY runtime SOURCES runtime/test_compute_atomic_parity.cpp)
+ocarina_add_test(test-compute-atomic-parity GPU CATEGORY runtime SOURCES runtime/test_compute_atomic_parity.cpp
+    CASES compute int64)
+if(TARGET ocarina-backend-vulkan-compute)
+    set_tests_properties(ocarina.test-runtime-compute-atomic-parity.vulkan-compute.int64 PROPERTIES
+        LABELS "ocarina;vulkan-compute;int64-atomics" SKIP_RETURN_CODE 77)
+endif()
 ocarina_add_test(test-storage-parity GPU CATEGORY runtime SOURCES runtime/test_storage_parity.cpp)
 ocarina_add_test(test-stream-order GPU CATEGORY runtime SOURCES runtime/test_stream_order.cpp)
 ocarina_add_test(test-host-transfer-order GPU CATEGORY runtime SOURCES runtime/test_host_transfer_order.cpp)
-ocarina_add_test(test-accel-update GPU CATEGORY runtime SOURCES runtime/test_accel_update.cpp)
 ocarina_add_test(test-launch-latency BENCHMARK CATEGORY runtime SOURCES runtime/test_launch_latency.cpp)
-ocarina_add_test(test-backend-performance BENCHMARK CATEGORY runtime SOURCES runtime/test_backend_performance.cpp)
+ocarina_add_test(test-backend-performance BENCHMARK CATEGORY runtime SOURCES runtime/test_backend_performance.cpp
+    ARGS --no-raytracing)
 # Isolate capability regressions so one failure cannot hide later scenarios.
 ocarina_add_test(test-codegen-capability-probe GPU CATEGORY runtime SOURCES runtime/test_codegen_capability_probe.cpp
     CASES inverse2 determinant2 callable-storage callable-alias fmod-mod ulong-makers vector-narrow)
-ocarina_add_test(test-backend-capability-probe GPU CATEGORY runtime SOURCES runtime/test_backend_capability_probe.cpp
-    CASES empty-accel fast-build mesh-rebuild same-batch-accel multistream-ray-params)
 ocarina_add_test(test-resource-capability-probe GPU CATEGORY resources SOURCES resources/test_resource_capability_probe.cpp
     CASES texture-buffer-view-offset texture-narrow-channels texture-linear-fraction texture-uint-reinterpret)
 ocarina_add_test(test-float32-policy-probe GPU CATEGORY runtime SOURCES runtime/test_float32_policy_probe.cpp
     CASES float32-subnormal hyperbolic-stability half-intermediate half-inverse)
 if(TARGET ocarina-backend-vulkan-compute)
-    find_package(Python COMPONENTS Interpreter REQUIRED)
+    find_package(Python 3.11 COMPONENTS Interpreter REQUIRED)
     add_test(NAME ocarina.capability-audit
         COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/run_capability_audit.py"
             --runtime "$<TARGET_FILE_DIR:test-runtime-codegen-capability-probe>"
@@ -194,4 +216,15 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ci/$<CONFIG>/targets.json"
 
 if(HORIZON_BUILD_TRACE_MODE_TESTS)
     add_subdirectory(trace_modes)
+    add_dependencies(ocarina-tests ocarina-trace-mode-tests)
+endif()
+
+if(HORIZON_BUILD_WARP32_TESTS AND TARGET ocarina-backend-vulkan-compute)
+    foreach(test IN ITEMS slang-capabilities compute-dispatch-parity)
+        add_test(NAME horizon.warp32.${test}
+            COMMAND $<TARGET_FILE:test-runtime-${test}> --case warp32)
+        set_tests_properties(horizon.warp32.${test} PROPERTIES
+            WORKING_DIRECTORY "$<TARGET_FILE_DIR:test-runtime-${test}>"
+            LABELS "warp32-local" RUN_SERIAL TRUE TIMEOUT 300 SKIP_RETURN_CODE 77)
+    endforeach()
 endif()

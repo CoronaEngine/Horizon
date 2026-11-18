@@ -9,7 +9,7 @@ add_subdirectory(core)
 add_subdirectory(hotfix)
 
 # Keep the checks also used by CI available from CLion's All CTest runner.
-find_package(Python COMPONENTS Interpreter REQUIRED)
+find_package(Python 3.11 COMPONENTS Interpreter REQUIRED)
 add_test(NAME horizon.python.build_tools
     COMMAND "${Python_EXECUTABLE}" -B -m unittest discover
         -s "${HORIZON_BUILD_TOOLS_DIR}/tests" -p "test_*.py")

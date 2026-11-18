@@ -208,7 +208,7 @@ void scene(Device &device, vector<float4x4> transforms, bool update) {
 
 int main() {
     auto device = create_test_device();
-    if (skip_without_feature(device.supports_raytracing(), "ray tracing")) return 0;
+    if (skip_without_feature(device.supports_raytracing(), "ray tracing")) return 77;
     device.init_rtx();
     scene(device, {make_float4x4(1.f)}, false);
     scene(device, {translation<H>(0.f, -.65f, 0.f) * scale<H>(5.f, .2f, 4.f),
