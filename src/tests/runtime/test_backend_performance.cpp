@@ -386,8 +386,8 @@ int main(int argc, char *argv[]) {
     auto &context = RHIContext::instance();
     auto device = context.create_device();
     if (options.raytracing && !device.supports_raytracing()) {
-        require(!options.ci, "--ci requires ray queries unless --no-raytracing was explicitly selected");
-        std::cerr << "SKIPPED raytracing benchmark: device does not support ray queries" << std::endl;
+        require(!options.ci, "--ci requires ray tracing unless --no-raytracing was explicitly selected");
+        std::cerr << "SKIPPED raytracing benchmark: device does not support ray tracing" << std::endl;
         options.raytracing = false;
     }
     if (options.raytracing) device.init_rtx();

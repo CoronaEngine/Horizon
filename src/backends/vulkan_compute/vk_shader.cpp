@@ -3,39 +3,15 @@
 
 #include "vk_shader.h"
 #include "vk_compute_device.h"
-#include "vk_stream.h"
+#include "vk_ray_tracing_shader.h"
 
 namespace ocarina {
 
-// ── VkComputeShader ───────────────────────────────────────────────────────────
-
-VkComputeShader::VkComputeShader(VulkanComputeDevice *device,
-                                  const vector<uint32_t> &spirv,
-                                  const Function &f)
-    : VkShaderBase(device, f) {
-    workgroup_size_ = device_->workgroup_size(f);
-    VkPhysicalDeviceProperties properties{};
-    vkGetPhysicalDeviceProperties(device_->physical_device(), &properties);
-    const auto &counts = properties.limits.maxComputeWorkGroupCount;
-    max_group_count_ = make_uint3(counts[0], counts[1], counts[2]);
-    create_pipeline_layout();
-    create_pipeline(spirv);
-}
-
-VkComputeShader::~VkComputeShader() noexcept {
-    if (pipeline_ != VK_NULL_HANDLE)
-        vkDestroyPipeline(device_->logical_device(), pipeline_, nullptr);
-    if (layout_ != VK_NULL_HANDLE)
-        vkDestroyPipelineLayout(device_->logical_device(), layout_, nullptr);
-    if (params_uniform_pool_ != VK_NULL_HANDLE)
-        vkDestroyDescriptorPool(device_->logical_device(), params_uniform_pool_, nullptr);
-    if (params_buf_.buffer != VK_NULL_HANDLE)
-        device_->free_buffer(params_buf_);
-}
-
-void VkComputeShader::create_pipeline_layout() noexcept {
+VkShaderBase::VkShaderBase(VulkanComputeDevice *device, const Function &function, ShaderExecutionMode mode,
+                           const string &description)
+    : mode_(mode), description_(description), device_(device), parameter_layout_(function, description) {
     VkPushConstantRange pc_range{};
-    pc_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pc_range.stageFlags = parameter_stage();
     pc_range.offset     = 0;
     pc_range.size       = parameter_layout_.push_bytes();
 
@@ -48,18 +24,57 @@ void VkComputeShader::create_pipeline_layout() noexcept {
     OC_VK_CHECK(vkCreatePipelineLayout(device_->logical_device(), &ci, nullptr, &layout_));
 }
 
-void VkComputeShader::create_pipeline(const vector<uint32_t> &spirv) noexcept {
+VkShaderBase::~VkShaderBase() noexcept {
+    if (pipeline_ != VK_NULL_HANDLE)
+        vkDestroyPipeline(device_->logical_device(), pipeline_, nullptr);
+    if (layout_ != VK_NULL_HANDLE)
+        vkDestroyPipelineLayout(device_->logical_device(), layout_, nullptr);
+    if (params_uniform_pool_ != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(device_->logical_device(), params_uniform_pool_, nullptr);
+    if (params_buf_.buffer != VK_NULL_HANDLE)
+        device_->free_buffer(params_buf_);
+}
+
+VkPipelineBindPoint VkShaderBase::bind_point() const noexcept {
+    return mode_ == ShaderExecutionMode::RayTracingPipeline ?
+               VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR : VK_PIPELINE_BIND_POINT_COMPUTE;
+}
+
+VkPipelineStageFlagBits VkShaderBase::access_stage() const noexcept {
+    return mode_ == ShaderExecutionMode::RayTracingPipeline ?
+               VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+}
+
+VkShaderStageFlagBits VkShaderBase::parameter_stage() const noexcept {
+    return mode_ == ShaderExecutionMode::RayTracingPipeline ? VK_SHADER_STAGE_RAYGEN_BIT_KHR : VK_SHADER_STAGE_COMPUTE_BIT;
+}
+
+VkPipelineShaderStageCreateInfo VkShaderBase::create_stage(const VkShaderModuleCode &module) const noexcept {
     VkShaderModuleCreateInfo smi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    smi.codeSize = spirv.size() * 4;
-    smi.pCode    = spirv.data();
+    smi.codeSize = module.spirv.size() * 4;
+    smi.pCode    = module.spirv.data();
     VkShaderModule shader_mod = VK_NULL_HANDLE;
     OC_VK_CHECK(vkCreateShaderModule(device_->logical_device(), &smi, nullptr, &shader_mod));
 
     VkPipelineShaderStageCreateInfo stage{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-    stage.stage               = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.stage               = module.stage;
     stage.module              = shader_mod;
-    stage.pName               = "main";
+    stage.pName               = module.entry.c_str();
 
+    return stage;
+}
+
+VkComputeShader::VkComputeShader(VulkanComputeDevice *device, const VkShaderProgram &program, const Function &function,
+                                 const string &description, uint3 workgroup_size)
+    : VkShaderBase(device, function, program.execution_mode, description), function_(function),
+      workgroup_size_(workgroup_size) {
+    OC_ERROR_IF(program.modules.size() != 1 || program.modules.front().stage != VK_SHADER_STAGE_COMPUTE_BIT,
+                "Expected one compute shader module for ", description);
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(device_->physical_device(), &properties);
+    const auto &counts = properties.limits.maxComputeWorkGroupCount;
+    max_group_count_ = make_uint3(counts[0], counts[1], counts[2]);
+    auto stage = create_stage(program.modules.front());
     VkComputePipelineCreateInfo pci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     pci.stage  = stage;
     pci.layout = layout_;
@@ -69,24 +84,19 @@ void VkComputeShader::create_pipeline(const vector<uint32_t> &spirv) noexcept {
     OC_VK_CHECK(vkCreateComputePipelines(
         device_->logical_device(), VK_NULL_HANDLE, 1u, &pci, nullptr, &pipeline_));
     if (capture_statistics)
-        device_->report_pipeline_statistics(pipeline_, function_.description());
-    vkDestroyShaderModule(device_->logical_device(), shader_mod, nullptr);
+        device_->report_pipeline_statistics(pipeline_, description);
+    vkDestroyShaderModule(device_->logical_device(), stage.module, nullptr);
 }
 
-void VkComputeShader::compute_fit_size() noexcept {
-    // numthreads is compiled into SPIR-V; dispatch must use that same size.
-    workgroup_size_ = device_->workgroup_size(function_);
-}
-
-void VkComputeShader::launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept {
-    device_->immediate_submit([&](VkCommandBuffer cb) { dispatch(cb, cmd); });
-}
-
-void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, VkDeviceAddress params,
-                               bool bind_pipeline, VkDescriptorSet uniform_set, uint32_t uniform_offset) noexcept {
+void VkShaderBase::launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept {
     const uint3 dim = cmd->dispatch_dim();
     if (!dim.x || !dim.y || !dim.z) return;
-    auto data = cmd->argument_data();
+    device_->immediate_submit([&](VkCommandBuffer cb) { dispatch(cb, dim, cmd->argument_data()); });
+}
+
+void VkShaderBase::dispatch(VkCommandBuffer cb, uint3 dim, span<const std::byte> data, VkDeviceAddress params,
+                            bool bind_pipeline, VkDescriptorSet uniform_set, uint32_t uniform_offset) noexcept {
+    if (!dim.x || !dim.y || !dim.z) return;
     OC_ERROR_IF(data.size_bytes() < parameter_layout_.extent,
                 "Vulkan shader argument data is smaller than its parameter layout");
     if (!parameters_inline() && !params && !data.empty()) {
@@ -113,15 +123,16 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
             }
         }
         void *mapped = nullptr;
-        vmaMapMemory(device_->vma_allocator(), params_buf_.alloc, &mapped);
+        OC_VK_CHECK(vmaMapMemory(device_->vma_allocator(), params_buf_.alloc, &mapped));
         memcpy(mapped, data.data(), data.size_bytes());
+        OC_VK_CHECK(vmaFlushAllocation(device_->vma_allocator(), params_buf_.alloc, 0, data.size_bytes()));
         vmaUnmapMemory(device_->vma_allocator(), params_buf_.alloc);
     }
 
     if (bind_pipeline) {
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
+        vkCmdBindPipeline(cb, bind_point(), pipeline_);
         VkDescriptorSet gs = device_->global_desc_set();
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &gs, 0, nullptr);
+        vkCmdBindDescriptorSets(cb, bind_point(), layout_, 0, 1, &gs, 0, nullptr);
     }
 
     if (parameters_uniform()) {
@@ -132,7 +143,7 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
         OC_ERROR_IF(selected == VK_NULL_HANDLE, "NRD UBO parameter descriptor is missing");
         // Dynamic offsets are per-dispatch state even if the pipeline and set0
         // remain bound. Never update a descriptor already used by pending work.
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 1u, 1u, &selected, 1u, &offset);
+        vkCmdBindDescriptorSets(cb, bind_point(), layout_, 1u, 1u, &selected, 1u, &offset);
     }
 
     uint8_t pc[VkShaderParameterLayout::max_push_bytes]{};
@@ -145,12 +156,25 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
     }
     memcpy(pc + VkShaderParameterLayout::dim_offset, &dim, 12);
 
-    uint3 wgs = workgroup_size_;
+    record_dispatch(cb, dim, pc);
+}
+
+void VkShaderBase::dispatch_barrier(VkCommandBuffer cb) const noexcept {
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cb, access_stage(), device_->shader_stages() | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+}
+
+void VkComputeShader::record_dispatch(VkCommandBuffer cb, uint3 dim, uint8_t *pc) const noexcept {
+    const uint3 wgs = workgroup_size_;
     uint3 grid = function_.grid_dim();
     // ray tracing launches exactly dispatch_dim rays and ignores compute launch
     // configuration. Ray queries run in a compute pipeline here, so derive
     // enough groups to cover that same raygen domain even for a configured grid.
-    if (function_.is_raytracing_kernel() || !grid.x || !grid.y || !grid.z)
+    if (execution_mode() == ShaderExecutionMode::ComputeRayQuery || function_.is_raytracing_kernel() || !grid.x || !grid.y || !grid.z)
         grid = make_uint3(dim.x / wgs.x + uint(dim.x % wgs.x != 0u),
                           dim.y / wgs.y + uint(dim.y % wgs.y != 0u),
                           dim.z / wgs.z + uint(dim.z % wgs.z != 0u));
@@ -167,14 +191,11 @@ void VkComputeShader::dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, V
             }
 }
 
-// ── VkShaderFactory ───────────────────────────────────────────────────────────
-
-VkShaderBase *VkShaderFactory::create(VulkanComputeDevice *device,
-                                       const vector<uint32_t> &spirv,
-                                       const Function &f) {
-    // Inline ray queries execute from the same compute entry point as other DSL
-    // kernels, so there are no missing miss/closest-hit entry points or SBT.
-    return new VkComputeShader(device, spirv, f);
+VkShaderBase *VkShaderFactory::create(VulkanComputeDevice *device, const VkShaderProgram &program,
+                                      const Function &function, const string &description, uint3 workgroup_size) {
+    if (program.execution_mode == ShaderExecutionMode::RayTracingPipeline)
+        return new VkRayTracingShader(device, program, function, description);
+    return new VkComputeShader(device, program, function, description, workgroup_size);
 }
 
 }// namespace ocarina

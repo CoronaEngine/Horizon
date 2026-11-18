@@ -1110,7 +1110,17 @@ void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y
 
 // ── Ray tracing helpers ───────────────────────────────────────────────────────
 
-struct OcHitInfo { uint inst_id; uint prim_id; float2 bary; float t; };
+#if OC_RAY_QUERY || OC_RAY_PIPELINE
+TriangleHit oc_trace_miss() {
+    TriangleHit hit;
+    hit.inst_id = 0xffffffffu;
+    hit.prim_id = 0xffffffffu;
+    hit.bary = float2(0.f);
+    return hit;
+}
+#endif
+
+#if OC_RAY_QUERY
 
 bool oc_trace_occlusion(uint64_t handle, Ray ray) {
     if (handle == 0) return false;
@@ -1122,13 +1132,7 @@ bool oc_trace_occlusion(uint64_t handle, Ray ray) {
 }
 
 TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
-    if (handle == 0) {
-        TriangleHit miss;
-        miss.inst_id = 0xffffffffu;
-        miss.prim_id = 0xffffffffu;
-        miss.bary = float2(0, 0);
-        return miss;
-    }
+    if (handle == 0) return oc_trace_miss();
     RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
     RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
     q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
@@ -1140,12 +1144,48 @@ TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
         float2 uv = q.CommittedTriangleBarycentrics();
         h.bary = float2(1.0f - uv.x - uv.y, uv.x);
     } else {
-        h.inst_id = 0xFFFFFFFFu;
-        h.prim_id = 0xFFFFFFFFu;
-        h.bary    = float2(0, 0);
+        h = oc_trace_miss();
     }
     return h;
 }
+
+#elif OC_RAY_PIPELINE
+// Only triangle hit groups exist. Devices enabling primitive culling may
+// explicitly skip AABBs, too. The mask and hit-group/miss indexes are shared
+// by closest and occlusion traces.
+TriangleHit oc_trace_triangle(uint64_t handle, Ray ray, uint flags) {
+    TriangleHit hit = oc_trace_miss();
+    if (handle != 0) {
+#if OC_PRIMITIVE_CULLING
+        flags |= RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
+#endif
+        TraceRay(RaytracingAccelerationStructure(handle), flags | RAY_FLAG_FORCE_OPAQUE,
+                 1u, 0u, 0u, 0u, oc_native_ray(ray), hit);
+    }
+    return hit;
+}
+
+TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
+    return oc_trace_triangle(handle, ray, RAY_FLAG_NONE);
+}
+
+bool oc_trace_occlusion(uint64_t handle, Ray ray) {
+    return oc_trace_triangle(handle, ray, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH).inst_id != 0xffffffffu;
+}
+
+[shader("closesthit")]
+void ocClosestHit(inout TriangleHit hit, BuiltInTriangleIntersectionAttributes attrib) {
+    hit.inst_id = InstanceID();
+    hit.prim_id = PrimitiveIndex();
+    float2 uv = attrib.barycentrics;
+    hit.bary = float2(1.f - uv.x - uv.y, uv.x);
+}
+
+[shader("miss")]
+void ocMiss(inout TriangleHit hit) {
+    hit = oc_trace_miss();
+}
+#endif
 
 // GEMM markers are placeholders; gemm_commands emits the arithmetic.
 void oc_tensor_gemm<uint Id>() {}

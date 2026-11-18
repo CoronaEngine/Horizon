@@ -3,11 +3,13 @@
 
 #include "ast_to_slang_source.h"
 #include "ast/expression.h"
+#include "ast/function_requirements.h"
 #include "core/util/util.h"
 #include "core/type_system/precision_policy.h"
 #include "core/type_system/type_desc.h"
 #include "vk_compute_device.h"
 #include "vk_shader_parameters.h"
+#include "trace_requirements.h"
 #include <algorithm>
 #include <cmath>
 
@@ -216,14 +218,33 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
 
 // ── visit(CallExpr) ──────────────────────────────────────────────────────────
 
+EmittedSlangSource AstToSlangSource::generate(const Function &function, const ShaderCompilationContext &context,
+                                              bool obfuscation, bool supports_warp32) noexcept {
+    // AST and type hashes are memoized lazily. Different compiler/device
+    // instances can share the same function graph and interned types.
+    static std::mutex emission_mutex;
+    std::lock_guard lock(emission_mutex);
+    AstToSlangSource emitter{context, obfuscation, supports_warp32};
+    auto requirements = analyze_function_requirements(function);
+    OC_ERROR_IF(requirements.uses_trace && context.execution_mode == ShaderExecutionMode::Compute,
+                "Slang compute program contains trace operations");
+    if (emitter.native_pipeline() && !native_trace_compatible(requirements)) {
+        OC_ERROR("Slang ray generation is incompatible with ", requirements.diagnostic_sources.front());
+    }
+    emitter.reachable_functions_ = std::move(requirements.reachable_functions);
+    emitter.emit(function);
+    return {string(emitter.scratch().view()), function.func_name(), emitter.requires_half_rte_};
+}
+
 void AstToSlangSource::emit(const Function &function) noexcept {
+    if (!reachable_functions_.contains(&function)) return;
     if (!supports_warp32_) {
         // Native source can hide subgroup operations from the AST checks.
         function.for_each_header([](string_view) {
             OC_ERROR("Vulkan device without warp32 support cannot validate custom shader headers");
         });
     }
-    AstToCppSource::emit(function);
+    AstToCppSource::emit(function, function.is_kernel() ? context_.description : function.description());
 }
 
 void AstToSlangSource::visit(const CallExpr *expr) noexcept {
@@ -1494,7 +1515,7 @@ void AstToSlangSource::_emit_struct_name(const Type *type) noexcept {
 // aggregate layout rules.
 
 void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
-    const VkShaderParameterLayout layout{f};
+    const VkShaderParameterLayout layout{f, context_.description};
     inline_parameters_ = layout.is_inline();
     uniform_parameter_bytes_ = layout.uniform_bytes;
     current_scratch() << "struct OCPushConstants {";
@@ -1555,6 +1576,7 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         current_scratch() << "uint oc_nrd_uniform_word(uint offset) { return oc_nrd_param_words[offset / 16u][(offset / 4u) % 4u]; }";
         _emit_newline();
     }
+    if (native_pipeline()) return;
     // DSL blockIdx/threadIdx are visible in callables too; mirror them as statics.
     current_scratch() << "static uint3 oc_group_id;";
     _emit_newline();
@@ -1574,7 +1596,8 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         _emit_newline();
         _emit_indent();
         auto grid = f.grid_dim();
-        if (grid.x && grid.y && grid.z)
+        if (context_.execution_mode == ShaderExecutionMode::Compute && !f.is_raytracing_kernel() &&
+            grid.x && grid.y && grid.z)
             current_scratch() << ocarina::format("uint3 grid = uint3({}u, {}u, {}u);", grid.x, grid.y, grid.z);
         else
             current_scratch() << "uint3 grid = d_dim / block + uint3(d_dim % block != uint3(0u));";
@@ -1627,13 +1650,12 @@ void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
                                   precision_policy_name(policy.policy),
                                   policy.allow_real_in_storage ? "true" : "false"));
     _emit_newline();
-    {
-        // SlangShaderCompiler::compile() patches this exact string with the real
-        // workgroup size.
-        current_scratch() << "[shader(\"compute\")] [numthreads(1, 1, 1)]";
+    if (native_pipeline()) {
+        current_scratch() << "[shader(\"raygeneration\")]";
+    } else {
+        current_scratch() << "[shader(\"compute\")] [numthreads(OC_WORKGROUP_X, OC_WORKGROUP_Y, OC_WORKGROUP_Z)]";
     }
     _emit_newline();
-    // SlangShaderCompiler looks the entry point up as "main".
     current_scratch() << "void main";
     _emit_arguments(f);
     _emit_body(f);
@@ -1643,7 +1665,7 @@ void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
 
 void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
     current_scratch() << "(";
-    if (f.is_kernel()) {
+    if (f.is_kernel() && !native_pipeline()) {
         // Kernel arguments come from the push-constant blob, not entry parameters.
         current_scratch() << "uint3 oc_dispatch_thread_id : SV_DispatchThreadID, "
                              "uint3 oc_group_id_in : SV_GroupID, "
@@ -1652,16 +1674,15 @@ void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
         for (const auto &v : f.all_arguments()) {
             _emit_argument(v);
         }
-        Variable dispatch_dim = const_cast<Function &>(f).create_variable(Type::of<uint3>(), Variable::Tag::LOCAL, "d_dim");
-        _emit_argument(dispatch_dim);
-        Variable dispatch_idx = const_cast<Function &>(f).create_variable(Type::of<uint3>(), Variable::Tag::LOCAL, "d_idx");
-        _emit_variable_define(dispatch_idx);
+        current_scratch() << "uint3 d_dim,";
+        _emit_newline();
+        current_scratch() << "uint3 d_idx";
     }
     current_scratch() << ")";
 }
 
 void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
-    if (f.is_kernel()) {
+    if (f.is_kernel() && !native_pipeline()) {
         _emit_indent();
         current_scratch() << "uint3 oc_group_base = uint3(oc_push.group_base_x, oc_push.group_base_y, oc_push.group_base_z);";
         _emit_newline();
@@ -1681,7 +1702,7 @@ void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
         current_scratch() << "if (any(d_idx >= d_dim)) { return; }";
         _emit_newline();
         _emit_kernel_argument_loads(f);
-    } else if (f.is_raytracing_kernel()) {
+    } else if (f.is_kernel()) {
         _emit_indent();
         current_scratch() << "uint3 d_idx = DispatchRaysIndex();";
         _emit_newline();
@@ -1831,11 +1852,7 @@ void AstToSlangSource::_emit_kernel_argument_loads(const Function &f) noexcept {
 void AstToSlangSource::_emit_builtin_var(Variable v) noexcept {
     using Tag = Variable::Tag;
     bool group_scoped = v.tag() == Tag::BLOCK_IDX || v.tag() == Tag::THREAD_IDX || v.tag() == Tag::THREAD_ID;
-    // This backend emits GLCompute plus inline ray queries for both logical
-    // kernel kinds. Only an explicit compute-workgroup requirement relaxes the
-    // generic logical-raygen guard; raytracing/argument/grid flags stay intact.
-    if (group_scoped && current_function().is_raytracing_kernel() &&
-        !current_function().requires_ray_query_compute_workgroups()) {
+    if (group_scoped && native_pipeline()) {
         OC_ERROR("Slang raygen shaders have no workgroup: block_idx/thread_idx/thread_id are unavailable");
     }
     _emit_type_name(v.type());

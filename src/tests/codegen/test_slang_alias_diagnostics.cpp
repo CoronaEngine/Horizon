@@ -1,4 +1,5 @@
 #include "tests/backend_test.h"
+#include "tests/codegen/slang_diagnostic_source.h"
 #include "dsl/dsl.h"
 #include "rhi/context.h"
 #include <slang.h>
@@ -50,6 +51,7 @@ bool compile_source(const string &source, string &diagnostic_text) {
 int main() {
     // The annotation still needs physical line boundaries when other source is compacted.
     Env::set_code_obfuscation(true);
+    test::SlangDiagnosticSource diagnostic{"slang-alias"};
     auto device = create_test_device();
     Kernel kernel = [](BufferVar<float> out) {
         Callable mutate = [](Float &first, Float &second) {
@@ -71,7 +73,7 @@ int main() {
         out.write(1u, mutate(first.value, second.value));
     };
     auto shader = device.compile(kernel, "slang-reference-alias-diagnostics");
-    string source = RHIContext::instance().read_global_cache(kernel.function()->func_name() + ".slang");
+    string source = diagnostic.compute_main();
     string diagnostics;
     if (source.empty() || !compile_source(source, diagnostics)) {
         std::cerr << "generated reference calls failed strict alias diagnostics\n" << diagnostics << std::endl;

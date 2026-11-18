@@ -328,7 +328,7 @@ void test_async_compile_and_stream_destruction(Device &device) {
 
 int main() {
     auto device = create_test_device();
-    const bool raytracing = !skip_without_feature(device.supports_raytracing(), "ray queries");
+    const bool raytracing = !skip_without_feature(device.supports_raytracing(), "ray tracing");
     if (raytracing) {
         device.init_rtx();
         test_ray_scene_and_clear(device);

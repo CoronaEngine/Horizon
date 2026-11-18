@@ -15,6 +15,7 @@
 #include "params.h"
 #include "graphics_descriptions.h"
 #include "pipeline_state.h"
+#include "shader_compile_options.h"
 
 namespace ocarina {
 
@@ -104,6 +105,10 @@ public:
         }
         [[nodiscard]] virtual bool supports_buffer_export() const noexcept { return false; }
         [[nodiscard]] virtual bool supports_raytracing() const noexcept { return false; }
+        [[nodiscard]] virtual TraceCapabilities trace_capabilities() const noexcept {
+            // The legacy capability flag represented inline ray queries.
+            return {supports_raytracing(), false};
+        }
         [[nodiscard]] virtual bool supports_int64_atomics() const noexcept { return false; }
         [[nodiscard]] virtual BufferExportMetadata buffer_export_metadata(handle_ty) const { return {}; }
         // Caller has completed all accesses in the previous owner before this
@@ -121,6 +126,15 @@ public:
         virtual void destroy_texture3d(handle_ty handle) noexcept = 0;
         virtual void destroy_texture2d(handle_ty handle) noexcept = 0;
         [[nodiscard]] virtual handle_ty create_shader(const Function &function) noexcept = 0;
+        [[nodiscard]] virtual handle_ty create_shader(const Function &function, ShaderCompileOptions options) noexcept {
+            OC_ERROR_IF(options.trace_mode != TraceMode::Auto,
+                        "This device backend does not support explicit shader trace modes");
+            return create_shader(function);
+        }
+        [[nodiscard]] virtual handle_ty create_shader(
+            const Function &function, ShaderCompileOptions options, const string &) noexcept {
+            return create_shader(function, options);
+        }
         [[nodiscard]] virtual handle_ty create_shader_from_file(const std::string &file_name, ShaderType shader_type, const std::set<string> &options) noexcept = 0;
         virtual void destroy_shader(handle_ty handle) noexcept = 0;
         [[nodiscard]] virtual handle_ty create_accel(AccelUsageTag usage_tag) noexcept = 0;
@@ -233,7 +247,11 @@ public:
     }
 
     [[nodiscard]] bool supports_buffer_export() const noexcept { return impl_->supports_buffer_export(); }
-    [[nodiscard]] bool supports_raytracing() const noexcept { return impl_->supports_raytracing(); }
+    [[nodiscard]] TraceCapabilities trace_capabilities() const noexcept { return impl_->trace_capabilities(); }
+    [[nodiscard]] bool supports_raytracing() const noexcept {
+        const auto capabilities = trace_capabilities();
+        return capabilities.ray_query || capabilities.ray_tracing_pipeline;
+    }
     [[nodiscard]] bool supports_int64_atomics() const noexcept { return impl_->supports_int64_atomics(); }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const {
         return impl_->buffer_export_metadata(handle);
@@ -273,14 +291,23 @@ public:
     [[nodiscard]] Texture3D create_texture(Image *image_resource, const TextureViewCreation &texture_view, const string &desc = "") const noexcept;
     template<typename T>
     [[nodiscard]] auto compile(const Kernel<T> &kernel, const string &shader_desc = "", ShaderTag tag = CS) const noexcept {
+        return compile(kernel, shader_desc, tag, {});
+    }
+    template<typename T>
+    [[nodiscard]] auto compile(const Kernel<T> &kernel, const string &shader_desc, ShaderTag tag,
+                               ShaderCompileOptions options) const noexcept {
         OC_DEBUG_FORMAT("prepare shader: {}", shader_desc.c_str());
-        kernel.function()->set_description(shader_desc);
-        return create<Shader<T>>(kernel.function(), tag);
+        return create<Shader<T>>(kernel.function(), tag, options, shader_desc);
     }
     template<typename T>
     [[nodiscard]] auto async_compile(Kernel<T> &&kernel, const string &shader_desc = "", ShaderTag tag = CS) const noexcept {
-        return async([=, this, kernel = ocarina::move(kernel)] {
-            return compile(kernel, shader_desc, tag);
+        return async_compile(ocarina::move(kernel), shader_desc, tag, {});
+    }
+    template<typename T>
+    [[nodiscard]] auto async_compile(Kernel<T> &&kernel, const string &shader_desc, ShaderTag tag,
+                                     ShaderCompileOptions options) const noexcept {
+        return async([this, kernel = ocarina::move(kernel), shader_desc, tag, options] {
+            return compile(kernel, shader_desc, tag, options);
         });
     }
 

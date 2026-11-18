@@ -98,6 +98,11 @@ set_tests_properties(ocarina.test-core-function-corrector.rejected-captures PROP
 ocarina_add_test(test-trait CATEGORY core SOURCES core/test_trait.cpp)
 
 # Codegen and shader interface tests.
+ocarina_add_test(test-trace-requirements CATEGORY codegen SOURCES
+    codegen/test_trace_requirements.cpp
+    ../backends/vulkan_compute/ast_to_slang_source.cpp)
+target_link_libraries(test-codegen-trace-requirements PRIVATE ocarina-generator
+    horizon::vulkan_headers vulkan-memory-allocator::vulkan-memory-allocator)
 ocarina_add_test(test-shader-argument-pack CATEGORY codegen SOURCES codegen/test_shader_argument_pack.cpp)
 ocarina_add_test(test-shader-parameter-policy GPU CATEGORY codegen SOURCES codegen/test_shader_parameter_policy.cpp)
 ocarina_add_test(test-slang-conversions GPU CATEGORY codegen SOURCES codegen/test_slang_conversions.cpp)

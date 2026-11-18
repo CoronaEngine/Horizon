@@ -46,14 +46,14 @@ uint64_t &profile_batch_serial() {
 }
 void memory_barrier(VkCommandBuffer cb, bool host_read = false) {
     VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
     VkPipelineStageFlags destination = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     if (host_read) {
         destination |= VK_PIPELINE_STAGE_HOST_BIT;
         barrier.dstAccessMask |= VK_ACCESS_HOST_READ_BIT;
     }
-    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, destination,
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT, destination,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 }
@@ -532,9 +532,9 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
         // Core timing starts after Pack's producer/consumer barrier below.
         if (!starts_nrd)
             vkCmdWriteTimestamp(batch.cb, starts_edsl_filter || starts_intervals ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query);
+                shader->access_stage(), queries->pool, query);
     }
-    shader->dispatch(batch.cb, command, address, bind_pipeline, parameter_uniform_set, parameter_uniform_offset);
+    shader->dispatch(batch.cb, command->dispatch_dim(), data, address, bind_pipeline, parameter_uniform_set, parameter_uniform_offset);
     if (ends_interval_nrd) {
         OC_ERROR_IF(!queries || !queries->filter_open || queries->interval_phase != 1u,
             "REBLUR interval GPU profiling encountered an unmatched NRD end");
@@ -556,17 +556,11 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
         // matching NativeReblur's nrd_timer before its Unpack barrier. All
         // intervening clears, dispatches and barriers remain inside the pair.
         vkCmdWriteTimestamp(batch.cb, ends_nrd ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT :
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query + 1u);
+            shader->access_stage(), queries->pool, query + 1u);
     }
     if (dispatch_mode)
-        vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, queries->pool, query + 1u);
-    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
-                            VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier(batch.cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 1, &barrier, 0, nullptr, 0, nullptr);
+        vkCmdWriteTimestamp(batch.cb, shader->access_stage(), queries->pool, query + 1u);
+    shader->dispatch_barrier(batch.cb);
     if (starts_intervals) {
         vkCmdWriteTimestamp(batch.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
             queries->pool, queries->interval_base + 1u);
@@ -684,6 +678,7 @@ VkDeviceAddress VkComputeStream::stage_parameters(const void *data, size_t size,
         *uniform_offset = uint32_t(offset);
     }
     memcpy(static_cast<std::byte *>(arena->mapped) + offset, data, size);
+    OC_VK_CHECK(vmaFlushAllocation(device_->vma_allocator(), arena->allocation.alloc, offset, size));
     auto address = arena->allocation.address + offset;
     arena->used = offset + bytes;
     return address;

@@ -11,6 +11,20 @@ add_dependencies(horizon-tests horizon-test-core-trace-mode-selection)
 add_test(NAME horizon.core.trace_mode_selection COMMAND horizon-test-core-trace-mode-selection)
 set_tests_properties(horizon.core.trace_mode_selection PROPERTIES LABELS "horizon;cpu")
 
+add_executable(horizon-test-core-trace-capabilities test_trace_capabilities.cpp)
+target_include_directories(horizon-test-core-trace-capabilities PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-test-core-trace-capabilities PRIVATE cxx_std_20)
+add_dependencies(horizon-tests horizon-test-core-trace-capabilities)
+add_test(NAME horizon.core.trace_capabilities COMMAND horizon-test-core-trace-capabilities)
+set_tests_properties(horizon.core.trace_capabilities PROPERTIES LABELS "horizon;cpu")
+
+add_executable(horizon-test-core-trace-dispatch-limits test_trace_dispatch_limits.cpp)
+target_include_directories(horizon-test-core-trace-dispatch-limits PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-test-core-trace-dispatch-limits PRIVATE cxx_std_20)
+add_dependencies(horizon-tests horizon-test-core-trace-dispatch-limits)
+add_test(NAME horizon.core.trace_dispatch_limits COMMAND horizon-test-core-trace-dispatch-limits)
+set_tests_properties(horizon.core.trace_dispatch_limits PROPERTIES LABELS "horizon;cpu")
+
 if(HORIZON_BUILD_OCARINA)
     add_executable(horizon-test-core-function-requirements test_function_requirements.cpp)
     target_include_directories(horizon-test-core-function-requirements PRIVATE "${PROJECT_SOURCE_DIR}/src")
@@ -19,6 +33,10 @@ if(HORIZON_BUILD_OCARINA)
     add_dependencies(horizon-tests horizon-test-core-function-requirements)
     add_test(NAME horizon.core.function_requirements COMMAND horizon-test-core-function-requirements)
     set_tests_properties(horizon.core.function_requirements PROPERTIES LABELS "horizon;cpu")
+
+    add_library(horizon-test-core-shader-options-api OBJECT test_shader_compile_options_api.cpp)
+    target_link_libraries(horizon-test-core-shader-options-api PRIVATE ocarina-include ocarina-rhi)
+    add_dependencies(horizon-tests horizon-test-core-shader-options-api)
 endif()
 
 # Exercise the real allocator across a DLL boundary without engine dependencies.

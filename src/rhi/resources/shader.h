@@ -294,6 +294,7 @@ public:
         virtual ~Impl() = default;
         virtual void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept = 0;
         virtual void compute_fit_size() noexcept {};
+        [[nodiscard]] virtual ShaderExecutionMode execution_mode() const noexcept { return ShaderExecutionMode::Compute; }
         uint8_t get_push_constant_size() const noexcept {
             return push_constant_size_;// Default implementation, can be overridden
         }
@@ -315,20 +316,35 @@ public:
     using Impl = typename Shader<>::Impl;
 
 private:
+    friend class Device;
+
     ShaderTag shader_tag_{};
     ocarina::shared_ptr<Function> function_{};
+    ShaderCompileOptions requested_options_{};
+
+    Shader(Device::Impl *device, ocarina::shared_ptr<Function> function, ShaderTag tag,
+           ShaderCompileOptions options, const string &shader_desc) noexcept
+        : ShaderBase(device, SHADER, device->create_shader(*function, options, shader_desc)),
+          shader_tag_(tag), function_(ocarina::move(function)), requested_options_(options) {}
 
 public:
     Shader() = default;
     using ShaderBase::ShaderBase;
     Shader(Device::Impl *device, ocarina::shared_ptr<Function> function, ShaderTag tag) noexcept
-        : ShaderBase(device, SHADER,
-                      device->create_shader(*function)),
-          shader_tag_(tag), function_(ocarina::move(function)) {}
+        : Shader(device, ocarina::move(function), tag, {}) {}
+    Shader(Device::Impl *device, ocarina::shared_ptr<Function> function, ShaderTag tag,
+           ShaderCompileOptions options) noexcept
+        : ShaderBase(device, SHADER, device->create_shader(*function, options)),
+          shader_tag_(tag), function_(ocarina::move(function)), requested_options_(options) {}
 
     [[nodiscard]] const Impl *impl() const noexcept { return reinterpret_cast<const Impl *>(handle_); }
     [[nodiscard]] Impl *impl() noexcept { return reinterpret_cast<Impl *>(handle_); }
     [[nodiscard]] ShaderTag shader_tag() const noexcept { return shader_tag_; }
+    [[nodiscard]] ShaderCompileOptions requested_options() const noexcept { return requested_options_; }
+    [[nodiscard]] ShaderExecutionMode execution_mode() const noexcept {
+        if (!valid() || handle_ == 0u || handle_ == InvalidUI64) return ShaderExecutionMode::Compute;
+        return impl()->execution_mode();
+    }
     void compute_fit_size() noexcept { impl()->compute_fit_size(); }
     [[nodiscard]] bool has_function() const noexcept { return function_ != nullptr; }
     [[nodiscard]] ShaderInvoke operator()(prototype_to_shader_invocation_t<Args> &&...args) const noexcept {

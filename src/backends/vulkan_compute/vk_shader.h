@@ -1,76 +1,63 @@
-//
-//
-
 #pragma once
 
-#include "core/stl.h"
 #include "rhi/resources/shader.h"
-#include "util.h"
 #include "vk_shader_parameters.h"
-#include <vulkan/vulkan.h>
+#include "vk_shader_program.h"
 
 namespace ocarina {
 
-class VulkanComputeDevice;
-
-// ── Base class ────────────────────────────────────────────────────────────────
-
 class VkShaderBase : public Shader<>::Impl {
+private:
+    const ShaderExecutionMode mode_;
+    const string description_;
+    // Immediate launches run under the device submission lock. Streams use batch arenas.
+    VkBufferAllocation params_buf_{};
+    VkDescriptorPool params_uniform_pool_{};
+    VkDescriptorSet params_uniform_set_{};
+
 protected:
-    VulkanComputeDevice *device_{};
-    const Function      &function_;
+    VulkanComputeDevice *device_;
     const VkShaderParameterLayout parameter_layout_;
+    VkPipelineLayout layout_{};
+    VkPipeline pipeline_{};
+
+    VkShaderBase(VulkanComputeDevice *device, const Function &function, ShaderExecutionMode mode,
+                 const string &description);
+    [[nodiscard]] VkPipelineShaderStageCreateInfo create_stage(const VkShaderModuleCode &module) const noexcept;
+    [[nodiscard]] VkShaderStageFlagBits parameter_stage() const noexcept;
+    virtual void record_dispatch(VkCommandBuffer cb, uint3 dim, uint8_t *push_constants) const noexcept = 0;
 
 public:
-    VkShaderBase(VulkanComputeDevice *device, const Function &f)
-        : device_(device), function_(f), parameter_layout_(f) {}
-    ~VkShaderBase() override = default;
-
+    ~VkShaderBase() noexcept override;
+    [[nodiscard]] ShaderExecutionMode execution_mode() const noexcept override { return mode_; }
+    [[nodiscard]] VkPipelineStageFlagBits access_stage() const noexcept;
+    [[nodiscard]] VkPipelineBindPoint bind_point() const noexcept;
     [[nodiscard]] bool parameters_inline() const noexcept { return parameter_layout_.is_inline(); }
     [[nodiscard]] bool parameters_uniform() const noexcept { return parameter_layout_.uniform_bytes != 0u; }
-    [[nodiscard]] const string &description() const noexcept { return function_.description(); }
+    [[nodiscard]] const string &description() const noexcept { return description_; }
 
-    // Called by VkComputeCommandVisitor::visit(ShaderDispatchCommand*)
-    virtual void dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, VkDeviceAddress params = 0,
-                          bool bind_pipeline = true, VkDescriptorSet uniform_set = VK_NULL_HANDLE,
-                          uint32_t uniform_offset = 0u) noexcept = 0;
+    void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept override;
+    void dispatch(VkCommandBuffer cb, uint3 dim, span<const std::byte> data, VkDeviceAddress params = 0,
+                  bool bind_pipeline = true, VkDescriptorSet uniform_set = VK_NULL_HANDLE,
+                  uint32_t uniform_offset = 0u) noexcept;
+    void dispatch_barrier(VkCommandBuffer cb) const noexcept;
 };
-
-// ── Compute pipeline ──────────────────────────────────────────────────────────
 
 class VkComputeShader final : public VkShaderBase {
 private:
-    VkPipeline       pipeline_{VK_NULL_HANDLE};
-    VkPipelineLayout layout_{VK_NULL_HANDLE};
-    // Immediate launches are synchronous; stream launches own their parameter storage.
-    VkBufferAllocation params_buf_{};
-    VkDescriptorPool params_uniform_pool_{VK_NULL_HANDLE};
-    VkDescriptorSet params_uniform_set_{VK_NULL_HANDLE};
-    uint3              workgroup_size_{1u, 1u, 1u};
-    uint3              max_group_count_{1u, 1u, 1u};
-
-    void create_pipeline_layout() noexcept;
-    void create_pipeline(const vector<uint32_t> &spirv) noexcept;
+    const Function &function_;
+    const uint3 workgroup_size_;
+    uint3 max_group_count_;
+    void record_dispatch(VkCommandBuffer cb, uint3 dim, uint8_t *push_constants) const noexcept override;
 
 public:
-    VkComputeShader(VulkanComputeDevice *device,
-                    const vector<uint32_t> &spirv,
-                    const Function &f);
-    ~VkComputeShader() noexcept override;
-
-    void launch(handle_ty stream, ShaderDispatchCommand *cmd) noexcept override;
-    void dispatch(VkCommandBuffer cb, ShaderDispatchCommand *cmd, VkDeviceAddress params = 0,
-                  bool bind_pipeline = true, VkDescriptorSet uniform_set = VK_NULL_HANDLE,
-                          uint32_t uniform_offset = 0u) noexcept override;
-    void compute_fit_size() noexcept override;
+    VkComputeShader(VulkanComputeDevice *device, const VkShaderProgram &program, const Function &function,
+                    const string &description, uint3 workgroup_size);
 };
 
-// ── Factory ──────────────────────────────────────────────────────────────────
-
 struct VkShaderFactory {
-    [[nodiscard]] static VkShaderBase *create(VulkanComputeDevice *device,
-                                              const vector<uint32_t> &spirv,
-                                              const Function &f);
+    [[nodiscard]] static VkShaderBase *create(VulkanComputeDevice *device, const VkShaderProgram &program,
+                                              const Function &function, const string &description, uint3 workgroup_size);
 };
 
 }// namespace ocarina

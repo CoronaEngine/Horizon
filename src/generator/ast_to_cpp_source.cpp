@@ -462,16 +462,20 @@ void AstToCppSource::_emit_arguments(const Function &f) noexcept {
 }
 
 void AstToCppSource::emit(const Function &func) noexcept {
+    emit(func, func.description());
+}
+
+void AstToCppSource::emit(const Function &func, const string &description) noexcept {
     FUNCTION_GUARD(func)
     if (func.is_kernel()) {
-        _emit_comment(func.description());
+        _emit_comment(description);
         _emit_newline();
         func.for_each_header([&](string_view fn) {
             current_scratch() << "#include \"" << fn << "\"\n";
         });
     }
 
-    TIMER_TAG(codegen, "function " + func.func_name() + " " + func.description() + " generated");
+    TIMER_TAG(codegen, "function " + func.func_name() + " " + description + " generated");
     func.for_each_structure([&](const Type *type) {
         visit(type);
     });
@@ -482,8 +486,8 @@ void AstToCppSource::emit(const Function &func) noexcept {
     if (func.is_raytracing_kernel()) {
         _emit_raytracing_param(func);
     }
-    if (!has_generated(&func) && !func.description().empty()) {
-        _emit_comment(func.description());
+    if (!has_generated(&func) && !description.empty()) {
+        _emit_comment(description);
         _emit_newline();
     }
     _emit_function(func);

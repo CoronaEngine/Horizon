@@ -12,16 +12,7 @@ void compact_acceleration_structure(VulkanComputeDevice *device, VkAccelerationS
                                     VkAccelerationStructureKHR &accel, VkBufferAllocation &storage,
                                     VkDeviceAddress &address) noexcept {
     auto logical = device->logical_device();
-    auto write_properties = reinterpret_cast<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(
-        vkGetDeviceProcAddr(logical, "vkCmdWriteAccelerationStructuresPropertiesKHR"));
-    auto create_as = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logical, "vkCreateAccelerationStructureKHR"));
-    auto copy_as = reinterpret_cast<PFN_vkCmdCopyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logical, "vkCmdCopyAccelerationStructureKHR"));
-    auto destroy_as = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-        vkGetDeviceProcAddr(logical, "vkDestroyAccelerationStructureKHR"));
-    auto get_address = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
-        vkGetDeviceProcAddr(logical, "vkGetAccelerationStructureDeviceAddressKHR"));
+    const auto &functions = device->acceleration_structure_functions();
 
     VkQueryPoolCreateInfo query_info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     query_info.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
@@ -30,7 +21,7 @@ void compact_acceleration_structure(VulkanComputeDevice *device, VkAccelerationS
     OC_VK_CHECK(vkCreateQueryPool(logical, &query_info, nullptr, &query));
     device->immediate_submit([&](VkCommandBuffer cb) {
         vkCmdResetQueryPool(cb, query, 0u, 1u);
-        write_properties(cb, 1u, &accel, query_info.queryType, query, 0u);
+        functions.cmd_write_properties(cb, 1u, &accel, query_info.queryType, query, 0u);
     });
     VkDeviceSize compacted_size = 0;
     OC_VK_CHECK(vkGetQueryPoolResults(logical, query, 0u, 1u, sizeof(compacted_size),
@@ -47,19 +38,19 @@ void compact_acceleration_structure(VulkanComputeDevice *device, VkAccelerationS
     create_info.buffer = compacted_storage.buffer;
     create_info.size = compacted_size;
     VkAccelerationStructureKHR compacted = VK_NULL_HANDLE;
-    OC_VK_CHECK(create_as(logical, &create_info, nullptr, &compacted));
+    OC_VK_CHECK(functions.create(logical, &create_info, nullptr, &compacted));
     VkCopyAccelerationStructureInfoKHR copy_info{VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR};
     copy_info.src = accel;
     copy_info.dst = compacted;
     copy_info.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
-    device->immediate_submit([&](VkCommandBuffer cb) { copy_as(cb, &copy_info); });
-    destroy_as(logical, accel, nullptr);
+    device->immediate_submit([&](VkCommandBuffer cb) { functions.cmd_copy(cb, &copy_info); });
+    functions.destroy(logical, accel, nullptr);
     device->free_buffer(storage);
     accel = compacted;
     storage = compacted_storage;
     VkAccelerationStructureDeviceAddressInfoKHR address_info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
     address_info.accelerationStructure = accel;
-    address = get_address(logical, &address_info);
+    address = functions.get_device_address(logical, &address_info);
 }
 
 VkMesh::~VkMesh() noexcept {
@@ -68,11 +59,7 @@ VkMesh::~VkMesh() noexcept {
 
 void VkMesh::clear() noexcept {
     if (blas_ != VK_NULL_HANDLE) {
-        auto vkDestroyAccelerationStructureKHR =
-            (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(
-                device_->logical_device(), "vkDestroyAccelerationStructureKHR");
-        if (vkDestroyAccelerationStructureKHR)
-            vkDestroyAccelerationStructureKHR(device_->logical_device(), blas_, nullptr);
+        device_->acceleration_structure_functions().destroy(device_->logical_device(), blas_, nullptr);
     }
     device_->free_buffer(blas_buf_);
     device_->free_buffer(packed_indices_);
@@ -106,6 +93,7 @@ void VkMesh::init_build_input() noexcept {
 }
 
 void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
+    OC_ERROR_IF(!device_->has_acceleration_structure(), "Vulkan acceleration structures are unavailable");
     clear();
     init_build_input();
     // ray tracing accepts a stride per uint32 index triplet; Vulkan requires tightly
@@ -126,23 +114,12 @@ void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
         geom_.geometry.triangles.indexData.deviceAddress = packed_indices_.address;
     }
 
-    auto vkGetAccelerationStructureBuildSizesKHR =
-        (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
-            device_->logical_device(), "vkGetAccelerationStructureBuildSizesKHR");
-    auto vkCreateAccelerationStructureKHR =
-        (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(
-            device_->logical_device(), "vkCreateAccelerationStructureKHR");
-    auto vkGetAccelerationStructureDeviceAddressKHR =
-        (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(
-            device_->logical_device(), "vkGetAccelerationStructureDeviceAddressKHR");
-    auto vkCmdBuildAccelerationStructuresKHR =
-        (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(
-            device_->logical_device(), "vkCmdBuildAccelerationStructuresKHR");
+    const auto &functions = device_->acceleration_structure_functions();
 
     uint32_t prim_count = params_.tri_num;
     VkAccelerationStructureBuildSizesInfoKHR size_info{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    vkGetAccelerationStructureBuildSizesKHR(
+    functions.get_build_sizes(
         device_->logical_device(),
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &build_info_, &prim_count, &size_info);
@@ -158,12 +135,12 @@ void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
     as_ci.buffer = blas_buf_.buffer;
     as_ci.size   = size_info.accelerationStructureSize;
     as_ci.type   = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-    OC_VK_CHECK(vkCreateAccelerationStructureKHR(device_->logical_device(), &as_ci, nullptr, &blas_));
+    OC_VK_CHECK(functions.create(device_->logical_device(), &as_ci, nullptr, &blas_));
 
     VkAccelerationStructureDeviceAddressInfoKHR addr_info{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
     addr_info.accelerationStructure = blas_;
-    blas_address_ = vkGetAccelerationStructureDeviceAddressKHR(device_->logical_device(), &addr_info);
+    blas_address_ = functions.get_device_address(device_->logical_device(), &addr_info);
 
     VkBufferAllocation scratch = device_->allocate_buffer(
         size_info.buildScratchSize,
@@ -178,7 +155,7 @@ void VkMesh::build_bvh(const BLASBuildCommand *cmd) noexcept {
     const VkAccelerationStructureBuildRangeInfoKHR *p_range = &range;
 
     device_->immediate_submit([&](VkCommandBuffer cb) {
-        vkCmdBuildAccelerationStructuresKHR(cb, 1u, &build_info_, &p_range);
+        functions.cmd_build(cb, 1u, &build_info_, &p_range);
     });
 
     device_->free_buffer(scratch);

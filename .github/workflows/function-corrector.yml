@@ -144,7 +144,7 @@ jobs:
           with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
               output.write(sysconfig.get_path("scripts") + "\n")
 
-      - name: Build all 53 Ocarina test and benchmark executables
+      - name: Build all 54 Ocarina test and benchmark executables
         id: build-suite
         run: >-
           python build_tools/dev.py build ocarina-tests
@@ -163,7 +163,7 @@ jobs:
                   "--target", "ocarina-tests", "--", "-k", "0"])
               print(f"Diagnostic build exited {result.returncode}; the original build failure is retained")
 
-      - name: Execute and verify the complete Ocarina suite
+      - name: Execute and verify all 76 Ocarina test cases
         run: >-
           python src/tests/run_ci_suite.py
           --build-dir build/conan/ocarina-tests/relwithdebinfo

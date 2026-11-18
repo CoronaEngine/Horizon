@@ -3,6 +3,8 @@
 
 #include "slang_compiler.h"
 #include <chrono>
+#include <atomic>
+#include <random>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -21,7 +23,7 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 11u;
+constexpr unsigned slang_source_cache_version = 12u;
 
 constexpr uint32_t float_width_mask(uint32_t width) noexcept {
     return width == 16u ? 1u : width == 32u ? 2u : width == 64u ? 4u : 0u;
@@ -274,45 +276,99 @@ void mark_physical_storage_loads_volatile(vector<uint32_t> &spirv) noexcept {
 }
 #endif
 
-[[nodiscard]] string emit_slang_source(const Function &function, bool supports_warp32, bool &requires_half_rte) noexcept {
-    AstToSlangSource emitter{Env::code_obfuscation(), supports_warp32};
-    emitter.emit(function);
-    requires_half_rte = emitter.requires_half_rte();
-    return emitter.scratch().c_str();
+struct Stage {
+    VkShaderStageFlagBits stage;
+    const char *label;
+    const char *entry;
+};
+constexpr Stage compute_stages[] = {{VK_SHADER_STAGE_COMPUTE_BIT, "compute", "main"}};
+constexpr Stage native_stages[] = {
+    {VK_SHADER_STAGE_RAYGEN_BIT_KHR, "raygen", "main"},
+    {VK_SHADER_STAGE_MISS_BIT_KHR, "miss", "ocMiss"},
+    {VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, "closesthit", "ocClosestHit"},
+};
+
+const char *mode_label(ShaderExecutionMode mode) noexcept {
+    switch (mode) {
+        case ShaderExecutionMode::Compute: return "compute";
+        case ShaderExecutionMode::ComputeRayQuery: return "query";
+        case ShaderExecutionMode::RayTracingPipeline: return "pipeline";
+    }
+    OC_ERROR("Unknown Slang execution mode");
+    return "";
+}
+
+vector<uint32_t> read_spirv(const fs::path &path) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) return {};
+    const auto size = file.tellg();
+    if (size < 20 || size % 4 != 0) return {};
+    vector<uint32_t> words(size_t(size) / sizeof(uint32_t));
+    file.seekg(0);
+    file.read(reinterpret_cast<char *>(words.data()), size);
+    if (!file || words.front() != 0x07230203u) return {};
+    return words;
+}
+
+// A cache reader must only see complete files, even with multiple compiler
+// instances. Missing modules in an interrupted native build can be regenerated.
+void write_cache_file(const fs::path &path, const void *data, size_t size) {
+    static const auto process_nonce = std::random_device{}();
+    static std::atomic<uint64_t> serial{};
+    const auto temp = path.string() + ocarina::format(".{}.{}.tmp", process_nonce, serial.fetch_add(1));
+    std::ofstream file(temp, std::ios::binary);
+    file.write(static_cast<const char *>(data), std::streamsize(size));
+    file.close();
+    std::error_code error;
+    if (file) fs::rename(temp, path, error);
+    if (!file || error) {
+        OC_WARNING_FORMAT("Could not publish Slang cache artifact {}", path.string());
+        fs::remove(temp, error);
+    }
+}
+
+void report_diagnostics(slang::IBlob *diagnostics) {
+    if (diagnostics && diagnostics->getBufferSize())
+        OC_WARNING_FORMAT("Slang diagnostics:\n{}", static_cast<const char *>(diagnostics->getBufferPointer()));
+}
+
+vector<uint32_t> compile_entry(slang::ISession *session, slang::IModule *module, const Stage &stage) {
+    Slang::ComPtr<slang::IEntryPoint> entry;
+    auto result = module->findEntryPointByName(stage.entry, entry.writeRef());
+    OC_ERROR_IF(SLANG_FAILED(result) || !entry, "Slang entry point missing: ", stage.entry);
+    slang::IComponentType *components[] = {module, entry.get()};
+    Slang::ComPtr<slang::IComponentType> linked;
+    Slang::ComPtr<slang::IBlob> diagnostics, blob;
+    result = session->createCompositeComponentType(components, 2, linked.writeRef(), diagnostics.writeRef());
+    report_diagnostics(diagnostics.get());
+    OC_ERROR_IF(SLANG_FAILED(result), "Slang link failed for ", stage.entry);
+    result = linked->getEntryPointCode(0, 0, blob.writeRef(), diagnostics.writeRef());
+    report_diagnostics(diagnostics.get());
+    OC_ERROR_IF(SLANG_FAILED(result) || !blob, "Slang SPIR-V generation failed for ", stage.entry);
+    const auto *words = static_cast<const uint32_t *>(blob->getBufferPointer());
+    return {words, words + blob->getBufferSize() / sizeof(uint32_t)};
 }
 
 }// namespace
-
-// ── SlangShaderCompiler ───────────────────────────────────────────────────────
 
 SlangShaderCompiler::SlangShaderCompiler(VulkanComputeDevice *device) noexcept
     : device_(device) {}
 
 SlangShaderCompiler::~SlangShaderCompiler() noexcept {
-    if (session_) {
-        session_->release();
-        session_ = nullptr;
-    }
-    if (global_session_) {
-        global_session_->release();
-        global_session_ = nullptr;
-    }
+    for (auto *session : sessions_) if (session) session->release();
+    if (global_session_) global_session_->release();
 }
 
-// ── ensure_session ────────────────────────────────────────────────────────────
-
-void SlangShaderCompiler::ensure_session() const noexcept {
-    if (session_) return;
-
-    // Create a global session using the modern C++ API.
-    Slang::ComPtr<slang::IGlobalSession> global_com;
-    SlangResult r = slang::createGlobalSession(global_com.writeRef());
-    OC_ERROR_IF(SLANG_FAILED(r) || !global_com, "Slang: failed to create global session");
-
-    // Target: SPIR-V 1.5 for Vulkan 1.2
+slang::ISession *SlangShaderCompiler::session_for(ShaderExecutionMode mode) const noexcept {
+    auto &session = sessions_[static_cast<size_t>(mode)];
+    if (session) return session;
+    if (!global_session_) {
+        auto result = slang::createGlobalSession(&global_session_);
+        OC_ERROR_IF(SLANG_FAILED(result) || !global_session_, "Slang global session creation failed");
+    }
     slang::TargetDesc target{};
-    target.format  = SLANG_SPIRV;
-    target.profile = global_com->findProfile("spirv_1_5");
+    target.format = SLANG_SPIRV;
+    target.profile = global_session_->findProfile("spirv_1_5");
     target.floatingPointMode = SLANG_FLOATING_POINT_MODE_PRECISE;
     VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
     VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -331,23 +387,28 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     // implicit profile upgrade; SPIR-V still declares only capabilities in use.
     // Warp operations validate ballot subgroup support during source emission;
     // ray queries are enabled separately.
-    const char *capabilities[] = {
+    vector<const char *> capabilities{
         "SPV_KHR_non_semantic_info", "SPV_GOOGLE_user_type",
         "spvDerivativeControl", "spvImageQuery", "spvImageGatherExtended",
         "spvSparseResidency", "spvMinLod", "spvFragmentFullyCoveredEXT",
-        "spvGroupNonUniform", "spvGroupNonUniformBallot",
-        "spvRayQueryKHR"};
-    slang::CompilerOptionEntry target_options[std::size(capabilities)]{};
-    const uint32_t capability_count = uint32_t(std::size(capabilities)) - (device_->has_rt() ? 0u : 1u);
-    for (uint32_t i = 0; i < capability_count; ++i) {
-        auto capability = global_com->findCapability(capabilities[i]);
-        OC_ERROR_IF(capability == SLANG_CAPABILITY_UNKNOWN,
-                    "Slang: required target capability not found: ", capabilities[i]);
-        target_options[i].name = slang::CompilerOptionName::Capability;
-        target_options[i].value.intValue0 = capability;
+        "spvGroupNonUniform", "spvGroupNonUniformBallot"};
+    if (mode == ShaderExecutionMode::ComputeRayQuery) capabilities.push_back("spvRayQueryKHR");
+    if (mode == ShaderExecutionMode::RayTracingPipeline) capabilities.push_back("spvRayTracingKHR");
+    vector<slang::CompilerOptionEntry> options;
+    for (const auto *name : capabilities) {
+        auto cap = global_session_->findCapability(name);
+        OC_ERROR_IF(cap == SLANG_CAPABILITY_UNKNOWN, "Unknown Slang capability: ", name);
+        slang::CompilerOptionEntry option{};
+        option.name = slang::CompilerOptionName::Capability;
+        option.value.intValue0 = cap;
+        options.push_back(option);
     }
-    target.compilerOptionEntries = target_options;
-    target.compilerOptionEntryCount = capability_count;
+    slang::CompilerOptionEntry entry_names{};
+    entry_names.name = slang::CompilerOptionName::VulkanUseEntryPointName;
+    entry_names.value.intValue0 = 1;
+    options.push_back(entry_names);
+    target.compilerOptionEntries = options.data();
+    target.compilerOptionEntryCount = uint32_t(options.size());
 
     // Search paths for builtin .slang files copied next to the backend DLL.
     string builtin_dir = (device_->context()->runtime_directory() / "slang").string();
@@ -360,156 +421,83 @@ void SlangShaderCompiler::ensure_session() const noexcept {
     session_desc.searchPathCount         = 1;
     session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_ROW_MAJOR;
 
-    Slang::ComPtr<slang::ISession> session_com;
-    r = global_com->createSession(session_desc, session_com.writeRef());
-    OC_ERROR_IF(SLANG_FAILED(r) || !session_com, "Slang: createSession failed");
-
-    // Keep both objects alive for the compiler's lifetime.
-    global_com->addRef();
-    global_session_ = global_com.get();
-
-    session_com->addRef();
-    session_ = session_com.get();
+    auto result = global_session_->createSession(session_desc, &session);
+    OC_ERROR_IF(SLANG_FAILED(result) || !session, "Slang target session creation failed");
+    return session;
 }
 
-// ── compile ───────────────────────────────────────────────────────────────────
-
-vector<uint32_t> SlangShaderCompiler::compile(const Function &function,
-                                               uint3 workgroup_size) const noexcept {
-    switch_profile::Scope profile{"SlangShaderCompiler::compile", "slang"};
+VkShaderProgram SlangShaderCompiler::compile_program(const Function &function, uint3 workgroup_size,
+                                                      const ShaderCompilationContext &context) const noexcept {
+    switch_profile::Scope profile{"SlangShaderCompiler::compile_program", "slang"};
     std::lock_guard lock(compile_mutex_);
-    ensure_session();
-
-    // Emit before looking in the SPIR-V cache so cached shaders obey the same
-    // device capability checks, including operations inside custom callables.
-    bool requires_half_rte = false;
-    string source = emit_slang_source(function, device_->supports_warp32(), requires_half_rte);
+    const auto mode = context.execution_mode;
+    const bool native = mode == ShaderExecutionMode::RayTracingPipeline;
+    const bool query = mode == ShaderExecutionMode::ComputeRayQuery;
+    const bool cull = native && device_->has_primitive_culling();
+    OC_ERROR_IF(query && !device_->has_ray_query(), "Slang ray query unavailable on device");
+    OC_ERROR_IF(native && !device_->has_ray_tracing_pipeline(), "Slang native ray tracing pipeline unavailable on device");
+    const char *label = mode_label(mode);
+    auto *session = session_for(mode);
+    auto [body, function_name, requires_half_rte] = AstToSlangSource::generate(
+        function, context, Env::code_obfuscation(), device_->supports_warp32());
     OC_ERROR_IF(requires_half_rte && (!preserve_float32_ || !(rte_widths_ & 2u)),
                 "Half fused operations require float32 RTE and signed-zero/NaN/Inf preservation on this device");
-    if (source.empty()) {
-        OC_ERROR("Slang: empty source for function '{}'", function.func_name());
-        return {};
-    }
-
-    // Include builtins and compiler version, so replacing a runtime DLL or a
-    // device header cannot silently reuse SPIR-V from a different compilation.
-    auto runtime_dir = device_->context()->runtime_directory();
-    auto source_hash = hash64(source,
-        RHIContext::read_file(runtime_dir / "slang/slang_device_math.slang"),
-        RHIContext::read_file(runtime_dir / "slang/slang_device_resource.slang"),
-        string_view(global_session_->getBuildTagString()), slang_source_cache_version, preserve_float32_,
-        requires_half_rte, preserve_float16_, rte_widths_, rounding_independence_);
-    const string cache_key = ocarina::format("{}_{}_{}_{}_{}", function.func_name(),
-        source_hash, workgroup_size.x, workgroup_size.y, workgroup_size.z);
-    const string cache_path = ocarina::format("{}/slang_cache/{}.spv",
-                                               device_->context()->cache_directory().string(), cache_key);
-
-    // Try loading from disk cache
-    if (std::filesystem::exists(cache_path)) {
-        std::ifstream f(cache_path, std::ios::binary | std::ios::ate);
-        if (f.is_open()) {
-            size_t byte_size = static_cast<size_t>(f.tellg());
-            if (byte_size >= 20 && byte_size % 4 == 0) {
-                f.seekg(0);
-                vector<uint32_t> spirv(byte_size / 4);
-                f.read(reinterpret_cast<char *>(spirv.data()), (std::streamsize)byte_size);
-                if (f.good() && spirv[0] == 0x07230203u) {
-                    OC_INFO_FORMAT("shader SPIR-V cache hit: {}.spv", cache_key);
-                    return spirv;
-                }
-            }
-        }
-    }
-
-    OC_INFO_FORMAT("shader SPIR-V cache miss: {}.spv", cache_key);
-    const auto compile_start = std::chrono::steady_clock::now();
-
-    // Patch numthreads attribute for compute kernels
-    if (function.is_kernel()) {
-        string nt = ocarina::format("[numthreads({}, {}, {})]",
-                                    workgroup_size.x, workgroup_size.y, workgroup_size.z);
-        auto pos = source.find("[numthreads(1, 1, 1)]");
-        if (pos != string::npos)
-            source.replace(pos, std::strlen("[numthreads(1, 1, 1)]"), nt);
-    }
-
-    // Add builtin includes
-    const string preamble = ocarina::format(
+    OC_ERROR_IF(body.empty(), "Slang source missing for ", function_name);
+    const string source = ocarina::format(
+        "#define OC_RAY_QUERY {}\n#define OC_RAY_PIPELINE {}\n#define OC_PRIMITIVE_CULLING {}\n"
         "#define OC_WORKGROUP_X {}\n#define OC_WORKGROUP_Y {}\n#define OC_WORKGROUP_Z {}\n",
-        workgroup_size.x, workgroup_size.y, workgroup_size.z) +
-        "#include \"slang_device_resource.slang\"\n#include \"slang_device_math.slang\"\n";
-    source = preamble + source;
-    device_->context()->write_global_cache(function.func_name() + ".slang", source);
+        int(query), int(native), int(cull), workgroup_size.x, workgroup_size.y, workgroup_size.z) +
+        "#include \"slang_device_resource.slang\"\n#include \"slang_device_math.slang\"\n" + body;
 
-    // Compile via Slang ISession
-    Slang::ComPtr<slang::IBlob> diag;
-    Slang::ComPtr<slang::IModule> module;
-    {
-        module = session_->loadModuleFromSourceString(
-            cache_key.c_str(), nullptr, source.c_str(), diag.writeRef());
-        if (diag && diag->getBufferSize() > 0) {
-            OC_WARNING_FORMAT("Slang diagnostics:\n{}",
-                       reinterpret_cast<const char *>(diag->getBufferPointer()));
-        }
-        if (!module) {
-            OC_ERROR("Slang: compile failed for '{}'", function.func_name());
-            return {};
-        }
-    }
-
-    // Find the entry point (always named "main" in our codegen)
-    Slang::ComPtr<slang::IEntryPoint> entry_point;
-    {
-        SlangResult r = module->findEntryPointByName("main", entry_point.writeRef());
-        if (SLANG_FAILED(r)) {
-            OC_ERROR("Slang: no entry point 'main' in '{}'", function.func_name());
-            return {};
-        }
-    }
-
-    // Link and extract SPIR-V
-    slang::IComponentType *components[] = {module.get(), entry_point.get()};
-    Slang::ComPtr<slang::IComponentType> linked;
-    {
-        SlangResult r = session_->createCompositeComponentType(
-            components, 2, linked.writeRef(), diag.writeRef());
-        if (SLANG_FAILED(r)) {
-            OC_ERROR("Slang: link failed for '{}'", function.func_name());
-            return {};
-        }
-    }
-
-    Slang::ComPtr<slang::IBlob> spirv_blob;
-    {
-        SlangResult r = linked->getEntryPointCode(0, 0, spirv_blob.writeRef(), diag.writeRef());
-        if (SLANG_FAILED(r)) {
-            OC_ERROR("Slang: SPIR-V extraction failed for '{}'", function.func_name());
-            return {};
-        }
-    }
-
-    size_t byte_size = spirv_blob->getBufferSize();
-    const uint32_t *data = reinterpret_cast<const uint32_t *>(spirv_blob->getBufferPointer());
-    vector<uint32_t> spirv(data, data + byte_size / 4);
-    normalize_ray_query_extensions(spirv);
-    if (preserve_float32_) set_float_control_mode(spirv, 4466u, 4461u, 2u);
-    if (requires_half_rte) require_half_rounding(spirv, rte_widths_, rounding_independence_, preserve_float16_);
-    decorate_native_fma(spirv);
+    const auto builtin_dir = device_->context()->runtime_directory() / "slang";
+    const auto stages = native ? span<const Stage>(native_stages) : span<const Stage>(compute_stages);
+    // Version covers target-profile options and the numeric postprocessing ABI.
+    auto key = hash64(source, context.description, string_view(label), slang_source_cache_version,
+        RHIContext::read_file(builtin_dir / "slang_device_math.slang"),
+        RHIContext::read_file(builtin_dir / "slang_device_resource.slang"),
+        string_view(global_session_->getBuildTagString()), string_view("spirv_1_5-precise-triangle-payload-v1"),
+        preserve_float32_, preserve_float16_, requires_half_rte, rte_widths_, rounding_independence_);
 #ifdef __APPLE__
-    mark_physical_storage_loads_volatile(spirv);
+    key = hash64(key, string_view("moltenvk-volatile-loads"));
 #endif
-    const double compile_ms = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - compile_start).count();
-    OC_INFO_FORMAT("task Slang compile {}.slang is take {} ms", cache_key, compile_ms);
-
-    // Write to disk cache
-    std::filesystem::create_directories(
-        std::filesystem::path(cache_path).parent_path());
-    std::ofstream out(cache_path, std::ios::binary);
-    out.write(reinterpret_cast<const char *>(spirv.data()),
-              (std::streamsize)(spirv.size() * 4));
-
-    return spirv;
+    for (const auto &stage : stages) key = hash64(key, stage.stage, string_view(stage.entry));
+    const string program_key = ocarina::format("{}_{}_{:x}", function_name, label, key);
+    const auto cache_dir = device_->context()->cache_directory() / "slang_cache";
+    fs::create_directories(cache_dir);
+    Slang::ComPtr<slang::IModule> module;
+    VkShaderProgram program{mode, {}};
+    for (const auto &stage : stages) {
+        const string name = ocarina::format("{}_{}_{}", program_key, stage.label, stage.entry);
+        const auto path = cache_dir / (name + ".spv");
+        const auto diagnostic = cache_dir / (name + ".slang");
+        if (!fs::exists(diagnostic)) write_cache_file(diagnostic, source.data(), source.size());
+        auto spirv = read_spirv(path);
+        if (spirv.empty()) {
+            OC_INFO_FORMAT("shader SPIR-V cache miss: {}.spv", name);
+            const auto start = std::chrono::steady_clock::now();
+            if (!module) {
+                Slang::ComPtr<slang::IBlob> diagnostics;
+                module = session->loadModuleFromSourceString(program_key.c_str(), nullptr, source.c_str(), diagnostics.writeRef());
+                report_diagnostics(diagnostics.get());
+                OC_ERROR_IF(!module, "Slang source failed for ", diagnostic.string());
+            }
+            spirv = compile_entry(session, module.get(), stage);
+            if (query) normalize_ray_query_extensions(spirv);
+            if (preserve_float32_) set_float_control_mode(spirv, 4466u, 4461u, 2u);
+            if (requires_half_rte) require_half_rounding(spirv, rte_widths_, rounding_independence_, preserve_float16_);
+            decorate_native_fma(spirv);
+#ifdef __APPLE__
+            mark_physical_storage_loads_volatile(spirv);
+#endif
+            write_cache_file(path, spirv.data(), spirv.size() * sizeof(uint32_t));
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            OC_INFO_FORMAT("task Slang compile {}.slang is take {} ms", name, ms);
+        } else {
+            OC_INFO_FORMAT("shader SPIR-V cache hit: {}.spv", name);
+        }
+        program.modules.push_back({stage.stage, stage.entry, std::move(spirv)});
+    }
+    return program;
 }
 
 }// namespace ocarina

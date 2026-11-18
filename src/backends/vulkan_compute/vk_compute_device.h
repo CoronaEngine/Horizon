@@ -9,6 +9,7 @@
 #include "core/concurrency/thread_safety.h"
 #include "util.h"
 #include "slang_compiler.h"
+#include "vk_trace_capabilities.h"
 #include <vulkan/vulkan.h>
 #include <cstdio>
 
@@ -16,6 +17,30 @@ namespace ocarina {
 
 class VkComputeCommandVisitor;
 class VkComputeStream;
+
+struct VkAccelerationStructureFunctions {
+    PFN_vkCreateAccelerationStructureKHR create{};
+    PFN_vkDestroyAccelerationStructureKHR destroy{};
+    PFN_vkGetAccelerationStructureBuildSizesKHR get_build_sizes{};
+    PFN_vkGetAccelerationStructureDeviceAddressKHR get_device_address{};
+    PFN_vkCmdBuildAccelerationStructuresKHR cmd_build{};
+    PFN_vkCmdWriteAccelerationStructuresPropertiesKHR cmd_write_properties{};
+    PFN_vkCmdCopyAccelerationStructureKHR cmd_copy{};
+
+    [[nodiscard]] bool complete() const noexcept {
+        return create && destroy && get_build_sizes && get_device_address && cmd_build && cmd_write_properties && cmd_copy;
+    }
+};
+
+struct VkRayTracingPipelineFunctions {
+    PFN_vkCreateRayTracingPipelinesKHR create_ray_tracing_pipelines{};
+    PFN_vkGetRayTracingShaderGroupHandlesKHR get_ray_tracing_shader_group_handles{};
+    PFN_vkCmdTraceRaysKHR cmd_trace_rays{};
+
+    [[nodiscard]] bool complete() const noexcept {
+        return create_ray_tracing_pipelines && get_ray_tracing_shader_group_handles && cmd_trace_rays;
+    }
+};
 
 class VulkanComputeDevice : public Device::Impl {
 public:
@@ -75,8 +100,13 @@ private:
                           VkExtent3D extent = {}, VkFormat format = VK_FORMAT_UNDEFINED,
                           uint32_t mip_levels = 0) noexcept;
 
-    // ── RT extension support ─────────────────────────────────────────────────
-    bool has_rt_{false};
+    VulkanTraceFeatures supported_trace_features_{};
+    VulkanTraceFeatures enabled_trace_features_{};
+    VkAccelerationStructureFunctions acceleration_structure_functions_{};
+    VkRayTracingPipelineFunctions ray_tracing_pipeline_functions_{};
+    bool has_image_view_swizzle_{true};
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties_{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
     bool supports_warp32_{false};
     bool has_int64_atomics_{false};
     bool has_external_memory_{false};
@@ -117,6 +147,8 @@ private:
     void init_instance() noexcept;
     void init_physical_device() noexcept;
     void init_logical_device() noexcept;
+    void init_trace_properties() noexcept;
+    void init_trace_functions() noexcept;
     void init_vma() noexcept;
     void init_descriptor_pool() noexcept;
     void init_samplers() noexcept;
@@ -135,7 +167,23 @@ public:
     [[nodiscard]] VmaAllocator     vma_allocator()    const noexcept { return allocator_; }
     [[nodiscard]] VkQueue          compute_queue()    const noexcept { return compute_queue_; }
     [[nodiscard]] uint32_t         queue_family()     const noexcept { return compute_queue_family_; }
-    [[nodiscard]] bool             has_rt()           const noexcept { return has_rt_; }
+    [[nodiscard]] bool has_acceleration_structure() const noexcept { return enabled_trace_features_.acceleration_structure; }
+    [[nodiscard]] bool has_ray_query() const noexcept { return enabled_trace_features_.ray_query; }
+    [[nodiscard]] bool has_ray_tracing_pipeline() const noexcept { return enabled_trace_features_.ray_tracing_pipeline; }
+    [[nodiscard]] bool has_primitive_culling() const noexcept { return enabled_trace_features_.primitive_culling; }
+    [[nodiscard]] VkPipelineStageFlags shader_stages() const noexcept {
+        return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+               (has_ray_tracing_pipeline() ? VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR : 0u);
+    }
+    [[nodiscard]] const VkAccelerationStructureFunctions &acceleration_structure_functions() const noexcept {
+        return acceleration_structure_functions_;
+    }
+    [[nodiscard]] const VkRayTracingPipelineFunctions &ray_tracing_pipeline_functions() const noexcept {
+        return ray_tracing_pipeline_functions_;
+    }
+    [[nodiscard]] const VkPhysicalDeviceRayTracingPipelinePropertiesKHR &ray_tracing_pipeline_properties() const noexcept {
+        return ray_tracing_pipeline_properties_;
+    }
     [[nodiscard]] bool supports_warp32() const noexcept { return supports_warp32_; }
     [[nodiscard]] bool has_pipeline_statistics() const noexcept { return has_pipeline_statistics_; }
     void report_pipeline_statistics(VkPipeline pipeline, const string &description) noexcept;
@@ -174,7 +222,10 @@ public:
 
     // ── Device::Impl interface ───────────────────────────────────────────────
     [[nodiscard]] bool supports_buffer_export() const noexcept override { return has_external_memory_; }
-    [[nodiscard]] bool supports_raytracing() const noexcept override { return has_rt_; }
+    [[nodiscard]] bool supports_raytracing() const noexcept override { return has_ray_query() || has_ray_tracing_pipeline(); }
+    [[nodiscard]] TraceCapabilities trace_capabilities() const noexcept override {
+        return enabled_trace_features_.trace_capabilities();
+    }
     [[nodiscard]] bool supports_int64_atomics() const noexcept override { return has_int64_atomics_; }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const override;
     void set_buffer_external_ownership(handle_ty handle, bool external) override;
@@ -196,6 +247,9 @@ public:
     void destroy_texture2d(handle_ty handle) noexcept override;
 
     [[nodiscard]] handle_ty create_shader(const Function &function) noexcept override;
+    [[nodiscard]] handle_ty create_shader(const Function &function, ShaderCompileOptions options) noexcept override;
+    [[nodiscard]] handle_ty create_shader(const Function &function, ShaderCompileOptions options,
+                                          const string &description) noexcept override;
     [[nodiscard]] handle_ty create_shader_from_file(const string &, ShaderType,
                                                     const std::set<string> &) noexcept override { return InvalidUI64; }
     void destroy_shader(handle_ty handle) noexcept override;

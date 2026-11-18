@@ -7,10 +7,23 @@
 #pragma once
 
 #include "generator/ast_to_cpp_source.h"
+#include "slang_compiler.h"
 
 namespace ocarina {
 
+struct EmittedSlangSource {
+    string source;
+    string function_name;
+    bool requires_half_rte;
+};
+
 class AstToSlangSource : public AstToCppSource {
+private:
+    const ShaderCompilationContext &context_;
+    unordered_set<const Function *> reachable_functions_;
+    [[nodiscard]] bool native_pipeline() const noexcept {
+        return context_.execution_mode == ShaderExecutionMode::RayTracingPipeline;
+    }
 protected:
     // Set once an emitted function uses THREAD_ID; the oc_thread_id helper is
     // only emitted then, with the compiled workgroup dimensions.
@@ -77,11 +90,14 @@ protected:
     void _emit_local_var_define(const ScopeStmt *scope) noexcept override;
     void _emit_statements(span<const Statement *const> statements) noexcept override;
 
-public:
-    explicit AstToSlangSource(bool obfuscation, bool supports_warp32 = true)
-        : AstToCppSource(obfuscation), supports_warp32_(supports_warp32) {}
+private:
+    AstToSlangSource(const ShaderCompilationContext &context, bool obfuscation, bool supports_warp32)
+        : AstToCppSource(obfuscation), context_(context), supports_warp32_(supports_warp32) {}
     void emit(const Function &function) noexcept override;
-    [[nodiscard]] bool requires_half_rte() const noexcept { return requires_half_rte_; }
+
+public:
+    [[nodiscard]] static EmittedSlangSource generate(const Function &function, const ShaderCompilationContext &context,
+                                                     bool obfuscation, bool supports_warp32) noexcept;
 };
 
 }// namespace ocarina

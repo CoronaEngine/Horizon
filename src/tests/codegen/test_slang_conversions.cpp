@@ -1,4 +1,5 @@
 #include "tests/backend_test.h"
+#include "tests/codegen/slang_diagnostic_source.h"
 #include "dsl/dsl.h"
 #include "rhi/context.h"
 #include <slang.h>
@@ -10,9 +11,8 @@ using namespace ocarina;
 
 namespace {
 
-bool compile_without_implicit_conversions(const Function &function) {
+bool compile_without_implicit_conversions(const string &source) {
     auto &context = RHIContext::instance();
-    const string source = context.read_global_cache(function.func_name() + ".slang");
     if (source.empty()) {
         std::cerr << "generated Slang source is missing" << std::endl;
         return false;
@@ -51,6 +51,7 @@ bool compile_without_implicit_conversions(const Function &function) {
 }// namespace
 
 int main() {
+    test::SlangDiagnosticSource diagnostic{"slang-conversions"};
     auto device = create_test_device();
     const vector<float> inputs{0.f, -0.f, -2.75f, 5.75f, std::numeric_limits<float>::quiet_NaN()};
     auto input = device.create_buffer<float>(inputs.size());
@@ -97,7 +98,7 @@ int main() {
         loops.write(i, iterations);
     };
     auto shader = device.compile(kernel, "slang-explicit-conversions");
-    if (!compile_without_implicit_conversions(*kernel.function())) return EXIT_FAILURE;
+    if (!compile_without_implicit_conversions(diagnostic.compute_main())) return EXIT_FAILURE;
     vector<uint4> actual(inputs.size() * 3u);
     vector<uint> actual_loops(inputs.size());
     vector<float4> actual_masks(inputs.size());
