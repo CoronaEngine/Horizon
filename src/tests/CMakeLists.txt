@@ -191,3 +191,7 @@ endforeach()
 list(JOIN _ci_manifest_entries ",\n" _ci_manifest)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ci/$<CONFIG>/targets.json"
     CONTENT "[\n${_ci_manifest}\n]\n")
+
+if(HORIZON_BUILD_TRACE_MODE_TESTS)
+    add_subdirectory(trace_modes)
+endif()

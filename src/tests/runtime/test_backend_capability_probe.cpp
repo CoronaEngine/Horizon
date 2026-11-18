@@ -20,6 +20,18 @@ void require(bool condition, const char *message) {
     }
 }
 
+// Local mode-comparison cases pass a forced request to every trace kernel.
+ShaderCompileOptions compile_options;
+auto compile_probe(Device &device, const auto &kernel, const char *name) {
+    if (compile_options.trace_mode == TraceMode::Auto) return device.compile(kernel, name);
+    auto shader = device.compile(kernel, name, CS, compile_options);
+    const auto expected = compile_options.trace_mode == TraceMode::RayQuery ?
+        ShaderExecutionMode::ComputeRayQuery : ShaderExecutionMode::RayTracingPipeline;
+    require(shader.requested_options().trace_mode == compile_options.trace_mode, "probe lost requested mode");
+    require(shader.execution_mode() == expected, "probe used unexpected execution mode");
+    return shader;
+}
+
 void report_action(const char *phase, const Accel &accel) {
     std::cout << "CAPABILITY_ACTION phase=" << phase
               << " action=" << uint(accel.last_build_action())
@@ -37,7 +49,7 @@ void check_ray(Device &device, Stream &stream, const Accel &accel,
         hits.write(0u, accel.trace_closest(ray));
         visibility.write(0u, cast<uint>(accel.trace_occlusion(ray)));
     };
-    auto shader = device.compile(kernel, "backend-capability-ray");
+    auto shader = compile_probe(device, kernel, "backend-capability-ray");
     TriangleHit hit{};
     uint visible = 0xcdcdcdcdu;
     // Reset GPU outputs too: a miss/error must not accidentally reuse an old hit.
@@ -96,7 +108,7 @@ void probe_empty_accel(Device &device) {
         out.write(0u, make_uint4(captured_hit.inst_id, cast<uint>(accel.trace_occlusion(ray)), 0u, 73u));
         out.write(1u, make_uint4(explicit_hit.inst_id, cast<uint>(explicit_accel.trace_occlusion(ray)), 0u, 79u));
     };
-    auto shader = device.compile(kernel, "capability-cleared-accel-invocation");
+    auto shader = compile_probe(device, kernel, "capability-cleared-accel-invocation");
     auto *before_clear = shader(accel, output).dispatch(1u);
     accel.clear();
     array<uint4, 2> result{};
@@ -185,8 +197,8 @@ void probe_same_batch_accel(Device &device) {
         auto hit = scene.trace_closest(ray);
         out.write(slot, make_uint4(token, cast<uint>(scene.trace_occlusion(ray)), hit.inst_id, hit.prim_id));
     };
-    auto captured_shader = device.compile(captured, "capability-late-captured-accel");
-    auto explicit_shader = device.compile(explicit_arg, "capability-late-explicit-accel");
+    auto captured_shader = compile_probe(device, captured, "capability-late-captured-accel");
+    auto explicit_shader = compile_probe(device, explicit_arg, "capability-late-explicit-accel");
     uint token = 17u;
     float x = 0.f;
     // Construct both invocations before the first BLAS/TLAS exists. POD values
@@ -250,7 +262,7 @@ void probe_multistream_ray_params(Device &device) {
         };
         out.write(i, make_uint4(token, i, hit_count, token ^ i));
     };
-    auto shader = device.compile(kernel, "capability-multistream-ray-params");
+    auto shader = compile_probe(device, kernel, "capability-multistream-ray-params");
     // Warm both per-stream parameter allocations before interleaved work.
     first_stream << shader(first_output.view(0u, count), 1u).dispatch(count) << synchronize() << commit();
     second_stream << shader(second_output.view(0u, count), 2u).dispatch(count) << synchronize() << commit();
@@ -291,7 +303,7 @@ void probe_multistream_ray_params(Device &device) {
         Uint increment = stamp + cast<uint>(!explicit_hit->is_miss()) + cast<uint>(!captured_hit->is_miss());
         counts.atomic(i).fetch_add(increment);
     };
-    auto shared_shader = device.compile(shared_kernel, "capability-shared-ray-invocation");
+    auto shared_shader = compile_probe(device, shared_kernel, "capability-shared-ray-invocation");
     // Warm the backend's stream-local pipeline/parameter caches independently
     // of the concurrent phase, then reset every counter before the oracle run.
     first_stream << counts.byte_set(0u) << shared_shader(accel, counts, frozen_stamp).dispatch(shared_count)
@@ -302,20 +314,16 @@ void probe_multistream_ray_params(Device &device) {
     uint stamp = frozen_stamp;
     const auto invocation = shared_shader(accel, counts, stamp);
     stamp = 99u;
-    vector<ShaderDispatchCommand *> first_commands, second_commands;
-    for (uint round = 0u; round < shared_rounds; ++round) {
-        first_commands.push_back(invocation.dispatch(shared_count));
-        second_commands.push_back(invocation.dispatch(shared_count - 16u));
-    }
     std::atomic<uint> ready{0u};
     std::atomic<bool> start{false};
-    auto submit = [&](Stream &stream, const vector<ShaderDispatchCommand *> &commands) {
+    auto submit = [&](Stream &stream, uint count) {
         ready.fetch_add(1u, std::memory_order_release);
         while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
-        for (auto *command : commands) stream << command << commit();
+        for (uint round = 0; round < shared_rounds; ++round)
+            stream << invocation.dispatch(count) << commit();
     };
-    std::thread first_submit([&] { submit(first_stream, first_commands); });
-    std::thread second_submit([&] { submit(second_stream, second_commands); });
+    std::thread first_submit([&] { submit(first_stream, shared_count); });
+    std::thread second_submit([&] { submit(second_stream, shared_count - 16u); });
     while (ready.load(std::memory_order_acquire) != 2u) std::this_thread::yield();
     start.store(true, std::memory_order_release);
     first_submit.join();
@@ -334,14 +342,22 @@ void probe_multistream_ray_params(Device &device) {
 }
 
 int main(int argc, char **argv) {
-    require(argc == 3 && std::string_view(argv[1]) == "--case",
+    require((argc == 3 || argc == 4) && std::string_view(argv[1]) == "--case",
             "usage: test-backend-capability-probe --case empty-accel|fast-build|mesh-rebuild|same-batch-accel|multistream-ray-params");
     const std::string_view name(argv[2]);
     require(name == "empty-accel" || name == "fast-build" || name == "mesh-rebuild" ||
                 name == "same-batch-accel" || name == "multistream-ray-params", "unknown case");
+    if (argc == 4) {
+        const auto mode = std::string_view(argv[3]);
+        require(mode == "query" || mode == "pipeline", "expected query or pipeline");
+        compile_options.trace_mode = mode == "query" ? TraceMode::RayQuery : TraceMode::RayTracingPipeline;
+    }
     const char *backend = test_backend_name();
     std::cout << "CAPABILITY_PROBE backend=" << backend << " case=" << name << " phase=attempt" << std::endl;
     auto device = RHIContext::instance().create_device();
+    const auto caps = device.trace_capabilities();
+    if ((compile_options.trace_mode == TraceMode::RayQuery && !caps.ray_query) ||
+        (compile_options.trace_mode == TraceMode::RayTracingPipeline && !caps.ray_tracing_pipeline)) return 77;
     if (skip_without_feature(device.supports_raytracing(), "ray tracing")) return 0;
     device.init_rtx();
     if (name == "empty-accel") probe_empty_accel(device);
