@@ -4,6 +4,13 @@ target_compile_features(horizon-test-core-tuple PRIVATE cxx_std_20)
 add_dependencies(horizon-tests horizon-test-core-tuple)
 add_test(NAME horizon.core.tuple COMMAND horizon-test-core-tuple)
 
+add_executable(horizon-test-core-trace-mode-selection test_trace_mode_selection.cpp)
+target_include_directories(horizon-test-core-trace-mode-selection PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-test-core-trace-mode-selection PRIVATE cxx_std_20)
+add_dependencies(horizon-tests horizon-test-core-trace-mode-selection)
+add_test(NAME horizon.core.trace_mode_selection COMMAND horizon-test-core-trace-mode-selection)
+set_tests_properties(horizon.core.trace_mode_selection PROPERTIES LABELS "horizon;cpu")
+
 # Exercise the real allocator across a DLL boundary without engine dependencies.
 add_library(horizon-allocator-crt-fixture SHARED
     allocator_crt_fixture.cpp "${PROJECT_SOURCE_DIR}/src/core/stl.cpp")
