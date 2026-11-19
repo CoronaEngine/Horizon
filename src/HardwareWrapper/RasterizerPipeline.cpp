@@ -1,3 +1,4 @@
+#include <cstring>
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 
 #include "Horizon_old.h"
@@ -110,8 +111,16 @@ void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuf
 void RasterBatch::appendIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
                                  const void* data, size_t size, IndirectFirstInstance firstInstance)
 {
+    drawIndirect(geometry, packets, count, size, [data](std::span<std::byte> bytes) {
+        std::memcpy(bytes.data(), data, bytes.size());
+    }, firstInstance);
+}
+
+void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
+                               size_t bytes, const ParameterWriter& writeParameters, IndirectFirstInstance firstInstance)
+{
     if (!record_) throw std::logic_error("Raster batch already submitted");
-    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(geometry, packets, count, data, size, firstInstance);
+    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(geometry, packets, count, bytes, writeParameters, firstInstance);
 }
 
 bool RasterizerPipelineBase::syncShaderConditions()

@@ -32,6 +32,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <span>
 #include <vector>
@@ -124,8 +125,6 @@ void run_drawstress_scene()
         commands[i].parameterWord = i * (sizeof(glm::mat4) / sizeof(uint32_t));
     }
     auto packets = HardwareBuffer::uploadDeviceLocal(commands, BufferUsage::RasterIndirect);
-    std::vector<glm::mat4> matrices;
-    matrices.reserve(maxDraws);
     HardwareExecutor render_executor;
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
@@ -160,9 +159,9 @@ void run_drawstress_scene()
 
         HORIZON_PROFILE_PLOT("draw calls", dim * dim * dim);
 
-        matrices.resize(dim * dim * dim);
+        const auto count = static_cast<uint32_t>(dim * dim * dim);
         auto batch = rasterizer.beginBatch(stress_width, stress_height);
-        {
+        const auto buildMatrices = [&](std::span<std::byte> parameters) {
             HORIZON_PROFILE_SCOPE_N("drawstress::build_records");
             // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
             std::array<glm::vec3, dim_max> sine, cosine;
@@ -173,7 +172,7 @@ void run_drawstress_scene()
                 cosine[i] = glm::cos(angles);
                 translations[i] = view_proj * glm::vec4(base + glm::vec3(i * step), 1.0f);
             }
-            auto* dst = matrices.data();
+            auto* dst = parameters.data();
             for (int zz = 0; zz < dim; ++zz) {
                 const float sz = sine[zz].z, cz = cosine[zz].z;
                 for (int yy = 0; yy < dim; ++yy)
@@ -186,18 +185,20 @@ void run_drawstress_scene()
                     {
                         const float sx = sine[xx].x, cx = cosine[xx].x;
                         translation.x = translations[xx].x;
-                        *dst++ = glm::mat4(axisX,
+                        const glm::mat4 matrix(axisX,
                             projectAxis(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx),
                             projectAxis(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx),
                             translation);
+                        std::memcpy(dst, &matrix, sizeof(matrix));
+                        dst += sizeof(matrix);
                     }
                 }
             }
-        }
+        };
 
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
-            batch.drawIndirect(cube, packets, static_cast<uint32_t>(matrices.size()), std::as_bytes(std::span(matrices)),
+            batch.drawIndirect(cube, packets, count, count * sizeof(glm::mat4), buildMatrices,
                                IndirectFirstInstance::AlwaysZero);
             benchmark.submit(render_executor, std::move(batch), display, final_output_image);
         }

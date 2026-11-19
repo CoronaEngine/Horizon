@@ -112,10 +112,10 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
         std::vector<Run> runs;
         std::shared_ptr<HardwareBuffer> upload;
         HardwareBuffer externalPackets;
-        void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
+        void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, size_t, const RasterBatch::ParameterWriter&, IndirectFirstInstance);
         Root root{};
         void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
-        void prepareUpload(std::span<const uint8_t> parameterData);
+        template<class Writer> void prepareUpload(size_t parameterBytes, const Writer& writeParameters);
         std::vector<uint8_t> uniformBytes;
         std::shared_ptr<BindingSnapshot> bindings;
         std::shared_ptr<UniformSnapshot> uniform;

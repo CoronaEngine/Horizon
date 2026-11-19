@@ -600,7 +600,8 @@ void RasterizerPipelineVulkan::Batch::append(const RasterGeometry& geometry, con
 }
 
 void RasterizerPipelineVulkan::Batch::appendIndirect(const RasterGeometry& geometry, const HardwareBuffer& buffer,
-                                                     uint32_t count, const void* data, size_t size, IndirectFirstInstance firstInstance)
+                                                     uint32_t count, size_t size, const RasterBatch::ParameterWriter& writeParameters,
+                                                     IndirectFirstInstance firstInstance)
 {
     if (!count) return;
     if (!supportsIndirectFirstInstance && firstInstance != IndirectFirstInstance::AlwaysZero)
@@ -618,17 +619,17 @@ void RasterizerPipelineVulkan::Batch::appendIndirect(const RasterGeometry& geome
     geometries.push_back(geometry);
     runs.push_back({{{0, 0}, {imageSize.x, imageSize.y}}, 0, count});
     externalPackets = buffer;
-    // Snapshot caller-owned bytes directly into the batch's GPU-visible slot.
-    try { prepareUpload({static_cast<const uint8_t*>(data), size}); }
+    try { prepareUpload(size, writeParameters); }
     catch (...) { externalPackets = {}; geometries.clear(); runs.clear(); throw; }
 }
 
-void RasterizerPipelineVulkan::Batch::prepareUpload(std::span<const uint8_t> parameterData)
+template<class Writer>
+void RasterizerPipelineVulkan::Batch::prepareUpload(size_t parameterBytes, const Writer& writeParameters)
 {
     if ((packets.empty() && !externalPackets) || upload) return;
     const size_t geometryOffset = packets.size() * sizeof(Packet);
     const size_t parameterOffset = (geometryOffset + geometries.size() * sizeof(GeometryEntry) + 15) & ~size_t(15);
-    const size_t bytes = parameterOffset + std::max<size_t>(parameterData.size(), 4);
+    const size_t bytes = parameterOffset + std::max<size_t>(parameterBytes, 4);
     if (bytes > UINT32_MAX) throw std::length_error("Raster batch exceeds 4 GiB");
     auto& pool = pipeline->uploadPool;
     std::unique_lock lock(pipeline->uploadMutex);
@@ -648,7 +649,7 @@ void RasterizerPipelineVulkan::Batch::prepareUpload(std::span<const uint8_t> par
         *entries++ = {addressOf(geometry.vertices), addressOf(geometry.indices),
                       uint32_t(geometry.vertices.getElementSize() / 4), uint32_t(geometry.indices.getElementSize()),
                       uint32_t(geometry.vertices.getElementCount())};
-    if (!parameterData.empty()) std::memcpy(mapped + parameterOffset, parameterData.data(), parameterData.size());
+    if (parameterBytes) writeParameters({reinterpret_cast<std::byte*>(mapped + parameterOffset), parameterBytes});
     auto* native = legacyBufferFromId(buffer->getBufferID());
     native->resourceManager->flushMapped(*native, bytes);
     const auto base = addressOf(*buffer);
@@ -665,7 +666,9 @@ void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const Resour
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
-    prepareUpload(parameters);
+    prepareUpload(parameters.size(), [this](std::span<std::byte> bytes) {
+        std::memcpy(bytes.data(), parameters.data(), bytes.size());
+    });
     if (upload)
         result.buffer(*legacyBufferFromId(upload->getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);

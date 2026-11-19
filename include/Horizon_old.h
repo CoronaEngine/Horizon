@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <concepts>
+#include <functional>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -332,6 +333,11 @@ public:
     void draw(const RasterGeometry& geometry, const RasterDraw& range = {}) {
         append(geometry, range, nullptr, 0);
     }
+    using ParameterWriter = std::function<void(std::span<std::byte>)>;
+    // Fill the span synchronously, keeping the batch idle until the writer returns.
+    // The span expires when the writer returns.
+    void drawIndirect(const RasterGeometry&, const HardwareBuffer& packets, uint32_t count, size_t parameterBytes,
+                      const ParameterWriter&, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
     // Packets share geometry 0. firstVertex is zero for index pulling.
     // parameterWord indexes the shared parameter payload in four-byte words.
     // AlwaysZero is a promise about every packet, including GPU-written packets.
