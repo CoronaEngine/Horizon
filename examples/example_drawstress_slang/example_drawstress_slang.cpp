@@ -139,6 +139,11 @@ void run_drawstress_scene()
         return m;
     }();
     const glm::mat4 view_proj = proj * view;
+    // The fixed view faces +Z. Clip X and Y scale independently, and Z supplies both clip Z and W.
+    const glm::vec4 projection(view_proj[0].x, view_proj[1].y, view_proj[2].z, view_proj[2].w);
+    const auto projectAxis = [&](float x, float y, float z) {
+        return projection * (0.25f * glm::vec4(x, y, z, z)) + view_proj[3] * 0.0f;
+    };
 
     legacy_example::Benchmark benchmark(mode, stress_width, stress_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
@@ -161,10 +166,12 @@ void run_drawstress_scene()
             HORIZON_PROFILE_SCOPE_N("drawstress::build_records");
             // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
             std::array<glm::vec3, dim_max> sine, cosine;
+            std::array<glm::vec4, dim_max> translations;
             for (int i = 0; i < dim; ++i) {
                 const glm::vec3 angles = time + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
                 sine[i] = glm::sin(angles);
                 cosine[i] = glm::cos(angles);
+                translations[i] = view_proj * glm::vec4(base + glm::vec3(i * step), 1.0f);
             }
             auto* dst = matrices.data();
             for (int zz = 0; zz < dim; ++zz) {
@@ -172,15 +179,17 @@ void run_drawstress_scene()
                 for (int yy = 0; yy < dim; ++yy)
                 {
                     const float sy = sine[yy].y, cy = cosine[yy].y;
-                    const glm::vec4 axisX = 0.25f * glm::vec4(cz * cy, cy * sz, -sy, 0.0f);
+                    const glm::vec4 axisX = projectAxis(cz * cy, cy * sz, -sy);
+                    glm::vec4 translation = translations[zz];
+                    translation.y = translations[yy].y;
                     for (int xx = 0; xx < dim; ++xx)
                     {
                         const float sx = sine[xx].x, cx = cosine[xx].x;
-                        const glm::mat4 model(axisX,
-                            0.25f * glm::vec4(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx, 0.0f),
-                            0.25f * glm::vec4(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx, 0.0f),
-                            glm::vec4(base + glm::vec3(xx * step, yy * step, zz * step), 1.0f));
-                        *dst++ = view_proj * model;
+                        translation.x = translations[xx].x;
+                        *dst++ = glm::mat4(axisX,
+                            projectAxis(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx),
+                            projectAxis(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx),
+                            translation);
                     }
                 }
             }
