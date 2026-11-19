@@ -110,7 +110,8 @@ void HardwareContext::prepareFeaturesChain()
         extensions.insert(VK_MVK_MOLTENVK_EXTENSION_NAME);
         extensions.insert(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
 #elif __linux__
-        extensions.insert(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+        // Keep Xlib macros out of the backend headers. This only needs the extension name.
+        extensions.insert("VK_KHR_xlib_surface");
 #endif
         return extensions;
     };
