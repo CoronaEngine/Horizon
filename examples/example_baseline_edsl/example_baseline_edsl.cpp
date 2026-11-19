@@ -30,8 +30,8 @@ struct BaselineEdslVertexProxy
 
 namespace
 {
-constexpr uint32_t edsl_width = 800;
-constexpr uint32_t edsl_height = 600;
+constexpr uint32_t edsl_width = 1920;
+constexpr uint32_t edsl_height = 1080;
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";

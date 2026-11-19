@@ -40,8 +40,8 @@ struct DisneyDrawParameters {
 };
 static_assert(offsetof(DisneyDrawParameters, texCubeIndex) == 128);
 
-constexpr uint32_t disney_width = 1280;
-constexpr uint32_t disney_height = 720;
+constexpr uint32_t disney_width = 1920;
+constexpr uint32_t disney_height = 1080;
 constexpr int chart_row_count = 10;
 constexpr int chart_col_count = 11;
 constexpr int chart_sphere_count = chart_row_count * chart_col_count;

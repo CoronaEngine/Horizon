@@ -38,8 +38,8 @@
 
 namespace
 {
-constexpr uint32_t stress_width = 1280;
-constexpr uint32_t stress_height = 720;
+constexpr uint32_t stress_width = 1920;
+constexpr uint32_t stress_height = 1080;
 constexpr int dim_min = 2;
 constexpr int dim_max = 40;
 

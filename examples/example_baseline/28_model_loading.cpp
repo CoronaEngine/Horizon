@@ -33,8 +33,8 @@
 
 namespace {
 
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
+const uint32_t WIDTH = 1920;
+const uint32_t HEIGHT = 1080;
 
 const auto ASSETS_DIR = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
 const std::string MODEL_PATH = (ASSETS_DIR / "models/viking_room.obj").string();
@@ -217,6 +217,12 @@ private:
         glfwInit();
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
+        if (auto* monitor = glfwGetPrimaryMonitor()) {
+            int workWidth, workHeight;
+            glfwGetMonitorWorkarea(monitor, nullptr, nullptr, &workWidth, &workHeight);
+            glfwWindowHint(GLFW_DECORATED, workWidth > static_cast<int>(WIDTH) && workHeight > static_cast<int>(HEIGHT));
+        }
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);

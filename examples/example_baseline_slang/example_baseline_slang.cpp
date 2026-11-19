@@ -26,8 +26,8 @@ struct DrawParameters {
     uint32_t texIndex{};
 };
 
-constexpr uint32_t width = 800;
-constexpr uint32_t height = 600;
+constexpr uint32_t width = 1920;
+constexpr uint32_t height = 1080;
 
 const std::filesystem::path viking_room_model_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "models" / "viking_room.obj";

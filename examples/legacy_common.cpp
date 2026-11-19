@@ -78,6 +78,12 @@ int env_int(const char* name, int fallback) {
 Window::Window(uint32_t width, uint32_t height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
+    if (auto* monitor = glfwGetPrimaryMonitor()) {
+        int work_width, work_height;
+        glfwGetMonitorWorkarea(monitor, nullptr, nullptr, &work_width, &work_height);
+        glfwWindowHint(GLFW_DECORATED, work_width > static_cast<int>(width) && work_height > static_cast<int>(height));
+    }
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     if (env_int("HORIZON_BENCH_HIDDEN", 0)) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     window_ = glfwCreateWindow(width, height, title, nullptr, nullptr);
