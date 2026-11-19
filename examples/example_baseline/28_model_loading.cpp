@@ -218,13 +218,12 @@ private:
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-        if (auto* monitor = glfwGetPrimaryMonitor()) {
-            int workWidth, workHeight;
-            glfwGetMonitorWorkarea(monitor, nullptr, nullptr, &workWidth, &workHeight);
-            glfwWindowHint(GLFW_DECORATED, workWidth > static_cast<int>(WIDTH) && workHeight > static_cast<int>(HEIGHT));
-        }
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        if (!window) { glfwTerminate(); throw std::runtime_error("glfwCreateWindow failed"); }
+        // Restore the requested client size if the desktop clamped the decorated window at creation.
+        glfwSetWindowSizeLimits(window, WIDTH, HEIGHT, GLFW_DONT_CARE, GLFW_DONT_CARE);
+        glfwSetWindowSizeLimits(window, GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
