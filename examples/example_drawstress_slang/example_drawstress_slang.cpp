@@ -43,8 +43,7 @@ constexpr uint32_t stress_height = 720;
 constexpr int dim_min = 2;
 constexpr int dim_max = 40;
 
-// Bits 0..2 are R/G/B and select the +X/-Y/-Z endpoints of the cube.
-// Vertex pulling uses a word-aligned stride, so each corner occupies one word.
+// The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
 const std::vector<uint32_t> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
 const std::vector<uint16_t> cube_indices = {

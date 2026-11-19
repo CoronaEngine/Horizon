@@ -12,13 +12,13 @@ struct DrawstressEdslPipeline::State {
     Texture2D<fvec4> output;
     std::unique_ptr<RasterizerPipeline<>> pipeline;
     State() {
-        auto vs = [&](Uint corner) {
-            Float3 color(corner & Uint(1), (corner >> Uint(1)) & Uint(1), (corner >> Uint(2)) & Uint(1));
-            Float3 pos = color * Float3(2.0f, -2.0f, -2.0f) + Float3(-1.0f, 1.0f, 1.0f);
+        auto vs = [&]() {
+            const auto corner = vertexIndex();
+            Aggregate<Varyings> out;
+            out->color = Float3(corner & Uint(1), (corner >> Uint(1)) & Uint(1), (corner >> Uint(2)) & Uint(1));
+            Float3 pos = out->color * Float3(2.0f, -2.0f, -2.0f) + Float3(-1.0f, 1.0f, 1.0f);
             auto mvp = rasterDrawParameter<fmat4x4>(0);
             position() = mul(mvp, Float4(pos, Float(1)));
-            Aggregate<Varyings> out;
-            out->color = color;
             return out;
         };
         auto fs = [&](Aggregate<Varyings> in) { output << Float4(in->color, Float(1)); };

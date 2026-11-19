@@ -12,7 +12,7 @@ struct VertexOutput {
 [shader("vertex")]
 VertexOutput main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     HorizonDrawPacket packet = drawRoot.packets[drawRoot.groupBase + drawID];
-    uint corner = *hzPullVertex(packet, vertexID);
+    uint corner = hzVertexIndex(drawRoot.geometries[packet.geometryIndex], packet, vertexID);
     float3 color = float3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
     float3 position = color * float3(2, -2, -2) + float3(-1, 1, 1);
     DrawParameters* draw = (DrawParameters*)(drawRoot.parameters + packet.parameterWord);
