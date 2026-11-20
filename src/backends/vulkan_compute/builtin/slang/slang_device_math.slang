@@ -232,14 +232,15 @@ uint64_t oc_fma32_shift_jam(uint64_t value, uint distance) {
 }
 uint64_t oc_fma32_round_shift(uint64_t value, uint distance) {
     if (distance == 0u) return value;
-    if (distance < 64u) {
-        uint64_t whole = value >> distance;
-        uint64_t remainder = value & ((uint64_t(1) << distance) - 1u);
-        uint64_t halfway = uint64_t(1) << (distance - 1u);
-        return whole + uint64_t(remainder > halfway || (remainder == halfway && (whole & 1u) != 0u));
-    }
-    // Exactly halfway rounds to the even zero. Never shift by the type width.
-    return distance == 64u && value > (uint64_t(1) << 63u) ? uint64_t(1) : uint64_t(0);
+    if (distance > 64u) return 0u;
+    // Keep the guard bit so a distance of 64 never shifts by the type width.
+    // Round up when the guard is set and either the discarded tail is nonzero
+    // or the retained integer is odd (an exact tie rounds to even).
+    uint tail_shift = distance - 1u;
+    uint64_t guarded = value >> tail_shift;
+    uint64_t whole = guarded >> 1u;
+    uint64_t sticky = uint64_t((guarded << tail_shift) != value);
+    return whole + (guarded & (whole | sticky) & 1u);
 }
 uint oc_fma32_bits(uint a, uint b, uint c) {
     uint magnitude_a = a & 0x7fffffffu, magnitude_b = b & 0x7fffffffu, magnitude_c = c & 0x7fffffffu;
