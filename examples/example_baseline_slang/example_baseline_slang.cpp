@@ -10,14 +10,16 @@
 
 #include "Codegen/ControlFlows.h"
 #include "common.h"
-#include "scene_pass.h"
+#include "examples.h"
 #include "legacy_common.h"
 
 #include SLANG(example_baseline_slang/baseline_vert.slang)
 #include SLANG(example_baseline_slang/baseline_frag.slang)
 
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
+#include <utility>
 
 namespace
 {
@@ -42,13 +44,13 @@ void run_example_baseline_slang()
     auto* window = owner.get();
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
-    HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
+    HardwareImage texture_image = baseline::loadTexture(viking_room_texture_path.string());
 
-    HardwareImage final_output_image(example::imageInfo(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    HardwareImage final_output_image(baseline::imageInfo(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
     final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     HardwareImage depth_image(
-        example::imageInfo(width, height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
+        baseline::imageInfo(width, height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     auto vertex_buffer = HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer);
     auto index_buffer = HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer);
@@ -57,11 +59,13 @@ void run_example_baseline_slang()
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);
 
 
-    example::ScenePass<DrawParameters, baseline_vert_slang_t, baseline_frag_slang_t> rasterizer(width, height, {{true, true, RasterCompare::LessEqual, RasterBlend::Alpha}, {false, false}});
+    RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> rasterizer;
+    rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
-    rasterizer.parameters.texIndex = texture_image.storeDescriptor();
+    DrawParameters parameters{};
+    parameters.texIndex = texture_image.storeDescriptor();
 
     // VP 不随帧变化（相机固定），绑定一次即可
     rasterizer.vp.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
@@ -105,13 +109,13 @@ void run_example_baseline_slang()
         }
 
         // Model 每帧更新（逐 draw 的 BDA 参数）；VP 已在循环外绑定
-        rasterizer.parameters.model = glm::rotate(glm::mat4(1.0f),
-                                          time_seconds * glm::pi<float>() * 0.5f,
-                                          glm::vec3(0.0f, 0.0f, 1.0f));
+        parameters.model = glm::rotate(glm::mat4(1.0f),
+                                       time_seconds * glm::pi<float>() * 0.5f,
+                                       glm::vec3(0.0f, 0.0f, 1.0f));
 
-        rasterizer.draw({vertex_buffer, index_buffer});
-
-        render_executor << rasterizer;
+        auto batch = rasterizer.beginBatch(width, height);
+        batch.draw({vertex_buffer, index_buffer}, {}, parameters);
+        render_executor << std::move(batch);
         benchmark.presented(display.present(render_executor, final_output_image));
     }
     render_executor.waitForDeferredResources();

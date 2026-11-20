@@ -13,7 +13,7 @@
 #include "Codegen/ControlFlows.h"
 #include "legacy_common.h"
 #include "example_disney_edsl/example_disney_edsl.h"
-#include "example_disney_slang.h"
+#include "examples.h"
 #include "Horizon.h"
 
 #include SLANG(example_disney_slang/disney_vert.slang)
@@ -35,10 +35,12 @@ namespace
 {
 struct DisneyDrawParameters {
     glm::mat4 model;
-    glm::vec4 mat0, mat1, mat2, mat3;
+    glm::vec4 mat0, mat1, mat2;
+    float clearcoatGloss;
     uint32_t texCubeIndex, texCubeIrrIndex;
 };
-static_assert(offsetof(DisneyDrawParameters, texCubeIndex) == 128);
+static_assert(offsetof(DisneyDrawParameters, clearcoatGloss) == 28 * sizeof(uint32_t));
+static_assert(offsetof(DisneyDrawParameters, texCubeIndex) == 29 * sizeof(uint32_t));
 
 constexpr uint32_t disney_width = 1920;
 constexpr uint32_t disney_height = 1080;
@@ -101,7 +103,7 @@ CubeMapData load_dds_cube_rgba16f(const std::filesystem::path& path)
     return data;
 }
 
-HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& /*name*/)
+HardwareImage create_cubemap_image(const CubeMapData& dds)
 {
     HardwareImageCreateInfo desc(dds.size, dds.size, ImageFormat::RGBA16_FLOAT);
     desc.arrayLayers = 6;
@@ -124,22 +126,6 @@ HardwareImage create_cubemap_image(const CubeMapData& dds, const std::string& /*
     }
     executor.commit().waitForDeferredResources();
     return image;
-}
-
-struct LightProbe
-{
-    HardwareImage lod;
-    HardwareImage irr;
-};
-
-LightProbe load_light_probe(const std::string& name)
-{
-    LightProbe probe;
-    probe.lod = create_cubemap_image(load_dds_cube_rgba16f(asset_root / "env" / (name + "_lod.dds")),
-                                     "disney." + name + ".lod");
-    probe.irr = create_cubemap_image(load_dds_cube_rgba16f(asset_root / "env" / (name + "_irr.dds")),
-                                     "disney." + name + ".irr");
-    return probe;
 }
 
 struct IblMesh
@@ -218,11 +204,6 @@ enum class ChartParam : int
     ClearcoatGloss,
 };
 
-constexpr const char* chart_param_names[] = {
-    "subsurface",     "metallic",      "specular",    "specularTint", "roughness",
-    "anisotropic",    "sheen",         "sheenTint",   "clearcoat",    "clearcoatGloss",
-};
-
 constexpr glm::vec3 chart_row_colors[chart_row_count] = {
     glm::vec3(1.0f, 1.0f, 1.0f),       // subsurface
     glm::vec3(1.0f, 0.86f, 0.12f),     // metallic
@@ -236,17 +217,10 @@ constexpr glm::vec3 chart_row_colors[chart_row_count] = {
     glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoatGloss
 };
 
-DisneyMaterial make_default_chart_material(glm::vec3 base_color)
-{
-    DisneyMaterial material;
-    material.base_color = base_color;
-    return material;
-}
-
 DisneyMaterial make_chart_material(int row, int col)
 {
     const float t = static_cast<float>(col) / static_cast<float>(chart_col_count - 1);
-    DisneyMaterial material = make_default_chart_material(chart_row_colors[row]);
+    DisneyMaterial material{.base_color = chart_row_colors[row]};
 
     switch (static_cast<ChartParam>(row))
     {
@@ -301,7 +275,6 @@ struct Settings
     float branch_switch_accum = 0.0f;
     int branch_switch_state = 0;
 
-    int current_probe = 0;
     glm::vec3 light_dir { -0.35f, 0.55f, -0.75f };
     glm::vec3 light_col { 1.0f, 1.0f, 1.0f };
 };
@@ -340,14 +313,6 @@ struct OrbitCamera
         return target + dir * dist_curr;
     }
 
-    [[nodiscard]] glm::mat4 env_view_mtx() const
-    {
-        const glm::vec3 forward = glm::normalize(target - position());
-        const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), forward));
-        const glm::vec3 up = glm::normalize(glm::cross(forward, right));
-        return glm::mat4(glm::vec4(right, 0.0f), glm::vec4(up, 0.0f), glm::vec4(forward, 0.0f),
-                         glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-    }
 };
 
 struct InputContext
@@ -359,14 +324,14 @@ struct InputContext
     bool has_prev = false;
 };
 
-void apply_material(DisneyDrawParameters& draw, const DisneyMaterial& material, float aspect)
+void apply_material(DisneyDrawParameters& draw, const DisneyMaterial& material)
 {
     draw.mat0 = glm::vec4(material.base_color, material.metallic);
     draw.mat1 =
         glm::vec4(material.roughness, material.specular, material.specular_tint, material.subsurface);
     draw.mat2 =
         glm::vec4(material.anisotropic, material.sheen, material.sheen_tint, material.clearcoat);
-    draw.mat3 = glm::vec4(material.clearcoat_gloss, 0.0f, aspect, 0.0f);
+    draw.clearcoatGloss = material.clearcoat_gloss;
 }
 
 void cursor_callback(GLFWwindow* window, double x, double y)
@@ -415,7 +380,8 @@ void run_disney_scene()
     glfwSetCursorPosCallback(window, cursor_callback);
     glfwSetScrollCallback(window, scroll_callback);
 
-    LightProbe probes[2] = { load_light_probe("bolonga"), load_light_probe("kyoto") };
+    HardwareImage radiance = create_cubemap_image(load_dds_cube_rgba16f(asset_root / "env/bolonga_lod.dds"));
+    HardwareImage irradiance = create_cubemap_image(load_dds_cube_rgba16f(asset_root / "env/bolonga_irr.dds"));
     IblMesh sphere_mesh = make_uv_sphere(48, 24);
 
     HardwareBuffer sphere_vb =
@@ -483,12 +449,11 @@ void run_disney_scene()
         const glm::vec3 cam_pos = camera.position();
         const glm::mat4 view = glm::lookAtLH(cam_pos, camera.target, glm::vec3(0.0f, 1.0f, 0.0f));
         const glm::mat4 env_rot = glm::rotate(glm::mat4(1.0f), s.env_rot_curr, glm::vec3(0.0f, 1.0f, 0.0f));
-        LightProbe& probe = probes[s.current_probe];
 
         benchmark.begin_scene();
-        if constexpr (Edsl) rasterizer.bind_textures(probe.lod, probe.irr);
-        const uint32_t cube_index = probe.lod.storeDescriptor();
-        const uint32_t irradiance_index = probe.irr.storeDescriptor();
+        if constexpr (Edsl) rasterizer.bind_textures(radiance, irradiance);
+        const uint32_t cube_index = radiance.storeDescriptor();
+        const uint32_t irradiance_index = irradiance.storeDescriptor();
         rasterizer.vsp.proj_view = proj * view;
         rasterizer.vsp.camPos = glm::vec4(cam_pos, 1.0f);
         rasterizer.vsp.flags = glm::vec4(s.do_diffuse ? 1.0f : 0.0f, s.do_specular ? 1.0f : 0.0f,
@@ -496,9 +461,8 @@ void run_disney_scene()
         rasterizer.vsp.lightDir = glm::vec4(glm::normalize(s.light_dir), 0.0f);
         rasterizer.vsp.lightCol = glm::vec4(s.light_col, 0.0f);
         rasterizer.vsp.envMtx = env_rot;
-        rasterizer.vsp.skyEnvMtx = env_rot * camera.env_view_mtx();
         rasterizer.vsp.exposurePad = glm::vec4(s.exposure, 0.0f, 0.0f, 0.0f);
-        if constexpr (!Edsl) rasterizer.uses({{probe.lod, ResourceAccess::Read}, {probe.irr, ResourceAccess::Read}});
+        if constexpr (!Edsl) rasterizer.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
         auto batch = rasterizer.beginBatch(disney_width, disney_height);
 
         RasterDraw draw_params;
@@ -514,7 +478,7 @@ void run_disney_scene()
 
                 DisneyDrawParameters draw{};
                 draw.model = model;
-                apply_material(draw, chart_materials[index], aspect);
+                apply_material(draw, chart_materials[index]);
                 draw.texCubeIndex = cube_index;
                 draw.texCubeIrrIndex = irradiance_index;
                 batch.draw({sphere_vb, sphere_ib}, draw_params, draw);

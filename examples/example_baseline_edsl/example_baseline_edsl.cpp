@@ -8,17 +8,13 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#include "Codegen/BuiltinVariate.h"
-#include "Codegen/ControlFlows.h"
-#include "Codegen/CustomLibrary.h"
-#include "Codegen/TypeAlias.h"
 #include "common.h"
-#include "scene_pass.h"
-#include "legacy_common.h"
+#include "examples.h"
+#include "legacy_edsl_support.h"
 
 #include <chrono>
 #include <cstdint>
-#include <cstring>
+#include <cstdio>
 #include <filesystem>
 #include <utility>
 
@@ -38,14 +34,6 @@ const std::filesystem::path viking_room_model_path =
 const std::filesystem::path viking_room_texture_path =
     std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "textures" / "viking_room.png";
 
-ktm::fmat4x4 to_edsl_matrix(const glm::mat4& matrix)
-{
-    static_assert(sizeof(ktm::fmat4x4) == sizeof(glm::mat4));
-
-    ktm::fmat4x4 result;
-    std::memcpy(&result, &matrix, sizeof(result));
-    return result;
-}
 } // namespace
 
 void run_example_baseline_edsl()
@@ -54,13 +42,13 @@ void run_example_baseline_edsl()
     auto* window = owner.get();
 
     baseline::Mesh mesh = baseline::load_mesh(viking_room_model_path);
-    HardwareImage texture_image = loadTexture(viking_room_texture_path.string()).texture;
+    HardwareImage texture_image = baseline::loadTexture(viking_room_texture_path.string());
 
-    HardwareImage final_output_image(example::imageInfo(edsl_width, edsl_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
+    HardwareImage final_output_image(baseline::imageInfo(edsl_width, edsl_height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage));
     final_output_image.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     HardwareImage depth_image(
-        example::imageInfo(edsl_width, edsl_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
+        baseline::imageInfo(edsl_width, edsl_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage));
 
     auto vertex_buffer = HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer);
     auto index_buffer = HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer);
@@ -89,12 +77,13 @@ void run_example_baseline_edsl()
     };
 
 
-    example::ScenePass<example::NoDrawParameters> rasterizer(edsl_width, edsl_height, {{true, true, RasterCompare::LessEqual, RasterBlend::Alpha}, {false, false}}, vertex_shader, fragment_shader, 1, example::shaderOptions());
+    RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, 1, legacy_example::edsl::options());
+    rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
     rasterizer.setDepthImage(depth_image);
 
 
     // VP 不随帧变化（相机固定），在循环外赋值一次
-    view = to_edsl_matrix(
+    view = legacy_example::edsl::value(
         glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
                     glm::vec3(0.0f, 0.0f, 0.0f),
                     glm::vec3(0.0f, 0.0f, 1.0f)));
@@ -103,7 +92,7 @@ void run_example_baseline_edsl()
                                               edsl_width / static_cast<float>(edsl_height),
                                               0.1f, 10.0f);
         proj_mat[1][1] *= -1.0f; // Vulkan 裁剪空间 Y 翻转
-        proj = to_edsl_matrix(proj_mat);
+        proj = legacy_example::edsl::value(proj_mat);
     }
 
     const auto start_time = std::chrono::high_resolution_clock::now();
@@ -136,14 +125,15 @@ void run_example_baseline_edsl()
         }
 
         // Model 每帧更新（逐 draw 参数）；VP 已在循环外绑定
-        model = to_edsl_matrix(
+        model = legacy_example::edsl::value(
             glm::rotate(glm::mat4(1.0f),
                         time_seconds * glm::pi<float>() * 0.5f,
                         glm::vec3(0.0f, 0.0f, 1.0f)));
 
-        rasterizer.draw({vertex_buffer, index_buffer});
-
-        render_executor << rasterizer;
+        rasterizer.syncShaderConditions();
+        auto batch = rasterizer.beginBatch(edsl_width, edsl_height);
+        batch.draw({vertex_buffer, index_buffer});
+        render_executor << std::move(batch);
         benchmark.presented(display.present(render_executor, final_output_image));
     }
     render_executor.waitForDeferredResources();

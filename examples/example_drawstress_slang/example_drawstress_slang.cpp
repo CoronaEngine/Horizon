@@ -20,7 +20,7 @@
 #include "Codegen/ControlFlows.h"
 #include "legacy_common.h"
 #include "example_drawstress_edsl/example_drawstress_edsl.h"
-#include "example_drawstress_slang.h"
+#include "examples.h"
 #include "Horizon.h"
 #include "horizon_profiling.h"  // 内部头（src/），埋点需在 CMake 里 opt-in
 

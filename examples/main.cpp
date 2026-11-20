@@ -1,11 +1,4 @@
-#include "example_baseline/example_baseline.h"
-#include "example_baseline_edsl/example_baseline_edsl.h"
-#include "example_baseline_slang/example_baseline_slang.h"
-#include "example_disney_edsl/example_disney_edsl.h"
-#include "example_disney_slang/example_disney_slang.h"
-#include "example_drawstress_edsl/example_drawstress_edsl.h"
-#include "example_drawstress_slang/example_drawstress_slang.h"
-#include <array>
+#include "examples.h"
 #include <exception>
 
 #include "horizon/core/logging.h"

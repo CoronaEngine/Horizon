@@ -2,14 +2,11 @@
 #include "legacy_common.h"
 #include <memory>
 
-void run_example_disney_edsl();
-
 // Adapter lets both shader paths execute the exact same legacy scene loop.
 class DisneyEdslPipeline {
 public:
     struct Shared {
         glm::mat4 proj_view{};
-        glm::mat4 skyEnvMtx{};
         glm::mat4 envMtx{};
         glm::vec4 camPos{};
         glm::vec4 flags{};

@@ -2,8 +2,6 @@
 #include "legacy_common.h"
 #include <memory>
 
-void run_example_drawstress_edsl();
-
 class DrawstressEdslPipeline {
 public:
     HardwareImage outColor;

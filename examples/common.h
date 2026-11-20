@@ -1,54 +1,33 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
-
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/glm.hpp>
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 #define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #include <tiny_obj_loader.h>
 
 #include "Horizon.h"
 
-struct Vertex
-{
-    std::array<float, 3> position;
-    std::array<float, 3> normal;
-    std::array<float, 2> texCoord;
-    std::array<float, 3> color;
-};
-
-struct TextureLoadResult
-{
-    HardwareImage texture;
-    uint32_t descriptorID = 0;
-    bool success = false;
-};
-
-TextureLoadResult loadTexture(const std::string& path);
-
-// =============================================================================
-// Viking Room 的 Slang 和 EDSL 对照示例共用的 CPU 端网格加载。
-// 数学使用 glm（已是 HorizonExamples 的链接依赖），不再手写矩阵。
-// =============================================================================
 namespace baseline
 {
+HardwareImage loadTexture(const std::string& path);
+
+inline HardwareImageCreateInfo imageInfo(uint32_t width, uint32_t height, ImageFormat format, ImageUsage usage)
+{
+    HardwareImageCreateInfo info(width, height, format);
+    info.usage = usage;
+    info.linearFiltering = true;
+    return info;
+}
+
 struct Vertex
 {
     std::array<float, 3> pos {};
@@ -132,7 +111,6 @@ inline Mesh load_mesh(const std::filesystem::path& model_path)
 
     return mesh;
 }
-
 
 } // namespace baseline
 

@@ -88,7 +88,7 @@ float3 evalDisneyDirect(DisneyDraw* draw, float3 L, float3 V, float3 N, float3 X
     float sheen = draw->mat2.y;
     float sheenTint = draw->mat2.z;
     float clearcoat = draw->mat2.w;
-    float clearcoatGloss = draw->mat3.x;
+    float clearcoatGloss = draw->clearcoatGloss;
 
     float3 Cdlin = toLinear(baseColor);
     float Cdlum = dot(Cdlin, float3(0.3, 0.6, 0.1));
@@ -129,25 +129,6 @@ float3 evalDisneyDirect(DisneyDraw* draw, float3 L, float3 V, float3 N, float3 X
 void main(DisneyVaryings input, out float4 outColor : SV_Target0)
 {
     DisneyDraw* draw = getDisneyDraw(input.parameterWord);
-    if (draw->mat3.y > 0.5)
-    {
-        float3 dir = normalize(input.dir);
-        float bgType = draw->mat3.w;
-
-        float3 color;
-        if (bgType >= 6.5)
-            color = toLinear(combinedCubeSamplerHandles[draw->texCubeIrrIndex].Sample(dir).xyz);
-        else
-        {
-            float lod = bgType;
-            dir = fixCubeLookup(dir, lod, 256.0);
-            color = toLinear(combinedCubeSamplerHandles[draw->texCubeIndex].SampleLevel(dir, lod).xyz);
-        }
-        color *= exp2(fsp.exposurePad.x);
-        outColor = float4(toFilmic(color), 1.0);
-        return;
-    }
-
     float3 N = normalize(input.normal);
     float3 V = normalize(input.view);
     float3 L = normalize(fsp.lightDir.xyz);
