@@ -1,22 +1,24 @@
 add_executable(HorizonExamples
     main.cpp
     common.cpp
-    legacy_common.cpp
-    present_benchmark.cpp
-    example_baseline/28_model_loading.cpp
-    example_baseline_edsl/example_baseline_edsl.cpp
-    example_baseline_slang/example_baseline_slang.cpp
-    example_disney_edsl/example_disney_edsl.cpp
-    example_disney_slang/example_disney_slang.cpp
-    example_drawstress_edsl/example_drawstress_edsl.cpp
-    example_drawstress_slang/example_drawstress_slang.cpp
+    Baseline/scene.cpp
+    Baseline/Tutorial/28_model_loading.cpp
+    Baseline/EDSL/example_baseline_edsl.cpp
+    Baseline/Slang/example_baseline_slang.cpp
+    Disney/scene.cpp
+    Disney/EDSL/example_disney_edsl.cpp
+    Disney/Slang/example_disney_slang.cpp
+    DrawStress/scene.cpp
+    DrawStress/EDSL/example_drawstress_edsl.cpp
+    DrawStress/Slang/example_drawstress_slang.cpp
 )
+target_compile_definitions(HorizonExamples PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
 find_program(TUTORIAL_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
-set(baseline_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/example_baseline")
+set(baseline_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Tutorial")
 if(TUTORIAL_GLSLC)
     set(baseline_shader_dir "${CMAKE_CURRENT_BINARY_DIR}/baseline_shaders")
     foreach(stage IN ITEMS vert frag)
-        set(source "${CMAKE_CURRENT_SOURCE_DIR}/example_baseline/27_shader_depth.${stage}")
+        set(source "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Tutorial/27_shader_depth.${stage}")
         set(output "${baseline_shader_dir}/${stage}.spv")
         add_custom_command(OUTPUT "${output}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${baseline_shader_dir}"
@@ -25,7 +27,7 @@ if(TUTORIAL_GLSLC)
         target_sources(HorizonExamples PRIVATE "${output}")
     endforeach()
 endif()
-set_property(SOURCE example_baseline/28_model_loading.cpp APPEND PROPERTY
+set_property(SOURCE Baseline/Tutorial/28_model_loading.cpp APPEND PROPERTY
     COMPILE_DEFINITIONS "TUTORIAL_SHADER_DIR=\"${baseline_shader_dir}\"")
 if(WIN32 AND HORIZON_BUILD_OCARINA)
     # Run beside the shared logging provider and Ocarina DLLs.
@@ -41,8 +43,8 @@ endif()
 helicon_install_runtime_deps(HorizonExamples)
 helicon_compile_shaders(HorizonExamples DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/raster_batch.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/example_baseline_slang/baseline_draw.slang"
-    "${CMAKE_CURRENT_SOURCE_DIR}/example_disney_slang/disney_shared.slang")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Slang/baseline_draw.slang"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Disney/Slang/disney_shared.slang")
 
 if(HORIZON_BUILD_TESTS)
     add_dependencies(horizon-tests HorizonExamples)

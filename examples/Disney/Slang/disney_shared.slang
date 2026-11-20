@@ -1,4 +1,4 @@
-#include "../raster_batch.slang"
+#include "../../raster_batch.slang"
 
 struct DisneyVaryings {
     float4 position : SV_Position;

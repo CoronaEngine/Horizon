@@ -111,6 +111,16 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
 
+每个场景的 `EDSL` 和 `Slang` 目录各有独立入口。对照管线创建、资源绑定和绘制调用时，可以并排打开表中两份实现。两边共用的场景逻辑放在该场景根目录的 `scene.h` 和 `scene.cpp`。
+
+| 场景 | EDSL 实现 | Slang 实现 |
+| --- | --- | --- |
+| Baseline | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) |
+| Disney | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
+| DrawStress | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
+
+Baseline 的原生 Vulkan 教程位于 [Baseline/Tutorial](examples/Baseline/Tutorial/28_model_loading.cpp)。
+
 直接运行 `HorizonExamples` 默认启动 `baseline`，使用 Vulkan Tutorial 章末的渲染流程和着色器绘制 Viking Room。运行 `HorizonExamples baseline_slang` 或 `HorizonExamples baseline_edsl` 可切换到手写 Slang 或 Helicon EDSL 实现。三者共用模型、纹理及项目的 tinyobjloader 依赖。[Loading models](https://vulkan-tutorial.com/Loading_models)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
@@ -240,7 +250,7 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
 Horizon 通过 `vkCmdDrawIndirect` 提交批次，顶点输入状态为空。手写 shader 自行声明所用字段、读取顶点，并决定各阶段之间传递什么。入口为 `main`。下面的字段名仅供对照，二进制接口由字节偏移、宽度和数组步长决定。
 
-Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，直接调用 `RasterizedPipelineObject::compile()` 也采用同一布局。顶点 lambda 可以写成 `[](Float3 position, Float2 uv)`，Helicon 按形参顺序从顶点记录读取属性。手写 shader 可参考 [手写 Slang 顶点着色器](examples/example_baseline_slang/baseline_vert.slang) 与[片元着色器](examples/example_baseline_slang/baseline_frag.slang)。
+Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，直接调用 `RasterizedPipelineObject::compile()` 也采用同一布局。顶点 lambda 可以写成 `[](Float3 position, Float2 uv)`，Helicon 按形参顺序从顶点记录读取属性。手写 shader 可参考 [手写 Slang 顶点着色器](examples/Baseline/Slang/baseline_vert.slang) 与[片元着色器](examples/Baseline/Slang/baseline_frag.slang)。
 
 | 数据 | 字节偏移与字段 | 大小 |
 | --- | --- | --- |

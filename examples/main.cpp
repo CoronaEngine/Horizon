@@ -1,4 +1,3 @@
-#include "examples.h"
 #include <exception>
 
 #include "horizon/core/logging.h"
@@ -8,6 +7,14 @@
 #include <iostream>
 #include <sstream>
 #include <string_view>
+
+void run_example_baseline_tutorial();
+void run_example_baseline_edsl();
+void run_example_baseline_slang();
+void run_example_disney_edsl();
+void run_example_disney_slang();
+void run_example_drawstress_edsl();
+void run_example_drawstress_slang();
 
 int main(int argc, char **argv)
 {
@@ -35,7 +42,7 @@ int main(int argc, char **argv)
 
     struct Example { std::string_view name; void (*run)(); };
     static constexpr Example examples[] = {
-        {"baseline", run_example_baseline},
+        {"baseline", run_example_baseline_tutorial},
         {"baseline_edsl", run_example_baseline_edsl},
         {"baseline_slang", run_example_baseline_slang},
         {"disney_edsl", run_example_disney_edsl},

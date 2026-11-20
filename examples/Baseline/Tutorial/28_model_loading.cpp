@@ -1,16 +1,13 @@
-#include "examples.h"
-#include "present_benchmark.h"
-
 #include <volk.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
+
+#include "common.h"
 
 #include <stb_image.h>
 
@@ -263,7 +260,7 @@ private:
     }
 
     void mainLoop() {
-        legacy_example::PresentBenchmark benchmark("baseline");
+        examples::PresentBenchmark benchmark("baseline");
         while (benchmark.running(window)) {
             glfwPollEvents();
             benchmark.presented(drawFrame());
@@ -1628,7 +1625,7 @@ private:
 
 } // namespace
 
-void run_example_baseline() {
+void run_example_baseline_tutorial() {
     if (volkInitialize() != VK_SUCCESS) {
         throw std::runtime_error("failed to initialize the Vulkan loader!");
     }

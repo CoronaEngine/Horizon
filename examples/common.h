@@ -1,116 +1,81 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
+#include <chrono>
 #include <cstdint>
-#include <filesystem>
-#include <functional>
-#include <iostream>
-#include <stdexcept>
+#include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
-#define TINYOBJLOADER_DISABLE_FAST_FLOAT
-#include <tiny_obj_loader.h>
+struct GLFWwindow;
+struct HardwareExecutor;
+struct HardwareDisplayer;
+struct HardwareImage;
+class RasterBatch;
 
-#include "Horizon.h"
+namespace examples {
+int env_int(const char* name, int fallback);
 
-namespace baseline
-{
-HardwareImage loadTexture(const std::string& path);
+// Sample intervals between successful presents on the normal windowed render path.
+class PresentBenchmark {
+public:
+    explicit PresentBenchmark(const char* mode);
+    bool enabled() const { return limit_ > 0; }
+    bool running(GLFWwindow* window) const;
+    void presented(bool success);
 
-inline HardwareImageCreateInfo imageInfo(uint32_t width, uint32_t height, ImageFormat format, ImageUsage usage)
-{
-    HardwareImageCreateInfo info(width, height, format);
-    info.usage = usage;
-    info.linearFiltering = true;
-    return info;
-}
-
-struct Vertex
-{
-    std::array<float, 3> pos {};
-    std::array<float, 2> tex_coord {};
-
-    bool operator==(const Vertex&) const = default;
-};
-static_assert(sizeof(Vertex) == 5 * sizeof(float));
-
-struct VertexHash
-{
-    size_t operator()(const Vertex& vertex) const
-    {
-        size_t seed = 0;
-        auto combine = [&seed](float value) {
-            seed ^= std::hash<float> {}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        };
-
-        for (float value : vertex.pos)
-            combine(value);
-        for (float value : vertex.tex_coord)
-            combine(value);
-
-        return seed;
-    }
+private:
+    using Clock = std::chrono::steady_clock;
+    const char* mode_;
+    int limit_;
+    int warmup_;
+    Clock::time_point previous_{};
+    std::vector<double> samples_;
 };
 
-struct Mesh
-{
-    std::vector<Vertex> vertices;
-    std::vector<uint16_t> indices;
+class Window {
+public:
+    Window(uint32_t width, uint32_t height, const char* title);
+    ~Window();
+    Window(const Window&) = delete;
+    Window& operator=(const Window&) = delete;
+    GLFWwindow* get() const { return window_; }
+    void* native_handle() const;
+private:
+    GLFWwindow* window_{};
 };
 
-inline Mesh load_mesh(const std::filesystem::path& model_path)
-{
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn;
-    std::string err;
-
-    const std::string model_path_str = model_path.string();
-    const std::string material_base_path =
-        model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator);
-
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path_str.c_str(), material_base_path.c_str()))
-        throw std::runtime_error(warn + err);
-    if (!warn.empty())
-        std::cerr << warn << '\n';
-
-    Mesh mesh;
-    std::unordered_map<Vertex, uint32_t, VertexHash> unique_vertices;
-    for (const tinyobj::shape_t& shape : shapes)
-    {
-        for (const tinyobj::index_t& index : shape.mesh.indices)
-        {
-            Vertex vertex;
-            vertex.pos = {
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 0],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
-            };
-            if (index.texcoord_index >= 0)
-            {
-                vertex.tex_coord = {
-                    attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 0],
-                    1.0f - attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 1],
-                };
-            }
-
-            auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(mesh.vertices.size()));
-            if (inserted)
-            {
-                if (mesh.vertices.size() >= 0x10000u)
-                    throw std::runtime_error("Mesh exceeds the 65536-vertex 16-bit index limit: " + model_path_str);
-                mesh.vertices.push_back(vertex);
-            }
-            mesh.indices.push_back(static_cast<uint16_t>(found->second));
-        }
-    }
-
-    return mesh;
-}
-
-} // namespace baseline
-
+// Bounded runs measure serialized scene submissions with Vulkan timestamps.
+// Animation uses an independent fixed dt; offscreen runs skip presentation.
+class Benchmark {
+public:
+    Benchmark(const char* mode, uint32_t width, uint32_t height);
+    ~Benchmark();
+    bool running(GLFWwindow* window) const { return present_benchmark_.running(window); }
+    void begin_frame();
+    void begin_scene();
+    void submit(HardwareExecutor&, RasterBatch&&, HardwareDisplayer&, const HardwareImage&);
+    void set_shader_setup_ms(double value) { shader_setup_ms_ = value; }
+    float dt() const;
+    float time() const;
+    void end_frame(GLFWwindow*, uint64_t draws, const HardwareImage&, HardwareExecutor&);
+private:
+    using Clock = std::chrono::steady_clock;
+    std::string mode_;
+    PresentBenchmark present_benchmark_;
+    uint32_t width_, height_;
+    int warmup_, limit_;
+    uint64_t frame_{};
+    float fixed_dt_{};
+    Clock::time_point start_, frame_start_;
+    double dt_{}, title_seconds_{};
+    uint64_t title_frames_{};
+    std::vector<double> samples_;
+    struct GpuTimer;
+    std::unique_ptr<GpuTimer> gpu_timer_;
+    bool offscreen_{};
+    Clock::time_point scene_start_;
+    double shader_setup_ms_{}, first_submit_ms_{};
+    double record_ms_{}, submit_ms_{}, gpu_ms_{};
+    double total_record_ms_{}, total_submit_ms_{}, total_gpu_ms_{};
+};
+} // namespace examples

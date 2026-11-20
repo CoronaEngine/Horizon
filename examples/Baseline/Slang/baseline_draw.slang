@@ -1,4 +1,4 @@
-#include "../raster_batch.slang"
+#include "../../raster_batch.slang"
 
 // Matches the GLM matrix and texture index uploaded for each draw.
 struct DrawParameters {

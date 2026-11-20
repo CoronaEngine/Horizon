@@ -1,4 +1,4 @@
-#include "../raster_batch.slang"
+#include "../../raster_batch.slang"
 
 struct DrawParameters {
     column_major float4x4 mvp;
