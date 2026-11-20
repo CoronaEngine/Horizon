@@ -27,6 +27,7 @@ public:
     ~VkComputeStream() noexcept override;
     void record(const std::function<void(VkCommandBuffer)> &fn) noexcept;
     void retain(VkBufferAllocation allocation) noexcept;
+    void retain_lifetime(std::function<void()> hold) noexcept;
     void after_completion(std::function<void()> fn) noexcept;
     void host_function(std::function<void()> fn, bool async) noexcept;
     void native_callback(NativeCallbackFunction fn) noexcept;

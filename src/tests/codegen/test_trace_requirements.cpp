@@ -51,6 +51,10 @@ void requirements() {
         check(r.uses_trace && native_trace_compatible(r), "nested trace must be eligible for native tracing");
     };
     check_trace([](Var<Accel> &scene, Var<Ray> &ray) { (void)scene.trace_closest(ray); });
+    check_trace([](Var<Accel> &scene, Var<Ray> &ray) {
+        Float distance;
+        (void)scene.trace_closest(ray, distance);
+    });
     check_trace([](Var<Accel> &scene, Var<Ray> &ray) { (void)scene.trace_occlusion(ray); });
 
     const auto leaf = Function::define_callable([] {
@@ -96,6 +100,47 @@ void requirements() {
         f->expr_statement(f->dispatch_dim());
     });
     check(native_trace_compatible(analyze_function_requirements(*dispatch)), "dispatch builtins are valid in raygen");
+}
+
+void typed_texture_requirements() {
+    const auto kernel = Function::define_kernel([] {
+        Var<Texture2D> floats{detail::ArgumentCreation{}};
+        Var<Texture2D> uints{detail::ArgumentCreation{}};
+        const uint2 pixel = make_uint2(0u, 1u);
+        floats.write_native(pixel, floats.read_native<float4>(pixel));
+        uints.write_native(pixel, uints.read_native<uint2>(pixel));
+    });
+    check(native_trace_compatible(analyze_function_requirements(*kernel)),
+          "typed texture access incorrectly prohibits native tracing");
+    for (auto mode : {ShaderExecutionMode::Compute, ShaderExecutionMode::RayTracingPipeline}) {
+        const auto source = AstToSlangSource::generate(*kernel, {{}, mode, {}}, false, false).source;
+        check(source.find("oc_tex2d_read_native_float4(") != string::npos &&
+              source.find("oc_tex2d_read_native_uint2(") != string::npos &&
+              source.find("oc_tex2d_write_native(") != string::npos,
+              "typed textures did not lower to the correct Slang helpers without warp32");
+    }
+}
+
+void subgroup_requirements() {
+    const auto arithmetic = Function::define_kernel([] { (void)subgroup_active_sum(1u); });
+    const auto ballot = Function::define_kernel([] { (void)subgroup_active_count_bits(Bool{true}); });
+    const auto basic = Function::define_kernel([] {
+        (void)subgroup_lane_count();
+        (void)subgroup_is_first_lane();
+    });
+    const auto sum_req = analyze_function_requirements(*arithmetic);
+    const auto count_req = analyze_function_requirements(*ballot);
+    const auto basic_req = analyze_function_requirements(*basic);
+    check(sum_req.uses_subgroup && sum_req.uses_subgroup_arithmetic && !sum_req.uses_subgroup_ballot,
+          "hardware subgroup sum requires arithmetic support");
+    check(count_req.uses_subgroup && !count_req.uses_subgroup_arithmetic && count_req.uses_subgroup_ballot,
+          "hardware subgroup count-bits requires ballot support");
+    check(basic_req.uses_subgroup && !basic_req.uses_subgroup_arithmetic && !basic_req.uses_subgroup_ballot,
+          "hardware subgroup lane operations require only basic support");
+    check(!sum_req.uses_warp && !native_trace_compatible(sum_req),
+          "hardware subgroups must select compute without imposing the warp32 contract");
+    const auto source = AstToSlangSource::generate(*arithmetic, {}, false, false).source;
+    check(source.find("WaveActiveSum(") != string::npos, "hardware subgroup sum could not emit without warp32");
 }
 
 void per_compile_uniform_layout() {
@@ -158,6 +203,8 @@ void concurrent_emission() {
 
 int main() {
     requirements();
+    typed_texture_requirements();
+    subgroup_requirements();
     per_compile_uniform_layout();
     concurrent_emission();
     const auto discarded = Function::define_callable([] {

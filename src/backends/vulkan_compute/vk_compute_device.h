@@ -108,8 +108,10 @@ private:
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties_{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
     bool supports_warp32_{false};
+    VkSubgroupFeatureFlags compute_subgroup_operations_{};
     bool has_int64_atomics_{false};
     bool native_float32_fma_enabled_{false};
+    bool has_bc7_{false};
     bool has_external_memory_{false};
     // Opt-in, host-side pipeline diagnostics; disabled unless an output path is set.
     bool has_pipeline_statistics_{false};
@@ -223,6 +225,7 @@ public:
 
     // ── Device::Impl interface ───────────────────────────────────────────────
     [[nodiscard]] bool supports_buffer_export() const noexcept override { return has_external_memory_; }
+    [[nodiscard]] bool supports_bc7_textures() const noexcept override { return has_bc7_; }
     [[nodiscard]] bool supports_raytracing() const noexcept override { return has_ray_query() || has_ray_tracing_pipeline(); }
     [[nodiscard]] TraceCapabilities trace_capabilities() const noexcept override {
         return enabled_trace_features_.trace_capabilities();

@@ -283,6 +283,77 @@ void test_many_commits_and_gpu_batch_reuse(Device &device) {
         require(reused_results[i] == expected[i], "synchronous batch reuse corrupted GPU output");
 }
 
+
+void test_retained_generations_without_submission_boundary(Device &device) {
+    constexpr uint count = 37u;
+    auto output = device.create_buffer<uint>(2u * count, "stream-order-retain-generations-output");
+    Kernel fill_kernel = [](BufferVar<uint> buffer, Uint value) {
+        buffer.write(dispatch_id(), value + dispatch_id());
+    };
+    Kernel read_kernel = [](BufferVar<uint> input, BufferVar<uint> output, Uint offset) {
+        output.write(offset + dispatch_id(), input.read(dispatch_id()));
+    };
+    // Distinct arithmetic keeps these probes in different shader-cache entries,
+    // so their diagnostic names identify both sides of the lifetime command.
+    Kernel second_read_kernel = [](BufferVar<uint> input, BufferVar<uint> output, Uint offset) {
+        output.write(offset + dispatch_id(), input.read(dispatch_id()) + 7u);
+    };
+    auto fill = device.compile(fill_kernel, "stream-order-retain-fill");
+    auto first_read = device.compile(read_kernel, "stream-order-retain-read-A");
+    auto second_read = device.compile(second_read_kernel, "stream-order-retain-read-B");
+    auto stream = device.create_stream();
+    using Generation = Buffer<uint>;
+    auto generation = std::make_shared<Generation>(device.create_buffer<uint>(count, "retained-generation-A"));
+    std::weak_ptr<Generation> old_generation = generation;
+    stream << fill(*generation, 1100u).dispatch(count)
+           << first_read(*generation, output, 0u).dispatch(count)
+           << retain_until_complete(generation);
+    // Replace and resize the active resource before commit. Only the queued
+    // lifetime command owns the old storage addressed by the earlier shaders.
+    generation = std::make_shared<Generation>(device.create_buffer<uint>(count * 2u, "retained-generation-B"));
+    require(!old_generation.expired(), "queued lifetime command lost the pre-resize resource generation");
+    std::weak_ptr<Generation> new_generation = generation;
+    stream << fill(*generation, 2200u).dispatch(count * 2u)
+           << second_read(*generation, output, count).dispatch(count)
+           << retain_until_complete(generation);
+    generation.reset();
+    require(!new_generation.expired(), "queued lifetime command lost the replacement generation");
+    stream << commit();
+    array<uint, count * 2u> results{};
+    stream << output.download(results.data()) << synchronize() << commit();
+    for (uint i = 0u; i < count; ++i) {
+        require(results[i] == 1100u + i, "old generation was freed or overwritten before its GPU reader");
+        require(results[count + i] == 2207u + i, "replacement generation did not survive its GPU reader");
+    }
+    require(old_generation.expired() && new_generation.expired(),
+            "lifetime captures survived synchronize after their GPU batch completed");
+    // With REBLUR_GPU_PROFILE + REBLUR_GPU_PROFILE_DIAGNOSTICS, read-A and
+    // read-B must have the same (stream_slot,submit_serial). The external
+    // validate_batches.py checks this; using keep_alive(true,...) fails it.
+}
+
+void test_retained_lifetime_on_stream_destruction(Device &device) {
+    std::weak_ptr<uint> weak_owner;
+    auto output = device.create_buffer<uint>(1u, "stream-order-retain-destruction-output");
+    Kernel kernel = [](BufferVar<uint> output) { output.write(0u, 0x1234a5a5u); };
+    auto shader = device.compile(kernel, "stream-order-retain-stream-destruction");
+    {
+        auto stream = device.create_stream();
+        auto owner = std::make_shared<uint>(0x1234a5a5u);
+        weak_owner = owner;
+        stream << shader(output).dispatch(1u) << retain_until_complete(owner);
+        owner.reset();
+        require(!weak_owner.expired(), "uncommitted lifetime capture released before stream destruction");
+        stream << commit();
+        // No explicit synchronize: destruction must retire submitted captures.
+    }
+    require(weak_owner.expired(), "stream destructor did not release its retained captures");
+    uint result = 0u;
+    auto reader = device.create_stream();
+    reader << output.download(&result) << synchronize() << commit();
+    require(result == 0x1234a5a5u, "stream destruction did not finish the retained GPU batch");
+}
+
 } // namespace
 
 int main() {
@@ -292,5 +363,7 @@ int main() {
     test_synchronize_before_resource_release(device);
     test_keep_alive_releases_shader_on_completion_thread(device);
     test_many_commits_and_gpu_batch_reuse(device);
+    test_retained_generations_without_submission_boundary(device);
+    test_retained_lifetime_on_stream_destruction(device);
     std::cout << "stream order regression checks passed" << std::endl;
 }

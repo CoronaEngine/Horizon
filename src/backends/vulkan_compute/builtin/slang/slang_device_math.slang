@@ -820,10 +820,16 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(0, 0)]] Texture2D<float4>      g_bindless_tex2d[];
 [allow("parameterBindingsOverlap")]
 [[vk::binding(0, 0)]] Texture2D<uint4>       g_nrd_uint_tex2d[];
+[allow("parameterBindingsOverlap")]
+[[vk::binding(0, 0)]] [vk::image_format("unknown")] Texture2D<uint4> g_native_uint_tex2d[];
 [[vk::binding(1, 0)]] RWTexture2D<float4>    g_bindless_surf2d[];
 [[vk::binding(2, 0)]] Texture3D<float4>      g_bindless_tex3d[];
 [[vk::binding(3, 0)]] RWTexture3D<float4>    g_bindless_surf3d[];
+[allow("parameterBindingsOverlap")]
 [[vk::binding(5, 0)]] globallycoherent RWTexture2D<uint4> g_bindless_uint_surf2d[];
+// The Vulkan view selects R32UI, RG32UI or RGBA32UI for each whole-texel access.
+[allow("parameterBindingsOverlap")]
+[[vk::binding(5, 0)]] [vk::image_format("unknown")] RWTexture2D<uint4> g_native_uint_surf2d[];
 [[vk::binding(6, 0)]] globallycoherent RWTexture3D<uint4> g_bindless_uint_surf3d[];
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 [[vk::binding(7, 0)]] globallycoherent RWStructuredBuffer<uint> g_texture_write_locks;
@@ -890,6 +896,46 @@ void oc_nrd_tex2d_write(uint64_t image_index, int2 p, float4 value) {
 void oc_nrd_tex2d_write_uint(uint64_t image_index, int2 p, uint4 value) {
     g_bindless_uint_surf2d[uint(image_index)][p] = value;
 }
+
+// Captured and dispatch texture descriptors are uniform. Native access uses
+// typed texels; the legacy checked surfaces interpret x as a byte offset.
+float4 oc_tex2d_read_native_float4(OCTextureDesc desc, int2 p) {
+    return oc_nrd_tex2d_read(desc.tex_index, p);
+}
+float2 oc_tex2d_read_native_float2(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_float4(desc, p).xy;
+}
+float oc_tex2d_read_native_float(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_float4(desc, p).x;
+}
+uint4 oc_tex2d_read_native_uint4(OCTextureDesc desc, int2 p) {
+    return g_native_uint_tex2d[uint(desc.tex_index)].Load(int3(p, 0));
+}
+uint2 oc_tex2d_read_native_uint2(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_uint4(desc, p).xy;
+}
+uint oc_tex2d_read_native_uint(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_uint4(desc, p).x;
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, float4 value) {
+    oc_nrd_tex2d_write(desc.surf_index, p, value);
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, float2 value) {
+    oc_tex2d_write_native(desc, p, float4(value, 0.f, 0.f));
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, float value) {
+    oc_tex2d_write_native(desc, p, float4(value, 0.f, 0.f, 0.f));
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, uint4 value) {
+    g_native_uint_surf2d[uint(desc.surf_index)][p] = value;
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, uint2 value) {
+    oc_tex2d_write_native(desc, p, uint4(value, 0u, 0u));
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, uint value) {
+    oc_tex2d_write_native(desc, p, uint4(value, 0u, 0u, 0u));
+}
+
 float4 oc_nrd_tex2d_sample(uint64_t image_index, float2 uv) {
     return g_bindless_tex2d[uint(image_index)].SampleLevel(g_samplers[1], uv, 0.f);
 }
@@ -1028,13 +1074,17 @@ void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y
 
 
 float[N] oc_tex3d_sample_float<uint N>(OCTextureDesc desc, float u, float v, float w = 0.0f) {
+    // BC7_UNORM=17 and BC7_SRGB=18 are sampled-only 2D images at depth one.
+    if (desc.pixel_storage == 17u || desc.pixel_storage == 18u)
+        return oc_tex2d_sample_float<N>(desc, u, v);
     float4 value=g_bindless_tex3d[NonUniformResourceIndex(uint(desc.tex_index))].SampleLevel(g_samplers[0], float3(u,v,w), 0);
     float result[N]; for(uint i=0;i<N;++i) result[i]=value[i]; return result;
 }
 
 float[N] oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float u, float v, float w = 0.0f) {
-    uint index=*((uint*)(arr.tex3d_slot + slot*4u));
-    OCTextureDesc desc={uint64_t(index),uint64_t(index),0,0};
+    uint tagged=*((uint*)(arr.tex3d_slot + slot*4u));
+    uint index=tagged & 0x7fffffffu;
+    OCTextureDesc desc={uint64_t(index),uint64_t(index),(tagged & 0x80000000u) != 0u ? 17u : 0u,0};
     return oc_tex3d_sample_float<N>(desc, u,v,w);
 }
 
@@ -1143,7 +1193,8 @@ bool oc_trace_occlusion(uint64_t handle, Ray ray) {
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
-TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
+TriangleHit oc_trace_closest_with_distance(uint64_t handle, Ray ray, out float distance) {
+    distance = 0.f;
     if (handle == 0) return oc_trace_miss();
     RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
     RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
@@ -1155,47 +1206,66 @@ TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
         h.prim_id = q.CommittedPrimitiveIndex();
         float2 uv = q.CommittedTriangleBarycentrics();
         h.bary = float2(1.0f - uv.x - uv.y, uv.x);
+        distance = q.CommittedRayT();
     } else {
         h = oc_trace_miss();
     }
     return h;
 }
 
+TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
+    float distance;
+    return oc_trace_closest_with_distance(handle, ray, distance);
+}
+
 #elif OC_RAY_PIPELINE
+struct OCTrianglePayload {
+    TriangleHit hit;
+    float distance;
+};
+
 // Only triangle hit groups exist. Devices enabling primitive culling may
 // explicitly skip AABBs, too. The mask and hit-group/miss indexes are shared
 // by closest and occlusion traces.
-TriangleHit oc_trace_triangle(uint64_t handle, Ray ray, uint flags) {
-    TriangleHit hit = oc_trace_miss();
+OCTrianglePayload oc_trace_triangle(uint64_t handle, Ray ray, uint flags) {
+    OCTrianglePayload payload = {oc_trace_miss(), 0.f};
     if (handle != 0) {
 #if OC_PRIMITIVE_CULLING
         flags |= RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 #endif
         TraceRay(RaytracingAccelerationStructure(handle), flags | RAY_FLAG_FORCE_OPAQUE,
-                 1u, 0u, 0u, 0u, oc_native_ray(ray), hit);
+                 1u, 0u, 0u, 0u, oc_native_ray(ray), payload);
     }
-    return hit;
+    return payload;
 }
 
 TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
-    return oc_trace_triangle(handle, ray, RAY_FLAG_NONE);
+    return oc_trace_triangle(handle, ray, RAY_FLAG_NONE).hit;
+}
+
+TriangleHit oc_trace_closest_with_distance(uint64_t handle, Ray ray, out float distance) {
+    OCTrianglePayload payload = oc_trace_triangle(handle, ray, RAY_FLAG_NONE);
+    distance = payload.distance;
+    return payload.hit;
 }
 
 bool oc_trace_occlusion(uint64_t handle, Ray ray) {
-    return oc_trace_triangle(handle, ray, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH).inst_id != 0xffffffffu;
+    return oc_trace_triangle(handle, ray, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH).hit.inst_id != 0xffffffffu;
 }
 
 [shader("closesthit")]
-void ocClosestHit(inout TriangleHit hit, BuiltInTriangleIntersectionAttributes attrib) {
-    hit.inst_id = InstanceID();
-    hit.prim_id = PrimitiveIndex();
+void ocClosestHit(inout OCTrianglePayload payload, BuiltInTriangleIntersectionAttributes attrib) {
+    payload.hit.inst_id = InstanceID();
+    payload.hit.prim_id = PrimitiveIndex();
     float2 uv = attrib.barycentrics;
-    hit.bary = float2(1.f - uv.x - uv.y, uv.x);
+    payload.hit.bary = float2(1.f - uv.x - uv.y, uv.x);
+    payload.distance = RayTCurrent();
 }
 
 [shader("miss")]
-void ocMiss(inout TriangleHit hit) {
-    hit = oc_trace_miss();
+void ocMiss(inout OCTrianglePayload payload) {
+    payload.hit = oc_trace_miss();
+    payload.distance = 0.f;
 }
 #endif
 

@@ -96,12 +96,13 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     VkPhysicalDeviceProperties2 subgroup_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     subgroup_properties.pNext = &subgroup;
     vkGetPhysicalDeviceProperties2(phys_device_, &subgroup_properties);
+    if (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT)
+        compute_subgroup_operations_ = subgroup.supportedOperations;
     // Ordinary compute kernels do not require the DSL's 32-lane warp contract.
     // Validate that contract when a shader actually emits a warp operation.
     supports_warp32_ = subgroup.subgroupSize >= 32u && subgroup.subgroupSize <= 128u &&
                       subgroup.subgroupSize % 32u == 0u &&
-                      (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
-                      (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT);
+                      (compute_subgroup_operations_ & VK_SUBGROUP_FEATURE_BALLOT_BIT);
     OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; DSL warp32 support: {}",
                    subgroup.subgroupSize, supports_warp32_);
 
@@ -192,6 +193,16 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         feats2.pNext = &pipeline_features;
     }
     vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    // BC7 is exposed only when both sampled formats can be filtered and copied.
+    has_bc7_ = feats2.features.textureCompressionBC != VK_FALSE;
+    for (VkFormat format : {VK_FORMAT_BC7_UNORM_BLOCK, VK_FORMAT_BC7_SRGB_BLOCK}) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(phys_device_, format, &properties);
+        constexpr auto required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+            VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        has_bc7_ &= (properties.optimalTilingFeatures & required) == required;
+    }
     if (shader_fma_extension && shader_fma.shaderFmaFloat32) {
         VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
         VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -721,10 +732,12 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
         vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
     });
-    // Storage image descriptors address only the base mip.
-    vci.components = {};
-    vci.subresourceRange.levelCount = 1;
-    OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.storage_view));
+    if (usage & VK_IMAGE_USAGE_STORAGE_BIT) {
+        // Storage image descriptors address only the base mip.
+        vci.components = {};
+        vci.subresourceRange.levelCount = 1;
+        OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.storage_view));
+    }
     {
         auto g = buffer_map_guard_.lock();
         image_map_[reinterpret_cast<handle_ty>(result.image)] = result;
@@ -920,6 +933,14 @@ handle_ty VulkanComputeDevice::create_shader(const Function &function, ShaderCom
             OC_ERROR_FORMAT("Invalid FP32 FMA mode for Vulkan shader '{}'", description);
     }
     const auto requirements = analyze_function_requirements(function);
+    if (requirements.uses_subgroup) {
+        VkSubgroupFeatureFlags required = VK_SUBGROUP_FEATURE_BASIC_BIT;
+        if (requirements.uses_subgroup_arithmetic) required |= VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+        if (requirements.uses_subgroup_ballot) required |= VK_SUBGROUP_FEATURE_BALLOT_BIT;
+        if ((compute_subgroup_operations_ & required) != required)
+            OC_ERROR_FORMAT("Vulkan shader '{}' requires compute subgroup features {:#x}, device supports {:#x}",
+                            description, required, compute_subgroup_operations_);
+    }
     const auto selected = select_trace_mode(options.trace_mode, trace_capabilities(), requirements.uses_trace,
                                             native_trace_compatible(requirements));
     using Error = TraceModeSelectionError;

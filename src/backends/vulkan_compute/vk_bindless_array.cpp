@@ -80,7 +80,10 @@ size_t VkBindlessArray::emplace_texture3d(handle_ty handle) noexcept {
 }
 
 size_t VkBindlessArray::emplace_texture3d(TextureDesc desc) noexcept {
-    return emplace_texture3d(static_cast<handle_ty>(desc.texture));
+    // The high bit routes sampled-only BC7 depth-one images to the 2D array.
+    auto index = static_cast<uint32_t>(desc.texture);
+    if (is_block_compressed(desc.pixel_storage)) index |= 0x80000000u;
+    return emplace_texture3d(index);
 }
 
 void VkBindlessArray::remove_texture3d(handle_ty index) noexcept {
@@ -95,7 +98,9 @@ void VkBindlessArray::set_texture3d(handle_ty index, handle_ty handle) noexcept 
 }
 
 void VkBindlessArray::set_texture3d(handle_ty index, TextureDesc desc) noexcept {
-    set_texture3d(index, desc.texture);
+    auto sample = static_cast<uint32_t>(desc.texture);
+    if (is_block_compressed(desc.pixel_storage)) sample |= 0x80000000u;
+    set_texture3d(index, sample);
 }
 
 size_t VkBindlessArray::texture3d_num() const noexcept { return tex3d_count_; }

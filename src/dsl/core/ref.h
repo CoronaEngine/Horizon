@@ -256,12 +256,43 @@ struct Ref<Texture2D>
     : detail::EnableTextureSample<Ref<Texture2D>, 2>,
       detail::EnableTextureReadAndWrite<Ref<Texture2D>, 2> {
     OC_REF_COMMON(Ref<Texture2D>)
+
+public:
+    // Vulkan native typed access. The texture descriptor must be uniform and
+    // callers must supply in-bounds coordinates and the matching numeric type.
+    template<typename Output, typename XY>
+    requires(is_general_integer_vector2_v<remove_device_t<XY>> &&
+             (is_float_element_expr_v<Output> || is_uint_element_expr_v<Output>))
+    [[nodiscard]] Var<Output> read_native(const XY &pixel) const noexcept {
+        const Expression *texture = expression();
+        texture->mark(Usage::READ);
+        static_assert(std::is_same_v<Output, float> || std::is_same_v<Output, float2> ||
+                      std::is_same_v<Output, float4> || std::is_same_v<Output, uint> ||
+                      std::is_same_v<Output, uint2> || std::is_same_v<Output, uint4>,
+                      "Unsupported native texture access type");
+        return eval<Output>(Function::current()->call_builtin(
+            Type::of<Output>(), CallOp::TEX2D_READ_NATIVE, {texture, OC_EXPR(pixel)}));
+    }
+
+    // Store the entire texel through the actual float/uint image view.
+    template<typename XY, typename Value>
+    requires(is_general_integer_vector2_v<remove_device_t<XY>> &&
+             (is_float_element_expr_v<Value> || is_uint_element_expr_v<Value>))
+    void write_native(const XY &pixel, const Value &value) const noexcept {
+        const Expression *texture = expression();
+        texture->mark(Usage::WRITE);
+        auto *function = Function::current();
+        function->expr_statement(function->call_builtin(nullptr, CallOp::TEX2D_WRITE_NATIVE,
+                                                         {texture, OC_EXPR(pixel), OC_EXPR(value)}));
+    }
 };
 
 template<>
 struct Ref<Accel> {
 public:
     [[nodiscard]] inline Var<TriangleHit> trace_closest(const Var<Ray> &ray) const noexcept;// implement in ref.inl
+    [[nodiscard]] inline Var<TriangleHit> trace_closest(const Var<Ray> &ray,
+                                                       Var<float> &distance) const noexcept;
     [[nodiscard]] inline Var<bool> trace_occlusion(const Var<Ray> &ray) const noexcept;     // implement in ref.inl
     OC_REF_COMMON(Ref<Accel>)
 };

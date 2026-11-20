@@ -372,7 +372,11 @@ SlangShaderCompiler::~SlangShaderCompiler() noexcept {
 
 slang::ISession *SlangShaderCompiler::session_for(ShaderExecutionMode mode) const noexcept {
     auto &session = sessions_[static_cast<size_t>(mode)];
-    if (session) return session;
+    if (!session) session = create_session(mode);
+    return session;
+}
+
+slang::ISession *SlangShaderCompiler::create_session(ShaderExecutionMode mode) const noexcept {
     if (!global_session_) {
         auto result = slang::createGlobalSession(&global_session_);
         OC_ERROR_IF(SLANG_FAILED(result) || !global_session_, "Slang global session creation failed");
@@ -402,7 +406,7 @@ slang::ISession *SlangShaderCompiler::session_for(ShaderExecutionMode mode) cons
         "SPV_KHR_non_semantic_info", "SPV_GOOGLE_user_type",
         "spvDerivativeControl", "spvImageQuery", "spvImageGatherExtended",
         "spvSparseResidency", "spvMinLod", "spvFragmentFullyCoveredEXT",
-        "spvGroupNonUniform", "spvGroupNonUniformBallot"};
+        "spvGroupNonUniform", "spvGroupNonUniformBallot", "spvGroupNonUniformArithmetic"};
     if (mode == ShaderExecutionMode::ComputeRayQuery) capabilities.push_back("spvRayQueryKHR");
     if (mode == ShaderExecutionMode::RayTracingPipeline) capabilities.push_back("spvRayTracingKHR");
     vector<slang::CompilerOptionEntry> options;
@@ -432,6 +436,7 @@ slang::ISession *SlangShaderCompiler::session_for(ShaderExecutionMode mode) cons
     session_desc.searchPathCount         = 1;
     session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_ROW_MAJOR;
 
+    slang::ISession *session = nullptr;
     auto result = global_session_->createSession(session_desc, &session);
     OC_ERROR_IF(SLANG_FAILED(result) || !session, "Slang target session creation failed");
     return session;
@@ -483,6 +488,17 @@ VkShaderProgram SlangShaderCompiler::compile_program_variant(const Function &fun
         RHIContext::read_file(builtin_dir / "slang_device_resource.slang"),
         string_view(global_session_->getBuildTagString()), string_view("spirv_1_5-precise-triangle-payload-v1"),
         preserve_float32_, preserve_float16_, requires_half_rte, rte_widths_, rounding_independence_);
+    // The emitted body already includes entry headers. Hash their contents as
+    // well, so replacing a literal header at the same path invalidates SPIR-V.
+    bool has_literal_header = false;
+    function.for_each_header([&](string_view path) {
+        has_literal_header = true;
+        const fs::path header{path};
+        key = hash64(key, RHIContext::read_file(header));
+        // In-memory modules also resolve relative includes in the session's
+        // builtin search directory. Include both candidates in the cache key.
+        if (header.is_relative()) key = hash64(key, RHIContext::read_file(builtin_dir / header));
+    });
 #ifdef __APPLE__
     key = hash64(key, string_view("moltenvk-volatile-loads"));
 #endif
@@ -490,6 +506,7 @@ VkShaderProgram SlangShaderCompiler::compile_program_variant(const Function &fun
     const string program_key = ocarina::format("{}_{}_{:x}", function_name, label, key);
     const auto cache_dir = device_->context()->cache_directory() / "slang_cache";
     fs::create_directories(cache_dir);
+    Slang::ComPtr<slang::ISession> literal_session;
     Slang::ComPtr<slang::IModule> module;
     VkShaderProgram program{mode, {}};
     for (const auto &stage : stages) {
@@ -502,6 +519,12 @@ VkShaderProgram SlangShaderCompiler::compile_program_variant(const Function &fun
             OC_INFO_FORMAT("shader SPIR-V cache miss: {}.spv", name);
             const auto start = std::chrono::steady_clock::now();
             if (!module) {
+                if (has_literal_header) {
+                    // A Slang session remembers included files by path. Start
+                    // a fresh session when compiling a literal-backed cache miss.
+                    literal_session.attach(create_session(mode));
+                    session = literal_session.get();
+                }
                 Slang::ComPtr<slang::IBlob> diagnostics;
                 module = session->loadModuleFromSourceString(program_key.c_str(), nullptr, source.c_str(), diagnostics.writeRef());
                 report_diagnostics(diagnostics.get());

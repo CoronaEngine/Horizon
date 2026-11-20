@@ -104,6 +104,7 @@ public:
             for (auto &item : callbacks) item.second();
         }
         [[nodiscard]] virtual bool supports_buffer_export() const noexcept { return false; }
+        [[nodiscard]] virtual bool supports_bc7_textures() const noexcept { return false; }
         [[nodiscard]] virtual bool supports_raytracing() const noexcept { return false; }
         [[nodiscard]] virtual TraceCapabilities trace_capabilities() const noexcept {
             // The legacy capability flag represented inline ray queries.
@@ -251,6 +252,7 @@ public:
     }
 
     [[nodiscard]] bool supports_buffer_export() const noexcept { return impl_->supports_buffer_export(); }
+    [[nodiscard]] bool supports_bc7_textures() const noexcept { return impl_->supports_bc7_textures(); }
     [[nodiscard]] TraceCapabilities trace_capabilities() const noexcept { return impl_->trace_capabilities(); }
     [[nodiscard]] bool supports_raytracing() const noexcept {
         const auto capabilities = trace_capabilities();

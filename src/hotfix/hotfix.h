@@ -6,6 +6,7 @@
 
 #include "macro.h"
 #include "object.h"
+#include "module_interface.h"
 #include "build_system.h"
 #include "file_tool.h"
 #include "hotfix/support.h"

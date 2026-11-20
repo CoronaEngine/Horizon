@@ -134,6 +134,7 @@ struct VkComputeStream::State {
         const VkShaderBase *bound_shader{};
         vector<VkBufferAllocation> retained;
         vector<std::function<void()>> completions;
+        vector<std::function<void()>> lifetime_holds;
         // Submission-time callbacks are kept alive through this batch's fence,
         // without turning them into host completion dependencies.
         vector<NativeCallbackFunction> native_submissions;
@@ -404,6 +405,7 @@ struct VkComputeStream::State {
         for (auto &fn : batch->completions) fn();
         batch->completions.clear();
         batch->native_submissions.clear();
+        batch->lifetime_holds.clear();
         for (auto &allocation : batch->retained) device->free_buffer(allocation);
         batch->retained.clear();
         bool background_work;
@@ -592,6 +594,10 @@ void VkComputeStream::dispatch_shader(VkShaderBase *shader, ShaderDispatchComman
 void VkComputeStream::retain(VkBufferAllocation allocation) noexcept {
     std::lock_guard lock(state_->operations);
     state_->begin().retained.push_back(allocation);
+}
+void VkComputeStream::retain_lifetime(std::function<void()> hold) noexcept {
+    std::lock_guard lock(state_->operations);
+    state_->begin().lifetime_holds.push_back(std::move(hold));
 }
 void VkComputeStream::after_completion(std::function<void()> fn) noexcept {
     std::lock_guard lock(state_->operations);

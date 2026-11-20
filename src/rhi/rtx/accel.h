@@ -91,6 +91,11 @@ public:
         return make_expr<Accel>(expression()).trace_closest(ray);
     }
 
+    template<typename TRay>
+    [[nodiscard]] Var<TriangleHit> trace_closest(const TRay &ray, Var<float> &distance) const noexcept {
+        return make_expr<Accel>(expression()).trace_closest(ray, distance);
+    }
+
     [[nodiscard]] handle_ty handle() const noexcept override { return impl()->handle(); }
     [[nodiscard]] const void *handle_ptr() const noexcept override { return impl()->handle_ptr(); }
     [[nodiscard]] TLASBuildCommand *build_bvh() noexcept {

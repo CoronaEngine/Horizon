@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "core/rtti.h"
+#include "core/smart_ptr.h"
 
 #include <array>
 #include <cstdint>
@@ -22,6 +23,8 @@
 namespace vision {
 
 using ocarina::RTTI;
+using ocarina::SP;
+using ocarina::UP;
 using std::array;
 using std::function;
 using std::make_pair;
@@ -36,17 +39,14 @@ using std::string_view;
 using std::unique_ptr;
 using std::vector;
 
-template<typename T>
-using SP = std::shared_ptr<T>;
-
-template<typename... Ts>
-using UP = std::unique_ptr<Ts...>;
-
 using uint = std::uint32_t;
 namespace fs = std::filesystem;
 
 using fmt::format;
-using std::tuple;
+
+}// namespace vision
+
+namespace vision::inline hotfix::hotfix_detail {
 
 [[nodiscard]] inline fs::path parent_path(fs::path path, int levels) {
     for (int i = 0; i < levels; ++i) {
@@ -55,4 +55,4 @@ using std::tuple;
     return path;
 }
 
-}// namespace vision
+}// namespace vision::inline hotfix::hotfix_detail

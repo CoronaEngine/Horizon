@@ -85,6 +85,7 @@ int transformed_scene(Device &device, std::string_view which) {
     auto input = device.create_buffer<Ray>(rays.size());
     auto produced = device.create_buffer<Ray>(rays.size());
     auto hits = device.create_buffer<TriangleHit>(rays.size());
+    auto distances = device.create_buffer<float>(rays.size());
     auto metadata = device.create_buffer<uint4>(2u * rays.size());
     auto consumed = device.create_buffer<uint4>(2u * rays.size());
     auto stream = device.create_stream();
@@ -101,12 +102,19 @@ int transformed_scene(Device &device, std::string_view which) {
     };
     build();
 
-    Kernel kernel = [&](BufferVar<Ray> in, BufferVar<TriangleHit> out, BufferVar<uint4> meta) {
+    Kernel kernel = [&](BufferVar<Ray> in, BufferVar<TriangleHit> out, BufferVar<uint4> meta,
+                        BufferVar<float> hit_distances) {
         Uint i = dispatch_id();
         Var<Ray> ray = in.read(i);
         meta.write(2u * i, make_uint4(dispatch_idx(), i));
         outline([&] {
-            out.write(i, accel.trace_closest(ray));
+            if (which == "performance") {
+                out.write(i, accel.trace_closest(ray));
+            } else {
+                Float distance = -1.f;
+                out.write(i, accel.trace_closest(ray, distance));
+                hit_distances.write(i, distance);
+            }
             meta.write(2u * i + 1u, make_uint4(dispatch_dim(), cast<uint>(accel.trace_occlusion(ray))));
         }, "trace-local-traversal");
     };
@@ -117,20 +125,29 @@ int transformed_scene(Device &device, std::string_view which) {
     auto consumer = device.compile(consume, "trace-output");
 
     vector<TriangleHit> read_hits(rays.size());
+    vector<float> read_distances(rays.size());
     vector<uint4> read_meta(2u * rays.size());
     auto run = [&](const auto &shader, TraceMode mode) {
         check_mode(shader, mode, expected_mode(mode, caps));
-        const auto invocation = shader(produced, hits, metadata);
+        const auto invocation = shader(produced, hits, metadata, distances);
         auto render = [&] {
             stream << hits.byte_set(0xcdu) << metadata.byte_set(0xcdu) << consumed.byte_set(0xcdu)
                    << producer(input, produced).dispatch(uint(rays.size()))
                    << invocation.dispatch(dim)
                    << consumer(metadata, consumed).dispatch(uint(read_meta.size()))
-                   << hits.download(read_hits.data()) << consumed.download(read_meta.data()) << synchronize() << commit();
+                   << hits.download(read_hits.data()) << consumed.download(read_meta.data());
+            if (which != "performance") stream << distances.download(read_distances.data());
+            stream << synchronize() << commit();
         };
         auto verify = [&] {
             render();
             test::validate_scene(scene, dim, rays, read_hits, read_meta);
+            if (which != "performance") for (uint i = 0u; i < rays.size(); ++i) {
+                float expected_distance;
+                (void)test::trace_reference(scene, rays[i], &expected_distance);
+                require(std::abs(read_distances[i] - expected_distance) <= 3e-4f,
+                        "closest hit distance differs from transformed host triangles");
+            }
         };
         verify();
         if (which == "query" || which == "pipeline") {
@@ -144,7 +161,8 @@ int transformed_scene(Device &device, std::string_view which) {
             accel.clear();
             render();
             for (uint i = 0; i < rays.size(); ++i)
-                require(test::has_miss_payload(read_hits[i]) && read_meta[2u * i + 1u].w == 0u,
+                require(test::has_miss_payload(read_hits[i]) && read_meta[2u * i + 1u].w == 0u &&
+                        read_distances[i] == 0.f,
                         "reused invocation returned an incorrect miss payload or occlusion after clear");
             build();
             verify();

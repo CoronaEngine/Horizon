@@ -11,6 +11,9 @@ struct FunctionRequirements {
     bool uses_trace{};
     bool requires_compute_workgroups{};
     bool uses_warp{};
+    bool uses_subgroup{};
+    bool uses_subgroup_arithmetic{};
+    bool uses_subgroup_ballot{};
     bool has_native_source{}; // A custom header or named native call is present.
     vector<string> diagnostic_sources;
     unordered_set<const Function *> reachable_functions;

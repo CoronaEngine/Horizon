@@ -22,7 +22,7 @@ class OC_RHI_API MemoryStats : public thread_safety<> {
         uint3 res;
         PixelStorage storage;
         [[nodiscard]] size_t size() const noexcept {
-            return res.x * res.y * res.z * pixel_size(storage);
+            return texture_size_bytes(storage, res.x, res.y, res.z);
         }
     };
 

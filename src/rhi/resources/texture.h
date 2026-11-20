@@ -12,6 +12,8 @@
 
 namespace ocarina {
 
+class Texture2D;
+
 template<typename texture_type>
 class TextureBehaviour {
 public:
@@ -97,6 +99,19 @@ public:
         }(elm, decay_swizzle(xy));
     }
 
+    // Native typed Vulkan access for uniform, in-bounds, whole-texel use.
+    template<typename Output, typename XY>
+    requires(std::is_same_v<texture_type, Texture2D>)
+    [[nodiscard]] auto read_native(const XY &pixel) const noexcept {
+        return make_expr<texture_type>(self()->expression()).template read_native<Output>(pixel);
+    }
+
+    template<typename XY, typename Value>
+    requires(std::is_same_v<texture_type, Texture2D>)
+    void write_native(const XY &pixel, const Value &value) const noexcept {
+        make_expr<texture_type>(self()->expression()).write_native(pixel, value);
+    }
+
     template<typename X, typename Y, typename Z, typename Val>
     requires(is_all_integral_expr_v<X, Y, Z> &&
              (is_uchar_element_expr_v<Val> || is_float_element_expr_v<Val> || is_uint_element_expr_v<Val>))
@@ -164,7 +179,8 @@ public:
     }
 
     [[nodiscard]] uint size_in_byte() const noexcept {
-        return pixel_num() * pixel_size();
+        const auto res = impl()->resolution();
+        return static_cast<uint>(texture_size_bytes(impl()->pixel_storage(), res.x, res.y, res.z));
     }
 
     [[nodiscard]] uint pixel_size() const noexcept {

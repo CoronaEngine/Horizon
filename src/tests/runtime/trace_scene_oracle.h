@@ -32,7 +32,7 @@ struct Scene {
 
 // Independent host triangle intersection. Public barycentrics contain weights
 // of vertices 0 and 1, rather than the native traversal weights of 1 and 2.
-inline TriangleHit trace_reference(const Scene &scene, const Ray &ray) {
+inline TriangleHit trace_reference(const Scene &scene, const Ray &ray, float *distance = nullptr) {
     TriangleHit hit{};
     float closest = ray.t_max();
     for (uint instance = 0u; instance < scene.transforms.size(); ++instance) {
@@ -58,6 +58,7 @@ inline TriangleHit trace_reference(const Scene &scene, const Ray &ray) {
             hit.bary = make_float2(1.f - u - v_weight, u);
         }
     }
+    if (distance) *distance = hit.is_miss() ? 0.f : closest;
     return hit;
 }
 

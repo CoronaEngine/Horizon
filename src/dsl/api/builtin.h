@@ -491,6 +491,34 @@ inline void synchronize_block() noexcept {
     Function::current()->expr_statement(Function::current()->call_builtin(nullptr, CallOp::SYNCHRONIZE_BLOCK, {}));
 }
 
+inline void synchronize_block(bool shared_only) noexcept {
+    Function::current()->expr_statement(Function::current()->call_builtin(
+        nullptr, CallOp::SYNCHRONIZE_BLOCK, {OC_EXPR(shared_only)}));
+}
+
+// A subgroup is the complete hardware wave, unlike the fixed 32-lane warp API.
+template<typename T>
+requires(std::is_same_v<expr_value_t<T>, float> ||
+         std::is_same_v<expr_value_t<T>, uint> || std::is_same_v<expr_value_t<T>, int>)
+[[nodiscard]] inline auto subgroup_active_sum(const T &value) noexcept {
+    using Value = expr_value_t<T>;
+    return eval<Value>(Function::current()->call_builtin(
+        Type::of<Value>(), CallOp::SUBGROUP_ACTIVE_SUM, {OC_EXPR(value)}));
+}
+
+[[nodiscard]] inline Uint subgroup_lane_count() noexcept {
+    return eval<uint>(Function::current()->call_builtin(Type::of<uint>(), CallOp::SUBGROUP_LANE_COUNT, {}));
+}
+
+[[nodiscard]] inline Bool subgroup_is_first_lane() noexcept {
+    return eval<bool>(Function::current()->call_builtin(Type::of<bool>(), CallOp::SUBGROUP_IS_FIRST_LANE, {}));
+}
+
+[[nodiscard]] inline Uint subgroup_active_count_bits(const Bool &predicate) noexcept {
+    return eval<uint>(Function::current()->call_builtin(
+        Type::of<uint>(), CallOp::SUBGROUP_ACTIVE_COUNT_BITS, {OC_EXPR(predicate)}));
+}
+
 #define OC_MAKE_WARP_FUNC(func_name, Tag, ret_type)                                                \
     template<typename T>                                                                           \
     requires ocarina::is_boolean_expr_v<T>                                                         \

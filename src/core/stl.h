@@ -5,6 +5,7 @@
 #pragma once
 
 #include "header.h"
+#include "core/smart_ptr.h"
 #include "core/tuple.h"
 #include <bit>
 #include <functional>
@@ -249,12 +250,6 @@ std::unique_ptr<T> make_unique_with_allocator(Args &&...args) {
     new (rawPtr) T(std::forward<Args>(args)...);
     return std::unique_ptr<T>(rawPtr);//std::unique_ptr<T, unique_deleter<T, Alloc>>(rawPtr, unique_deleter<T, Alloc>{alloc});
 }
-
-template<typename... Ts>
-using UP = unique_ptr<Ts...>;
-
-template<typename T>
-using SP = shared_ptr<T>;
 
 template<typename T>
 using WP = weak_ptr<T>;

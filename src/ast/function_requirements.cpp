@@ -49,10 +49,16 @@ private:
     }
     void visit(const CallExpr *e) override {
         const auto op = e->call_op();
-        if (op == CallOp::TRACE_CLOSEST || op == CallOp::TRACE_OCCLUSION) result_.uses_trace = true;
+        if (op == CallOp::TRACE_CLOSEST || op == CallOp::TRACE_OCCLUSION ||
+            op == CallOp::TRACE_CLOSEST_WITH_DISTANCE) result_.uses_trace = true;
         if (op == CallOp::SYNCHRONIZE_BLOCK) record(result_.requires_compute_workgroups, "synchronize_block");
         if (op >= CallOp::WARP_ACTIVE_COUNT_BITS && op <= CallOp::WARP_IS_FIRST_ACTIVE_LANE)
             record(result_.uses_warp, "warp operation");
+        if (op >= CallOp::SUBGROUP_ACTIVE_SUM && op <= CallOp::SUBGROUP_ACTIVE_COUNT_BITS) {
+            record(result_.uses_subgroup, "subgroup operation");
+            result_.uses_subgroup_arithmetic |= op == CallOp::SUBGROUP_ACTIVE_SUM;
+            result_.uses_subgroup_ballot |= op == CallOp::SUBGROUP_ACTIVE_COUNT_BITS;
+        }
         if (!e->function_name().empty())
             record(result_.has_native_source, ocarina::format("native call '{}'", e->function_name()));
         if (e->function()) function(*e->function());

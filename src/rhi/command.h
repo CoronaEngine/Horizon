@@ -274,8 +274,8 @@ public:
     [[nodiscard]] size_t width() const noexcept { return res_.x; }
     [[nodiscard]] size_t height() const noexcept { return res_.y; }
     [[nodiscard]] size_t depth() const noexcept { return res_.z; }
-    [[nodiscard]] size_t width_in_bytes() const noexcept { return pixel_size(storage_) * width(); }
-    [[nodiscard]] size_t size_in_bytes() const noexcept { return height() * width_in_bytes(); }
+    [[nodiscard]] size_t width_in_bytes() const noexcept { return texture_row_bytes(storage_, width()); }
+    [[nodiscard]] size_t size_in_bytes() const noexcept { return texture_size_bytes(storage_, width(), height()); }
     [[nodiscard]] uint level() const noexcept { return level_; }
     [[nodiscard]] uint3 resolution() const noexcept { return res_; }
 };
@@ -317,8 +317,8 @@ public:
     [[nodiscard]] size_t width() const noexcept { return resolution_.x; }
     [[nodiscard]] size_t height() const noexcept { return resolution_.y; }
     [[nodiscard]] size_t depth() const noexcept { return resolution_.z; }
-    [[nodiscard]] size_t width_in_bytes() const noexcept { return pixel_size(pixel_storage_) * width(); }
-    [[nodiscard]] size_t size_in_bytes() const noexcept { return height() * width_in_bytes(); }
+    [[nodiscard]] size_t width_in_bytes() const noexcept { return texture_row_bytes(pixel_storage_, width()); }
+    [[nodiscard]] size_t size_in_bytes() const noexcept { return texture_size_bytes(pixel_storage_, width(), height()); }
     [[nodiscard]] uint3 resolution() const noexcept { return resolution_; }
 };
 
@@ -417,11 +417,13 @@ public:
 class OC_RHI_API HostFunctionCommand : public Command {
 private:
     std::function<void()> function_;
+    bool lifetime_hold_{};
 
 public:
-    HostFunctionCommand(bool async, std::function<void()> f)
-        : Command(async), function_(ocarina::move(f)) {}
+    HostFunctionCommand(bool async, std::function<void()> f, bool lifetime_hold = false)
+        : Command(async), function_(ocarina::move(f)), lifetime_hold_(lifetime_hold) {}
     [[nodiscard]] std::function<void()> function() const noexcept { return function_; }
+    [[nodiscard]] bool lifetime_hold() const noexcept { return lifetime_hold_; }
     OC_MAKE_CMD_COMMON_FUNC(HostFunctionCommand)
 };
 
@@ -439,6 +441,16 @@ public:
 
 [[nodiscard]] inline NativeCallbackCommand *native_callback(NativeCallbackFunction function) noexcept {
     return NativeCallbackCommand::create(std::move(function));
+}
+
+// Place after the last GPU use. Vulkan retains this no-op capture through its
+// batch fence without a host dependency; other backends use their usual async
+// host callback, preserving the existing keep_alive lifetime semantics.
+template<typename... Args>
+requires(sizeof...(Args) > 0u && (std::is_copy_constructible_v<std::remove_cvref_t<Args>> && ...))
+[[nodiscard]] HostFunctionCommand *retain_until_complete(Args &&...args) noexcept {
+    return HostFunctionCommand::create(true,
+        [...objects = std::remove_cvref_t<Args>(OC_FORWARD(args))] {}, true);
 }
 
 /// Retain one or more copyable host-side objects until the command reaches execution.

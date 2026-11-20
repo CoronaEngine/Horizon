@@ -15,11 +15,17 @@ BindlessArray::BindlessArray(Device::Impl *device)
                   device->create_bindless_array()) {}
 
 size_t BindlessArray::emplace(const Texture3D &texture) noexcept {
+    if (is_block_compressed(texture.impl()->pixel_storage()))
+        return impl()->emplace_texture3d(texture.impl()->descriptor());
     return impl()->emplace_texture3d(texture.tex_handle());
 }
 
 void BindlessArray::set_texture3d(ocarina::handle_ty index,
                                 const ocarina::Texture3D &texture) noexcept {
+    if (is_block_compressed(texture.impl()->pixel_storage())) {
+        impl()->set_texture3d(index, texture.impl()->descriptor());
+        return;
+    }
     impl()->set_texture3d(index, texture.tex_handle());
 }
 

@@ -44,7 +44,11 @@ enum struct PixelStorage : uint {
     HALF1,
     HALF4,
     USHORT1,
-    RGB10A2
+    RGB10A2,
+    SNORM4,
+    // GPU sampled-only block formats. Existing enum values are storage ABI.
+    BC7_UNORM,
+    BC7_SRGB
 };
 
 enum struct ImageWrap : uint8_t {
@@ -104,10 +108,26 @@ OC_NDSC_INLINE size_t pixel_size(PixelStorage pixel_storage) noexcept {
         case PixelStorage::HALF4: return 8;
         case PixelStorage::USHORT1: return 2;
         case PixelStorage::RGB10A2: return 4;
-        case PixelStorage::UNKNOWN: break;
+        case PixelStorage::SNORM4: return 4;
+        case PixelStorage::UNKNOWN:
+        case PixelStorage::BC7_UNORM:
+        case PixelStorage::BC7_SRGB: break;
     }
     OC_ASSERT(0);
     return 0;
+}
+
+OC_NDSC_INLINE bool is_block_compressed(PixelStorage storage) noexcept {
+    return storage == PixelStorage::BC7_UNORM || storage == PixelStorage::BC7_SRGB;
+}
+
+OC_NDSC_INLINE size_t texture_row_bytes(PixelStorage storage, size_t width) noexcept {
+    return is_block_compressed(storage) ? ((width + 3u) / 4u) * 16u : width * pixel_size(storage);
+}
+
+OC_NDSC_INLINE size_t texture_size_bytes(PixelStorage storage, size_t width, size_t height, size_t depth = 1u) noexcept {
+    const size_t rows = is_block_compressed(storage) ? (height + 3u) / 4u : height;
+    return texture_row_bytes(storage, width) * rows * depth;
 }
 
 OC_NDSC_INLINE bool is_8bit(PixelStorage pixel_format) noexcept {
@@ -140,6 +160,7 @@ OC_NDSC_INLINE uint32_t format_size_in_bytes(PixelStorage pixel_storage) {
             return 2;
         case ocarina::PixelStorage::BYTE4:
         case ocarina::PixelStorage::RGB10A2:
+        case ocarina::PixelStorage::SNORM4:
             return 4;
         case ocarina::PixelStorage::UINT1:
         case ocarina::PixelStorage::FLOAT1:

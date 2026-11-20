@@ -459,6 +459,10 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::WARP_SIZE:                 OC_SLANG_WRAP(warp_size);                 break;
         case CallOp::WARP_FIRST_ACTIVE_LANE:    OC_SLANG_WRAP(warp_first_active_lane);    break;
         case CallOp::WARP_IS_FIRST_ACTIVE_LANE: OC_SLANG_WRAP(warp_is_first_active_lane); break;
+        case CallOp::SUBGROUP_ACTIVE_SUM:        OC_SLANG_FUNC(WaveActiveSum);             break;
+        case CallOp::SUBGROUP_LANE_COUNT:        OC_SLANG_FUNC(WaveGetLaneCount);          break;
+        case CallOp::SUBGROUP_IS_FIRST_LANE:     OC_SLANG_FUNC(WaveIsFirstLane);           break;
+        case CallOp::SUBGROUP_ACTIVE_COUNT_BITS: OC_SLANG_FUNC(WaveActiveCountBits);       break;
 
         case CallOp::MAKE_BOOL2:
         case CallOp::MAKE_BOOL3:
@@ -572,6 +576,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::TRACE_OCCLUSION:   OC_SLANG_WRAP(trace_occlusion);   break;
         case CallOp::RAY_OFFSET_ORIGIN: OC_SLANG_WRAP(offset_ray_origin); break;
         case CallOp::TRACE_CLOSEST:     OC_SLANG_WRAP(trace_closest);     break;
+        case CallOp::TRACE_CLOSEST_WITH_DISTANCE: OC_SLANG_WRAP(trace_closest_with_distance); break;
         case CallOp::IS_NULL_BUFFER:    OC_SLANG_WRAP(is_null_buffer);    break;
         case CallOp::IS_NULL_TEXTURE:   OC_SLANG_WRAP(is_null_texture);   break;
         case CallOp::BUFFER_SIZE:       OC_SLANG_WRAP(buffer_size);       break;
@@ -610,6 +615,11 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             break;
         }
         case CallOp::TEX2D_WRITE: OC_SLANG_WRAP(tex2d_write); break;
+        case CallOp::TEX2D_READ_NATIVE:
+            current_scratch() << "oc_tex2d_read_native_";
+            _emit_type_name(expr->type());
+            break;
+        case CallOp::TEX2D_WRITE_NATIVE: OC_SLANG_WRAP(tex2d_write_native); break;
         case CallOp::COUNT: break;
         default: OC_ASSERT(0); break;
     }

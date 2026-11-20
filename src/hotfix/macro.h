@@ -20,7 +20,7 @@ template<typename T>
     namespace {                                                                   \
     struct FileRegistrar {                                                        \
         FileRegistrar() {                                                         \
-            auto key = ::vision::parent_path(path, level);                         \
+            auto key = ::vision::hotfix::hotfix_detail::parent_path(path, level);  \
             ::vision::HotfixSystem::instance().register_target(key, ##__VA_ARGS__); \
         }                                                                         \
     };                                                                            \

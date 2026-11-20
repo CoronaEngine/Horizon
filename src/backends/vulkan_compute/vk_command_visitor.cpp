@@ -399,7 +399,8 @@ void VkComputeCommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
 }
 
 void VkComputeCommandVisitor::visit(const HostFunctionCommand *cmd) noexcept {
-    if (stream_) stream_->host_function(cmd->function(), cmd->async());
+    if (stream_ && cmd->lifetime_hold()) stream_->retain_lifetime(cmd->function());
+    else if (stream_) stream_->host_function(cmd->function(), cmd->async());
     else cmd->function()();
 }
 
