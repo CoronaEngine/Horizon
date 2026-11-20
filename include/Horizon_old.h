@@ -291,10 +291,12 @@ struct RasterGeometry {
 
 enum class RasterCompare { Less, LessEqual, Equal, Always };
 enum class RasterBlend { Alpha, Opaque, Additive };
+enum class RasterTopology { TriangleList, TriangleStrip };
 struct RasterState {
     bool depthTest{true}, depthWrite{true};
     RasterCompare compare{RasterCompare::Less};
     RasterBlend blend{RasterBlend::Alpha};
+    RasterTopology topology{RasterTopology::TriangleList};
     bool operator==(const RasterState&) const = default;
 };
 struct RasterPass {

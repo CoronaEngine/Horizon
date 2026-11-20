@@ -153,7 +153,7 @@ IblMesh make_uv_sphere(int slices, int stacks)
 {
     IblMesh mesh;
     mesh.vertices.reserve(static_cast<size_t>((slices + 1) * (stacks + 1)));
-    mesh.indices.reserve(static_cast<size_t>(slices * stacks * 6));
+    mesh.indices.reserve(static_cast<size_t>(stacks * (slices + 1) * 2 + (stacks - 1) * 2));
 
     for (int y = 0; y <= stacks; ++y)
     {
@@ -175,19 +175,14 @@ IblMesh make_uv_sphere(int slices, int stacks)
 
     for (int y = 0; y < stacks; ++y)
     {
-        for (int x = 0; x < slices; ++x)
-        {
-            const uint16_t i0 = static_cast<uint16_t>(y * (slices + 1) + x);
-            const uint16_t i1 = static_cast<uint16_t>(i0 + 1);
-            const uint16_t i2 = static_cast<uint16_t>(i0 + slices + 1);
-            const uint16_t i3 = static_cast<uint16_t>(i2 + 1);
-
-            mesh.indices.push_back(i0);
-            mesh.indices.push_back(i2);
-            mesh.indices.push_back(i1);
-            mesh.indices.push_back(i1);
-            mesh.indices.push_back(i2);
-            mesh.indices.push_back(i3);
+        const auto first = static_cast<uint16_t>(y * (slices + 1));
+        if (y != 0) {
+            mesh.indices.push_back(mesh.indices.back());
+            mesh.indices.push_back(first);
+        }
+        for (int x = 0; x <= slices; ++x) {
+            mesh.indices.push_back(static_cast<uint16_t>(first + x));
+            mesh.indices.push_back(static_cast<uint16_t>(first + slices + 1 + x));
         }
     }
 
@@ -438,6 +433,7 @@ void run_disney_scene()
     const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
+    rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     HardwareExecutor render_executor;
     HardwareDisplayer display(HORIZON_NATIVE_WINDOW(window), PresentDevicePreference::RenderDevice);

@@ -298,6 +298,7 @@ void DisneyEdslPipeline::bind_textures(HardwareImage& radiance, HardwareImage& i
     state_->texCube = radiance;
     state_->texCubeIrr = irradiance;
 }
+void DisneyEdslPipeline::setRasterState(RasterState state) { state_->pipeline->setRasterState(state); }
 void DisneyEdslPipeline::setDepthImage(HardwareImage& image) { state_->pipeline->setDepthImage(image); }
 RasterBatch DisneyEdslPipeline::beginBatch(uint16_t width, uint16_t height) {
     state_->shared.proj_view = value(vsp.proj_view);

@@ -22,6 +22,7 @@ public:
     ~DisneyEdslPipeline();
     void bind_textures(HardwareImage&, HardwareImage&);
     void setDepthImage(HardwareImage&);
+    void setRasterState(RasterState);
     RasterBatch beginBatch(uint16_t width, uint16_t height);
 private:
     struct State;
