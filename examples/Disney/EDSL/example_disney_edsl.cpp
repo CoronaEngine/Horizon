@@ -1,6 +1,7 @@
-#include "../scene.h"
-#include "common.h"
 #include "Horizon.h"
+#include "../scene.h"
+#include "window.h"
+#include "example_benchmark/benchmark.h"
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
 #include "Codegen/CustomLibrary.h"
@@ -8,7 +9,7 @@
 #include <bit>
 
 #include <GLFW/glfw3.h>
-#include <chrono>
+#include <utility>
 #include <cstdio>
 
 namespace disney_edsl {
@@ -30,7 +31,77 @@ struct DisneyEdslSharedProxy
     Float4 lightCol;
     Float4 exposurePad;
 };
+
+Float3 toLinear(Float3 rgb) {
+    return pow(abs(rgb), Float3(Float(2.2), Float(2.2), Float(2.2)));
 }
+
+Float3 toFilmic(Float3 rgb) {
+    Float3 mapped = max(Float3(Float(0.0), Float(0.0), Float(0.0)),
+                        rgb - Float3(Float(0.004), Float(0.004), Float(0.004)));
+    return (mapped * (Float(6.2) * mapped + Float3(Float(0.5), Float(0.5), Float(0.5)))) /
+           (mapped * (Float(6.2) * mapped + Float3(Float(1.7), Float(1.7), Float(1.7))) +
+            Float3(Float(0.06), Float(0.06), Float(0.06)));
+}
+
+Float3 fixCubeLookup(Float3 v, Float lod, Float topLevelCubeSize) {
+    Float ax = abs(v->x);
+    Float ay = abs(v->y);
+    Float az = abs(v->z);
+    Float vmax = max(max(ax, ay), az);
+    Float scale = Float(1.0) - exp2(lod) / topLevelCubeSize;
+    Float3 result;
+    result = v;
+    $IF(ax != vmax) { result->x = v->x * scale; };
+    $IF(ay != vmax) { result->y = v->y * scale; };
+    $IF(az != vmax) { result->z = v->z * scale; };
+    return result;
+}
+
+Float sqr(Float x) { return x * x; }
+
+Float schlickFresnel(Float u) {
+    Float m = clamp(Float(1.0) - u, Float(0.0), Float(1.0));
+    return m * m * m * m * m;
+}
+
+Float edsl_log(Float x) {
+    return Float { Ast::AST::callFunc(
+        "log", Ast::AST::createType<float>(),
+        Ast::Node::accessAll({ proxy_wrap(x) }, Ast::AccessPermissions::ReadOnly)) };
+}
+
+Float3 edsl_cross(Float3 a, Float3 b) {
+    return Float3 { Ast::AST::callFunc(
+        "cross", Ast::AST::createType<ktm::fvec3>(),
+        Ast::Node::accessAll({ proxy_wrap(a), proxy_wrap(b) }, Ast::AccessPermissions::ReadOnly)) };
+}
+
+Float gtr1(Float NdotH, Float a) {
+    Float a2 = a * a;
+    Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
+    Float result;
+    result = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * edsl_log(a2) * t);
+    $IF(a >= Float(1.0)) { result = Float(1.0) / Float(3.14159265358979323846); };
+    return result;
+}
+
+Float gtr2_aniso(Float NdotH, Float HdotX, Float HdotY, Float ax, Float ay) {
+    return Float(1.0) /
+           (Float(3.14159265358979323846) * ax * ay *
+            sqr(sqr(HdotX / ax) + sqr(HdotY / ay) + NdotH * NdotH));
+}
+
+Float smithG_GGX(Float NdotV, Float alphaG) {
+    Float a = alphaG * alphaG;
+    Float b = NdotV * NdotV;
+    return Float(1.0) / (NdotV + sqrt(a + b - a * b));
+}
+
+Float smithG_GGX_aniso(Float NdotV, Float VdotX, Float VdotY, Float ax, Float ay) {
+    return Float(1.0) / (NdotV + sqrt(sqr(VdotX * ax) + sqr(VdotY * ay) + sqr(NdotV)));
+}
+} // namespace disney_edsl
 
 void run_example_disney_edsl()
 {
@@ -39,22 +110,21 @@ void run_example_disney_edsl()
     using namespace ktm;
     using namespace disney_edsl;
     constexpr auto mode = "disney_edsl";
-    examples::Window window_owner(disney_width, disney_height, mode);
-    GLFWwindow* window = window_owner.get();
+    auto window = examples::open_window(disney_width, disney_height, mode);
 
     InputContext input;
-    attach_input(window, input);
+    attach_input(window.get(), input);
 
     HardwareImage radiance = load_cubemap("bolonga_lod.dds");
     HardwareImage irradiance = load_cubemap("bolonga_irr.dds");
-    MaterialChart chart;
+    auto sphere = make_sphere();
 
     HardwareImage final_output_image(disney_width, disney_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
     HardwareImage depth_image(disney_width, disney_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    const auto shader_start = std::chrono::steady_clock::now();
+    const auto shader_start = bench::Clock::now();
     DisneyEdslSharedProxy shared;
     TextureCube<fvec4> texCube, texCubeIrr;
     Texture2D<fvec4> final_output;
@@ -72,76 +142,6 @@ void run_example_disney_edsl()
         out->v_view = shared.camPos->xyz() - world_pos->xyz();
         out->v_normal = mul(per_model, Float4(pos, Float(0.0)))->xyz();
         return out;
-    };
-
-    auto toLinear = [](Float3 rgb) -> Float3 {
-        return pow(abs(rgb), Float3(Float(2.2), Float(2.2), Float(2.2)));
-    };
-
-    auto toFilmic = [](Float3 rgb) -> Float3 {
-        Float3 mapped = max(Float3(Float(0.0), Float(0.0), Float(0.0)),
-                            rgb - Float3(Float(0.004), Float(0.004), Float(0.004)));
-        return (mapped * (Float(6.2) * mapped + Float3(Float(0.5), Float(0.5), Float(0.5)))) /
-               (mapped * (Float(6.2) * mapped + Float3(Float(1.7), Float(1.7), Float(1.7))) +
-                Float3(Float(0.06), Float(0.06), Float(0.06)));
-    };
-
-    auto fixCubeLookup = [](Float3 v, Float lod, Float topLevelCubeSize) -> Float3 {
-        Float ax = abs(v->x);
-        Float ay = abs(v->y);
-        Float az = abs(v->z);
-        Float vmax = max(max(ax, ay), az);
-        Float scale = Float(1.0) - exp2(lod) / topLevelCubeSize;
-        Float3 result;
-        result = v;
-        $IF(ax != vmax) { result->x = v->x * scale; };
-        $IF(ay != vmax) { result->y = v->y * scale; };
-        $IF(az != vmax) { result->z = v->z * scale; };
-        return result;
-    };
-
-    auto sqr = [](Float x) -> Float { return x * x; };
-
-    auto schlickFresnel = [](Float u) -> Float {
-        Float m = clamp(Float(1.0) - u, Float(0.0), Float(1.0));
-        return m * m * m * m * m;
-    };
-
-    auto edsl_log = [](Float x) -> Float {
-        return Float { Ast::AST::callFunc(
-            "log", Ast::AST::createType<float>(),
-            Ast::Node::accessAll({ proxy_wrap(x) }, Ast::AccessPermissions::ReadOnly)) };
-    };
-
-    auto edsl_cross = [](Float3 a, Float3 b) -> Float3 {
-        return Float3 { Ast::AST::callFunc(
-            "cross", Ast::AST::createType<ktm::fvec3>(),
-            Ast::Node::accessAll({ proxy_wrap(a), proxy_wrap(b) }, Ast::AccessPermissions::ReadOnly)) };
-    };
-
-    auto gtr1 = [&](Float NdotH, Float a) -> Float {
-        Float a2 = a * a;
-        Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
-        Float result;
-        result = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * edsl_log(a2) * t);
-        $IF(a >= Float(1.0)) { result = Float(1.0) / Float(3.14159265358979323846); };
-        return result;
-    };
-
-    auto gtr2_aniso = [&](Float NdotH, Float HdotX, Float HdotY, Float ax, Float ay) -> Float {
-        return Float(1.0) /
-               (Float(3.14159265358979323846) * ax * ay *
-                sqr(sqr(HdotX / ax) + sqr(HdotY / ay) + NdotH * NdotH));
-    };
-
-    auto smithG_GGX = [&](Float NdotV, Float alphaG) -> Float {
-        Float a = alphaG * alphaG;
-        Float b = NdotV * NdotV;
-        return Float(1.0) / (NdotV + sqrt(a + b - a * b));
-    };
-
-    auto smithG_GGX_aniso = [&](Float NdotV, Float VdotX, Float VdotY, Float ax, Float ay) -> Float {
-        return Float(1.0) / (NdotV + sqrt(sqr(VdotX * ax) + sqr(VdotY * ay) + sqr(NdotV)));
     };
 
     // x: doDiffuse, y: doSpecular, z: doDiffuseIbl, w: doSpecularIbl
@@ -271,24 +271,23 @@ void run_example_disney_edsl()
         final_output << Float4(toFilmic(color), Float(1.0));
     };
     RasterizerPipeline<> rasterizer(edsl_vertex, edsl_fragment, 1, CompilerOption{.enableMatrixColumnMajor = true});
-    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
+    const double shader_setup_ms = bench::milliseconds_since(shader_start);
     rasterizer.setDepthImage(depth_image);
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     HardwareExecutor render_executor;
-    HardwareDisplayer display(window_owner.native_handle(), PresentDevicePreference::RenderDevice);
+    HardwareDisplayer display(examples::native_handle(window.get()), PresentDevicePreference::RenderDevice);
 
-    examples::Benchmark benchmark(mode, disney_width, disney_height);
-    benchmark.set_shader_setup_ms(shader_setup_ms);
+    auto run = bench::start_run(mode, disney_width, disney_height, shader_setup_ms);
     float branch_switch_accum = 0.0f;
     int branch_switch_state = 0;
-    while (benchmark.running(window))
+    while (!glfwWindowShouldClose(window.get()))
     {
-        benchmark.begin_frame();
+        bench::begin_frame(run);
         glfwPollEvents();
         Settings& s = input.settings;
 
-        const float dt = benchmark.dt();
+        const float dt = run.delta_seconds;
         branch_switch_accum += dt;
         if (branch_switch_accum >= 1.5f)
         {
@@ -307,7 +306,7 @@ void run_example_disney_edsl()
 
         const auto frame = update_frame(input, dt);
 
-        benchmark.begin_scene();
+        const auto record_start = bench::Clock::now();
         texCube = radiance;
         texCubeIrr = irradiance;
         shared.proj_view = std::bit_cast<fmat4x4>(frame.proj_view);
@@ -327,13 +326,19 @@ void run_example_disney_edsl()
         {
             for (int col = 0; col < chart_col_count; ++col)
             {
-                const auto draw = chart.parameters(row, col);
-                batch.draw(chart.sphere, chart.range, draw);
+                const auto draw = sphere_parameters(row, col);
+                batch.draw(sphere, {}, draw);
             }
         }
 
-        benchmark.submit(render_executor, std::move(batch), display, final_output_image);
-        benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
+        if (run.present_normally) {
+            render_executor << std::move(batch);
+            const bool presented = display.present(render_executor, final_output_image);
+            bench::observe_present(run.presents, window.get(), presented);
+        } else {
+            bench::submit_measured(run, record_start, render_executor, std::move(batch), display, final_output_image);
+        }
+        bench::finish_frame(run, window.get(), chart_sphere_count, final_output_image, render_executor);
     }
 
     render_executor.waitForDeferredResources();

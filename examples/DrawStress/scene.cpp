@@ -1,7 +1,7 @@
 // 移植自 bgfx examples/17-drawstress，用于对照单线程提交（Num threads=1）的绘制开销。
 // 保留 8 顶点立方体、0.25 缩放、0.6 间距和逐立方体的旋转，每个立方体使用独立的间接绘制命令和 MVP。
 #include "scene.h"
-#include "common.h"
+#include "Horizon.h"
 #include "horizon_profiling.h"
 
 #include <GLFW/glfw3.h>
@@ -32,16 +32,16 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
     if (action != GLFW_PRESS && action != GLFW_REPEAT)
         return;
 
-    auto* state = static_cast<StressState*>(glfwGetWindowUserPointer(window));
+    int& dim = *static_cast<int*>(glfwGetWindowUserPointer(window));
     switch (key)
     {
     case GLFW_KEY_EQUAL:
     case GLFW_KEY_KP_ADD:
-        state->dim = std::min(state->dim + 2, dim_max);
+        dim = std::min(dim + 2, dim_max);
         break;
     case GLFW_KEY_MINUS:
     case GLFW_KEY_KP_SUBTRACT:
-        state->dim = std::max(state->dim - 2, dim_min);
+        dim = std::max(dim - 2, dim_min);
         break;
     case GLFW_KEY_ESCAPE:
         glfwSetWindowShouldClose(window, GLFW_TRUE);
@@ -53,16 +53,16 @@ void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int
 
 } // namespace
 
-void attach_input(GLFWwindow* window, StressState& state, const char* mode) {
-    state.dim = std::clamp(examples::env_int("HORIZON_DRAWSTRESS_DIM", state.dim), dim_min, dim_max);
-    glfwSetWindowUserPointer(window, &state);
+void attach_input(GLFWwindow* window, int& dim, const char* mode) {
+    glfwSetWindowUserPointer(window, &dim);
     glfwSetKeyCallback(window, key_callback);
     std::cout << "== " << mode << " controls ==\n"
-              << "  + / - : dim +2 / -2 (draws = dim^3)\n"
+              << "  + / - : dim +2 / -2 (cubes = dim^3)\n"
               << "  Esc   : quit\n";
 }
 
-namespace {
+std::span<const uint16_t> cube_triangle_indices() { return cube_indices; }
+
 RasterGeometry make_cube() {
     auto cube_vb = HardwareBuffer::uploadDeviceLocal(cube_vertices, BufferUsage::VertexBuffer);
     auto cube_ib = HardwareBuffer::uploadDeviceLocal(cube_indices, BufferUsage::IndexBuffer);
@@ -136,17 +136,4 @@ void write_matrices(std::span<std::byte> parameters, const glm::mat4& view_proj,
     }
 }
 
-} // namespace
-
-CubeGrid::CubeGrid() : cube_(make_cube()), packets_(make_draw_packets()), view_proj_(make_view_projection()) {}
-
-void CubeGrid::draw(RasterBatch& batch, const StressState& state, float time) const {
-    const auto count = state.draw_count();
-    HORIZON_PROFILE_PLOT("draw calls", count);
-    const auto build_matrices = [&](std::span<std::byte> parameters) {
-        write_matrices(parameters, view_proj_, state.dim, time);
-    };
-    batch.drawIndirect(cube_, packets_, count, count * sizeof(glm::mat4), build_matrices,
-                       IndirectFirstInstance::AlwaysZero);
-}
 } // namespace drawstress

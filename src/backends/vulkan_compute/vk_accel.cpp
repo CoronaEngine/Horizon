@@ -108,7 +108,7 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     auto vkCmdBuildAS = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(
         device_->logical_device(), "vkCmdBuildAccelerationStructuresKHR");
 
-    uint32_t instance_count = static_cast<uint32_t>(meshes_.size());
+    uint32_t instance_count = static_cast<uint32_t>(mesh_num());
     if (instance_count == 0) { clear(); return; }
 
     // (Re)allocate instance buffer if needed
@@ -127,10 +127,10 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     vmaMapMemory(device_->vma_allocator(), instances_buf_.alloc, &mapped);
     auto *inst_ptr = reinterpret_cast<VkAccelerationStructureInstanceKHR *>(mapped);
     for (uint32_t i = 0; i < instance_count; ++i) {
-        auto *mesh_impl = reinterpret_cast<VkMesh *>(meshes_[i].impl());
+        const auto *mesh_impl = static_cast<const VkMesh *>(instance_mesh(i).impl());
         VkAccelerationStructureInstanceKHR inst{};
         // Copy row-major 4x3 transform
-        const float4x4 &t = transforms_[i];
+        const float4x4 &t = instances_[i].transform;
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c)
                 inst.transform.matrix[r][c] = t[c][r];
@@ -180,18 +180,18 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     }
     built_ = true;
     built_blas_.clear();
-    for (const auto &mesh : meshes_) built_blas_.push_back(mesh.impl()->blas_handle());
+    for (size_t i = 0; i < mesh_num(); ++i) built_blas_.push_back(instance_mesh(i).impl()->blas_handle());
     mark_build();
 }
 
 // ── update_tlas ───────────────────────────────────────────────────────────────
 
 void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
-    if (meshes_.empty()) { clear(); return; }
-    bool topology_changed = built_blas_.size() != meshes_.size();
+    if (mesh_num() == 0) { clear(); return; }
+    bool topology_changed = built_blas_.size() != mesh_num();
     if (!topology_changed) {
-        for (size_t i = 0; i < meshes_.size(); ++i)
-            topology_changed |= built_blas_[i] != meshes_[i].impl()->blas_handle();
+        for (size_t i = 0; i < mesh_num(); ++i)
+            topology_changed |= built_blas_[i] != instance_mesh(i).impl()->blas_handle();
     }
     if (!built_ || usage_tag_ != FAST_UPDATE || topology_changed) {
         build_tlas(visitor);
@@ -201,14 +201,14 @@ void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
     auto vkCmdBuildAS = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(
         device_->logical_device(), "vkCmdBuildAccelerationStructuresKHR");
 
-    uint32_t instance_count = static_cast<uint32_t>(meshes_.size());
+    uint32_t instance_count = static_cast<uint32_t>(mesh_num());
 
     // Update instance transforms in the existing buffer
     void *mapped = nullptr;
     vmaMapMemory(device_->vma_allocator(), instances_buf_.alloc, &mapped);
     auto *inst_ptr = reinterpret_cast<VkAccelerationStructureInstanceKHR *>(mapped);
     for (uint32_t i = 0; i < instance_count; ++i) {
-        const float4x4 &t = transforms_[i];
+        const float4x4 &t = instances_[i].transform;
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 4; ++c)
                 inst_ptr[i].transform.matrix[r][c] = t[c][r];

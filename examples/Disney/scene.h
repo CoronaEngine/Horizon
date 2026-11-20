@@ -1,14 +1,14 @@
 #pragma once
 
-#include "Horizon.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#include <algorithm>
 #include <array>
-#include <cmath>
+#include <vector>
 #include <cstddef>
 #include <cstdint>
 
+struct RasterGeometry;
+struct HardwareImage;
 struct GLFWwindow;
 
 namespace disney {
@@ -25,21 +25,6 @@ struct DisneyDrawParameters {
 };
 static_assert(offsetof(DisneyDrawParameters, clearcoatGloss) == 28 * sizeof(uint32_t));
 static_assert(sizeof(DisneyDrawParameters) == 29 * sizeof(uint32_t));
-
-struct DisneyMaterial
-{
-    glm::vec3 base_color { 0.82f, 0.67f, 0.16f };
-    float metallic = 0.0f;
-    float roughness = 0.5f;
-    float specular = 0.5f;
-    float specular_tint = 0.0f;
-    float subsurface = 0.0f;
-    float anisotropic = 0.0f;
-    float sheen = 0.0f;
-    float sheen_tint = 0.5f;
-    float clearcoat = 0.0f;
-    float clearcoat_gloss = 1.0f;
-};
 
 struct Settings
 {
@@ -63,31 +48,6 @@ struct OrbitCamera
     float dist_curr = 13.5f;
     float dist_dest = 13.5f;
     glm::vec3 target { 0.0f };
-
-    void orbit(float dx, float dy)
-    {
-        yaw_dest += dx * glm::two_pi<float>();
-        pitch_dest = std::clamp(pitch_dest - dy * glm::pi<float>(), 0.15f * glm::pi<float>(),
-                                0.85f * glm::pi<float>());
-    }
-
-    void dolly(float dz) { dist_dest = std::clamp(dist_dest + dist_dest * dz, 4.0f, 40.0f); }
-
-    void update(float dt)
-    {
-        const float amount = std::min(dt / 0.12f, 1.0f);
-        yaw_curr = glm::mix(yaw_curr, yaw_dest, amount);
-        pitch_curr = glm::mix(pitch_curr, pitch_dest, amount);
-        dist_curr = glm::mix(dist_curr, dist_dest, amount);
-    }
-
-    [[nodiscard]] glm::vec3 position() const
-    {
-        const glm::vec3 dir(std::sin(pitch_curr) * std::sin(yaw_curr), std::cos(pitch_curr),
-                            std::sin(pitch_curr) * std::cos(yaw_curr));
-        return target + dir * dist_curr;
-    }
-
 };
 
 struct InputContext
@@ -99,21 +59,29 @@ struct InputContext
     bool has_prev = false;
 };
 
-struct MaterialChart {
-    MaterialChart();
-    DisneyDrawParameters parameters(int row, int col) const;
-
-    RasterGeometry sphere;
-    RasterDraw range;
-private:
-    std::array<DisneyMaterial, chart_sphere_count> materials_;
-};
-
 struct FrameUniforms {
     glm::mat4 proj_view, env_rotation;
     glm::vec4 camera, flags, light_direction, light_color, exposure;
 };
 
+struct CubeMapData
+{
+    uint32_t size = 0;
+    uint32_t mip_count = 0;
+    std::vector<std::byte> payload;
+};
+
+struct IblMesh
+{
+    // Each unit-sphere position also supplies its original object-space normal.
+    std::vector<std::array<float, 3>> vertices;
+    std::vector<uint16_t> indices;
+};
+
+CubeMapData read_cubemap(const char* filename);
+IblMesh make_uv_sphere(int slices, int stacks);
+RasterGeometry make_sphere();
+DisneyDrawParameters sphere_parameters(int row, int col);
 HardwareImage load_cubemap(const char* filename);
 FrameUniforms update_frame(InputContext& input, float dt);
 void attach_input(GLFWwindow* window, InputContext& input);

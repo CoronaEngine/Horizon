@@ -1,7 +1,8 @@
 add_executable(HorizonExamples
     main.cpp
-    common.cpp
-    Baseline/scene.cpp
+    window.cpp
+    ../tools/example_benchmark/benchmark.cpp
+    Baseline/assets.cpp
     Baseline/Tutorial/28_model_loading.cpp
     Baseline/EDSL/example_baseline_edsl.cpp
     Baseline/Slang/example_baseline_slang.cpp
@@ -29,11 +30,19 @@ if(TUTORIAL_GLSLC)
 endif()
 set_property(SOURCE Baseline/Tutorial/28_model_loading.cpp APPEND PROPERTY
     COMPILE_DEFINITIONS "TUTORIAL_SHADER_DIR=\"${baseline_shader_dir}\"")
-if(WIN32 AND HORIZON_BUILD_OCARINA)
+if(HORIZON_BUILD_OCARINA)
+    target_sources(HorizonExamples PRIVATE
+        Ocarina/rays.cpp Ocarina/ray_view.cpp
+        Baseline/Ocarina/example_baseline_ocarina.cpp
+        Disney/Ocarina/example_disney_ocarina.cpp Disney/Ocarina/lighting.cpp
+        DrawStress/Ocarina/example_drawstress_ocarina.cpp)
+    target_link_libraries(HorizonExamples PRIVATE ocarina-native)
+    target_compile_definitions(HorizonExamples PRIVATE HORIZON_OCARINA_EXAMPLES)
+    set(ocarina_modes baseline_ocarina disney_ocarina drawstress_ocarina)
     # Run beside the shared logging provider and Ocarina DLLs.
     set_target_properties(HorizonExamples PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
-target_include_directories(HorizonExamples PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(HorizonExamples PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/tools" "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(HorizonExamples PRIVATE
     Horizon horizon::glm horizon::glfw horizon::stb horizon::tinyobjloader)
 if(HORIZON_ENABLE_TRACY)
@@ -49,12 +58,16 @@ helicon_compile_shaders(HorizonExamples DEPENDS
 if(HORIZON_BUILD_TESTS)
     add_dependencies(horizon-tests HorizonExamples)
     add_test(NAME horizon.examples.list COMMAND HorizonExamples --list)
-    foreach(mode IN ITEMS baseline baseline_edsl baseline_slang disney_edsl disney_slang drawstress_edsl drawstress_slang)
+    foreach(mode IN ITEMS baseline baseline_edsl baseline_slang disney_edsl disney_slang drawstress_edsl drawstress_slang ${ocarina_modes})
         add_test(NAME horizon.examples.${mode} COMMAND HorizonExamples ${mode})
         set_tests_properties(horizon.examples.${mode} PROPERTIES
             LABELS "examples;gpu"
             RESOURCE_LOCK horizon_example_window
             TIMEOUT 90)
+        if(mode IN_LIST ocarina_modes)
+            set_tests_properties(horizon.examples.${mode} PROPERTIES
+                SKIP_REGULAR_EXPRESSION "Ocarina ray queries unsupported on this device")
+        endif()
         set_property(TEST horizon.examples.${mode} PROPERTY ENVIRONMENT
             "HORIZON_PRESENT_FRAMES=8" "HORIZON_BENCH_WARMUP=2"
             "HORIZON_BENCH_FRAMES=0" "HORIZON_BENCH_OFFSCREEN=0"

@@ -1,8 +1,12 @@
 // Disney Principled PBR chart: 10 parameter rows x 11 values from 0 to 1.
 #include "scene.h"
+#include "Horizon.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <GLFW/glfw3.h>
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -11,13 +15,6 @@
 
 namespace disney {
 namespace {
-struct CubeMapData
-{
-    uint32_t size = 0;
-    uint32_t mip_count = 0;
-    std::vector<std::byte> payload;
-};
-
 uint32_t read_u32(const std::vector<std::byte>& bytes, size_t offset)
 {
     uint32_t value = 0;
@@ -88,6 +85,21 @@ HardwareImage create_cubemap_image(const CubeMapData& dds)
     return image;
 }
 
+struct DisneyMaterial
+{
+    glm::vec3 base_color { 0.82f, 0.67f, 0.16f };
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+    float specular = 0.5f;
+    float specular_tint = 0.0f;
+    float subsurface = 0.0f;
+    float anisotropic = 0.0f;
+    float sheen = 0.0f;
+    float sheen_tint = 0.5f;
+    float clearcoat = 0.0f;
+    float clearcoat_gloss = 1.0f;
+};
+
 enum class ChartParam : int
 {
     Subsurface = 0,
@@ -140,6 +152,10 @@ DisneyMaterial make_chart_material(int row, int col)
     return material;
 }
 
+void zoom(OrbitCamera& camera, float amount) {
+    camera.dist_dest = std::clamp(camera.dist_dest + camera.dist_dest * amount, 4.0f, 40.0f);
+}
+
 void cursor_callback(GLFWwindow* window, double x, double y)
 {
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
@@ -151,15 +167,20 @@ void cursor_callback(GLFWwindow* window, double x, double y)
         return;
     }
 
-    const float dx = static_cast<float>(x - context->prev_x) / static_cast<float>(disney_width);
-    const float dy = static_cast<float>(y - context->prev_y) / static_cast<float>(disney_height);
+    int width, height;
+    glfwGetWindowSize(window, &width, &height);
+    const float dx = static_cast<float>(x - context->prev_x) / std::max(width, 1);
+    const float dy = static_cast<float>(y - context->prev_y) / std::max(height, 1);
     context->prev_x = x;
     context->prev_y = y;
 
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
-        context->camera.orbit(dx, dy);
-    else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
-        context->camera.dolly(dx + dy);
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+        auto& camera = context->camera;
+        camera.yaw_dest += dx * glm::two_pi<float>();
+        camera.pitch_dest = std::clamp(camera.pitch_dest - dy * glm::pi<float>(),
+                                       0.15f * glm::pi<float>(), 0.85f * glm::pi<float>());
+    } else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+        zoom(context->camera, dx + dy);
     else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS)
         context->settings.env_rot_dest += dx * 2.0f;
 }
@@ -167,23 +188,19 @@ void cursor_callback(GLFWwindow* window, double x, double y)
 void scroll_callback(GLFWwindow* window, double /*dx*/, double dy)
 {
     auto* context = static_cast<InputContext*>(glfwGetWindowUserPointer(window));
-    context->camera.dolly(static_cast<float>(-dy) * 0.05f);
+    zoom(context->camera, static_cast<float>(-dy) * 0.05f);
 }
 
 } // namespace
 
-HardwareImage load_cubemap(const char* filename) {
+CubeMapData read_cubemap(const char* filename) {
     const auto path = std::filesystem::path(__FILE__).parent_path() / "assets" / "env" / filename;
-    return create_cubemap_image(load_dds_cube_rgba16f(path));
+    return load_dds_cube_rgba16f(path);
 }
 
-namespace {
-struct IblMesh
-{
-    // Each unit-sphere position also supplies its original object-space normal.
-    std::vector<std::array<float, 3>> vertices;
-    std::vector<uint16_t> indices;
-};
+HardwareImage load_cubemap(const char* filename) {
+    return create_cubemap_image(read_cubemap(filename));
+}
 
 IblMesh make_uv_sphere(int slices, int stacks)
 {
@@ -225,6 +242,7 @@ IblMesh make_uv_sphere(int slices, int stacks)
     return mesh;
 }
 
+namespace {
 glm::vec3 chart_sphere_position(int row, int col)
 {
     constexpr float spacing = 1.12f;
@@ -235,21 +253,17 @@ glm::vec3 chart_sphere_position(int row, int col)
 
 } // namespace
 
-MaterialChart::MaterialChart() {
+RasterGeometry make_sphere() {
     const auto mesh = make_uv_sphere(48, 24);
-    sphere.vertices = HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer);
-    sphere.indices = HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer);
-    range.indexCount = static_cast<uint32_t>(mesh.indices.size());
-    for (int row = 0; row < chart_row_count; ++row)
-        for (int col = 0; col < chart_col_count; ++col)
-            materials_[row * chart_col_count + col] = make_chart_material(row, col);
+    return {HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer),
+            HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer)};
 }
 
-DisneyDrawParameters MaterialChart::parameters(int row, int col) const
+DisneyDrawParameters sphere_parameters(int row, int col)
 {
     constexpr float sphere_scale = 0.42f;
     DisneyDrawParameters draw{};
-    const auto& material = materials_[row * chart_col_count + col];
+    const auto material = make_chart_material(row, col);
     draw.model = glm::translate(glm::mat4(1.0f), chart_sphere_position(row, col))
                * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
     draw.mat0 = glm::vec4(material.base_color, material.metallic);
@@ -270,9 +284,14 @@ FrameUniforms update_frame(InputContext& input, float dt) {
     }();
     auto& camera = input.camera;
     auto& s = input.settings;
-    camera.update(dt);
-    s.env_rot_curr = glm::mix(s.env_rot_curr, s.env_rot_dest, std::min(dt / 0.12f, 1.0f));
-    const auto position = camera.position();
+    const float amount = std::min(dt / 0.12f, 1.0f);
+    camera.yaw_curr = glm::mix(camera.yaw_curr, camera.yaw_dest, amount);
+    camera.pitch_curr = glm::mix(camera.pitch_curr, camera.pitch_dest, amount);
+    camera.dist_curr = glm::mix(camera.dist_curr, camera.dist_dest, amount);
+    s.env_rot_curr = glm::mix(s.env_rot_curr, s.env_rot_dest, amount);
+    const glm::vec3 direction(std::sin(camera.pitch_curr) * std::sin(camera.yaw_curr), std::cos(camera.pitch_curr),
+                              std::sin(camera.pitch_curr) * std::cos(camera.yaw_curr));
+    const auto position = camera.target + direction * camera.dist_curr;
     FrameUniforms frame;
     frame.proj_view = projection * glm::lookAtLH(position, camera.target, glm::vec3(0.0f, 1.0f, 0.0f));
     frame.env_rotation = glm::rotate(glm::mat4(1.0f), s.env_rot_curr, glm::vec3(0.0f, 1.0f, 0.0f));

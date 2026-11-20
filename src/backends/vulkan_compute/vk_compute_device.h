@@ -170,6 +170,7 @@ public:
     [[nodiscard]] VkImageAllocation &get_vk_image(handle_ty handle) noexcept;
 
     // ── Device::Impl interface ───────────────────────────────────────────────
+    [[nodiscard]] bool supports_ray_queries() const noexcept override { return has_rt_; }
     [[nodiscard]] bool supports_buffer_export() const noexcept override { return has_external_memory_; }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const override;
     void set_buffer_external_ownership(handle_ty handle, bool external) override;

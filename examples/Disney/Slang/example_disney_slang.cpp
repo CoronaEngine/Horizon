@@ -1,13 +1,14 @@
-#include "../scene.h"
-#include "common.h"
 #include "Horizon.h"
+#include "../scene.h"
+#include "window.h"
+#include "example_benchmark/benchmark.h"
 #include "Codegen/ControlFlows.h"
 
 #include SLANG(Disney/Slang/disney_vert.slang)
 #include SLANG(Disney/Slang/disney_frag.slang)
 
 #include <GLFW/glfw3.h>
-#include <chrono>
+#include <utility>
 
 namespace {
 struct DrawParameters {
@@ -22,41 +23,39 @@ void run_example_disney_slang()
 {
     using namespace disney;
     constexpr auto mode = "disney_slang";
-    examples::Window window_owner(disney_width, disney_height, mode);
-    GLFWwindow* window = window_owner.get();
+    auto window = examples::open_window(disney_width, disney_height, mode);
 
     InputContext input;
-    attach_input(window, input);
+    attach_input(window.get(), input);
 
     HardwareImage radiance = load_cubemap("bolonga_lod.dds");
     HardwareImage irradiance = load_cubemap("bolonga_irr.dds");
-    MaterialChart chart;
+    auto sphere = make_sphere();
 
     HardwareImage final_output_image(disney_width, disney_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
     HardwareImage depth_image(disney_width, disney_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    const auto shader_start = std::chrono::steady_clock::now();
+    const auto shader_start = bench::Clock::now();
     RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> rasterizer;
-    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
+    const double shader_setup_ms = bench::milliseconds_since(shader_start);
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     HardwareExecutor render_executor;
-    HardwareDisplayer display(window_owner.native_handle(), PresentDevicePreference::RenderDevice);
+    HardwareDisplayer display(examples::native_handle(window.get()), PresentDevicePreference::RenderDevice);
 
-    examples::Benchmark benchmark(mode, disney_width, disney_height);
-    benchmark.set_shader_setup_ms(shader_setup_ms);
-    while (benchmark.running(window))
+    auto run = bench::start_run(mode, disney_width, disney_height, shader_setup_ms);
+    while (!glfwWindowShouldClose(window.get()))
     {
-        benchmark.begin_frame();
+        bench::begin_frame(run);
         glfwPollEvents();
-        const float dt = benchmark.dt();
+        const float dt = run.delta_seconds;
         const auto frame = update_frame(input, dt);
 
-        benchmark.begin_scene();
+        const auto record_start = bench::Clock::now();
         const uint32_t cube_index = radiance.storeDescriptor();
         const uint32_t irradiance_index = irradiance.storeDescriptor();
         rasterizer.vsp.proj_view = frame.proj_view;
@@ -73,13 +72,19 @@ void run_example_disney_slang()
         {
             for (int col = 0; col < chart_col_count; ++col)
             {
-                const DrawParameters draw{chart.parameters(row, col), cube_index, irradiance_index};
-                batch.draw(chart.sphere, chart.range, draw);
+                const DrawParameters draw{sphere_parameters(row, col), cube_index, irradiance_index};
+                batch.draw(sphere, {}, draw);
             }
         }
 
-        benchmark.submit(render_executor, std::move(batch), display, final_output_image);
-        benchmark.end_frame(window, chart_sphere_count, final_output_image, render_executor);
+        if (run.present_normally) {
+            render_executor << std::move(batch);
+            const bool presented = display.present(render_executor, final_output_image);
+            bench::observe_present(run.presents, window.get(), presented);
+        } else {
+            bench::submit_measured(run, record_start, render_executor, std::move(batch), display, final_output_image);
+        }
+        bench::finish_frame(run, window.get(), chart_sphere_count, final_output_image, render_executor);
     }
 
     render_executor.waitForDeferredResources();

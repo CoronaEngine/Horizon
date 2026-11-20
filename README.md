@@ -111,17 +111,38 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
 
-每个场景的 `EDSL` 和 `Slang` 目录各有独立入口。对照管线创建、资源绑定和绘制调用时，可以并排打开表中两份实现。两边共用的场景逻辑放在该场景根目录的 `scene.h` 和 `scene.cpp`。
+#### 第一次阅读渲染示例
 
-| 场景 | EDSL 实现 | Slang 实现 |
+先运行 `HorizonExamples baseline_slang`。打开下表第一行的 Slang 入口，从 `run_example_baseline_slang()` 往下读：载入 Viking Room 的模型和纹理，设置相机和渲染目标，然后在窗口循环中更新矩阵、绘制并呈现。接着并排打开 EDSL 入口，对照同一张纹理在两种 shader 中怎样绑定和采样。模型和纹理的加载实现在 [Baseline/assets.cpp](examples/Baseline/assets.cpp)。
+
+| 场景和阅读重点 | EDSL 实现 | Slang 实现 |
 | --- | --- | --- |
-| Baseline | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) |
-| Disney | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
-| DrawStress | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
+| Baseline · 绘制一个带纹理的模型 | [example_baseline_edsl.cpp](examples/Baseline/EDSL/example_baseline_edsl.cpp) | [example_baseline_slang.cpp](examples/Baseline/Slang/example_baseline_slang.cpp) |
+| Disney · 复用球体几何，逐球传入材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
+| DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
 
-Baseline 的原生 Vulkan 教程位于 [Baseline/Tutorial](examples/Baseline/Tutorial/28_model_loading.cpp)。
+Disney 和 DrawStress 的两个入口分别共用本场景的 `scene.cpp`，其中有球体、材质、间接命令和变换矩阵的生成函数。需要查看 GPU 时间戳、离屏提交或截图时，可阅读 [benchmark.cpp](tools/example_benchmark/benchmark.cpp)。
 
-直接运行 `HorizonExamples` 默认启动 `baseline`，使用 Vulkan Tutorial 章末的渲染流程和着色器绘制 Viking Room。运行 `HorizonExamples baseline_slang` 或 `HorizonExamples baseline_edsl` 可切换到手写 Slang 或 Helicon EDSL 实现。三者共用模型、纹理及项目的 tinyobjloader 依赖。[Loading models](https://vulkan-tutorial.com/Loading_models)
+最后可以对照原生 Vulkan 实现。无参数运行 `HorizonExamples` 默认启动 `baseline`。它与两个 Horizon Baseline 共用 Viking Room 资产，入口直接初始化 Vulkan、绘制和释放资源。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
+
+#### 用 Ocarina 追踪同一组场景
+
+`examples` 预设同时构建 Ocarina 和 Vulkan Compute 后端。先从仓库根目录编译，再选择一个模式。运行光追需要支持 Vulkan 加速结构和 ray query 的 GPU。
+
+```powershell
+cmake --preset examples-release
+cmake --build --preset examples-release --target HorizonExamples
+$examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExamples.exe
+& $examples baseline_ocarina
+```
+
+| 模式 | 从入口阅读的内容 |
+| --- | --- |
+| `baseline_ocarina` | 载入 Viking Room，建立三角形加速结构，为每个像素发出相机射线。命中后插值 UV、采样模型纹理，再向光源发出阴影射线。[源码](examples/Baseline/Ocarina/example_baseline_ocarina.cpp) |
+| `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。光照使用可见性查询和原场景的两张 DDS 环境贴图。鼠标左键拖动环绕，滚轮缩放，中键拖动旋转环境。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
+| `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。按 `+` 或 `-` 改变网格边长可观察重建，按 Esc 退出。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
+
+三个光追入口均以 960 × 540 执行 Ocarina kernel，再将 RGBA 像素读回并交给 Horizon 窗口呈现，窗口计时包含这次传输。设置 `HORIZON_FIXED_DT`、`HORIZON_PRESENT_FRAMES`、`HORIZON_BENCH_WARMUP` 可以重复同一段动画，`HORIZON_CAPTURE_PATH` 可在结束时保存最后一帧 PNG。显示与截图实现位于 [ray_view.cpp](examples/Ocarina/ray_view.cpp)。
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
@@ -177,7 +198,7 @@ ctest --preset examples-relwithdebinfo
 ```
 
 `engine` 和 `examples` 预设均启用 Horizon 测试。`examples` 的 `horizon-tests` 目标也构建
-`HorizonExamples`，CTest 会在有 Vulkan GPU 和桌面的机器上逐个运行七个窗口示例。
+`HorizonExamples`，CTest 会在有 Vulkan GPU 和桌面的机器上逐个运行窗口示例。标准 examples 预设包含七个光栅模式和三个 Ocarina 光追模式。缺少光线查询能力时，CTest 跳过相应的光追测试。
 只运行窗口测试可使用 `ctest --preset examples-relwithdebinfo -L examples`。
 
 运行 `HorizonExamples --list` 查看全部模式。窗口性能复测使用正常呈现路径，首次成功呈现后
@@ -187,7 +208,7 @@ ctest --preset examples-relwithdebinfo
 ```powershell
 cmake --preset examples-release
 cmake --build --preset examples-release --target HorizonExamples
-$examples = Resolve-Path build/conan/examples/release/examples/Release/HorizonExamples.exe
+$examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExamples.exe
 foreach ($mode in (& $examples --list)) {
     $dt = if ($mode -like 'disney_*') { '0.001' } else { '0.016666667' }
     cmake -E env HORIZON_PRESENT_FRAMES=512 HORIZON_BENCH_WARMUP=64 `

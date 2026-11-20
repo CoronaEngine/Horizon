@@ -216,6 +216,24 @@ void test_fast_update_transform_refit(Device &device) {
            "FAST_UPDATE transform changes must report refits");
 }
 
+void test_shared_mesh_instances(Device &device) {
+    auto stream = device.create_stream();
+    auto accel = device.create_accel(FAST_UPDATE);
+    accel.add_instance(create_cube_mesh(device, stream), make_float4x4(1.f));
+    stream << accel.build_bvh() << synchronize() << commit();
+    accel.add_instance(0u, translation<H>(3.f, 0.f, 0.f));
+    stream << accel.update_bvh() << synchronize() << commit();
+    expect(accel.mesh_num() == 2 && accel.triangle_num() == 24, "shared instance counts");
+    expect(accel.last_build_action() == Accel::BuildAction::BUILD, "new instance requires a TLAS build");
+    accel.set_transform(1u, translation<H>(4.f, 0.f, 0.f));
+    stream << accel.update_bvh() << synchronize() << commit();
+    expect(accel.last_build_action() == Accel::BuildAction::UPDATE, "shared geometry should support a refit");
+    expect_front_face_sample(device, accel, 0.f);
+    expect_miss(trace_hit(device, accel, sample_ray_origin(3.f), sample_ray_direction()), "stale shared instance");
+    expect_hit(trace_hit(device, accel, sample_ray_origin(4.f), sample_ray_direction()),
+               1u, 0u, make_float2(.3f), "shared BLAS instance ID or transform");
+}
+
 void test_padded_indices_and_instance_growth(Device &device) {
     Stream stream = device.create_stream();
     array<float3, 5> vertices{make_float3(100.f), make_float3(-0.5f, -0.5f, 0.5f),
@@ -258,5 +276,6 @@ int main(int argc, char *argv[]) {
     test_fast_trace_update_command_falls_back_to_build(device);
     test_fast_update_transform_refit(device);
     test_padded_indices_and_instance_growth(device);
+    test_shared_mesh_instances(device);
     return 0;
 }

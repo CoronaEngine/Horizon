@@ -102,6 +102,7 @@ public:
             cleanup_callbacks_.clear();
             for (auto &item : callbacks) item.second();
         }
+        [[nodiscard]] virtual bool supports_ray_queries() const noexcept { return false; }
         [[nodiscard]] virtual bool supports_buffer_export() const noexcept { return false; }
         [[nodiscard]] virtual BufferExportMetadata buffer_export_metadata(handle_ty) const { return {}; }
         // Caller has completed all accesses in the previous owner before this
@@ -232,6 +233,7 @@ public:
         return impl_->get_aligned_memory_size(handle);
     }
 
+    [[nodiscard]] bool supports_ray_queries() const noexcept { return impl_->supports_ray_queries(); }
     [[nodiscard]] bool supports_buffer_export() const noexcept { return impl_->supports_buffer_export(); }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const {
         return impl_->buffer_export_metadata(handle);

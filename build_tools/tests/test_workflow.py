@@ -332,8 +332,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
         self.assertEqual(target_family_for_target("horizon-hotfix-run"), "vision-hotfix")
         self.assertEqual(target_family_for_targets(["test-core-parsetype"]), "ocarina-tests")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "ocarina-native"]), "examples")
         with self.assertRaises(ValueError):
-            target_family_for_targets(["HorizonExamples", "ocarina-native"])
+            target_family_for_targets(["HorizonExamples", "test-core-parsetype"])
 
     def test_posix_hotfix_targets_infer_the_core_build(self) -> None:
         targets = ["horizon-hotfix", "horizon-hotfix-build-cmake", "horizon-hotfix-process-posix",
@@ -363,7 +364,7 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertEqual(conan_options("engine"), ["&:with_engine=True", "&:with_tests=True"])
         self.assertEqual(target_family_slug("engine"), "engine")
-        self.assertEqual(conan_options("examples"), ["&:with_examples=True", "&:with_tests=True"])
+        self.assertEqual(conan_options("examples"), ["&:with_examples=True", "&:with_tests=True", "&:with_ocarina=True"])
         self.assertEqual(conan_options("ocarina"), ["&:with_ocarina=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),

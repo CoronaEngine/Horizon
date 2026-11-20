@@ -55,9 +55,13 @@ RHIContext &RHIContext::init(const fs::path &path, std::string_view cache_dir) {
 RHIContext *RHIContext::s_context = nullptr;
 
 RHIContext &RHIContext::instance() noexcept {
+    return s_context ? *s_context : instance(fs::current_path());
+}
+
+RHIContext &RHIContext::instance(const fs::path &runtime_path) {
     if (s_context == nullptr) {
         s_context = new RHIContext();
-        s_context->init(fs::current_path());
+        s_context->init(runtime_path);
     }
     return *s_context;
 }

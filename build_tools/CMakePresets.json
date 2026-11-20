@@ -138,6 +138,7 @@
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "Debug",
         "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_OCARINA": "ON",
         "HORIZON_BUILD_TESTS": "ON"
       }
     },
@@ -149,6 +150,7 @@
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
         "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_OCARINA": "ON",
         "HORIZON_BUILD_TESTS": "ON"
       }
     },
@@ -160,6 +162,7 @@
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "Release",
         "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_OCARINA": "ON",
         "HORIZON_BUILD_TESTS": "ON"
       }
     },
@@ -171,6 +174,7 @@
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
         "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_OCARINA": "ON",
         "HORIZON_BUILD_TESTS": "ON"
       }
     },

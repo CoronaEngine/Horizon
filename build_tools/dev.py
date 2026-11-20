@@ -34,7 +34,7 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
     "core": ("&:with_engine=False", "&:with_tests=True"),
     "engine": ("&:with_engine=True", "&:with_tests=True"),
     "tools": ("&:with_tools=True",),
-    "examples": ("&:with_examples=True", "&:with_tests=True"),
+    "examples": ("&:with_examples=True", "&:with_tests=True", "&:with_ocarina=True"),
     "ocarina": ("&:with_ocarina=True",),
     "ocarina-tests": (
         "&:with_ocarina=True",
@@ -76,8 +76,8 @@ def target_family_for_targets(targets: list[str]) -> str:
 
     families = {target_family_for_target(target) for target in targets}
     if "examples" in families:
-        # Examples build both the engine and the shader compiler.
-        families.difference_update({"engine", "tools"})
+        # The examples preset builds the engine, shader compiler, and Ocarina backend.
+        families.difference_update({"engine", "tools", "ocarina"})
     if families & {"examples", "engine"} and "core" in families:
         core_targets = (target for target in targets if target_family_for_target(target) == "core")
         if all(target == "horizon-tests" or target.startswith("horizon-test-") for target in core_targets):

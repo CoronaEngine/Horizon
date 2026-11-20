@@ -9,12 +9,17 @@ namespace ocarina {
 Accel::Impl::Impl(AccelUsageTag usage_tag) noexcept : usage_tag_(usage_tag) {}
 
 void Accel::Impl::add_instance(RHIMesh mesh, float4x4 transform) noexcept {
+    instances_.push_back({meshes_.size(), transform});
     meshes_.push_back(ocarina::move(mesh));
-    transforms_.push_back(transform);
+}
+
+void Accel::Impl::add_instance(size_t source_instance, float4x4 transform) {
+    const size_t mesh_index = instances_.at(source_instance).mesh_index;
+    instances_.push_back({mesh_index, transform});
 }
 
 void Accel::Impl::set_transform(size_t index, float4x4 transform) noexcept {
-    transforms_[index] = transform;
+    instances_[index].transform = transform;
 }
 
 void Accel::Impl::mark_build() noexcept {
@@ -28,8 +33,8 @@ void Accel::Impl::mark_update() noexcept {
 }
 
 void Accel::Impl::clear() noexcept {
+    instances_.clear();
     meshes_.clear();
-    transforms_.clear();
     last_build_action_ = BuildAction::NONE;
     build_count_ = 0;
     update_count_ = 0;
@@ -39,6 +44,13 @@ void Accel::add_instance(RHIMesh mesh, float4x4 transform) noexcept {
     triangle_num_ += mesh.triangle_num();
     vertex_num_ += mesh.vertex_num();
     impl()->add_instance(ocarina::move(mesh), transform);
+}
+
+void Accel::add_instance(size_t source_instance, float4x4 transform) {
+    const auto& mesh = impl()->instance_mesh(source_instance);
+    impl()->add_instance(source_instance, transform);
+    triangle_num_ += mesh.triangle_num();
+    vertex_num_ += mesh.vertex_num();
 }
 
 void Accel::set_transform(size_t index, float4x4 transform) noexcept {

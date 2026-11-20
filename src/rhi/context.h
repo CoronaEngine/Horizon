@@ -19,6 +19,8 @@ class OC_RHI_API RHIContext : public concepts::Noncopyable {
 
 public:
     [[nodiscard]] static RHIContext &instance() noexcept;
+    // Select the runtime directory when creating the context for the first time.
+    [[nodiscard]] static RHIContext &instance(const fs::path &runtime_path);
     static void destroy_instance();
 
 private:

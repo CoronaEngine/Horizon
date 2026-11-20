@@ -1,6 +1,7 @@
-#include "../scene.h"
-#include "common.h"
 #include "Horizon.h"
+#include "../scene.h"
+#include "window.h"
+#include "example_benchmark/benchmark.h"
 #include "horizon_profiling.h"
 #include "Codegen/ControlFlows.h"
 
@@ -8,51 +9,62 @@
 #include SLANG(DrawStress/Slang/drawstress_frag.slang)
 
 #include <GLFW/glfw3.h>
-#include <chrono>
+#include <algorithm>
 #include <utility>
 
 void run_example_drawstress_slang()
 {
     using namespace drawstress;
     constexpr auto mode = "drawstress_slang";
-    examples::Window window_owner(stress_width, stress_height, mode);
-    GLFWwindow* window = window_owner.get();
+    auto window = examples::open_window(stress_width, stress_height, mode);
 
-    StressState state;
-    attach_input(window, state, mode);
+    int dim = std::clamp(bench::env_int("HORIZON_DRAWSTRESS_DIM", 40), dim_min, dim_max);
+    attach_input(window.get(), dim, mode);
 
-    CubeGrid grid;
+    auto cube = make_cube();
+    auto commands = make_draw_packets();
+    const auto view_projection = make_view_projection();
 
     HardwareImage final_output_image(stress_width, stress_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
     final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
 
     HardwareImage depth_image(stress_width, stress_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
-    const auto shader_start = std::chrono::steady_clock::now();
+    const auto shader_start = bench::Clock::now();
     RasterizerPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> rasterizer;
-    const double shader_setup_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shader_start).count();
+    const double shader_setup_ms = bench::milliseconds_since(shader_start);
     rasterizer.outColor = final_output_image;
     rasterizer.setDepthImage(depth_image);
 
     HardwareExecutor render_executor;
-    HardwareDisplayer display(window_owner.native_handle(), PresentDevicePreference::RenderDevice);
+    HardwareDisplayer display(examples::native_handle(window.get()), PresentDevicePreference::RenderDevice);
 
-    examples::Benchmark benchmark(mode, stress_width, stress_height);
-    benchmark.set_shader_setup_ms(shader_setup_ms);
-    while (benchmark.running(window))
+    auto run = bench::start_run(mode, stress_width, stress_height, shader_setup_ms);
+    while (!glfwWindowShouldClose(window.get()))
     {
-        benchmark.begin_frame();
+        bench::begin_frame(run);
         glfwPollEvents();
 
-        benchmark.begin_scene();
-        const float time = benchmark.time();
+        const auto record_start = bench::Clock::now();
         auto batch = rasterizer.beginBatch(stress_width, stress_height);
+        const uint32_t draw_count = static_cast<uint32_t>(dim * dim * dim);
+        HORIZON_PROFILE_PLOT("draw calls", draw_count);
         {
             HORIZON_PROFILE_SCOPE_N("drawstress::submit");
-            grid.draw(batch, state, time);
-            benchmark.submit(render_executor, std::move(batch), display, final_output_image);
+            batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(glm::mat4),
+                [&](std::span<std::byte> destination) {
+                    write_matrices(destination, view_projection, dim, run.elapsed_seconds);
+                }, IndirectFirstInstance::AlwaysZero);
+
+            if (run.present_normally) {
+                render_executor << std::move(batch);
+                const bool presented = display.present(render_executor, final_output_image);
+                bench::observe_present(run.presents, window.get(), presented);
+            } else {
+                bench::submit_measured(run, record_start, render_executor, std::move(batch), display, final_output_image);
+            }
         }
-        benchmark.end_frame(window, state.draw_count(), final_output_image, render_executor);
+        bench::finish_frame(run, window.get(), draw_count, final_output_image, render_executor);
     }
 
     render_executor.waitForDeferredResources();
