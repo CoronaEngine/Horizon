@@ -23,7 +23,9 @@ DIAGNOSTICS = {
 def check(cmake, probe, reason, name, lines, acceptable, exit_code=1, signal=None):
     # Separate writes to stdout/stderr exercise the order observed by the wrapper.
     if os.name == "nt":
-        script = ["@echo off", *(f"1>&{fd} echo({msg}" for fd, msg in lines), f"exit /b {exit_code}"]
+        # cmd.exe cannot duplicate stdout onto itself (1>&1).
+        commands = [f"echo({msg}" if fd == 1 else f"1>&{fd} echo({msg}" for fd, msg in lines]
+        script = ["@echo off", *commands, f"exit /b {exit_code}"]
     else:
         termination = f"kill -{signal} $$" if signal else f"exit {exit_code}"
         script = ["#!/bin/sh", "ulimit -c 0", *(f"printf '%s\\n' {shlex.quote(msg)} >&{fd}" for fd, msg in lines), termination]
