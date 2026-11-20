@@ -109,6 +109,7 @@ private:
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
     bool supports_warp32_{false};
     bool has_int64_atomics_{false};
+    bool native_float32_fma_enabled_{false};
     bool has_external_memory_{false};
     // Opt-in, host-side pipeline diagnostics; disabled unless an output path is set.
     bool has_pipeline_statistics_{false};
@@ -227,6 +228,7 @@ public:
         return enabled_trace_features_.trace_capabilities();
     }
     [[nodiscard]] bool supports_int64_atomics() const noexcept override { return has_int64_atomics_; }
+    [[nodiscard]] bool supports_native_float32_fma() const noexcept override { return native_float32_fma_enabled_; }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const override;
     void set_buffer_external_ownership(handle_ty handle, bool external) override;
     [[nodiscard]] handle_ty create_buffer(size_t size, const string &desc,

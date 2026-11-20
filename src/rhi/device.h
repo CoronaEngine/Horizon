@@ -110,6 +110,7 @@ public:
             return {supports_raytracing(), false};
         }
         [[nodiscard]] virtual bool supports_int64_atomics() const noexcept { return false; }
+        [[nodiscard]] virtual bool supports_native_float32_fma() const noexcept { return false; }
         [[nodiscard]] virtual BufferExportMetadata buffer_export_metadata(handle_ty) const { return {}; }
         // Caller has completed all accesses in the previous owner before this
         // synchronous ownership transfer. Non-Vulkan backends need no barrier.
@@ -129,6 +130,9 @@ public:
         [[nodiscard]] virtual handle_ty create_shader(const Function &function, ShaderCompileOptions options) noexcept {
             OC_ERROR_IF(options.trace_mode != TraceMode::Auto,
                         "This device backend does not support explicit shader trace modes");
+            OC_ERROR_IF(options.float32_fma_mode != Float32FmaMode::Auto &&
+                            options.float32_fma_mode != Float32FmaMode::Software,
+                        "This device backend supports only the software FP32 FMA mode");
             return create_shader(function);
         }
         [[nodiscard]] virtual handle_ty create_shader(
@@ -253,6 +257,7 @@ public:
         return capabilities.ray_query || capabilities.ray_tracing_pipeline;
     }
     [[nodiscard]] bool supports_int64_atomics() const noexcept { return impl_->supports_int64_atomics(); }
+    [[nodiscard]] bool supports_native_float32_fma() const noexcept { return impl_->supports_native_float32_fma(); }
     [[nodiscard]] BufferExportMetadata buffer_export_metadata(handle_ty handle) const {
         return impl_->buffer_export_metadata(handle);
     }

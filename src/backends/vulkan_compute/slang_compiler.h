@@ -29,6 +29,9 @@ private:
     mutable uint32_t rounding_independence_{};
 
     slang::ISession *session_for(ShaderExecutionMode mode) const noexcept;
+    // An empty program requests a software retry for Auto with incompatible rounding modes.
+    [[nodiscard]] VkShaderProgram compile_program_variant(const Function &function, uint3 workgroup_size,
+        const ShaderCompilationContext &context, bool use_native_float32_fma) const noexcept;
 
 public:
     explicit SlangShaderCompiler(VulkanComputeDevice *device) noexcept;

@@ -174,6 +174,9 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         feature.pNext = f12.pNext;
         f12.pNext = &feature;
     };
+    const bool shader_fma_extension = supports(VK_KHR_SHADER_FMA_EXTENSION_NAME);
+    VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR};
+    if (shader_fma_extension) prepend_feature(shader_fma);
     const bool portability_device = supports(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     VkPhysicalDevicePortabilitySubsetFeaturesKHR portability{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR};
     if (portability_device) prepend_feature(portability);
@@ -189,6 +192,13 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         feats2.pNext = &pipeline_features;
     }
     vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    if (shader_fma_extension && shader_fma.shaderFmaFloat32) {
+        VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
+        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        properties.pNext = &float_controls;
+        vkGetPhysicalDeviceProperties2(phys_device_, &properties);
+        native_float32_fma_enabled_ = float_controls.shaderRoundingModeRTEFloat32 != VK_FALSE;
+    }
     has_int64_atomics_ = f12.shaderBufferInt64Atomics != 0u;
     if (has_pipeline_statistics_ && !pipeline_features.pipelineExecutableInfo) {
         has_pipeline_statistics_ = false;
@@ -208,9 +218,14 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     });
     init_trace_properties();
 
-    // Rebuild the chain with only the optional tracing features used by this backend.
+    // Rebuild the chain with the optional features this backend uses.
     vector<const char *> exts;
     f12.pNext = nullptr;
+    if (native_float32_fma_enabled_) {
+        exts.push_back(VK_KHR_SHADER_FMA_EXTENSION_NAME);
+        shader_fma = {.sType = shader_fma.sType, .shaderFmaFloat32 = VK_TRUE};
+        prepend_feature(shader_fma);
+    }
     if (supported_trace_features_.acceleration_structure) {
         exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
         exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
@@ -892,6 +907,18 @@ handle_ty VulkanComputeDevice::create_shader(const Function &function, ShaderCom
 
 handle_ty VulkanComputeDevice::create_shader(const Function &function, ShaderCompileOptions options,
                                             const string &description) noexcept {
+    switch (options.float32_fma_mode) {
+        case Float32FmaMode::Auto:
+        case Float32FmaMode::Software: break;
+        case Float32FmaMode::Native:
+            if (!supports_native_float32_fma())
+                OC_ERROR_FORMAT("Native FP32 FMA unavailable for Vulkan shader '{}'. "
+                                "It requires VK_KHR_shader_fma, shaderFmaFloat32, and FP32 round-to-nearest-even",
+                                description);
+            break;
+        default:
+            OC_ERROR_FORMAT("Invalid FP32 FMA mode for Vulkan shader '{}'", description);
+    }
     const auto requirements = analyze_function_requirements(function);
     const auto selected = select_trace_mode(options.trace_mode, trace_capabilities(), requirements.uses_trace,
                                             native_trace_compatible(requirements));

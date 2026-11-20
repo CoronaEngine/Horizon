@@ -8,8 +8,18 @@ enum class TraceMode {
     RayTracingPipeline,
 };
 
+enum class Float32FmaMode {
+    Software,
+    // Uses the device's fused instruction with round-to-nearest-even.
+    // The device may flush subnormal inputs and results to zero.
+    Native,
+    // Prefers Native when the device and shader rounding modes allow it.
+    Auto,
+};
+
 struct ShaderCompileOptions {
     TraceMode trace_mode = TraceMode::Auto;
+    Float32FmaMode float32_fma_mode = Float32FmaMode::Auto;
 };
 
 enum class ShaderExecutionMode {

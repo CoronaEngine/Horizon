@@ -217,6 +217,15 @@ float oc_half_minor(float a, float b, float c, float d) {
     return oc_half_fma(a, b, -oc_half_mul(c, d));
 }
 
+#if defined(OC_NATIVE_FLOAT32_FMA)
+float oc_fma(float a, float b, float c) {
+    return spirv_asm {
+        OpExtension "SPV_KHR_fma";
+        OpCapability FMAKHR;
+        result : $$float = OpFmaKHR $a $b $c;
+    };
+}
+#else
 // Binary32 round-to-nearest-even FMA. GLSL.std.450 Fma is not guaranteed to be
 // fused by Vulkan, even with NoContraction. Integer significands retain the
 // exact 48-bit product and enough low bits to round the sum only once.
@@ -296,6 +305,8 @@ uint oc_fma32_bits(uint a, uint b, uint c) {
     return sign | (uint(result_exponent + 127) << 23u) | (uint(significand) & 0x7fffffu);
 }
 float oc_fma(float a, float b, float c) { return asfloat(oc_fma32_bits(asuint(a), asuint(b), asuint(c))); }
+#endif
+
 // A binary16 product is exact in float32. The existing Half helper retains the
 // sum's residual and corrects Half midpoints before its single Half rounding.
 // Kernels using this path declare RTE32 (and other widths where required by

@@ -1,12 +1,15 @@
 #include "tests/backend_test.h"
+#include "tests/codegen/slang_diagnostic_source.h"
 #include "dsl/dsl.h"
 #include "rhi/context.h"
 #include <cmath>
 #include <bit>
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
+#include <string_view>
 
 using namespace ocarina;
 
@@ -389,7 +392,8 @@ void test_fma32_rounding(Device &device) {
         auto result = fma(matrix_a, matrix_b, matrix_c);
         out.write(i * rows + 2u, as<uint4>(make_float4(result[0u], result[1u])));
     };
-    auto shader = device.compile(kernel, "storage-parity-fma32-rne");
+    auto shader = device.compile(kernel, "storage-parity-fma32-rne", CS,
+                                 {.float32_fma_mode = Float32FmaMode::Software});
     vector<uint4> actual(inputs.size() * rows);
     auto stream = device.create_stream();
     stream << source.upload(inputs.data()) << shader(source, destination).dispatch(uint(inputs.size()))
@@ -414,6 +418,98 @@ void test_fma32_rounding(Device &device) {
     }
     std::cout << "FMA32_RNE inputs=" << inputs.size() << " comparisons=" << inputs.size() * 9u << " mismatches=" << failures << std::endl;
     require(failures == 0u, "binary32 fma must round the exact product and sum once");
+}
+
+void check_fma32_spirv(const fs::path &path, bool expect_native) {
+    constexpr uint header_words = 5u, op_execution_mode = 16u, op_fma_khr = 4427u;
+    constexpr uint rounding_mode_rte = 4462u;
+    const auto bytes = fs::file_size(path);
+    require(bytes >= header_words * sizeof(uint) && bytes % sizeof(uint) == 0u,
+            "invalid SPIR-V size for FP32 FMA mode test");
+    vector<uint> words(bytes / sizeof(uint));
+    std::ifstream input(path, std::ios::binary);
+    require(bool(input.read(reinterpret_cast<char *>(words.data()), std::streamsize(bytes))) &&
+            words.front() == 0x07230203u, "unable to read FP32 FMA SPIR-V");
+    bool native = false, fp32_rte = false;
+    for (size_t offset = header_words; offset < words.size();) {
+        const uint count = words[offset] >> 16u, opcode = words[offset] & 0xffffu;
+        require(count && count <= words.size() - offset, "malformed FP32 FMA SPIR-V instruction");
+        native |= opcode == op_fma_khr;
+        fp32_rte |= opcode == op_execution_mode && count == 4u &&
+                    words[offset + 2u] == rounding_mode_rte && words[offset + 3u] == 32u;
+        offset += count;
+    }
+    require(native == expect_native, "FP32 FMA mode selected the wrong instruction");
+    require(!expect_native || fp32_rte, "native FP32 FMA SPIR-V must declare round-to-nearest-even");
+}
+
+void test_fma32_modes(Device &device, bool require_native) {
+    // Cancellation and both midpoint directions with normal operands and results.
+    constexpr size_t case_count = 4u;
+    constexpr float half_ulp = 0x1p-24f;
+    const array<float4, case_count> inputs{make_float4(4097.f, 4097.f, -16785408.f, 0.f),
+        make_float4(1.000244140625f, .999755859375f, -1.f, 0.f),
+        make_float4(1.f, 1.f, half_ulp, 0.f),
+        make_float4(1.f, std::bit_cast<float>(0x3f800001u), half_ulp, 0.f)};
+    Kernel kernel = [](BufferVar<float4> in, BufferVar<uint> out) {
+        Uint i = dispatch_id();
+        Float4 v = in.read(i);
+        out.write(i, as<uint>(fma(v.x, v.y, v.z)));
+    };
+    auto source = device.create_buffer<float4>(inputs.size());
+    auto destination = device.create_buffer<uint>(inputs.size());
+    auto stream = device.create_stream();
+    stream << source.upload(inputs.data()) << synchronize() << commit();
+    auto verify = [&](const auto &shader) {
+        array<uint, case_count> actual{};
+        stream << shader(source, destination).dispatch(uint(inputs.size()))
+               << destination.download(actual.data()) << synchronize() << commit();
+        for (size_t i = 0u; i < inputs.size(); ++i) {
+            const auto v = inputs[i];
+            require(actual[i] == std::bit_cast<uint>(std::fma(v.x, v.y, v.z)),
+                    "FP32 FMA mode differs from std::fma for a normal result");
+        }
+    };
+    const auto cache = RHIContext::instance().cache_directory() / "slang_cache";
+    auto new_module = [&](const fs::path &previous, const fs::path &also_previous = {}) {
+        fs::path path;
+        for (const auto &entry : fs::directory_iterator(cache)) {
+            if (entry.path().extension() != ".spv" || entry.path() == previous || entry.path() == also_previous) continue;
+            require(path.empty(), "expected exactly one new FP32 FMA SPIR-V cache entry");
+            path = entry.path();
+        }
+        require(!path.empty(), "FP32 FMA mode did not produce a distinct SPIR-V cache entry");
+        return path;
+    };
+
+    const bool has_native = device.supports_native_float32_fma();
+    const auto default_shader = device.compile(kernel, "storage-parity-fma32-default");
+    require(default_shader.requested_options().float32_fma_mode == Float32FmaMode::Auto,
+            "default FP32 FMA mode must select automatically");
+    const auto default_module = new_module({});
+    check_fma32_spirv(default_module, has_native);
+    verify(default_shader);
+
+    // Use the same description for both explicit modes to check cache separation.
+    const auto software = device.compile(kernel, "storage-parity-fma32-modes", CS,
+                                         {.float32_fma_mode = Float32FmaMode::Software});
+    require(software.requested_options().float32_fma_mode == Float32FmaMode::Software,
+            "compiled shader did not retain the requested software FP32 FMA mode");
+    const auto software_module = new_module(default_module);
+    check_fma32_spirv(software_module, false);
+    verify(software);
+
+    if (!has_native && !require_native) {
+        std::cout << "FMA32_MODES software=verified native=unavailable default=software" << std::endl;
+        return;
+    }
+    const auto native = device.compile(kernel, "storage-parity-fma32-modes", CS,
+                                       {.float32_fma_mode = Float32FmaMode::Native});
+    require(native.requested_options().float32_fma_mode == Float32FmaMode::Native,
+            "compiled shader did not retain the requested native FP32 FMA mode");
+    check_fma32_spirv(new_module(default_module, software_module), true);
+    verify(native);
+    std::cout << "FMA32_MODES software=verified native=verified default=native" << std::endl;
 }
 
 double fma_half_value(uint bits) {
@@ -553,8 +649,13 @@ void test_global_block_barrier(Device &device) {
 }
 }
 
-int main() {
+int main(int argc, char **argv) {
+    const bool require_native = argc == 2 && std::string_view(argv[1]) == "--require-native";
+    require(argc == 1 || require_native, "usage: test-runtime-storage-parity [--require-native]");
+    test::SlangDiagnosticSource cache{"storage-parity"};
     auto device = create_test_device();
+    test_fma32_modes(device, require_native);
+    if (require_native) return EXIT_SUCCESS;
     test_nested_writes(device);
     test_vector_record_copies(device);
     test_nested_integer_vector_copies(device);
