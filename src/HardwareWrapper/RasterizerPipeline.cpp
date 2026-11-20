@@ -1,7 +1,7 @@
 #include <cstring>
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include <stdexcept>
 
 RasterizerPipelineBase::RasterizerPipelineBase()

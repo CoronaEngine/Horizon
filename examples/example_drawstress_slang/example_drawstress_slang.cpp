@@ -21,7 +21,7 @@
 #include "legacy_common.h"
 #include "example_drawstress_edsl/example_drawstress_edsl.h"
 #include "example_drawstress_slang.h"
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "horizon_profiling.h"  // 内部头（src/），埋点需在 CMake 里 opt-in
 
 #include SLANG(example_drawstress_slang/drawstress_vert.slang)
@@ -146,7 +146,7 @@ void run_drawstress_scene()
 
     legacy_example::Benchmark benchmark(mode, stress_width, stress_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
-    while (!glfwWindowShouldClose(window))
+    while (benchmark.running(window))
     {
         benchmark.begin_frame();
         glfwPollEvents();

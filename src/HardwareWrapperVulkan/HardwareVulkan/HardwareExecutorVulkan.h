@@ -9,7 +9,7 @@
 #include <span>
 
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "Horizon_old.h"
+#include "Horizon.h"
 
 struct HardwareExecutorVulkan;
 struct CommandRecordVulkan;

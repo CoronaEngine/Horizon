@@ -1,6 +1,6 @@
 #include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
 
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include <stdexcept>
 

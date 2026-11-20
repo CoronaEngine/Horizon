@@ -323,6 +323,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("Helicon"), "engine")
         self.assertEqual(target_family_for_target("ShaderCompileScripts"), "tools")
         self.assertEqual(target_family_for_target("HorizonExamples"), "examples")
+        self.assertEqual(target_family_for_target("horizon-test-legacy"), "engine")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "horizon-tests"]), "examples")
+        self.assertEqual(target_family_for_targets(["HorizonExamples", "ShaderCompileScripts"]), "examples")
+        self.assertEqual(target_family_for_targets(["horizon-tests", "horizon-test-legacy"]), "engine")
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
         self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
@@ -357,9 +361,9 @@ class WorkflowTests(unittest.TestCase):
             conan_options("core"),
             ["&:with_engine=False", "&:with_tests=True"],
         )
-        self.assertEqual(conan_options("engine"), ["&:with_engine=True"])
+        self.assertEqual(conan_options("engine"), ["&:with_engine=True", "&:with_tests=True"])
         self.assertEqual(target_family_slug("engine"), "engine")
-        self.assertEqual(conan_options("examples"), ["&:with_examples=True"])
+        self.assertEqual(conan_options("examples"), ["&:with_examples=True", "&:with_tests=True"])
         self.assertEqual(conan_options("ocarina"), ["&:with_ocarina=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),

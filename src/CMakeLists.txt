@@ -18,8 +18,7 @@ if(HORIZON_BUILD_ENGINE)
     endif()
 
     set(PUBLIC_HEADERS
-        "${PROJECT_SOURCE_DIR}/include/Horizon_old.h"
-        "${PROJECT_SOURCE_DIR}/include/HardwareCommands_old.h"
+        "${PROJECT_SOURCE_DIR}/include/Horizon.h"
         "${PROJECT_SOURCE_DIR}/include/corona/pal/cfw_platform.h"
     )
 

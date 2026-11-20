@@ -3,7 +3,7 @@
 #include <memory>
 #include <ktm/ktm.h>
 
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"

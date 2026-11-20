@@ -66,15 +66,6 @@ struct Benchmark::GpuTimer {
     }
 };
 
-int env_int(const char* name, int fallback) {
-    const char* value = std::getenv(name);
-    if (!value || !*value) return fallback;
-    char* end{};
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value || *end || parsed < 0 || parsed > 10000000)
-        throw std::invalid_argument(std::string("Invalid ") + name);
-    return static_cast<int>(parsed);
-}
 Window::Window(uint32_t width, uint32_t height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -88,10 +79,12 @@ Window::Window(uint32_t width, uint32_t height, const char* title) {
 Window::~Window() { glfwDestroyWindow(window_); glfwTerminate(); }
 
 Benchmark::Benchmark(const char* mode, uint32_t width, uint32_t height)
-    : mode_(mode), width_(width), height_(height),
+    : mode_(mode), present_benchmark_(mode), width_(width), height_(height),
       warmup_(env_int("HORIZON_BENCH_WARMUP", 60)), limit_(env_int("HORIZON_BENCH_FRAMES", 0)),
       start_(Clock::now()), previous_(start_) {
     offscreen_ = env_int("HORIZON_BENCH_OFFSCREEN", 0) != 0;
+    if (present_benchmark_.enabled() && (limit_ || offscreen_))
+        throw std::invalid_argument("HORIZON_PRESENT_FRAMES requires normal windowed presentation");
     if (limit_ > 0) gpu_timer_ = std::make_unique<GpuTimer>();
     if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
         fixed_dt_ = std::stof(value);
@@ -113,7 +106,7 @@ void Benchmark::submit(HardwareExecutor& executor, RasterBatch&& batch, Hardware
     executor << std::move(batch);
     if (gpu_timer_) *backend << &gpu_timer_->end;
     if (gpu_timer_ || offscreen_) executor.commit();
-    else display.present(executor, image);
+    else present_benchmark_.presented(display.present(executor, image));
     submit_ms_ = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
     if (frame_ == 0) first_submit_ms_ = submit_ms_;
     if (gpu_timer_) {

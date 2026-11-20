@@ -32,9 +32,9 @@ DEFAULT_TARGET = "HorizonExamples"
 
 TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
     "core": ("&:with_engine=False", "&:with_tests=True"),
-    "engine": ("&:with_engine=True",),
+    "engine": ("&:with_engine=True", "&:with_tests=True"),
     "tools": ("&:with_tools=True",),
-    "examples": ("&:with_examples=True",),
+    "examples": ("&:with_examples=True", "&:with_tests=True"),
     "ocarina": ("&:with_ocarina=True",),
     "ocarina-tests": (
         "&:with_ocarina=True",
@@ -48,7 +48,7 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
 
 
 def target_family_for_target(target: str) -> str:
-    if target in {"Horizon", "Helicon"}:
+    if target in {"Horizon", "Helicon", "horizon-test-legacy"}:
         return "engine"
     if target == "ShaderCompileScripts":
         return "tools"
@@ -75,6 +75,13 @@ def target_family_for_targets(targets: list[str]) -> str:
         return DEFAULT_TARGET_FAMILY
 
     families = {target_family_for_target(target) for target in targets}
+    if "examples" in families:
+        # Examples build both the engine and the shader compiler.
+        families.difference_update({"engine", "tools"})
+    if families & {"examples", "engine"} and "core" in families:
+        core_targets = (target for target in targets if target_family_for_target(target) == "core")
+        if all(target == "horizon-tests" or target.startswith("horizon-test-") for target in core_targets):
+            families.remove("core")
     if len(families) != 1:
         choices = ", ".join(sorted(families))
         raise ValueError(

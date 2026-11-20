@@ -157,17 +157,34 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 
 ## Horizon 渲染接口的构建与验证
 
-消费端在 CMake 中链接 `Horizon`，在 C++ 中包含 `Horizon_old.h`。引擎与示例均使用
-`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。拷贝命令可单独包含 `HardwareCommands_old.h`。
+消费端在 CMake 中链接 `Horizon`，在 C++ 中包含 `Horizon.h` 即可使用渲染接口和拷贝命令。引擎与示例均使用
+`src/HardwareWrapper` 和 `src/HardwareWrapperVulkan`。
 
 ```powershell
-cmake --preset engine-debug -DHORIZON_BUILD_TESTS=ON
-cmake --build --preset engine-debug --target horizon-test-legacy
-ctest --test-dir build/conan/engine/debug -C Debug -L legacy --output-on-failure
+cmake --preset examples-relwithdebinfo
+cmake --build --preset examples-relwithdebinfo --target horizon-tests
+ctest --preset examples-relwithdebinfo
 ```
 
-运行 `HorizonExamples --list` 查看全部示例模式。使用 `HorizonExamples disney_slang` 或
-`HorizonExamples disney_edsl` 启动 Disney PBR 材质示例的手写 Slang 或 EDSL 版本。
+`engine` 和 `examples` 预设均启用 Horizon 测试。`examples` 的 `horizon-tests` 目标也构建
+`HorizonExamples`，CTest 会在有 Vulkan GPU 和桌面的机器上逐个运行七个窗口示例。
+只运行窗口测试可使用 `ctest --preset examples-relwithdebinfo -L examples`。
+
+运行 `HorizonExamples --list` 查看全部模式。窗口性能复测使用正常呈现路径，首次成功呈现后
+跳过预热帧间隔，再统计相邻成功呈现之间的平均耗时、P95 和 FPS。以下 PowerShell 命令
+使用 Release 构建，逐个运行全部模式。每个进程会在输出 `PRESENT_BENCHMARK` 后退出。
+
+```powershell
+cmake --preset examples-release
+cmake --build --preset examples-release --target HorizonExamples
+$examples = Resolve-Path build/conan/examples/release/examples/Release/HorizonExamples.exe
+foreach ($mode in (& $examples --list)) {
+    $dt = if ($mode -like 'disney_*') { '0.001' } else { '0.016666667' }
+    cmake -E env HORIZON_PRESENT_FRAMES=512 HORIZON_BENCH_WARMUP=64 `
+        HORIZON_DRAWSTRESS_DIM=40 "HORIZON_FIXED_DT=$dt" $examples $mode
+    if ($LASTEXITCODE -ne 0) { throw "$mode exited with $LASTEXITCODE" }
+}
+```
 
 源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
 
@@ -176,7 +193,7 @@ ctest --test-dir build/conan/engine/debug -C Debug -L legacy --output-on-failure
 
 | 层次 | 发现的问题 | 修复方式 |
 | --- | --- | --- |
-| 公共接口 | 旧文件名、缺少有效头文件保护和标准头文件 | 恢复 `_old.h` 声明，所有旧实现显式包含它们 |
+| 公共接口 | 旧文件名、缺少有效头文件保护和标准头文件 | 将渲染接口和拷贝命令合并到 `Horizon.h`，由实现显式包含 |
 | 资源池与日志 | 引用已移除的 Corona Kernel 路径 | 使用已有 `horizon::core::Storage` 和 Core/Quill 日志 |
 | 宿主内存 | 引用旧的对齐分配器 | 使用 C++ 对齐 `operator new/delete`，保存分配对齐值，先销毁导入缓冲区再释放内存 |
 | 着色器 | `getShaderCode` 已改为可变操作，SPIRV-Cross 反射已移除 | 适配当前 Helicon API，使用 Slang 产生的二进制和反射 |

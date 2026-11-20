@@ -53,7 +53,8 @@
       "binaryDir": "${sourceDir}/build/conan/engine/debug",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "Debug",
-        "HORIZON_DEV_TARGET_FAMILY": "engine"
+        "HORIZON_DEV_TARGET_FAMILY": "engine",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -63,7 +64,8 @@
       "binaryDir": "${sourceDir}/build/conan/engine/relwithdebinfo",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
-        "HORIZON_DEV_TARGET_FAMILY": "engine"
+        "HORIZON_DEV_TARGET_FAMILY": "engine",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -73,7 +75,8 @@
       "binaryDir": "${sourceDir}/build/conan/engine/release",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "Release",
-        "HORIZON_DEV_TARGET_FAMILY": "engine"
+        "HORIZON_DEV_TARGET_FAMILY": "engine",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -83,7 +86,8 @@
       "binaryDir": "${sourceDir}/build/conan/engine/minsizerel",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
-        "HORIZON_DEV_TARGET_FAMILY": "engine"
+        "HORIZON_DEV_TARGET_FAMILY": "engine",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -133,7 +137,8 @@
       "binaryDir": "${sourceDir}/build/conan/examples/debug",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "Debug",
-        "HORIZON_DEV_TARGET_FAMILY": "examples"
+        "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -143,7 +148,8 @@
       "binaryDir": "${sourceDir}/build/conan/examples/relwithdebinfo",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "RelWithDebInfo",
-        "HORIZON_DEV_TARGET_FAMILY": "examples"
+        "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -153,7 +159,8 @@
       "binaryDir": "${sourceDir}/build/conan/examples/release",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "Release",
-        "HORIZON_DEV_TARGET_FAMILY": "examples"
+        "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -163,7 +170,8 @@
       "binaryDir": "${sourceDir}/build/conan/examples/minsizerel",
       "cacheVariables": {
         "HORIZON_DEV_CONFIGURATION": "MinSizeRel",
-        "HORIZON_DEV_TARGET_FAMILY": "examples"
+        "HORIZON_DEV_TARGET_FAMILY": "examples",
+        "HORIZON_BUILD_TESTS": "ON"
       }
     },
     {
@@ -426,6 +434,66 @@
     {
       "name": "vision-hotfix-minsizerel",
       "configurePreset": "vision-hotfix-minsizerel",
+      "configuration": "MinSizeRel"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "horizon-tests",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "engine-debug",
+      "inherits": "horizon-tests",
+      "configurePreset": "engine-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "engine-relwithdebinfo",
+      "inherits": "horizon-tests",
+      "configurePreset": "engine-relwithdebinfo",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "engine-release",
+      "inherits": "horizon-tests",
+      "configurePreset": "engine-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "engine-minsizerel",
+      "inherits": "horizon-tests",
+      "configurePreset": "engine-minsizerel",
+      "configuration": "MinSizeRel"
+    },
+    {
+      "name": "examples-debug",
+      "inherits": "horizon-tests",
+      "configurePreset": "examples-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "examples-relwithdebinfo",
+      "inherits": "horizon-tests",
+      "configurePreset": "examples-relwithdebinfo",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "examples-release",
+      "inherits": "horizon-tests",
+      "configurePreset": "examples-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "examples-minsizerel",
+      "inherits": "horizon-tests",
+      "configurePreset": "examples-minsizerel",
       "configuration": "MinSizeRel"
     }
   ]

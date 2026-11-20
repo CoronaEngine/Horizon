@@ -1,5 +1,4 @@
-#include "Horizon_old.h"
-#include "HardwareCommands_old.h"
+#include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareContext.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"

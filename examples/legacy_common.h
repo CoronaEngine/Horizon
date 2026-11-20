@@ -1,6 +1,6 @@
 #pragma once
-#include "Horizon_old.h"
-#include "HardwareCommands_old.h"
+#include "Horizon.h"
+#include "present_benchmark.h"
 #include <GLFW/glfw3.h>
 #include <array>
 #include <chrono>
@@ -17,7 +17,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace legacy_example {
-int env_int(const char* name, int fallback);
 class Window {
 public:
     Window(uint32_t width, uint32_t height, const char* title);
@@ -35,6 +34,7 @@ class Benchmark {
 public:
     Benchmark(const char* mode, uint32_t width, uint32_t height);
     ~Benchmark();
+    bool running(GLFWwindow* window) const { return present_benchmark_.running(window); }
     void begin_frame();
     void begin_scene();
     void submit(HardwareExecutor&, RasterBatch&&, HardwareDisplayer&, const HardwareImage&);
@@ -45,6 +45,7 @@ public:
 private:
     using Clock = std::chrono::steady_clock;
     std::string mode_;
+    PresentBenchmark present_benchmark_;
     uint32_t width_, height_;
     int warmup_, limit_;
     uint64_t frame_{};

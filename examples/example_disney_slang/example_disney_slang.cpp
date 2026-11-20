@@ -14,7 +14,7 @@
 #include "legacy_common.h"
 #include "example_disney_edsl/example_disney_edsl.h"
 #include "example_disney_slang.h"
-#include "Horizon_old.h"
+#include "Horizon.h"
 
 #include SLANG(example_disney_slang/disney_vert.slang)
 #include SLANG(example_disney_slang/disney_frag.slang)
@@ -448,7 +448,7 @@ void run_disney_scene()
 
     legacy_example::Benchmark benchmark(mode, disney_width, disney_height);
     benchmark.set_shader_setup_ms(shader_setup_ms);
-    while (!glfwWindowShouldClose(window))
+    while (benchmark.running(window))
     {
         benchmark.begin_frame();
         glfwPollEvents();

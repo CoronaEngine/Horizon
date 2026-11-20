@@ -80,7 +80,8 @@ void run_example_baseline_slang()
     double fps_accum_seconds = 0.0;
     int fps_frame_count = 0;
 
-    while (!glfwWindowShouldClose(window))
+    legacy_example::PresentBenchmark benchmark("baseline_slang");
+    while (benchmark.running(window))
     {
         glfwPollEvents();
 
@@ -111,7 +112,7 @@ void run_example_baseline_slang()
         rasterizer.draw({vertex_buffer, index_buffer});
 
         render_executor << rasterizer;
-        display.present(render_executor, final_output_image);
+        benchmark.presented(display.present(render_executor, final_output_image));
     }
     render_executor.waitForDeferredResources();
 }

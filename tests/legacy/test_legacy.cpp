@@ -1,4 +1,4 @@
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
 #include "Codegen/TypeAlias.h"

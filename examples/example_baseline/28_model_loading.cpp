@@ -1,4 +1,5 @@
 #include "example_baseline.h"
+#include "present_benchmark.h"
 
 #include <volk.h>
 #define GLFW_INCLUDE_NONE
@@ -262,9 +263,10 @@ private:
     }
 
     void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
+        legacy_example::PresentBenchmark benchmark("baseline");
+        while (benchmark.running(window)) {
             glfwPollEvents();
-            drawFrame();
+            benchmark.presented(drawFrame());
         }
 
         vkDeviceWaitIdle(device);
@@ -1353,7 +1355,7 @@ private:
         memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
-    void drawFrame() {
+    bool drawFrame() {
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
         uint32_t imageIndex;
@@ -1361,7 +1363,7 @@ private:
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             recreateSwapChain();
-            return;
+            return false;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image!");
         }
@@ -1415,6 +1417,7 @@ private:
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        return result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR;
     }
 
     VkShaderModule createShaderModule(const std::vector<char>& code) {

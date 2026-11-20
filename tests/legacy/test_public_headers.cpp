@@ -1,9 +1,13 @@
-// Deliberately include the command header first and twice, without backend headers.
-#include "HardwareCommands_old.h"
-#include "Horizon_old.h"
-#include "HardwareCommands_old.h"
+// Include the public header twice to check its include guard.
+#include "Horizon.h"
+#include "Horizon.h"
 
 #include <type_traits>
+
+static_assert(std::is_constructible_v<BufferCopyCommand, const HardwareBuffer&, const HardwareBuffer&>);
+static_assert(std::is_constructible_v<BufferToImageCommand, const HardwareBuffer&, const HardwareImage&>);
+static_assert(std::is_constructible_v<ImageCopyCommand, const HardwareImage&, const HardwareImage&>);
+static_assert(std::is_constructible_v<ImageToBufferCommand, const HardwareImage&, const HardwareBuffer&>);
 
 static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uintptr_t>);
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);

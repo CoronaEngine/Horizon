@@ -16,7 +16,7 @@
 #include <Codegen/ParseHelper.h>
 #include <Codegen/MathProxy.h>
 
-// Forward declarations for Level 2 resource binding (defined in Horizon_old.h)
+// Forward declarations for Level 2 resource binding (defined in Horizon.h)
 struct HardwareImage;
 struct HardwareBuffer;
 struct HardwareImageCreateInfo;
@@ -883,7 +883,7 @@ namespace EmbeddedShader
 		}
 
 		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in Horizon_old.h (after HardwareImage is complete).
+		// Definition is in Horizon.h (after HardwareImage is complete).
 		void createResource(const ::HardwareImageCreateInfo& createInfo);
 
 		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
@@ -1041,7 +1041,7 @@ namespace EmbeddedShader
 		}
 
 		// Owning constructor: creates proxy + GPU resource in one step.
-		// Definition is in Horizon_old.h (after HardwareImage is complete).
+		// Definition is in Horizon.h (after HardwareImage is complete).
 		void createResource(const ::HardwareImageCreateInfo& createInfo);
 
 		// Bind existing HardwareImage at construction: Texture2D<fvec4> img = existingImage;
@@ -1285,7 +1285,7 @@ namespace EmbeddedShader
 	// Pipeline-bound field proxy for direct member access syntax:
 	//   rasterizer.GlobalUniformParam.globalTime = currentTime;
 	// PipelineType is RasterizerPipeline or ComputePipeline.
-	// operator= implementation is supplied by Horizon_old.h.
+	// operator= implementation is supplied by Horizon.h.
 	template<typename PipelineType>
 	struct BoundField
 	{

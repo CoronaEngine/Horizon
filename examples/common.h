@@ -24,7 +24,7 @@
 #define TINYOBJLOADER_DISABLE_FAST_FLOAT
 #include <tiny_obj_loader.h>
 
-#include "Horizon_old.h"
+#include "Horizon.h"
 
 struct Vertex
 {

@@ -2,6 +2,7 @@ add_executable(HorizonExamples
     main.cpp
     common.cpp
     legacy_common.cpp
+    present_benchmark.cpp
     example_baseline/28_model_loading.cpp
     example_baseline_edsl/example_baseline_edsl.cpp
     example_baseline_slang/example_baseline_slang.cpp
@@ -42,3 +43,19 @@ helicon_compile_shaders(HorizonExamples DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/raster_batch.slang"
     "${CMAKE_CURRENT_SOURCE_DIR}/example_baseline_slang/baseline_draw.slang"
     "${CMAKE_CURRENT_SOURCE_DIR}/example_disney_slang/disney_shared.slang")
+
+if(HORIZON_BUILD_TESTS)
+    add_dependencies(horizon-tests HorizonExamples)
+    add_test(NAME horizon.examples.list COMMAND HorizonExamples --list)
+    foreach(mode IN ITEMS baseline baseline_edsl baseline_slang disney_edsl disney_slang drawstress_edsl drawstress_slang)
+        add_test(NAME horizon.examples.${mode} COMMAND HorizonExamples ${mode})
+        set_tests_properties(horizon.examples.${mode} PROPERTIES
+            LABELS "examples;gpu"
+            RESOURCE_LOCK horizon_example_window
+            TIMEOUT 90)
+        set_property(TEST horizon.examples.${mode} PROPERTY ENVIRONMENT
+            "HORIZON_PRESENT_FRAMES=8" "HORIZON_BENCH_WARMUP=2"
+            "HORIZON_BENCH_FRAMES=0" "HORIZON_BENCH_OFFSCREEN=0"
+            "HORIZON_BENCH_HIDDEN=0" "HORIZON_CAPTURE_PATH=")
+    endforeach()
+endif()

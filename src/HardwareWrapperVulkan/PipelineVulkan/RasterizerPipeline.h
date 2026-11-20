@@ -5,7 +5,7 @@
 #include <mutex>
 #include <vector>
 
-#include "Horizon_old.h"
+#include "Horizon.h"
 #include "Compiler/ShaderCodeCompiler.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
