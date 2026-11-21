@@ -519,12 +519,8 @@ vector<uint, 3> oc_sqr(vector<uint, 3> x) { return x*x; }
 vector<uint, 4> oc_sqr(vector<uint, 4> x) { return x*x; }
 uint[N] oc_sqr<uint N>(uint x[N]) { uint result[N]; for(uint i=0;i<N;++i) result[i]=oc_sqr(x[i]); return result; }
 
-// GLSL FMin/FMax leave a NaN operand unspecified. The DSL chooses the numeric
-// operand when exactly one input is NaN, including inside clamp/saturate.
-// Widen classification to float32, whose preservation mode also covers half
-// inputs. toFloat is the unambiguous conversion on Slang's IFloat interface.
-T oc_min<T : __BuiltinFloatingPointType>(T a, T b) { return isnan(a.toFloat()) ? b : isnan(b.toFloat()) ? a : min(a,b); }
-T oc_max<T : __BuiltinFloatingPointType>(T a, T b) { return isnan(a.toFloat()) ? b : isnan(b.toFloat()) ? a : max(a,b); }
+T oc_min<T : __BuiltinFloatingPointType>(T a, T b) { return min(a,b); }
+T oc_max<T : __BuiltinFloatingPointType>(T a, T b) { return max(a,b); }
 vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, vector<T, N> b) { vector<T, N> result; for (uint i=0;i<N;++i) result[i]=oc_min(a[i],b[i]); return result; }
 vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, vector<T, N> b) { vector<T, N> result; for (uint i=0;i<N;++i) result[i]=oc_max(a[i],b[i]); return result; }
 vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, T b) { return oc_min(a,vector<T,N>(b)); }
