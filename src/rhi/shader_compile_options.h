@@ -10,10 +10,10 @@ enum class TraceMode {
 
 enum class Float32FmaMode {
     Software,
-    // Uses the device's fused instruction with round-to-nearest-even.
+    // Uses the device's fused instruction and the shader's rounding mode.
     // The device may flush subnormal inputs and results to zero.
     Native,
-    // Prefers Native when the device and shader rounding modes allow it.
+    // Prefers Native on supported devices.
     Auto,
 };
 

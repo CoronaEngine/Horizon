@@ -23,7 +23,7 @@ namespace ocarina {
 
 namespace {
 
-constexpr unsigned slang_source_cache_version = 12u;
+constexpr unsigned slang_source_cache_version = 13u;
 
 constexpr uint32_t float_width_mask(uint32_t width) noexcept {
     return width == 16u ? 1u : width == 32u ? 2u : width == 64u ? 4u : 0u;
@@ -73,39 +73,28 @@ void set_float_control_mode(vector<uint32_t> &spirv, uint32_t capability,
         spirv.insert(spirv.begin() + capability_end, {(2u << 16u) | op_capability, capability});
 }
 
-bool require_fused_rounding(vector<uint32_t> &spirv, bool requires_half_rte, bool allow_software_fallback,
-                            uint32_t supported_widths, uint32_t independence, bool preserve_float16) noexcept {
-    constexpr uint32_t op_type_float = 22u, op_fma_khr = 4427u, op_execution_mode = 16u, rounding_mode_rtz = 4463u;
-    bool uses_fma_khr = false;
+void require_half_fused_rounding(vector<uint32_t> &spirv, uint32_t supported_widths,
+                                 uint32_t independence, bool preserve_float16) noexcept {
+    constexpr uint32_t op_type_float = 22u;
     uint32_t used_widths = 0u;
-    uint32_t rtz_widths = 0u;
     for (size_t offset = 5u; offset < spirv.size();) {
         uint32_t count = spirv[offset] >> 16u, op = spirv[offset] & 0xffffu;
         OC_ERROR_IF(count == 0u || count > spirv.size() - offset, "Malformed Slang SPIR-V instruction");
         if (op == op_type_float && count >= 3u) used_widths |= float_width_mask(spirv[offset + 2u]);
-        if (op == op_execution_mode && count == 4u && spirv[offset + 2u] == rounding_mode_rtz)
-            rtz_widths |= float_width_mask(spirv[offset + 3u]);
-        uses_fma_khr |= op == op_fma_khr;
         offset += count;
     }
-    if (!requires_half_rte && !uses_fma_khr) return true;
-    // Half TwoSum and native float32 FMA both require round-to-nearest-even in float32.
+    // Half TwoSum requires round-to-nearest-even in float32.
     const uint32_t required_widths = independence == VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ?
                                          used_widths : float_width_mask(32u);
-    const bool supports_required_widths = (required_widths & supported_widths) == required_widths;
-    const bool conflicts_with_rtz = (required_widths & rtz_widths) != 0u;
-    if (allow_software_fallback && !requires_half_rte && (!supports_required_widths || conflicts_with_rtz))
-        return false;
-    OC_ERROR_IF(!supports_required_widths,
-                "Fused operations require RTE for every dependent floating-point width used by the shader");
+    OC_ERROR_IF((required_widths & supported_widths) != required_widths,
+                "Half fused operations require RTE for every dependent floating-point width used by the shader");
     set_float_control_mode(spirv, 4467u, 4462u, required_widths);
     // Half adapters transfer their input/output bits through real float16 values.
     // RTE alone does not preserve the sign of zero at those typed boundaries.
-    if (requires_half_rte && (used_widths & 1u)) {
+    if (used_widths & 1u) {
         OC_ERROR_IF(!preserve_float16, "Half fused operations require float16 signed-zero/NaN/Inf preservation");
         set_float_control_mode(spirv, 4466u, 4461u, 1u);
     }
-    return true;
 }
 
 void decorate_glsl_fma(vector<uint32_t> &spirv) noexcept {
@@ -449,17 +438,6 @@ VkShaderProgram SlangShaderCompiler::compile_program(const Function &function, u
     const auto fma_mode = context.options.float32_fma_mode;
     const bool use_native_float32_fma = fma_mode == Float32FmaMode::Native ||
         (fma_mode == Float32FmaMode::Auto && device_->supports_native_float32_fma());
-    auto program = compile_program_variant(function, workgroup_size, context, use_native_float32_fma);
-    if (use_native_float32_fma && program.modules.empty()) {
-        OC_DEBUG_FORMAT("Shader '{}' uses software FP32 FMA because native FMA requires incompatible rounding modes",
-                        context.description);
-        return compile_program_variant(function, workgroup_size, context, false);
-    }
-    return program;
-}
-
-VkShaderProgram SlangShaderCompiler::compile_program_variant(const Function &function, uint3 workgroup_size,
-    const ShaderCompilationContext &context, bool use_native_float32_fma) const noexcept {
     const auto mode = context.execution_mode;
     const bool native = mode == ShaderExecutionMode::RayTracingPipeline;
     const bool query = mode == ShaderExecutionMode::ComputeRayQuery;
@@ -533,10 +511,8 @@ VkShaderProgram SlangShaderCompiler::compile_program_variant(const Function &fun
             spirv = compile_entry(session, module.get(), stage);
             if (query) normalize_ray_query_extensions(spirv);
             if (preserve_float32_) set_float_control_mode(spirv, 4466u, 4461u, 2u);
-            if ((requires_half_rte || use_native_float32_fma) &&
-                !require_fused_rounding(spirv, requires_half_rte, context.options.float32_fma_mode == Float32FmaMode::Auto,
-                                        rte_widths_, rounding_independence_, preserve_float16_))
-                return {mode, {}};
+            if (requires_half_rte)
+                require_half_fused_rounding(spirv, rte_widths_, rounding_independence_, preserve_float16_);
             decorate_glsl_fma(spirv);
 #ifdef __APPLE__
             mark_physical_storage_loads_volatile(spirv);

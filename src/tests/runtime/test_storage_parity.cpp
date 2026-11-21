@@ -440,17 +440,18 @@ void check_fma32_spirv(const fs::path &path, bool expect_native) {
         offset += count;
     }
     require(native == expect_native, "FP32 FMA mode selected the wrong instruction");
-    require(!expect_native || fp32_rte, "native FP32 FMA SPIR-V must declare round-to-nearest-even");
+    require(!fp32_rte, "an FP32-only FMA shader must omit the RTE32 execution mode");
 }
 
 void test_fma32_modes(Device &device, bool require_native) {
     // Cancellation and both midpoint directions with normal operands and results.
     constexpr size_t case_count = 4u;
     constexpr float half_ulp = 0x1p-24f;
+    constexpr uint odd_midpoint_neighbor = 0x3f800001u;
     const array<float4, case_count> inputs{make_float4(4097.f, 4097.f, -16785408.f, 0.f),
         make_float4(1.000244140625f, .999755859375f, -1.f, 0.f),
         make_float4(1.f, 1.f, half_ulp, 0.f),
-        make_float4(1.f, std::bit_cast<float>(0x3f800001u), half_ulp, 0.f)};
+        make_float4(1.f, std::bit_cast<float>(odd_midpoint_neighbor), half_ulp, 0.f)};
     Kernel kernel = [](BufferVar<float4> in, BufferVar<uint> out) {
         Uint i = dispatch_id();
         Float4 v = in.read(i);
@@ -460,14 +461,17 @@ void test_fma32_modes(Device &device, bool require_native) {
     auto destination = device.create_buffer<uint>(inputs.size());
     auto stream = device.create_stream();
     stream << source.upload(inputs.data()) << synchronize() << commit();
-    auto verify = [&](const auto &shader) {
+    auto verify = [&](const auto &shader, bool uses_native) {
         array<uint, case_count> actual{};
         stream << shader(source, destination).dispatch(uint(inputs.size()))
                << destination.download(actual.data()) << synchronize() << commit();
         for (size_t i = 0u; i < inputs.size(); ++i) {
             const auto v = inputs[i];
-            require(actual[i] == std::bit_cast<uint>(std::fma(v.x, v.y, v.z)),
-                    "FP32 FMA mode differs from std::fma for a normal result");
+            const uint nearest_even = std::bit_cast<uint>(std::fma(v.x, v.y, v.z));
+            // Both midpoint cases share the same odd neighbor.
+            const bool native_alternative = uses_native && i >= 2u && actual[i] == odd_midpoint_neighbor;
+            require(actual[i] == nearest_even || native_alternative,
+                    "FP32 FMA rounded outside the permitted result");
         }
     };
     const auto cache = RHIContext::instance().cache_directory() / "slang_cache";
@@ -488,7 +492,7 @@ void test_fma32_modes(Device &device, bool require_native) {
             "default FP32 FMA mode must select automatically");
     const auto default_module = new_module({});
     check_fma32_spirv(default_module, has_native);
-    verify(default_shader);
+    verify(default_shader, has_native);
 
     // Use the same description for both explicit modes to check cache separation.
     const auto software = device.compile(kernel, "storage-parity-fma32-modes", CS,
@@ -497,7 +501,7 @@ void test_fma32_modes(Device &device, bool require_native) {
             "compiled shader did not retain the requested software FP32 FMA mode");
     const auto software_module = new_module(default_module);
     check_fma32_spirv(software_module, false);
-    verify(software);
+    verify(software, false);
 
     if (!has_native && !require_native) {
         std::cout << "FMA32_MODES software=verified native=unavailable default=software" << std::endl;
@@ -508,7 +512,7 @@ void test_fma32_modes(Device &device, bool require_native) {
     require(native.requested_options().float32_fma_mode == Float32FmaMode::Native,
             "compiled shader did not retain the requested native FP32 FMA mode");
     check_fma32_spirv(new_module(default_module, software_module), true);
-    verify(native);
+    verify(native, true);
     std::cout << "FMA32_MODES software=verified native=verified default=native" << std::endl;
 }
 
