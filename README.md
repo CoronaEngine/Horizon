@@ -170,7 +170,9 @@ python build_tools/dev.py build HorizonExamples --configuration RelWithDebInfo -
 ```
 
 详细说明见
-[`examples/example_ocarina_dsl/README.md`](examples/example_ocarina_dsl/README.md)。
+[`examples/example_ocarina_dsl/README.md`](examples/example_ocarina_dsl/README.md)，
+AST 构建到 Slang 生成的内部流程见
+[`docs/ocarina-dsl-example-flow.md`](docs/ocarina-dsl-example-flow.md)。
 
 ### Ocarina 运行时光追模式
 

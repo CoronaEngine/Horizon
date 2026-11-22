@@ -26,6 +26,9 @@ Ocarina 的 Vulkan 后端目前只有 compute，没有图形管线。这里的�
 compute shader 把程序化生成的画面写入 `Texture2D`，再回读到 CPU 保存成图片，
 不涉及窗口、交换链或光栅化。
 
+从 AST 构建到 Slang 生成的内部细节，见
+[`docs/ocarina-dsl-example-flow.md`](../../docs/ocarina-dsl-example-flow.md)。
+
 ## 构建
 
 示例已经并入根目录的 `examples/`，通过 `HorizonExamples` 的 `ocarina_dsl`
