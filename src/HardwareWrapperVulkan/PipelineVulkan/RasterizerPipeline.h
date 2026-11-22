@@ -12,7 +12,9 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "PipelineSnapshot.h"
 
-struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelineVulkan>
+using horizon::detail::RasterizerPipelineVulkan;
+
+struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelineVulkan>
 {
   public:
     RasterizerPipelineVulkan();
@@ -21,8 +23,6 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
     RasterizerPipelineVulkan(std::string vertexShaderCode,
                              std::string fragmentShaderCode,
                              uint32_t multiviewCount = 1,
-                             EmbeddedShader::ShaderLanguage vertexShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
-                             EmbeddedShader::ShaderLanguage fragmentShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
                              const std::source_location &sourceLocation = std::source_location::current());
 
     // 从已编译的 ShaderCodeCompiler 构造
@@ -124,7 +124,7 @@ struct RasterizerPipelineVulkan : std::enable_shared_from_this<RasterizerPipelin
         void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
         void commitCommand(HardwareExecutorVulkan& executor) override;
     };
-    std::shared_ptr<Batch> capture(uint16_t width, uint16_t height, RasterPass pass);
+    std::shared_ptr<Batch> capture(std::optional<ktm::uvec2> extent, RasterPass pass);
 
   private:
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;

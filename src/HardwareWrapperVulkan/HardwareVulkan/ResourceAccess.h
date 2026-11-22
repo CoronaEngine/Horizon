@@ -2,6 +2,7 @@
 
 #include "ResourceManager.h"
 #include <map>
+#include <optional>
 #include <tuple>
 
 // Whole-buffer tracking is deliberately conservative. Images are tracked by
@@ -64,6 +65,12 @@ private:
     std::unordered_map<VkBuffer, AccessState> buffers;
     using ImageKey = std::tuple<VkImage, VkImageAspectFlags, uint32_t, uint32_t>;
     std::map<ImageKey, AccessState> images;
+    // Initial reads of a multi-mip/layer texture apply until a subresource gets its own history.
+    struct InitialImageRead {
+        VkImageSubresourceRange range;
+        AccessState state;
+    };
+    std::optional<std::unordered_map<VkImage, InitialImageRead>> initialImageReads;
     bool boundary{true};
     static bool dependency(AccessState& state, VkPipelineStageFlags2 stages, VkAccessFlags2 access,
                            VkPipelineStageFlags2& sourceStages, VkAccessFlags2& sourceAccess);

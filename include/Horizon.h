@@ -31,59 +31,56 @@ typedef void* HANDLE;
 #endif
 #endif
 
+namespace horizon::detail {
+struct CommandRecordVulkan;
+struct ComputePipelineVulkan;
+struct RasterizerPipelineVulkan;
+struct CopyCommandImpl;
+}
+
 struct HardwareExecutor;
 struct HardwareBuffer;
 struct HardwareImage;
-struct CopyCommandImpl;
 
-// ================= 拷贝命令基类 =================
+// Transfers retain both resources. A zero buffer copy size uses the source remainder.
 struct CopyCommand
 {
-    std::shared_ptr<CopyCommandImpl> impl;
+    std::shared_ptr<horizon::detail::CopyCommandImpl> impl;
 
     CopyCommand() = default;
-    explicit CopyCommand(std::shared_ptr<CopyCommandImpl> implPtr) : impl(std::move(implPtr))
-    {
-    }
+    explicit CopyCommand(std::shared_ptr<horizon::detail::CopyCommandImpl> record) : impl(std::move(record)) {}
+    explicit operator bool() const { return impl != nullptr; }
 
-    explicit operator bool() const
-    {
-        return impl != nullptr;
-    }
+protected:
+    CopyCommand(const HardwareBuffer& src, const HardwareBuffer& dst,
+                uint64_t srcOffset = 0, uint64_t dstOffset = 0, uint64_t size = 0);
+    CopyCommand(const HardwareBuffer& src, const HardwareImage& dst,
+                uint64_t bufferOffset = 0, uint32_t imageLayer = 0, uint32_t imageMip = 0);
+    CopyCommand(const HardwareImage& src, const HardwareImage& dst,
+                uint32_t srcLayer = 0, uint32_t dstLayer = 0, uint32_t srcMip = 0, uint32_t dstMip = 0);
+    CopyCommand(const HardwareImage& src, const HardwareBuffer& dst,
+                uint32_t imageLayer = 0, uint32_t imageMip = 0, uint64_t bufferOffset = 0);
 };
 
-// ================= Buffer 到 Buffer 拷贝命令 =================
-struct BufferCopyCommand : CopyCommand
-{
-    BufferCopyCommand() = default;
-    BufferCopyCommand(const HardwareBuffer &src, const HardwareBuffer &dst,
-                      uint64_t srcOffset = 0, uint64_t dstOffset = 0, uint64_t size = 0);
-};
+namespace horizon::detail {
+// Preserve overload resolution on the direction of a transfer.
+template<class Source, class Destination, class First, class Second, class Third>
+struct DirectionalCopy : CopyCommand {
+    DirectionalCopy() = default;
+    DirectionalCopy(const Source& src, const Destination& dst, First first = 0, Second second = 0, Third third = 0)
+        : CopyCommand(src, dst, first, second, third) {}
 
-// ================= Buffer 到 Image 拷贝命令 =================
-struct BufferToImageCommand : CopyCommand
-{
-    BufferToImageCommand() = default;
-    BufferToImageCommand(const HardwareBuffer &src, const HardwareImage &dst,
-                         uint64_t bufferOffset = 0, uint32_t imageLayer = 0, uint32_t imageMip = 0);
+    DirectionalCopy(const Source& src, const Destination& dst, First srcLayer, Second dstLayer,
+                    Third srcMip, uint32_t dstMip)
+        requires std::same_as<Source, HardwareImage> && std::same_as<Destination, HardwareImage>
+        : CopyCommand(src, dst, srcLayer, dstLayer, srcMip, dstMip) {}
 };
+}
 
-// ================= Image 到 Image 拷贝命令 =================
-struct ImageCopyCommand : CopyCommand
-{
-    ImageCopyCommand() = default;
-    ImageCopyCommand(const HardwareImage &src, const HardwareImage &dst,
-                     uint32_t srcLayer = 0, uint32_t dstLayer = 0,
-                     uint32_t srcMip = 0, uint32_t dstMip = 0);
-};
-
-// ================= Image 到 Buffer 拷贝命令 =================
-struct ImageToBufferCommand : CopyCommand
-{
-    ImageToBufferCommand() = default;
-    ImageToBufferCommand(const HardwareImage &src, const HardwareBuffer &dst,
-                         uint32_t imageLayer = 0, uint32_t imageMip = 0, uint64_t bufferOffset = 0);
-};
+using BufferCopyCommand = horizon::detail::DirectionalCopy<HardwareBuffer, HardwareBuffer, uint64_t, uint64_t, uint64_t>;
+using BufferToImageCommand = horizon::detail::DirectionalCopy<HardwareBuffer, HardwareImage, uint64_t, uint32_t, uint32_t>;
+using ImageCopyCommand = horizon::detail::DirectionalCopy<HardwareImage, HardwareImage, uint32_t, uint32_t, uint32_t>;
+using ImageToBufferCommand = horizon::detail::DirectionalCopy<HardwareImage, HardwareBuffer, uint32_t, uint32_t, uint64_t>;
 
 // Legacy resources and control objects are owner-thread objects.
 // Copying/releasing shared handles and modifying resource state require external serialization.
@@ -141,12 +138,14 @@ enum class BufferUsage : uint32_t
     RasterIndirect = 16,
 };
 
+namespace horizon::detail {
 template <typename T>
 concept IsContainer = requires(T a) {
     { a.size() } -> std::convertible_to<size_t>;
     { a.data() };
     { a[0] };
 };
+}
 
 struct ExternalHandle
 {
@@ -171,14 +170,14 @@ public:
     {
     }
 
-    template <IsContainer Container>
+    template <horizon::detail::IsContainer Container>
     HardwareBuffer(const Container& input, BufferUsage usage, bool useDedicated = true)
         : HardwareBuffer(input.size(), sizeof(input[0]), usage, input.data(), useDedicated)
     {
     }
 
     // Stage initial data once for GPU reads. The returned allocation is not mapped.
-    template <IsContainer Container>
+    template <horizon::detail::IsContainer Container>
     [[nodiscard]] static HardwareBuffer uploadDeviceLocal(const Container& input, BufferUsage usage) {
         static_assert(std::is_trivially_copyable_v<std::remove_cvref_t<decltype(input[0])>>);
         return uploadDeviceLocal(input.size(), sizeof(input[0]), usage, input.data());
@@ -233,7 +232,7 @@ private:
     std::uintptr_t bufferID{0};
 
     friend class HardwareImage;
-    friend struct RasterizerPipelineVulkan;
+    friend struct horizon::detail::RasterizerPipelineVulkan;
 };
 
 // ================= HardwareImage 参数结构体 =================
@@ -371,9 +370,6 @@ struct RasterDraw {
     uint32_t firstInstance{};
 };
 
-struct CommandRecordVulkan;
-struct ComputePipelineVulkan;
-struct RasterizerPipelineVulkan;
 enum class IndirectFirstInstance { MayBeNonzero, AlwaysZero };
 class RasterBatch {
 public:
@@ -383,8 +379,13 @@ public:
     void draw(const RasterGeometry& geometry, const RasterDraw& range, const T& parameters) {
         append(geometry, range, &parameters, sizeof(T));
     }
-    void draw(const RasterGeometry& geometry, const RasterDraw& range = {}) {
-        append(geometry, range, nullptr, 0);
+    // With the default index range, a draw needs only the geometry and its shader parameters.
+    template<class T = RasterDraw> requires (std::convertible_to<const T&, const RasterDraw&> || std::is_trivially_copyable_v<T>)
+    void draw(const RasterGeometry& geometry, const T& rangeOrParameters = {}) {
+        if constexpr (std::convertible_to<const T&, const RasterDraw&>)
+            append(geometry, rangeOrParameters, nullptr, 0);
+        else
+            draw(geometry, {}, rangeOrParameters);
     }
     using ParameterWriter = std::function<void(std::span<std::byte>)>;
     // Fill the span synchronously, keeping the batch idle until the writer returns.
@@ -410,10 +411,10 @@ private:
     void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
     friend struct HardwareExecutor;
     friend struct RasterizerPipelineBase;
-    RasterBatch(std::shared_ptr<CommandRecordVulkan> record, const std::vector<ResourceUse>& uses)
+    RasterBatch(std::shared_ptr<horizon::detail::CommandRecordVulkan> record, const std::vector<ResourceUse>& uses)
         : record_(std::move(record)), uses_(uses) {}
     void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
-    std::shared_ptr<CommandRecordVulkan> record_;
+    std::shared_ptr<horizon::detail::CommandRecordVulkan> record_;
     std::vector<ResourceUse> uses_;
 };
 
@@ -423,8 +424,8 @@ enum class PresentDevicePreference { RenderDevice, AlternateDevice };
 struct HardwareDisplayer
 {
 public:
-    explicit HardwareDisplayer(void* surface = nullptr);
-    HardwareDisplayer(void* surface, PresentDevicePreference preference);
+    explicit HardwareDisplayer(void* surface = nullptr,
+                               PresentDevicePreference preference = PresentDevicePreference::AlternateDevice);
     HardwareDisplayer(const HardwareDisplayer& other) = delete;
     HardwareDisplayer(HardwareDisplayer&& other) noexcept;
     ~HardwareDisplayer();
@@ -452,15 +453,18 @@ struct ComputePipelineBase
 {
 public:
     ComputePipelineBase();
+    ComputePipelineBase(const std::string& slangSource,
+                        const std::source_location& sourceLocation = std::source_location::current());
+    // Compatibility for callers that previously supplied an input language.
     ComputePipelineBase(const std::string& shaderCode,
-                        EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL,
+                        EmbeddedShader::ShaderLanguage language,
                         const std::source_location& sourceLocation = std::source_location::current());
 
     // 从当前编译器的 ShaderCodeModule（SPIR-V + Slang 反射）构造
     ComputePipelineBase(const EmbeddedShader::ShaderCodeModule& spirV,
                         const std::source_location& sourceLocation = std::source_location::current());
 
-    // Bare SPIR-V has no Slang reflection. Pass the compiler's ShaderCodeModule.
+    // A binary alone lacks the reflection that these pipelines require.
     ComputePipelineBase(const std::vector<uint32_t>&,
                         const std::source_location& = std::source_location::current()) = delete;
 
@@ -479,7 +483,8 @@ public:
     ComputePipelineBase& operator=(const ComputePipelineBase& other) = delete;
     ComputePipelineBase& operator=(ComputePipelineBase&& other) noexcept;
 
-    ComputePipelineBase& operator()(uint16_t x, uint16_t y, uint16_t z);
+    // Set workgroup counts and read proxy bindings. The executor snapshots them at enqueue.
+    ComputePipelineBase& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
 
     // Replace the declared resource uses; this does not bind or execute resources.
     ComputePipelineBase& uses(std::span<const ResourceUse> resources)
@@ -508,8 +513,9 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType);
 
-    ComputePipelineVulkan& backend() const;
-    std::shared_ptr<ComputePipelineVulkan> computePipeline_;
+    void initFromCompiler(EmbeddedShader::ShaderCodeCompiler& compiler, const std::source_location& src);
+    horizon::detail::ComputePipelineVulkan& backend() const;
+    std::shared_ptr<horizon::detail::ComputePipelineVulkan> computePipeline_;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
     std::vector<ResourceUse> resourceUses_;
 };
@@ -519,10 +525,13 @@ struct RasterizerPipelineBase
 {
 public:
     RasterizerPipelineBase();
+    RasterizerPipelineBase(std::string vertexSlang, std::string fragmentSlang, uint32_t multiviewCount = 1,
+                           const std::source_location& sourceLocation = std::source_location::current());
+    // Compatibility for callers that previously supplied shader input languages.
     RasterizerPipelineBase(std::string vertexShaderCode,
                            std::string fragmentShaderCode,
-                           uint32_t multiviewCount = 1,
-                           EmbeddedShader::ShaderLanguage vertexShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
+                           uint32_t multiviewCount,
+                           EmbeddedShader::ShaderLanguage vertexShaderLanguage,
                            EmbeddedShader::ShaderLanguage fragmentShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
                            const std::source_location& sourceLocation = std::source_location::current());
 
@@ -532,8 +541,7 @@ public:
                            uint32_t multiviewCount = 1,
                            const std::source_location& sourceLocation = std::source_location::current());
 
-    RasterizerPipelineBase(const std::vector<uint32_t>&, const std::vector<uint32_t>&,
-                           uint32_t = 1,
+    RasterizerPipelineBase(const std::vector<uint32_t>&, const std::vector<uint32_t>&, uint32_t = 1,
                            const std::source_location& = std::source_location::current()) = delete;
 
     // 模板构造函数：接受 DSL lambda，内部完成编译
@@ -558,7 +566,12 @@ public:
     void setDepthImage(HardwareImage& depthImage);
     [[nodiscard]] HardwareImage getDepthImage();
 
-    [[nodiscard]] RasterBatch beginBatch(uint16_t width, uint16_t height, RasterPass pass = {});
+    // Snapshot this pass, its attachments, shared parameters and resource bindings.
+    [[nodiscard]] RasterBatch beginBatch(uint16_t width, uint16_t height, RasterPass pass = {}) {
+        return capture(ktm::uvec2(width, height), pass);
+    }
+    // Use the first bound color attachment's extent, or the explicitly bound depth image.
+    [[nodiscard]] RasterBatch beginBatch(RasterPass pass = {}) { return capture(std::nullopt, pass); }
 
     // Replace the declared resource uses; this does not bind or execute resources.
     RasterizerPipelineBase& uses(std::initializer_list<ResourceUse> resources)
@@ -602,8 +615,11 @@ private:
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer& buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage& image, int32_t bindType, uint32_t location = 0);
 
-    RasterizerPipelineVulkan& backend() const;
-    std::shared_ptr<RasterizerPipelineVulkan> rasterizerPipeline_;
+    void initFromCompiler(EmbeddedShader::ShaderCodeCompiler& vertex, EmbeddedShader::ShaderCodeCompiler& fragment,
+                          uint32_t views, const std::source_location& src);
+    RasterBatch capture(std::optional<ktm::uvec2> extent, RasterPass pass);
+    horizon::detail::RasterizerPipelineVulkan& backend() const;
+    std::shared_ptr<horizon::detail::RasterizerPipelineVulkan> rasterizerPipeline_;
     std::unique_ptr<EmbeddedShader::RasterizedPipelineObject> variants_;
     EmbeddedShader::ShaderCodeCompiler::ConditionInfo vertexConditions_, fragmentConditions_;
     std::vector<EmbeddedShader::AutoBindEntry> autoBindEntries_;
@@ -624,9 +640,11 @@ public:
 
     HardwareExecutor& operator<<(ComputePipelineBase& computePipeline);
     HardwareExecutor& operator<<(RasterBatch&& batch);
+    [[deprecated("Enqueue commands on the destination executor directly")]]
     HardwareExecutor& operator<<(HardwareExecutor& other);
     HardwareExecutor& operator<<(const CopyCommand& cmd);
 
+    // Depend on the most recent successful submission of other at the time of this call.
     HardwareExecutor& wait(HardwareExecutor& other);
     HardwareExecutor& commit();
 
@@ -645,6 +663,116 @@ public:
 private:
     std::uintptr_t executorID{0};
 };
+
+// ================= RasterizerPipeline: unified template =================
+// EDSL path:  RasterizerPipeline rasterizer(vsLambda, fsLambda);          // deduces <void, void>
+// Generated Slang path:  RasterizerPipeline<vert_slang, frag_slang> rasterizer;        // direct member access
+template <typename VS = void, typename FS = void>
+struct RasterizerPipeline;
+
+// void specialization — EDSL / Slang source string path (inherits all Base constructors)
+template <>
+struct RasterizerPipeline<void, void> : RasterizerPipelineBase
+{
+    using RasterizerPipelineBase::RasterizerPipelineBase;
+};
+
+// General template — Slang code-gen path with direct member access
+namespace horizon::detail {
+template<class VS, class FS>
+using RasterResourceStage = std::conditional_t<(VS::uniformBufferBlockSize == 0 && FS::uniformBufferBlockSize != 0), FS, VS>;
+}
+
+template <typename VS, typename FS>
+struct RasterizerPipeline
+    : RasterizerPipelineBase,
+      horizon::detail::RasterResourceStage<VS, FS>::template ResourceBindings<RasterizerPipelineBase>,
+      FS::template OutputBindings<RasterizerPipelineBase>
+{
+    static_assert(!VS::uniformBufferBlockSize || !FS::uniformBufferBlockSize || VS::uniformBufferBlockSize == FS::uniformBufferBlockSize,
+                  "VS and FS uniform buffer block sizes must match");
+
+    using VSRes = typename horizon::detail::RasterResourceStage<VS, FS>::template ResourceBindings<RasterizerPipelineBase>;
+    using FSOut = typename FS::template OutputBindings<RasterizerPipelineBase>;
+
+    RasterizerPipeline(uint32_t multiviewCount = 1,
+                       const std::source_location& sourceLocation = std::source_location::current())
+        : RasterizerPipelineBase(
+              compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, VS::slangModule),
+              compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, FS::slangModule),
+              multiviewCount, sourceLocation), VSRes(static_cast<RasterizerPipelineBase*>(this)), FSOut(static_cast<RasterizerPipelineBase*>(this))
+    {
+    }
+
+    RasterizerPipeline(const RasterizerPipeline& other) = delete;
+
+    RasterizerPipeline(RasterizerPipeline&& other) noexcept
+        : RasterizerPipelineBase(std::move(other)), VSRes(static_cast<RasterizerPipelineBase*>(this)), FSOut(static_cast<RasterizerPipelineBase*>(this))
+    {
+    }
+
+    RasterizerPipeline& operator=(const RasterizerPipeline& other) = delete;
+
+    RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept
+    {
+        RasterizerPipelineBase::operator=(std::move(other));
+        return *this;
+    }
+};
+
+template <class Vertex, class Fragment>
+RasterizerPipeline(Vertex&&, Fragment&&, uint32_t = 1, EmbeddedShader::CompilerOption = {},
+                   std::source_location = std::source_location::current()) -> RasterizerPipeline<>;
+template <class... Args> requires std::constructible_from<RasterizerPipelineBase, Args...>
+RasterizerPipeline(Args&&...) -> RasterizerPipeline<>;
+
+// ================= ComputePipeline: unified template =================
+// EDSL path:  ComputePipeline computer(csLambda, numthreads);             // deduces <void>
+// Generated Slang path:  ComputePipeline<compute_slang> computer;                     // direct member access
+template <typename CS = void>
+struct ComputePipeline;
+
+// void specialization — EDSL / Slang source string path
+template <>
+struct ComputePipeline<void> : ComputePipelineBase
+{
+    using ComputePipelineBase::ComputePipelineBase;
+};
+
+// General template — Slang code-gen path with direct member access
+template <typename CS>
+struct ComputePipeline
+    : ComputePipelineBase,
+      CS::template Bindings<ComputePipelineBase>
+{
+    using CSBindings = typename CS::template Bindings<ComputePipelineBase>;
+
+    ComputePipeline(const std::source_location& sourceLocation = std::source_location::current())
+        : ComputePipelineBase(compileLegacyShaderModule(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule), sourceLocation), CSBindings(static_cast<ComputePipelineBase*>(this))
+    {
+    }
+
+    ComputePipeline(const ComputePipeline& other) = delete;
+
+    ComputePipeline(ComputePipeline&& other) noexcept
+        : ComputePipelineBase(std::move(other)), CSBindings(static_cast<ComputePipelineBase*>(this))
+    {
+    }
+
+    ComputePipeline& operator=(const ComputePipeline& other) = delete;
+
+    ComputePipeline& operator=(ComputePipeline&& other) noexcept
+    {
+        ComputePipelineBase::operator=(std::move(other));
+        return *this;
+    }
+};
+
+template <class F> requires std::invocable<F>
+ComputePipeline(F&&, ktm::uvec3 = ktm::uvec3(1), EmbeddedShader::CompilerOption = {},
+                std::source_location = std::source_location::current()) -> ComputePipeline<>;
+template <class... Args> requires std::constructible_from<ComputePipelineBase, Args...>
+ComputePipeline(Args&&...) -> ComputePipeline<>;
 
 // ================= BoundField::operator= Implementation =================
 // Deferred from VariateProxy.h until the legacy pipeline types are complete.
@@ -677,11 +805,6 @@ namespace EmbeddedShader
 } // namespace EmbeddedShader
 
 // ================= ComputePipeline 模板构造函数实现 =================
-// 通过辅助函数创建后端 ComputePipelineVulkan 实现
-void computePipelineInitFromCompiler(std::shared_ptr<ComputePipelineVulkan>& pipeline,
-                                     EmbeddedShader::ShaderCodeCompiler& compiler,
-                                     const std::source_location& src);
-
 template <typename F>
     requires std::invocable<F> && (!std::is_convertible_v<F, std::string>)
 ComputePipelineBase::ComputePipelineBase(F&& computeShaderCode,
@@ -700,16 +823,10 @@ ComputePipelineBase::ComputePipelineBase(F&& computeShaderCode,
     autoBindEntries_ = std::move(pipelineObj.autoBindEntries);
 
     // 调用辅助函数完成 Vulkan 管线创建
-    computePipelineInitFromCompiler(computePipeline_, *pipelineObj.compute, sourceLocation);
+    initFromCompiler(*pipelineObj.compute, sourceLocation);
 }
 
 // ================= RasterizerPipeline 模板构造函数实现 =================
-void rasterizerPipelineInitFromCompiler(std::shared_ptr<RasterizerPipelineVulkan>& pipeline,
-                                        EmbeddedShader::ShaderCodeCompiler& vertexCompiler,
-                                        EmbeddedShader::ShaderCodeCompiler& fragmentCompiler,
-                                        uint32_t multiviewCount,
-                                        const std::source_location& src);
-
 template <typename VF, typename FF>
     requires(!std::is_convertible_v<VF, std::string>) && (!std::is_convertible_v<FF, std::string>) && (!std::is_same_v<std::remove_cvref_t<VF>, EmbeddedShader::ShaderCodeModule>) && (!std::is_same_v<std::remove_cvref_t<FF>, EmbeddedShader::ShaderCodeModule>) && (!std::is_same_v<std::remove_cvref_t<VF>, std::vector<uint32_t>>) && (!std::is_same_v<std::remove_cvref_t<FF>, std::vector<uint32_t>>)
 RasterizerPipelineBase::RasterizerPipelineBase(VF&& vertexShaderCode,
@@ -729,130 +846,12 @@ RasterizerPipelineBase::RasterizerPipelineBase(VF&& vertexShaderCode,
     autoBindEntries_ = std::move(pipelineObj.autoBindEntries);
 
     // 调用辅助函数完成 Vulkan 管线创建
-    rasterizerPipelineInitFromCompiler(rasterizerPipeline_,
-                                       *pipelineObj.vertex,
-                                       *pipelineObj.fragment,
-                                       multiviewCount,
-                                       sourceLocation);
+    initFromCompiler(*pipelineObj.vertex, *pipelineObj.fragment, multiviewCount, sourceLocation);
     vertexConditions_ = pipelineObj.vertex->getCurrentConditionInfo();
     fragmentConditions_ = pipelineObj.fragment->getCurrentConditionInfo();
     if (!vertexConditions_.empty() || !fragmentConditions_.empty())
         variants_ = std::make_unique<EmbeddedShader::RasterizedPipelineObject>(std::move(pipelineObj));
 }
-
-// ================= RasterizerPipeline: unified template =================
-// EDSL path:  RasterizerPipeline rasterizer(vsLambda, fsLambda);          // deduces <void, void>
-// GLSL path:  RasterizerPipeline<vert_glsl, frag_glsl> rasterizer;        // direct member access
-template <typename VS = void, typename FS = void>
-struct RasterizerPipeline;
-
-// void specialization — EDSL / raw GLSL string path (inherits all Base constructors)
-template <>
-struct RasterizerPipeline<void, void> : RasterizerPipelineBase
-{
-    using RasterizerPipelineBase::RasterizerPipelineBase;
-};
-
-// General template — GLSL code-gen path with direct member access
-template<class VS, class FS>
-using RasterResourceStage = std::conditional_t<(VS::uniformBufferBlockSize == 0 && FS::uniformBufferBlockSize != 0), FS, VS>;
-
-template <typename VS, typename FS>
-struct RasterizerPipeline
-    : RasterizerPipelineBase,
-      RasterResourceStage<VS, FS>::template ResourceBindings<RasterizerPipelineBase>,
-      FS::template OutputBindings<RasterizerPipelineBase>
-{
-    static_assert(!VS::uniformBufferBlockSize || !FS::uniformBufferBlockSize || VS::uniformBufferBlockSize == FS::uniformBufferBlockSize,
-                  "VS and FS uniform buffer block sizes must match");
-
-    using VSRes = typename RasterResourceStage<VS, FS>::template ResourceBindings<RasterizerPipelineBase>;
-    using FSOut = typename FS::template OutputBindings<RasterizerPipelineBase>;
-
-    RasterizerPipeline(uint32_t multiviewCount = 1,
-                       const std::source_location& sourceLocation = std::source_location::current())
-        : RasterizerPipelineBase(
-              compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, VS::slangModule),
-              compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, FS::slangModule),
-              multiviewCount, sourceLocation), VSRes(static_cast<RasterizerPipelineBase*>(this)), FSOut(static_cast<RasterizerPipelineBase*>(this))
-    {
-    }
-
-    RasterizerPipeline(const RasterizerPipeline& other) = delete;
-
-    RasterizerPipeline(RasterizerPipeline&& other) noexcept
-        : RasterizerPipelineBase(std::move(other)), VSRes(static_cast<RasterizerPipelineBase*>(this)), FSOut(static_cast<RasterizerPipelineBase*>(this))
-    {
-    }
-
-    RasterizerPipeline& operator=(const RasterizerPipeline& other) = delete;
-
-    RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept
-    {
-        RasterizerPipelineBase::operator=(std::move(other));
-        return *this;
-    }
-};
-
-// Deduction guides: EDSL / string / SPIR-V paths deduce to RasterizerPipeline<void, void>
-template <typename VF, typename FF>
-RasterizerPipeline(VF&&, FF&&, uint32_t = 1, EmbeddedShader::CompilerOption = {}, std::source_location = std::source_location::current())
-    -> RasterizerPipeline<>;
-RasterizerPipeline(std::string, std::string, uint32_t, EmbeddedShader::ShaderLanguage, EmbeddedShader::ShaderLanguage, const std::source_location&)
-    -> RasterizerPipeline<>;
-RasterizerPipeline(const EmbeddedShader::ShaderCodeModule&, const EmbeddedShader::ShaderCodeModule&, uint32_t, const std::source_location&)
-    -> RasterizerPipeline<>;
-
-// ================= ComputePipeline: unified template =================
-// EDSL path:  ComputePipeline computer(csLambda, numthreads);             // deduces <void>
-// GLSL path:  ComputePipeline<compute_glsl> computer;                     // direct member access
-template <typename CS = void>
-struct ComputePipeline;
-
-// void specialization — EDSL / raw GLSL string path
-template <>
-struct ComputePipeline<void> : ComputePipelineBase
-{
-    using ComputePipelineBase::ComputePipelineBase;
-};
-
-// General template — GLSL code-gen path with direct member access
-template <typename CS>
-struct ComputePipeline
-    : ComputePipelineBase,
-      CS::template Bindings<ComputePipelineBase>
-{
-    using CSBindings = typename CS::template Bindings<ComputePipelineBase>;
-
-    ComputePipeline(const std::source_location& sourceLocation = std::source_location::current())
-        : ComputePipelineBase(compileLegacyShaderModule(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule), sourceLocation), CSBindings(static_cast<ComputePipelineBase*>(this))
-    {
-    }
-
-    ComputePipeline(const ComputePipeline& other) = delete;
-
-    ComputePipeline(ComputePipeline&& other) noexcept
-        : ComputePipelineBase(std::move(other)), CSBindings(static_cast<ComputePipelineBase*>(this))
-    {
-    }
-
-    ComputePipeline& operator=(const ComputePipeline& other) = delete;
-
-    ComputePipeline& operator=(ComputePipeline&& other) noexcept
-    {
-        ComputePipelineBase::operator=(std::move(other));
-        return *this;
-    }
-};
-
-// Deduction guides: EDSL / string / SPIR-V paths deduce to ComputePipeline<void>
-template <typename F>
-ComputePipeline(F&&, ktm::uvec3, EmbeddedShader::CompilerOption = {}, std::source_location = std::source_location::current())
-    -> ComputePipeline<>;
-ComputePipeline(const std::string&, EmbeddedShader::ShaderLanguage, const std::source_location&)
-    -> ComputePipeline<>;
-ComputePipeline(const EmbeddedShader::ShaderCodeModule&, const std::source_location&)
-    -> ComputePipeline<>;
 
 namespace EmbeddedShader
 {

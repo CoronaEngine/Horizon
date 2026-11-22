@@ -10,13 +10,15 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include "PipelineSnapshot.h"
 
-struct ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulkan>
+using horizon::detail::ComputePipelineVulkan;
+
+struct horizon::detail::ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulkan>
 {
   public:
     ComputePipelineVulkan();
     ~ComputePipelineVulkan();
 
-    ComputePipelineVulkan(std::string shaderCode, EmbeddedShader::ShaderLanguage language = EmbeddedShader::ShaderLanguage::GLSL, const std::source_location &sourceLocation = std::source_location::current());
+    ComputePipelineVulkan(std::string source, const std::source_location& location);
 
     // 新构造函数：接受已编译的 ShaderCodeCompiler，避免重复编译
     ComputePipelineVulkan(EmbeddedShader::ShaderCodeCompiler &compiler, const std::source_location &sourceLocation = std::source_location::current());

@@ -2,11 +2,6 @@
 #include "HardwareWrapperVulkan/DisplayVulkan/DisplayManager.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 
-HardwareDisplayer::HardwareDisplayer(void* surface)
-    : HardwareDisplayer(surface, PresentDevicePreference::AlternateDevice)
-{
-}
-
 HardwareDisplayer::HardwareDisplayer(void* surface, PresentDevicePreference preference)
     : displaySurfaceID(reinterpret_cast<uintptr_t>(new DisplayManager(preference))), displaySurface(surface)
 {

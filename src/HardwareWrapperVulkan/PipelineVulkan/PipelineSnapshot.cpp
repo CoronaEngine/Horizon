@@ -269,6 +269,11 @@ void UniformSnapshot::prepare(std::span<const uint8_t> bytes, VkDescriptorSetLay
 std::shared_ptr<UniformSnapshot> UniformSnapshotPool::acquire(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout)
 {
     if (bytes.empty()) return {};
+    if (!slots.empty()) {
+        // Immutable bytes and descriptor sets can serve multiple in-flight invocations.
+        const auto& latest = slots[next ? next - 1 : slots.size() - 1];
+        if (std::ranges::equal(bytes, latest->uploadedBytes)) return latest;
+    }
     for (size_t visited = 0; visited < slots.size(); ++visited)
     {
         const size_t index = (next + visited) % slots.size();

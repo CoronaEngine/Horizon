@@ -12,11 +12,9 @@ ComputePipelineVulkan& ComputePipelineBase::backend() const
 }
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 创建 ComputePipeline
-void computePipelineInitFromCompiler(std::shared_ptr<ComputePipelineVulkan>& pipeline,
-                                      EmbeddedShader::ShaderCodeCompiler &compiler,
-                                      const std::source_location &src)
+void ComputePipelineBase::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& compiler, const std::source_location& src)
 {
-    pipeline = std::make_shared<ComputePipelineVulkan>(compiler, src);
+    computePipeline_ = std::make_shared<ComputePipelineVulkan>(compiler, src);
 }
 
 ComputePipelineBase::ComputePipelineBase()
@@ -24,9 +22,15 @@ ComputePipelineBase::ComputePipelineBase()
     computePipeline_ = std::make_shared<ComputePipelineVulkan>();
 }
 
-ComputePipelineBase::ComputePipelineBase(const std::string &shaderCode, EmbeddedShader::ShaderLanguage language, const std::source_location &src)
+ComputePipelineBase::ComputePipelineBase(const std::string& source, const std::source_location& location)
+    : computePipeline_(std::make_shared<ComputePipelineVulkan>(source, location))
 {
-    computePipeline_ = std::make_shared<ComputePipelineVulkan>(shaderCode, language, src);
+}
+
+ComputePipelineBase::ComputePipelineBase(const std::string& source, EmbeddedShader::ShaderLanguage,
+                                         const std::source_location& location)
+    : ComputePipelineBase(source, location)
+{
 }
 
 ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)

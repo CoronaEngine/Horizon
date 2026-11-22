@@ -12,16 +12,17 @@
 #include "Horizon.h"
 
 struct HardwareExecutorVulkan;
-struct CommandRecordVulkan;
+using horizon::detail::CommandRecordVulkan;
+using horizon::detail::CopyCommandImpl;
 struct ResourceAccessList;
 
-struct CopyCommandImpl
+struct horizon::detail::CopyCommandImpl
 {
     virtual ~CopyCommandImpl() = default;
     virtual CommandRecordVulkan* getCommandRecord() = 0;
 };
 
-struct CommandRecordVulkan
+struct horizon::detail::CommandRecordVulkan
 {
     enum class ExecutorType
     {

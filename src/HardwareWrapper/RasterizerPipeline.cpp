@@ -9,9 +9,17 @@ RasterizerPipelineBase::RasterizerPipelineBase()
     rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>();
 }
 
-RasterizerPipelineBase::RasterizerPipelineBase(std::string vs, std::string fs, uint32_t multiviewCount, EmbeddedShader::ShaderLanguage vlang, EmbeddedShader::ShaderLanguage flang, const std::source_location &src)
+RasterizerPipelineBase::RasterizerPipelineBase(std::string vertex, std::string fragment,
+                                             uint32_t views, const std::source_location& location)
+    : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(std::move(vertex), std::move(fragment), views, location))
 {
-    rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vs, fs, multiviewCount, vlang, flang, src);
+}
+
+RasterizerPipelineBase::RasterizerPipelineBase(std::string vertex, std::string fragment, uint32_t views,
+                                             EmbeddedShader::ShaderLanguage, EmbeddedShader::ShaderLanguage,
+                                             const std::source_location& location)
+    : RasterizerPipelineBase(std::move(vertex), std::move(fragment), views, location)
+{
 }
 
 RasterizerPipelineBase::RasterizerPipelineBase(const EmbeddedShader::ShaderCodeModule &vertexSpirV, const EmbeddedShader::ShaderCodeModule &fragmentSpirV, uint32_t multiviewCount, const std::source_location &src)
@@ -20,13 +28,11 @@ RasterizerPipelineBase::RasterizerPipelineBase(const EmbeddedShader::ShaderCodeM
 }
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 初始化 RasterizerPipeline
-void rasterizerPipelineInitFromCompiler(std::shared_ptr<RasterizerPipelineVulkan>& pipeline,
-                                         EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
-                                         EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                                         uint32_t multiviewCount,
-                                         const std::source_location &src)
+void RasterizerPipelineBase::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& vertex,
+                                              EmbeddedShader::ShaderCodeCompiler& fragment,
+                                              uint32_t views, const std::source_location& src)
 {
-    pipeline = std::make_shared<RasterizerPipelineVulkan>(vertexCompiler, fragmentCompiler, multiviewCount, src);
+    rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, views, src);
 }
 
 RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineBase&&) noexcept = default;
@@ -74,7 +80,7 @@ void RasterizerPipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typ
     backend().setResourceDirect(byteOffset, typeSize, image, bindType, location);
 }
 
-RasterBatch RasterizerPipelineBase::beginBatch(uint16_t width, uint16_t height, RasterPass pass)
+RasterBatch RasterizerPipelineBase::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
 {
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
     for (const auto& entry : autoBindEntries_)
@@ -92,7 +98,7 @@ RasterBatch RasterizerPipelineBase::beginBatch(uint16_t width, uint16_t height, 
                 setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
         }
     }
-    auto batch = backend().capture(width, height, pass);
+    auto batch = backend().capture(extent, pass);
     return RasterBatch(std::move(batch), resourceUses_);
 }
 

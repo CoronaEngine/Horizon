@@ -142,7 +142,7 @@ BufferCopyCommand HardwareBuffer::copyTo(const HardwareBuffer &dst,
                                          uint64_t dstOffset,
                                          uint64_t size) const
 {
-    return BufferCopyCommand(*this, dst, srcOffset, dstOffset, size);
+    return {*this, dst, srcOffset, dstOffset, size};
 }
 
 BufferToImageCommand HardwareBuffer::copyTo(const HardwareImage &dst,
@@ -150,7 +150,7 @@ BufferToImageCommand HardwareBuffer::copyTo(const HardwareImage &dst,
                                             uint32_t imageLayer,
                                             uint32_t imageMip) const
 {
-    return BufferToImageCommand(*this, dst, bufferOffset, imageLayer, imageMip);
+    return {*this, dst, bufferOffset, imageLayer, imageMip};
 }
 
 uint32_t HardwareBuffer::storeDescriptor() const
@@ -197,6 +197,7 @@ bool HardwareBuffer::copyToData(void *outputData, const uint64_t size) const
     if (const auto handle = legacyBufferFromId(self_buffer_id);
         handle->bufferAllocInfo.pMappedData != nullptr)
     {
+        if (size > uint64_t(handle->elementCount) * handle->elementSize) return false;
         handle->resourceManager->copyBufferToHost(*handle, outputData, size);
         return true;
     }

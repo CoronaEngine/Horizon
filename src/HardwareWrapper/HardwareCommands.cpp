@@ -79,7 +79,7 @@ struct BufferToImageCommandImpl : CopyCommandImpl
 };
 
 // ================= BufferCopyCommand 构造函数 =================
-BufferCopyCommand::BufferCopyCommand(const HardwareBuffer &src, const HardwareBuffer &dst,
+CopyCommand::CopyCommand(const HardwareBuffer &src, const HardwareBuffer &dst,
                                      uint64_t srcOffset, uint64_t dstOffset, uint64_t size)
 {
     auto implPtr = std::make_shared<BufferCopyCommandImpl>(src, dst);
@@ -90,7 +90,7 @@ BufferCopyCommand::BufferCopyCommand(const HardwareBuffer &src, const HardwareBu
 }
 
 // ================= BufferToImageCommand 构造函数 =================
-BufferToImageCommand::BufferToImageCommand(const HardwareBuffer &src, const HardwareImage &dst,
+CopyCommand::CopyCommand(const HardwareBuffer &src, const HardwareImage &dst,
                                            uint64_t bufferOffset, uint32_t imageLayer, uint32_t imageMip)
 {
     auto implPtr = std::make_shared<BufferToImageCommandImpl>(src, dst);
@@ -139,7 +139,7 @@ struct ImageCopyCommandImpl : CopyCommandImpl
 };
 
 // ================= ImageCopyCommand 构造函数 =================
-ImageCopyCommand::ImageCopyCommand(const HardwareImage &src, const HardwareImage &dst,
+CopyCommand::CopyCommand(const HardwareImage &src, const HardwareImage &dst,
                                    uint32_t srcLayer, uint32_t dstLayer,
                                    uint32_t srcMip, uint32_t dstMip)
 {
@@ -184,7 +184,7 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
 };
 
 // ================= ImageToBufferCommand 构造函数 =================
-ImageToBufferCommand::ImageToBufferCommand(const HardwareImage &src, const HardwareBuffer &dst,
+CopyCommand::CopyCommand(const HardwareImage &src, const HardwareBuffer &dst,
                                            uint32_t imageLayer, uint32_t imageMip, uint64_t bufferOffset)
 {
     auto implPtr = std::make_shared<ImageToBufferCommandImpl>(src, dst);

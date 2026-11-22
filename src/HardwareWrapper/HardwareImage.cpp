@@ -298,7 +298,7 @@ ImageCopyCommand HardwareImage::copyTo(const HardwareImage &dst,
                                        uint32_t srcLayer, uint32_t dstLayer,
                                        uint32_t srcMip, uint32_t dstMip) const
 {
-    return ImageCopyCommand(*this, dst, srcLayer, dstLayer, srcMip, dstMip);
+    return {*this, dst, srcLayer, dstLayer, srcMip, dstMip};
 }
 
 ImageToBufferCommand HardwareImage::copyTo(const HardwareBuffer &dst,
@@ -306,7 +306,7 @@ ImageToBufferCommand HardwareImage::copyTo(const HardwareBuffer &dst,
                                            uint32_t imageMip,
                                            uint64_t bufferOffset) const
 {
-    return ImageToBufferCommand(*this, dst, imageLayer, imageMip, bufferOffset);
+    return {*this, dst, imageLayer, imageMip, bufferOffset};
 }
 
 BufferToImageCommand HardwareImage::copyFrom(const void *inputData,
@@ -315,13 +315,12 @@ BufferToImageCommand HardwareImage::copyFrom(const void *inputData,
 {
     if (inputData == nullptr)
     {
-        return BufferToImageCommand();
+        return {};
     }
 
     if (!*this) return {};
     const auto* image = legacyImageFromId(imageID);
     if (imageMip >= image->mipLevels) return {};
     HardwareBuffer stagingBuffer(uploadByteCount(*image, imageMip, 1), BufferUsage::StorageBuffer, inputData);
-    auto cmd = BufferToImageCommand(std::move(stagingBuffer), *this, 0, imageLayer, imageMip);
-    return cmd;
+    return {stagingBuffer, *this, 0, imageLayer, imageMip};
 }

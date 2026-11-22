@@ -9,11 +9,9 @@
 ComputePipelineVulkan::ComputePipelineVulkan() = default;
 
 ComputePipelineVulkan::ComputePipelineVulkan(std::string shaderCode,
-                                             EmbeddedShader::ShaderLanguage /*language*/,
                                              const std::source_location &sourceLocation)
     : ComputePipelineVulkan()
 {
-    // Keep the legacy signature; Helicon's runtime compiler now consumes Slang source.
     EmbeddedShader::ShaderCodeCompiler compiler(shaderCode,
                                                 EmbeddedShader::ShaderStage::ComputeShader,
                                                 EmbeddedShader::CompilerOption(),

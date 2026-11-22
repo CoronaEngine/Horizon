@@ -10,6 +10,16 @@
 #include "Compiler/ShaderLanguageConverter.h"
 #include "Compiler/ShaderUtils.h"
 
+namespace {
+VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& image)
+{
+    // Descriptor-backed targets stay in their descriptor layout through the pass.
+    // The planner orders the color write against the stages that consume it.
+    return (image.imageUsage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT))
+        ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+}
+}
+
 void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResources &resources,
                           std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> &inputs,
                           std::vector<EmbeddedShader::ShaderCodeModule::ShaderResources::ShaderBindInfo> &outputs)
@@ -34,12 +44,9 @@ RasterizerPipelineVulkan::RasterizerPipelineVulkan() = default;
 RasterizerPipelineVulkan::RasterizerPipelineVulkan(std::string vertexShaderCode,
                                                    std::string fragmentShaderCode,
                                                    uint32_t multiviewCount,
-                                                   EmbeddedShader::ShaderLanguage /*vertexShaderLanguage*/,
-                                                   EmbeddedShader::ShaderLanguage /*fragmentShaderLanguage*/,
                                                    const std::source_location &sourceLocation)
     : RasterizerPipelineVulkan()
 {
-    // Keep the legacy signature; Helicon's runtime compiler now consumes Slang source.
     EmbeddedShader::CompilerOption options;
     options.compileHLSL = false;
     EmbeddedShader::ShaderCodeCompiler vertexCompiler(vertexShaderCode,
@@ -141,7 +148,7 @@ void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attachment.initialLayout = state.finalLayouts[i];
         attachment.finalLayout = state.finalLayouts[i];
         attachments.push_back(attachment);
     }
@@ -163,7 +170,7 @@ void RasterizerPipelineVulkan::createRenderPass(GraphicsState& state)
     colorReferences.reserve(state.colorFormats.size());
     for (uint32_t i = 0; i < state.colorFormats.size(); ++i)
     {
-        colorReferences.push_back({i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+        colorReferences.push_back({i, state.finalLayouts[i]});
     }
 
     // 配置深度附件引用
@@ -404,12 +411,19 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::capture(uint16_t width, uint16_t height, RasterPass pass)
+std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
 {
-    if (!width || !height) throw std::invalid_argument("Raster batch requires a nonzero extent");
+    if (!extent) {
+        const auto color = std::find_if(renderTargets.begin(), renderTargets.end(), [](const HardwareImage& image) { return bool(image); });
+        const HardwareImage& target = color != renderTargets.end() ? *color : depthImage;
+        if (!target || (color == renderTargets.end() && !explicitDepthImage))
+            throw std::invalid_argument("An inferred raster extent requires a bound color or depth image");
+        extent = legacyImageFromId(target.getImageID())->imageSize;
+    }
+    const auto imageSize = *extent;
+    if (!imageSize.x || !imageSize.y) throw std::invalid_argument("Raster batch requires a nonzero extent");
     auto batch = std::make_shared<Batch>();
     batch->pipeline = shared_from_this();
-    const ktm::uvec2 imageSize{width, height};
     batch->imageSize = imageSize;
     batch->state = rasterState;
     batch->supportsIndirectFirstInstance = getHardwareContext().getMainDevice()->deviceManager
@@ -418,8 +432,8 @@ std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::captu
     batch->renderTargets = renderTargets;
     if (!explicitDepthImage) {
         const auto* depth = depthImage ? legacyImageFromId(depthImage.getImageID()) : nullptr;
-        if (!depth || depth->imageSize.x != width || depth->imageSize.y != height) {
-            HardwareImageCreateInfo info(width, height, ImageFormat::D32_FLOAT);
+        if (!depth || depth->imageSize != imageSize) {
+            HardwareImageCreateInfo info(imageSize.x, imageSize.y, ImageFormat::D32_FLOAT);
             info.usage = ImageUsage::DepthImage;
             info.arrayLayers = multiviewCount;
             depthImage = HardwareImage(info);
@@ -470,7 +484,7 @@ void RasterizerPipelineVulkan::prepareFramebuffer(Batch& batch)
         auto* image = legacyImageFromId(target.getImageID());
         checkExtent(image);
         formats.push_back(image->imageFormat);
-        finalLayouts.push_back((image->imageUsage & (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        finalLayouts.push_back(colorAttachmentLayout(*image));
         views.push_back(attachmentView(image));
     }
     checkExtent(depth);
@@ -691,7 +705,7 @@ void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const Resour
             range.layerCount = pipeline->multiviewCount;
             result.image(*image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                          VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, range);
+                         colorAttachmentLayout(*image), range);
         }
     if (depthImage)
     {

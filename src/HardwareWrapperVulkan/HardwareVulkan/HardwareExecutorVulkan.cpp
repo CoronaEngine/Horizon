@@ -74,9 +74,16 @@ void HardwareExecutorVulkan::waitForAllDeferredResources()
 {
     if (deferredReleaseQueue.empty()) return;
     // Queue order and explicit cross-queue waits link this executor's submissions.
-    coronaHardwareCheck(waitTimeline(hardwareContext->deviceManager.getLogicalDevice(),
-                                     lastSubmission.queue->timelineSemaphore, lastSubmission.value));
-    lastCompleted = lastSubmission;
+    const auto device = hardwareContext->deviceManager.getLogicalDevice();
+    const auto timeline = lastSubmission.queue->timelineSemaphore;
+    uint64_t completed{};
+    coronaHardwareCheck(vkGetSemaphoreCounterValue(device, timeline, &completed));
+    if (completed < lastSubmission.value)
+    {
+        coronaHardwareCheck(waitTimeline(device, timeline, lastSubmission.value));
+        completed = lastSubmission.value;
+    }
+    lastCompleted = {lastSubmission.queue, completed};
     deferredReleaseQueue.clear();
 }
 

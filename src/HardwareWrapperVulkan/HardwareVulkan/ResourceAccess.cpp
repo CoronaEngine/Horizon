@@ -1,8 +1,19 @@
 #include "ResourceAccess.h"
 #include <algorithm>
+#include <cstddef>
+#include <memory_resource>
 
 namespace {
 constexpr VkAccessFlags2 shaderAccess = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+// GENERAL is valid for both color output and shader access. An overlapping
+// attachment and another concrete role still require feedback-loop support.
+bool incompatibleImageUses(VkImageLayout a, VkAccessFlags2 accessA, VkImageLayout b, VkAccessFlags2 accessB)
+{
+    if (a == VK_IMAGE_LAYOUT_UNDEFINED || b == VK_IMAGE_LAYOUT_UNDEFINED) return false;
+    constexpr auto colorAccess = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    return a != b || bool(accessA & colorAccess) != bool(accessB & colorAccess);
+}
+
 VkAccessFlags2 applyDeclaration(VkAccessFlags2 access, VkAccessFlags2 declared)
 {
     return declared ? (access & ~shaderAccess) | declared : access;
@@ -109,7 +120,7 @@ ResolvedResourceUse& ResourceAccessList::image(ResourceManager::ImageHardwareWra
     auto& previous = uses[index];
     if (layout != VK_IMAGE_LAYOUT_UNDEFINED)
     {
-        if (previous.layout != VK_IMAGE_LAYOUT_UNDEFINED && previous.layout != layout)
+        if (incompatibleImageUses(previous.layout, previous.access, layout, access))
             throw std::invalid_argument("An invocation uses one image range with incompatible layouts");
         previous.image = &value;
         previous.layout = layout;
@@ -121,7 +132,7 @@ ResolvedResourceUse& ResourceAccessList::image(ResourceManager::ImageHardwareWra
 
 void ResourceBarrierPlanner::invalidate()
 {
-    buffers.clear(); images.clear(); boundary = true;
+    buffers.clear(); images.clear(); initialImageReads.reset(); boundary = true;
 }
 
 bool ResourceBarrierPlanner::dependency(AccessState& state, VkPipelineStageFlags2 stages, VkAccessFlags2 access,
@@ -151,7 +162,8 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
     // The first barrier also orders prior submissions on this queue, including opaque commands.
     if (!boundary && accesses.uses.empty() && !accesses.conservative) return;
     const bool isolated = accesses.conservative || (finalCommand && boundary);
-    if (boundary || accesses.conservative)
+    const bool firstAccess = boundary || accesses.conservative;
+    if (firstAccess)
     {
         VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
         barrier.srcStageMask = barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
@@ -164,7 +176,7 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
             if (stages) barrier.dstStageMask = stages;
         }
         result.memoryBarriers.push_back(barrier);
-        buffers.clear(); images.clear();
+        buffers.clear(); images.clear(); initialImageReads.reset();
         // Keep the original boundary after a leading command with no declared accesses.
         boundary = accesses.uses.empty() && !accesses.conservative;
     }
@@ -178,7 +190,11 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
         VkPipelineStageFlags2 declaredStages;
         VkAccessFlags2 declaredAccess;
     };
-    std::map<ImageKey, ImageUse> imageUses;
+    // The per-command merge usually covers just a few attachments. Larger
+    // sets spill to the heap and all nodes expire together after this plan.
+    alignas(std::max_align_t) std::byte storage[1024];
+    std::pmr::monotonic_buffer_resource scratch(storage, sizeof(storage), std::pmr::new_delete_resource());
+    std::pmr::map<ImageKey, ImageUse> imageUses(&scratch);
     for (const auto& use : accesses.uses)
     {
         if (!use.image)
@@ -202,9 +218,12 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
             }
             continue;
         }
-        // A sampled cubemap can cover dozens of subresources. At a synchronized
-        // boundary whose history is discarded there is no per-subresource state to keep.
-        if (isolated && (use.range.levelCount > 1 || use.range.layerCount > 1) &&
+        // The submission boundary already covers an isolated upload or blit.
+        // Larger first reads (such as cubemaps) can also share one history entry.
+        const auto access = use.layout == VK_IMAGE_LAYOUT_UNDEFINED ? use.declaredAccess
+            : (use.access & shaderAccess) ? applyDeclaration(use.access, use.declaredAccess) : use.access;
+        if (firstAccess && (isolated || !(access & writes)) &&
+            ((isolated && accesses.uses.size() <= 2) || use.range.levelCount > 1 || use.range.layerCount > 1) &&
             std::none_of(accesses.uses.begin(), accesses.uses.end(), [&](const auto& other) {
                 return &other != &use && other.image && other.image->imageHandle == use.image->imageHandle;
             }))
@@ -216,6 +235,13 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
                     unchanged = imageSubresourceLayout(*use.image, mip, layer) == layout;
             if (unchanged)
             {
+                if (!isolated) {
+                    if (!initialImageReads) initialImageReads.emplace();
+                    auto& read = (*initialImageReads)[use.image->imageHandle];
+                    read.range = use.range;
+                    read.state.readerStages = use.stages | use.declaredStages;
+                    read.state.readerAccess = access;
+                }
                 use.image->imageLayout = layout;
                 continue;
             }
@@ -228,8 +254,7 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
                                                                            use.declaredStages, use.declaredAccess});
                 if (!inserted)
                 {
-                    if (entry->second.layout != VK_IMAGE_LAYOUT_UNDEFINED && use.layout != VK_IMAGE_LAYOUT_UNDEFINED &&
-                        entry->second.layout != use.layout)
+                    if (incompatibleImageUses(entry->second.layout, entry->second.access, use.layout, use.access))
                         throw std::invalid_argument("Overlapping image views require incompatible invocation layouts");
                     if (use.layout != VK_IMAGE_LAYOUT_UNDEFINED)
                     {
@@ -258,7 +283,17 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
         const auto [handle, aspect, mip, layer] = key;
         VkPipelineStageFlags2 sourceStages{};
         VkAccessFlags2 sourceAccess{};
-        const bool hazard = dependency(images[key], use.stages, use.access, sourceStages, sourceAccess);
+        auto [history, inserted] = images.try_emplace(key);
+        if (inserted && initialImageReads) {
+            const auto initial = initialImageReads->find(handle);
+            if (initial != initialImageReads->end()) {
+                const auto& range = initial->second.range;
+                if ((range.aspectMask & aspect) && mip - range.baseMipLevel < range.levelCount &&
+                    layer - range.baseArrayLayer < range.layerCount)
+                    history->second = initial->second.state;
+            }
+        }
+        const bool hazard = dependency(history->second, use.stages, use.access, sourceStages, sourceAccess);
         const auto oldLayout = imageSubresourceLayout(*use.image, mip, layer);
         if (hazard || oldLayout != use.layout)
         {

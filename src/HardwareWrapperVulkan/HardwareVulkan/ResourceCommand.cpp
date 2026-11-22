@@ -134,6 +134,17 @@ void CopyImageCommand::resolveResourceUses(std::span<const ResourceUse>, Resourc
 }
 
 // CopyBufferToImageCommand implementations
+namespace {
+VkImageLayout transferLayout(const ResourceManager::ImageHardwareWrap& image, uint32_t layers, VkImageLayout optimal)
+{
+    // A full copy can use the descriptor layout throughout. Partial copies still
+    // restore the full view so that every mip and layer can be sampled afterwards.
+    const bool entireView = image.mipLevels == 1 && layers == image.arrayLayers;
+    const bool hasDescriptor = image.imageUsage & (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+    return entireView && hasDescriptor ? VK_IMAGE_LAYOUT_GENERAL : optimal;
+}
+}
+
 CopyBufferToImageCommand::CopyBufferToImageCommand(ResourceManager::BufferHardwareWrap &srcBuf,
                                                    ResourceManager::ImageHardwareWrap &dstImg,
                                                    uint32_t mip, uint32_t layer, VkDeviceSize offset, uint32_t layers)
@@ -157,7 +168,7 @@ void CopyBufferToImageCommand::commitCommand(HardwareExecutorVulkan &hardwareExe
                           std::max(1u, dstImage.imageSize.y >> mipLevel), 1};
     vkCmdCopyBufferToImage(hardwareExecutor.currentRecordQueue->commandBuffer,
                            srcBuffer.bufferHandle, dstImage.imageHandle,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                           dstImage.imageLayout, 1, &region);
 
     if ((dstImage.imageUsage & (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) != 0 &&
         dstImage.imageLayout != VK_IMAGE_LAYOUT_GENERAL)
@@ -175,7 +186,8 @@ void CopyBufferToImageCommand::resolveResourceUses(std::span<const ResourceUse>,
 {
     result.buffer(srcBuffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     result.image(dstImage, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, {dstImage.aspectMask, dstImage.baseMipLevel + mipLevel, 1, dstImage.baseArrayLayer + imageLayer, layerCount});
+        transferLayout(dstImage, layerCount, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL),
+        {dstImage.aspectMask, dstImage.baseMipLevel + mipLevel, 1, dstImage.baseArrayLayer + imageLayer, layerCount});
 }
 
 // CopyImageToBufferCommand implementations
@@ -200,7 +212,7 @@ void CopyImageToBufferCommand::commitCommand(HardwareExecutorVulkan &hardwareExe
     region.imageExtent = {std::max(1u, srcImage.imageSize.x >> mipLevel),
                           std::max(1u, srcImage.imageSize.y >> mipLevel), 1};
     vkCmdCopyImageToBuffer(hardwareExecutor.currentRecordQueue->commandBuffer,
-                           srcImage.imageHandle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           srcImage.imageHandle, srcImage.imageLayout,
                            dstBuffer.bufferHandle, 1, &region);
 
     if ((srcImage.imageUsage & (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)) != 0 &&
@@ -218,6 +230,7 @@ void CopyImageToBufferCommand::commitCommand(HardwareExecutorVulkan &hardwareExe
 void CopyImageToBufferCommand::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
 {
     result.image(srcImage, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, {srcImage.aspectMask, srcImage.baseMipLevel + mipLevel, 1, srcImage.baseArrayLayer + imageLayer, layerCount});
+        transferLayout(srcImage, layerCount, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
+        {srcImage.aspectMask, srcImage.baseMipLevel + mipLevel, 1, srcImage.baseArrayLayer + imageLayer, layerCount});
     result.buffer(dstBuffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
