@@ -157,6 +157,21 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 
 重新配置 `ocarina-tests-debug` 后，`test-core-my-check` 会出现在 target 列表中；不需要修改 Conan。
 
+### Ocarina DSL 示例
+
+`examples/example_ocarina_dsl` 是一个完整的 `C++ EDSL -> Slang -> Vulkan Compute -> PNG`
+示例：它构建一个光线步进 kernel，保存后端生成的 Slang 源码，并把它调度到
+Vulkan 写入 storage texture，最后回读为 PNG。示例并入现有的 `HorizonExamples`
+模式体系，构建时同时启用 examples 和 Ocarina 即可：
+
+```powershell
+python build_tools/dev.py build HorizonExamples --configuration RelWithDebInfo --with-ocarina
+.\build\conan\examples\relwithdebinfo\bin\RelWithDebInfo\HorizonExamples.exe ocarina_dsl
+```
+
+详细说明见
+[`examples/example_ocarina_dsl/README.md`](examples/example_ocarina_dsl/README.md)。
+
 ### Ocarina 运行时光追模式
 
 每次创建 shader 时，`ShaderCompileOptions::trace_mode` 决定这次编译请求。已有的 `compile(kernel, name)` 和 `async_compile` 调用默认使用 `Auto`。没有实际 trace 调用的 kernel 始终生成普通 compute shader。对带有 `trace_closest` 或 `trace_occlusion` 的 kernel（包括 callable 中的调用），`Auto` 优先选择设备已启用的 ray query。只有设备缺少 query、具备原生光追管线且 kernel 语义兼容时，才选择 raygen 管线。

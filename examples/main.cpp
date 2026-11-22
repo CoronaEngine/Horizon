@@ -24,6 +24,10 @@
 #include "example_edsl_rsm/example_edsl_rsm.h"
 #include "example_edsl_sponza/example_edsl_sponza.h"
 
+#ifdef HORIZON_OCARINA_EXAMPLE_ENABLED
+#include "example_ocarina_dsl/example_ocarina_dsl.h"
+#endif
+
 #include "horizon/core/logging.h"
 
 #include <ctime>
@@ -62,6 +66,20 @@ int main(int argc, char **argv)
         run_example_baseline();
         return 0;
     }
+
+#ifdef HORIZON_OCARINA_EXAMPLE_ENABLED
+    if (mode == "ocarina_dsl")
+    {
+        return run_example_ocarina_dsl(argc, argv);
+    }
+#else
+    if (mode == "ocarina_dsl")
+    {
+        std::cerr << "ocarina_dsl example requires HORIZON_BUILD_OCARINA=ON; rebuild "
+                     "HorizonExamples with --with-ocarina.\n";
+        return 1;
+    }
+#endif
 
     if (mode == "edsl")
     {

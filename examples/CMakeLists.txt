@@ -31,6 +31,10 @@ set(HORIZON_EXAMPLE_SOURCES
     example_edsl_compile_comparison/example_edsl_compile_comparison.cpp
 )
 
+# example_ocarina_dsl/example_ocarina_dsl.cpp is appended by
+# horizon_ocarina.cmake when HORIZON_BUILD_OCARINA and HorizonExamples are both
+# enabled; Ocarina targets are defined after this directory.
+
 if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
     list(APPEND HORIZON_EXAMPLE_SOURCES
         example_baseline/baseline_hotfix_test.cpp)
@@ -67,6 +71,7 @@ set(HORIZON_EXAMPLE_HEADERS
     example_edsl_sponza/example_edsl_sponza.h
     example_edsl_compile/example_edsl_compile.h
     example_edsl_compile_comparison/example_edsl_compile_comparison.h
+    example_ocarina_dsl/example_ocarina_dsl.h
 )
 
 if(HORIZON_ENABLE_EXAMPLE_HOTFIX)
