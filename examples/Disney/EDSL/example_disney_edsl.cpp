@@ -1,7 +1,6 @@
 #include "Horizon.h"
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
-#include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
 
 #include <GLFW/glfw3.h>
@@ -90,6 +89,7 @@ void run_example_disney_edsl()
 
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
+    HardwareExecutor render_executor;
     HardwareImage radiance, irradiance;
     for (const auto& [filename, cubemap] : {std::pair{"bolonga_lod.dds", &radiance},
                                            std::pair{"bolonga_irr.dds", &irradiance}}) {
@@ -120,12 +120,9 @@ void run_example_disney_edsl()
         const uint32_t height = read_u32(12);
         const uint32_t width = read_u32(16);
         const uint32_t mip_count = std::max(1u, read_u32(28));
-        const uint32_t fourcc = read_u32(84);
-        const uint32_t caps2 = read_u32(112);
-
-        if (fourcc != fourcc_dx10 || read_u32(128) != dxgi_format_rgba16_float)
+        if (read_u32(84) != fourcc_dx10 || read_u32(128) != dxgi_format_rgba16_float)
             throw std::runtime_error("Expected DX10 RGBA16F DDS: " + path.string());
-        if ((caps2 & caps2_cubemap) == 0 || width != height)
+        if ((read_u32(112) & caps2_cubemap) == 0 || width != height)
             throw std::runtime_error("Expected cubemap DDS: " + path.string());
 
         HardwareImageCreateInfo desc(width, height, ImageFormat::RGBA16_FLOAT);
@@ -133,24 +130,22 @@ void run_example_disney_edsl()
         desc.cube = true;
         desc.linearFiltering = true;
         desc.mipLevels = static_cast<int>(mip_count);
-        desc.usage = ImageUsage::SampledImage;
         *cubemap = HardwareImage(desc);
         const size_t payload_size = bytes.size() - dx10_payload_offset;
         HardwareBuffer staging(static_cast<uint32_t>(payload_size), BufferUsage::StorageBuffer,
                                bytes.data() + dx10_payload_offset);
-        HardwareExecutor executor;
         uint64_t offset = 0;
         for (uint32_t face = 0; face < 6; ++face) {
             for (uint32_t mip = 0; mip < mip_count; ++mip) {
                 const uint32_t dim = std::max(1u, width >> mip);
                 const uint64_t mip_bytes = static_cast<uint64_t>(dim) * dim * 8;
                 if (offset + mip_bytes > payload_size) throw std::runtime_error("Truncated DDS payload");
-                executor << staging.copyTo(*cubemap, offset, face, mip);
+                render_executor << staging.copyTo(*cubemap, offset, face, mip);
                 offset += mip_bytes;
             }
         }
-        executor.commit().waitForDeferredResources();
     }
+    render_executor.commit().waitForDeferredResources();
 
     // Each triangle-strip vertex also supplies the sphere's object-space normal.
     RasterGeometry sphere;
@@ -255,6 +250,7 @@ void run_example_disney_edsl()
     using EmbeddedShader::GPU_IF_BRANCH;
     using EmbeddedShader::abs;
     using EmbeddedShader::clamp;
+    using EmbeddedShader::cross;
     using EmbeddedShader::dot;
     using EmbeddedShader::exp2;
     using EmbeddedShader::max;
@@ -264,9 +260,8 @@ void run_example_disney_edsl()
     using EmbeddedShader::pow;
     using EmbeddedShader::sqrt;
 
-
-    EmbeddedShader::Float4x4 proj_view, envMtx;
-    Float4 camPos, flags, lightDir, lightCol, exposurePad;
+    EmbeddedShader::Float4x4 proj_view;
+    Float4 camPos, lightDir;
     EmbeddedShader::TextureCube<ktm::fvec4> texCube, texCubeIrr;
     EmbeddedShader::Texture2D<ktm::fvec4> final_output;
     bool directEnabled = true;
@@ -285,7 +280,6 @@ void run_example_disney_edsl()
         return out;
     };
 
-    // x: doDiffuse, y: doSpecular, z: doDiffuseIbl, w: doSpecularIbl
     auto edsl_fragment = [&](EmbeddedShader::Aggregate<DisneyEdslVaryings> in) {
         Float4 per_mat0;
         per_mat0 = EmbeddedShader::rasterDrawParameter<ktm::fvec4>(16);
@@ -298,12 +292,6 @@ void run_example_disney_edsl()
         Float3 V = normalize(in->v_view);
         Float3 L = normalize(Float3(lightDir->xyz()));
 
-        const auto cross = [](Float3 a, Float3 b) {
-            return Float3 { EmbeddedShader::Ast::AST::callFunc(
-                "cross", EmbeddedShader::Ast::AST::createType<ktm::fvec3>(),
-                EmbeddedShader::Ast::Node::accessAll({EmbeddedShader::proxy_wrap(a), EmbeddedShader::proxy_wrap(b)},
-                                                      EmbeddedShader::Ast::AccessPermissions::ReadOnly)) };
-        };
         Float3 X;
         X = normalize(cross(N, Float3(Float(0.0), Float(1.0), Float(0.0))));
         $IF(dot(X, X) < Float(1e-4))
@@ -325,17 +313,15 @@ void run_example_disney_edsl()
         Float clearcoatGloss = EmbeddedShader::rasterDrawParameter<float>(28);
 
         const auto toLinear = [](Float3 rgb) {
-            return pow(abs(rgb), Float3(Float(2.2), Float(2.2), Float(2.2)));
+            return pow(abs(rgb), Float3(2.2f));
         };
         Float3 Cdlin = toLinear(baseColor);
         Float Cdlum = dot(Cdlin, Float3(Float(0.3), Float(0.6), Float(0.1)));
-        Float3 Ctint;
-        Ctint = Float3(Float(1.0), Float(1.0), Float(1.0));
+        Float3 Ctint(1.0f);
         $IF(Cdlum > Float(0.0)) { Ctint = Cdlin / Cdlum; };
         Float3 Cspec0 =
-            mix(specular * Float(0.08) * mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, specularTint),
-                Cdlin, metallic);
-        Float3 Csheen = mix(Float3(Float(1.0), Float(1.0), Float(1.0)), Ctint, sheenTint);
+            mix(specular * Float(0.08) * mix(Float3(1.0f), Ctint, specularTint), Cdlin, metallic);
+        Float3 Csheen = mix(Float3(1.0f), Ctint, sheenTint);
 
         Float NdotV = clamp(dot(N, V), Float(0.0), Float(1.0));
         Float NdotVraw = dot(N, V);
@@ -345,12 +331,10 @@ void run_example_disney_edsl()
         };
         Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
 
-        Float3 direct;
-        direct = Float3(Float(0.0), Float(0.0), Float(0.0));
+        Float3 direct(0.0f);
         $IF(directEnabled)
         {
-            Float3 brdf;
-            brdf = Float3(Float(0.0), Float(0.0), Float(0.0));
+            Float3 brdf(0.0f);
             Float NdotL = dot(N, L);
             $IF(NdotL >= Float(0.0))
             {
@@ -378,7 +362,7 @@ void run_example_disney_edsl()
                         (Float(3.14159265358979323846) * ax * ay *
                          sqr(sqr(dot(H, X) / ax) + sqr(dot(H, Y) / ay) + NdotH * NdotH));
                     Float FH = schlickFresnel(LdotH);
-                    Float3 Fs = mix(Cspec0, Float3(Float(1.0), Float(1.0), Float(1.0)), FH);
+                    Float3 Fs = mix(Cspec0, Float3(1.0f), FH);
                     const auto smithGGXAniso = [&](Float n, Float x, Float y) {
                         return Float(1.0) / (n + sqrt(sqr(x * ax) + sqr(y * ay) + sqr(n)));
                     };
@@ -410,19 +394,15 @@ void run_example_disney_edsl()
                 };
             };
 
-            Float NdotLclamped = clamp(dot(N, L), Float(0.0), Float(1.0));
-            Float3 lit = brdf * NdotLclamped * Float3(lightCol->xyz());
-            Float enable = max(flags->x + flags->y, Float(0.0));
-            direct = lit * enable;
+            direct = brdf * clamp(NdotL, Float(0.0), Float(1.0)) * Float(2.0);
         };
 
-        Float3 indirect;
-        indirect = Float3(0.0f);
+        Float3 indirect(0.0f);
         $IF(iblEnabled)
         {
             Float mip = roughness * Float(5.0);
             Float3 vr = normalize(Float(2.0) * NdotVraw * N - V);
-            Float3 reflected = normalize(Float3(mul(envMtx, Float4(vr, Float(0.0)))->xyz()));
+            Float3 reflected = normalize(vr);
             Float ax = abs(reflected->x), ay = abs(reflected->y), az = abs(reflected->z);
             Float major = max(max(ax, ay), az);
             Float scale = Float(1.0) - exp2(mip) / Float(256.0);
@@ -431,29 +411,22 @@ void run_example_disney_edsl()
             $IF(ax != major) { cubeR->x = reflected->x * scale; };
             $IF(ay != major) { cubeR->y = reflected->y * scale; };
             $IF(az != major) { cubeR->z = reflected->z * scale; };
-            Float3 cubeN = normalize(Float3(mul(envMtx, Float4(N, Float(0.0)))->xyz()));
 
             Float3 radiance = toLinear(Float3(EmbeddedShader::textureLod(texCube, cubeR, mip)->xyz()));
-            Float3 irradiance = toLinear(Float3(EmbeddedShader::texture(texCubeIrr, cubeN)->xyz()));
+            Float3 irradiance = toLinear(Float3(EmbeddedShader::texture(texCubeIrr, normalize(N))->xyz()));
 
             Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
-            Float3 envDiffuse = diffuseAlbedo * irradiance * flags->z;
-            Float3 envSpecular = Cspec0 * radiance * envFresnel * flags->w;
-            indirect = envDiffuse + envSpecular;
+            indirect = diffuseAlbedo * irradiance + Cspec0 * radiance * envFresnel;
         }
 
-        Float3 color = (direct + indirect) * exp2(exposurePad->x);
-        Float3 mapped = max(Float3(Float(0.0), Float(0.0), Float(0.0)),
-                            color - Float3(Float(0.004), Float(0.004), Float(0.004)));
-        Float3 filmic = (mapped * (Float(6.2) * mapped + Float3(Float(0.5), Float(0.5), Float(0.5)))) /
-                        (mapped * (Float(6.2) * mapped + Float3(Float(1.7), Float(1.7), Float(1.7))) +
-                         Float3(Float(0.06), Float(0.06), Float(0.06)));
+        Float3 mapped = max(Float3(0.0f), (direct + indirect) - Float3(0.004f));
+        Float3 filmic = (mapped * (Float(6.2) * mapped + Float3(0.5f))) /
+                        (mapped * (Float(6.2) * mapped + Float3(1.7f)) + Float3(0.06f));
         final_output << Float4(filmic, Float(1.0));
     };
-    RasterizerPipeline<> rasterizer(edsl_vertex, edsl_fragment, 1, EmbeddedShader::CompilerOption{.enableMatrixColumnMajor = true});
+    RasterizerPipeline<> rasterizer(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
-    HardwareExecutor render_executor;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const glm::vec3 target(0.0f);
@@ -462,15 +435,10 @@ void run_example_disney_edsl()
     const glm::vec3 direction(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
     const auto eye = target + direction * 13.5f;
     const auto view = glm::lookAtLH(eye, target, up);
-    const glm::vec4 camera_position(eye, 1.0f);
-    const glm::vec4 light_direction(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
     texCube = radiance;
     texCubeIrr = irradiance;
-    camPos = std::bit_cast<ktm::fvec4>(camera_position);
-    lightDir = std::bit_cast<ktm::fvec4>(light_direction);
-    lightCol = std::bit_cast<ktm::fvec4>(glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
-    envMtx = std::bit_cast<ktm::fmat4x4>(glm::mat4(1.0f));
-    exposurePad = std::bit_cast<ktm::fvec4>(glm::vec4(0.0f));
+    camPos = std::bit_cast<ktm::fvec4>(glm::vec4(eye, 1.0f));
+    lightDir = std::bit_cast<ktm::fvec4>(glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f));
 
     int width = 0, height = 0;
     double start = 0.0;
@@ -500,11 +468,10 @@ void run_example_disney_edsl()
         const int phase = static_cast<int>(std::fmod(seconds, 6.0) / 1.5);
         directEnabled = (phase & 1) == 0;
         iblEnabled = (phase & 2) == 0;
-        flags = std::bit_cast<ktm::fvec4>(glm::vec4(directEnabled, directEnabled, iblEnabled, iblEnabled));
         auto batch = rasterizer.beginBatch();
 
         for (const auto& draw : draws)
-            batch.draw(sphere, {}, draw);
+            batch.draw(sphere, draw);
 
         render_executor << std::move(batch);
         if (offscreen) {
@@ -515,22 +482,21 @@ void run_example_disney_edsl()
         if (remaining_frames > 0 && --remaining_frames == 0) break;
     }
 
-    render_executor.waitForDeferredResources();
     if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
         const std::filesystem::path path(filename);
         const uint32_t byte_count = width * height * 8;
         HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
-        HardwareExecutor copy;
-        copy.wait(render_executor);
-        copy << final_output_image.copyTo(readback);
-        copy.commit().waitForDeferredResources();
+        render_executor << final_output_image.copyTo(readback);
+        render_executor.commit().waitForDeferredResources();
         std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
         if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
         std::vector<unsigned char> rgba(half.size());
         for (size_t i = 0; i < half.size(); ++i)
             rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
         if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        if (!stbi_write_png(path.string().c_str(), width, height, 4, rgba.data(), width * 4))
+        if (!stbi_write_png(filename, width, height, 4, rgba.data(), width * 4))
             throw std::runtime_error("Capture PNG write failed");
+    } else {
+        render_executor.waitForDeferredResources();
     }
 }

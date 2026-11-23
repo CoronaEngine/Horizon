@@ -163,9 +163,6 @@ void run_example_drawstress_ocarina() {
     ocarina::vector<uint32_t> pixels;
     ocarina::Buffer<uint32_t> output;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-    HardwareBuffer staging;
-    HardwareImage image;
-    HardwareExecutor copy;
     const auto eye = make_float3(0.f, 0.f, -35.f);
     double start = 0.0;
     uint64_t frame = 0;
@@ -182,9 +179,6 @@ void run_example_drawstress_ocarina() {
             height = h;
             pixels.resize(static_cast<size_t>(width) * height);
             output = device.create_buffer<uint32_t>(pixels.size());
-            copy.waitForDeferredResources();
-            staging = HardwareBuffer(pixels.size() * sizeof(uint32_t), BufferUsage::StorageBuffer);
-            image = HardwareImage(width, height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
         }
         if (frame == 0) start = glfwGetTime();
         const float time = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
@@ -207,12 +201,7 @@ void run_example_drawstress_ocarina() {
         }
         stream << shader(eye, output).dispatch(width, height) << output.download(pixels.data()) << synchronize()
                << commit();
-        // The previous present may still be reading the upload buffer on another adapter.
-        copy.waitForDeferredResources();
-        if (!staging.copyFromData(pixels.data(), pixels.size() * sizeof(uint32_t)))
-            throw std::runtime_error("Ray image upload failed");
-        copy << staging.copyTo(image);
-        const bool shown = display.present(copy, image);
+        const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
         ++frame;
         const bool frame_limit_reached = shown && remaining_frames > 0 && --remaining_frames == 0;
         if (frame_limit_reached || glfwWindowShouldClose(window.get())) {
@@ -225,5 +214,4 @@ void run_example_drawstress_ocarina() {
             break;
         }
     }
-    copy.waitForDeferredResources();
 }

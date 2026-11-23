@@ -83,6 +83,7 @@ void run_example_disney_slang()
 
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
+    HardwareExecutor render_executor;
     HardwareImage radiance, irradiance;
     for (const auto& [filename, cubemap] : {std::pair{"bolonga_lod.dds", &radiance},
                                            std::pair{"bolonga_irr.dds", &irradiance}}) {
@@ -113,12 +114,9 @@ void run_example_disney_slang()
         const uint32_t height = read_u32(12);
         const uint32_t width = read_u32(16);
         const uint32_t mip_count = std::max(1u, read_u32(28));
-        const uint32_t fourcc = read_u32(84);
-        const uint32_t caps2 = read_u32(112);
-
-        if (fourcc != fourcc_dx10 || read_u32(128) != dxgi_format_rgba16_float)
+        if (read_u32(84) != fourcc_dx10 || read_u32(128) != dxgi_format_rgba16_float)
             throw std::runtime_error("Expected DX10 RGBA16F DDS: " + path.string());
-        if ((caps2 & caps2_cubemap) == 0 || width != height)
+        if ((read_u32(112) & caps2_cubemap) == 0 || width != height)
             throw std::runtime_error("Expected cubemap DDS: " + path.string());
 
         HardwareImageCreateInfo desc(width, height, ImageFormat::RGBA16_FLOAT);
@@ -126,24 +124,22 @@ void run_example_disney_slang()
         desc.cube = true;
         desc.linearFiltering = true;
         desc.mipLevels = static_cast<int>(mip_count);
-        desc.usage = ImageUsage::SampledImage;
         *cubemap = HardwareImage(desc);
         const size_t payload_size = bytes.size() - dx10_payload_offset;
         HardwareBuffer staging(static_cast<uint32_t>(payload_size), BufferUsage::StorageBuffer,
                                bytes.data() + dx10_payload_offset);
-        HardwareExecutor executor;
         uint64_t offset = 0;
         for (uint32_t face = 0; face < 6; ++face) {
             for (uint32_t mip = 0; mip < mip_count; ++mip) {
                 const uint32_t dim = std::max(1u, width >> mip);
                 const uint64_t mip_bytes = static_cast<uint64_t>(dim) * dim * 8;
                 if (offset + mip_bytes > payload_size) throw std::runtime_error("Truncated DDS payload");
-                executor << staging.copyTo(*cubemap, offset, face, mip);
+                render_executor << staging.copyTo(*cubemap, offset, face, mip);
                 offset += mip_bytes;
             }
         }
-        executor.commit().waitForDeferredResources();
     }
+    render_executor.commit().waitForDeferredResources();
 
     // Each triangle-strip vertex also supplies the sphere's object-space normal.
     RasterGeometry sphere;
@@ -191,16 +187,12 @@ void run_example_disney_slang()
         float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
         float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
         float clearcoatGloss = 1.0f;
-        uint32_t texCubeIndex, texCubeIrrIndex;
     };
     static_assert(offsetof(DrawParameters, baseColorMetallic) == 16 * sizeof(uint32_t));
     static_assert(offsetof(DrawParameters, roughness) == 20 * sizeof(uint32_t));
     static_assert(offsetof(DrawParameters, anisotropic) == 24 * sizeof(uint32_t));
     static_assert(offsetof(DrawParameters, clearcoatGloss) == 28 * sizeof(uint32_t));
-    static_assert(offsetof(DrawParameters, texCubeIndex) == 29 * sizeof(uint32_t));
-    static_assert(offsetof(DrawParameters, texCubeIrrIndex) == 30 * sizeof(uint32_t));
-    const uint32_t cube_index = radiance.storeDescriptor();
-    const uint32_t irradiance_index = irradiance.storeDescriptor();
+    static_assert(sizeof(DrawParameters) == 29 * sizeof(uint32_t));
 
     constexpr int chart_row_count = 10, chart_col_count = 11;
     constexpr glm::vec3 chart_row_colors[chart_row_count] = {
@@ -226,8 +218,6 @@ void run_example_disney_slang()
             draw.model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f))
                        * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
             draw.baseColorMetallic = glm::vec4(chart_row_colors[row], 0.0f);
-            draw.texCubeIndex = cube_index;
-            draw.texCubeIrrIndex = irradiance_index;
             switch (row) {
             case 0: draw.subsurface = t; break;
             case 1: draw.baseColorMetallic.w = t; break;
@@ -251,7 +241,6 @@ void run_example_disney_slang()
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
     rasterizer.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
 
-    HardwareExecutor render_executor;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const glm::vec3 target(0.0f);
@@ -260,13 +249,10 @@ void run_example_disney_slang()
     const glm::vec3 direction(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
     const auto eye = target + direction * 13.5f;
     const auto view = glm::lookAtLH(eye, target, up);
-    const glm::vec4 camera_position(eye, 1.0f);
-    const glm::vec4 light_direction(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
-    rasterizer.vsp.camPos = camera_position;
-    rasterizer.vsp.lightDir = light_direction;
-    rasterizer.vsp.lightCol = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
-    rasterizer.vsp.envMtx = glm::mat4(1.0f);
-    rasterizer.vsp.exposurePad = glm::vec4(0.0f);
+    rasterizer.vsp.camPos = glm::vec4(eye, 1.0f);
+    rasterizer.vsp.lightDir = glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
+    rasterizer.vsp.texCubeIndex = radiance.storeDescriptor();
+    rasterizer.vsp.texCubeIrrIndex = irradiance.storeDescriptor();
 
     int width = 0, height = 0;
     double start = 0.0;
@@ -293,13 +279,11 @@ void run_example_disney_slang()
         if (frame == 0) start = glfwGetTime();
         const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
         ++frame;
-        const int phase = static_cast<int>(std::fmod(seconds, 6.0) / 1.5);
-        const float direct = (phase & 1) == 0, ibl = (phase & 2) == 0;
-        rasterizer.vsp.flags = glm::vec4(direct, direct, ibl, ibl);
+        rasterizer.vsp.phase = static_cast<uint32_t>(std::fmod(seconds, 6.0) / 1.5);
         auto batch = rasterizer.beginBatch();
 
         for (const auto& draw : draws)
-            batch.draw(sphere, {}, draw);
+            batch.draw(sphere, draw);
 
         render_executor << std::move(batch);
         if (offscreen) {
@@ -310,22 +294,21 @@ void run_example_disney_slang()
         if (remaining_frames > 0 && --remaining_frames == 0) break;
     }
 
-    render_executor.waitForDeferredResources();
     if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
         const std::filesystem::path path(filename);
         const uint32_t byte_count = width * height * 8;
         HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
-        HardwareExecutor copy;
-        copy.wait(render_executor);
-        copy << final_output_image.copyTo(readback);
-        copy.commit().waitForDeferredResources();
+        render_executor << final_output_image.copyTo(readback);
+        render_executor.commit().waitForDeferredResources();
         std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
         if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
         std::vector<unsigned char> rgba(half.size());
         for (size_t i = 0; i < half.size(); ++i)
             rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
         if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        if (!stbi_write_png(path.string().c_str(), width, height, 4, rgba.data(), width * 4))
+        if (!stbi_write_png(filename, width, height, 4, rgba.data(), width * 4))
             throw std::runtime_error("Capture PNG write failed");
+    } else {
+        render_executor.waitForDeferredResources();
     }
 }

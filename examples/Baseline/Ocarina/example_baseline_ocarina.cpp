@@ -217,9 +217,6 @@ void run_example_baseline_ocarina() {
     ocarina::vector<uint32_t> pixels;
     ocarina::Buffer<uint32_t> output;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-    HardwareBuffer staging;
-    HardwareImage image;
-    HardwareExecutor copy;
     double start = 0.0;
     uint64_t frame = 0;
     while (!glfwWindowShouldClose(window.get())) {
@@ -235,9 +232,6 @@ void run_example_baseline_ocarina() {
             height = h;
             pixels.resize(static_cast<size_t>(width) * height);
             output = device.create_buffer<uint32_t>(pixels.size());
-            copy.waitForDeferredResources();
-            staging = HardwareBuffer(pixels.size() * sizeof(uint32_t), BufferUsage::StorageBuffer);
-            image = HardwareImage(width, height, ImageFormat::RGBA8_SRGB, ImageUsage::SampledImage);
         }
         if (frame == 0) start = glfwGetTime();
         const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
@@ -248,12 +242,7 @@ void run_example_baseline_ocarina() {
         stream << shader(eye, output).dispatch(width, height) << output.download(pixels.data()) << synchronize()
                << commit();
 
-        // The presenter can run on a different GPU. Wait before overwriting its upload buffer.
-        copy.waitForDeferredResources();
-        if (!staging.copyFromData(pixels.data(), pixels.size() * sizeof(uint32_t)))
-            throw std::runtime_error("Ray image upload failed");
-        copy << staging.copyTo(image);
-        const bool shown = display.present(copy, image);
+        const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_SRGB);
         ++frame;
         const bool frame_limit_reached = shown && frames_remaining > 0 && --frames_remaining == 0;
         if (frame_limit_reached || glfwWindowShouldClose(window.get())) {
@@ -266,5 +255,4 @@ void run_example_baseline_ocarina() {
             break;
         }
     }
-    copy.waitForDeferredResources();
 }

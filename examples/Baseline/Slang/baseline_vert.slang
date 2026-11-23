@@ -51,7 +51,6 @@ struct ViewProj {
 
 struct VertexOutput {
     float4 position : SV_Position;
-    float3 color : COLOR0;
     float2 texCoord : TEXCOORD0;
     nointerpolation uint parameterWord : TEXCOORD1;
 };
@@ -66,7 +65,6 @@ VertexOutput main(uint vertexID : SV_VertexID, uint drawID : SV_DrawIndex) {
     VertexOutput output;
     float4x4 mvp = mul(mul(vp.proj, vp.view), draw->model);
     output.position = mul(mvp, float4(position, 1.0));
-    output.color = float3(1.0);
     output.texCoord = *(float2*)(vertex + 3);
     output.parameterWord = packet.parameterWord;
     return output;

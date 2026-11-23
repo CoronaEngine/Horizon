@@ -46,12 +46,11 @@ struct DisneyVaryings {
 
 struct DisneyPbrShared {
     column_major float4x4 proj_view;
-    column_major float4x4 envMtx;
     float4 camPos;
-    float4 flags;       // Diffuse, specular, diffuse IBL, specular IBL
     float4 lightDir;
-    float4 lightCol;
-    float4 exposurePad; // x: exposure
+    uint texCubeIndex;
+    uint texCubeIrrIndex;
+    uint phase;
 };
 
 struct DisneyDraw {
@@ -60,8 +59,6 @@ struct DisneyDraw {
     float4 mat1; // roughness, specular, specularTint, subsurface
     float4 mat2; // anisotropic, sheen, sheenTint, clearcoat
     float clearcoatGloss;
-    uint texCubeIndex;
-    uint texCubeIrrIndex;
 };
 
 DisneyDraw* getDisneyDraw(uint parameterWord) {

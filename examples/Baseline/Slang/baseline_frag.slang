@@ -15,7 +15,7 @@ struct DrawParameters {
 [[vk::binding(0, 0)]] Sampler2D<float4> combinedTextureSamplerHandles[];
 
 [shader("fragment")]
-void main(float3 color : COLOR0, float2 texCoord : TEXCOORD0,
+void main(float2 texCoord : TEXCOORD0,
           nointerpolation uint parameterWord : TEXCOORD1, out float4 outColor : SV_Target0) {
     DrawParameters* draw = (DrawParameters*)(drawRoot.parameters + parameterWord);
     outColor = combinedTextureSamplerHandles[draw->texIndex].Sample(texCoord);

@@ -1,6 +1,5 @@
 #include "Horizon.h"
 #include "Codegen/BuiltinVariate.h"
-#include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
 
 #include <GLFW/glfw3.h>
@@ -110,7 +109,8 @@ void run_example_drawstress_edsl()
     // Match the left-handed camera in the bgfx drawstress example.
     const glm::mat4 view = glm::lookAtLH(glm::vec3(0.0f, 0.0f, -35.0f), glm::vec3(0.0f),
                                          glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 view_projection{};
+    glm::vec4 axis_projection{};
+    std::array<glm::vec4, dim_max> translations;
 
     using EmbeddedShader::Float, EmbeddedShader::Float3, EmbeddedShader::Float4, EmbeddedShader::Uint;
     EmbeddedShader::Texture2D<ktm::fvec4> output;
@@ -123,7 +123,7 @@ void run_example_drawstress_edsl()
         return color;
     };
     const auto fragment_shader = [&](Float3 color) { output << Float4(color, Float(1)); };
-    RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, 1, EmbeddedShader::CompilerOption{.enableMatrixColumnMajor = true});
+    RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
 
     HardwareImage final_output_image;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
@@ -149,7 +149,12 @@ void run_example_drawstress_edsl()
             output = final_output_image;
             glm::mat4 projection = glm::perspectiveLH(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.
-            view_projection = projection * view;
+            const glm::mat4 view_projection = projection * view;
+            axis_projection = {view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w};
+            constexpr float step = 0.6f;
+            const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
+            for (int i = 0; i < dim; ++i)
+                translations[i] = view_projection * glm::vec4(base + glm::vec3(i * step), 1.0f);
         }
 
         if (frame == 0) start = glfwGetTime();
@@ -158,23 +163,17 @@ void run_example_drawstress_edsl()
         auto batch = rasterizer.beginBatch();
         batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(glm::mat4),
             [&](std::span<std::byte> destination) {
-                constexpr float step = 0.6f;
-                const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
-
                 // The fixed view faces +Z. Clip X and Y scale independently, and Z supplies both clip Z and W.
-                const glm::vec4 projection(view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w);
                 const auto projectAxis = [&](float x, float y, float z) {
-                    return projection * (0.25f * glm::vec4(x, y, z, z)) + view_projection[3] * 0.0f;
+                    return axis_projection * (0.25f * glm::vec4(x, y, z, z));
                 };
 
                 // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
                 std::array<glm::vec3, dim_max> sine, cosine;
-                std::array<glm::vec4, dim_max> translations;
                 for (int i = 0; i < dim; ++i) {
                     const glm::vec3 angles = elapsed_seconds + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
                     sine[i] = glm::sin(angles);
                     cosine[i] = glm::cos(angles);
-                    translations[i] = view_projection * glm::vec4(base + glm::vec3(i * step), 1.0f);
                 }
                 auto* dst = destination.data();
                 for (int zz = 0; zz < dim; ++zz) {
@@ -207,14 +206,11 @@ void run_example_drawstress_edsl()
         if (remaining_frames > 0 && --remaining_frames == 0) break;
     }
 
-    render_executor.waitForDeferredResources();
     if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
         const uint32_t byte_count = width * height * 8;
         HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
-        HardwareExecutor copy;
-        copy.wait(render_executor);
-        copy << final_output_image.copyTo(readback);
-        copy.commit().waitForDeferredResources();
+        render_executor << final_output_image.copyTo(readback);
+        render_executor.commit().waitForDeferredResources();
         std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
         if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
         std::vector<unsigned char> rgba(half.size());
@@ -224,5 +220,7 @@ void run_example_drawstress_edsl()
         if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
         if (!stbi_write_png(filename, width, height, 4, rgba.data(), width * 4))
             throw std::runtime_error("Capture PNG write failed");
+    } else {
+        render_executor.waitForDeferredResources();
     }
 }

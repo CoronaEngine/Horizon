@@ -382,10 +382,7 @@ void run_example_disney_ocarina() {
     int width = 0, height = 0;
     ocarina::vector<unsigned> pixels;
     ocarina::Buffer<unsigned> output;
-    HardwareBuffer staging;
-    HardwareImage image;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-    HardwareExecutor copy;
 
     const auto direction = glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f));
     const auto light = make_float3(direction.x, direction.y, direction.z);
@@ -407,9 +404,6 @@ void run_example_disney_ocarina() {
             height = h;
             pixels.resize(static_cast<size_t>(width) * height);
             output = device.create_buffer<uint32_t>(pixels.size());
-            copy.waitForDeferredResources();
-            staging = HardwareBuffer(pixels.size() * sizeof(pixels[0]), BufferUsage::StorageBuffer);
-            image = HardwareImage(width, height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
         }
         if (frame == 0) start = glfwGetTime();
         const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
@@ -418,12 +412,7 @@ void run_example_disney_ocarina() {
         stream << shader(eye, light, phase, output).dispatch(width, height)
                << output.download(pixels.data()) << ocarina::synchronize() << ocarina::commit();
 
-        // Wait for the previous present before overwriting its upload buffer.
-        copy.waitForDeferredResources();
-        if (!staging.copyFromData(pixels.data(), pixels.size() * sizeof(pixels[0])))
-            throw std::runtime_error("Ray image upload failed");
-        copy << staging.copyTo(image);
-        const bool shown = display.present(copy, image);
+        const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
         const bool frame_limit_reached = shown && remaining_frames > 0 && --remaining_frames == 0;
         if (frame_limit_reached || glfwWindowShouldClose(window.get())) {
             if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path) {
@@ -435,5 +424,4 @@ void run_example_disney_ocarina() {
             break;
         }
     }
-    copy.waitForDeferredResources();
 }

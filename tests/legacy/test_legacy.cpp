@@ -104,6 +104,16 @@ void test_cpu()
     displayer = std::move(movedDisplayer);
     expect(movedDisplayer.getDisplayerID() == 0 && displayer.getDisplayerID() == displayerID,
            "displayer move assignment transfers ownership");
+    expect(!displayer.present({}, 0, 0, ImageFormat::RGBA8_UNORM), "an empty pixel frame is skipped");
+    const std::array<uint32_t, 1> pixel{0xff00ff00u};
+    bool rejected = false;
+    try { displayer.present(pixel, 2, 1, ImageFormat::RGBA8_UNORM); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    expect(rejected, "pixel count must match the extent");
+    rejected = false;
+    try { displayer.present(pixel, 1, 1, ImageFormat::RGBA16_FLOAT); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    expect(rejected, "pixel presentation rejects a format incompatible with RGBA8 data");
     expect(!empty && !image, "default resources must be empty");
     expect(!CopyCommand{} && !image.copyFrom(nullptr), "default command and null upload must be empty");
 }
@@ -165,9 +175,9 @@ void test_raster_batch()
         HardwareBuffer vb(vertices, BufferUsage::VertexBuffer);
         RasterGeometry left{vb, HardwareBuffer(std::array<uint16_t,3>{0,1,2}, BufferUsage::IndexBuffer)};
         RasterGeometry right{vb, HardwareBuffer(std::array<uint32_t,4>{99,1,2,3}, BufferUsage::IndexBuffer)};
-        batch.draw(left, {.scissor = ScissorRect{0,0,2,2}}, std::array<float,4>{1,0,0,1});
-        batch.draw(right, {.indexCount=3, .firstIndex=1, .vertexOffset=-1, .instanceCount=2,
-                           .scissor = ScissorRect{2,0,2,2}}, std::array<float,4>{0,1,0,1});
+        batch.draw(left, std::array<float,4>{1,0,0,1}, {.scissor = ScissorRect{0,0,2,2}});
+        batch.draw(right, std::array<float,4>{0,1,0,1}, {.indexCount=3, .firstIndex=1, .vertexOffset=-1,
+                           .instanceCount=2, .scissor = ScissorRect{2,0,2,2}});
         useDrawColor = false;
         auto switched = pipeline.beginBatch({.loadColor = true});
         switched.draw(left, {.scissor = ScissorRect{3,0,1,2}});
@@ -251,7 +261,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "unsupported nonzero firstInstance rejected");
     auto first = pipeline.beginBatch(4, 2);
-    first.draw(mesh, {.indexCount=3}, std::array<float,4>{1,0,0,1});
+    first.draw(mesh, std::array<float,4>{1,0,0,1}, {.indexCount=3});
     HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
     rejected = false;
     try { restricted.drawIndirect(mesh, packets, 1); }
@@ -363,6 +373,18 @@ void test_gpu()
     executor << emptyBuffer.copyTo(emptyBuffer) << emptyBuffer.copyTo(emptyImage)
              << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer);
     expect(backend->commandList.empty(), "copies between empty resources must not record GPU work");
+    {
+        HardwareDisplayer display;
+        HardwareImage target(4, 2, ImageFormat::RGBA8_UNORM);
+        executor << source.copyTo(target);
+        expect(!display.present(executor, target) && backend->commandList.empty() && backend->getSubmissionPoint(),
+               "headless presentation commits pending work even when the frame is skipped");
+        expect(!display.present(input, 4, 2, ImageFormat::RGBA8_UNORM), "headless pixel presentation skips the frame");
+        HardwareDisplayer moved(std::move(display));
+        expect(!moved.present(input, 4, 2, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel format");
+        display = std::move(moved);
+        expect(!display.present(input, 2, 4, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
+    }
     std::cerr << "GPU: buffer copy/readback\n";
     executor << source.copyTo(destination);
     executor.commit().waitForDeferredResources();

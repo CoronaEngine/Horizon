@@ -18,7 +18,6 @@
 #include <GLFW/glfw3native.h>
 
 #include "Codegen/BuiltinVariate.h"
-#include "Codegen/CustomLibrary.h"
 #include "Codegen/TypeAlias.h"
 
 #include <array>
@@ -142,20 +141,17 @@ void run_example_baseline_edsl()
         HardwareImageCreateInfo texture_info(texture_width, texture_height, ImageFormat::RGBA8_SRGB);
         texture_info.linearFiltering = true;
         texture_image = HardwareImage(texture_info);
-        const auto byte_count = static_cast<uint32_t>(texture_width) * static_cast<uint32_t>(texture_height) * 4u;
-        HardwareBuffer staging(byte_count, BufferUsage::StorageBuffer, pixels.get());
         HardwareExecutor upload;
-        upload << staging.copyTo(texture_image);
+        upload << texture_image.copyFrom(pixels.get());
         upload.commit().waitForDeferredResources();
     }
 
     HardwareImage color;
     int width = 0, height = 0;
-    const auto camera_view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
     HardwareExecutor render_executor;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
-    using EmbeddedShader::Float4;
+    using EmbeddedShader::Float2, EmbeddedShader::Float4;
     using EmbeddedShader::mul;
 
     EmbeddedShader::Texture2D<ktm::fvec4> texture_proxy = texture_image;
@@ -164,20 +160,19 @@ void run_example_baseline_edsl()
     EmbeddedShader::Float4x4 view;
     EmbeddedShader::Float4x4 proj;
 
-    auto vertex_shader = [&](EmbeddedShader::Aggregate<BaselineEdslVertexProxy> vertex) -> Float4 {
+    auto vertex_shader = [&](EmbeddedShader::Aggregate<BaselineEdslVertexProxy> vertex) -> Float2 {
         EmbeddedShader::position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
-        return Float4(vertex->tex_coord, 1.0f, 1.0f);
+        return vertex->tex_coord;
     };
 
-    auto fragment_shader = [&](Float4 input) {
-        Float4 sampled_color = EmbeddedShader::texture(texture_proxy, input->xy());
-        final_output_proxy << sampled_color * Float4(input->z, input->z, input->z, 1.0f);
+    auto fragment_shader = [&](Float2 uv) {
+        final_output_proxy << EmbeddedShader::texture(texture_proxy, uv);
     };
 
-    RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, 1, EmbeddedShader::CompilerOption{.enableMatrixColumnMajor = true});
+    RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
 
-    view = std::bit_cast<ktm::fmat4x4>(camera_view);
+    view = std::bit_cast<ktm::fmat4x4>(glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1)));
 
     double start = 0.0;
     uint64_t frame = 0;
@@ -194,11 +189,7 @@ void run_example_baseline_edsl()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            HardwareImageCreateInfo color_info(width, height, ImageFormat::RGBA16_FLOAT);
-            color_info.usage = ImageUsage::SampledStorageImage;
-            color_info.linearFiltering = true;
-            color = HardwareImage(color_info);
-            color.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage);
             final_output_proxy = color;
             auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.
@@ -206,9 +197,8 @@ void run_example_baseline_edsl()
         }
         if (frame == 0) start = glfwGetTime();
         const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
-        const auto rotation = glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1));
-
-        model = std::bit_cast<ktm::fmat4x4>(rotation);
+        model = std::bit_cast<ktm::fmat4x4>(
+            glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1)));
 
         auto batch = rasterizer.beginBatch();
         batch.draw(geometry);

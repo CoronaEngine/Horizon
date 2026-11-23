@@ -25,6 +25,17 @@ class DisplayManager
     bool displayFrame(void *surface, const HardwareImage& displayImage, HardwareExecutorVulkan* producer = nullptr);
 
   private:
+    friend struct HardwareDisplayer;
+    struct PixelUpload
+    {
+        uint32_t width{}, height{};
+        ImageFormat format{};
+        HardwareBuffer staging;
+        HardwareImage image;
+        HardwareExecutor executor;
+    };
+    std::optional<PixelUpload> pixelUpload;
+
     // Vulkan 核心资源
     VkSurfaceKHR vkSurface{VK_NULL_HANDLE};
     VkSwapchainKHR swapChain{VK_NULL_HANDLE};

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "Codegen/ComputePipelineObject.h"
+#include "Codegen/CustomLibrary.h"
 #include "Codegen/RasterizedPipelineObject.h"
 #include "Codegen/VariateProxy.h"
 #include "Compiler/ShaderCodeCompiler.h"
@@ -351,8 +352,8 @@ class RasterBatch {
 public:
     RasterBatch(RasterBatch&&) noexcept = default;
     RasterBatch& operator=(RasterBatch&&) noexcept = default;
-    template<class T> requires std::is_trivially_copyable_v<T>
-    void draw(const RasterGeometry& geometry, const RasterDraw& range, const T& parameters) {
+    template<class T> requires (std::is_trivially_copyable_v<T> && !std::same_as<T, RasterDraw>)
+    void draw(const RasterGeometry& geometry, const T& parameters, const RasterDraw& range = {}) {
         append(geometry, range, &parameters, sizeof(T));
     }
     void draw(const RasterGeometry& geometry, const RasterDraw& range = {}) {
@@ -406,6 +407,8 @@ public:
     HardwareDisplayer& operator<<(const HardwareImage& image);
     // Commit pending work and present its output. A skipped presentation still commits the work.
     bool present(HardwareExecutor& pending, const HardwareImage& image);
+    // Present tightly packed RGBA8 pixels (UNORM or SRGB). The span may be reused on return.
+    bool present(std::span<const uint32_t> pixels, uint32_t width, uint32_t height, ImageFormat format);
 
     HardwareDisplayer& wait(const HardwareExecutor& executor);
 
@@ -511,8 +514,8 @@ public:
         requires(!std::is_convertible_v<VF, std::string>) && (!std::is_convertible_v<FF, std::string>) && (!std::is_same_v<std::remove_cvref_t<VF>, EmbeddedShader::ShaderCodeModule>) && (!std::is_same_v<std::remove_cvref_t<FF>, EmbeddedShader::ShaderCodeModule>) && (!std::is_same_v<std::remove_cvref_t<VF>, std::vector<uint32_t>>) && (!std::is_same_v<std::remove_cvref_t<FF>, std::vector<uint32_t>>)
     RasterizerPipeline(VF&& vertexShaderCode,
                        FF&& fragmentShaderCode,
-                       uint32_t multiviewCount = 1,
                        EmbeddedShader::CompilerOption compilerOption = {},
+                       uint32_t multiviewCount = 1,
                        std::source_location sourceLocation = std::source_location::current());
 
     RasterizerPipeline(const RasterizerPipeline& other) = delete;
@@ -784,8 +787,8 @@ template <typename VF, typename FF>
     requires(!std::is_convertible_v<VF, std::string>) && (!std::is_convertible_v<FF, std::string>) && (!std::is_same_v<std::remove_cvref_t<VF>, EmbeddedShader::ShaderCodeModule>) && (!std::is_same_v<std::remove_cvref_t<FF>, EmbeddedShader::ShaderCodeModule>) && (!std::is_same_v<std::remove_cvref_t<VF>, std::vector<uint32_t>>) && (!std::is_same_v<std::remove_cvref_t<FF>, std::vector<uint32_t>>)
 RasterizerPipeline<>::RasterizerPipeline(VF&& vertexShaderCode,
                                          FF&& fragmentShaderCode,
-                                         uint32_t multiviewCount,
                                          EmbeddedShader::CompilerOption compilerOption,
+                                         uint32_t multiviewCount,
                                          std::source_location sourceLocation)
 {
     // 使用 helicon 编译 DSL lambda 到着色器代码

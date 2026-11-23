@@ -136,16 +136,13 @@ void run_example_baseline_slang()
         HardwareImageCreateInfo texture_info(texture_width, texture_height, ImageFormat::RGBA8_SRGB);
         texture_info.linearFiltering = true;
         texture_image = HardwareImage(texture_info);
-        const auto byte_count = static_cast<uint32_t>(texture_width) * static_cast<uint32_t>(texture_height) * 4u;
-        HardwareBuffer staging(byte_count, BufferUsage::StorageBuffer, pixels.get());
         HardwareExecutor upload;
-        upload << staging.copyTo(texture_image);
+        upload << texture_image.copyFrom(pixels.get());
         upload.commit().waitForDeferredResources();
     }
 
     HardwareImage color;
     int width = 0, height = 0;
-    const auto camera_view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
     HardwareExecutor render_executor;
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
@@ -158,7 +155,7 @@ void run_example_baseline_slang()
     } parameters{};
     parameters.texIndex = texture_image.storeDescriptor();
 
-    rasterizer.vp.view = camera_view;
+    rasterizer.vp.view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
 
     double start = 0.0;
     uint64_t frame = 0;
@@ -175,11 +172,7 @@ void run_example_baseline_slang()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            HardwareImageCreateInfo color_info(width, height, ImageFormat::RGBA16_FLOAT);
-            color_info.usage = ImageUsage::SampledStorageImage;
-            color_info.linearFiltering = true;
-            color = HardwareImage(color_info);
-            color.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage);
             rasterizer.outColor = color;
             auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.
@@ -187,12 +180,10 @@ void run_example_baseline_slang()
         }
         if (frame == 0) start = glfwGetTime();
         const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
-        const auto rotation = glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1));
-
-        parameters.model = rotation;
+        parameters.model = glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1));
 
         auto batch = rasterizer.beginBatch();
-        batch.draw(geometry, {}, parameters);
+        batch.draw(geometry, parameters);
         render_executor << std::move(batch);
         const bool presented = display.present(render_executor, color);
         ++frame;
