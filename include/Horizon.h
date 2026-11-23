@@ -43,44 +43,20 @@ struct HardwareBuffer;
 struct HardwareImage;
 
 // Transfers retain both resources. A zero buffer copy size uses the source remainder.
-struct CopyCommand
+class CopyCommand
 {
-    std::shared_ptr<horizon::detail::CopyCommandImpl> impl;
-
+public:
     CopyCommand() = default;
-    explicit CopyCommand(std::shared_ptr<horizon::detail::CopyCommandImpl> record) : impl(std::move(record)) {}
-    explicit operator bool() const { return impl != nullptr; }
+    explicit operator bool() const { return impl_ != nullptr; }
 
-protected:
-    CopyCommand(const HardwareBuffer& src, const HardwareBuffer& dst,
-                uint64_t srcOffset = 0, uint64_t dstOffset = 0, uint64_t size = 0);
-    CopyCommand(const HardwareBuffer& src, const HardwareImage& dst,
-                uint64_t bufferOffset = 0, uint32_t imageLayer = 0, uint32_t imageMip = 0);
-    CopyCommand(const HardwareImage& src, const HardwareImage& dst,
-                uint32_t srcLayer = 0, uint32_t dstLayer = 0, uint32_t srcMip = 0, uint32_t dstMip = 0);
-    CopyCommand(const HardwareImage& src, const HardwareBuffer& dst,
-                uint32_t imageLayer = 0, uint32_t imageMip = 0, uint64_t bufferOffset = 0);
+private:
+    friend struct HardwareBuffer;
+    friend struct HardwareImage;
+    friend struct HardwareExecutor;
+
+    explicit CopyCommand(std::shared_ptr<horizon::detail::CopyCommandImpl> impl) : impl_(std::move(impl)) {}
+    std::shared_ptr<horizon::detail::CopyCommandImpl> impl_;
 };
-
-namespace horizon::detail {
-// Preserve overload resolution on the direction of a transfer.
-template<class Source, class Destination, class First, class Second, class Third>
-struct DirectionalCopy : CopyCommand {
-    DirectionalCopy() = default;
-    DirectionalCopy(const Source& src, const Destination& dst, First first = 0, Second second = 0, Third third = 0)
-        : CopyCommand(src, dst, first, second, third) {}
-
-    DirectionalCopy(const Source& src, const Destination& dst, First srcLayer, Second dstLayer,
-                    Third srcMip, uint32_t dstMip)
-        requires std::same_as<Source, HardwareImage> && std::same_as<Destination, HardwareImage>
-        : CopyCommand(src, dst, srcLayer, dstLayer, srcMip, dstMip) {}
-};
-}
-
-using BufferCopyCommand = horizon::detail::DirectionalCopy<HardwareBuffer, HardwareBuffer, uint64_t, uint64_t, uint64_t>;
-using BufferToImageCommand = horizon::detail::DirectionalCopy<HardwareBuffer, HardwareImage, uint64_t, uint32_t, uint32_t>;
-using ImageCopyCommand = horizon::detail::DirectionalCopy<HardwareImage, HardwareImage, uint32_t, uint32_t, uint32_t>;
-using ImageToBufferCommand = horizon::detail::DirectionalCopy<HardwareImage, HardwareBuffer, uint32_t, uint32_t, uint64_t>;
 
 // Legacy resources and control objects are owner-thread objects.
 // Copying/releasing shared handles and modifying resource state require external serialization.
@@ -198,14 +174,10 @@ public:
     [[nodiscard]] uint32_t storeDescriptor() const;
 
     // 流式拷贝命令（用于 HardwareExecutor << ）
-    [[nodiscard]] BufferCopyCommand copyTo(const HardwareBuffer& dst,
-                                           uint64_t srcOffset = 0,
-                                           uint64_t dstOffset = 0,
-                                           uint64_t size = 0) const;
-    [[nodiscard]] BufferToImageCommand copyTo(const HardwareImage& dst,
-                                              uint64_t bufferOffset = 0,
-                                              uint32_t imageLayer = 0,
-                                              uint32_t imageMip = 0) const;
+    [[nodiscard]] CopyCommand copyTo(const HardwareBuffer& dst, uint64_t srcOffset = 0,
+                                     uint64_t dstOffset = 0, uint64_t size = 0) const;
+    [[nodiscard]] CopyCommand copyTo(const HardwareImage& dst, uint64_t bufferOffset = 0,
+                                     uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
 
     // CPU 映射内存操作（非 GPU 命令）
     bool copyFromData(const void* inputData, uint64_t size) const;
@@ -285,16 +257,11 @@ public:
     void setClearColor(float r, float g, float b, float a);
 
     // 流式拷贝命令（用于 HardwareExecutor << ）
-    [[nodiscard]] ImageCopyCommand copyTo(const HardwareImage& dst,
-                                          uint32_t srcLayer = 0, uint32_t dstLayer = 0,
-                                          uint32_t srcMip = 0, uint32_t dstMip = 0) const;
-    [[nodiscard]] ImageToBufferCommand copyTo(const HardwareBuffer& dst,
-                                              uint32_t imageLayer = 0,
-                                              uint32_t imageMip = 0,
-                                              uint64_t bufferOffset = 0) const;
-    [[nodiscard]] BufferToImageCommand copyFrom(const void* inputData,
-                                                uint32_t imageLayer = 0,
-                                                uint32_t imageMip = 0) const;
+    [[nodiscard]] CopyCommand copyTo(const HardwareImage& dst, uint32_t srcLayer = 0, uint32_t dstLayer = 0,
+                                     uint32_t srcMip = 0, uint32_t dstMip = 0) const;
+    [[nodiscard]] CopyCommand copyTo(const HardwareBuffer& dst, uint32_t imageLayer = 0,
+                                     uint32_t imageMip = 0, uint64_t bufferOffset = 0) const;
+    [[nodiscard]] CopyCommand copyFrom(const void* inputData, uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
 
     //[[nodiscard]] uint32_t getNumMipLevels() const;
     //[[nodiscard]] uint32_t getArrayLayers() const;

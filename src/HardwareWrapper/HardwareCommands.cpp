@@ -4,14 +4,6 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include <optional>
 
-// ================= CopyCommandImpl 基类 =================
-// CopyCommandImpl definition moved to HardwareExecutorVulkan.h to allow shared usage
-// struct CopyCommandImpl
-// {
-//    virtual ~CopyCommandImpl() = default;
-//    virtual CommandRecordVulkan *getCommandRecord() = 0;
-// };
-
 // ================= Buffer 到 Buffer 拷贝命令实现 =================
 struct BufferCopyCommandImpl : CopyCommandImpl
 {
@@ -78,26 +70,22 @@ struct BufferToImageCommandImpl : CopyCommandImpl
     }
 };
 
-// ================= BufferCopyCommand 构造函数 =================
-CopyCommand::CopyCommand(const HardwareBuffer &src, const HardwareBuffer &dst,
-                                     uint64_t srcOffset, uint64_t dstOffset, uint64_t size)
+CopyCommand HardwareBuffer::copyTo(const HardwareBuffer& dst, uint64_t srcOffset, uint64_t dstOffset, uint64_t size) const
 {
-    auto implPtr = std::make_shared<BufferCopyCommandImpl>(src, dst);
-    implPtr->srcOffset = srcOffset;
-    implPtr->dstOffset = dstOffset;
-    implPtr->size = size;
-    impl = implPtr;
+    auto copy = std::make_shared<BufferCopyCommandImpl>(*this, dst);
+    copy->srcOffset = srcOffset;
+    copy->dstOffset = dstOffset;
+    copy->size = size;
+    return CopyCommand(std::move(copy));
 }
 
-// ================= BufferToImageCommand 构造函数 =================
-CopyCommand::CopyCommand(const HardwareBuffer &src, const HardwareImage &dst,
-                                           uint64_t bufferOffset, uint32_t imageLayer, uint32_t imageMip)
+CopyCommand HardwareBuffer::copyTo(const HardwareImage& dst, uint64_t bufferOffset, uint32_t imageLayer, uint32_t imageMip) const
 {
-    auto implPtr = std::make_shared<BufferToImageCommandImpl>(src, dst);
-    implPtr->bufferOffset = bufferOffset;
-    implPtr->imageLayer = imageLayer;
-    implPtr->imageMip = imageMip;
-    impl = implPtr;
+    auto copy = std::make_shared<BufferToImageCommandImpl>(*this, dst);
+    copy->bufferOffset = bufferOffset;
+    copy->imageLayer = imageLayer;
+    copy->imageMip = imageMip;
+    return CopyCommand(std::move(copy));
 }
 
 // ================= Image 到 Image 拷贝命令实现 =================
@@ -138,17 +126,15 @@ struct ImageCopyCommandImpl : CopyCommandImpl
     }
 };
 
-// ================= ImageCopyCommand 构造函数 =================
-CopyCommand::CopyCommand(const HardwareImage &src, const HardwareImage &dst,
-                                   uint32_t srcLayer, uint32_t dstLayer,
-                                   uint32_t srcMip, uint32_t dstMip)
+CopyCommand HardwareImage::copyTo(const HardwareImage& dst, uint32_t srcLayer, uint32_t dstLayer,
+                                  uint32_t srcMip, uint32_t dstMip) const
 {
-    auto implPtr = std::make_shared<ImageCopyCommandImpl>(src, dst);
-    implPtr->srcLayer = srcLayer;
-    implPtr->dstLayer = dstLayer;
-    implPtr->srcMip = srcMip;
-    implPtr->dstMip = dstMip;
-    impl = implPtr;
+    auto copy = std::make_shared<ImageCopyCommandImpl>(*this, dst);
+    copy->srcLayer = srcLayer;
+    copy->dstLayer = dstLayer;
+    copy->srcMip = srcMip;
+    copy->dstMip = dstMip;
+    return CopyCommand(std::move(copy));
 }
 
 // ================= Image 到 Buffer 拷贝命令实现 =================
@@ -183,13 +169,11 @@ struct ImageToBufferCommandImpl : CopyCommandImpl
     }
 };
 
-// ================= ImageToBufferCommand 构造函数 =================
-CopyCommand::CopyCommand(const HardwareImage &src, const HardwareBuffer &dst,
-                                           uint32_t imageLayer, uint32_t imageMip, uint64_t bufferOffset)
+CopyCommand HardwareImage::copyTo(const HardwareBuffer& dst, uint32_t imageLayer, uint32_t imageMip, uint64_t bufferOffset) const
 {
-    auto implPtr = std::make_shared<ImageToBufferCommandImpl>(src, dst);
-    implPtr->imageLayer = imageLayer;
-    implPtr->imageMip = imageMip;
-    implPtr->bufferOffset = bufferOffset;
-    impl = implPtr;
+    auto copy = std::make_shared<ImageToBufferCommandImpl>(*this, dst);
+    copy->imageLayer = imageLayer;
+    copy->imageMip = imageMip;
+    copy->bufferOffset = bufferOffset;
+    return CopyCommand(std::move(copy));
 }

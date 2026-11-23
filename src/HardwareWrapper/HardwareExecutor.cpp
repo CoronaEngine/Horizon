@@ -61,13 +61,13 @@ HardwareExecutor& HardwareExecutor::operator<<(HardwareExecutor& other)
 
 HardwareExecutor& HardwareExecutor::operator<<(const CopyCommand& cmd)
 {
-    if (!cmd.impl || !executorID)
+    if (!cmd.impl_ || !executorID)
         return *this;
 
     auto* executor = execFromId(executorID);
-    if (CommandRecordVulkan* record = cmd.impl->getCommandRecord())
+    if (CommandRecordVulkan* record = cmd.impl_->getCommandRecord())
     {
-        executor->record(record, {}, cmd.impl);
+        executor->record(record, {}, cmd.impl_);
     }
     return *this;
 }

@@ -137,22 +137,6 @@ HardwareBuffer::operator bool() const
     return bufferID && legacyBufferFromId(bufferID)->bufferHandle != VK_NULL_HANDLE;
 }
 
-BufferCopyCommand HardwareBuffer::copyTo(const HardwareBuffer &dst,
-                                         uint64_t srcOffset,
-                                         uint64_t dstOffset,
-                                         uint64_t size) const
-{
-    return {*this, dst, srcOffset, dstOffset, size};
-}
-
-BufferToImageCommand HardwareBuffer::copyTo(const HardwareImage &dst,
-                                            uint64_t bufferOffset,
-                                            uint32_t imageLayer,
-                                            uint32_t imageMip) const
-{
-    return {*this, dst, bufferOffset, imageLayer, imageMip};
-}
-
 uint32_t HardwareBuffer::storeDescriptor() const
 {
     if (!*this) throw std::invalid_argument("Cannot bind an empty buffer");

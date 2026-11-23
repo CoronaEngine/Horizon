@@ -92,8 +92,7 @@ void test_cpu()
     expect(movedDisplayer.getDisplayerID() == 0 && displayer.getDisplayerID() == displayerID,
            "displayer move assignment transfers ownership");
     expect(!empty && !image, "default resources must be empty");
-    auto command = empty.copyTo(empty);
-    expect(command.impl->getCommandRecord() == nullptr, "empty copy must not record GPU work");
+    expect(!CopyCommand{} && !image.copyFrom(nullptr), "default command and null upload must be empty");
 }
 
 bool has_vulkan_14_device()
@@ -338,6 +337,12 @@ void test_gpu()
     HardwareBuffer source(input, BufferUsage::StorageBuffer);
     HardwareBuffer destination(zeros, BufferUsage::StorageBuffer);
     HardwareExecutor executor;
+    auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
+    HardwareBuffer emptyBuffer;
+    HardwareImage emptyImage;
+    executor << emptyBuffer.copyTo(emptyBuffer) << emptyBuffer.copyTo(emptyImage)
+             << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer);
+    expect(backend->commandList.empty(), "copies between empty resources must not record GPU work");
     std::cerr << "GPU: buffer copy/readback\n";
     executor << source.copyTo(destination);
     executor.commit().waitForDeferredResources();
@@ -385,7 +390,6 @@ void test_gpu()
         expect(destination.copyToData(output.data(), sizeof(output)) && std::ranges::equal(blocks, std::span(output).first(4)),
                "odd-sized BC1 upload rounds up to two whole blocks");
     }
-    auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
     struct RetryCommand : CommandRecordVulkan {
         bool fail = true;
         ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
@@ -432,6 +436,13 @@ void test_gpu()
     expect(destination.copyToData(output.data(), sizeof(output)), "image readback");
     expect(output == std::array<uint32_t, 8>{0, 0, 20, 30, 40, 50, 0, 0},
            "image copies preserve layers, mips and buffer offsets");
+
+    executor << imageCopy.copyFrom(input.data(), 0, 1) << imageCopy.copyTo(destination, 0, 1);
+    executor.commit().waitForDeferredResources();
+    std::array<uint32_t, 4> mipPixels{};
+    expect(destination.copyToData(mipPixels.data(), sizeof(mipPixels)) &&
+           std::ranges::equal(mipPixels, std::span(input).first(mipPixels.size())),
+           "staged upload retains its buffer and writes the selected image mip");
 
     EmbeddedShader::CompilerOption options;
     std::cerr << "GPU: Slang compilation/compute dispatch\n";
