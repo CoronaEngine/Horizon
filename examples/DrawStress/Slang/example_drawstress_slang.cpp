@@ -34,74 +34,67 @@
 #undef STB_IMAGE_WRITE_IMPLEMENTATION
 #undef STB_IMAGE_WRITE_STATIC
 
-// 移植自 bgfx examples/17-drawstress，用于对照单线程提交（Num threads=1）的绘制开销。
-constexpr int dim_min = 2;
-constexpr int dim_max = 40;
-
-// The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
-constexpr std::array<uint32_t, 8> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
-
-constexpr std::array<uint16_t, 36> cube_indices = {
-    0, 1, 2, 1, 3, 2,
-    4, 6, 5, 5, 6, 7,
-    0, 2, 4, 4, 2, 6,
-    1, 5, 3, 5, 7, 3,
-    0, 4, 1, 4, 5, 1,
-    2, 3, 6, 6, 3, 7,
-};
-
-static void capture(const HardwareImage& image, HardwareExecutor& ready, const std::filesystem::path& path, int width, int height);
-static void write_matrices(std::span<std::byte> parameters, const glm::mat4& view_proj, int dim, float time);
-
-static int env_int(const char* name, int fallback) {
-    const char* value = std::getenv(name);
-    if (!value || !*value) return fallback;
-    char* end{};
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value || *end || parsed < 0 || parsed > 10000000)
-        throw std::invalid_argument(std::string("Invalid ") + name);
-    return static_cast<int>(parsed);
-}
-
-static auto open_window(int width, int height, const char* title) {
+// Based on the single-threaded bgfx examples/17-drawstress workload.
+void run_example_drawstress_slang()
+{
+    constexpr auto mode = "drawstress_slang";
+    const auto env_int = [](const char* name, int fallback) {
+        const char* value = std::getenv(name);
+        if (!value || !*value) return fallback;
+        char* end{};
+        const long parsed = std::strtol(value, &end, 10);
+        if (end == value || *end || parsed < 0 || parsed > 10000000)
+            throw std::invalid_argument(std::string("Invalid ") + name);
+        return static_cast<int>(parsed);
+    };
+    constexpr int dim_max = 40;
+    const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", dim_max), 2, dim_max);
     const bool hidden = env_int("HORIZON_BENCH_HIDDEN", 0) != 0;
+    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN", 0) != 0;
+    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES", 0);
+    float fixed_dt = 0.0f;
+    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
+        fixed_dt = std::stof(value);
+        if (!std::isfinite(fixed_dt) || fixed_dt < 0.0f)
+            throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
+    }
+
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+    const auto close_window = [](GLFWwindow* window) {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+    };
+    std::unique_ptr<GLFWwindow, decltype(close_window)> window(
+        glfwCreateWindow(1920, 1080, mode, nullptr, nullptr), close_window);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    auto close = [](GLFWwindow* handle) {
-        glfwDestroyWindow(handle);
-        glfwTerminate();
-    };
-    return std::unique_ptr<GLFWwindow, decltype(close)>(window, close);
-}
-
-static void* native_handle(GLFWwindow* window) {
+    void* native_window = nullptr;
 #if defined(_WIN32)
-    return glfwGetWin32Window(window);
+    native_window = glfwGetWin32Window(window.get());
 #elif defined(__APPLE__)
-    return glfwGetCocoaView(window);
+    native_window = glfwGetCocoaView(window.get());
 #else
     throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
 #endif
-}
 
-void run_example_drawstress_slang()
-{
-    constexpr auto mode = "drawstress_slang";
-    auto window = open_window(1920, 1080, mode);
-    int width = 0, height = 0;
-    HardwareImage final_output_image;
+    // The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
+    constexpr std::array<uint32_t, 8> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
-    const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", 40), dim_min, dim_max);
+    constexpr std::array<uint16_t, 36> cube_indices = {
+        0, 1, 2, 1, 3, 2,
+        4, 6, 5, 5, 6, 7,
+        0, 2, 4, 4, 2, 6,
+        1, 5, 3, 5, 7, 3,
+        0, 4, 1, 4, 5, 1,
+        2, 3, 6, 6, 3, 7,
+    };
     const uint32_t draw_count = static_cast<uint32_t>(dim * dim * dim);
-
     auto cube = RasterGeometry::upload(cube_vertices, cube_indices);
     HardwareBuffer commands;
     {
@@ -122,17 +115,10 @@ void run_example_drawstress_slang()
 
     RasterizerPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> rasterizer;
 
+    HardwareImage final_output_image;
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
     HardwareExecutor render_executor;
-    HardwareDisplayer display(native_handle(window.get()), PresentDevicePreference::RenderDevice);
-
-    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN", 0) != 0;
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES", 0);
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0.0f)
-            throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
+    int width = 0, height = 0;
 
     double start = 0.0;
     uint64_t frame = 0;
@@ -161,7 +147,44 @@ void run_example_drawstress_slang()
         auto batch = rasterizer.beginBatch();
         batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(glm::mat4),
             [&](std::span<std::byte> destination) {
-                write_matrices(destination, view_projection, dim, elapsed_seconds);
+                constexpr float step = 0.6f;
+                const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
+
+                // The fixed view faces +Z. Clip X and Y scale independently, and Z supplies both clip Z and W.
+                const glm::vec4 projection(view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w);
+                const auto projectAxis = [&](float x, float y, float z) {
+                    return projection * (0.25f * glm::vec4(x, y, z, z)) + view_projection[3] * 0.0f;
+                };
+
+                // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
+                std::array<glm::vec3, dim_max> sine, cosine;
+                std::array<glm::vec4, dim_max> translations;
+                for (int i = 0; i < dim; ++i) {
+                    const glm::vec3 angles = elapsed_seconds + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
+                    sine[i] = glm::sin(angles);
+                    cosine[i] = glm::cos(angles);
+                    translations[i] = view_projection * glm::vec4(base + glm::vec3(i * step), 1.0f);
+                }
+                auto* dst = destination.data();
+                for (int zz = 0; zz < dim; ++zz) {
+                    const float sz = sine[zz].z, cz = cosine[zz].z;
+                    for (int yy = 0; yy < dim; ++yy) {
+                        const float sy = sine[yy].y, cy = cosine[yy].y;
+                        const glm::vec4 axisX = projectAxis(cz * cy, cy * sz, -sy);
+                        glm::vec4 translation = translations[zz];
+                        translation.y = translations[yy].y;
+                        for (int xx = 0; xx < dim; ++xx) {
+                            const float sx = sine[xx].x, cx = cosine[xx].x;
+                            translation.x = translations[xx].x;
+                            const glm::mat4 matrix(axisX,
+                                projectAxis(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx),
+                                projectAxis(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx),
+                                translation);
+                            std::memcpy(dst, &matrix, sizeof(matrix));
+                            dst += sizeof(matrix);
+                        }
+                    }
+                }
             }, IndirectFirstInstance::AlwaysZero);
 
         render_executor << std::move(batch);
@@ -174,66 +197,21 @@ void run_example_drawstress_slang()
     }
 
     render_executor.waitForDeferredResources();
-    if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path && final_output_image)
-        capture(final_output_image, render_executor, path, width, height);
-}
-
-static void write_matrices(std::span<std::byte> parameters, const glm::mat4& view_proj, int dim, float time) {
-    const float step = 0.6f;
-    const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
-
-    // The fixed view faces +Z. Clip X and Y scale independently, and Z supplies both clip Z and W.
-    const glm::vec4 projection(view_proj[0].x, view_proj[1].y, view_proj[2].z, view_proj[2].w);
-    const auto projectAxis = [&](float x, float y, float z) {
-        return projection * (0.25f * glm::vec4(x, y, z, z)) + view_proj[3] * 0.0f;
-    };
-
-    // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
-    std::array<glm::vec3, dim_max> sine, cosine;
-    std::array<glm::vec4, dim_max> translations;
-    for (int i = 0; i < dim; ++i) {
-        const glm::vec3 angles = time + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
-        sine[i] = glm::sin(angles);
-        cosine[i] = glm::cos(angles);
-        translations[i] = view_proj * glm::vec4(base + glm::vec3(i * step), 1.0f);
+    if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
+        const uint32_t byte_count = width * height * 8;
+        HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
+        HardwareExecutor copy;
+        copy.wait(render_executor);
+        copy << final_output_image.copyTo(readback);
+        copy.commit().waitForDeferredResources();
+        std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
+        if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
+        std::vector<unsigned char> rgba(half.size());
+        for (size_t i = 0; i < half.size(); ++i)
+            rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
+        const std::filesystem::path path(filename);
+        if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
+        if (!stbi_write_png(filename, width, height, 4, rgba.data(), width * 4))
+            throw std::runtime_error("Capture PNG write failed");
     }
-    auto* dst = parameters.data();
-    for (int zz = 0; zz < dim; ++zz) {
-        const float sz = sine[zz].z, cz = cosine[zz].z;
-        for (int yy = 0; yy < dim; ++yy)
-        {
-            const float sy = sine[yy].y, cy = cosine[yy].y;
-            const glm::vec4 axisX = projectAxis(cz * cy, cy * sz, -sy);
-            glm::vec4 translation = translations[zz];
-            translation.y = translations[yy].y;
-            for (int xx = 0; xx < dim; ++xx)
-            {
-                const float sx = sine[xx].x, cx = cosine[xx].x;
-                translation.x = translations[xx].x;
-                const glm::mat4 matrix(axisX,
-                    projectAxis(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx),
-                    projectAxis(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx),
-                    translation);
-                std::memcpy(dst, &matrix, sizeof(matrix));
-                dst += sizeof(matrix);
-            }
-        }
-    }
-}
-
-static void capture(const HardwareImage& image, HardwareExecutor& ready, const std::filesystem::path& path, int width, int height) {
-    const uint32_t byte_count = width * height * 8;
-    HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
-    HardwareExecutor copy;
-    copy.wait(ready);
-    copy << image.copyTo(readback);
-    copy.commit().waitForDeferredResources();
-    std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
-    if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
-    std::vector<unsigned char> rgba(half.size());
-    for (size_t i = 0; i < half.size(); ++i)
-        rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
-    if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-    if (!stbi_write_png(path.string().c_str(), width, height, 4, rgba.data(), width * 4))
-        throw std::runtime_error("Capture PNG write failed");
 }

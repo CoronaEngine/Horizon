@@ -123,7 +123,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 每个运行模式只有一个 C++ 源文件，从 `run_example_*` 可以看到窗口创建、场景准备和逐帧渲染。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-阅读 Disney 光栅示例时，可从 `make_sphere` 和 `sphere_parameters` 查看几何和材质的生成。阅读 DrawStress 时，可从逐帧循环追踪间接绘制命令和变换矩阵的更新。这四个光栅模式都支持离屏渲染和截图。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制与截图](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，帧循环中更新光照并按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。这四个光栅模式都支持离屏渲染和截图。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制与截图](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
 最后可以对照原生 Vulkan 实现。无参数运行 `HorizonExamples` 默认启动 `baseline`。教程入口直接初始化 Vulkan、绘制 Viking Room 并释放资源。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 

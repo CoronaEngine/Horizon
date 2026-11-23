@@ -36,55 +36,94 @@
 #include <utility>
 #include <vector>
 
-constexpr char window_title[] = "Horizon Baseline [Slang]";
-const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
+void run_example_baseline_slang()
+{
+    const auto env_int = [](const char* name) {
+        const char* value = std::getenv(name);
+        if (!value || !*value) return 0;
+        char* end{};
+        const long parsed = std::strtol(value, &end, 10);
+        if (end == value || *end || parsed < 0 || parsed > 10000000)
+            throw std::invalid_argument(std::string("Invalid ") + name);
+        return static_cast<int>(parsed);
+    };
+    const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
+    int frames_remaining = env_int("HORIZON_PRESENT_FRAMES");
+    float fixed_dt = 0.0f;
+    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
+        fixed_dt = std::stof(value);
+        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
+    }
 
-static int env_int(const char* name, int fallback) {
-    const char* value = std::getenv(name);
-    if (!value || !*value) return fallback;
-    char* end{};
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value || *end || parsed < 0 || parsed > 10000000)
-        throw std::invalid_argument(std::string("Invalid ") + name);
-    return static_cast<int>(parsed);
-}
-
-static RasterGeometry load_model();
-
-static auto open_window(int width, int height, const char* title) {
-    const bool hidden = env_int("HORIZON_BENCH_HIDDEN", 0) != 0;
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+    const auto destroy_window = [](GLFWwindow* handle) {
+        glfwDestroyWindow(handle);
+        glfwTerminate();
+    };
+    std::unique_ptr<GLFWwindow, decltype(destroy_window)> window(
+        glfwCreateWindow(1920, 1080, "Horizon Baseline [Slang]", nullptr, nullptr), destroy_window);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    auto close = [](GLFWwindow* handle) {
-        glfwDestroyWindow(handle);
-        glfwTerminate();
-    };
-    return std::unique_ptr<GLFWwindow, decltype(close)>(window, close);
-}
-
-static void* native_handle(GLFWwindow* window) {
+    void* native_window = nullptr;
 #if defined(_WIN32)
-    return glfwGetWin32Window(window);
+    native_window = glfwGetWin32Window(window.get());
 #elif defined(__APPLE__)
-    return glfwGetCocoaView(window);
+    native_window = glfwGetCocoaView(window.get());
 #else
     throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
 #endif
-}
 
-void run_example_baseline_slang()
-{
-    auto window = open_window(1920, 1080, window_title);
+    const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
+    RasterGeometry geometry;
+    {
+        const auto model_path = assets / "models/viking_room.obj";
+        const auto filename = model_path.string();
+        const auto material_dir = (model_path.parent_path() / "").string();
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename.c_str(), material_dir.c_str()))
+            throw std::runtime_error(warn + err);
+        if (!warn.empty()) std::cerr << warn << '\n';
 
-    auto geometry = load_model();
+        using Vertex = std::array<float, 5>; // Position (x, y, z), then texture coordinates (u, v).
+        auto hash_vertex = [](const Vertex& vertex) {
+            size_t seed = 0;
+            for (float value : vertex)
+                seed ^= std::hash<float>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            return seed;
+        };
+        std::unordered_map<Vertex, uint32_t, decltype(hash_vertex)> unique_vertices;
+        std::vector<Vertex> vertices;
+        std::vector<uint16_t> indices;
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                const size_t p = 3 * static_cast<size_t>(index.vertex_index);
+                Vertex vertex{attrib.vertices[p], attrib.vertices[p + 1], attrib.vertices[p + 2]};
+                if (index.texcoord_index >= 0) {
+                    const size_t uv = 2 * static_cast<size_t>(index.texcoord_index);
+                    vertex[3] = attrib.texcoords[uv];
+                    vertex[4] = 1.0f - attrib.texcoords[uv + 1];
+                }
+                const auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(vertices.size()));
+                if (inserted) {
+                    if (vertices.size() >= 0x10000u)
+                        throw std::runtime_error("Mesh exceeds the 65536-vertex 16-bit index limit: " + filename);
+                    vertices.push_back(vertex);
+                }
+                indices.push_back(static_cast<uint16_t>(found->second));
+            }
+        }
+        geometry = RasterGeometry::upload(vertices, indices);
+    }
+
     HardwareImage texture_image;
     {
         const auto filename = (assets / "textures/viking_room.png").string();
@@ -108,7 +147,7 @@ void run_example_baseline_slang()
     int width = 0, height = 0;
     const auto camera_view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
     HardwareExecutor render_executor;
-    HardwareDisplayer display(native_handle(window.get()), PresentDevicePreference::RenderDevice);
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> rasterizer;
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
@@ -122,13 +161,7 @@ void run_example_baseline_slang()
     rasterizer.vp.view = camera_view;
 
     double start = 0.0;
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
     uint64_t frame = 0;
-    int frames_remaining = env_int("HORIZON_PRESENT_FRAMES", 0);
     while (!glfwWindowShouldClose(window.get()))
     {
         glfwPollEvents();
@@ -166,73 +199,4 @@ void run_example_baseline_slang()
         if (presented && frames_remaining > 0 && --frames_remaining == 0) break;
     }
     render_executor.waitForDeferredResources();
-}
-
-static RasterGeometry load_model()
-{
-    struct Vertex {
-        std::array<float, 3> pos{};
-        std::array<float, 2> tex_coord{};
-        bool operator==(const Vertex&) const = default;
-    };
-    static_assert(sizeof(Vertex) == 5 * sizeof(float));
-
-    const auto model_path = assets / "models/viking_room.obj";
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn;
-    std::string err;
-
-    const std::string model_path_str = model_path.string();
-    const std::string material_base_path =
-        model_path.parent_path().string() + std::string(1, std::filesystem::path::preferred_separator);
-
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, model_path_str.c_str(), material_base_path.c_str()))
-        throw std::runtime_error(warn + err);
-    if (!warn.empty())
-        std::cerr << warn << '\n';
-
-    std::vector<Vertex> vertices;
-    std::vector<uint16_t> indices;
-    auto hash_vertex = [](const Vertex& vertex) {
-        size_t seed = 0;
-        auto combine = [&seed](float value) {
-            seed ^= std::hash<float>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        };
-        for (float value : vertex.pos) combine(value);
-        for (float value : vertex.tex_coord) combine(value);
-        return seed;
-    };
-    std::unordered_map<Vertex, uint32_t, decltype(hash_vertex)> unique_vertices(0, hash_vertex);
-    for (const tinyobj::shape_t& shape : shapes)
-    {
-        for (const tinyobj::index_t& index : shape.mesh.indices)
-        {
-            Vertex vertex;
-            vertex.pos = {
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 0],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 1],
-                attrib.vertices[3 * static_cast<size_t>(index.vertex_index) + 2],
-            };
-            if (index.texcoord_index >= 0)
-            {
-                vertex.tex_coord = {
-                    attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 0],
-                    1.0f - attrib.texcoords[2 * static_cast<size_t>(index.texcoord_index) + 1],
-                };
-            }
-
-            auto [found, inserted] = unique_vertices.emplace(vertex, static_cast<uint32_t>(vertices.size()));
-            if (inserted)
-            {
-                if (vertices.size() >= 0x10000u)
-                    throw std::runtime_error("Mesh exceeds the 65536-vertex 16-bit index limit: " + model_path_str);
-                vertices.push_back(vertex);
-            }
-            indices.push_back(static_cast<uint16_t>(found->second));
-        }
-    }
-
-    return RasterGeometry::upload(vertices, indices);
 }

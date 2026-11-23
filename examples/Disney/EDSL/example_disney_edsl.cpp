@@ -38,176 +38,235 @@
 #undef STB_IMAGE_WRITE_IMPLEMENTATION
 #undef STB_IMAGE_WRITE_STATIC
 
-// Disney Principled PBR chart: 10 parameter rows x 11 values from 0 to 1.
-constexpr int chart_row_count = 10;
-constexpr int chart_col_count = 11;
-
-struct DisneyEdslSphereParameters {
-    glm::mat4 model;
-    glm::vec4 mat0, mat1, mat2;
-    float clearcoatGloss;
-};
-static_assert(offsetof(DisneyEdslSphereParameters, clearcoatGloss) == 28 * sizeof(uint32_t));
-static_assert(sizeof(DisneyEdslSphereParameters) == 29 * sizeof(uint32_t));
-
-static RasterGeometry make_sphere();
-static DisneyEdslSphereParameters sphere_parameters(int row, int col);
-static HardwareImage load_cubemap(const char* filename);
-
-static int env_int(const char* name) {
-    const char* value = std::getenv(name);
-    if (!value || !*value) return 0;
-    char* end{};
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value || *end || parsed < 0 || parsed > 10000000)
-        throw std::invalid_argument(std::string("Invalid ") + name);
-    return static_cast<int>(parsed);
-}
-
-using EmbeddedShader::Float;
-using EmbeddedShader::Float3;
-using EmbeddedShader::Float4;
-using EmbeddedShader::GPU_IF;
-using EmbeddedShader::GPU_IF_BRANCH;
-using EmbeddedShader::abs;
-using EmbeddedShader::clamp;
-using EmbeddedShader::dot;
-using EmbeddedShader::exp2;
-using EmbeddedShader::max;
-using EmbeddedShader::mix;
-using EmbeddedShader::mul;
-using EmbeddedShader::normalize;
-using EmbeddedShader::pow;
-using EmbeddedShader::sqrt;
-
 struct DisneyEdslVaryings
 {
-    Float3 v_view;
-    Float3 v_normal;
+    EmbeddedShader::Float3 v_view;
+    EmbeddedShader::Float3 v_normal;
 };
 
-struct DisneyEdslSharedProxy
+void run_example_disney_edsl()
 {
-    EmbeddedShader::Float4x4 proj_view;
-    EmbeddedShader::Float4x4 envMtx;
-    Float4 camPos;
-    Float4 flags;
-    Float4 lightDir;
-    Float4 lightCol;
-    Float4 exposurePad;
-};
-
-static Float3 toLinear(Float3 rgb) {
-    return pow(abs(rgb), Float3(Float(2.2), Float(2.2), Float(2.2)));
-}
-
-static Float3 toFilmic(Float3 rgb) {
-    Float3 mapped = max(Float3(Float(0.0), Float(0.0), Float(0.0)),
-                        rgb - Float3(Float(0.004), Float(0.004), Float(0.004)));
-    return (mapped * (Float(6.2) * mapped + Float3(Float(0.5), Float(0.5), Float(0.5)))) /
-           (mapped * (Float(6.2) * mapped + Float3(Float(1.7), Float(1.7), Float(1.7))) +
-            Float3(Float(0.06), Float(0.06), Float(0.06)));
-}
-
-static Float3 fixCubeLookup(Float3 v, Float lod, Float topLevelCubeSize) {
-    Float ax = abs(v->x);
-    Float ay = abs(v->y);
-    Float az = abs(v->z);
-    Float vmax = max(max(ax, ay), az);
-    Float scale = Float(1.0) - exp2(lod) / topLevelCubeSize;
-    Float3 result;
-    result = v;
-    $IF(ax != vmax) { result->x = v->x * scale; };
-    $IF(ay != vmax) { result->y = v->y * scale; };
-    $IF(az != vmax) { result->z = v->z * scale; };
-    return result;
-}
-
-static Float sqr(Float x) { return x * x; }
-
-static Float schlickFresnel(Float u) {
-    Float m = clamp(Float(1.0) - u, Float(0.0), Float(1.0));
-    return m * m * m * m * m;
-}
-
-static Float edsl_log(Float x) {
-    return Float { EmbeddedShader::Ast::AST::callFunc(
-        "log", EmbeddedShader::Ast::AST::createType<float>(),
-        EmbeddedShader::Ast::Node::accessAll({ EmbeddedShader::proxy_wrap(x) }, EmbeddedShader::Ast::AccessPermissions::ReadOnly)) };
-}
-
-static Float3 edsl_cross(Float3 a, Float3 b) {
-    return Float3 { EmbeddedShader::Ast::AST::callFunc(
-        "cross", EmbeddedShader::Ast::AST::createType<ktm::fvec3>(),
-        EmbeddedShader::Ast::Node::accessAll({ EmbeddedShader::proxy_wrap(a), EmbeddedShader::proxy_wrap(b) }, EmbeddedShader::Ast::AccessPermissions::ReadOnly)) };
-}
-
-static Float gtr1(Float NdotH, Float a) {
-    Float a2 = a * a;
-    Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
-    Float result;
-    result = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * edsl_log(a2) * t);
-    $IF(a >= Float(1.0)) { result = Float(1.0) / Float(3.14159265358979323846); };
-    return result;
-}
-
-static Float gtr2_aniso(Float NdotH, Float HdotX, Float HdotY, Float ax, Float ay) {
-    return Float(1.0) /
-           (Float(3.14159265358979323846) * ax * ay *
-            sqr(sqr(HdotX / ax) + sqr(HdotY / ay) + NdotH * NdotH));
-}
-
-static Float smithG_GGX(Float NdotV, Float alphaG) {
-    Float a = alphaG * alphaG;
-    Float b = NdotV * NdotV;
-    return Float(1.0) / (NdotV + sqrt(a + b - a * b));
-}
-
-static Float smithG_GGX_aniso(Float NdotV, Float VdotX, Float VdotY, Float ax, Float ay) {
-    return Float(1.0) / (NdotV + sqrt(sqr(VdotX * ax) + sqr(VdotY * ay) + sqr(NdotV)));
-}
-
-static auto open_window(int width, int height, const char* title) {
+    const auto env_int = [](const char* name) {
+        const char* value = std::getenv(name);
+        if (!value || !*value) return 0;
+        char* end{};
+        const long parsed = std::strtol(value, &end, 10);
+        if (end == value || *end || parsed < 0 || parsed > 10000000)
+            throw std::invalid_argument(std::string("Invalid ") + name);
+        return static_cast<int>(parsed);
+    };
     const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
+    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
+    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
+    float fixed_dt = 0.0f;
+    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
+        fixed_dt = std::stof(value);
+        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
+    }
+
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+    const auto close = [](GLFWwindow* handle) {
+        glfwDestroyWindow(handle);
+        glfwTerminate();
+    };
+    std::unique_ptr<GLFWwindow, decltype(close)> window(
+        glfwCreateWindow(1920, 1080, "disney_edsl", nullptr, nullptr), close);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    auto close = [](GLFWwindow* handle) {
-        glfwDestroyWindow(handle);
-        glfwTerminate();
-    };
-    return std::unique_ptr<GLFWwindow, decltype(close)>(window, close);
-}
-
-static void* native_handle(GLFWwindow* window) {
+    void* native_window = nullptr;
 #if defined(_WIN32)
-    return glfwGetWin32Window(window);
+    native_window = glfwGetWin32Window(window.get());
 #elif defined(__APPLE__)
-    return glfwGetCocoaView(window);
+    native_window = glfwGetCocoaView(window.get());
 #else
     throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
 #endif
-}
 
-void run_example_disney_edsl()
-{
-    constexpr auto mode = "disney_edsl";
-    auto window = open_window(1920, 1080, mode);
-    int width = 0, height = 0;
+    // Upload the six faces and all prefiltered mips of each environment map.
+    const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
+    HardwareImage radiance, irradiance;
+    for (const auto& [filename, cubemap] : {std::pair{"bolonga_lod.dds", &radiance},
+                                           std::pair{"bolonga_irr.dds", &irradiance}}) {
+        const auto path = environment_dir / filename;
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file.is_open())
+            throw std::runtime_error("Failed to open DDS file: " + path.string());
+
+        const std::streamsize file_size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        std::vector<std::byte> bytes(static_cast<size_t>(file_size));
+        file.read(reinterpret_cast<char*>(bytes.data()), file_size);
+
+        constexpr uint32_t dds_magic = 0x20534444;
+        constexpr uint32_t fourcc_dx10 = 0x30315844;
+        constexpr uint32_t dxgi_format_rgba16_float = 10;
+        constexpr uint32_t caps2_cubemap = 0x200;
+        constexpr size_t dx10_payload_offset = 148;
+
+        const auto read_u32 = [&](size_t offset) {
+            uint32_t value;
+            std::memcpy(&value, bytes.data() + offset, sizeof(value));
+            return value;
+        };
+        if (bytes.size() < dx10_payload_offset || read_u32(0) != dds_magic)
+            throw std::runtime_error("Not a DDS file: " + path.string());
+
+        const uint32_t height = read_u32(12);
+        const uint32_t width = read_u32(16);
+        const uint32_t mip_count = std::max(1u, read_u32(28));
+        const uint32_t fourcc = read_u32(84);
+        const uint32_t caps2 = read_u32(112);
+
+        if (fourcc != fourcc_dx10 || read_u32(128) != dxgi_format_rgba16_float)
+            throw std::runtime_error("Expected DX10 RGBA16F DDS: " + path.string());
+        if ((caps2 & caps2_cubemap) == 0 || width != height)
+            throw std::runtime_error("Expected cubemap DDS: " + path.string());
+
+        HardwareImageCreateInfo desc(width, height, ImageFormat::RGBA16_FLOAT);
+        desc.arrayLayers = 6;
+        desc.cube = true;
+        desc.linearFiltering = true;
+        desc.mipLevels = static_cast<int>(mip_count);
+        desc.usage = ImageUsage::SampledImage;
+        *cubemap = HardwareImage(desc);
+        const size_t payload_size = bytes.size() - dx10_payload_offset;
+        HardwareBuffer staging(static_cast<uint32_t>(payload_size), BufferUsage::StorageBuffer,
+                               bytes.data() + dx10_payload_offset);
+        HardwareExecutor executor;
+        uint64_t offset = 0;
+        for (uint32_t face = 0; face < 6; ++face) {
+            for (uint32_t mip = 0; mip < mip_count; ++mip) {
+                const uint32_t dim = std::max(1u, width >> mip);
+                const uint64_t mip_bytes = static_cast<uint64_t>(dim) * dim * 8;
+                if (offset + mip_bytes > payload_size) throw std::runtime_error("Truncated DDS payload");
+                executor << staging.copyTo(*cubemap, offset, face, mip);
+                offset += mip_bytes;
+            }
+        }
+        executor.commit().waitForDeferredResources();
+    }
+
+    // Each triangle-strip vertex also supplies the sphere's object-space normal.
+    RasterGeometry sphere;
+    {
+        constexpr int slices = 48, stacks = 24;
+        std::vector<std::array<float, 3>> vertices;
+        std::vector<uint16_t> indices;
+        vertices.reserve(static_cast<size_t>((slices + 1) * (stacks + 1)));
+        indices.reserve(static_cast<size_t>(stacks * (slices + 1) * 2 + (stacks - 1) * 2));
+
+        for (int y = 0; y <= stacks; ++y) {
+            const float v = static_cast<float>(y) / static_cast<float>(stacks);
+            const float phi = v * glm::pi<float>();
+            const float sin_phi = std::sin(phi);
+            const float cos_phi = std::cos(phi);
+
+            for (int x = 0; x <= slices; ++x) {
+                const float u = static_cast<float>(x) / static_cast<float>(slices);
+                const float theta = u * glm::two_pi<float>();
+                const float sin_theta = std::sin(theta);
+                const float cos_theta = std::cos(theta);
+
+                vertices.push_back({ sin_phi * cos_theta, cos_phi, sin_phi * sin_theta });
+            }
+        }
+
+        for (int y = 0; y < stacks; ++y) {
+            const auto first = static_cast<uint16_t>(y * (slices + 1));
+            if (y != 0) {
+                indices.push_back(indices.back());
+                indices.push_back(first);
+            }
+            for (int x = 0; x <= slices; ++x) {
+                indices.push_back(static_cast<uint16_t>(first + x));
+                indices.push_back(static_cast<uint16_t>(first + slices + 1 + x));
+            }
+        }
+
+        sphere = RasterGeometry::upload(vertices, indices);
+    }
+
+    struct DrawParameters {
+        glm::mat4 model;
+        glm::vec4 baseColorMetallic;
+        float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
+        float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
+        float clearcoatGloss = 1.0f;
+    };
+    static_assert(offsetof(DrawParameters, baseColorMetallic) == 16 * sizeof(uint32_t));
+    static_assert(offsetof(DrawParameters, roughness) == 20 * sizeof(uint32_t));
+    static_assert(offsetof(DrawParameters, anisotropic) == 24 * sizeof(uint32_t));
+    static_assert(offsetof(DrawParameters, clearcoatGloss) == 28 * sizeof(uint32_t));
+    static_assert(sizeof(DrawParameters) == 29 * sizeof(uint32_t));
+
+    constexpr int chart_row_count = 10, chart_col_count = 11;
+    constexpr glm::vec3 chart_row_colors[chart_row_count] = {
+        glm::vec3(1.0f, 1.0f, 1.0f),       // subsurface
+        glm::vec3(1.0f, 0.86f, 0.12f),     // metallic
+        glm::vec3(0.92f, 0.12f, 0.12f),    // specular
+        glm::vec3(0.92f, 0.12f, 0.12f),    // specularTint
+        glm::vec3(0.42f, 0.32f, 0.92f),    // roughness
+        glm::vec3(0.92f, 0.18f, 0.78f),    // anisotropic
+        glm::vec3(0.62f, 0.18f, 0.14f),    // sheen
+        glm::vec3(0.62f, 0.18f, 0.14f),    // sheenTint
+        glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoat
+        glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoatGloss
+    };
+    constexpr float sphere_scale = 0.42f, spacing = 1.12f;
+    std::array<DrawParameters, chart_row_count * chart_col_count> draws{};
+    for (int row = 0; row < chart_row_count; ++row) {
+        const float y = ((chart_row_count - 1) * 0.5f - static_cast<float>(row)) * spacing;
+        for (int col = 0; col < chart_col_count; ++col) {
+            const float x = (static_cast<float>(col) - (chart_col_count - 1) * 0.5f) * spacing;
+            const float t = static_cast<float>(col) / static_cast<float>(chart_col_count - 1);
+            auto& draw = draws[row * chart_col_count + col];
+            draw.model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f))
+                       * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
+            draw.baseColorMetallic = glm::vec4(chart_row_colors[row], 0.0f);
+            switch (row) {
+            case 0: draw.subsurface = t; break;
+            case 1: draw.baseColorMetallic.w = t; break;
+            case 2: draw.specular = t; break;
+            case 3: draw.specularTint = t; break;
+            case 4: draw.roughness = t; break;
+            case 5: draw.anisotropic = t; break;
+            case 6: draw.sheen = t; break;
+            case 7: draw.sheenTint = t; break;
+            case 8: draw.clearcoat = t; break;
+            case 9:
+                draw.clearcoat = 1.0f;
+                draw.clearcoatGloss = t;
+                break;
+            }
+        }
+    }
+
     HardwareImage final_output_image;
+    using EmbeddedShader::Float;
+    using EmbeddedShader::Float3;
+    using EmbeddedShader::Float4;
+    using EmbeddedShader::GPU_IF;
+    using EmbeddedShader::GPU_IF_BRANCH;
+    using EmbeddedShader::abs;
+    using EmbeddedShader::clamp;
+    using EmbeddedShader::dot;
+    using EmbeddedShader::exp2;
+    using EmbeddedShader::max;
+    using EmbeddedShader::mix;
+    using EmbeddedShader::mul;
+    using EmbeddedShader::normalize;
+    using EmbeddedShader::pow;
+    using EmbeddedShader::sqrt;
 
-    HardwareImage radiance = load_cubemap("bolonga_lod.dds");
-    HardwareImage irradiance = load_cubemap("bolonga_irr.dds");
-    auto sphere = make_sphere();
 
-    DisneyEdslSharedProxy shared;
+    EmbeddedShader::Float4x4 proj_view, envMtx;
+    Float4 camPos, flags, lightDir, lightCol, exposurePad;
     EmbeddedShader::TextureCube<ktm::fvec4> texCube, texCubeIrr;
     EmbeddedShader::Texture2D<ktm::fvec4> final_output;
     bool directEnabled = true;
@@ -220,8 +279,8 @@ void run_example_disney_edsl()
 
         Float4 local_pos = Float4(pos, Float(1.0));
         Float4 world_pos = mul(per_model, local_pos);
-        EmbeddedShader::position() = mul(mul(shared.proj_view, per_model), local_pos);
-        out->v_view = shared.camPos->xyz() - world_pos->xyz();
+        EmbeddedShader::position() = mul(mul(proj_view, per_model), local_pos);
+        out->v_view = camPos->xyz() - world_pos->xyz();
         out->v_normal = mul(per_model, Float4(pos, Float(0.0)))->xyz();
         return out;
     };
@@ -237,15 +296,21 @@ void run_example_disney_edsl()
 
         Float3 N = normalize(in->v_normal);
         Float3 V = normalize(in->v_view);
-        Float3 L = normalize(Float3(shared.lightDir->xyz()));
+        Float3 L = normalize(Float3(lightDir->xyz()));
 
+        const auto cross = [](Float3 a, Float3 b) {
+            return Float3 { EmbeddedShader::Ast::AST::callFunc(
+                "cross", EmbeddedShader::Ast::AST::createType<ktm::fvec3>(),
+                EmbeddedShader::Ast::Node::accessAll({EmbeddedShader::proxy_wrap(a), EmbeddedShader::proxy_wrap(b)},
+                                                      EmbeddedShader::Ast::AccessPermissions::ReadOnly)) };
+        };
         Float3 X;
-        X = normalize(edsl_cross(N, Float3(Float(0.0), Float(1.0), Float(0.0))));
+        X = normalize(cross(N, Float3(Float(0.0), Float(1.0), Float(0.0))));
         $IF(dot(X, X) < Float(1e-4))
         {
-            X = normalize(edsl_cross(N, Float3(Float(1.0), Float(0.0), Float(0.0))));
+            X = normalize(cross(N, Float3(Float(1.0), Float(0.0), Float(0.0))));
         };
-        Float3 Y = normalize(edsl_cross(N, X));
+        Float3 Y = normalize(cross(N, X));
 
         Float3 baseColor = Float3(per_mat0->xyz());
         Float metallic = per_mat0->w;
@@ -259,6 +324,9 @@ void run_example_disney_edsl()
         Float clearcoat = per_mat2->w;
         Float clearcoatGloss = EmbeddedShader::rasterDrawParameter<float>(28);
 
+        const auto toLinear = [](Float3 rgb) {
+            return pow(abs(rgb), Float3(Float(2.2), Float(2.2), Float(2.2)));
+        };
         Float3 Cdlin = toLinear(baseColor);
         Float Cdlum = dot(Cdlin, Float3(Float(0.3), Float(0.6), Float(0.1)));
         Float3 Ctint;
@@ -271,6 +339,10 @@ void run_example_disney_edsl()
 
         Float NdotV = clamp(dot(N, V), Float(0.0), Float(1.0));
         Float NdotVraw = dot(N, V);
+        const auto schlickFresnel = [](Float u) {
+            Float m = clamp(Float(1.0) - u, Float(0.0), Float(1.0));
+            return m * m * m * m * m;
+        };
         Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
 
         Float3 direct;
@@ -298,22 +370,37 @@ void run_example_disney_edsl()
                     Float Fss = mix(Float(1.0), Fss90, FL) * mix(Float(1.0), Fss90, FV);
                     Float ss = Float(1.25) * (Fss * (Float(1.0) / (NdotL + NdotVraw) - Float(0.5)) + Float(0.5));
 
+                    const auto sqr = [](Float x) { return x * x; };
                     Float aniso_aspect = sqrt(Float(1.0) - anisotropic * Float(0.9));
                     Float ax = max(Float(0.001), sqr(roughness) / aniso_aspect);
                     Float ay = max(Float(0.001), sqr(roughness) * aniso_aspect);
-                    Float Ds = gtr2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
+                    Float Ds = Float(1.0) /
+                        (Float(3.14159265358979323846) * ax * ay *
+                         sqr(sqr(dot(H, X) / ax) + sqr(dot(H, Y) / ay) + NdotH * NdotH));
                     Float FH = schlickFresnel(LdotH);
                     Float3 Fs = mix(Cspec0, Float3(Float(1.0), Float(1.0), Float(1.0)), FH);
-                    Float Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay) *
-                               smithG_GGX_aniso(NdotVraw, dot(V, X), dot(V, Y), ax, ay);
+                    const auto smithGGXAniso = [&](Float n, Float x, Float y) {
+                        return Float(1.0) / (n + sqrt(sqr(x * ax) + sqr(y * ay) + sqr(n)));
+                    };
+                    Float Gs = smithGGXAniso(NdotL, dot(L, X), dot(L, Y)) *
+                               smithGGXAniso(NdotVraw, dot(V, X), dot(V, Y));
 
                     Float3 Fsheen = FH * sheen * Csheen;
 
                     Float clearcoatAlpha =
                         Float(0.1) * (Float(1.0) - clearcoatGloss) + Float(0.001) * clearcoatGloss;
-                    Float Dr = gtr1(NdotH, clearcoatAlpha);
+                    Float a2 = clearcoatAlpha * clearcoatAlpha;
+                    Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
+                    Float Dr;
+                    Dr = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * EmbeddedShader::log(a2) * t);
+                    $IF(clearcoatAlpha >= Float(1.0)) { Dr = Float(1.0) / Float(3.14159265358979323846); };
                     Float Fr = Float(0.04) * (Float(1.0) - FH) + Float(1.0) * FH;
-                    Float Gr = smithG_GGX(NdotL, Float(0.25)) * smithG_GGX(NdotVraw, Float(0.25));
+                    const auto smithGGXClearcoat = [](Float n) {
+                        Float a = Float(0.25) * Float(0.25);
+                        Float b = n * n;
+                        return Float(1.0) / (n + sqrt(a + b - a * b));
+                    };
+                    Float Gr = smithGGXClearcoat(NdotL) * smithGGXClearcoat(NdotVraw);
 
                     Float3 diffusePart =
                         ((Float(1.0) / Float(3.14159265358979323846)) * mix(Fd, ss, subsurface) * Cdlin + Fsheen) *
@@ -324,8 +411,8 @@ void run_example_disney_edsl()
             };
 
             Float NdotLclamped = clamp(dot(N, L), Float(0.0), Float(1.0));
-            Float3 lit = brdf * NdotLclamped * Float3(shared.lightCol->xyz());
-            Float enable = max(shared.flags->x + shared.flags->y, Float(0.0));
+            Float3 lit = brdf * NdotLclamped * Float3(lightCol->xyz());
+            Float enable = max(flags->x + flags->y, Float(0.0));
             direct = lit * enable;
         };
 
@@ -335,27 +422,39 @@ void run_example_disney_edsl()
         {
             Float mip = roughness * Float(5.0);
             Float3 vr = normalize(Float(2.0) * NdotVraw * N - V);
-            Float3 cubeR = fixCubeLookup(normalize(Float3(mul(shared.envMtx, Float4(vr, Float(0.0)))->xyz())), mip,
-                                         Float(256.0));
-            Float3 cubeN = normalize(Float3(mul(shared.envMtx, Float4(N, Float(0.0)))->xyz()));
+            Float3 reflected = normalize(Float3(mul(envMtx, Float4(vr, Float(0.0)))->xyz()));
+            Float ax = abs(reflected->x), ay = abs(reflected->y), az = abs(reflected->z);
+            Float major = max(max(ax, ay), az);
+            Float scale = Float(1.0) - exp2(mip) / Float(256.0);
+            Float3 cubeR;
+            cubeR = reflected;
+            $IF(ax != major) { cubeR->x = reflected->x * scale; };
+            $IF(ay != major) { cubeR->y = reflected->y * scale; };
+            $IF(az != major) { cubeR->z = reflected->z * scale; };
+            Float3 cubeN = normalize(Float3(mul(envMtx, Float4(N, Float(0.0)))->xyz()));
 
             Float3 radiance = toLinear(Float3(EmbeddedShader::textureLod(texCube, cubeR, mip)->xyz()));
             Float3 irradiance = toLinear(Float3(EmbeddedShader::texture(texCubeIrr, cubeN)->xyz()));
 
             Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
-            Float3 envDiffuse = diffuseAlbedo * irradiance * shared.flags->z;
-            Float3 envSpecular = Cspec0 * radiance * envFresnel * shared.flags->w;
+            Float3 envDiffuse = diffuseAlbedo * irradiance * flags->z;
+            Float3 envSpecular = Cspec0 * radiance * envFresnel * flags->w;
             indirect = envDiffuse + envSpecular;
         }
 
-        Float3 color = (direct + indirect) * exp2(shared.exposurePad->x);
-        final_output << Float4(toFilmic(color), Float(1.0));
+        Float3 color = (direct + indirect) * exp2(exposurePad->x);
+        Float3 mapped = max(Float3(Float(0.0), Float(0.0), Float(0.0)),
+                            color - Float3(Float(0.004), Float(0.004), Float(0.004)));
+        Float3 filmic = (mapped * (Float(6.2) * mapped + Float3(Float(0.5), Float(0.5), Float(0.5)))) /
+                        (mapped * (Float(6.2) * mapped + Float3(Float(1.7), Float(1.7), Float(1.7))) +
+                         Float3(Float(0.06), Float(0.06), Float(0.06)));
+        final_output << Float4(filmic, Float(1.0));
     };
     RasterizerPipeline<> rasterizer(edsl_vertex, edsl_fragment, 1, EmbeddedShader::CompilerOption{.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     HardwareExecutor render_executor;
-    HardwareDisplayer display(native_handle(window.get()), PresentDevicePreference::RenderDevice);
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const glm::vec3 target(0.0f);
     const glm::vec3 up(0.0f, 1.0f, 0.0f);
@@ -367,19 +466,13 @@ void run_example_disney_edsl()
     const glm::vec4 light_direction(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
     texCube = radiance;
     texCubeIrr = irradiance;
-    shared.camPos = std::bit_cast<ktm::fvec4>(camera_position);
-    shared.lightDir = std::bit_cast<ktm::fvec4>(light_direction);
-    shared.lightCol = std::bit_cast<ktm::fvec4>(glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
-    shared.envMtx = std::bit_cast<ktm::fmat4x4>(glm::mat4(1.0f));
-    shared.exposurePad = std::bit_cast<ktm::fvec4>(glm::vec4(0.0f));
+    camPos = std::bit_cast<ktm::fvec4>(camera_position);
+    lightDir = std::bit_cast<ktm::fvec4>(light_direction);
+    lightCol = std::bit_cast<ktm::fvec4>(glm::vec4(1.0f, 1.0f, 1.0f, 0.0f));
+    envMtx = std::bit_cast<ktm::fmat4x4>(glm::mat4(1.0f));
+    exposurePad = std::bit_cast<ktm::fvec4>(glm::vec4(0.0f));
 
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
-    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
+    int width = 0, height = 0;
     double start = 0.0;
     uint64_t frame = 0;
     while (!glfwWindowShouldClose(window.get())) {
@@ -399,7 +492,7 @@ void run_example_disney_edsl()
             final_output = final_output_image;
             auto projection = glm::perspectiveLH(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
             projection[1][1] *= -1.0f;
-            shared.proj_view = std::bit_cast<ktm::fmat4x4>(glm::mat4(projection * view));
+            proj_view = std::bit_cast<ktm::fmat4x4>(glm::mat4(projection * view));
         }
         if (frame == 0) start = glfwGetTime();
         const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
@@ -407,17 +500,11 @@ void run_example_disney_edsl()
         const int phase = static_cast<int>(std::fmod(seconds, 6.0) / 1.5);
         directEnabled = (phase & 1) == 0;
         iblEnabled = (phase & 2) == 0;
-        shared.flags = std::bit_cast<ktm::fvec4>(glm::vec4(directEnabled, directEnabled, iblEnabled, iblEnabled));
+        flags = std::bit_cast<ktm::fvec4>(glm::vec4(directEnabled, directEnabled, iblEnabled, iblEnabled));
         auto batch = rasterizer.beginBatch();
 
-        for (int row = 0; row < chart_row_count; ++row)
-        {
-            for (int col = 0; col < chart_col_count; ++col)
-            {
-                const auto draw = sphere_parameters(row, col);
-                batch.draw(sphere, {}, draw);
-            }
-        }
+        for (const auto& draw : draws)
+            batch.draw(sphere, {}, draw);
 
         render_executor << std::move(batch);
         if (offscreen) {
@@ -446,172 +533,4 @@ void run_example_disney_edsl()
         if (!stbi_write_png(path.string().c_str(), width, height, 4, rgba.data(), width * 4))
             throw std::runtime_error("Capture PNG write failed");
     }
-}
-
-static uint32_t read_u32(const std::vector<std::byte>& bytes, size_t offset)
-{
-    uint32_t value = 0;
-    std::memcpy(&value, bytes.data() + offset, sizeof(value));
-    return value;
-}
-
-static HardwareImage load_cubemap(const char* filename)
-{
-    const auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env" / filename;
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file.is_open())
-        throw std::runtime_error("Failed to open DDS file: " + path.string());
-
-    const std::streamsize file_size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    std::vector<std::byte> bytes(static_cast<size_t>(file_size));
-    file.read(reinterpret_cast<char*>(bytes.data()), file_size);
-
-    constexpr uint32_t dds_magic = 0x20534444;
-    constexpr uint32_t fourcc_dx10 = 0x30315844;
-    constexpr uint32_t dxgi_format_rgba16_float = 10;
-    constexpr uint32_t caps2_cubemap = 0x200;
-    constexpr size_t dx10_payload_offset = 148;
-
-    if (bytes.size() < dx10_payload_offset || read_u32(bytes, 0) != dds_magic)
-        throw std::runtime_error("Not a DDS file: " + path.string());
-
-    const uint32_t height = read_u32(bytes, 12);
-    const uint32_t width = read_u32(bytes, 16);
-    const uint32_t mip_count = std::max(1u, read_u32(bytes, 28));
-    const uint32_t fourcc = read_u32(bytes, 84);
-    const uint32_t caps2 = read_u32(bytes, 112);
-
-    if (fourcc != fourcc_dx10 || read_u32(bytes, 128) != dxgi_format_rgba16_float)
-        throw std::runtime_error("Expected DX10 RGBA16F DDS: " + path.string());
-    if ((caps2 & caps2_cubemap) == 0 || width != height)
-        throw std::runtime_error("Expected cubemap DDS: " + path.string());
-
-    HardwareImageCreateInfo desc(width, height, ImageFormat::RGBA16_FLOAT);
-    desc.arrayLayers = 6;
-    desc.cube = true;
-    desc.linearFiltering = true;
-    desc.mipLevels = static_cast<int>(mip_count);
-    desc.usage = ImageUsage::SampledImage;
-    HardwareImage image(desc);
-    const size_t payload_size = bytes.size() - dx10_payload_offset;
-    HardwareBuffer staging(static_cast<uint32_t>(payload_size), BufferUsage::StorageBuffer,
-                           bytes.data() + dx10_payload_offset);
-    HardwareExecutor executor;
-    uint64_t offset = 0;
-    for (uint32_t face = 0; face < 6; ++face) {
-        for (uint32_t mip = 0; mip < mip_count; ++mip) {
-            const uint32_t dim = std::max(1u, width >> mip);
-            const uint64_t mip_bytes = static_cast<uint64_t>(dim) * dim * 8;
-            if (offset + mip_bytes > payload_size) throw std::runtime_error("Truncated DDS payload");
-            executor << staging.copyTo(image, offset, face, mip);
-            offset += mip_bytes;
-        }
-    }
-    executor.commit().waitForDeferredResources();
-    return image;
-}
-
-static RasterGeometry make_sphere()
-{
-    constexpr int slices = 48, stacks = 24;
-    // Each unit-sphere position also supplies its original object-space normal.
-    std::vector<std::array<float, 3>> vertices;
-    std::vector<uint16_t> indices;
-    vertices.reserve(static_cast<size_t>((slices + 1) * (stacks + 1)));
-    indices.reserve(static_cast<size_t>(stacks * (slices + 1) * 2 + (stacks - 1) * 2));
-
-    for (int y = 0; y <= stacks; ++y)
-    {
-        const float v = static_cast<float>(y) / static_cast<float>(stacks);
-        const float phi = v * glm::pi<float>();
-        const float sin_phi = std::sin(phi);
-        const float cos_phi = std::cos(phi);
-
-        for (int x = 0; x <= slices; ++x)
-        {
-            const float u = static_cast<float>(x) / static_cast<float>(slices);
-            const float theta = u * glm::two_pi<float>();
-            const float sin_theta = std::sin(theta);
-            const float cos_theta = std::cos(theta);
-
-            vertices.push_back({ sin_phi * cos_theta, cos_phi, sin_phi * sin_theta });
-        }
-    }
-
-    for (int y = 0; y < stacks; ++y)
-    {
-        const auto first = static_cast<uint16_t>(y * (slices + 1));
-        if (y != 0) {
-            indices.push_back(indices.back());
-            indices.push_back(first);
-        }
-        for (int x = 0; x <= slices; ++x) {
-            indices.push_back(static_cast<uint16_t>(first + x));
-            indices.push_back(static_cast<uint16_t>(first + slices + 1 + x));
-        }
-    }
-
-    return RasterGeometry::upload(vertices, indices);
-}
-
-constexpr glm::vec3 chart_row_colors[chart_row_count] = {
-    glm::vec3(1.0f, 1.0f, 1.0f),       // subsurface
-    glm::vec3(1.0f, 0.86f, 0.12f),     // metallic
-    glm::vec3(0.92f, 0.12f, 0.12f),    // specular
-    glm::vec3(0.92f, 0.12f, 0.12f),    // specularTint
-    glm::vec3(0.42f, 0.32f, 0.92f),    // roughness
-    glm::vec3(0.92f, 0.18f, 0.78f),    // anisotropic
-    glm::vec3(0.62f, 0.18f, 0.14f),    // sheen
-    glm::vec3(0.62f, 0.18f, 0.14f),    // sheenTint
-    glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoat
-    glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoatGloss
-};
-
-static DisneyEdslSphereParameters sphere_parameters(int row, int col)
-{
-    enum class ChartParam : int
-    {
-        Subsurface = 0,
-        Metallic,
-        Specular,
-        SpecularTint,
-        Roughness,
-        Anisotropic,
-        Sheen,
-        SheenTint,
-        Clearcoat,
-        ClearcoatGloss,
-    };
-
-    constexpr float sphere_scale = 0.42f, spacing = 1.12f;
-    const float x = (static_cast<float>(col) - (chart_col_count - 1) * 0.5f) * spacing;
-    const float y = ((chart_row_count - 1) * 0.5f - static_cast<float>(row)) * spacing;
-    DisneyEdslSphereParameters draw{};
-    draw.model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f))
-               * glm::scale(glm::mat4(1.0f), glm::vec3(sphere_scale));
-    draw.mat0 = glm::vec4(chart_row_colors[row], 0.0f);  // base color and metallic
-    draw.mat1 = glm::vec4(0.5f, 0.5f, 0.0f, 0.0f);     // roughness, specular, specular tint, subsurface
-    draw.mat2 = glm::vec4(0.0f, 0.0f, 0.5f, 0.0f);     // anisotropic, sheen, sheen tint, clearcoat
-    draw.clearcoatGloss = 1.0f;
-
-    const float t = static_cast<float>(col) / static_cast<float>(chart_col_count - 1);
-    switch (static_cast<ChartParam>(row))
-    {
-    case ChartParam::Subsurface: draw.mat1.w = t; break;
-    case ChartParam::Metallic: draw.mat0.w = t; break;
-    case ChartParam::Specular: draw.mat1.y = t; break;
-    case ChartParam::SpecularTint: draw.mat1.z = t; break;
-    case ChartParam::Roughness: draw.mat1.x = t; break;
-    case ChartParam::Anisotropic: draw.mat2.x = t; break;
-    case ChartParam::Sheen: draw.mat2.y = t; break;
-    case ChartParam::SheenTint: draw.mat2.z = t; break;
-    case ChartParam::Clearcoat: draw.mat2.w = t; break;
-    case ChartParam::ClearcoatGloss:
-        draw.mat2.w = 1.0f;
-        draw.clearcoatGloss = t;
-        break;
-    }
-
-    return draw;
 }
