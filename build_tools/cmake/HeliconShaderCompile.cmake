@@ -24,7 +24,7 @@ endif()
 
 # 解析源文件中的 shader include 指令
 # 返回: shader lang list, shader path list, shader relative path list
-function(_helicon_parse_shader_includes source_files source_dir out_langs out_paths out_rel_paths out_source_paths out_scanned_files)
+function(_helicon_parse_shader_includes source_files source_dir output_dir out_langs out_paths out_rel_paths out_source_paths out_scanned_files)
     set(_helicon_lang_list "")
     set(_helicon_path_list "")
     set(_helicon_rel_path_list "")
@@ -74,9 +74,22 @@ function(_helicon_parse_shader_includes source_files source_dir out_langs out_pa
             
             # 处理相对路径 -> 绝对路径（用于编译）
             if(NOT IS_ABSOLUTE "${_helicon_raw_shader_path}")
-                #get_filename_component(FILE_DIR "${_helicon_source_file}" DIRECTORY)
-                #get_filename_component(_helicon_shader_path "${FILE_DIR}/${_helicon_raw_shader_path}" ABSOLUTE)
                 get_filename_component(_helicon_shader_path "${source_dir}/${_helicon_raw_shader_path}" ABSOLUTE)
+                # A bare filename may refer to a shader beside the including C++ file.
+                # Give each such directory its own generated include path for matching basenames.
+                get_filename_component(_shader_name "${_helicon_raw_shader_path}" NAME)
+                get_filename_component(_cpp_dir "${_helicon_source_file}" DIRECTORY)
+                if(NOT EXISTS "${_helicon_shader_path}" AND _shader_name STREQUAL _helicon_raw_shader_path
+                   AND EXISTS "${_cpp_dir}/${_shader_name}")
+                    set(_helicon_shader_path "${_cpp_dir}/${_shader_name}")
+                    file(RELATIVE_PATH _local_dir "${source_dir}" "${_cpp_dir}")
+                    if(_local_dir MATCHES "^\\.\\." OR IS_ABSOLUTE "${_local_dir}")
+                        string(SHA256 _local_dir "${_cpp_dir}")
+                    endif()
+                    set(_helicon_relative_path "${_local_dir}/${_shader_name}")
+                    set_property(SOURCE "${_helicon_source_file}" DIRECTORY "${source_dir}" APPEND
+                        PROPERTY INCLUDE_DIRECTORIES "${output_dir}/${_local_dir}")
+                endif()
             else()
                 set(_helicon_shader_path "${_helicon_raw_shader_path}")
             endif()
@@ -135,7 +148,7 @@ function(helicon_compile_shaders target_name)
     endif()
     
     # 解析所有源文件中的 shader include
-    _helicon_parse_shader_includes("${_helicon_target_sources}" "${_helicon_target_source_dir}"
+    _helicon_parse_shader_includes("${_helicon_target_sources}" "${_helicon_target_source_dir}" "${_helicon_arg_OUTPUT_DIR}"
         _helicon_shader_langs _helicon_shader_paths _helicon_shader_rel_paths
         _helicon_shader_source_paths _helicon_shader_scanned_files)
 

@@ -34,7 +34,7 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
     "core": ("&:with_engine=False", "&:with_tests=True"),
     "engine": ("&:with_engine=True", "&:with_tests=True"),
     "tools": ("&:with_tools=True",),
-    "examples": ("&:with_examples=True", "&:with_tests=True", "&:with_ocarina=True"),
+    "examples": ("&:with_examples=True", "&:with_tests=True"),
     "ocarina": ("&:with_ocarina=True",),
     "ocarina-tests": (
         "&:with_ocarina=True",

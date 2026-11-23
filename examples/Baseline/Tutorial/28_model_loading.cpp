@@ -7,10 +7,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
 
-#include "window.h"
-#include "example_benchmark/benchmark.h"
-
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
 #include <stb_image.h>
+#undef STBI_ONLY_PNG
+#undef STB_IMAGE_IMPLEMENTATION
+#undef STB_IMAGE_STATIC
 
 #include <tiny_obj_loader.h>
 
@@ -29,8 +32,28 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <memory>
+#include <cmath>
+#include <cstdio>
+#include <numeric>
+#include <string>
+#include <utility>
 
-namespace {
+using TutorialClock = std::chrono::steady_clock;
+
+struct TutorialPresentSamples {
+    const char* mode;
+    int limit, warmup;
+    std::vector<double> intervals;
+    TutorialClock::time_point previous{};
+    const char* window_title{};
+    TutorialClock::time_point last_title_update{};
+    unsigned title_frames{};
+};
+
+static int env_int(const char* name, int fallback);
+static TutorialPresentSamples present_samples(const char* mode, const char* title = nullptr);
+static void observe_present(TutorialPresentSamples& samples, GLFWwindow* window, bool presented);
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
@@ -55,7 +78,7 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
-VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
+static VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
     auto func = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
     if (func != nullptr) {
         return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
@@ -64,79 +87,79 @@ VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMes
     }
 }
 
-void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator) {
+static void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator) {
     auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
     if (func != nullptr) {
         func(instance, debugMessenger, pAllocator);
     }
 }
 
-struct QueueFamilyIndices {
+struct TutorialQueueFamilies {
     std::optional<uint32_t> graphicsFamily;
     std::optional<uint32_t> presentFamily;
 };
 
-bool complete(const QueueFamilyIndices& families) {
+static bool complete(const TutorialQueueFamilies& families) {
     return families.graphicsFamily.has_value() && families.presentFamily.has_value();
 }
 
-struct SwapChainSupportDetails {
+struct TutorialSwapChainSupport {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
     std::vector<VkPresentModeKHR> presentModes;
 };
 
-struct Vertex {
+struct TutorialVertex {
     glm::vec3 pos;
     glm::vec3 color;
     glm::vec2 texCoord;
 
-    bool operator==(const Vertex&) const = default;
+    bool operator==(const TutorialVertex&) const = default;
 };
 
-VkVertexInputBindingDescription getBindingDescription() {
+static VkVertexInputBindingDescription getBindingDescription() {
     VkVertexInputBindingDescription bindingDescription{};
     bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
+    bindingDescription.stride = sizeof(TutorialVertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     return bindingDescription;
 }
 
-std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
+static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
     std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, pos);
+    attributeDescriptions[0].offset = offsetof(TutorialVertex, pos);
 
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
+    attributeDescriptions[1].offset = offsetof(TutorialVertex, color);
 
     attributeDescriptions[2].binding = 0;
     attributeDescriptions[2].location = 2;
     attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+    attributeDescriptions[2].offset = offsetof(TutorialVertex, texCoord);
 
     return attributeDescriptions;
 }
 
-size_t hashVertex(const Vertex& vertex) {
+static size_t hashVertex(const TutorialVertex& vertex) {
     const std::hash<glm::vec3> hash3;
     const std::hash<glm::vec2> hash2;
     return ((hash3(vertex.pos) ^ (hash3(vertex.color) << 1)) >> 1) ^ (hash2(vertex.texCoord) << 1);
 }
 
-struct UniformBufferObject {
+struct TutorialUniforms {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
 
-struct VulkanState {
+struct TutorialVulkanState {
     GLFWwindow* window;
 
     VkInstance instance;
@@ -172,7 +195,7 @@ struct VulkanState {
     VkImageView textureImageView;
     VkSampler textureSampler;
 
-    std::vector<Vertex> vertices;
+    std::vector<TutorialVertex> vertices;
     std::vector<uint32_t> indices;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -196,29 +219,46 @@ struct VulkanState {
     bool framebufferResized = false;
 };
 
-void framebufferResizeCallback(GLFWwindow* window, int, int);
-void initVulkan(VulkanState& state);
-bool drawFrame(VulkanState& state);
-void cleanup(VulkanState& state);
+static void framebufferResizeCallback(GLFWwindow* window, int, int);
+static void initVulkan(TutorialVulkanState& state);
+static bool drawFrame(TutorialVulkanState& state);
+static void cleanup(TutorialVulkanState& state);
 
-} // namespace
+static auto open_window(int width, int height, const char* title) {
+    const bool hidden = env_int("HORIZON_BENCH_HIDDEN", 0) != 0;
+    if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+    if (!window) {
+        glfwTerminate();
+        throw std::runtime_error("glfwCreateWindow failed");
+    }
+    auto close = [](GLFWwindow* handle) {
+        glfwDestroyWindow(handle);
+        glfwTerminate();
+    };
+    return std::unique_ptr<GLFWwindow, decltype(close)>(window, close);
+}
 
 void run_example_baseline_tutorial() {
-    auto window = examples::open_window(WIDTH, HEIGHT, "Vulkan", true);
+    auto window = open_window(WIDTH, HEIGHT, "Vulkan");
     if (volkInitialize() != VK_SUCCESS)
         throw std::runtime_error("failed to initialize the Vulkan loader!");
 
-    VulkanState state{};
+    TutorialVulkanState state{};
     state.window = window.get();
     glfwSetWindowUserPointer(state.window, &state);
     glfwSetFramebufferSizeCallback(state.window, framebufferResizeCallback);
     try {
         initVulkan(state);
-        auto samples = bench::present_samples("baseline");
+        auto samples = present_samples("baseline");
         while (!glfwWindowShouldClose(state.window)) {
             glfwPollEvents();
             const bool presented = drawFrame(state);
-            bench::observe_present(samples, state.window, presented);
+            observe_present(samples, state.window, presented);
         }
     } catch (...) {
         cleanup(state);
@@ -229,20 +269,18 @@ void run_example_baseline_tutorial() {
     volkFinalize();
 }
 
-namespace {
-
-void framebufferResizeCallback(GLFWwindow* window, int, int) {
-    auto* state = static_cast<VulkanState*>(glfwGetWindowUserPointer(window));
+static void framebufferResizeCallback(GLFWwindow* window, int, int) {
+    auto* state = static_cast<TutorialVulkanState*>(glfwGetWindowUserPointer(window));
     state->framebufferResized = true;
 }
 
-VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) {
     std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
 
     return VK_FALSE;
 }
 
-void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
+static void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
     createInfo = {};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -250,7 +288,7 @@ void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& create
     createInfo.pfnUserCallback = debugCallback;
 }
 
-std::vector<const char*> getRequiredExtensions() {
+static std::vector<const char*> getRequiredExtensions() {
     uint32_t glfwExtensionCount = 0;
     const char** glfwExtensions;
     glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
@@ -264,7 +302,7 @@ std::vector<const char*> getRequiredExtensions() {
     return extensions;
 }
 
-bool checkValidationLayerSupport() {
+static bool checkValidationLayerSupport() {
     uint32_t layerCount;
     vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 
@@ -289,7 +327,7 @@ bool checkValidationLayerSupport() {
     return true;
 }
 
-void createInstance(VulkanState& state) {
+static void createInstance(TutorialVulkanState& state) {
     if (enableValidationLayers && !checkValidationLayerSupport()) {
         throw std::runtime_error("validation layers requested, but not available!");
     }
@@ -328,7 +366,7 @@ void createInstance(VulkanState& state) {
     }
 }
 
-void setupDebugMessenger(VulkanState& state) {
+static void setupDebugMessenger(TutorialVulkanState& state) {
     if (!enableValidationLayers) return;
 
     VkDebugUtilsMessengerCreateInfoEXT createInfo;
@@ -339,14 +377,14 @@ void setupDebugMessenger(VulkanState& state) {
     }
 }
 
-void createSurface(VulkanState& state) {
+static void createSurface(TutorialVulkanState& state) {
     if (glfwCreateWindowSurface(state.instance, state.window, nullptr, &state.surface) != VK_SUCCESS) {
         throw std::runtime_error("failed to create window surface!");
     }
 }
 
-SwapChainSupportDetails querySwapChainSupport(VulkanState& state, VkPhysicalDevice device) {
-    SwapChainSupportDetails details;
+static TutorialSwapChainSupport querySwapChainSupport(TutorialVulkanState& state, VkPhysicalDevice device) {
+    TutorialSwapChainSupport details;
 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, state.surface, &details.capabilities);
 
@@ -369,7 +407,7 @@ SwapChainSupportDetails querySwapChainSupport(VulkanState& state, VkPhysicalDevi
     return details;
 }
 
-bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
+static bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
     uint32_t extensionCount;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
@@ -385,8 +423,8 @@ bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
     return requiredExtensions.empty();
 }
 
-QueueFamilyIndices findQueueFamilies(VulkanState& state, VkPhysicalDevice device) {
-    QueueFamilyIndices indices;
+static TutorialQueueFamilies findQueueFamilies(TutorialVulkanState& state, VkPhysicalDevice device) {
+    TutorialQueueFamilies indices;
 
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
@@ -417,14 +455,14 @@ QueueFamilyIndices findQueueFamilies(VulkanState& state, VkPhysicalDevice device
     return indices;
 }
 
-bool isDeviceSuitable(VulkanState& state, VkPhysicalDevice device) {
-    QueueFamilyIndices indices = findQueueFamilies(state, device);
+static bool isDeviceSuitable(TutorialVulkanState& state, VkPhysicalDevice device) {
+    TutorialQueueFamilies indices = findQueueFamilies(state, device);
 
     bool extensionsSupported = checkDeviceExtensionSupport(device);
 
     bool swapChainAdequate = false;
     if (extensionsSupported) {
-        SwapChainSupportDetails swapChainSupport = querySwapChainSupport(state, device);
+        TutorialSwapChainSupport swapChainSupport = querySwapChainSupport(state, device);
         swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
     }
 
@@ -434,7 +472,7 @@ bool isDeviceSuitable(VulkanState& state, VkPhysicalDevice device) {
     return complete(indices) && extensionsSupported && swapChainAdequate  && supportedFeatures.samplerAnisotropy;
 }
 
-void pickPhysicalDevice(VulkanState& state) {
+static void pickPhysicalDevice(TutorialVulkanState& state) {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(state.instance, &deviceCount, nullptr);
 
@@ -457,8 +495,8 @@ void pickPhysicalDevice(VulkanState& state) {
     }
 }
 
-void createLogicalDevice(VulkanState& state) {
-    QueueFamilyIndices indices = findQueueFamilies(state, state.physicalDevice);
+static void createLogicalDevice(TutorialVulkanState& state) {
+    TutorialQueueFamilies indices = findQueueFamilies(state, state.physicalDevice);
 
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
@@ -502,7 +540,7 @@ void createLogicalDevice(VulkanState& state) {
     vkGetDeviceQueue(state.device, indices.presentFamily.value(), 0, &state.presentQueue);
 }
 
-VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+static VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
     for (const auto& availableFormat : availableFormats) {
         if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return availableFormat;
@@ -512,7 +550,7 @@ VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>
     return availableFormats[0];
 }
 
-VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+static VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
     for (const auto& availablePresentMode : availablePresentModes) {
         if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
             return availablePresentMode;
@@ -522,7 +560,7 @@ VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& avai
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 
-VkExtent2D chooseSwapExtent(VulkanState& state, const VkSurfaceCapabilitiesKHR& capabilities) {
+static VkExtent2D chooseSwapExtent(TutorialVulkanState& state, const VkSurfaceCapabilitiesKHR& capabilities) {
     if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         return capabilities.currentExtent;
     } else {
@@ -541,8 +579,8 @@ VkExtent2D chooseSwapExtent(VulkanState& state, const VkSurfaceCapabilitiesKHR& 
     }
 }
 
-void createSwapChain(VulkanState& state) {
-    SwapChainSupportDetails swapChainSupport = querySwapChainSupport(state, state.physicalDevice);
+static void createSwapChain(TutorialVulkanState& state) {
+    TutorialSwapChainSupport swapChainSupport = querySwapChainSupport(state, state.physicalDevice);
 
     VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
     VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
@@ -564,7 +602,7 @@ void createSwapChain(VulkanState& state) {
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-    QueueFamilyIndices indices = findQueueFamilies(state, state.physicalDevice);
+    TutorialQueueFamilies indices = findQueueFamilies(state, state.physicalDevice);
     uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 
     if (indices.graphicsFamily != indices.presentFamily) {
@@ -592,7 +630,7 @@ void createSwapChain(VulkanState& state) {
     state.swapChainExtent = extent;
 }
 
-VkImageView createImageView(VulkanState& state, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
+static VkImageView createImageView(TutorialVulkanState& state, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = image;
@@ -612,7 +650,7 @@ VkImageView createImageView(VulkanState& state, VkImage image, VkFormat format, 
     return imageView;
 }
 
-void createImageViews(VulkanState& state) {
+static void createImageViews(TutorialVulkanState& state) {
     state.swapChainImageViews.resize(state.swapChainImages.size());
 
     for (uint32_t i = 0; i < state.swapChainImages.size(); i++) {
@@ -620,7 +658,7 @@ void createImageViews(VulkanState& state) {
     }
 }
 
-VkFormat findSupportedFormat(VulkanState& state, const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
+static VkFormat findSupportedFormat(TutorialVulkanState& state, const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
     for (VkFormat format : candidates) {
         VkFormatProperties props;
         vkGetPhysicalDeviceFormatProperties(state.physicalDevice, format, &props);
@@ -635,7 +673,7 @@ VkFormat findSupportedFormat(VulkanState& state, const std::vector<VkFormat>& ca
     throw std::runtime_error("failed to find supported format!");
 }
 
-VkFormat findDepthFormat(VulkanState& state) {
+static VkFormat findDepthFormat(TutorialVulkanState& state) {
     return findSupportedFormat(state,
         {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
         VK_IMAGE_TILING_OPTIMAL,
@@ -643,7 +681,7 @@ VkFormat findDepthFormat(VulkanState& state) {
     );
 }
 
-void createRenderPass(VulkanState& state) {
+static void createRenderPass(TutorialVulkanState& state) {
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = state.swapChainImageFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -701,7 +739,7 @@ void createRenderPass(VulkanState& state) {
     }
 }
 
-void createDescriptorSetLayout(VulkanState& state) {
+static void createDescriptorSetLayout(TutorialVulkanState& state) {
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorCount = 1;
@@ -727,7 +765,7 @@ void createDescriptorSetLayout(VulkanState& state) {
     }
 }
 
-VkShaderModule createShaderModule(VulkanState& state, const std::vector<char>& code) {
+static VkShaderModule createShaderModule(TutorialVulkanState& state, const std::vector<char>& code) {
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
@@ -741,11 +779,11 @@ VkShaderModule createShaderModule(VulkanState& state, const std::vector<char>& c
     return shaderModule;
 }
 
-std::vector<char> readFile(const std::string& filename) {
+static std::vector<char> readFile(const std::filesystem::path& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        throw std::runtime_error("failed to open file!");
+        throw std::runtime_error("failed to open shader: " + filename.string());
     }
 
     size_t fileSize = (size_t) file.tellg();
@@ -759,9 +797,14 @@ std::vector<char> readFile(const std::string& filename) {
     return buffer;
 }
 
-void createGraphicsPipeline(VulkanState& state) {
-    auto vertShaderCode = readFile(TUTORIAL_SHADER_DIR "/vert.spv");
-    auto fragShaderCode = readFile(TUTORIAL_SHADER_DIR "/frag.spv");
+static void createGraphicsPipeline(TutorialVulkanState& state) {
+#ifdef TUTORIAL_SHADER_DIR
+    const std::filesystem::path shaderDir = TUTORIAL_SHADER_DIR;
+#else
+    const auto shaderDir = std::filesystem::path(__FILE__).parent_path();
+#endif
+    auto vertShaderCode = readFile(shaderDir / "vert.spv");
+    auto fragShaderCode = readFile(shaderDir / "frag.spv");
 
     VkShaderModule vertShaderModule = createShaderModule(state, vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(state, fragShaderCode);
@@ -882,7 +925,7 @@ void createGraphicsPipeline(VulkanState& state) {
     vkDestroyShaderModule(state.device, vertShaderModule, nullptr);
 }
 
-void createFramebuffers(VulkanState& state) {
+static void createFramebuffers(TutorialVulkanState& state) {
     state.swapChainFramebuffers.resize(state.swapChainImageViews.size());
 
     for (size_t i = 0; i < state.swapChainImageViews.size(); i++) {
@@ -906,8 +949,8 @@ void createFramebuffers(VulkanState& state) {
     }
 }
 
-void createCommandPool(VulkanState& state) {
-    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(state, state.physicalDevice);
+static void createCommandPool(TutorialVulkanState& state) {
+    TutorialQueueFamilies queueFamilyIndices = findQueueFamilies(state, state.physicalDevice);
 
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -919,7 +962,7 @@ void createCommandPool(VulkanState& state) {
     }
 }
 
-uint32_t findMemoryType(VulkanState& state, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+static uint32_t findMemoryType(TutorialVulkanState& state, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(state.physicalDevice, &memProperties);
 
@@ -932,7 +975,7 @@ uint32_t findMemoryType(VulkanState& state, uint32_t typeFilter, VkMemoryPropert
     throw std::runtime_error("failed to find suitable memory type!");
 }
 
-void createImage(VulkanState& state, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+static void createImage(TutorialVulkanState& state, uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -967,14 +1010,14 @@ void createImage(VulkanState& state, uint32_t width, uint32_t height, VkFormat f
     vkBindImageMemory(state.device, image, imageMemory, 0);
 }
 
-void createDepthResources(VulkanState& state) {
+static void createDepthResources(TutorialVulkanState& state) {
     VkFormat depthFormat = findDepthFormat(state);
 
     createImage(state, state.swapChainExtent.width, state.swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, state.depthImage, state.depthImageMemory);
     state.depthImageView = createImageView(state, state.depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
-VkCommandBuffer beginSingleTimeCommands(VulkanState& state) {
+static VkCommandBuffer beginSingleTimeCommands(TutorialVulkanState& state) {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -993,7 +1036,7 @@ VkCommandBuffer beginSingleTimeCommands(VulkanState& state) {
     return commandBuffer;
 }
 
-void endSingleTimeCommands(VulkanState& state, VkCommandBuffer commandBuffer) {
+static void endSingleTimeCommands(TutorialVulkanState& state, VkCommandBuffer commandBuffer) {
     vkEndCommandBuffer(commandBuffer);
 
     VkSubmitInfo submitInfo{};
@@ -1007,7 +1050,7 @@ void endSingleTimeCommands(VulkanState& state, VkCommandBuffer commandBuffer) {
     vkFreeCommandBuffers(state.device, state.commandPool, 1, &commandBuffer);
 }
 
-void transitionImageLayout(VulkanState& state, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+static void transitionImageLayout(TutorialVulkanState& state, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommands(state);
 
     VkImageMemoryBarrier barrier{};
@@ -1054,7 +1097,7 @@ void transitionImageLayout(VulkanState& state, VkImage image, VkFormat format, V
     endSingleTimeCommands(state, commandBuffer);
 }
 
-void copyBufferToImage(VulkanState& state, VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
+static void copyBufferToImage(TutorialVulkanState& state, VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommands(state);
 
     VkBufferImageCopy region{};
@@ -1077,7 +1120,7 @@ void copyBufferToImage(VulkanState& state, VkBuffer buffer, VkImage image, uint3
     endSingleTimeCommands(state, commandBuffer);
 }
 
-void createBuffer(VulkanState& state, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+static void createBuffer(TutorialVulkanState& state, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -1103,7 +1146,7 @@ void createBuffer(VulkanState& state, VkDeviceSize size, VkBufferUsageFlags usag
     vkBindBufferMemory(state.device, buffer, bufferMemory, 0);
 }
 
-void createTextureImage(VulkanState& state) {
+static void createTextureImage(TutorialVulkanState& state) {
     int texWidth, texHeight, texChannels;
     stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
@@ -1133,11 +1176,11 @@ void createTextureImage(VulkanState& state) {
     vkFreeMemory(state.device, stagingBufferMemory, nullptr);
 }
 
-void createTextureImageView(VulkanState& state) {
+static void createTextureImageView(TutorialVulkanState& state) {
     state.textureImageView = createImageView(state, state.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
-void createTextureSampler(VulkanState& state) {
+static void createTextureSampler(TutorialVulkanState& state) {
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(state.physicalDevice, &properties);
 
@@ -1161,7 +1204,7 @@ void createTextureSampler(VulkanState& state) {
     }
 }
 
-void loadModel(VulkanState& state) {
+static void loadModel(TutorialVulkanState& state) {
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -1172,11 +1215,11 @@ void loadModel(VulkanState& state) {
         throw std::runtime_error(warn + err);
     }
 
-    std::unordered_map<Vertex, uint32_t, decltype(&hashVertex)> uniqueVertices(0, hashVertex);
+    std::unordered_map<TutorialVertex, uint32_t, decltype(&hashVertex)> uniqueVertices(0, hashVertex);
 
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
-            Vertex vertex{};
+            TutorialVertex vertex{};
 
             vertex.pos = {
                 attrib.vertices[3 * index.vertex_index + 0],
@@ -1201,7 +1244,7 @@ void loadModel(VulkanState& state) {
     }
 }
 
-void copyBuffer(VulkanState& state, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+static void copyBuffer(TutorialVulkanState& state, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
     VkCommandBuffer commandBuffer = beginSingleTimeCommands(state);
 
     VkBufferCopy copyRegion{};
@@ -1211,7 +1254,7 @@ void copyBuffer(VulkanState& state, VkBuffer srcBuffer, VkBuffer dstBuffer, VkDe
     endSingleTimeCommands(state, commandBuffer);
 }
 
-void createVertexBuffer(VulkanState& state) {
+static void createVertexBuffer(TutorialVulkanState& state) {
     VkDeviceSize bufferSize = sizeof(state.vertices[0]) * state.vertices.size();
 
     VkBuffer stagingBuffer;
@@ -1231,7 +1274,7 @@ void createVertexBuffer(VulkanState& state) {
     vkFreeMemory(state.device, stagingBufferMemory, nullptr);
 }
 
-void createIndexBuffer(VulkanState& state) {
+static void createIndexBuffer(TutorialVulkanState& state) {
     VkDeviceSize bufferSize = sizeof(state.indices[0]) * state.indices.size();
 
     VkBuffer stagingBuffer;
@@ -1251,8 +1294,8 @@ void createIndexBuffer(VulkanState& state) {
     vkFreeMemory(state.device, stagingBufferMemory, nullptr);
 }
 
-void createUniformBuffers(VulkanState& state) {
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+static void createUniformBuffers(TutorialVulkanState& state) {
+    VkDeviceSize bufferSize = sizeof(TutorialUniforms);
 
     state.uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     state.uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1265,7 +1308,7 @@ void createUniformBuffers(VulkanState& state) {
     }
 }
 
-void createDescriptorPool(VulkanState& state) {
+static void createDescriptorPool(TutorialVulkanState& state) {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
@@ -1283,7 +1326,7 @@ void createDescriptorPool(VulkanState& state) {
     }
 }
 
-void createDescriptorSets(VulkanState& state) {
+static void createDescriptorSets(TutorialVulkanState& state) {
     std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, state.descriptorSetLayout);
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1300,7 +1343,7 @@ void createDescriptorSets(VulkanState& state) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = state.uniformBuffers[i];
         bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
+        bufferInfo.range = sizeof(TutorialUniforms);
 
         VkDescriptorImageInfo imageInfo{};
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1329,7 +1372,7 @@ void createDescriptorSets(VulkanState& state) {
     }
 }
 
-void createCommandBuffers(VulkanState& state) {
+static void createCommandBuffers(TutorialVulkanState& state) {
     state.commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
     VkCommandBufferAllocateInfo allocInfo{};
@@ -1343,7 +1386,7 @@ void createCommandBuffers(VulkanState& state) {
     }
 }
 
-void createSyncObjects(VulkanState& state) {
+static void createSyncObjects(TutorialVulkanState& state) {
     state.imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     state.renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     state.inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -1364,7 +1407,7 @@ void createSyncObjects(VulkanState& state) {
     }
 }
 
-void initVulkan(VulkanState& state) {
+static void initVulkan(TutorialVulkanState& state) {
     createInstance(state);
     volkLoadInstance(state.instance);
     setupDebugMessenger(state);
@@ -1392,7 +1435,7 @@ void initVulkan(VulkanState& state) {
     createSyncObjects(state);
 }
 
-void cleanupSwapChain(VulkanState& state) {
+static void cleanupSwapChain(TutorialVulkanState& state) {
     for (auto framebuffer : state.swapChainFramebuffers) {
         vkDestroyFramebuffer(state.device, framebuffer, nullptr);
     }
@@ -1414,7 +1457,7 @@ void cleanupSwapChain(VulkanState& state) {
     state.swapChain = VK_NULL_HANDLE;
 }
 
-void recreateSwapChain(VulkanState& state) {
+static void recreateSwapChain(TutorialVulkanState& state) {
     int width = 0, height = 0;
     glfwGetFramebufferSize(state.window, &width, &height);
     while (width == 0 || height == 0) {
@@ -1433,7 +1476,7 @@ void recreateSwapChain(VulkanState& state) {
     createFramebuffers(state);
 }
 
-void recordCommandBuffer(VulkanState& state, VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+static void recordCommandBuffer(TutorialVulkanState& state, VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -1490,13 +1533,13 @@ void recordCommandBuffer(VulkanState& state, VkCommandBuffer commandBuffer, uint
     }
 }
 
-void updateUniformBuffer(VulkanState& state, uint32_t currentImage) {
+static void updateUniformBuffer(TutorialVulkanState& state, uint32_t currentImage) {
     static auto startTime = std::chrono::high_resolution_clock::now();
 
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    UniformBufferObject ubo{};
+    TutorialUniforms ubo{};
     ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     ubo.proj = glm::perspective(glm::radians(45.0f), state.swapChainExtent.width / (float) state.swapChainExtent.height, 0.1f, 10.0f);
@@ -1505,7 +1548,7 @@ void updateUniformBuffer(VulkanState& state, uint32_t currentImage) {
     memcpy(state.uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
-bool drawFrame(VulkanState& state) {
+static bool drawFrame(TutorialVulkanState& state) {
     vkWaitForFences(state.device, 1, &state.inFlightFences[state.currentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
@@ -1570,7 +1613,7 @@ bool drawFrame(VulkanState& state) {
     return result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR;
 }
 
-void cleanup(VulkanState& state) {
+static void cleanup(TutorialVulkanState& state) {
     if (state.device) {
         vkDeviceWaitIdle(state.device);
         cleanupSwapChain(state);
@@ -1619,4 +1662,63 @@ void cleanup(VulkanState& state) {
     vkDestroyInstance(state.instance, nullptr);
 }
 
-} // namespace
+struct TutorialFrameStats {
+    double mean, p95;
+};
+
+static TutorialFrameStats frame_stats(std::vector<double>& samples) {
+    const double mean = std::accumulate(samples.begin(), samples.end(), 0.0) / samples.size();
+    std::sort(samples.begin(), samples.end());
+    return {mean, samples[static_cast<size_t>(std::ceil(samples.size() * 0.95)) - 1]};
+}
+
+static int env_int(const char* name, int fallback) {
+    const char* value = std::getenv(name);
+    if (!value || !*value) return fallback;
+    char* end{};
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value || *end || parsed < 0 || parsed > 10000000)
+        throw std::invalid_argument(std::string("Invalid ") + name);
+    return static_cast<int>(parsed);
+}
+
+static TutorialPresentSamples present_samples(const char* mode, const char* title) {
+    const int limit = env_int("HORIZON_PRESENT_FRAMES", 0);
+    TutorialPresentSamples samples{mode, limit, limit ? env_int("HORIZON_BENCH_WARMUP", 60) : 0};
+    samples.intervals.reserve(limit);
+    samples.window_title = title;
+    samples.last_title_update = TutorialClock::now();
+    return samples;
+}
+
+static void observe_present(TutorialPresentSamples& samples, GLFWwindow* window, bool presented) {
+    const auto now = TutorialClock::now();
+    if (samples.window_title) {
+        ++samples.title_frames;
+        const double seconds = std::chrono::duration<double>(now - samples.last_title_update).count();
+        if (seconds >= 0.5) {
+            const double fps = samples.title_frames / seconds;
+            char title[160];
+            std::snprintf(title, sizeof(title), "%s %.1f FPS (%.2f ms)", samples.window_title, fps, 1000.0 / fps);
+            glfwSetWindowTitle(window, title);
+            samples.last_title_update = now;
+            samples.title_frames = 0;
+        }
+    }
+    if (!samples.limit) return;
+    if (presented) {
+        const auto last = std::exchange(samples.previous, now);
+        if (last != TutorialClock::time_point{}) {
+            if (samples.warmup > 0) --samples.warmup;
+            else samples.intervals.push_back(std::chrono::duration<double, std::milli>(now - last).count());
+        }
+    }
+    if (samples.intervals.size() == static_cast<size_t>(samples.limit)) {
+        const auto [mean, p95] = frame_stats(samples.intervals);
+        std::cout << "PRESENT_BENCHMARK," << samples.mode << ",frames=" << samples.limit
+                  << ",mean_ms=" << mean << ",p95_ms=" << p95 << ",fps=" << 1000.0 / mean << '\n';
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+    } else if (glfwWindowShouldClose(window)) {
+        throw std::runtime_error("Window closed before the present benchmark finished");
+    }
+}

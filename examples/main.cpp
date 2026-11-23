@@ -16,11 +16,9 @@ void run_example_disney_slang();
 void run_example_drawstress_edsl();
 void run_example_drawstress_slang();
 
-#ifdef HORIZON_OCARINA_EXAMPLES
 void run_example_baseline_ocarina();
 void run_example_disney_ocarina();
 void run_example_drawstress_ocarina();
-#endif
 
 int main(int argc, char **argv)
 {
@@ -55,11 +53,9 @@ int main(int argc, char **argv)
         {"disney_slang", run_example_disney_slang},
         {"drawstress_edsl", run_example_drawstress_edsl},
         {"drawstress_slang", run_example_drawstress_slang},
-#ifdef HORIZON_OCARINA_EXAMPLES
         {"baseline_ocarina", run_example_baseline_ocarina},
         {"disney_ocarina", run_example_disney_ocarina},
         {"drawstress_ocarina", run_example_drawstress_ocarina},
-#endif
     };
     if (mode == "--list" || mode == "--help" || (argc > 2 && std::string_view(argv[2]) == "--help")) {
         if (mode != "--list") std::cout << "Usage: HorizonExamples [mode] (default: " << default_mode << ")\n";

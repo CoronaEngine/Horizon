@@ -113,7 +113,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 #### 第一次阅读渲染示例
 
-先运行 `HorizonExamples baseline_slang`。打开下表第一行的 Slang 入口，从 `run_example_baseline_slang()` 往下读：载入 Viking Room 的模型和纹理，设置相机和渲染目标，然后在窗口循环中更新矩阵、绘制并呈现。接着并排打开 EDSL 入口，对照同一张纹理在两种 shader 中怎样绑定和采样。模型和纹理的加载实现在 [Baseline/assets.cpp](examples/Baseline/assets.cpp)。
+先运行 `HorizonExamples baseline_slang`。打开下表第一行的 Slang 入口，从 `run_example_baseline_slang()` 往下读：载入 Viking Room 的模型和纹理，设置相机和渲染目标，然后在窗口循环中更新矩阵、绘制并呈现。接着并排打开 EDSL 入口，对照同一张纹理在两种 shader 中怎样绑定和采样。四个 Baseline 模式从 [Baseline/assets](examples/Baseline/assets) 读取同一份模型、材质和纹理。
 
 | 场景和阅读重点 | EDSL 实现 | Slang 实现 |
 | --- | --- | --- |
@@ -121,13 +121,15 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 | Disney · 复用球体几何，逐球传入材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
 | DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
 
-Disney 和 DrawStress 的两个入口分别共用本场景的 `scene.cpp`，其中有球体、材质、间接命令和变换矩阵的生成函数。需要查看 GPU 时间戳、离屏提交或截图时，可阅读 [benchmark.cpp](tools/example_benchmark/benchmark.cpp)。
+每个运行模式只有一个 C++ 源文件，从 `run_example_*` 可以看到窗口创建、场景准备和逐帧渲染。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-最后可以对照原生 Vulkan 实现。无参数运行 `HorizonExamples` 默认启动 `baseline`。它与两个 Horizon Baseline 共用 Viking Room 资产，入口直接初始化 Vulkan、绘制和释放资源。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
+阅读 Disney 光栅示例时，可从 `make_sphere` 和 `sphere_parameters` 查看几何和材质的生成。阅读 DrawStress 时，可从逐帧循环追踪间接绘制命令和变换矩阵的更新。这四个光栅模式都支持离屏渲染和截图。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制与截图](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+
+最后可以对照原生 Vulkan 实现。无参数运行 `HorizonExamples` 默认启动 `baseline`。教程入口直接初始化 Vulkan、绘制 Viking Room 并释放资源。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
 #### 用 Ocarina 追踪同一组场景
 
-`examples` 预设同时构建 Ocarina 和 Vulkan Compute 后端。先从仓库根目录编译，再选择一个模式。运行光追需要支持 Vulkan 加速结构和 ray query 的 GPU。
+构建 `HorizonExamples` 时会自动编译三个 Ocarina 示例及其 Vulkan Compute 后端。先从仓库根目录编译，再选择一个模式。运行光追需要支持 Vulkan 加速结构和 ray query 的 GPU。
 
 ```powershell
 cmake --preset examples-release
@@ -139,10 +141,10 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 | 模式 | 从入口阅读的内容 |
 | --- | --- |
 | `baseline_ocarina` | 载入 Viking Room，建立三角形加速结构，为每个像素发出相机射线。命中后插值 UV、采样模型纹理，再向光源发出阴影射线。[源码](examples/Baseline/Ocarina/example_baseline_ocarina.cpp) |
-| `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。光照使用可见性查询和原场景的两张 DDS 环境贴图。鼠标左键拖动环绕，滚轮缩放，中键拖动旋转环境。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
-| `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。按 `+` 或 `-` 改变网格边长可观察重建，按 Esc 退出。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
+| `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。光照使用可见性查询和原场景的两张 DDS 环境贴图。相机固定在材质球阵列前。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
+| `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。可在启动前用 `HORIZON_DRAWSTRESS_DIM` 指定网格边长。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
 
-三个光追入口均以 960 × 540 执行 Ocarina kernel，再将 RGBA 像素读回并交给 Horizon 窗口呈现，窗口计时包含这次传输。设置 `HORIZON_FIXED_DT`、`HORIZON_PRESENT_FRAMES`、`HORIZON_BENCH_WARMUP` 可以重复同一段动画，`HORIZON_CAPTURE_PATH` 可在结束时保存最后一帧 PNG。显示与截图实现位于 [ray_view.cpp](examples/Ocarina/ray_view.cpp)。
+三个光追入口均以 960 × 540 执行 Ocarina kernel，再将 RGBA 像素读回并交给 Horizon 窗口呈现。`HORIZON_PRESENT_FRAMES` 指定成功呈现多少帧后退出，`HORIZON_CAPTURE_PATH` 指定最后一帧 PNG 的保存路径。对于会运动的 Baseline 和 DrawStress 光追场景，设置 `HORIZON_FIXED_DT` 可以固定每帧的动画步长。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
@@ -198,23 +200,17 @@ ctest --preset examples-relwithdebinfo
 ```
 
 `engine` 和 `examples` 预设均启用 Horizon 测试。`examples` 的 `horizon-tests` 目标也构建
-`HorizonExamples`，CTest 会在有 Vulkan GPU 和桌面的机器上逐个运行窗口示例。标准 examples 预设包含七个光栅模式和三个 Ocarina 光追模式。缺少光线查询能力时，CTest 跳过相应的光追测试。
+`HorizonExamples`，CTest 会在有 Vulkan GPU 和桌面的机器上逐个运行全部十个模式。缺少光线查询能力时，CTest 跳过相应的光追测试。
 只运行窗口测试可使用 `ctest --preset examples-relwithdebinfo -L examples`。
 
-运行 `HorizonExamples --list` 查看全部模式。窗口性能复测使用正常呈现路径，首次成功呈现后
-跳过预热帧间隔，再统计相邻成功呈现之间的平均耗时、P95 和 FPS。以下 PowerShell 命令
-使用 Release 构建，逐个运行全部模式。每个进程会在输出 `PRESENT_BENCHMARK` 后退出。
+运行 `HorizonExamples --list` 查看全部模式。默认持续绘制，关闭窗口即可退出。
+要逐个检查窗口呈现，可用前述 CTest 命令。要保存 Disney 或 DrawStress 光栅模式的某一帧，
+可设置固定步长和帧数，以离屏方式运行。例如在仓库根目录执行以下命令保存第三帧。
 
 ```powershell
-cmake --preset examples-release
-cmake --build --preset examples-release --target HorizonExamples
-$examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExamples.exe
-foreach ($mode in (& $examples --list)) {
-    $dt = if ($mode -like 'disney_*') { '0.001' } else { '0.016666667' }
-    cmake -E env HORIZON_PRESENT_FRAMES=512 HORIZON_BENCH_WARMUP=64 `
-        HORIZON_DRAWSTRESS_DIM=40 "HORIZON_FIXED_DT=$dt" $examples $mode
-    if ($LASTEXITCODE -ne 0) { throw "$mode exited with $LASTEXITCODE" }
-}
+$examples = Resolve-Path build/conan/examples/relwithdebinfo/bin/RelWithDebInfo/HorizonExamples.exe
+cmake -E env HORIZON_BENCH_OFFSCREEN=1 HORIZON_BENCH_HIDDEN=1 HORIZON_PRESENT_FRAMES=3 `
+    HORIZON_FIXED_DT=0.016666667 HORIZON_CAPTURE_PATH=drawstress.png $examples drawstress_slang
 ```
 
 源码字符串由 Helicon 的 Slang 编译器处理。构造管线时使用 `ComputePipeline(source)` 或 `RasterizerPipeline(vertexSource, fragmentSource, multiviewCount)`，迁移旧调用时删去 `ShaderLanguage` 实参。
@@ -266,7 +262,7 @@ option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" OFF)
 ->
 option(HORIZON_ENABLE_TRACY "Enable Tracy profiler instrumentation" ON)
 
-2、编译启动 example
+2、为需要分析的目标链接 `Tracy::TracyClient`，定义 `HORIZON_TRACY_ENABLED=1`，添加埋点后编译并启动该目标。
 
 3、打开tracy-profiler.exe 点Connect
 

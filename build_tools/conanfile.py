@@ -60,13 +60,16 @@ class HorizonConan(ConanFile):
             )
         cmake_layout(self, build_folder=f"build/conan/{target_family}/{configuration}")
 
+    @property
+    def _build_ocarina(self):
+        return bool(self.options.with_examples) or bool(self.options.with_ocarina)
+
     def requirements(self):
         self.requires("quill/11.0.2", transitive_headers=True, transitive_libs=True)
         self.requires("fmt/12.1.0")
-        if bool(self.options.with_ocarina):
+        if self._build_ocarina:
             self.requires("xxhash/0.8.3")
             self.requires("tinyexr/1.0.7")
-        if bool(self.options.with_ocarina) or bool(self.options.with_examples):
             self.requires("stb/cci.20240531")
 
         if bool(self.options.with_engine):
@@ -98,10 +101,10 @@ class HorizonConan(ConanFile):
             raise ConanInvalidConfiguration(
                 "with_engine=False is incompatible with: " + ", ".join(enabled_engine_features)
             )
-        if bool(self.options.with_vision_hotfix) and not bool(self.options.with_ocarina):
-            raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True")
-        if bool(self.options.with_ocarina_tests) and not bool(self.options.with_ocarina):
-            raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True")
+        if bool(self.options.with_vision_hotfix) and not self._build_ocarina:
+            raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True or with_examples=True")
+        if bool(self.options.with_ocarina_tests) and not self._build_ocarina:
+            raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True or with_examples=True")
 
     def generate(self):
         CMakeDeps(self).generate()
@@ -110,7 +113,7 @@ class HorizonConan(ConanFile):
         variables = toolchain.variables
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
         variables["HORIZON_BUILD_ENGINE"] = bool(self.options.with_engine)
-        variables["HORIZON_BUILD_OCARINA"] = bool(self.options.with_ocarina)
+        variables["HORIZON_BUILD_OCARINA"] = self._build_ocarina
         variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)

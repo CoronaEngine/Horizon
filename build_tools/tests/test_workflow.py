@@ -279,22 +279,19 @@ class WorkflowTests(unittest.TestCase):
     def test_image_and_hash_dependencies_follow_active_consumers(self) -> None:
         recipe = ast.parse((REPO_ROOT / "build_tools/conanfile.py").read_text(encoding="utf-8"))
         recipe_class = next(node for node in recipe.body if isinstance(node, ast.ClassDef))
-        requirements = next(node for node in recipe_class.body
-                            if isinstance(node, ast.FunctionDef) and node.name == "requirements")
-        namespace = {}
-        exec(compile(ast.Module(body=[requirements], type_ignores=[]), "requirements", "exec"), namespace)
+        namespace = {"ConanFile": object}
+        exec(compile(ast.Module(body=[recipe_class], type_ignores=[]), "recipe", "exec"), namespace)
 
         for ocarina, examples in itertools.product((False, True), repeat=2):
             with self.subTest(ocarina=ocarina, examples=examples):
                 packages = set()
-                consumer = SimpleNamespace(
-                    options=SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
-                                            with_examples=examples, with_tracy=False),
-                    requires=lambda reference, **kwargs: packages.add(reference.split("/", 1)[0]))
-                namespace["requirements"](consumer)
-                self.assertEqual("xxhash" in packages, ocarina)
-                self.assertEqual("tinyexr" in packages, ocarina)
-                self.assertEqual("stb" in packages, ocarina or examples)
+                consumer = namespace["HorizonConan"]()
+                consumer.options = SimpleNamespace(with_engine=ocarina or examples, with_ocarina=ocarina,
+                                                   with_examples=examples, with_tracy=False)
+                consumer.requires = lambda reference, **kwargs: packages.add(reference.split("/", 1)[0])
+                consumer.requirements()
+                for package in ("xxhash", "tinyexr", "stb"):
+                    self.assertEqual(package in packages, ocarina or examples)
                 self.assertTrue({"fmt", "quill"} <= packages)
                 if not ocarina and not examples:
                     self.assertEqual(packages, {"fmt", "quill"})
@@ -364,7 +361,7 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertEqual(conan_options("engine"), ["&:with_engine=True", "&:with_tests=True"])
         self.assertEqual(target_family_slug("engine"), "engine")
-        self.assertEqual(conan_options("examples"), ["&:with_examples=True", "&:with_tests=True", "&:with_ocarina=True"])
+        self.assertEqual(conan_options("examples"), ["&:with_examples=True", "&:with_tests=True"])
         self.assertEqual(conan_options("ocarina"), ["&:with_ocarina=True"])
         self.assertEqual(
             conan_options("ocarina-tests"),
