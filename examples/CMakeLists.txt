@@ -11,7 +11,7 @@ add_executable(HorizonExamples
     DrawStress/Slang/example_drawstress_slang.cpp
     DrawStress/Ocarina/example_drawstress_ocarina.cpp
 )
-target_compile_definitions(HorizonExamples PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_compile_definitions(HorizonExamples PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE=)
 find_program(TUTORIAL_GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
 set(baseline_shader_dir "${CMAKE_CURRENT_SOURCE_DIR}/Baseline/Tutorial")
 if(TUTORIAL_GLSLC)
@@ -27,7 +27,9 @@ if(TUTORIAL_GLSLC)
     endforeach()
 endif()
 set_property(SOURCE Baseline/Tutorial/28_model_loading.cpp APPEND PROPERTY
-    COMPILE_DEFINITIONS "TUTORIAL_SHADER_DIR=\"${baseline_shader_dir}\"")
+    COMPILE_DEFINITIONS
+        "TUTORIAL_ASSET_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/Baseline/assets\""
+        "TUTORIAL_SHADER_DIR=\"${baseline_shader_dir}\"")
 # Run beside the shared logging provider and Ocarina backends.
 set_target_properties(HorizonExamples PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 target_include_directories(HorizonExamples PRIVATE "${PROJECT_SOURCE_DIR}/src")
@@ -54,5 +56,4 @@ if(HORIZON_BUILD_TESTS)
             "HORIZON_PRESENT_FRAMES=8" "HORIZON_BENCH_OFFSCREEN=0"
             "HORIZON_BENCH_HIDDEN=0" "HORIZON_CAPTURE_PATH=")
     endforeach()
-    set_property(TEST horizon.examples.baseline APPEND PROPERTY ENVIRONMENT "HORIZON_BENCH_WARMUP=2")
 endif()
