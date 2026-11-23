@@ -80,8 +80,6 @@ static ocarina::Float3 direct_brdf(ocarina::Float3 normal, ocarina::Float3 view,
                             ocarina::Float3 base, ocarina::Float3 specular_color, ocarina::Float4 mat0,
                             ocarina::Float4 mat1, ocarina::Float4 mat2, ocarina::Float gloss);
 
-constexpr uint32_t image_width = 960, image_height = 540;
-
 static int env_int(const char* name, int fallback);
 
 class DisneyRayDisplay {
@@ -89,15 +87,16 @@ public:
     explicit DisneyRayDisplay(GLFWwindow* window);
     ~DisneyRayDisplay() { copy_.waitForDeferredResources(); }
 
-    void present(std::span<const uint32_t> pixels);
+    void resize(int width, int height);
+    void present(std::span<const uint32_t> pixels, int width, int height);
 
 private:
     GLFWwindow* window_;
     int remaining_frames_ = env_int("HORIZON_PRESENT_FRAMES", 0);
     HardwareDisplayer surface_;
     HardwareExecutor copy_;
-    HardwareBuffer staging_{image_width * image_height * 4, BufferUsage::StorageBuffer};
-    HardwareImage image_{image_width, image_height, ImageFormat::RGBA8_SRGB, ImageUsage::SampledImage};
+    HardwareBuffer staging_;
+    HardwareImage image_;
 };
 
 static ocarina::Device open_device();
@@ -107,14 +106,13 @@ static auto open_window(int width, int height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    glfwSetWindowSizeLimits(window, width, height, GLFW_DONT_CARE, GLFW_DONT_CARE);
     auto close = [](GLFWwindow* handle) {
         glfwDestroyWindow(handle);
         glfwTerminate();
@@ -136,7 +134,7 @@ void run_example_disney_ocarina() {
     constexpr auto mode = "disney_ocarina";
     auto device = open_device();
     auto stream = device.create_stream();
-    auto window = open_window(image_width, image_height, mode);
+    auto window = open_window(1920, 1080, mode);
 
     auto radiance = load_environment(device, "bolonga_lod.dds");
     auto irradiance = load_environment(device, "bolonga_irr.dds");
@@ -174,14 +172,17 @@ void run_example_disney_ocarina() {
     auto materials = device.create_buffer<ocarina::float4>(material_data.size());
     stream << materials.upload(material_data.data()) << chart.build_bvh() << ocarina::synchronize() << ocarina::commit();
 
-    ocarina::Kernel trace = [&](Float3 eye, Float3 light, Float angle, ocarina::BufferVar<unsigned> output) {
-        ocarina::Uint pixel = ocarina::dispatch_id();
+    ocarina::Kernel trace = [&](Float3 eye, Float3 light, ocarina::Uint phase, ocarina::BufferVar<unsigned> output) {
+        ocarina::Uint2 xy = ocarina::dispatch_idx().xy();
+        ocarina::Uint2 extent = ocarina::dispatch_dim().xy();
+        $if (xy.x >= extent.x || xy.y >= extent.y) { $return(); };
+        auto pixel = xy.y * extent.x + xy.x;
         Float3 forward = normalize(-eye);
         Float3 right = normalize(cross(make_float3(0.f, 1.f, 0.f), forward));
         Float3 up = cross(forward, right);
-        Float screen_x = (ocarina::cast<float>(pixel % image_width) + .5f) / image_width * 2.f - 1.f;
-        Float screen_y = 1.f - (ocarina::cast<float>(pixel / image_width) + .5f) / image_height * 2.f;
-        constexpr float aspect = float(image_width) / image_height;
+        Float screen_x = (ocarina::cast<float>(xy.x) + .5f) / ocarina::cast<float>(extent.x) * 2.f - 1.f;
+        Float screen_y = 1.f - (ocarina::cast<float>(xy.y) + .5f) / ocarina::cast<float>(extent.y) * 2.f;
+        ocarina::Float aspect = ocarina::cast<float>(extent.x) / ocarina::cast<float>(extent.y);
         constexpr float half_fov = .41421356f; // tan(45 degrees / 2)
         auto ray = make_ray(eye, normalize(forward + half_fov * (right * screen_x * aspect + up * screen_y)));
         auto hit = chart.trace_closest(ray);
@@ -192,27 +193,28 @@ void run_example_disney_ocarina() {
             ocarina::Uint start = 4u * hit->inst_id;
             Float4 m0 = materials.read(start), m1 = materials.read(start + 1u), m2 = materials.read(start + 2u);
             Float4 placement = materials.read(start + 3u);
-            Float3 point = make_float3(placement.x, placement.y, 0.f) + placement.z * local;
             Float3 n = normalize(local), v = -ray->direction();
             Float3 base = pow(m0.xyz(), make_float3(2.2f));
             Float3 tint = base / max(dot(base, make_float3(.3f, .6f, .1f)), .0001f);
             Float3 spec = lerp(m0.w, m1.y * .08f * lerp(m1.z, make_float3(1.f), tint), base);
             Float3 direct = make_float3(0.f);
-            $if (dot(n, light) > 0.f) {
-                ocarina::Bool shadow = chart.trace_occlusion(make_ray(offset_ray_origin(point, n), light));
-                direct = direct_brdf(n, v, light, base, spec, m0, m1, m2, placement.w) *
-                         max(dot(n, light), 0.f) * select(shadow, 0.f, 1.f);
+            $if (((phase & 1u) == 0u) && (dot(n, light) > 0.f) && (dot(n, v) > 0.f)) {
+                direct = 2.f * direct_brdf(n, v, light, base, spec, m0, m1, m2, placement.w) * dot(n, light);
             };
-            auto rotate_env = [&](Float3 d) {
-                return make_float3(cos(angle) * d.x + sin(angle) * d.z, d.y,
-                                   -sin(angle) * d.x + cos(angle) * d.z);
+            Float3 indirect = make_float3(0.f);
+            $if ((phase & 2u) == 0u) {
+                Float mip = m1.x * 5.f;
+                Float3 reflected = normalize(2.f * dot(n, v) * n - v);
+                Float3 axis = abs(reflected);
+                Float major = max(axis.x, max(axis.y, axis.z));
+                Float scale = 1.f - exp2(mip) / 256.f;
+                Float3 lookup = reflected * make_float3(select(axis.x == major, 1.f, scale),
+                    select(axis.y == major, 1.f, scale), select(axis.z == major, 1.f, scale));
+                Float fresnel = pow(1.f - clamp(dot(n, v), 0.f, 1.f), 5.f);
+                indirect = base * (1.f - m0.w) * sample_environment(irradiance, n, 0.f) +
+                           spec * lerp(fresnel, spec.x, 1.f) * sample_environment(radiance, lookup, mip);
             };
-            Float3 reflected = 2.f * dot(n, v) * n - v;
-            Float3 diffuse_env = sample_environment(irradiance, rotate_env(n), 0.f);
-            Float3 spec_env = sample_environment(radiance, rotate_env(reflected), m1.x * 5.f);
-            Float fresnel = pow(1.f - clamp(dot(n, v), 0.f, 1.f), 5.f);
-            Float3 lit =
-                direct + base * (1.f - m0.w) * diffuse_env + lerp(fresnel, spec, make_float3(1.f)) * spec_env;
+            Float3 lit = direct + indirect;
             Float3 x = max(lit - .004f, make_float3(0.f));
             color = x * (6.2f * x + .5f) / (x * (6.2f * x + 1.7f) + .06f);
         };
@@ -221,36 +223,45 @@ void run_example_disney_ocarina() {
                             (ocarina::cast<unsigned>(bytes.z) << 16u) | 0xff000000u);
     };
     auto shader = device.compile(trace, mode);
-    ocarina::vector<unsigned> pixels(image_width * image_height);
-    auto output = device.create_buffer<unsigned>(pixels.size());
+    int width = 0, height = 0;
+    ocarina::vector<unsigned> pixels;
+    ocarina::Buffer<unsigned> output;
     DisneyRayDisplay display(window.get());
     const auto direction = glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f));
     const auto light = make_float3(direction.x, direction.y, direction.z);
-    const double start = glfwGetTime();
     float fixed_dt = 0.f;
     if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
         fixed_dt = std::stof(value);
         if (!std::isfinite(fixed_dt) || fixed_dt < 0)
             throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
     }
-    constexpr float default_yaw = glm::pi<float>(), default_pitch = 0.42f * glm::pi<float>();
-    float yaw = default_yaw, pitch = default_pitch, distance = 15.f, previous = 0.f;
-    for (uint64_t frame = 0; !glfwWindowShouldClose(window.get()); ++frame) {
+    constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
+    const auto eye = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch),
+                                         std::sin(pitch) * std::cos(yaw));
+    double start = 0.0;
+    uint64_t frame = 0;
+    while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
-        const float now = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
-        const float blend = std::min((now - previous) / 0.12f, 1.f);
-        previous = now;
-        // Preserve the original camera's per-frame rounding for reproducible captures.
-        yaw = glm::mix(yaw, default_yaw, blend);
-        pitch = glm::mix(pitch, default_pitch, blend);
-        distance = glm::mix(distance, 15.f, blend);
-        const glm::vec3 direction_from_target(std::sin(pitch) * std::sin(yaw), std::cos(pitch),
-                                              std::sin(pitch) * std::cos(yaw));
-        const glm::vec3 position = direction_from_target * distance;
-        const auto eye = make_float3(position.x, position.y, position.z);
-        stream << shader(eye, light, 0.f, output).dispatch(pixels.size())
+        int w, h;
+        glfwGetFramebufferSize(window.get(), &w, &h);
+        if (w == 0 || h == 0) {
+            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            continue;
+        }
+        if (w != width || h != height) {
+            width = w;
+            height = h;
+            pixels.resize(static_cast<size_t>(width) * height);
+            output = device.create_buffer<uint32_t>(pixels.size());
+            display.resize(width, height);
+        }
+        if (frame == 0) start = glfwGetTime();
+        const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
+        ++frame;
+        const auto phase = static_cast<unsigned>(std::fmod(seconds, 6.0) / 1.5);
+        stream << shader(eye, light, phase, output).dispatch(width, height)
                << output.download(pixels.data()) << ocarina::synchronize() << ocarina::commit();
-        display.present(pixels);
+        display.present(pixels, width, height);
     }
 }
 
@@ -528,11 +539,17 @@ static ocarina::Device open_device() {
 DisneyRayDisplay::DisneyRayDisplay(GLFWwindow* window)
     : window_(window), surface_(native_handle(window), PresentDevicePreference::RenderDevice) {}
 
-void DisneyRayDisplay::present(std::span<const uint32_t> pixels) {
+void DisneyRayDisplay::resize(int width, int height) {
+    copy_.waitForDeferredResources();
+    staging_ = HardwareBuffer(width * height * 4u, BufferUsage::StorageBuffer);
+    image_ = HardwareImage(width, height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
+}
+
+void DisneyRayDisplay::present(std::span<const uint32_t> pixels, int width, int height) {
     // The compute device and Horizon presenter can be on different adapters.
     // Wait before reusing the upload buffer that the previous frame still reads.
     copy_.waitForDeferredResources();
-    if (pixels.size() != image_width * image_height || !staging_.copyFromData(pixels.data(), pixels.size_bytes()))
+    if (pixels.size() != static_cast<size_t>(width) * height || !staging_.copyFromData(pixels.data(), pixels.size_bytes()))
         throw std::runtime_error("Ray image upload failed");
     copy_ << staging_.copyTo(image_);
     const bool shown = surface_.present(copy_, image_);
@@ -544,7 +561,7 @@ void DisneyRayDisplay::present(std::span<const uint32_t> pixels) {
     if (!path || !*path) return;
     const auto parent = std::filesystem::path(path).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
-    if (!stbi_write_png(path, image_width, image_height, 4, pixels.data(), image_width * 4))
+    if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
         throw std::runtime_error("Could not write ray-traced PNG");
 }
 

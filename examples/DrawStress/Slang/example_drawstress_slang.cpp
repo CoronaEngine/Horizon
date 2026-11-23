@@ -35,8 +35,6 @@
 #undef STB_IMAGE_WRITE_STATIC
 
 // 移植自 bgfx examples/17-drawstress，用于对照单线程提交（Num threads=1）的绘制开销。
-constexpr uint32_t stress_width = 1920;
-constexpr uint32_t stress_height = 1080;
 constexpr int dim_min = 2;
 constexpr int dim_max = 40;
 
@@ -52,7 +50,7 @@ constexpr std::array<uint16_t, 36> cube_indices = {
     2, 3, 6, 6, 3, 7,
 };
 
-static void capture(const HardwareImage& image, HardwareExecutor& ready, const std::filesystem::path& path);
+static void capture(const HardwareImage& image, HardwareExecutor& ready, const std::filesystem::path& path, int width, int height);
 static void write_matrices(std::span<std::byte> parameters, const glm::mat4& view_proj, int dim, float time);
 
 static int env_int(const char* name, int fallback) {
@@ -70,14 +68,13 @@ static auto open_window(int width, int height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    glfwSetWindowSizeLimits(window, width, height, GLFW_DONT_CARE, GLFW_DONT_CARE);
     auto close = [](GLFWwindow* handle) {
         glfwDestroyWindow(handle);
         glfwTerminate();
@@ -98,7 +95,9 @@ static void* native_handle(GLFWwindow* window) {
 void run_example_drawstress_slang()
 {
     constexpr auto mode = "drawstress_slang";
-    auto window = open_window(stress_width, stress_height, mode);
+    auto window = open_window(1920, 1080, mode);
+    int width = 0, height = 0;
+    HardwareImage final_output_image;
 
     const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", 40), dim_min, dim_max);
     const uint32_t draw_count = static_cast<uint32_t>(dim * dim * dim);
@@ -116,19 +115,12 @@ void run_example_drawstress_slang()
         commands = HardwareBuffer::uploadDeviceLocal(packets, BufferUsage::RasterIndirect);
     }
 
-    constexpr float aspect = static_cast<float>(stress_width) / static_cast<float>(stress_height);
     // Match the left-handed camera in the bgfx drawstress example.
     const glm::mat4 view = glm::lookAtLH(glm::vec3(0.0f, 0.0f, -35.0f), glm::vec3(0.0f),
                                          glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 projection = glm::perspectiveLH(glm::radians(60.0f), aspect, 0.1f, 100.0f);
-    projection[1][1] *= -1.0f; // Vulkan clip-space Y.
-    const glm::mat4 view_projection = projection * view;
-
-    HardwareImage final_output_image(stress_width, stress_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
-    final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
+    glm::mat4 view_projection{};
 
     RasterizerPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> rasterizer;
-    rasterizer.outColor = final_output_image;
 
     HardwareExecutor render_executor;
     HardwareDisplayer display(native_handle(window.get()), PresentDevicePreference::RenderDevice);
@@ -142,11 +134,30 @@ void run_example_drawstress_slang()
             throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
     }
 
-    const double start = glfwGetTime();
-    for (uint64_t frame = 0; !glfwWindowShouldClose(window.get()); ++frame) {
-        const float elapsed_seconds = fixed_dt > 0.0f ? fixed_dt * static_cast<float>(frame)
-                                                     : static_cast<float>(glfwGetTime() - start);
+    double start = 0.0;
+    uint64_t frame = 0;
+    while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
+        int w, h;
+        glfwGetFramebufferSize(window.get(), &w, &h);
+        if (w == 0 || h == 0) {
+            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            continue;
+        }
+        if (w != width || h != height) {
+            render_executor.waitForDeferredResources();
+            width = w;
+            height = h;
+            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+            final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
+            rasterizer.outColor = final_output_image;
+            glm::mat4 projection = glm::perspectiveLH(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+            projection[1][1] *= -1.0f; // Vulkan clip-space Y.
+            view_projection = projection * view;
+        }
+        if (frame == 0) start = glfwGetTime();
+        const float elapsed_seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
+        ++frame;
         auto batch = rasterizer.beginBatch();
         batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(glm::mat4),
             [&](std::span<std::byte> destination) {
@@ -163,8 +174,8 @@ void run_example_drawstress_slang()
     }
 
     render_executor.waitForDeferredResources();
-    if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path)
-        capture(final_output_image, render_executor, path);
+    if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path && final_output_image)
+        capture(final_output_image, render_executor, path, width, height);
 }
 
 static void write_matrices(std::span<std::byte> parameters, const glm::mat4& view_proj, int dim, float time) {
@@ -210,19 +221,19 @@ static void write_matrices(std::span<std::byte> parameters, const glm::mat4& vie
     }
 }
 
-static void capture(const HardwareImage& image, HardwareExecutor& ready, const std::filesystem::path& path) {
-    const uint32_t byte_count = stress_width * stress_height * 8;
+static void capture(const HardwareImage& image, HardwareExecutor& ready, const std::filesystem::path& path, int width, int height) {
+    const uint32_t byte_count = width * height * 8;
     HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
     HardwareExecutor copy;
     copy.wait(ready);
     copy << image.copyTo(readback);
     copy.commit().waitForDeferredResources();
-    std::vector<uint16_t> half(static_cast<size_t>(stress_width) * stress_height * 4);
+    std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
     if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
     std::vector<unsigned char> rgba(half.size());
     for (size_t i = 0; i < half.size(); ++i)
         rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-    if (!stbi_write_png(path.string().c_str(), stress_width, stress_height, 4, rgba.data(), stress_width * 4))
+    if (!stbi_write_png(path.string().c_str(), width, height, 4, rgba.data(), width * 4))
         throw std::runtime_error("Capture PNG write failed");
 }

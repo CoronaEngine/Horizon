@@ -38,8 +38,6 @@
 #undef STB_IMAGE_WRITE_STATIC
 
 // Disney Principled PBR chart: 10 parameter rows x 11 values from 0 to 1.
-constexpr uint32_t disney_width = 1920;
-constexpr uint32_t disney_height = 1080;
 constexpr int chart_row_count = 10;
 constexpr int chart_col_count = 11;
 
@@ -70,14 +68,13 @@ static auto open_window(int width, int height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    glfwSetWindowSizeLimits(window, width, height, GLFW_DONT_CARE, GLFW_DONT_CARE);
     auto close = [](GLFWwindow* handle) {
         glfwDestroyWindow(handle);
         glfwTerminate();
@@ -105,17 +102,15 @@ void run_example_disney_slang()
     static_assert(offsetof(DrawParameters, texCubeIrrIndex) == 30 * sizeof(uint32_t));
 
     constexpr auto mode = "disney_slang";
-    auto window = open_window(disney_width, disney_height, mode);
+    auto window = open_window(1920, 1080, mode);
+    int width = 0, height = 0;
+    HardwareImage final_output_image;
 
     HardwareImage radiance = load_cubemap("bolonga_lod.dds");
     HardwareImage irradiance = load_cubemap("bolonga_irr.dds");
     auto sphere = make_sphere();
 
-    HardwareImage final_output_image(disney_width, disney_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
-    final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
-
     RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> rasterizer;
-    rasterizer.outColor = final_output_image;
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
     const uint32_t cube_index = radiance.storeDescriptor();
     const uint32_t irradiance_index = irradiance.storeDescriptor();
@@ -124,20 +119,15 @@ void run_example_disney_slang()
     HardwareExecutor render_executor;
     HardwareDisplayer display(native_handle(window.get()), PresentDevicePreference::RenderDevice);
 
-    constexpr float aspect = static_cast<float>(disney_width) / disney_height;
-    auto projection = glm::perspectiveLH(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-    projection[1][1] *= -1.0f;
     const glm::vec3 target(0.0f);
     const glm::vec3 up(0.0f, 1.0f, 0.0f);
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
     const glm::vec3 direction(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
     const auto eye = target + direction * 13.5f;
-    const auto proj_view = projection * glm::lookAtLH(eye, target, up);
+    const auto view = glm::lookAtLH(eye, target, up);
     const glm::vec4 camera_position(eye, 1.0f);
     const glm::vec4 light_direction(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
-    rasterizer.vsp.proj_view = proj_view;
     rasterizer.vsp.camPos = camera_position;
-    rasterizer.vsp.flags = glm::vec4(1.0f);
     rasterizer.vsp.lightDir = light_direction;
     rasterizer.vsp.lightCol = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
     rasterizer.vsp.envMtx = glm::mat4(1.0f);
@@ -145,9 +135,38 @@ void run_example_disney_slang()
 
     int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
     const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
-    while (!glfwWindowShouldClose(window.get()))
-    {
+    float fixed_dt = 0.0f;
+    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
+        fixed_dt = std::stof(value);
+        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
+    }
+    double start = 0.0;
+    uint64_t frame = 0;
+    while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
+        int w, h;
+        glfwGetFramebufferSize(window.get(), &w, &h);
+        if (w == 0 || h == 0) {
+            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            continue;
+        }
+        if (w != width || h != height) {
+            render_executor.waitForDeferredResources();
+            width = w;
+            height = h;
+            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+            final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+            rasterizer.outColor = final_output_image;
+            auto projection = glm::perspectiveLH(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+            projection[1][1] *= -1.0f;
+            rasterizer.vsp.proj_view = projection * view;
+        }
+        if (frame == 0) start = glfwGetTime();
+        const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
+        ++frame;
+        const int phase = static_cast<int>(std::fmod(seconds, 6.0) / 1.5);
+        const float direct = (phase & 1) == 0, ibl = (phase & 2) == 0;
+        rasterizer.vsp.flags = glm::vec4(direct, direct, ibl, ibl);
         auto batch = rasterizer.beginBatch();
 
         for (int row = 0; row < chart_row_count; ++row)
@@ -169,21 +188,21 @@ void run_example_disney_slang()
     }
 
     render_executor.waitForDeferredResources();
-    if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename) {
+    if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
         const std::filesystem::path path(filename);
-        const uint32_t byte_count = disney_width * disney_height * 8;
+        const uint32_t byte_count = width * height * 8;
         HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
         HardwareExecutor copy;
         copy.wait(render_executor);
         copy << final_output_image.copyTo(readback);
         copy.commit().waitForDeferredResources();
-        std::vector<uint16_t> half(static_cast<size_t>(disney_width) * disney_height * 4);
+        std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
         if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
         std::vector<unsigned char> rgba(half.size());
         for (size_t i = 0; i < half.size(); ++i)
             rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
         if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        if (!stbi_write_png(path.string().c_str(), disney_width, disney_height, 4, rgba.data(), disney_width * 4))
+        if (!stbi_write_png(path.string().c_str(), width, height, 4, rgba.data(), width * 4))
             throw std::runtime_error("Capture PNG write failed");
     }
 }

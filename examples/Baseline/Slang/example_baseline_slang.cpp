@@ -22,6 +22,7 @@
 #include SLANG(baseline_frag.slang)
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -55,14 +56,13 @@ static auto open_window(int width, int height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    glfwSetWindowSizeLimits(window, width, height, GLFW_DONT_CARE, GLFW_DONT_CARE);
     auto close = [](GLFWwindow* handle) {
         glfwDestroyWindow(handle);
         glfwTerminate();
@@ -82,8 +82,7 @@ static void* native_handle(GLFWwindow* window) {
 
 void run_example_baseline_slang()
 {
-    constexpr int width = 1920, height = 1080;
-    auto window = open_window(width, height, window_title);
+    auto window = open_window(1920, 1080, window_title);
 
     auto geometry = load_model();
     HardwareImage texture_image;
@@ -105,22 +104,14 @@ void run_example_baseline_slang()
         upload.commit().waitForDeferredResources();
     }
 
-    HardwareImageCreateInfo color_info(width, height, ImageFormat::RGBA16_FLOAT);
-    color_info.usage = ImageUsage::SampledStorageImage;
-    color_info.linearFiltering = true;
-    HardwareImage color(color_info);
-    color.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-
+    HardwareImage color;
+    int width = 0, height = 0;
     const auto camera_view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
-    auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
-    projection[1][1] *= -1.0f; // Vulkan clip-space Y.
-
     HardwareExecutor render_executor;
     HardwareDisplayer display(native_handle(window.get()), PresentDevicePreference::RenderDevice);
 
     RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> rasterizer;
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
-    rasterizer.outColor = color;
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
     struct DrawParameters {
         glm::mat4 model{};
@@ -129,14 +120,40 @@ void run_example_baseline_slang()
     parameters.texIndex = texture_image.storeDescriptor();
 
     rasterizer.vp.view = camera_view;
-    rasterizer.vp.proj = projection;
 
-    const double start = glfwGetTime();
+    double start = 0.0;
+    float fixed_dt = 0.0f;
+    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
+        fixed_dt = std::stof(value);
+        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
+    }
+    uint64_t frame = 0;
     int frames_remaining = env_int("HORIZON_PRESENT_FRAMES", 0);
     while (!glfwWindowShouldClose(window.get()))
     {
         glfwPollEvents();
-        const float seconds = static_cast<float>(glfwGetTime() - start);
+        int w, h;
+        glfwGetFramebufferSize(window.get(), &w, &h);
+        if (w == 0 || h == 0) {
+            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            continue;
+        }
+        if (w != width || h != height) {
+            render_executor.waitForDeferredResources();
+            width = w;
+            height = h;
+            HardwareImageCreateInfo color_info(width, height, ImageFormat::RGBA16_FLOAT);
+            color_info.usage = ImageUsage::SampledStorageImage;
+            color_info.linearFiltering = true;
+            color = HardwareImage(color_info);
+            color.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            rasterizer.outColor = color;
+            auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
+            projection[1][1] *= -1.0f; // Vulkan clip-space Y.
+            rasterizer.vp.proj = projection;
+        }
+        if (frame == 0) start = glfwGetTime();
+        const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
         const auto rotation = glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1));
 
         parameters.model = rotation;
@@ -145,6 +162,7 @@ void run_example_baseline_slang()
         batch.draw(geometry, {}, parameters);
         render_executor << std::move(batch);
         const bool presented = display.present(render_executor, color);
+        ++frame;
         if (presented && frames_remaining > 0 && --frames_remaining == 0) break;
     }
     render_executor.waitForDeferredResources();

@@ -1,4 +1,8 @@
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
 #include <exception>
+#include <stdexcept>
 
 #include "horizon/core/logging.h"
 
@@ -65,6 +69,11 @@ int main(int argc, char **argv)
     for (const auto& example : examples) {
         if (example.name != mode) continue;
         try {
+            if (mode == "baseline") {
+                // The upstream tutorial owns its window. GLFW retains hints across repeated initialization.
+                if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+                glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
+            }
             example.run();
             return 0;
         } catch (const std::exception& error) {

@@ -34,8 +34,6 @@
 #undef STB_IMAGE_WRITE_IMPLEMENTATION
 #undef STB_IMAGE_WRITE_STATIC
 
-constexpr uint32_t image_width = 960, image_height = 540;
-
 static int env_int(const char* name, int fallback);
 
 class DrawStressRayDisplay {
@@ -43,20 +41,22 @@ public:
     explicit DrawStressRayDisplay(GLFWwindow* window);
     ~DrawStressRayDisplay() { copy_.waitForDeferredResources(); }
 
-    float elapsed_seconds() const {
+    float elapsed_seconds() {
+        if (frame_ == 0) start_ = glfwGetTime();
         return fixed_dt_ ? static_cast<float>(frame_) * fixed_dt_
                          : static_cast<float>(glfwGetTime() - start_);
     }
-    void present(std::span<const uint32_t> pixels);
+    void resize(int width, int height);
+    void present(std::span<const uint32_t> pixels, int width, int height);
 
 private:
     GLFWwindow* window_;
     int remaining_frames_ = env_int("HORIZON_PRESENT_FRAMES", 0);
     HardwareDisplayer surface_;
     HardwareExecutor copy_;
-    HardwareBuffer staging_{image_width * image_height * 4, BufferUsage::StorageBuffer};
-    HardwareImage image_{image_width, image_height, ImageFormat::RGBA8_SRGB, ImageUsage::SampledImage};
-    double start_ = glfwGetTime();
+    HardwareBuffer staging_;
+    HardwareImage image_;
+    double start_{};
     float fixed_dt_{};
     uint64_t frame_{};
 };
@@ -80,14 +80,13 @@ static auto open_window(int width, int height, const char* title) {
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("glfwCreateWindow failed");
     }
-    glfwSetWindowSizeLimits(window, width, height, GLFW_DONT_CARE, GLFW_DONT_CARE);
     auto close = [](GLFWwindow* handle) {
         glfwDestroyWindow(handle);
         glfwTerminate();
@@ -113,7 +112,7 @@ void run_example_drawstress_ocarina() {
     constexpr auto mode = "drawstress_ocarina";
     auto device = open_device();
     auto stream = device.create_stream();
-    auto window = open_window(image_width, image_height, mode);
+    auto window = open_window(1920, 1080, mode);
     const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", 40), dim_min, dim_max);
 
     ocarina::vector<ocarina::float3> corners;
@@ -134,14 +133,17 @@ void run_example_drawstress_ocarina() {
         grid.add_instance(0u, ocarina::make_float4x4(1.f));
 
     ocarina::Kernel trace = [&](Float3 eye, ocarina::BufferVar<uint32_t> output) {
-        ocarina::Uint pixel = ocarina::dispatch_id();
+        ocarina::Uint2 xy = ocarina::dispatch_idx().xy();
+        ocarina::Uint2 extent = ocarina::dispatch_dim().xy();
+        $if (xy.x >= extent.x || xy.y >= extent.y) { $return(); };
+        auto pixel = xy.y * extent.x + xy.x;
         Float3 forward = make_float3(0.f, 0.f, 1.f);
         Float3 right = make_float3(1.f, 0.f, 0.f);
         Float3 up = make_float3(0.f, 1.f, 0.f);
-        ocarina::Float screen_x = (cast<float>(pixel % image_width) + .5f) / image_width * 2.f - 1.f;
-        ocarina::Float screen_y = 1.f - (cast<float>(pixel / image_width) + .5f) / image_height * 2.f;
-        constexpr float aspect = float(image_width) / image_height;
-        constexpr float half_fov = .41421356f; // tan(45 degrees / 2)
+        ocarina::Float screen_x = (cast<float>(xy.x) + .5f) / ocarina::cast<float>(extent.x) * 2.f - 1.f;
+        ocarina::Float screen_y = 1.f - (cast<float>(xy.y) + .5f) / ocarina::cast<float>(extent.y) * 2.f;
+        ocarina::Float aspect = ocarina::cast<float>(extent.x) / ocarina::cast<float>(extent.y);
+        constexpr float half_fov = .57735027f; // tan(60 degrees / 2)
         auto ray = ocarina::make_ray(eye, ocarina::normalize(
             forward + half_fov * (right * screen_x * aspect + up * screen_y)));
         auto hit = grid.trace_closest(ray);
@@ -156,19 +158,33 @@ void run_example_drawstress_ocarina() {
                             (cast<uint32_t>(bytes.z) << 16u) | 0xff000000u);
     };
     auto shader = device.compile(trace, mode);
-    ocarina::vector<uint32_t> pixels(image_width * image_height);
-    auto output = device.create_buffer<uint32_t>(pixels.size());
+    int width = 0, height = 0;
+    ocarina::vector<uint32_t> pixels;
+    ocarina::Buffer<uint32_t> output;
     DrawStressRayDisplay display(window.get());
-    const auto eye = make_float3(0.f, 0.f, -float(dim) * 1.05f);
+    const auto eye = make_float3(0.f, 0.f, -35.f);
     bool first_frame = true;
     while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
+        int w, h;
+        glfwGetFramebufferSize(window.get(), &w, &h);
+        if (w == 0 || h == 0) {
+            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            continue;
+        }
+        if (w != width || h != height) {
+            width = w;
+            height = h;
+            pixels.resize(static_cast<size_t>(width) * height);
+            output = device.create_buffer<uint32_t>(pixels.size());
+            display.resize(width, height);
+        }
         const float time = display.elapsed_seconds();
         for (int z = 0; z < dim; ++z) {
             for (int y = 0; y < dim; ++y) {
                 for (int x = 0; x < dim; ++x) {
                     const uint32_t instance = (z * dim + y) * dim + x;
-                    const auto centre = (make_float3(float(x), float(y), float(z)) - .5f * (dim - 1)) * .6f;
+                    const auto centre = make_float3(.6f * (x - .5f * dim), .6f * (y - .5f * dim), -15.f + .6f * z);
                     const auto transform = ocarina::translation<H>(centre)
                         * ocarina::rotation_z<H>(time + z * .13f, true) * ocarina::rotation_y<H>(time + y * .37f, true)
                         * ocarina::rotation_x<H>(time + x * .21f, true) * ocarina::scale<H>(.25f);
@@ -182,9 +198,9 @@ void run_example_drawstress_ocarina() {
         } else {
             stream << grid.update_bvh();
         }
-        stream << shader(eye, output).dispatch(pixels.size()) << output.download(pixels.data()) << synchronize()
+        stream << shader(eye, output).dispatch(width, height) << output.download(pixels.data()) << synchronize()
                << commit();
-        display.present(pixels);
+        display.present(pixels, width, height);
     }
 }
 
@@ -207,11 +223,17 @@ DrawStressRayDisplay::DrawStressRayDisplay(GLFWwindow* window)
     }
 }
 
-void DrawStressRayDisplay::present(std::span<const uint32_t> pixels) {
+void DrawStressRayDisplay::resize(int width, int height) {
+    copy_.waitForDeferredResources();
+    staging_ = HardwareBuffer(width * height * 4u, BufferUsage::StorageBuffer);
+    image_ = HardwareImage(width, height, ImageFormat::RGBA8_UNORM, ImageUsage::SampledImage);
+}
+
+void DrawStressRayDisplay::present(std::span<const uint32_t> pixels, int width, int height) {
     // The compute device and Horizon presenter can be on different adapters.
     // Wait before reusing the upload buffer that the previous frame still reads.
     copy_.waitForDeferredResources();
-    if (pixels.size() != image_width * image_height || !staging_.copyFromData(pixels.data(), pixels.size_bytes()))
+    if (pixels.size() != static_cast<size_t>(width) * height || !staging_.copyFromData(pixels.data(), pixels.size_bytes()))
         throw std::runtime_error("Ray image upload failed");
     copy_ << staging_.copyTo(image_);
     const bool shown = surface_.present(copy_, image_);
@@ -224,7 +246,7 @@ void DrawStressRayDisplay::present(std::span<const uint32_t> pixels) {
     if (!path || !*path) return;
     const auto parent = std::filesystem::path(path).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent);
-    if (!stbi_write_png(path, image_width, image_height, 4, pixels.data(), image_width * 4))
+    if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
         throw std::runtime_error("Could not write ray-traced PNG");
 }
 
