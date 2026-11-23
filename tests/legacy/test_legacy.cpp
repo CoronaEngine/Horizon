@@ -24,6 +24,19 @@ void expect(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
+struct GeneratedComputeStage
+{
+    static inline EmbeddedShader::SlangModule slangModule;
+
+    template<class Pipeline>
+    struct Bindings
+    {
+        explicit Bindings(Pipeline* pipeline)
+            : output(pipeline, 0, sizeof(uint32_t), EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers, 0) {}
+        EmbeddedShader::BoundField<Pipeline> output;
+    };
+};
+
 void test_cpu()
 {
     DeviceFeaturesChain original;
@@ -121,30 +134,31 @@ bool has_vulkan_14_device()
     return supported;
 }
 
-// Two scissor runs force DrawIndex to restart. Read both colors back after
-// the pipeline and geometry handles have gone out of scope.
+// Capture both variants before enqueue, then read back after all pipeline,
+// geometry and output proxy handles have gone out of scope.
 void test_raster_batch()
 {
     using namespace EmbeddedShader;
     HardwareExecutor executor;
     HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
     {
-        Texture2D<ktm::fvec4> color;
+        HardwareImage reflectedTarget(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+        Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = target;
         bool useDrawColor = true;
         auto vs = [&](Float2 pos, Float scale) {
             Float w;
-            w = Float(0);
+            w = Float(1);
             $IF(useDrawColor) { w = rasterDrawParameter<float>(3); };
             position() = Float4(pos, Float(0), w * scale);
         };
         auto fs = [&] {
             Float4 value;
-            value = Float4(0, 0, 0, 1);
+            value = Float4(0, 0, 1, 1);
             $IF(useDrawColor) { value = rasterDrawParameter<ktm::fvec4>(0); };
             color << value;
         };
         RasterizerPipeline pipeline(vs, fs);
-        color = target;
+        pipeline.bindRenderTarget(0, overrideColor);
         pipeline.setDepthEnabled(false);
         auto batch = pipeline.beginBatch(4, 2);
         const std::array<std::array<float, 3>, 3> vertices{{{-1,-1,1}, {3,-1,1}, {-1,3,1}}};
@@ -154,7 +168,10 @@ void test_raster_batch()
         batch.draw(left, {.scissor = ScissorRect{0,0,2,2}}, std::array<float,4>{1,0,0,1});
         batch.draw(right, {.indexCount=3, .firstIndex=1, .vertexOffset=-1, .instanceCount=2,
                            .scissor = ScissorRect{2,0,2,2}}, std::array<float,4>{0,1,0,1});
-        executor << std::move(batch);
+        useDrawColor = false;
+        auto switched = pipeline.beginBatch({.loadColor = true});
+        switched.draw(left, {.scissor = ScissorRect{3,0,1,2}});
+        executor << std::move(batch) << std::move(switched);
     }
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
@@ -162,9 +179,9 @@ void test_raster_batch()
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "raster readback");
     for (size_t i = 0; i < pixels.size(); ++i) {
-        const bool left = i % 4 < 2;
-        expect(pixels[i] == std::array<float,4>{float(left), float(!left), 0, 1},
-               "indirect scissor run, index range or per-fragment parameter mismatch");
+        const auto column = i % 4;
+        expect(pixels[i] == std::array<float,4>{float(column < 2), float(column == 2), float(column == 3), 1},
+               "raster batch must snapshot its shader variant and honor the explicit output");
     }
 }
 
@@ -217,8 +234,11 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     const std::array<std::array<float,2>,7> vertices{{{-1,-1},{3,-1},{-1,3},
                                                        {0,-1},{1,-1},{1,1},{0,1}}};
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
-    RasterGeometry mesh{HardwareBuffer::uploadDeviceLocal(vertices, BufferUsage::VertexBuffer),
-                        HardwareBuffer::uploadDeviceLocal(indices, BufferUsage::IndexBuffer)};
+    const auto mesh = explicitDepth ? RasterGeometry::upload(vertices, indices)
+                                    : RasterGeometry::upload(vertices, std::vector<uint32_t>(indices.begin(), indices.end()));
+    expect(mesh.vertices.getElementSize() == sizeof(vertices[0]) &&
+           mesh.indices.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
+           "geometry upload preserves vertex stride and index width");
     // Exercise the public API on the restricted capability path even on a full-featured GPU.
     auto& feature = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                         .featuresChain.getChainHead()->features.drawIndirectFirstInstance;
@@ -242,7 +262,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareExecutor executor;
     executor << std::move(first);
     {
-        ComputePipelineBase generate([&] {
+        ComputePipeline generate([&] {
             words[0] = Uint(6);
             words[1] = Uint(1);
             words[5] = Uint(3);
@@ -295,7 +315,7 @@ void test_compute_sampling()
     executor << uploadBase.copyTo(input) << upload.copyTo(input, 0, 0, 1);
     if (getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils().computeDerivativeGroupQuads) {
         // A 2x2 quad over a 4x4 image selects the colored mip.
-        ComputePipelineBase pipeline(shader, ktm::uvec3(2, 2, 1), options);
+        ComputePipeline pipeline(shader, ktm::uvec3(2, 2, 1), options);
         executor << pipeline(1, 1, 1) << result.copyTo(readback);
         executor.commit().waitForDeferredResources();
         expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == source, "explicit compute sampler mip readback");
@@ -305,7 +325,7 @@ void test_compute_sampling()
 
     auto mipZero = input[0];
     tex = mipZero;
-    ComputePipelineBase load([&] {
+    ComputePipeline load([&] {
         auto xy = dispatchThreadID()->xy();
         dst[xy] = tex[xy];
     }, ktm::uvec3(2, 2, 1), options);
@@ -320,7 +340,7 @@ void test_compute_sampling()
     cubeInfo.mipLevels = 2;
     HardwareImage cubeImage(cubeInfo);
     TextureCube<ktm::fvec4> cube = cubeImage;
-    ComputePipelineBase sampleCube([&] {
+    ComputePipeline sampleCube([&] {
         dst[dispatchThreadID()->xy()] = cube.sampleLevel(sampler, Float3(1, 0, 0), Float(1));
     }, ktm::uvec3(2, 2, 1), options);
     executor << upload.copyTo(cubeImage, 0, 0, 1) << sampleCube(1, 1, 1) << result.copyTo(readback);
@@ -453,12 +473,12 @@ void test_gpu()
         EmbeddedShader::ShaderStage::ComputeShader, options);
     auto module = compiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
     expect(!std::get<std::vector<uint32_t>>(module.shaderCode).empty(), "current Slang emits SPIR-V");
-    ComputePipelineBase pipeline(module);
+    ComputePipeline pipeline(module);
     executor << pipeline(1, 1, 1);
     executor.commit();
 
     std::cerr << "GPU: EDSL compute\n";
-    ComputePipelineBase edsl([] {}, ktm::uvec3(1), options);
+    ComputePipeline edsl([] {}, ktm::uvec3(1), options);
     executor << edsl(1, 1, 1);
     executor.commit();
 
@@ -466,12 +486,26 @@ void test_gpu()
     std::cerr << "GPU: generated Slang module\n";
     moduleArgs.moduleName = "legacy_test";
     moduleArgs.sourceLanguage = EmbeddedShader::ShaderLanguage::Slang;
-    moduleArgs.shaderCode = "[shader(\"compute\")] [numthreads(1,1,1)] void main() {}";
-    auto slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
-    ComputePipelineBase generated(compileLegacyShaderModule(EmbeddedShader::ShaderStage::ComputeShader, slangModule));
-    executor << generated(1, 1, 1);
-    executor.commit();
-    coronaHardwareCheck(vkDeviceWaitIdle(getHardwareContext().getMainDevice()->deviceManager.getLogicalDevice()));
+    moduleArgs.shaderCode = R"(
+        struct Parameters { uint outputIndex; };
+        [[vk::push_constant]] ConstantBuffer<Parameters> params;
+        [[vk::binding(0, 1)]] RWStructuredBuffer<uint> outputs[];
+        [shader("compute")] [numthreads(1,1,1)]
+        void main() { outputs[params.outputIndex][0] = 47; }
+    )";
+    GeneratedComputeStage::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
+    ComputePipeline<GeneratedComputeStage> generated;
+    auto moved = std::move(generated);
+    moved.output = destination;
+    executor << moved(1);
+    generated = std::move(moved);
+    generated.output = source;
+    executor << generated(1);
+    executor.commit().waitForDeferredResources();
+    uint32_t afterConstruction{}, afterAssignment{};
+    expect(destination.copyToData(&afterConstruction, sizeof(afterConstruction)) && afterConstruction == 47 &&
+           source.copyToData(&afterAssignment, sizeof(afterAssignment)) && afterAssignment == 47,
+           "generated fields bind independent outputs after move construction and assignment");
 }
 }
 

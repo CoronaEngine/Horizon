@@ -4,77 +4,78 @@
 #include "Horizon.h"
 #include <stdexcept>
 
-RasterizerPipelineBase::RasterizerPipelineBase()
+RasterizerPipeline<>::RasterizerPipeline()
 {
     rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>();
 }
 
-RasterizerPipelineBase::RasterizerPipelineBase(std::string vertex, std::string fragment,
-                                             uint32_t views, const std::source_location& location)
+RasterizerPipeline<>::RasterizerPipeline(std::string vertex, std::string fragment,
+                                         uint32_t views, const std::source_location& location)
     : rasterizerPipeline_(std::make_shared<RasterizerPipelineVulkan>(std::move(vertex), std::move(fragment), views, location))
 {
 }
 
-RasterizerPipelineBase::RasterizerPipelineBase(const EmbeddedShader::ShaderCodeModule &vertexSpirV, const EmbeddedShader::ShaderCodeModule &fragmentSpirV, uint32_t multiviewCount, const std::source_location &src)
+RasterizerPipeline<>::RasterizerPipeline(const EmbeddedShader::ShaderCodeModule &vertexSpirV, const EmbeddedShader::ShaderCodeModule &fragmentSpirV, uint32_t multiviewCount, const std::source_location &src)
 {
     rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vertexSpirV, fragmentSpirV, multiviewCount, src);
 }
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 初始化 RasterizerPipeline
-void RasterizerPipelineBase::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& vertex,
-                                              EmbeddedShader::ShaderCodeCompiler& fragment,
-                                              uint32_t views, const std::source_location& src)
+void RasterizerPipeline<>::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& vertex,
+                                            EmbeddedShader::ShaderCodeCompiler& fragment,
+                                            uint32_t views, const std::source_location& src)
 {
     rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, views, src);
 }
 
-RasterizerPipelineBase::RasterizerPipelineBase(RasterizerPipelineBase&&) noexcept = default;
-RasterizerPipelineBase::~RasterizerPipelineBase() = default;
-RasterizerPipelineBase& RasterizerPipelineBase::operator=(RasterizerPipelineBase&&) noexcept = default;
+RasterizerPipeline<>::RasterizerPipeline(RasterizerPipeline<>&&) noexcept = default;
+RasterizerPipeline<>::~RasterizerPipeline() = default;
+RasterizerPipeline<>& RasterizerPipeline<>::operator=(RasterizerPipeline<>&&) noexcept = default;
 
-RasterizerPipelineVulkan& RasterizerPipelineBase::backend() const
+RasterizerPipelineVulkan& RasterizerPipeline<>::backend() const
 {
     if (!rasterizerPipeline_) throw std::logic_error("Empty raster pipeline handle");
     return *rasterizerPipeline_;
 }
 
-void RasterizerPipelineBase::setDepthImage(HardwareImage &depthImage)
+void RasterizerPipeline<>::setDepthImage(HardwareImage &depthImage)
 {
     backend().setDepthImage(depthImage);
 }
 
-void RasterizerPipelineBase::setDepthEnabled(bool enabled)
+void RasterizerPipeline<>::setDepthEnabled(bool enabled)
 {
     backend().setDepthEnabled(enabled);
 }
 
-void RasterizerPipelineBase::setRasterState(RasterState state)
+void RasterizerPipeline<>::setRasterState(RasterState state)
 {
     backend().setRasterState(state);
 }
 
-HardwareImage RasterizerPipelineBase::getDepthImage()
+HardwareImage RasterizerPipeline<>::getDepthImage()
 {
     return backend().getDepthImage();
 }
 
-void RasterizerPipelineBase::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
+void RasterizerPipeline<>::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
     backend().setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
-void RasterizerPipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void RasterizerPipeline<>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
     backend().setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
-void RasterizerPipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
+void RasterizerPipeline<>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location)
 {
     backend().setResourceDirect(byteOffset, typeSize, image, bindType, location);
 }
 
-RasterBatch RasterizerPipelineBase::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
+RasterBatch RasterizerPipeline<>::capture(std::optional<ktm::uvec2> extent, RasterPass pass)
 {
+    if (variants_) refreshShaderVariant();
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
     for (const auto& entry : autoBindEntries_)
     {
@@ -122,17 +123,18 @@ void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuf
     static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(geometry, packets, count, bytes, writeParameters, firstInstance);
 }
 
-bool RasterizerPipelineBase::syncShaderConditions()
+void RasterizerPipeline<>::refreshShaderVariant()
 {
-    if (!variants_) return false;
     auto vertex = variants_->vertex->getCurrentConditionInfo();
     auto fragment = variants_->fragment->getCurrentConditionInfo();
-    if (vertex == vertexConditions_ && fragment == fragmentConditions_) return false;
-    auto next = backend().variant(*variants_->vertex, *variants_->fragment);
+    if (vertex == vertexConditions_ && fragment == fragmentConditions_) return;
+    auto next = backend().variant(variants_->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertex),
+                                  variants_->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragment));
     variants_->updateAutoBind(vertex, fragment);
-    autoBindEntries_ = variants_->autoBindEntries;
+    auto& bindings = variants_->autoBindEntries;
+    bindings.insert(bindings.end(), autoBindEntries_.end() - explicitTargetCount_, autoBindEntries_.end());
+    autoBindEntries_ = std::move(bindings);
     rasterizerPipeline_ = std::move(next);
     vertexConditions_ = std::move(vertex);
     fragmentConditions_ = std::move(fragment);
-    return true;
 }

@@ -61,6 +61,15 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
 
 HardwareBuffer HardwareBuffer::uploadDeviceLocal(size_t count, size_t stride, BufferUsage usage, const void* data)
 {
+    HardwareExecutor upload;
+    auto destination = stageDeviceLocal(upload, count, stride, usage, data);
+    upload.commit().waitForDeferredResources();
+    return destination;
+}
+
+HardwareBuffer HardwareBuffer::stageDeviceLocal(HardwareExecutor& upload, size_t count, size_t stride,
+                                                BufferUsage usage, const void* data)
+{
     if (count > UINT32_MAX || stride > UINT32_MAX)
         throw std::length_error("Device-local buffer dimensions exceed the supported range");
     const auto elementCount = static_cast<uint32_t>(count);
@@ -72,9 +81,7 @@ HardwareBuffer HardwareBuffer::uploadDeviceLocal(size_t count, size_t stride, Bu
     destination.bufferID = reinterpret_cast<uintptr_t>(resource.release());
     if (elementCount) {
         HardwareBuffer staging(elementCount, elementSize, BufferUsage::StorageBuffer, data);
-        HardwareExecutor upload;
         upload << staging.copyTo(destination);
-        upload.commit().waitForDeferredResources();
     }
     return destination;
 }

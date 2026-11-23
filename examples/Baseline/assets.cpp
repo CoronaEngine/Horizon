@@ -86,8 +86,7 @@ ModelData read_model(const char* asset_name)
 
 RasterGeometry load_model(const char* asset_name) {
     const auto mesh = read_model(asset_name);
-    return {HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer),
-            HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer)};
+    return RasterGeometry::upload(mesh.vertices, mesh.indices);
 }
 
 TextureData read_texture(const char* asset_name)

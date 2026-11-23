@@ -38,7 +38,7 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::operator<<(ComputePipelineBase& computePipeline)
+HardwareExecutor& HardwareExecutor::operator<<(ComputePipeline<>& computePipeline)
 {
     auto* executor = execFromId(executorID);
     if (const auto& pipeline = computePipeline.computePipeline_)

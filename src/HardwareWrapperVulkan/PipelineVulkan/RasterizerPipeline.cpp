@@ -779,8 +779,9 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan& hardwareExe
 }
 
 std::shared_ptr<RasterizerPipelineVulkan> RasterizerPipelineVulkan::variant(
-    EmbeddedShader::ShaderCodeCompiler& vertex, EmbeddedShader::ShaderCodeCompiler& fragment) const
+    EmbeddedShader::ShaderCodeModule vertex, EmbeddedShader::ShaderCodeModule fragment) const
 {
+    EmbeddedShader::linkRasterDrawParameter(vertex, fragment);
     auto next = std::make_shared<RasterizerPipelineVulkan>(vertex, fragment, multiviewCount);
     if (next->renderTargets.size() == renderTargets.size()) next->renderTargets = renderTargets;
     next->rasterState = rasterState;

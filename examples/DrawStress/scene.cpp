@@ -64,9 +64,7 @@ void attach_input(GLFWwindow* window, int& dim, const char* mode) {
 std::span<const uint16_t> cube_triangle_indices() { return cube_indices; }
 
 RasterGeometry make_cube() {
-    auto cube_vb = HardwareBuffer::uploadDeviceLocal(cube_vertices, BufferUsage::VertexBuffer);
-    auto cube_ib = HardwareBuffer::uploadDeviceLocal(cube_indices, BufferUsage::IndexBuffer);
-    return {cube_vb, cube_ib};
+    return RasterGeometry::upload(cube_vertices, cube_indices);
 }
 
 HardwareBuffer make_draw_packets() {

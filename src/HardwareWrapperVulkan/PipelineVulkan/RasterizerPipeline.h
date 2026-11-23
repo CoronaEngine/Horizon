@@ -45,8 +45,8 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
 
     void setDepthEnabled(bool enabled) { rasterState.depthTest = rasterState.depthWrite = enabled; }
     void setRasterState(RasterState state) { rasterState = state; }
-    std::shared_ptr<RasterizerPipelineVulkan> variant(EmbeddedShader::ShaderCodeCompiler& vertex,
-                                                      EmbeddedShader::ShaderCodeCompiler& fragment) const;
+    std::shared_ptr<RasterizerPipelineVulkan> variant(EmbeddedShader::ShaderCodeModule vertex,
+                                                      EmbeddedShader::ShaderCodeModule fragment) const;
 
     [[nodiscard]] HardwareImage &getDepthImage()
     {

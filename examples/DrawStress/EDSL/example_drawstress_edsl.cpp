@@ -34,8 +34,6 @@ void run_example_drawstress_edsl()
     HardwareImage final_output_image(stress_width, stress_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
     final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
 
-    HardwareImage depth_image(stress_width, stress_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
-
     const auto shader_start = bench::Clock::now();
     Texture2D<fvec4> output;
     auto vs = [&]() {
@@ -50,7 +48,6 @@ void run_example_drawstress_edsl()
     auto fs = [&](Aggregate<Varyings> in) { output << Float4(in->color, Float(1)); };
     RasterizerPipeline<> rasterizer(vs, fs, 1, CompilerOption{.enableMatrixColumnMajor = true});
     const double shader_setup_ms = bench::milliseconds_since(shader_start);
-    rasterizer.setDepthImage(depth_image);
 
     HardwareExecutor render_executor;
     HardwareDisplayer display(examples::native_handle(window.get()), PresentDevicePreference::RenderDevice);
@@ -63,7 +60,7 @@ void run_example_drawstress_edsl()
 
         const auto record_start = bench::Clock::now();
         output = final_output_image;
-        auto batch = rasterizer.beginBatch(stress_width, stress_height);
+        auto batch = rasterizer.beginBatch();
         const uint32_t draw_count = static_cast<uint32_t>(dim * dim * dim);
         HORIZON_PROFILE_PLOT("draw calls", draw_count);
         {

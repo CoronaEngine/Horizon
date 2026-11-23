@@ -219,6 +219,12 @@ foreach ($mode in (& $examples --list)) {
 
 源码字符串由 Helicon 的 Slang 编译器处理。构造管线时使用 `ComputePipeline(source)` 或 `RasterizerPipeline(vertexSource, fragmentSource, multiviewCount)`，迁移旧调用时删去 `ShaderLanguage` 实参。
 
+需要接收任意计算或光栅管线的函数可以分别使用 `ComputePipeline<>&` 和 `RasterizerPipeline<>&`。这两个默认特化也直接支持 EDSL、Slang 源码和已编译模块。
+
+`RasterGeometry::upload(vertices, indices)` 在一次提交中上传顶点和索引，返回时上传已完成。有现成缓冲时可直接使用 `RasterGeometry{vertexBuffer, indexBuffer}`。
+
+`beginBatch()` 根据绑定的颜色附件或显式深度附件推导尺寸，按需复用同尺寸的默认深度图，并捕获当前 EDSL 条件和绑定。需要渲染较小区域时传入宽高，需要共享深度图时使用 `setDepthImage()`。
+
 将旧写法 `a << b << cmd` 改为 `b << cmd` 即可保留原有的入队行为。如果 `b` 的工作依赖 `a` 的提交，先调用 `a.commit()`，再用 `b.wait(a)` 让 `b` 的下一次提交等待 `a` 最近一次成功提交。
 
 旧代码原先未被 CMake 收集，两份公共头文件也被整体注释，因此默认构建成功并不能证明旧版可编译。

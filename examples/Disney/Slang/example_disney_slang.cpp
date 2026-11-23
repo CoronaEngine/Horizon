@@ -35,14 +35,14 @@ void run_example_disney_slang()
     HardwareImage final_output_image(disney_width, disney_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
-    HardwareImage depth_image(disney_width, disney_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
-
     const auto shader_start = bench::Clock::now();
     RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> rasterizer;
     const double shader_setup_ms = bench::milliseconds_since(shader_start);
     rasterizer.outColor = final_output_image;
-    rasterizer.setDepthImage(depth_image);
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
+    const uint32_t cube_index = radiance.storeDescriptor();
+    const uint32_t irradiance_index = irradiance.storeDescriptor();
+    rasterizer.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
 
     HardwareExecutor render_executor;
     HardwareDisplayer display(examples::native_handle(window.get()), PresentDevicePreference::RenderDevice);
@@ -56,8 +56,6 @@ void run_example_disney_slang()
         const auto frame = update_frame(input, dt);
 
         const auto record_start = bench::Clock::now();
-        const uint32_t cube_index = radiance.storeDescriptor();
-        const uint32_t irradiance_index = irradiance.storeDescriptor();
         rasterizer.vsp.proj_view = frame.proj_view;
         rasterizer.vsp.camPos = frame.camera;
         rasterizer.vsp.flags = frame.flags;
@@ -65,8 +63,7 @@ void run_example_disney_slang()
         rasterizer.vsp.lightCol = frame.light_color;
         rasterizer.vsp.envMtx = frame.env_rotation;
         rasterizer.vsp.exposurePad = frame.exposure;
-        rasterizer.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
-        auto batch = rasterizer.beginBatch(disney_width, disney_height);
+        auto batch = rasterizer.beginBatch();
 
         for (int row = 0; row < chart_row_count; ++row)
         {

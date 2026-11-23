@@ -4,54 +4,54 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include <stdexcept>
 
-ComputePipelineVulkan& ComputePipelineBase::backend() const
+ComputePipelineVulkan& ComputePipeline<>::backend() const
 {
     if (!computePipeline_)
-        throw std::runtime_error("Empty ComputePipelineBase handle");
+        throw std::runtime_error("Empty ComputePipeline<> handle");
     return *computePipeline_;
 }
 
 // 辅助函数：从已编译的 ShaderCodeCompiler 创建 ComputePipeline
-void ComputePipelineBase::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& compiler, const std::source_location& src)
+void ComputePipeline<>::initFromCompiler(EmbeddedShader::ShaderCodeCompiler& compiler, const std::source_location& src)
 {
     computePipeline_ = std::make_shared<ComputePipelineVulkan>(compiler, src);
 }
 
-ComputePipelineBase::ComputePipelineBase()
+ComputePipeline<>::ComputePipeline()
 {
     computePipeline_ = std::make_shared<ComputePipelineVulkan>();
 }
 
-ComputePipelineBase::ComputePipelineBase(const std::string& source, const std::source_location& location)
+ComputePipeline<>::ComputePipeline(const std::string& source, const std::source_location& location)
     : computePipeline_(std::make_shared<ComputePipelineVulkan>(source, location))
 {
 }
 
-ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)
+ComputePipeline<>::ComputePipeline(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)
 {
     computePipeline_ = std::make_shared<ComputePipelineVulkan>(spirV, src);
 }
 
-ComputePipelineBase::ComputePipelineBase(ComputePipelineBase&&) noexcept = default;
-ComputePipelineBase::~ComputePipelineBase() = default;
-ComputePipelineBase& ComputePipelineBase::operator=(ComputePipelineBase&&) noexcept = default;
+ComputePipeline<>::ComputePipeline(ComputePipeline<>&&) noexcept = default;
+ComputePipeline<>::~ComputePipeline() = default;
+ComputePipeline<>& ComputePipeline<>::operator=(ComputePipeline<>&&) noexcept = default;
 
-void ComputePipelineBase::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
+void ComputePipeline<>::setPushConstantDirect(uint64_t byteOffset, const void *data, size_t size, int32_t bindType)
 {
     backend().setPushConstantDirect(byteOffset, data, size, bindType);
 }
 
-void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
+void ComputePipeline<>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType)
 {
     backend().setResourceDirect(byteOffset, typeSize, buffer, bindType);
 }
 
-void ComputePipelineBase::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
+void ComputePipeline<>::setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType)
 {
     backend().setResourceDirect(byteOffset, typeSize, image, bindType);
 }
 
-ComputePipelineBase &ComputePipelineBase::operator()(uint16_t x, uint16_t y, uint16_t z)
+ComputePipeline<> &ComputePipeline<>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
     // Auto-bind: read current resource from each EDSL proxy's back-pointer
     for (const auto& entry : autoBindEntries_)

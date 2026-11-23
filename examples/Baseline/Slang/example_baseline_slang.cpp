@@ -35,7 +35,6 @@ void run_example_baseline_slang()
     color_info.linearFiltering = true;
     HardwareImage color(color_info);
     color.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    HardwareImage depth(width, height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
     const auto camera_view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
     auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
@@ -47,7 +46,6 @@ void run_example_baseline_slang()
     RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> rasterizer;
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
     rasterizer.outColor = color;
-    rasterizer.setDepthImage(depth);
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
     DrawParameters parameters{};
     parameters.texIndex = texture_image.storeDescriptor();
@@ -65,7 +63,7 @@ void run_example_baseline_slang()
 
         parameters.model = rotation;
 
-        auto batch = rasterizer.beginBatch(width, height);
+        auto batch = rasterizer.beginBatch();
         batch.draw(geometry, {}, parameters);
         render_executor << std::move(batch);
         const bool presented = display.present(render_executor, color);

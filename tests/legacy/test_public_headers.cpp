@@ -16,14 +16,12 @@ static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uint
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);
 static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
 static_assert(std::is_assignable_v<EmbeddedShader::BindingKey&, HardwareBuffer&>);
-static_assert(!std::is_constructible_v<ComputePipelineBase, const std::vector<uint32_t>&>);
-static_assert(!std::is_constructible_v<RasterizerPipelineBase, std::vector<uint32_t>, std::vector<uint32_t>>);
+static_assert(!std::is_constructible_v<ComputePipeline<>, const std::vector<uint32_t>&>);
+static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::vector<uint32_t>, std::vector<uint32_t>>);
 
 using EmbeddedShader::ShaderLanguage;
-static_assert(!std::is_constructible_v<ComputePipelineBase, std::string, ShaderLanguage>);
 static_assert(!std::is_constructible_v<ComputePipeline<>, std::string, ShaderLanguage>);
 static_assert(!std::is_constructible_v<ComputePipeline<>, std::string, ShaderLanguage, std::source_location>);
-static_assert(!std::is_constructible_v<RasterizerPipelineBase, std::string, std::string, uint32_t, ShaderLanguage>);
 static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::string, std::string, uint32_t, ShaderLanguage>);
 static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::string, std::string, uint32_t, ShaderLanguage, ShaderLanguage>);
 static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::string, std::string, uint32_t,

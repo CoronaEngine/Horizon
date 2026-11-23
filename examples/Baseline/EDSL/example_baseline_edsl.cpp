@@ -33,7 +33,6 @@ void run_example_baseline_edsl()
     color_info.linearFiltering = true;
     HardwareImage color(color_info);
     color.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    HardwareImage depth(width, height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
 
     const auto camera_view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
     auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
@@ -63,7 +62,6 @@ void run_example_baseline_edsl()
 
     RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, 1, CompilerOption{.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
-    rasterizer.setDepthImage(depth);
 
     view = std::bit_cast<fmat4x4>(camera_view);
     proj = std::bit_cast<fmat4x4>(projection);
@@ -78,8 +76,7 @@ void run_example_baseline_edsl()
 
         model = std::bit_cast<fmat4x4>(rotation);
 
-        rasterizer.syncShaderConditions();
-        auto batch = rasterizer.beginBatch(width, height);
+        auto batch = rasterizer.beginBatch();
         batch.draw(geometry);
         render_executor << std::move(batch);
         const bool presented = display.present(render_executor, color);

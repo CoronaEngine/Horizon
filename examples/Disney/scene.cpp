@@ -255,8 +255,7 @@ glm::vec3 chart_sphere_position(int row, int col)
 
 RasterGeometry make_sphere() {
     const auto mesh = make_uv_sphere(48, 24);
-    return {HardwareBuffer::uploadDeviceLocal(mesh.vertices, BufferUsage::VertexBuffer),
-            HardwareBuffer::uploadDeviceLocal(mesh.indices, BufferUsage::IndexBuffer)};
+    return RasterGeometry::upload(mesh.vertices, mesh.indices);
 }
 
 DisneyDrawParameters sphere_parameters(int row, int col)

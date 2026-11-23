@@ -122,8 +122,6 @@ void run_example_disney_edsl()
     HardwareImage final_output_image(disney_width, disney_height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
-    HardwareImage depth_image(disney_width, disney_height, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
-
     const auto shader_start = bench::Clock::now();
     DisneyEdslSharedProxy shared;
     TextureCube<fvec4> texCube, texCubeIrr;
@@ -272,7 +270,6 @@ void run_example_disney_edsl()
     };
     RasterizerPipeline<> rasterizer(edsl_vertex, edsl_fragment, 1, CompilerOption{.enableMatrixColumnMajor = true});
     const double shader_setup_ms = bench::milliseconds_since(shader_start);
-    rasterizer.setDepthImage(depth_image);
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     HardwareExecutor render_executor;
@@ -318,9 +315,8 @@ void run_example_disney_edsl()
         shared.exposurePad = std::bit_cast<fvec4>(frame.exposure);
         directEnabled = s.do_diffuse || s.do_specular;
         iblEnabled = s.do_diffuse_ibl || s.do_specular_ibl;
-        rasterizer.syncShaderConditions();
         final_output = final_output_image;
-        auto batch = rasterizer.beginBatch(disney_width, disney_height);
+        auto batch = rasterizer.beginBatch();
 
         for (int row = 0; row < chart_row_count; ++row)
         {
