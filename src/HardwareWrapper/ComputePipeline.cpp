@@ -27,12 +27,6 @@ ComputePipelineBase::ComputePipelineBase(const std::string& source, const std::s
 {
 }
 
-ComputePipelineBase::ComputePipelineBase(const std::string& source, EmbeddedShader::ShaderLanguage,
-                                         const std::source_location& location)
-    : ComputePipelineBase(source, location)
-{
-}
-
 ComputePipelineBase::ComputePipelineBase(const EmbeddedShader::ShaderCodeModule &spirV, const std::source_location &src)
 {
     computePipeline_ = std::make_shared<ComputePipelineVulkan>(spirV, src);

@@ -217,7 +217,9 @@ foreach ($mode in (& $examples --list)) {
 }
 ```
 
-源码字符串入口使用当前 Helicon 的 Slang 编译器；旧签名中的语言参数仅为源码兼容保留，不再切换输入语言。
+源码字符串由 Helicon 的 Slang 编译器处理。构造管线时使用 `ComputePipeline(source)` 或 `RasterizerPipeline(vertexSource, fragmentSource, multiviewCount)`，迁移旧调用时删去 `ShaderLanguage` 实参。
+
+将旧写法 `a << b << cmd` 改为 `b << cmd` 即可保留原有的入队行为。如果 `b` 的工作依赖 `a` 的提交，先调用 `a.commit()`，再用 `b.wait(a)` 让 `b` 的下一次提交等待 `a` 最近一次成功提交。
 
 旧代码原先未被 CMake 收集，两份公共头文件也被整体注释，因此默认构建成功并不能证明旧版可编译。
 恢复构建后，主要迁移点如下：

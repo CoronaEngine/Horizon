@@ -417,10 +417,6 @@ public:
     ComputePipelineBase();
     ComputePipelineBase(const std::string& slangSource,
                         const std::source_location& sourceLocation = std::source_location::current());
-    [[deprecated("Omit ShaderLanguage when constructing a pipeline from Slang source")]]
-    ComputePipelineBase(const std::string& shaderCode,
-                        EmbeddedShader::ShaderLanguage language,
-                        const std::source_location& sourceLocation = std::source_location::current());
 
     // 从当前编译器的 ShaderCodeModule（SPIR-V + Slang 反射）构造
     ComputePipelineBase(const EmbeddedShader::ShaderCodeModule& spirV,
@@ -488,13 +484,6 @@ struct RasterizerPipelineBase
 public:
     RasterizerPipelineBase();
     RasterizerPipelineBase(std::string vertexSlang, std::string fragmentSlang, uint32_t multiviewCount = 1,
-                           const std::source_location& sourceLocation = std::source_location::current());
-    [[deprecated("Omit both ShaderLanguage arguments when constructing a pipeline from Slang source")]]
-    RasterizerPipelineBase(std::string vertexShaderCode,
-                           std::string fragmentShaderCode,
-                           uint32_t multiviewCount,
-                           EmbeddedShader::ShaderLanguage vertexShaderLanguage,
-                           EmbeddedShader::ShaderLanguage fragmentShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
                            const std::source_location& sourceLocation = std::source_location::current());
 
     // 从当前编译器的 ShaderCodeModule（SPIR-V + Slang 反射）构造
@@ -602,8 +591,6 @@ public:
 
     HardwareExecutor& operator<<(ComputePipelineBase& computePipeline);
     HardwareExecutor& operator<<(RasterBatch&& batch);
-    [[deprecated("Enqueue commands directly on the right-hand executor")]]
-    HardwareExecutor& operator<<(HardwareExecutor& other);
     HardwareExecutor& operator<<(const CopyCommand& cmd);
 
     // Depend on the most recent successful submission of other at the time of this call.
@@ -637,13 +624,6 @@ template <>
 struct RasterizerPipeline<void, void> : RasterizerPipelineBase
 {
     using RasterizerPipelineBase::RasterizerPipelineBase;
-
-    // MSVC omits deprecation diagnostics for inherited constructors.
-    [[deprecated("Omit both ShaderLanguage arguments when constructing a pipeline from Slang source")]]
-    RasterizerPipeline(std::string vertexSlang, std::string fragmentSlang, uint32_t multiviewCount,
-                       EmbeddedShader::ShaderLanguage, EmbeddedShader::ShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
-                       const std::source_location& sourceLocation = std::source_location::current())
-        : RasterizerPipelineBase(std::move(vertexSlang), std::move(fragmentSlang), multiviewCount, sourceLocation) {}
 };
 
 // General template — Slang code-gen path with direct member access
@@ -706,12 +686,6 @@ template <>
 struct ComputePipeline<void> : ComputePipelineBase
 {
     using ComputePipelineBase::ComputePipelineBase;
-
-    // MSVC omits deprecation diagnostics for inherited constructors.
-    [[deprecated("Omit ShaderLanguage when constructing a pipeline from Slang source")]]
-    ComputePipeline(const std::string& slangSource, EmbeddedShader::ShaderLanguage,
-                    const std::source_location& sourceLocation = std::source_location::current())
-        : ComputePipelineBase(slangSource, sourceLocation) {}
 };
 
 // General template — Slang code-gen path with direct member access

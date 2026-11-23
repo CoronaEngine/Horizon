@@ -15,13 +15,6 @@ RasterizerPipelineBase::RasterizerPipelineBase(std::string vertex, std::string f
 {
 }
 
-RasterizerPipelineBase::RasterizerPipelineBase(std::string vertex, std::string fragment, uint32_t views,
-                                             EmbeddedShader::ShaderLanguage, EmbeddedShader::ShaderLanguage,
-                                             const std::source_location& location)
-    : RasterizerPipelineBase(std::move(vertex), std::move(fragment), views, location)
-{
-}
-
 RasterizerPipelineBase::RasterizerPipelineBase(const EmbeddedShader::ShaderCodeModule &vertexSpirV, const EmbeddedShader::ShaderCodeModule &fragmentSpirV, uint32_t multiviewCount, const std::source_location &src)
 {
     rasterizerPipeline_ = std::make_shared<RasterizerPipelineVulkan>(vertexSpirV, fragmentSpirV, multiviewCount, src);

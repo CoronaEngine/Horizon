@@ -54,11 +54,6 @@ HardwareExecutor& HardwareExecutor::operator<<(RasterBatch&& batch)
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::operator<<(HardwareExecutor& other)
-{
-    return other;
-}
-
 HardwareExecutor& HardwareExecutor::operator<<(const CopyCommand& cmd)
 {
     if (!cmd.impl_ || !executorID)
