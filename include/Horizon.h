@@ -379,13 +379,8 @@ public:
     void draw(const RasterGeometry& geometry, const RasterDraw& range, const T& parameters) {
         append(geometry, range, &parameters, sizeof(T));
     }
-    // With the default index range, a draw needs only the geometry and its shader parameters.
-    template<class T = RasterDraw> requires (std::convertible_to<const T&, const RasterDraw&> || std::is_trivially_copyable_v<T>)
-    void draw(const RasterGeometry& geometry, const T& rangeOrParameters = {}) {
-        if constexpr (std::convertible_to<const T&, const RasterDraw&>)
-            append(geometry, rangeOrParameters, nullptr, 0);
-        else
-            draw(geometry, {}, rangeOrParameters);
+    void draw(const RasterGeometry& geometry, const RasterDraw& range = {}) {
+        append(geometry, range, nullptr, 0);
     }
     using ParameterWriter = std::function<void(std::span<std::byte>)>;
     // Fill the span synchronously, keeping the batch idle until the writer returns.
@@ -455,7 +450,7 @@ public:
     ComputePipelineBase();
     ComputePipelineBase(const std::string& slangSource,
                         const std::source_location& sourceLocation = std::source_location::current());
-    // Compatibility for callers that previously supplied an input language.
+    [[deprecated("Omit ShaderLanguage when constructing a pipeline from Slang source")]]
     ComputePipelineBase(const std::string& shaderCode,
                         EmbeddedShader::ShaderLanguage language,
                         const std::source_location& sourceLocation = std::source_location::current());
@@ -527,7 +522,7 @@ public:
     RasterizerPipelineBase();
     RasterizerPipelineBase(std::string vertexSlang, std::string fragmentSlang, uint32_t multiviewCount = 1,
                            const std::source_location& sourceLocation = std::source_location::current());
-    // Compatibility for callers that previously supplied shader input languages.
+    [[deprecated("Omit both ShaderLanguage arguments when constructing a pipeline from Slang source")]]
     RasterizerPipelineBase(std::string vertexShaderCode,
                            std::string fragmentShaderCode,
                            uint32_t multiviewCount,
@@ -640,7 +635,7 @@ public:
 
     HardwareExecutor& operator<<(ComputePipelineBase& computePipeline);
     HardwareExecutor& operator<<(RasterBatch&& batch);
-    [[deprecated("Enqueue commands on the destination executor directly")]]
+    [[deprecated("Enqueue commands directly on the right-hand executor")]]
     HardwareExecutor& operator<<(HardwareExecutor& other);
     HardwareExecutor& operator<<(const CopyCommand& cmd);
 
@@ -675,6 +670,13 @@ template <>
 struct RasterizerPipeline<void, void> : RasterizerPipelineBase
 {
     using RasterizerPipelineBase::RasterizerPipelineBase;
+
+    // MSVC omits deprecation diagnostics for inherited constructors.
+    [[deprecated("Omit both ShaderLanguage arguments when constructing a pipeline from Slang source")]]
+    RasterizerPipeline(std::string vertexSlang, std::string fragmentSlang, uint32_t multiviewCount,
+                       EmbeddedShader::ShaderLanguage, EmbeddedShader::ShaderLanguage = EmbeddedShader::ShaderLanguage::GLSL,
+                       const std::source_location& sourceLocation = std::source_location::current())
+        : RasterizerPipelineBase(std::move(vertexSlang), std::move(fragmentSlang), multiviewCount, sourceLocation) {}
 };
 
 // General template — Slang code-gen path with direct member access
@@ -737,6 +739,12 @@ template <>
 struct ComputePipeline<void> : ComputePipelineBase
 {
     using ComputePipelineBase::ComputePipelineBase;
+
+    // MSVC omits deprecation diagnostics for inherited constructors.
+    [[deprecated("Omit ShaderLanguage when constructing a pipeline from Slang source")]]
+    ComputePipeline(const std::string& slangSource, EmbeddedShader::ShaderLanguage,
+                    const std::source_location& sourceLocation = std::source_location::current())
+        : ComputePipelineBase(slangSource, sourceLocation) {}
 };
 
 // General template — Slang code-gen path with direct member access
