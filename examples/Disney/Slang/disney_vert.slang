@@ -50,7 +50,6 @@ struct DisneyPbrShared {
     float4 lightDir;
     uint texCubeIndex;
     uint texCubeIrrIndex;
-    uint phase;
 };
 
 struct DisneyDraw {

@@ -86,12 +86,6 @@ void run_example_disney_ocarina() {
     };
     const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
     int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
-    float fixed_dt = 0.f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0)
-            throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -260,7 +254,7 @@ void run_example_disney_ocarina() {
     stream << materials.upload(material_data.data()) << chart.build_bvh() << ocarina::synchronize() << ocarina::commit();
 
     // Each invocation traces one camera ray and shades the surface it hits.
-    ocarina::Kernel trace = [&](Float3 eye, Float3 light, ocarina::Uint phase, ocarina::BufferVar<unsigned> output) {
+    ocarina::Kernel trace = [&](Float3 eye, Float3 light, ocarina::BufferVar<unsigned> output) {
         ocarina::Uint2 xy = ocarina::dispatch_idx().xy();
         ocarina::Uint2 extent = ocarina::dispatch_dim().xy();
         $if (xy.x >= extent.x || xy.y >= extent.y) { $return(); };
@@ -286,7 +280,7 @@ void run_example_disney_ocarina() {
             Float3 tint = base / max(dot(base, make_float3(.3f, .6f, .1f)), .0001f);
             Float3 spec = lerp(m0.w, m1.y * .08f * lerp(m1.z, make_float3(1.f), tint), base);
             Float3 direct = make_float3(0.f);
-            $if (((phase & 1u) == 0u) && (dot(n, light) > 0.f) && (dot(n, v) > 0.f)) {
+            $if ((dot(n, light) > 0.f) && (dot(n, v) > 0.f)) {
                 // Disney diffuse, anisotropic reflection and clearcoat under the directional light.
                 Float metallic = m0.w, roughness = max(.001f, m1.x), subsurface = m1.w;
                 Float anisotropy = m2.x, sheen_strength = m2.y, sheen_tint = m2.z, clearcoat = m2.w;
@@ -324,52 +318,49 @@ void run_example_disney_ocarina() {
                 Float coat = .25f * clearcoat * coat_d * lerp(fh, .04f, 1.f) * coat_g(nl) * coat_g(nv);
                 direct = 2.f * (diffuse + reflection + coat) * dot(n, light);
             };
-            Float3 indirect = make_float3(0.f);
-            $if ((phase & 2u) == 0u) {
-                // Select a cube face and blend the two neighboring levels of its atlas.
-                auto sample_environment = [](const Environment& env, Float3 d, Float mip) -> Float3 {
-                    Float3 axis = abs(d);
-                    Float major = max(axis.x, max(axis.y, axis.z));
-                    Float face;
-                    Float2 uv;
-                    $if (axis.x == major) {
-                        face = select(d.x > 0.f, 0.f, 1.f);
-                        uv = make_float2(select(d.x > 0.f, -d.z, d.z), -d.y);
+            // Select a cube face and blend the two neighboring levels of its atlas.
+            auto sample_environment = [](const Environment& env, Float3 d, Float mip) -> Float3 {
+                Float3 axis = abs(d);
+                Float major = max(axis.x, max(axis.y, axis.z));
+                Float face;
+                Float2 uv;
+                $if (axis.x == major) {
+                    face = select(d.x > 0.f, 0.f, 1.f);
+                    uv = make_float2(select(d.x > 0.f, -d.z, d.z), -d.y);
+                }
+                $else {
+                    $if (axis.y == major) {
+                        face = select(d.y > 0.f, 2.f, 3.f);
+                        uv = make_float2(d.x, select(d.y > 0.f, d.z, -d.z));
                     }
                     $else {
-                        $if (axis.y == major) {
-                            face = select(d.y > 0.f, 2.f, 3.f);
-                            uv = make_float2(d.x, select(d.y > 0.f, d.z, -d.z));
-                        }
-                        $else {
-                            face = select(d.z > 0.f, 4.f, 5.f);
-                            uv = make_float2(select(d.z > 0.f, d.x, -d.x), -d.y);
-                        };
+                        face = select(d.z > 0.f, 4.f, 5.f);
+                        uv = make_float2(select(d.z > 0.f, d.x, -d.x), -d.y);
                     };
-                    uv = .5f * (uv / major + 1.f);
-                    auto sample_level = [&](Float level) -> Float3 {
-                        Float side = float(env.face_size) * exp2(-level);
-                        Float2 xy = clamp(uv * side, make_float2(.5f), make_float2(side - .5f));
-                        xy += make_float2(face * side, 2.f * (float(env.face_size) - side));
-                        return env.atlas.sample(4, xy / make_float2(6.f * env.face_size, 2.f * env.face_size)).as_vec4().xyz();
-                    };
-                    Float level = clamp(mip, 0.f, float(env.levels - 1));
-                    Float lo = floor(level);
-                    Float3 first = sample_level(lo);
-                    Float3 second = sample_level(min(lo + 1.f, float(env.levels - 1)));
-                    return pow(abs(lerp(level - lo, first, second)), make_float3(2.2f));
                 };
-                Float mip = m1.x * 5.f;
-                Float3 reflected = normalize(2.f * dot(n, v) * n - v);
-                Float3 axis = abs(reflected);
-                Float major = max(axis.x, max(axis.y, axis.z));
-                Float scale = 1.f - exp2(mip) / 256.f;
-                Float3 lookup = reflected * make_float3(select(axis.x == major, 1.f, scale),
-                    select(axis.y == major, 1.f, scale), select(axis.z == major, 1.f, scale));
-                Float fresnel = pow(1.f - clamp(dot(n, v), 0.f, 1.f), 5.f);
-                indirect = base * (1.f - m0.w) * sample_environment(irradiance, n, 0.f) +
-                           spec * lerp(fresnel, spec.x, 1.f) * sample_environment(radiance, lookup, mip);
+                uv = .5f * (uv / major + 1.f);
+                auto sample_level = [&](Float level) -> Float3 {
+                    Float side = float(env.face_size) * exp2(-level);
+                    Float2 xy = clamp(uv * side, make_float2(.5f), make_float2(side - .5f));
+                    xy += make_float2(face * side, 2.f * (float(env.face_size) - side));
+                    return env.atlas.sample(4, xy / make_float2(6.f * env.face_size, 2.f * env.face_size)).as_vec4().xyz();
+                };
+                Float level = clamp(mip, 0.f, float(env.levels - 1));
+                Float lo = floor(level);
+                Float3 first = sample_level(lo);
+                Float3 second = sample_level(min(lo + 1.f, float(env.levels - 1)));
+                return pow(abs(lerp(level - lo, first, second)), make_float3(2.2f));
             };
+            Float mip = m1.x * 5.f;
+            Float3 reflected = normalize(2.f * dot(n, v) * n - v);
+            Float3 axis = abs(reflected);
+            Float major = max(axis.x, max(axis.y, axis.z));
+            Float scale = 1.f - exp2(mip) / 256.f;
+            Float3 lookup = reflected * make_float3(select(axis.x == major, 1.f, scale),
+                select(axis.y == major, 1.f, scale), select(axis.z == major, 1.f, scale));
+            Float fresnel = pow(1.f - clamp(dot(n, v), 0.f, 1.f), 5.f);
+            Float3 indirect = base * (1.f - m0.w) * sample_environment(irradiance, n, 0.f) +
+                              spec * lerp(fresnel, spec.x, 1.f) * sample_environment(radiance, lookup, mip);
             Float3 lit = direct + indirect;
             Float3 x = max(lit - .004f, make_float3(0.f));
             color = x * (6.2f * x + .5f) / (x * (6.2f * x + 1.7f) + .06f);
@@ -389,8 +380,6 @@ void run_example_disney_ocarina() {
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
     const auto eye = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch),
                                          std::sin(pitch) * std::cos(yaw));
-    double start = 0.0;
-    uint64_t frame = 0;
     while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
         int w, h;
@@ -405,11 +394,7 @@ void run_example_disney_ocarina() {
             pixels.resize(static_cast<size_t>(width) * height);
             output = device.create_buffer<uint32_t>(pixels.size());
         }
-        if (frame == 0) start = glfwGetTime();
-        const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
-        ++frame;
-        const auto phase = static_cast<unsigned>(std::fmod(seconds, 6.0) / 1.5);
-        stream << shader(eye, light, phase, output).dispatch(width, height)
+        stream << shader(eye, light, output).dispatch(width, height)
                << output.download(pixels.data()) << ocarina::synchronize() << ocarina::commit();
 
         const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);

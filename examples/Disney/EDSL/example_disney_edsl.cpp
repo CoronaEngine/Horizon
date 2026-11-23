@@ -57,11 +57,6 @@ void run_example_disney_edsl()
     const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
     int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
     const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -264,8 +259,6 @@ void run_example_disney_edsl()
     Float4 camPos, lightDir;
     EmbeddedShader::TextureCube<ktm::fvec4> texCube, texCubeIrr;
     EmbeddedShader::Texture2D<ktm::fvec4> final_output;
-    bool directEnabled = true;
-    bool iblEnabled = true;
 
     auto edsl_vertex = [&](Float3 pos) {
         auto per_model = EmbeddedShader::rasterDrawParameter<ktm::fmat4x4>(0);
@@ -331,93 +324,85 @@ void run_example_disney_edsl()
         };
         Float envFresnel = mix(Cspec0->x, Float(1.0), schlickFresnel(NdotV));
 
-        Float3 direct(0.0f);
-        $IF(directEnabled)
+        Float3 brdf(0.0f);
+        Float NdotL = dot(N, L);
+        $IF(NdotL >= Float(0.0))
         {
-            Float3 brdf(0.0f);
-            Float NdotL = dot(N, L);
-            $IF(NdotL >= Float(0.0))
+            $IF(NdotVraw >= Float(0.0))
             {
-                $IF(NdotVraw >= Float(0.0))
-                {
-                    Float3 H = normalize(L + V);
-                    Float NdotH;
-                    NdotH = dot(N, H);
-                    Float LdotH = dot(L, H);
+                Float3 H = normalize(L + V);
+                Float NdotH;
+                NdotH = dot(N, H);
+                Float LdotH = dot(L, H);
 
-                    Float FL = schlickFresnel(NdotL);
-                    Float FV = schlickFresnel(NdotVraw);
-                    Float Fd90 = Float(0.5) + Float(2.0) * LdotH * LdotH * roughness;
-                    Float Fd = mix(Float(1.0), Fd90, FL) * mix(Float(1.0), Fd90, FV);
+                Float FL = schlickFresnel(NdotL);
+                Float FV = schlickFresnel(NdotVraw);
+                Float Fd90 = Float(0.5) + Float(2.0) * LdotH * LdotH * roughness;
+                Float Fd = mix(Float(1.0), Fd90, FL) * mix(Float(1.0), Fd90, FV);
 
-                    Float Fss90 = LdotH * LdotH * roughness;
-                    Float Fss = mix(Float(1.0), Fss90, FL) * mix(Float(1.0), Fss90, FV);
-                    Float ss = Float(1.25) * (Fss * (Float(1.0) / (NdotL + NdotVraw) - Float(0.5)) + Float(0.5));
+                Float Fss90 = LdotH * LdotH * roughness;
+                Float Fss = mix(Float(1.0), Fss90, FL) * mix(Float(1.0), Fss90, FV);
+                Float ss = Float(1.25) * (Fss * (Float(1.0) / (NdotL + NdotVraw) - Float(0.5)) + Float(0.5));
 
-                    const auto sqr = [](Float x) { return x * x; };
-                    Float aniso_aspect = sqrt(Float(1.0) - anisotropic * Float(0.9));
-                    Float ax = max(Float(0.001), sqr(roughness) / aniso_aspect);
-                    Float ay = max(Float(0.001), sqr(roughness) * aniso_aspect);
-                    Float Ds = Float(1.0) /
-                        (Float(3.14159265358979323846) * ax * ay *
-                         sqr(sqr(dot(H, X) / ax) + sqr(dot(H, Y) / ay) + NdotH * NdotH));
-                    Float FH = schlickFresnel(LdotH);
-                    Float3 Fs = mix(Cspec0, Float3(1.0f), FH);
-                    const auto smithGGXAniso = [&](Float n, Float x, Float y) {
-                        return Float(1.0) / (n + sqrt(sqr(x * ax) + sqr(y * ay) + sqr(n)));
-                    };
-                    Float Gs = smithGGXAniso(NdotL, dot(L, X), dot(L, Y)) *
-                               smithGGXAniso(NdotVraw, dot(V, X), dot(V, Y));
-
-                    Float3 Fsheen = FH * sheen * Csheen;
-
-                    Float clearcoatAlpha =
-                        Float(0.1) * (Float(1.0) - clearcoatGloss) + Float(0.001) * clearcoatGloss;
-                    Float a2 = clearcoatAlpha * clearcoatAlpha;
-                    Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
-                    Float Dr;
-                    Dr = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * EmbeddedShader::log(a2) * t);
-                    $IF(clearcoatAlpha >= Float(1.0)) { Dr = Float(1.0) / Float(3.14159265358979323846); };
-                    Float Fr = Float(0.04) * (Float(1.0) - FH) + Float(1.0) * FH;
-                    const auto smithGGXClearcoat = [](Float n) {
-                        Float a = Float(0.25) * Float(0.25);
-                        Float b = n * n;
-                        return Float(1.0) / (n + sqrt(a + b - a * b));
-                    };
-                    Float Gr = smithGGXClearcoat(NdotL) * smithGGXClearcoat(NdotVraw);
-
-                    Float3 diffusePart =
-                        ((Float(1.0) / Float(3.14159265358979323846)) * mix(Fd, ss, subsurface) * Cdlin + Fsheen) *
-                        (Float(1.0) - metallic);
-                    Float3 specPart = Gs * Fs * Ds + Float(0.25) * clearcoat * Gr * Fr * Dr;
-                    brdf = diffusePart + specPart;
+                const auto sqr = [](Float x) { return x * x; };
+                Float aniso_aspect = sqrt(Float(1.0) - anisotropic * Float(0.9));
+                Float ax = max(Float(0.001), sqr(roughness) / aniso_aspect);
+                Float ay = max(Float(0.001), sqr(roughness) * aniso_aspect);
+                Float Ds = Float(1.0) /
+                    (Float(3.14159265358979323846) * ax * ay *
+                     sqr(sqr(dot(H, X) / ax) + sqr(dot(H, Y) / ay) + NdotH * NdotH));
+                Float FH = schlickFresnel(LdotH);
+                Float3 Fs = mix(Cspec0, Float3(1.0f), FH);
+                const auto smithGGXAniso = [&](Float n, Float x, Float y) {
+                    return Float(1.0) / (n + sqrt(sqr(x * ax) + sqr(y * ay) + sqr(n)));
                 };
-            };
+                Float Gs = smithGGXAniso(NdotL, dot(L, X), dot(L, Y)) *
+                           smithGGXAniso(NdotVraw, dot(V, X), dot(V, Y));
 
-            direct = brdf * clamp(NdotL, Float(0.0), Float(1.0)) * Float(2.0);
+                Float3 Fsheen = FH * sheen * Csheen;
+
+                Float clearcoatAlpha =
+                    Float(0.1) * (Float(1.0) - clearcoatGloss) + Float(0.001) * clearcoatGloss;
+                Float a2 = clearcoatAlpha * clearcoatAlpha;
+                Float t = Float(1.0) + (a2 - Float(1.0)) * NdotH * NdotH;
+                Float Dr;
+                Dr = (a2 - Float(1.0)) / (Float(3.14159265358979323846) * EmbeddedShader::log(a2) * t);
+                $IF(clearcoatAlpha >= Float(1.0)) { Dr = Float(1.0) / Float(3.14159265358979323846); };
+                Float Fr = Float(0.04) * (Float(1.0) - FH) + Float(1.0) * FH;
+                const auto smithGGXClearcoat = [](Float n) {
+                    Float a = Float(0.25) * Float(0.25);
+                    Float b = n * n;
+                    return Float(1.0) / (n + sqrt(a + b - a * b));
+                };
+                Float Gr = smithGGXClearcoat(NdotL) * smithGGXClearcoat(NdotVraw);
+
+                Float3 diffusePart =
+                    ((Float(1.0) / Float(3.14159265358979323846)) * mix(Fd, ss, subsurface) * Cdlin + Fsheen) *
+                    (Float(1.0) - metallic);
+                Float3 specPart = Gs * Fs * Ds + Float(0.25) * clearcoat * Gr * Fr * Dr;
+                brdf = diffusePart + specPart;
+            };
         };
 
-        Float3 indirect(0.0f);
-        $IF(iblEnabled)
-        {
-            Float mip = roughness * Float(5.0);
-            Float3 vr = normalize(Float(2.0) * NdotVraw * N - V);
-            Float3 reflected = normalize(vr);
-            Float ax = abs(reflected->x), ay = abs(reflected->y), az = abs(reflected->z);
-            Float major = max(max(ax, ay), az);
-            Float scale = Float(1.0) - exp2(mip) / Float(256.0);
-            Float3 cubeR;
-            cubeR = reflected;
-            $IF(ax != major) { cubeR->x = reflected->x * scale; };
-            $IF(ay != major) { cubeR->y = reflected->y * scale; };
-            $IF(az != major) { cubeR->z = reflected->z * scale; };
+        Float3 direct = brdf * clamp(NdotL, Float(0.0), Float(1.0)) * Float(2.0);
 
-            Float3 radiance = toLinear(Float3(EmbeddedShader::textureLod(texCube, cubeR, mip)->xyz()));
-            Float3 irradiance = toLinear(Float3(EmbeddedShader::texture(texCubeIrr, normalize(N))->xyz()));
+        Float mip = roughness * Float(5.0);
+        Float3 vr = normalize(Float(2.0) * NdotVraw * N - V);
+        Float3 reflected = normalize(vr);
+        Float ax = abs(reflected->x), ay = abs(reflected->y), az = abs(reflected->z);
+        Float major = max(max(ax, ay), az);
+        Float scale = Float(1.0) - exp2(mip) / Float(256.0);
+        Float3 cubeR;
+        cubeR = reflected;
+        $IF(ax != major) { cubeR->x = reflected->x * scale; };
+        $IF(ay != major) { cubeR->y = reflected->y * scale; };
+        $IF(az != major) { cubeR->z = reflected->z * scale; };
 
-            Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
-            indirect = diffuseAlbedo * irradiance + Cspec0 * radiance * envFresnel;
-        }
+        Float3 radiance = toLinear(Float3(EmbeddedShader::textureLod(texCube, cubeR, mip)->xyz()));
+        Float3 irradiance = toLinear(Float3(EmbeddedShader::texture(texCubeIrr, normalize(N))->xyz()));
+
+        Float3 diffuseAlbedo = Cdlin * (Float(1.0) - metallic);
+        Float3 indirect = diffuseAlbedo * irradiance + Cspec0 * radiance * envFresnel;
 
         Float3 mapped = max(Float3(0.0f), (direct + indirect) - Float3(0.004f));
         Float3 filmic = (mapped * (Float(6.2) * mapped + Float3(0.5f))) /
@@ -441,8 +426,6 @@ void run_example_disney_edsl()
     lightDir = std::bit_cast<ktm::fvec4>(glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f));
 
     int width = 0, height = 0;
-    double start = 0.0;
-    uint64_t frame = 0;
     while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
         int w, h;
@@ -462,12 +445,6 @@ void run_example_disney_edsl()
             projection[1][1] *= -1.0f;
             proj_view = std::bit_cast<ktm::fmat4x4>(glm::mat4(projection * view));
         }
-        if (frame == 0) start = glfwGetTime();
-        const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
-        ++frame;
-        const int phase = static_cast<int>(std::fmod(seconds, 6.0) / 1.5);
-        directEnabled = (phase & 1) == 0;
-        iblEnabled = (phase & 2) == 0;
         auto batch = rasterizer.beginBatch();
 
         for (const auto& draw : draws)

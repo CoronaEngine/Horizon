@@ -20,7 +20,6 @@ struct DisneyPbrShared {
     float4 lightDir;
     uint texCubeIndex;
     uint texCubeIrrIndex;
-    uint phase;
 };
 
 struct DisneyDraw {
@@ -185,27 +184,19 @@ void main(DisneyVaryings input, out float4 outColor : SV_Target0)
     float NdotV = clamp(dot(N, V), 0.0, 1.0);
     float envFresnel = lerp(Cspec0.r, 1.0, SchlickFresnel(NdotV)); // scalar approx for mip env
 
-    float3 direct = float3(0.0);
-    if ((fsp.phase & 1u) == 0u)
-    {
-        float3 brdf = evalDisneyDirect(draw, L, V, N, X, Y);
-        float NdotL = clamp(dot(N, L), 0.0, 1.0);
-        direct = brdf * NdotL * 2.0;
-    }
+    float3 brdf = evalDisneyDirect(draw, L, V, N, X, Y);
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    float3 direct = brdf * NdotL * 2.0;
 
-    float3 indirect = float3(0.0);
-    if ((fsp.phase & 2u) == 0u)
-    {
-        float mip = roughness * 5.0;
-        float3 vr = normalize(reflect(-V, N));
-        float3 cubeR = fixCubeLookup(normalize(vr), mip, 256.0);
+    float mip = roughness * 5.0;
+    float3 vr = normalize(reflect(-V, N));
+    float3 cubeR = fixCubeLookup(normalize(vr), mip, 256.0);
 
-        float3 radiance = toLinear(combinedCubeSamplerHandles[fsp.texCubeIndex].SampleLevel(cubeR, mip).xyz);
-        float3 irradiance = toLinear(combinedCubeSamplerHandles[fsp.texCubeIrrIndex].Sample(normalize(N)).xyz);
+    float3 radiance = toLinear(combinedCubeSamplerHandles[fsp.texCubeIndex].SampleLevel(cubeR, mip).xyz);
+    float3 irradiance = toLinear(combinedCubeSamplerHandles[fsp.texCubeIrrIndex].Sample(normalize(N)).xyz);
 
-        float3 diffuseAlbedo = Cdlin * (1.0 - metallic);
-        indirect = diffuseAlbedo * irradiance + Cspec0 * radiance * envFresnel;
-    }
+    float3 diffuseAlbedo = Cdlin * (1.0 - metallic);
+    float3 indirect = diffuseAlbedo * irradiance + Cspec0 * radiance * envFresnel;
 
     outColor = float4(toFilmic(direct + indirect), 1.0);
 }

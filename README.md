@@ -123,7 +123,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 每个运行模式只有一个 C++ 源文件，从 `run_example_*` 可以看到窗口创建、场景准备和逐帧渲染。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，帧循环中更新光照并按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。这四个光栅模式都支持离屏渲染和截图。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制与截图](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，每帧在固定光照下按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。这四个光栅模式都支持离屏渲染和截图。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制与截图](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
 最后可以对照原生 Vulkan 实现。无参数运行 `HorizonExamples` 默认启动 `baseline`。教程入口直接初始化 Vulkan、绘制 Viking Room 并释放资源。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
@@ -141,10 +141,10 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 | 模式 | 从入口阅读的内容 |
 | --- | --- |
 | `baseline_ocarina` | 载入 Viking Room，建立三角形加速结构，为每个像素发出相机射线。命中后插值 UV、采样模型纹理，与 Tutorial 显示相同的无光照材质。[源码](examples/Baseline/Ocarina/example_baseline_ocarina.cpp) |
-| `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。三个 Disney 模式使用相同的直射光和两张 DDS 环境贴图，每 1.5 秒切换一次光照组合。相机固定在材质球阵列前。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
+| `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。三个 Disney 模式都使用同一束方向光，并从两张 DDS 环境贴图采样漫反射和镜面光照。相机固定在材质球阵列前。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
 | `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。可在启动前用 `HORIZON_DRAWSTRESS_DIM` 指定网格边长。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
 
-全部十个示例的初始窗口尺寸均为 1920 × 1080，启动时最大化并保留窗口边框。光栅和光追均按实际 framebuffer 尺寸渲染，并根据其宽高比计算投影。三个光追入口将 RGBA 像素读回并交给 Horizon 窗口呈现。`HORIZON_PRESENT_FRAMES` 指定成功呈现多少帧后退出，`HORIZON_CAPTURE_PATH` 指定最后一帧 PNG 的保存路径。对于三个光追场景，设置 `HORIZON_FIXED_DT` 可以固定每帧的动画步长。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
+全部十个示例的初始窗口尺寸均为 1920 × 1080，启动时最大化并保留窗口边框。光栅和光追均按实际 framebuffer 尺寸渲染，并根据其宽高比计算投影。三个光追入口将 RGBA 像素读回并交给 Horizon 窗口呈现。`HORIZON_PRESENT_FRAMES` 指定成功呈现多少帧后退出，`HORIZON_CAPTURE_PATH` 指定最后一帧 PNG 的保存路径。Baseline 和 DrawStress 光追示例可用 `HORIZON_FIXED_DT` 固定每帧的动画步长。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。

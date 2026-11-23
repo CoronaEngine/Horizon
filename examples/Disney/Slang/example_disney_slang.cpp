@@ -51,11 +51,6 @@ void run_example_disney_slang()
     const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
     int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
     const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0) throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -255,8 +250,6 @@ void run_example_disney_slang()
     rasterizer.vsp.texCubeIrrIndex = irradiance.storeDescriptor();
 
     int width = 0, height = 0;
-    double start = 0.0;
-    uint64_t frame = 0;
     while (!glfwWindowShouldClose(window.get())) {
         glfwPollEvents();
         int w, h;
@@ -276,10 +269,6 @@ void run_example_disney_slang()
             projection[1][1] *= -1.0f;
             rasterizer.vsp.proj_view = projection * view;
         }
-        if (frame == 0) start = glfwGetTime();
-        const double seconds = fixed_dt ? frame * double(fixed_dt) : glfwGetTime() - start;
-        ++frame;
-        rasterizer.vsp.phase = static_cast<uint32_t>(std::fmod(seconds, 6.0) / 1.5);
         auto batch = rasterizer.beginBatch();
 
         for (const auto& draw : draws)
