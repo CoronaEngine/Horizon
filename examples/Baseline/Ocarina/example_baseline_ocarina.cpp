@@ -2,17 +2,11 @@
 #include "dsl/dsl.h"
 #include "rhi/common.h"
 #include "rhi/context.h"
-#include <GLFW/glfw3.h>
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 #undef STB_IMAGE_WRITE_IMPLEMENTATION
 #undef STB_IMAGE_WRITE_STATIC
-#ifdef _WIN32
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
-#endif
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -23,25 +17,34 @@
 #undef STB_IMAGE_STATIC
 #include <tiny_obj_loader.h>
 
+#include <GLFW/glfw3.h>
+#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#include <windows.h>
+static constexpr auto native_window_handle = glfwGetWin32Window;
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#endif
 #include <GLFW/glfw3native.h>
+#include <mach-o/dyld.h>
+static constexpr auto native_window_handle = glfwGetCocoaView;
+#else
+static void* native_window_handle(GLFWwindow*) {
+    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
+}
+#endif
 
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <numbers>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 void run_example_baseline_ocarina() {
@@ -67,8 +70,7 @@ void run_example_baseline_ocarina() {
 #else
     const auto executable = std::filesystem::read_symlink("/proc/self/exe");
 #endif
-    auto& context = ocarina::RHIContext::instance(executable.parent_path());
-    auto device = context.create_device();
+    auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
     if (!device.supports_ray_queries())
         throw std::runtime_error("Ocarina ray queries unsupported on this device");
     device.init_rtx();
@@ -92,37 +94,25 @@ void run_example_baseline_ocarina() {
     }
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+    struct GlfwSession {
+        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
+    } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    const auto destroy_window = [](GLFWwindow* handle) {
-        glfwDestroyWindow(handle);
-        glfwTerminate();
-    };
-    std::unique_ptr<GLFWwindow, decltype(destroy_window)> window(
-        glfwCreateWindow(1920, 1080, mode, nullptr, nullptr), destroy_window);
-    if (!window) {
-        glfwTerminate();
-        throw std::runtime_error("glfwCreateWindow failed");
-    }
-    void* native_window = nullptr;
-#if defined(_WIN32)
-    native_window = glfwGetWin32Window(window.get());
-#elif defined(__APPLE__)
-    native_window = glfwGetCocoaView(window.get());
-#else
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-#endif
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, mode, nullptr, nullptr);
+    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+
+    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
 
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     ocarina::vector<ocarina::float3> positions;
     ocarina::vector<ocarina::float2> uvs;
     ocarina::vector<ocarina::uint3> triangles;
     {
-        const auto model_path = assets / "models/viking_room.obj";
-        const auto filename = model_path.string();
-        const auto material_dir = (model_path.parent_path() / "").string();
+        const auto filename = (assets / "models/viking_room.obj").string();
+        const auto material_dir = (assets / "models/").string();
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
@@ -132,18 +122,12 @@ void run_example_baseline_ocarina() {
         if (!warn.empty()) std::cerr << warn << '\n';
 
         using Vertex = std::array<float, 5>; // Position (x, y, z), then texture coordinates (u, v).
-        auto hash_vertex = [](const Vertex& vertex) {
-            size_t seed = 0;
-            for (float value : vertex)
-                seed ^= std::hash<float>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            return seed;
-        };
-        std::unordered_map<Vertex, uint32_t, decltype(hash_vertex)> unique_vertices;
+        std::map<Vertex, uint32_t> unique_vertices;
         for (const auto& shape : shapes) {
             // tinyobj triangulates the faces, so every three indices form one ray-tracing primitive.
             for (size_t face = 0; face < shape.mesh.indices.size(); face += 3) {
-                std::array<uint32_t, 3> triangle;
-                for (size_t corner = 0; corner < triangle.size(); ++corner) {
+                ocarina::uint3 triangle;
+                for (size_t corner = 0; corner < 3; ++corner) {
                     const auto& index = shape.mesh.indices[face + corner];
                     const size_t p = 3 * static_cast<size_t>(index.vertex_index);
                     Vertex vertex{attrib.vertices[p], attrib.vertices[p + 1], attrib.vertices[p + 2]};
@@ -161,7 +145,7 @@ void run_example_baseline_ocarina() {
                     }
                     triangle[corner] = found->second;
                 }
-                triangles.push_back(ocarina::make_uint3(triangle[0], triangle[1], triangle[2]));
+                triangles.push_back(triangle);
             }
         }
     }
@@ -216,15 +200,14 @@ void run_example_baseline_ocarina() {
     int width = 0, height = 0;
     ocarina::vector<uint32_t> pixels;
     ocarina::Buffer<uint32_t> output;
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
     double start = 0.0;
     uint64_t frame = 0;
-    while (!glfwWindowShouldClose(window.get())) {
+    while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         int w, h;
-        glfwGetFramebufferSize(window.get(), &w, &h);
+        glfwGetFramebufferSize(window, &w, &h);
         if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
             continue;
         }
         if (w != width || h != height) {
@@ -244,15 +227,13 @@ void run_example_baseline_ocarina() {
 
         const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_SRGB);
         ++frame;
-        const bool frame_limit_reached = shown && frames_remaining > 0 && --frames_remaining == 0;
-        if (frame_limit_reached || glfwWindowShouldClose(window.get())) {
-            if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path) {
-                const auto parent = std::filesystem::path(path).parent_path();
-                if (!parent.empty()) std::filesystem::create_directories(parent);
-                if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
-                    throw std::runtime_error("Could not write ray-traced PNG");
-            }
-            break;
-        }
+        if (shown && frames_remaining > 0 && --frames_remaining == 0) break;
+    }
+
+    if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path && !pixels.empty()) {
+        const auto parent = std::filesystem::path(path).parent_path();
+        if (!parent.empty()) std::filesystem::create_directories(parent);
+        if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
+            throw std::runtime_error("Could not write ray-traced PNG");
     }
 }

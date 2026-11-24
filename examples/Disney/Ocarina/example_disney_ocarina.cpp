@@ -5,19 +5,24 @@
 #include "math/transform.h"
 
 #include <GLFW/glfw3.h>
+#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#include <windows.h>
+static constexpr auto native_window_handle = glfwGetWin32Window;
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#endif
 #include <GLFW/glfw3native.h>
+#include <mach-o/dyld.h>
+static constexpr auto native_window_handle = glfwGetCocoaView;
+#else
+static void* native_window_handle(GLFWwindow*) {
+    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
+}
+#endif
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#ifdef _WIN32
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
-#endif
 
 #include <algorithm>
 #include <bit>
@@ -28,9 +33,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <memory>
 #include <utility>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -41,13 +44,8 @@
 #undef STB_IMAGE_WRITE_STATIC
 
 void run_example_disney_ocarina() {
-    using ocarina::Float;
-    using ocarina::Float2;
-    using ocarina::Float3;
-    using ocarina::Float4;
-    using ocarina::make_float2;
-    using ocarina::make_float3;
-    using ocarina::make_float4;
+    using ocarina::Float, ocarina::Float2, ocarina::Float3, ocarina::Float4;
+    using ocarina::make_float2, ocarina::make_float3, ocarina::make_float4;
     constexpr auto mode = "disney_ocarina";
 
     // Slang builtins and the dynamically loaded backend live next to the executable.
@@ -68,8 +66,7 @@ void run_example_disney_ocarina() {
 #else
     const auto executable = std::filesystem::read_symlink("/proc/self/exe");
 #endif
-    auto& context = ocarina::RHIContext::instance(executable.parent_path());
-    auto device = context.create_device();
+    auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
     if (!device.supports_ray_queries())
         throw std::runtime_error("Ocarina ray queries unsupported on this device");
     device.init_rtx();
@@ -88,28 +85,17 @@ void run_example_disney_ocarina() {
     int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+    struct GlfwSession {
+        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
+    } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    auto close_window = [](GLFWwindow* handle) {
-        glfwDestroyWindow(handle);
-        glfwTerminate();
-    };
-    std::unique_ptr<GLFWwindow, decltype(close_window)> window(
-        glfwCreateWindow(1920, 1080, mode, nullptr, nullptr), close_window);
-    if (!window) {
-        glfwTerminate();
-        throw std::runtime_error("glfwCreateWindow failed");
-    }
-    void* native_window;
-#if defined(_WIN32)
-    native_window = glfwGetWin32Window(window.get());
-#elif defined(__APPLE__)
-    native_window = glfwGetCocoaView(window.get());
-#else
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-#endif
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, mode, nullptr, nullptr);
+    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+
+    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
 
     // Pack the six faces of each DDS mip into a row of a 2D texture.
     struct Environment {
@@ -169,19 +155,14 @@ void run_example_disney_ocarina() {
     triangles.reserve(2 * slices * stacks);
     for (int y = 0; y <= stacks; ++y)
     {
-        const float v = static_cast<float>(y) / static_cast<float>(stacks);
-        const float phi = v * glm::pi<float>();
+        const float phi = (static_cast<float>(y) / stacks) * glm::pi<float>();
         const float sin_phi = std::sin(phi);
         const float cos_phi = std::cos(phi);
 
         for (int x = 0; x <= slices; ++x)
         {
-            const float u = static_cast<float>(x) / static_cast<float>(slices);
-            const float theta = u * glm::two_pi<float>();
-            const float sin_theta = std::sin(theta);
-            const float cos_theta = std::cos(theta);
-
-            positions.push_back(ocarina::make_float3(sin_phi * cos_theta, cos_phi, sin_phi * sin_theta));
+            const float theta = (static_cast<float>(x) / slices) * glm::two_pi<float>();
+            positions.push_back(ocarina::make_float3(sin_phi * std::cos(theta), cos_phi, sin_phi * std::sin(theta)));
         }
     }
 
@@ -201,55 +182,48 @@ void run_example_disney_ocarina() {
     stream << mesh.build_bvh() << ocarina::synchronize() << ocarina::commit();
     auto chart = device.create_accel(ocarina::FAST_TRACE);
 
-    constexpr int chart_row_count = 10;
-    constexpr int chart_col_count = 11;
-    constexpr glm::vec3 chart_row_colors[chart_row_count] = {
-        glm::vec3(1.0f, 1.0f, 1.0f),       // subsurface
-        glm::vec3(1.0f, 0.86f, 0.12f),     // metallic
-        glm::vec3(0.92f, 0.12f, 0.12f),    // specular
-        glm::vec3(0.92f, 0.12f, 0.12f),    // specularTint
-        glm::vec3(0.42f, 0.32f, 0.92f),    // roughness
-        glm::vec3(0.92f, 0.18f, 0.78f),    // anisotropic
-        glm::vec3(0.62f, 0.18f, 0.14f),    // sheen
-        glm::vec3(0.62f, 0.18f, 0.14f),    // sheenTint
-        glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoat
-        glm::vec3(0.10f, 0.34f, 0.40f),    // clearcoatGloss
+    struct Material {
+        glm::vec4 baseColorMetallic;
+        float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
+        float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
+        float clearcoatGloss = 1.0f;
     };
+    constexpr int rows = 10, columns = 11;
+    constexpr float radius = 0.42f, spacing = 1.12f;
     ocarina::vector<ocarina::float4> material_data;
-    for (int row = 0; row < chart_row_count; ++row) {
-        for (int col = 0; col < chart_col_count; ++col) {
-            constexpr float radius = 0.42f, spacing = 1.12f;
-            const float x = (col - (chart_col_count - 1) * 0.5f) * spacing;
-            const float y = ((chart_row_count - 1) * 0.5f - row) * spacing;
+    for (int col = 0; col < columns; ++col) {
+        const float x = (col - (columns - 1) * 0.5f) * spacing;
+        const float t = static_cast<float>(col) / (columns - 1);
+        const Material column[rows] = {
+            {.baseColorMetallic = {1.00f, 1.00f, 1.00f, 0.f}, .subsurface = t},
+            {.baseColorMetallic = {1.00f, 0.86f, 0.12f, t}},
+            {.baseColorMetallic = {0.92f, 0.12f, 0.12f, 0.f}, .specular = t},
+            {.baseColorMetallic = {0.92f, 0.12f, 0.12f, 0.f}, .specularTint = t},
+            {.baseColorMetallic = {0.42f, 0.32f, 0.92f, 0.f}, .roughness = t},
+            {.baseColorMetallic = {0.92f, 0.18f, 0.78f, 0.f}, .anisotropic = t},
+            {.baseColorMetallic = {0.62f, 0.18f, 0.14f, 0.f}, .sheen = t},
+            {.baseColorMetallic = {0.62f, 0.18f, 0.14f, 0.f}, .sheenTint = t},
+            {.baseColorMetallic = {0.10f, 0.34f, 0.40f, 0.f}, .clearcoat = t},
+            {.baseColorMetallic = {0.10f, 0.34f, 0.40f, 0.f}, .clearcoat = 1.f, .clearcoatGloss = t},
+        };
+        for (int row = 0; row < rows; ++row) {
+            const float y = ((rows - 1) * 0.5f - row) * spacing;
             const auto transform = ocarina::translation<ocarina::H>(x, y, 0.f) * ocarina::scale<ocarina::H>(radius);
-            if (row == 0 && col == 0)
+            if (col == 0 && row == 0)
                 chart.add_instance(ocarina::move(mesh), transform);
             else
                 chart.add_instance(0u, transform);
-            const float t = static_cast<float>(col) / (chart_col_count - 1);
-            const auto color = chart_row_colors[row];
-            auto mat0 = make_float4(color.x, color.y, color.z, 0.f); // base color, metallic
-            auto mat1 = make_float4(.5f, .5f, 0.f, 0.f);            // roughness, specular, tint, subsurface
-            auto mat2 = make_float4(0.f, 0.f, .5f, 0.f);            // anisotropy, sheen, sheen tint, clearcoat
-            float gloss = 1.f;
-            switch (row) {
-            case 0: mat1.w = t; break;  // subsurface
-            case 1: mat0.w = t; break;  // metallic
-            case 2: mat1.y = t; break;  // specular
-            case 3: mat1.z = t; break;  // specular tint
-            case 4: mat1.x = t; break;  // roughness
-            case 5: mat2.x = t; break;  // anisotropy
-            case 6: mat2.y = t; break;  // sheen
-            case 7: mat2.z = t; break;  // sheen tint
-            case 8: mat2.w = t; break;  // clearcoat
-            case 9: mat2.w = 1.f; gloss = t; break;  // clearcoat gloss
-            }
-            material_data.push_back(mat0);
-            material_data.push_back(mat1);
-            material_data.push_back(mat2);
-            material_data.push_back(make_float4(x, y, radius, gloss));
+
+            // The hit instance indexes four float4s in this same insertion order.
+            const auto& material = column[row];
+            const auto& color = material.baseColorMetallic;
+            material_data.push_back(make_float4(color.x, color.y, color.z, color.w));
+            material_data.push_back(make_float4(material.roughness, material.specular, material.specularTint, material.subsurface));
+            material_data.push_back(make_float4(material.anisotropic, material.sheen, material.sheenTint, material.clearcoat));
+            material_data.push_back(make_float4(x, y, radius, material.clearcoatGloss));
         }
     }
+
     auto materials = device.create_buffer<ocarina::float4>(material_data.size());
     stream << materials.upload(material_data.data()) << chart.build_bvh() << ocarina::synchronize() << ocarina::commit();
 
@@ -373,19 +347,18 @@ void run_example_disney_ocarina() {
     int width = 0, height = 0;
     ocarina::vector<unsigned> pixels;
     ocarina::Buffer<unsigned> output;
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const auto direction = glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f));
     const auto light = make_float3(direction.x, direction.y, direction.z);
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
     const auto eye = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch),
                                          std::sin(pitch) * std::cos(yaw));
-    while (!glfwWindowShouldClose(window.get())) {
+    while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         int w, h;
-        glfwGetFramebufferSize(window.get(), &w, &h);
+        glfwGetFramebufferSize(window, &w, &h);
         if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
             continue;
         }
         if (w != width || h != height) {
@@ -398,15 +371,13 @@ void run_example_disney_ocarina() {
                << output.download(pixels.data()) << ocarina::synchronize() << ocarina::commit();
 
         const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
-        const bool frame_limit_reached = shown && remaining_frames > 0 && --remaining_frames == 0;
-        if (frame_limit_reached || glfwWindowShouldClose(window.get())) {
-            if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path) {
-                const auto parent = std::filesystem::path(path).parent_path();
-                if (!parent.empty()) std::filesystem::create_directories(parent);
-                if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
-                    throw std::runtime_error("Could not write ray-traced PNG");
-            }
-            break;
-        }
+        if (shown && remaining_frames > 0 && --remaining_frames == 0) break;
+    }
+
+    if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path && !pixels.empty()) {
+        const auto parent = std::filesystem::path(path).parent_path();
+        if (!parent.empty()) std::filesystem::create_directories(parent);
+        if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
+            throw std::runtime_error("Could not write ray-traced PNG");
     }
 }

@@ -3,12 +3,20 @@
 #include "Codegen/TypeAlias.h"
 
 #include <GLFW/glfw3.h>
+#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+static constexpr auto native_window_handle = glfwGetWin32Window;
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#endif
 #include <GLFW/glfw3native.h>
+static constexpr auto native_window_handle = glfwGetCocoaView;
+#else
+static void* native_window_handle(GLFWwindow*) {
+    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
+}
+#endif
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/packing.hpp>
@@ -19,9 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <memory>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,8 +41,7 @@
 // Based on the single-threaded bgfx examples/17-drawstress workload.
 void run_example_drawstress_edsl()
 {
-    constexpr auto mode = "drawstress_edsl";
-    const auto env_int = [](const char* name, int fallback) {
+    const auto env_int = [](const char* name, int fallback = 0) {
         const char* value = std::getenv(name);
         if (!value || !*value) return fallback;
         char* end{};
@@ -47,9 +52,9 @@ void run_example_drawstress_edsl()
     };
     constexpr int dim_max = 40;
     const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", dim_max), 2, dim_max);
-    const bool hidden = env_int("HORIZON_BENCH_HIDDEN", 0) != 0;
-    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN", 0) != 0;
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES", 0);
+    const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
+    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
+    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
     float fixed_dt = 0.0f;
     if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
         fixed_dt = std::stof(value);
@@ -58,28 +63,17 @@ void run_example_drawstress_edsl()
     }
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+    struct GlfwSession {
+        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
+    } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    const auto close_window = [](GLFWwindow* window) {
-        glfwDestroyWindow(window);
-        glfwTerminate();
-    };
-    std::unique_ptr<GLFWwindow, decltype(close_window)> window(
-        glfwCreateWindow(1920, 1080, mode, nullptr, nullptr), close_window);
-    if (!window) {
-        glfwTerminate();
-        throw std::runtime_error("glfwCreateWindow failed");
-    }
-    void* native_window = nullptr;
-#if defined(_WIN32)
-    native_window = glfwGetWin32Window(window.get());
-#elif defined(__APPLE__)
-    native_window = glfwGetCocoaView(window.get());
-#else
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-#endif
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, "drawstress_edsl", nullptr, nullptr);
+    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+
+    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
 
     // The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
     constexpr std::array<uint32_t, 8> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -126,18 +120,17 @@ void run_example_drawstress_edsl()
     RasterizerPipeline rasterizer(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
 
     HardwareImage final_output_image;
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
     HardwareExecutor render_executor;
     int width = 0, height = 0;
 
     double start = 0.0;
     uint64_t frame = 0;
-    while (!glfwWindowShouldClose(window.get())) {
+    while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         int w, h;
-        glfwGetFramebufferSize(window.get(), &w, &h);
+        glfwGetFramebufferSize(window, &w, &h);
         if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
             continue;
         }
         if (w != width || h != height) {
@@ -147,7 +140,7 @@ void run_example_drawstress_edsl()
             final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
             output = final_output_image;
-            glm::mat4 projection = glm::perspectiveLH(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+            glm::mat4 projection = glm::perspectiveLH_ZO(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.
             const glm::mat4 view_projection = projection * view;
             axis_projection = {view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w};
@@ -175,23 +168,23 @@ void run_example_drawstress_edsl()
                     sine[i] = glm::sin(angles);
                     cosine[i] = glm::cos(angles);
                 }
-                auto* dst = destination.data();
-                for (int zz = 0; zz < dim; ++zz) {
-                    const float sz = sine[zz].z, cz = cosine[zz].z;
-                    for (int yy = 0; yy < dim; ++yy) {
-                        const float sy = sine[yy].y, cy = cosine[yy].y;
+                auto* matrix_bytes = destination.data();
+                for (int z = 0; z < dim; ++z) {
+                    const float sz = sine[z].z, cz = cosine[z].z;
+                    for (int y = 0; y < dim; ++y) {
+                        const float sy = sine[y].y, cy = cosine[y].y;
                         const glm::vec4 axisX = projectAxis(cz * cy, cy * sz, -sy);
-                        glm::vec4 translation = translations[zz];
-                        translation.y = translations[yy].y;
-                        for (int xx = 0; xx < dim; ++xx) {
-                            const float sx = sine[xx].x, cx = cosine[xx].x;
-                            translation.x = translations[xx].x;
+                        glm::vec4 translation = translations[z];
+                        translation.y = translations[y].y;
+                        for (int x = 0; x < dim; ++x) {
+                            const float sx = sine[x].x, cx = cosine[x].x;
+                            translation.x = translations[x].x;
                             const glm::mat4 matrix(axisX,
                                 projectAxis(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx),
                                 projectAxis(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx),
                                 translation);
-                            std::memcpy(dst, &matrix, sizeof(matrix));
-                            dst += sizeof(matrix);
+                            std::memcpy(matrix_bytes, &matrix, sizeof(matrix));
+                            matrix_bytes += sizeof(matrix);
                         }
                     }
                 }

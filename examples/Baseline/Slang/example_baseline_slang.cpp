@@ -10,12 +10,20 @@
 #include <tiny_obj_loader.h>
 
 #include <GLFW/glfw3.h>
+#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+static constexpr auto native_window_handle = glfwGetWin32Window;
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#endif
 #include <GLFW/glfw3native.h>
+static constexpr auto native_window_handle = glfwGetCocoaView;
+#else
+static void* native_window_handle(GLFWwindow*) {
+    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
+}
+#endif
 
 #include "Codegen/ControlFlows.h"
 #include SLANG(baseline_vert.slang)
@@ -26,13 +34,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <functional>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <map>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -56,35 +62,23 @@ void run_example_baseline_slang()
     }
 
     if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+    struct GlfwSession {
+        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
+    } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
     if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    const auto destroy_window = [](GLFWwindow* handle) {
-        glfwDestroyWindow(handle);
-        glfwTerminate();
-    };
-    std::unique_ptr<GLFWwindow, decltype(destroy_window)> window(
-        glfwCreateWindow(1920, 1080, "Horizon Baseline [Slang]", nullptr, nullptr), destroy_window);
-    if (!window) {
-        glfwTerminate();
-        throw std::runtime_error("glfwCreateWindow failed");
-    }
-    void* native_window = nullptr;
-#if defined(_WIN32)
-    native_window = glfwGetWin32Window(window.get());
-#elif defined(__APPLE__)
-    native_window = glfwGetCocoaView(window.get());
-#else
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-#endif
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, "Horizon Baseline [Slang]", nullptr, nullptr);
+    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+
+    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
 
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     RasterGeometry geometry;
     {
-        const auto model_path = assets / "models/viking_room.obj";
-        const auto filename = model_path.string();
-        const auto material_dir = (model_path.parent_path() / "").string();
+        const auto filename = (assets / "models/viking_room.obj").string();
+        const auto material_dir = (assets / "models/").string();
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
@@ -94,13 +88,7 @@ void run_example_baseline_slang()
         if (!warn.empty()) std::cerr << warn << '\n';
 
         using Vertex = std::array<float, 5>; // Position (x, y, z), then texture coordinates (u, v).
-        auto hash_vertex = [](const Vertex& vertex) {
-            size_t seed = 0;
-            for (float value : vertex)
-                seed ^= std::hash<float>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            return seed;
-        };
-        std::unordered_map<Vertex, uint32_t, decltype(hash_vertex)> unique_vertices;
+        std::map<Vertex, uint32_t> unique_vertices;
         std::vector<Vertex> vertices;
         std::vector<uint16_t> indices;
         for (const auto& shape : shapes) {
@@ -124,6 +112,7 @@ void run_example_baseline_slang()
         geometry = RasterGeometry::upload(vertices, indices);
     }
 
+    HardwareExecutor render_executor;
     HardwareImage texture_image;
     {
         const auto filename = (assets / "textures/viking_room.png").string();
@@ -136,15 +125,12 @@ void run_example_baseline_slang()
         HardwareImageCreateInfo texture_info(texture_width, texture_height, ImageFormat::RGBA8_SRGB);
         texture_info.linearFiltering = true;
         texture_image = HardwareImage(texture_info);
-        HardwareExecutor upload;
-        upload << texture_image.copyFrom(pixels.get());
-        upload.commit().waitForDeferredResources();
+        render_executor << texture_image.copyFrom(pixels.get());
+        render_executor.commit().waitForDeferredResources();
     }
 
     HardwareImage color;
     int width = 0, height = 0;
-    HardwareExecutor render_executor;
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t> rasterizer;
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
@@ -159,13 +145,13 @@ void run_example_baseline_slang()
 
     double start = 0.0;
     uint64_t frame = 0;
-    while (!glfwWindowShouldClose(window.get()))
+    while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
         int w, h;
-        glfwGetFramebufferSize(window.get(), &w, &h);
+        glfwGetFramebufferSize(window, &w, &h);
         if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window.get())) glfwWaitEvents();
+            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
             continue;
         }
         if (w != width || h != height) {
@@ -174,7 +160,7 @@ void run_example_baseline_slang()
             height = h;
             color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             rasterizer.outColor = color;
-            auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
+            auto projection = glm::perspectiveRH_ZO(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.
             rasterizer.vp.proj = projection;
         }
