@@ -409,7 +409,7 @@ void run_example_disney_edsl()
                         (mapped * (Float(6.2) * mapped + Float3(1.7f)) + Float3(0.06f));
         final_output << Float4(filmic, Float(1.0));
     };
-    RasterizerPipeline<> rasterizer(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
+    RasterizerPipeline rasterizer(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
@@ -438,7 +438,7 @@ void run_example_disney_edsl()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
             final_output = final_output_image;
             auto projection = glm::perspectiveLH(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);

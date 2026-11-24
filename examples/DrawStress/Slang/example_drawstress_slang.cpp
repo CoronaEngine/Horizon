@@ -135,7 +135,7 @@ void run_example_drawstress_slang()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
             rasterizer.outColor = final_output_image;
             glm::mat4 projection = glm::perspectiveLH(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);

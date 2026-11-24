@@ -18,6 +18,7 @@ struct ResolvedResourceUse
     // Kept separate until overlapping image ranges have been merged.
     VkPipelineStageFlags2 declaredStages{};
     VkAccessFlags2 declaredAccess{};
+    bool hostMapped{};
 };
 
 struct ResourceAccessList
@@ -54,6 +55,7 @@ class ResourceBarrierPlanner
 {
 public:
     void plan(const ResourceAccessList& accesses, ResourceBarriers& result, bool finalCommand);
+    void recordHostReadBarrier(VkCommandBuffer commandBuffer) const;
     void invalidate(); // An opaque command is a conservative boundary on both sides.
 
 private:
@@ -71,6 +73,7 @@ private:
         AccessState state;
     };
     std::optional<std::unordered_map<VkImage, InitialImageRead>> initialImageReads;
+    VkPipelineStageFlags2 mappedWriteStages{};
     bool boundary{true};
     static bool dependency(AccessState& state, VkPipelineStageFlags2 stages, VkAccessFlags2 access,
                            VkPipelineStageFlags2& sourceStages, VkAccessFlags2& sourceAccess);

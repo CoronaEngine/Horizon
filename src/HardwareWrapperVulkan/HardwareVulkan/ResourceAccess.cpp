@@ -91,6 +91,7 @@ ResolvedResourceUse& ResourceAccessList::buffer(ResourceManager::BufferHardwareW
     if (indexed) bufferIndices.emplace(value.bufferHandle, uses.size());
     ResolvedResourceUse use;
     use.buffer = value.bufferHandle;
+    use.hostMapped = value.bufferAllocInfo.pMappedData != nullptr;
     use.stages = stages;
     use.access = access;
     uses.push_back(use);
@@ -135,6 +136,20 @@ void ResourceBarrierPlanner::invalidate()
     buffers.clear(); images.clear(); initialImageReads.reset(); boundary = true;
 }
 
+void ResourceBarrierPlanner::recordHostReadBarrier(VkCommandBuffer commandBuffer) const
+{
+    if (!mappedWriteStages) return;
+    VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    barrier.srcStageMask = mappedWriteStages;
+    barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+}
+
 bool ResourceBarrierPlanner::dependency(AccessState& state, VkPipelineStageFlags2 stages, VkAccessFlags2 access,
                                        VkPipelineStageFlags2& sourceStages, VkAccessFlags2& sourceAccess)
 {
@@ -161,6 +176,8 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
     result.clear();
     // The first barrier also orders prior submissions on this queue, including opaque commands.
     if (!boundary && accesses.uses.empty() && !accesses.conservative) return;
+    // An opaque shader may write a mapped buffer through the bindless table.
+    if (accesses.conservative) mappedWriteStages |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
     const bool isolated = accesses.conservative || (finalCommand && boundary);
     const bool firstAccess = boundary || accesses.conservative;
     if (firstAccess)
@@ -199,9 +216,10 @@ void ResourceBarrierPlanner::plan(const ResourceAccessList& accesses, ResourceBa
     {
         if (!use.image)
         {
-            if (isolated) continue; // The boundary barrier covers all prior accesses.
             const auto stages = use.stages | use.declaredStages;
             const auto access = applyDeclaration(use.access, use.declaredAccess);
+            if (use.hostMapped && (access & writes)) mappedWriteStages |= stages;
+            if (isolated) continue; // The boundary barrier covers all prior accesses.
             VkPipelineStageFlags2 sourceStages{};
             VkAccessFlags2 sourceAccess{};
             if (dependency(buffers[use.buffer], stages, access, sourceStages, sourceAccess))

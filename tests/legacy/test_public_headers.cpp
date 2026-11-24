@@ -27,11 +27,32 @@ static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::string, std::s
 static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::string, std::string, uint32_t,
                                        ShaderLanguage, ShaderLanguage, std::source_location>);
 
+struct RasterPipelineAdapter {
+    operator RasterizerPipeline<>() const;
+};
+
+static_assert(requires(RasterizerPipeline<>& pipeline, RasterPipelineAdapter adapter) {
+    { RasterizerPipeline{} } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline(std::move(pipeline)) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline(adapter) } -> std::same_as<RasterizerPipeline<>>;
+});
+
 static_assert(requires(const std::string& source, const std::source_location& location) {
     { ComputePipeline(source) } -> std::same_as<ComputePipeline<>>;
     { ComputePipeline(source, location) } -> std::same_as<ComputePipeline<>>;
     { RasterizerPipeline(source, source) } -> std::same_as<RasterizerPipeline<>>;
     { RasterizerPipeline(source, source, 1, location) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline(source, source, {2}) } -> std::same_as<RasterizerPipeline<>>;
+});
+
+using ShaderVector = EmbeddedShader::VariateProxy<ktm::fvec4>;
+static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
+                       decltype([](ShaderVector) {}) fragment, EmbeddedShader::CompilerOption options,
+                       const EmbeddedShader::ShaderCodeModule& module, const std::source_location& location) {
+    { RasterizerPipeline(vertex, fragment, {.enableMatrixColumnMajor = true}) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline(vertex, fragment, options) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline(vertex, fragment, {}, 2, location) } -> std::same_as<RasterizerPipeline<>>;
+    { RasterizerPipeline(module, module, 2, location) } -> std::same_as<RasterizerPipeline<>>;
 });
 
 template<class T>

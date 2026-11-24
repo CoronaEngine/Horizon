@@ -172,7 +172,7 @@ void run_example_baseline_slang()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage);
+            color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             rasterizer.outColor = color;
             auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.

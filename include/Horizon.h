@@ -691,7 +691,12 @@ struct RasterizerPipeline
 };
 
 template <class Vertex, class Fragment>
-RasterizerPipeline(Vertex&&, Fragment&&, uint32_t = 1, EmbeddedShader::CompilerOption = {},
+    requires std::constructible_from<RasterizerPipeline<>, Vertex, Fragment, EmbeddedShader::CompilerOption, uint32_t>
+RasterizerPipeline(Vertex&&, Fragment&&, EmbeddedShader::CompilerOption = {}, uint32_t = 1,
+                   std::source_location = std::source_location::current()) -> RasterizerPipeline<>;
+template <class Vertex, class Fragment>
+    requires std::constructible_from<RasterizerPipeline<>, Vertex, Fragment, uint32_t>
+RasterizerPipeline(Vertex&&, Fragment&&, uint32_t = 1,
                    std::source_location = std::source_location::current()) -> RasterizerPipeline<>;
 template <class... Args> requires std::constructible_from<RasterizerPipeline<>, Args...>
 RasterizerPipeline(Args&&...) -> RasterizerPipeline<>;

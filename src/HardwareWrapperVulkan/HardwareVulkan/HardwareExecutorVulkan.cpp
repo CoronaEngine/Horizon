@@ -72,18 +72,12 @@ void HardwareExecutorVulkan::cleanupCompletedResources()
 
 void HardwareExecutorVulkan::waitForAllDeferredResources()
 {
-    if (deferredReleaseQueue.empty()) return;
+    if (!lastSubmission) return;
     // Queue order and explicit cross-queue waits link this executor's submissions.
     const auto device = hardwareContext->deviceManager.getLogicalDevice();
     const auto timeline = lastSubmission.queue->timelineSemaphore;
-    uint64_t completed{};
-    coronaHardwareCheck(vkGetSemaphoreCounterValue(device, timeline, &completed));
-    if (completed < lastSubmission.value)
-    {
-        coronaHardwareCheck(waitTimeline(device, timeline, lastSubmission.value));
-        completed = lastSubmission.value;
-    }
-    lastCompleted = {lastSubmission.queue, completed};
+    coronaHardwareCheck(waitTimeline(device, timeline, lastSubmission.value));
+    lastCompleted = lastSubmission;
     deferredReleaseQueue.clear();
 }
 
@@ -212,6 +206,7 @@ HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
         }
         recorded.command->commitCommand(*this);
     }
+    planner.recordHostReadBarrier(cb);
     coronaHardwareCheck(vkEndCommandBuffer(cb));
 
     // A future wait or a larger external signal on our private timeline would

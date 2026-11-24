@@ -169,7 +169,7 @@ void run_example_baseline_edsl()
         final_output_proxy << EmbeddedShader::texture(texture_proxy, uv);
     };
 
-    RasterizerPipeline<> rasterizer(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
+    RasterizerPipeline rasterizer(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
 
     view = std::bit_cast<ktm::fmat4x4>(glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1)));
@@ -189,7 +189,7 @@ void run_example_baseline_edsl()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::SampledStorageImage);
+            color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             final_output_proxy = color;
             auto projection = glm::perspective(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
             projection[1][1] *= -1.0f; // Vulkan clip-space Y.

@@ -246,8 +246,8 @@ void run_example_disney_slang()
     const auto view = glm::lookAtLH(eye, target, up);
     rasterizer.vsp.camPos = glm::vec4(eye, 1.0f);
     rasterizer.vsp.lightDir = glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
-    rasterizer.vsp.texCubeIndex = radiance.storeDescriptor();
-    rasterizer.vsp.texCubeIrrIndex = irradiance.storeDescriptor();
+    rasterizer.vsp.texCubeIndex = radiance;
+    rasterizer.vsp.texCubeIrrIndex = irradiance;
 
     int width = 0, height = 0;
     while (!glfwWindowShouldClose(window.get())) {
@@ -262,7 +262,7 @@ void run_example_disney_slang()
             render_executor.waitForDeferredResources();
             width = w;
             height = h;
-            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT, ImageUsage::StorageImage);
+            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
             final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
             rasterizer.outColor = final_output_image;
             auto projection = glm::perspectiveLH(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);

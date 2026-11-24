@@ -1523,6 +1523,7 @@ void ResourceManager::copyBufferToHost(BufferHardwareWrap &buffer, void *cpuData
 {
     if (buffer.bufferAllocInfo.pMappedData != nullptr)
     {
+        coronaHardwareCheck(vmaInvalidateAllocation(vmaAllocator, buffer.bufferAlloc, 0, size));
         std::memcpy(cpuData, buffer.bufferAllocInfo.pMappedData, size);
     }
 }
