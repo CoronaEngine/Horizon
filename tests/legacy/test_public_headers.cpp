@@ -19,6 +19,16 @@ static_assert(std::is_assignable_v<EmbeddedShader::BindingKey&, HardwareBuffer&>
 static_assert(!std::is_constructible_v<ComputePipeline<>, const std::vector<uint32_t>&>);
 static_assert(!std::is_constructible_v<RasterizerPipeline<>, std::vector<uint32_t>, std::vector<uint32_t>>);
 
+template<class R>
+concept CanReadBackInto = requires(const HardwareBuffer& buffer, R&& output) {
+    { buffer.copyToData(std::forward<R>(output)) } -> std::same_as<bool>;
+};
+static_assert(CanReadBackInto<std::vector<uint16_t>&> && CanReadBackInto<std::span<std::byte>> &&
+              CanReadBackInto<uint32_t(&)[4]>);
+static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<std::span<volatile uint16_t>> &&
+              !CanReadBackInto<std::vector<std::string>&> && !CanReadBackInto<std::vector<bool>&> &&
+              !CanReadBackInto<std::vector<uint16_t>>);
+
 using EmbeddedShader::ShaderLanguage;
 static_assert(!std::is_constructible_v<ComputePipeline<>, std::string, ShaderLanguage>);
 static_assert(!std::is_constructible_v<ComputePipeline<>, std::string, ShaderLanguage, std::source_location>);

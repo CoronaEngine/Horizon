@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <ranges>
 #include <source_location>
 #include <span>
 #include <string>
@@ -37,6 +38,8 @@ struct CommandRecordVulkan;
 struct ComputePipelineVulkan;
 struct RasterizerPipelineVulkan;
 struct CopyCommandImpl;
+EmbeddedShader::ShaderCodeModule compileLegacyShaderModule(
+    EmbeddedShader::ShaderStage stage, const EmbeddedShader::SlangModule& module);
 }
 
 struct HardwareExecutor;
@@ -184,10 +187,14 @@ public:
     bool copyFromData(const void* inputData, uint64_t size) const;
     bool copyToData(void* outputData, uint64_t size) const;
 
-    template <typename T>
-    bool copyFromVector(const std::vector<T>& input)
+    template <std::ranges::contiguous_range R>
+        requires std::ranges::sized_range<R> && std::ranges::borrowed_range<R> &&
+                 std::is_trivially_copyable_v<std::ranges::range_value_t<R>> &&
+                 std::same_as<std::ranges::range_reference_t<R>, std::ranges::range_value_t<R>&>
+    bool copyToData(R&& output) const
     {
-        return copyFromData(input.data(), input.size() * sizeof(T));
+        const auto destination = std::span{output};
+        return copyToData(destination.data(), destination.size_bytes());
     }
 
     [[nodiscard]] void* getMappedData() const;
@@ -295,10 +302,6 @@ struct ComputePipeline;
 template<class VS = void, class FS = void>
 struct RasterizerPipeline;
 
-// Compile the generated Slang modules with the current Helicon/Slang toolchain.
-EmbeddedShader::ShaderCodeModule compileLegacyShaderModule(
-    EmbeddedShader::ShaderStage stage, const EmbeddedShader::SlangModule& module);
-
 struct ScissorRect
 {
     int32_t x { 0 };
@@ -373,11 +376,6 @@ public:
     void drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
                       std::span<T, Extent> parameters, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
         appendIndirect(geometry, packets, count, parameters.data(), parameters.size_bytes(), firstInstance);
-    }
-    template<class T> requires std::is_trivially_copyable_v<T>
-    void drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count, const T& parameters,
-                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
-        appendIndirect(geometry, packets, count, &parameters, sizeof(T), firstInstance);
     }
 private:
     void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
@@ -469,11 +467,6 @@ public:
         return *this;
     }
 
-    [[nodiscard]] uintptr_t getComputePipelineID() const
-    {
-        return reinterpret_cast<uintptr_t>(computePipeline_.get());
-    }
-
 private:
     friend struct HardwareExecutor;
 
@@ -554,20 +547,6 @@ public:
                                      location });
         ++explicitTargetCount_;
         return *this;
-    }
-
-    // 批量绑定 render target
-    template <typename... Ts>
-    RasterizerPipeline& bindOutputTargets(EmbeddedShader::Texture2DProxy<Ts>&... targets)
-    {
-        uint32_t location = 0;
-        (bindRenderTarget(location++, targets), ...);
-        return *this;
-    }
-
-    [[nodiscard]] uintptr_t getRasterizerPipelineID() const
-    {
-        return reinterpret_cast<uintptr_t>(rasterizerPipeline_.get());
     }
 
 private:
@@ -668,8 +647,8 @@ struct RasterizerPipeline
     RasterizerPipeline(uint32_t multiviewCount = 1,
                        const std::source_location& sourceLocation = std::source_location::current())
         : RasterizerPipeline<>(
-              compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, VS::slangModule),
-              compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, FS::slangModule),
+              horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, VS::slangModule),
+              horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, FS::slangModule),
               multiviewCount, sourceLocation), VSRes(this), FSOut(this)
     {
     }
@@ -709,7 +688,8 @@ struct ComputePipeline
     using CSBindings = typename CS::template Bindings<ComputePipeline<>>;
 
     ComputePipeline(const std::source_location& sourceLocation = std::source_location::current())
-        : ComputePipeline<>(compileLegacyShaderModule(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule), sourceLocation), CSBindings(this)
+        : ComputePipeline<>(horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::ComputeShader, CS::slangModule),
+                            sourceLocation), CSBindings(this)
     {
     }
 

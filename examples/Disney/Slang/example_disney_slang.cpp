@@ -285,12 +285,11 @@ void run_example_disney_slang()
 
     if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
         const std::filesystem::path path(filename);
-        const uint32_t byte_count = width * height * 8;
-        HardwareBuffer readback(byte_count, BufferUsage::StorageBuffer);
+        HardwareBuffer readback(height, width * 8u, BufferUsage::StorageBuffer);
         render_executor << final_output_image.copyTo(readback);
         render_executor.commit().waitForDeferredResources();
         std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
-        if (!readback.copyToData(half.data(), byte_count)) throw std::runtime_error("Capture readback failed");
+        if (!readback.copyToData(half)) throw std::runtime_error("Capture readback failed");
         std::vector<unsigned char> rgba(half.size());
         for (size_t i = 0; i < half.size(); ++i)
             rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);

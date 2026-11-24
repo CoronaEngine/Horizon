@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <vector>
 
-EmbeddedShader::ShaderCodeModule compileLegacyShaderModule(
+EmbeddedShader::ShaderCodeModule horizon::detail::compileLegacyShaderModule(
     EmbeddedShader::ShaderStage stage, const EmbeddedShader::SlangModule& module)
 {
     using EmbeddedShader::ShaderLanguageConverter;
