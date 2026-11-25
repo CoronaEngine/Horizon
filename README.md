@@ -124,7 +124,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run()`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，每帧在固定光照下按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。这四个光栅模式都支持离屏渲染。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，每帧在固定光照下按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
 最后可以阅读 Tutorial 的原生 Vulkan 实现，对照 Vulkan 初始化、Viking Room 绘制和资源释放的顺序。Tutorial 的源码作为独立参考保留。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
@@ -147,7 +147,7 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 
 九个模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
-`main()` 中的 `hidden` 控制窗口可见性，`offscreen` 为 Disney 和 DrawStress 的光栅示例启用离屏渲染。Baseline 和 DrawStress 的动画默认从首帧开始计时。在对应示例的 `run()` 中将 `fixed_dt` 设为正数，即可指定每帧推进的秒数。
+Baseline 和 DrawStress 的动画默认从首帧开始计时。在对应示例的 `run()` 中将 `fixed_dt` 设为正数，即可指定每帧推进的秒数。
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
@@ -258,7 +258,7 @@ ctest --preset examples-relwithdebinfo
 ```
 
 `engine` 和 `examples` 预设均启用 Horizon 测试。`examples` 的 `horizon-tests` 目标也构建
-`HorizonExamples`，CTest 会运行 `HorizonExamples --list`，列出全部九个模式。要查看画面，用 `HorizonExamples <mode>` 启动示例，关闭窗口即可退出。
+`HorizonExamples`。用 `HorizonExamples <mode>` 选择示例，省略参数时运行 `baseline_slang`。关闭窗口即可退出。
 
 ```powershell
 cmake --build --preset examples-relwithdebinfo --target HorizonExamples

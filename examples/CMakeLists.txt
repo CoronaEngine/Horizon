@@ -40,5 +40,4 @@ helicon_compile_shaders(HorizonExamples)
 
 if(HORIZON_BUILD_TESTS)
     add_dependencies(horizon-tests HorizonExamples)
-    add_test(NAME horizon.examples.list COMMAND HorizonExamples --list)
 endif()
