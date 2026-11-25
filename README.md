@@ -147,7 +147,7 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 
 九个模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
-窗口标题每帧显示模式、累计帧数和本帧实际耗时，例如 `baseline_slang | Frame 42 | 12.34 ms`。Baseline 和 DrawStress 的动画从首帧零秒开始。将主循环中的 `fixed_dt` 设为正数可指定动画每帧推进的秒数。[主循环](examples/main.cpp)
+窗口标题每帧显示模式、实时帧率和本帧实际耗时，例如 `baseline_slang | 125.0 FPS | 8.00 ms`。Baseline 和 DrawStress 的动画从首帧零秒开始。将主循环中的 `fixed_dt` 设为正数可指定动画每帧推进的秒数，帧率和耗时仍按实际时间计算。[主循环](examples/main.cpp)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
