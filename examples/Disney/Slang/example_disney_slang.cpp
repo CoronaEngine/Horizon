@@ -144,8 +144,7 @@ DisneySlang::DisneySlang(void* native_window)
 void DisneySlang::run(float)
 {
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer,
-                       IndirectFirstInstance::AlwaysZero);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
 
     render_executor << std::move(batch);
     display.present(render_executor, final_output_image);

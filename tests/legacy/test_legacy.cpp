@@ -189,17 +189,13 @@ void test_raster_batch(bool forceSingleDraw)
         HardwareBuffer red(std::array<float,4>{1,0,0,1}, BufferUsage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
                               BufferUsage::StorageBuffer);
-        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red,
-                           IndirectFirstInstance::AlwaysZero, ScissorRect{0,0,2,2});
+        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
         batch.drawIndirect({}, {}, {}, 0);
-        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red,
-                           IndirectFirstInstance::AlwaysZero, ScissorRect{-3,0,2,2});
-        batch.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens,
-                           IndirectFirstInstance::AlwaysZero, ScissorRect{2,0,2,2});
+        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2});
+        batch.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
         useDrawColor = false;
         auto switched = pipeline.beginBatch({.loadColor = true});
-        switched.drawIndirect(leftVertices, leftIndices, leftCommands, 1,
-                              IndirectFirstInstance::AlwaysZero, ScissorRect{3,0,1,2});
+        switched.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2});
         executor << std::move(batch) << std::move(switched);
     }
     std::array<std::array<float,4>,8> pixels{};
@@ -240,7 +236,7 @@ void test_raster_sampled_storage_image()
     HardwareBuffer commands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
                             BufferUsage::RasterIndirect);
     auto batch = pipeline.beginBatch(1, 1);
-    batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1, IndirectFirstInstance::AlwaysZero);
+    batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
     HardwareExecutor executor;
     executor << upload.copyTo(input) << std::move(batch) << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
@@ -269,8 +265,9 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     Texture2D<ktm::fvec4> output = target;
     auto vs = [] {
         position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), rasterDrawParameter<float>(4), Float(1));
+        return Float4(0, 0, instanceIndex(), 0);
     };
-    auto fs = [&] { output << rasterDrawParameter<ktm::fvec4>(0); };
+    auto fs = [&](Float4 instanceColor) { output << rasterDrawParameter<ktm::fvec4>(0) + instanceColor; };
     RasterizerPipeline pipeline(vs, fs);
     if (explicitDepth) pipeline.setDepthImage(depth);
     pipeline.setRasterState({true, true, RasterCompare::Less, RasterBlend::Opaque});
@@ -307,24 +304,15 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
            indexBuffer.getElementCount() == indices.size() &&
            indexBuffer.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
            "staged raster buffers preserve element counts, vertex stride and index width");
-    // Exercise the public API on the restricted capability path even on a full-featured GPU.
-    auto& feature = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
-                        .featuresChain.getChainHead()->features.drawIndirectFirstInstance;
-    const auto supported = feature;
-    feature = VK_FALSE;
-    auto restricted = pipeline.beginBatch(4, 2);
-    feature = supported;
     auto first = pipeline.beginBatch(4, 2);
     HardwareBuffer firstCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
                                  BufferUsage::RasterIndirect);
     HardwareBuffer redAndDepth(std::array<float,5>{1,0,0,1,0.5f}, BufferUsage::StorageBuffer);
-    first.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, IndirectFirstInstance::AlwaysZero);
+    first.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth);
     HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
-    bool rejected = false;
-    try { restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1, redAndDepth); }
-    catch (const std::invalid_argument&) { rejected = true; }
-    expect(rejected, "GPU packets must declare zero firstInstance on a restricted device");
-    restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1, redAndDepth, IndirectFirstInstance::AlwaysZero);
+    const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
+                               .featuresChain.getChainHead()->features;
+    const uint32_t firstInstance = features.drawIndirectFirstInstance ? 7u : 0u;
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), BufferUsage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
@@ -333,7 +321,8 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
-            words[1] = Uint(1);
+            words[1] = Uint(2);
+            words[3] = Uint(firstInstance);
             words[5] = Uint(3);
             words[7] = Uint(4);
             parameters[0] = Float4(0, 0, 1, 0);
@@ -345,16 +334,19 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     }
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
     auto second = pipeline.beginBatch(4, 2, {true, true});
-    second.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters, IndirectFirstInstance::AlwaysZero);
+    second.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters);
 
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
     executor << std::move(second) << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
+    // Both instances contribute green and their absolute instance indices to blue.
+    const float instanceSum = static_cast<float>(firstInstance + (firstInstance + 1));
+    const std::array<float,4> left{1,0,0,1}, right{1,2,instanceSum,1};
     for (size_t i = 0; i < pixels.size(); ++i) {
-        expect(pixels[i] == std::array<float,4>{1, float(i % 4 >= 2), 0, 1},
-               "GPU-generated command, color, depth or attachment load failed");
+        expect(pixels[i] == (i % 4 < 2 ? left : right),
+               "GPU-generated command, instance indices, color, depth or attachment load failed");
     }
 }
 

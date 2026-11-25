@@ -108,14 +108,12 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
         RasterState state;
         RasterPass pass;
         HardwareImage depthImage;
-        bool supportsIndirectFirstInstance{};
         std::vector<HardwareImage> renderTargets;
         std::vector<VkClearValue> clearValues;
         std::vector<IndirectGroup> groups;
         uint32_t drawCount{};
         void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                             const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                            IndirectFirstInstance firstInstance,
                             std::optional<ScissorRect> scissor);
         std::vector<uint8_t> uniformBytes;
         std::shared_ptr<BindingSnapshot> bindings;

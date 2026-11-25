@@ -309,8 +309,8 @@ namespace EmbeddedShader
     {
         std::string reflectionStr = reflection ? "_Reflection" : "";
         auto languageStr = enumToString(language);
-        // Raster V3 keeps the batch-wide draw index separate from the packet table index.
-        auto prefixStr = languageStr + reflectionStr + (stage == "ComputeShader" ? "_BindlessV2" : "_BindlessV3");
+        // Raster V4 includes firstInstance in the EDSL instance index.
+        auto prefixStr = languageStr + reflectionStr + (stage == "ComputeShader" ? "_BindlessV2" : "_BindlessV4");
         for (size_t i = 0; i < conditionInfo.size(); ++i)
         {
             auto conditionStr = conditionInfo[i] ? "_True" : "_False";

@@ -299,8 +299,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
 void DisneyEdsl::run(float)
 {
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer,
-                       IndirectFirstInstance::AlwaysZero);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
 
     render_executor << std::move(batch);
     display.present(render_executor, final_output.image());

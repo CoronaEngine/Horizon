@@ -338,7 +338,6 @@ struct RasterIndirectPacket {
     uint32_t parameterWord{};
 };
 
-enum class IndirectFirstInstance { MayBeNonzero, AlwaysZero };
 class RasterBatch {
 public:
     RasterBatch(RasterBatch&&) noexcept = default;
@@ -346,15 +345,8 @@ public:
     // Append the first count packets in order, with one geometry pair and scissor for this call.
     // Each packet uses geometryIndex = firstVertex = 0. parameterWord is an offset into parameters in 4-byte words.
     // The batch retains its buffers until GPU completion. Omit parameters when the shader does not read them.
-    // AlwaysZero is a promise about every packet, including GPU-written packets.
     void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
-                      std::optional<ScissorRect> scissor = {}) {
-        drawIndirect(vertices, indices, packets, count, {}, firstInstance, scissor);
-    }
-    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, const HardwareBuffer& parameters,
-                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
+                      uint32_t count, const HardwareBuffer& parameters = {},
                       std::optional<ScissorRect> scissor = {});
 private:
     friend struct HardwareExecutor;

@@ -769,9 +769,7 @@ std::shared_ptr<EmbeddedShader::Ast::Variate> EmbeddedShader::Generator::SlangGe
 	instanceIdx->location = 0;
 	auto defineNode = std::make_shared<DefineSystemSemanticVariate>();
 	defineNode->variate = instanceIdx;
-	// Slang 把 SV_InstanceID 映射到 SPIR-V 的 gl_InstanceIndex,含 firstInstance
-	// 基址,所以能当逐-draw 数据下标用(instance_count 恒为 1 时等于 first_instance)。
-	defineNode->semanticName = "SV_InstanceID";
+	defineNode->semanticName = "SV_VulkanInstanceID";
 	Ast::AST::addInputStatement(defineNode);
 	return instanceIdx;
 }

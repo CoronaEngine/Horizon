@@ -425,8 +425,6 @@ std::shared_ptr<RasterizerPipelineVulkan::Batch> RasterizerPipelineVulkan::captu
     batch->pipeline = shared_from_this();
     batch->imageSize = imageSize;
     batch->state = rasterState;
-    batch->supportsIndirectFirstInstance = getHardwareContext().getMainDevice()->deviceManager
-        .getFeaturesUtils().featuresChain.getChainHead()->features.drawIndirectFirstInstance;
     batch->pass = pass;
     batch->renderTargets = renderTargets;
     if (!explicitDepthImage) {
@@ -565,11 +563,9 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 
 void RasterizerPipelineVulkan::Batch::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                                      const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                                                     IndirectFirstInstance firstInstance, std::optional<ScissorRect> scissor)
+                                                     std::optional<ScissorRect> scissor)
 {
     if (!count) return;
-    if (!supportsIndirectFirstInstance && firstInstance != IndirectFirstInstance::AlwaysZero)
-        throw std::invalid_argument("This device requires indirect packets with firstInstance always zero");
     if (!packets || packets.getElementSize() != sizeof(RasterIndirectPacket) || count > packets.getElementCount() ||
         !(legacyBufferFromId(packets.getBufferID())->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
         throw std::invalid_argument("Invalid indirect packet buffer or draw count");

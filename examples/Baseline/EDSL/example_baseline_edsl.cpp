@@ -104,7 +104,7 @@ void BaselineEdsl::run(float seconds)
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, IndirectFirstInstance::AlwaysZero);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1);
     render_executor << std::move(batch);
     display.present(render_executor, color.image());
 }

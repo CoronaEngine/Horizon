@@ -219,7 +219,8 @@ struct ParseOutput
   stage 为 `type name : LOCATION<location>;`
 - `DefineSystemSemanticVariate`：`position()`、`isFrontFace()`、
   `dispatchThreadID()` 等内建变量使用 `SV_POSITION`、`SV_IsFrontFace`、
-  `SV_DispatchThreadID`、`SV_DrawIndex`、`SV_InstanceID`、`SV_VertexID`。
+  `SV_DispatchThreadID`、`SV_DrawIndex`、`SV_VulkanInstanceID`、`SV_VertexID`。
+  `instanceIndex()` 包含间接命令指定的 `firstInstance`。
 
 示意（实际变量名由生成器分配）：
 

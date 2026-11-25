@@ -103,8 +103,7 @@ void BaselineSlang::run(float seconds)
     parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer,
-                       IndirectFirstInstance::AlwaysZero);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer);
     render_executor << std::move(batch);
     display.present(render_executor, color);
 }

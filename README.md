@@ -283,7 +283,7 @@ commands.createDeviceLocal(upload, BufferUsage::RasterIndirect, &packet, 1, size
 upload.commit().waitForDeferredResources();
 
 auto batch = pipeline.beginBatch();
-batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1, IndirectFirstInstance::AlwaysZero);
+batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
 executor << std::move(batch);
 ```
 
@@ -356,7 +356,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 - **定位 draw**。每次 `drawIndirect` 从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一 batch 内跨调用连续编号。零条命令和完全落在目标外的裁剪区域不占编号。
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
 - **读取 draw 参数**。有逐 draw 参数时，使用 `batch.drawIndirect(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `BufferUsage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。batch 持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
-- **首实例**。缺少 `drawIndirectFirstInstance` 的设备只支持 `firstInstance = 0`。如果外部命令的生产者保证每个 packet 的该字段都为零，可在 `drawIndirect()` 末尾传入 `IndirectFirstInstance::AlwaysZero`，包括带参数区的重载。
+- **首实例**。每个 packet 的 `firstInstance` 指定起始实例编号。设备未启用 `drawIndirectFirstInstance` 时，生成 packet 的 CPU 或 GPU 代码必须将该字段设为零。
 - **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
 
@@ -364,7 +364,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 
 Helicon 的光栅和计算 EDSL 都通过 bindless 描述符表访问纹理和 `Array<T>` 资源。每个阶段只生成一份绑定布局，使用 `getShaderCode(language)` 取得编译结果。计算 shader 的资源句柄写入 push constant，光栅 shader 的共享资源句柄写入 set 3 的 UBO。间接绘制的顶点、索引和逐 draw 参数通过上节的设备地址读取。
 
-需要生成离线 shader 缓存时，启用 `HORIZON_ENABLE_HARDCODE_SHADERS` 并运行带 `CABBAGE_ENGINE_DEBUG` 的构建。已有的 EDSL 光栅 shader 缓存需重新生成，才能使用跨调用的批次绘制编号。
+需要生成离线 shader 缓存时，启用 `HORIZON_ENABLE_HARDCODE_SHADERS` 并运行带 `CABBAGE_ENGINE_DEBUG` 的构建。请重新生成已有的 EDSL 光栅 shader 缓存，以包含 `instanceIndex()` 的首实例偏移修正。
 
 | Set | 用途 |
 | --- | --- |

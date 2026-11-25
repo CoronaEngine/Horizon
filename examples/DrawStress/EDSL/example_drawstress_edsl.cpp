@@ -112,7 +112,7 @@ void DrawStressEdsl::run(float seconds)
     parameters.flushMapped();
 
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters, IndirectFirstInstance::AlwaysZero);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
 
     render_executor << std::move(batch);
     display.present(render_executor, output.image());
