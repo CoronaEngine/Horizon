@@ -25,8 +25,8 @@ function(horizon_dev_bootstrap)
     endif()
 
     set_property(CACHE HORIZON_DEV_TARGET_FAMILY PROPERTY STRINGS
-        core engine tools examples ocarina ocarina-tests vision-hotfix)
-    set(_horizon_target_families core engine tools examples ocarina ocarina-tests vision-hotfix)
+        core engine tools examples ocarina ocarina-tests)
+    set(_horizon_target_families core engine tools examples ocarina ocarina-tests)
     list(FIND _horizon_target_families "${HORIZON_DEV_TARGET_FAMILY}" _horizon_target_family_index)
     if(_horizon_target_family_index EQUAL -1)
         message(FATAL_ERROR
@@ -39,6 +39,18 @@ function(horizon_dev_bootstrap)
         "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/conan_toolchain.cmake")
     set(_horizon_build_environment
         "${CMAKE_CURRENT_SOURCE_DIR}/build/conan/${HORIZON_DEV_TARGET_FAMILY}/${_horizon_configuration_slug}/generators/dev_build_environment.cmake")
+    # An IDE preset can enable additional features without changing its family
+    # or build directory. Preserve their Conan dependencies on every reload.
+    set(_horizon_bootstrap_options)
+    if(HORIZON_BUILD_OCARINA)
+        list(APPEND _horizon_bootstrap_options --with-ocarina)
+    endif()
+    if(HORIZON_BUILD_OCARINA_TESTS)
+        list(APPEND _horizon_bootstrap_options --with-ocarina-tests)
+    endif()
+    if(HORIZON_BUILD_TESTS)
+        list(APPEND _horizon_bootstrap_options --with-tests)
+    endif()
 
     # IDEs may start without an activated Python environment. Reuse the
     # project's development venv before falling back to Conda provisioning.
@@ -57,6 +69,7 @@ function(horizon_dev_bootstrap)
                     "${_horizon_python}" "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
+                    ${_horizon_bootstrap_options}
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             RESULT_VARIABLE _horizon_bootstrap_result
             COMMAND_ECHO STDOUT
@@ -139,6 +152,7 @@ function(horizon_dev_bootstrap)
                     python "${HORIZON_BUILD_TOOLS_DIR}/dev.py" _bootstrap
                     --configuration "${HORIZON_DEV_CONFIGURATION}"
                     --target-family "${HORIZON_DEV_TARGET_FAMILY}"
+                    ${_horizon_bootstrap_options}
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             RESULT_VARIABLE _horizon_bootstrap_result
             COMMAND_ECHO STDOUT

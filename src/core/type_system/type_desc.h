@@ -87,6 +87,12 @@ OC_MAKE_SCALAR_AND_VECTOR_TYPE_DESC_SPECIALIZATION(char)
 OC_MAKE_SCALAR_AND_VECTOR_TYPE_DESC_SPECIALIZATION(ulong)
 OC_MAKE_SCALAR_AND_VECTOR_TYPE_DESC_SPECIALIZATION(ushort)
 
+// Host indices can use a distinct unsigned type from uint64_t on LP64.
+// Keep their DSL representation identical to the corresponding fixed-width type.
+template<typename T>
+requires(std::is_same_v<T, size_t> && !std::is_same_v<T, uint> && !std::is_same_v<T, ulong>)
+struct TypeDesc<T> : TypeDesc<std::conditional_t<sizeof(size_t) == sizeof(uint), uint, ulong>> {};
+
 #undef OC_MAKE_VECTOR_DESC_NAME
 #undef OC_MAKE_SCALAR_AND_VECTOR_TYPE_DESC_SPECIALIZATION
 

@@ -13,64 +13,72 @@
 #include "core/util/macro_map.h"
 #include "core/runtime/oc_windows.h"
 
-#ifdef OC_AST_EXPORT_DLL
-#define OC_AST_API __declspec(dllexport)
+#ifdef _WIN32
+#define OC_DLL_EXPORT __declspec(dllexport)
+#define OC_DLL_IMPORT __declspec(dllimport)
 #else
-#define OC_AST_API __declspec(dllimport)
+#define OC_DLL_EXPORT __attribute__((visibility("default")))
+#define OC_DLL_IMPORT __attribute__((visibility("default")))
+#endif
+
+#ifdef OC_AST_EXPORT_DLL
+#define OC_AST_API OC_DLL_EXPORT
+#else
+#define OC_AST_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_CORE_EXPORT_DLL
-#define OC_CORE_API __declspec(dllexport)
+#define OC_CORE_API OC_DLL_EXPORT
 #else
-#define OC_CORE_API __declspec(dllimport)
+#define OC_CORE_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_DSL_EXPORT_DLL
-#define OC_DSL_API __declspec(dllexport)
+#define OC_DSL_API OC_DLL_EXPORT
 #else
-#define OC_DSL_API __declspec(dllimport)
+#define OC_DSL_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_GENERATOR_EXPORT_DLL
-#define OC_GENERATOR_API __declspec(dllexport)
+#define OC_GENERATOR_API OC_DLL_EXPORT
 #else
-#define OC_GENERATOR_API __declspec(dllimport)
+#define OC_GENERATOR_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_RHI_EXPORT_DLL
-#define OC_RHI_API __declspec(dllexport)
+#define OC_RHI_API OC_DLL_EXPORT
 #else
-#define OC_RHI_API __declspec(dllimport)
+#define OC_RHI_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_BACKENDS_EXPORT_DLL
-#define OC_BACKENDS_API __declspec(dllexport)
+#define OC_BACKENDS_API OC_DLL_EXPORT
 #else
-#define OC_BACKENDS_API __declspec(dllimport)
+#define OC_BACKENDS_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_UTIL_EXPORT_DLL
-#define OC_UTIL_API __declspec(dllexport)
+#define OC_UTIL_API OC_DLL_EXPORT
 #else
-#define OC_UTIL_API __declspec(dllimport)
+#define OC_UTIL_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_MATH_EXPORT_DLL
-#define OC_MATH_API __declspec(dllexport)
+#define OC_MATH_API OC_DLL_EXPORT
 #else
-#define OC_MATH_API __declspec(dllimport)
+#define OC_MATH_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_GUI_EXPORT_DLL
-#define OC_GUI_API __declspec(dllexport)
+#define OC_GUI_API OC_DLL_EXPORT
 #else
-#define OC_GUI_API __declspec(dllimport)
+#define OC_GUI_API OC_DLL_IMPORT
 #endif
 
 #ifdef OC_EXT_EXPORT_DLL
-#define OC_EXT_API __declspec(dllexport)
+#define OC_EXT_API OC_DLL_EXPORT
 #else
-#define OC_EXT_API __declspec(dllimport)
+#define OC_EXT_API OC_DLL_IMPORT
 #endif
 
 #ifdef _MSC_VER
@@ -94,8 +102,8 @@
 #define OC_EXPORT_API OC_EXTERN_C __declspec(dllexport)
 #define OC_IMPORT_API OC_EXTERN_C __declspec(dllimport)
 #else
-#define OC_FORCE_INLINE [[gnu::always_inline, gnu::hot]] inline
-#define OC_NEVER_INLINE [[gnu::noinline]]
+#define OC_FORCE_INLINE __attribute__((always_inline, hot)) inline
+#define OC_NEVER_INLINE __attribute__((noinline))
 #define OC_DLL
 #define OC_EXPORT_API OC_EXTERN_C [[gnu::visibility("default")]]
 #define OC_IMPORT_API OC_EXTERN_C

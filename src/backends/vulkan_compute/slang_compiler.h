@@ -1,40 +1,42 @@
-//
-//
-
 #pragma once
 
-#include "core/stl.h"
 #include "ast/function.h"
+#include "vk_shader_program.h"
+#include <array>
 #include <mutex>
 
-// Forward declarations only — avoids pulling slang.h into every TU.
 namespace slang { struct IGlobalSession; struct ISession; }
 
 namespace ocarina {
 
 class VulkanComputeDevice;
 
+struct ShaderCompilationContext {
+    ShaderCompileOptions options{};
+    ShaderExecutionMode execution_mode{ShaderExecutionMode::Compute};
+    string description;
+};
+
 class SlangShaderCompiler {
 private:
-    VulkanComputeDevice     *device_;
+    VulkanComputeDevice *device_;
     mutable std::mutex compile_mutex_;
-    // global_session_ owns the Slang context; session_ is a child session scoped
-    // to a single target profile.  Both are ref-counted COM-like objects; we hold
-    // raw pointers and manage AddRef/Release explicitly in the .cpp.
-    mutable slang::IGlobalSession *global_session_{nullptr};
-    mutable slang::ISession       *session_{nullptr};
+    mutable slang::IGlobalSession *global_session_{};
+    mutable std::array<slang::ISession *, 3> sessions_{};
+    mutable bool preserve_float32_{};
+    mutable bool preserve_float16_{};
+    mutable uint32_t rte_widths_{};
+    mutable uint32_t rounding_independence_{};
 
-    void ensure_session() const noexcept;
+    slang::ISession *session_for(ShaderExecutionMode mode) const noexcept;
+    slang::ISession *create_session(ShaderExecutionMode mode) const noexcept;
 
 public:
     explicit SlangShaderCompiler(VulkanComputeDevice *device) noexcept;
     ~SlangShaderCompiler() noexcept;
 
-    // Compile an EDSL Function to SPIR-V.  workgroup_size is the desired
-    // numthreads for all kernels, including those using inline ray queries.
-    // Returns empty vector on failure (error already logged).
-    [[nodiscard]] vector<uint32_t> compile(const Function &function,
-                                           uint3 workgroup_size) const noexcept;
+    [[nodiscard]] VkShaderProgram compile_program(const Function &function, uint3 workgroup_size,
+                                                  const ShaderCompilationContext &context) const noexcept;
 };
 
 }// namespace ocarina

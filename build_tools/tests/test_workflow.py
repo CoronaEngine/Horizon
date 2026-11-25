@@ -296,6 +296,30 @@ class WorkflowTests(unittest.TestCase):
                 if not ocarina and not examples:
                     self.assertEqual(packages, {"fmt", "quill"})
 
+    def test_examples_commands_preserve_enabled_ocarina_and_test_features(self) -> None:
+        for command in ("install", "_bootstrap", "configure", "build", "rebuild", "update"):
+            with self.subTest(command=command), \
+                    patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                    patch.object(dev, "safe_remove"), patch.object(dev, "cmake_configure"), \
+                    patch.object(dev, "cmake_build"), patch.object(dev, "conan_install") as install:
+                args = dev.create_parser().parse_args([
+                    command, "--target-family", "examples", "--configuration", "Release",
+                    "--with-ocarina", "--with-ocarina-tests", "--with-tests"])
+                dev.execute(args)
+                self.assertEqual(install.call_args.kwargs["target_family"], "examples")
+                self.assertEqual(install.call_args.kwargs["options"], [
+                    "&:with_examples=True", "&:with_tests=True",
+                    "&:with_ocarina=True", "&:with_ocarina_tests=True"])
+
+    def test_enabled_features_do_not_duplicate_target_family_options(self) -> None:
+        with patch.object(dev, "ensure_git"), patch.object(dev, "ensure_ninja"), \
+                patch.object(dev, "conan_install") as install:
+            dev.execute(dev.create_parser().parse_args([
+                "_bootstrap", "--target-family", "ocarina-tests",
+                "--with-ocarina", "--with-ocarina-tests"]))
+        self.assertEqual(install.call_args.kwargs["options"], [
+            "&:with_ocarina=True", "&:with_ocarina_tests=True"])
+
     def test_configuration_paths_are_per_configuration_and_target_family(self) -> None:
         root = Path("C:/repo")
         self.assertEqual(configuration_slug("RelWithDebInfo"), "relwithdebinfo")
@@ -307,7 +331,7 @@ class WorkflowTests(unittest.TestCase):
             build_dir(root, "Debug", "ocarina-tests"),
             root / "build" / "conan" / "ocarina-tests" / "debug",
         )
-        self.assertEqual(preset_name("vision-hotfix", "RelWithDebInfo"), "vision-hotfix-relwithdebinfo")
+        self.assertEqual(preset_name("core", "RelWithDebInfo"), "core-relwithdebinfo")
 
     def test_unknown_configuration_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -327,23 +351,27 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(target_family_for_target("ocarina-native"), "ocarina")
         self.assertEqual(target_family_for_target("copy_slang_headers"), "ocarina")
         self.assertEqual(target_family_for_target("test-core-parsetype"), "ocarina-tests")
-        self.assertEqual(target_family_for_target("horizon-hotfix-run"), "vision-hotfix")
+        self.assertEqual(target_family_for_target("horizon-hotfix-build-cmake"), "core")
         self.assertEqual(target_family_for_targets(["test-core-parsetype"]), "ocarina-tests")
         self.assertEqual(target_family_for_targets(["HorizonExamples", "ocarina-native"]), "examples")
         with self.assertRaises(ValueError):
             target_family_for_targets(["HorizonExamples", "test-core-parsetype"])
 
-    def test_posix_hotfix_targets_infer_the_core_build(self) -> None:
+    def test_hotfix_targets_infer_the_core_build_on_every_platform(self) -> None:
         targets = ["horizon-hotfix", "horizon-hotfix-build-cmake", "horizon-hotfix-process-posix",
-                   "horizon-hotfix-runtime-fixture", "horizon-test-hotfix-runtime"]
-        for platform in ("linux", "darwin"):
+                   "horizon-hotfix-process-windows", "horizon-hotfix-runtime-fixture",
+                   "horizon-test-hotfix-runtime"]
+        for platform in ("win32", "linux", "darwin"):
             with self.subTest(platform=platform), patch.object(dev.sys, "platform", platform):
                 self.assertEqual(target_family_for_targets(targets), "core")
+                self.assertEqual(conan_options(target_family_for_targets(targets)),
+                                 ["&:with_engine=False", "&:with_tests=True"])
 
-    def test_windows_keeps_legacy_hotfix_runtime_inference(self) -> None:
-        with patch.object(dev.sys, "platform", "win32"):
-            self.assertEqual(target_family_for_target("horizon-hotfix"), "vision-hotfix")
-            self.assertEqual(target_family_for_target("horizon-hotfix-all"), "vision-hotfix")
+    def test_retired_vision_hotfix_family_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            target_family_slug("vision-hotfix")
+        with self.assertRaises(ValueError):
+            conan_options("vision-hotfix")
 
     def test_build_commands_keep_all_requested_targets(self):
         for command in ("build", "build-fast", "rebuild"):

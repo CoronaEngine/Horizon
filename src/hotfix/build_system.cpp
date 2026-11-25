@@ -11,62 +11,6 @@
 
 namespace vision::inline hotfix {
 
-BuildSystem::BuildSystem() {
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-    DynamicModule::add_search_path(directory() / "bin");
-#endif
-}
-
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-Compiler::Handle &BuildSystem::compiler() const noexcept {
-    if (compiler_ == nullptr) {
-        compiler_ = Compiler::create();
-    }
-    return compiler_;
-}
-
-BuildRules::Handle &BuildSystem::build_rules() const noexcept {
-    if (build_rules_ == nullptr) {
-        build_rules_ = BuildRules::create();
-    }
-    return build_rules_;
-}
-
-bool BuildSystem::compile(const Target &target) const noexcept {
-    for (const fs::path &item : target.modified_files) {
-        const CompileOptions &options = build_rules()->compile_options(item.string());
-        if (!compiler()->compile(options)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool BuildSystem::link(const Target &target) const noexcept {
-    fs::path fn(target.name);
-    if (!fn.has_parent_path()) {
-        fn = fs::path("bin") / fn;
-    }
-    const LinkOptions &options = build_rules()->link_options(fn.string());
-    vector<string> extension_objs = build_rules()->obj_paths(ModuleInterface::src_path());
-    return compiler()->link(options, target, FileTool::files_string(extension_objs));
-}
-#endif
-
-void BuildSystem::clear() noexcept {
-}
-
-fs::path BuildSystem::directory() noexcept {
-    return fs::current_path().parent_path();
-}
-
-void BuildSystem::create_temp_path(const fs::path &path) noexcept {
-    if (fs::exists(path)) {
-        return;
-    }
-    fs::create_directory(path);
-}
-
 bool BuildSystem::set_build_backend(std::shared_ptr<::horizon::hotfix::IBuildBackend> backend,
                                     fs::path build_directory, string configuration) {
     if (!backend || build_directory.empty()) {
@@ -140,33 +84,8 @@ bool BuildSystem::build_targets(vector<Target> &targets) noexcept {
             return false;
         }
     }
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-    if (!compiler()->setup_environment()) {
-        CFW_LOG_WARNING("Hotfix toolchain setup failed");
-        return false;
-    }
-    for (const auto &target : targets) {
-        CFW_LOG_INFO("target {} has been modified", target.name);
-        for (const fs::path &fn : target.modified_files) {
-            CFW_LOG_INFO("file: {}", fn.string());
-        }
-        if (!compile(target)) {
-            CFW_LOG_INFO("module {} build failure!", target.name);
-            return false;
-        }
-    }
-    for (const auto &target : targets) {
-        create_temp_path(target.temp_directory());
-        if (!link(target)) {
-            OC_INFO_FORMAT("module {} build failure!", target.name);
-            return false;
-        }
-    }
-    return true;
-#else
     CFW_LOG_WARNING("Hotfix requires a configured build backend");
     return false;
-#endif
 }
 
 }// namespace vision::inline hotfix

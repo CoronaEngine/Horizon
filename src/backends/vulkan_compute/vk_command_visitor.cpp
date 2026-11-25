@@ -38,7 +38,10 @@ VkBufferAllocation VkComputeCommandVisitor::make_staging(size_t size, const void
     auto copy = [dev, buf, src, size] {
         void *mapped = nullptr;
         OC_VK_CHECK(vmaMapMemory(dev->vma_allocator(), buf.alloc, &mapped));
-        if (src) memcpy(mapped, src, size);
+        if (src) {
+            memcpy(mapped, src, size);
+            OC_VK_CHECK(vmaFlushAllocation(dev->vma_allocator(), buf.alloc, 0, size));
+        }
         vmaUnmapMemory(dev->vma_allocator(), buf.alloc);
     };
     if (stream_ && ordered) stream_->prepare_upload(std::move(copy));
@@ -167,7 +170,7 @@ static void image_barrier(VkCommandBuffer cb, VkImage img,
     vkCmdPipelineBarrier(cb, src_s, dst_s, 0, 0, nullptr, 0, nullptr, 1, &b);
 }
 
-static void transfer_barrier(VkCommandBuffer cb) {
+static void transfer_barrier(VkCommandBuffer cb, VkPipelineStageFlags shader_stages) {
     // Images stay in GENERAL. Order both the written destination and the read
     // source against later transfers, including overwrites of a source buffer.
     VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
@@ -175,7 +178,7 @@ static void transfer_barrier(VkCommandBuffer cb) {
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
                             VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+        shader_stages | VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
@@ -190,7 +193,7 @@ void VkComputeCommandVisitor::upload_image(VkImage img, const void *src, size_t 
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {w, h, d};
         vkCmdCopyBufferToImage(cb, staging.buffer, img, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        transfer_barrier(cb);
+        transfer_barrier(cb, device_->shader_stages());
     };
     record(do_copy);
     retire(staging);
@@ -212,7 +215,7 @@ void VkComputeCommandVisitor::visit(const Texture3DDownloadCommand *cmd) noexcep
         image_barrier(cb, tex, VK_IMAGE_LAYOUT_GENERAL,
                       VK_IMAGE_LAYOUT_GENERAL,
                       VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                      device_->shader_stages(), VK_PIPELINE_STAGE_TRANSFER_BIT);
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {(uint32_t)cmd->width(), (uint32_t)cmd->height(), (uint32_t)cmd->depth()};
@@ -224,6 +227,7 @@ void VkComputeCommandVisitor::visit(const Texture3DDownloadCommand *cmd) noexcep
     complete([device = device_, rb, host = cmd->host_ptr<void *>(), sz] {
         void *mapped = nullptr;
         OC_VK_CHECK(vmaMapMemory(device->vma_allocator(), rb.alloc, &mapped));
+        OC_VK_CHECK(vmaInvalidateAllocation(device->vma_allocator(), rb.alloc, 0, sz));
         memcpy(host, mapped, sz);
         vmaUnmapMemory(device->vma_allocator(), rb.alloc);
     });
@@ -239,7 +243,7 @@ void VkComputeCommandVisitor::visit(const Texture3DCopyCommand *cmd) noexcept {
         image_barrier(cb, src_tex, VK_IMAGE_LAYOUT_GENERAL,
                       VK_IMAGE_LAYOUT_GENERAL,
                       VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                      device_->shader_stages(), VK_PIPELINE_STAGE_TRANSFER_BIT);
         image_barrier(cb, dst_tex, VK_IMAGE_LAYOUT_GENERAL,
                       VK_IMAGE_LAYOUT_GENERAL,
                       0, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -250,7 +254,7 @@ void VkComputeCommandVisitor::visit(const Texture3DCopyCommand *cmd) noexcept {
         ic.extent = {res.x, res.y, res.z};
         vkCmdCopyImage(cb, src_tex, VK_IMAGE_LAYOUT_GENERAL,
                        dst_tex, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
-        transfer_barrier(cb);
+        transfer_barrier(cb, device_->shader_stages());
     };
     record(do_copy);
     finish(cmd);
@@ -270,7 +274,7 @@ void VkComputeCommandVisitor::visit(const BufferToTexture3DCommand *cmd) noexcep
         region.imageExtent = {(uint32_t)cmd->width(), (uint32_t)cmd->height(), (uint32_t)cmd->depth()};
         vkCmdCopyBufferToImage(cb, src_buf, tex,
                                VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        transfer_barrier(cb);
+        transfer_barrier(cb, device_->shader_stages());
     };
     record(do_copy);
     finish(cmd);
@@ -292,7 +296,7 @@ void VkComputeCommandVisitor::visit(const Texture2DDownloadCommand *cmd) noexcep
         image_barrier(cb, tex, VK_IMAGE_LAYOUT_GENERAL,
                       VK_IMAGE_LAYOUT_GENERAL,
                       VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                      device_->shader_stages(), VK_PIPELINE_STAGE_TRANSFER_BIT);
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {(uint32_t)cmd->width(), (uint32_t)cmd->height(), 1u};
@@ -304,6 +308,7 @@ void VkComputeCommandVisitor::visit(const Texture2DDownloadCommand *cmd) noexcep
     complete([device = device_, rb, host = cmd->host_ptr<void *>(), sz] {
         void *mapped = nullptr;
         OC_VK_CHECK(vmaMapMemory(device->vma_allocator(), rb.alloc, &mapped));
+        OC_VK_CHECK(vmaInvalidateAllocation(device->vma_allocator(), rb.alloc, 0, sz));
         memcpy(host, mapped, sz);
         vmaUnmapMemory(device->vma_allocator(), rb.alloc);
     });
@@ -319,7 +324,7 @@ void VkComputeCommandVisitor::visit(const Texture2DCopyCommand *cmd) noexcept {
         image_barrier(cb, src_tex, VK_IMAGE_LAYOUT_GENERAL,
                       VK_IMAGE_LAYOUT_GENERAL,
                       VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+                      device_->shader_stages(), VK_PIPELINE_STAGE_TRANSFER_BIT);
         image_barrier(cb, dst_tex, VK_IMAGE_LAYOUT_GENERAL,
                       VK_IMAGE_LAYOUT_GENERAL,
                       0, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -330,7 +335,7 @@ void VkComputeCommandVisitor::visit(const Texture2DCopyCommand *cmd) noexcept {
         ic.extent = {res.x, res.y, 1u};
         vkCmdCopyImage(cb, src_tex, VK_IMAGE_LAYOUT_GENERAL,
                        dst_tex, VK_IMAGE_LAYOUT_GENERAL, 1, &ic);
-        transfer_barrier(cb);
+        transfer_barrier(cb, device_->shader_stages());
     };
     record(do_copy);
     finish(cmd);
@@ -350,7 +355,7 @@ void VkComputeCommandVisitor::visit(const BufferToTexture2DCommand *cmd) noexcep
         region.imageExtent = {(uint32_t)cmd->width(), (uint32_t)cmd->height(), 1u};
         vkCmdCopyBufferToImage(cb, src_buf, tex,
                                VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        transfer_barrier(cb);
+        transfer_barrier(cb, device_->shader_stages());
     };
     record(do_copy);
     finish(cmd);
@@ -388,22 +393,14 @@ void VkComputeCommandVisitor::visit(const ShaderDispatchCommand *cmd) noexcept {
         return;
     }
     record([&](VkCommandBuffer cb) {
-        shader->dispatch(cb, const_cast<ShaderDispatchCommand *>(cmd));
-        // All DSL kernels (including ray queries) execute in the compute stage.
-        // Preserve RAW/WAR/WAW order with later compute and transfer commands
-        // without serializing unrelated pipeline stages after every dispatch.
-        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
-                                VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 1, &barrier, 0, nullptr, 0, nullptr);
+        shader->dispatch(cb, dim, const_cast<ShaderDispatchCommand *>(cmd)->argument_data());
+        shader->dispatch_barrier(cb);
     });
 }
 
 void VkComputeCommandVisitor::visit(const HostFunctionCommand *cmd) noexcept {
-    if (stream_) stream_->host_function(cmd->function(), cmd->async());
+    if (stream_ && cmd->lifetime_hold()) stream_->retain_lifetime(cmd->function());
+    else if (stream_) stream_->host_function(cmd->function(), cmd->async());
     else cmd->function()();
 }
 

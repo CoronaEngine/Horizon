@@ -94,13 +94,12 @@ public:
         size_t size;
     };
 
-#if _WIN32 || _WIN64
     virtual void import_handle(uint64_t handle) { OC_ASSERT(0); };
     virtual uint64_t export_handle() {
         OC_ASSERT(0);
         return 0;
     };
-#endif
+
     OC_MAKE_MEMBER_GETTER(exported, )
 };
 

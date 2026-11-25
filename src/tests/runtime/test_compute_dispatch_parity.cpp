@@ -1,4 +1,5 @@
 #include "tests/backend_test.h"
+#include "tests/warp32_test.h"
 #include "dsl/dsl.h"
 #include "rhi/context.h"
 
@@ -124,7 +125,7 @@ void test_layout_cases(Device &device, const char *backend, const char *name,
 }
 
 void test_full_group_barriers(Device &device) {
-    constexpr uint bx = 4u, by = 3u, bz = 2u, group_size = bx * by * bz;
+    static constexpr uint bx = 4u, by = 3u, bz = 2u, group_size = bx * by * bz;
     const auto block = make_uint3(bx, by, bz);
     const auto grid = make_uint3(3u, 2u, 2u);
     const auto dim = make_uint3(12u, 6u, 4u);
@@ -264,7 +265,7 @@ void test_invoke_reuse(Device &device) {
 }
 
 void test_warp_queries(Device &device) {
-    constexpr uint block = 64u, count = 141u, records = 4u;
+    static constexpr uint block = 64u, count = 141u, records = 4u;
     auto output = device.create_buffer<uint4>(count * records);
     Kernel kernel = [](BufferVar<uint4> out) {
         Uint i = dispatch_id();
@@ -314,15 +315,30 @@ void test_warp_queries(Device &device) {
         else expect_sentinel(actual[i * records + 3u]);
     }
 }
+
+void test_warp32(Device &device, const char *backend) {
+    test_warp_active_count(device, backend, 32u);
+    test_warp_active_count(device, backend, 64u);
+    test_warp_queries(device);
+}
 }
 
 int main(int argc, char **argv) {
     const bool zero_probe = argc == 2 && std::string_view(argv[1]) == "--zero-dispatch";
-    require(argc == 1 || zero_probe, "usage: test-compute-dispatch-parity [--zero-dispatch]");
+    const bool named_case = argc == 3 && std::string_view(argv[1]) == "--case";
+    const std::string_view test_case = named_case ? argv[2] : "";
+    require(argc == 1 || zero_probe || test_case == "compute" || test_case == "warp32",
+            "usage: test-compute-dispatch-parity [--zero-dispatch | --case compute|warp32]");
     const char *backend = test_backend_name();
     auto device = RHIContext::instance().create_device();
     if (zero_probe) {
         probe_zero_dispatch(device, backend);
+        return EXIT_SUCCESS;
+    }
+    if (test_case == "warp32") {
+        if (skip_without_feature(test_device_supports_warp32(device), "warp32 compute ballot")) return 77;
+        test_warp32(device, backend);
+        std::cout << "compute dispatch warp32 checks passed" << std::endl;
         return EXIT_SUCCESS;
     }
     test_layout_cases(device, backend, "automatic", make_uint3(0u), make_uint3(0u),
@@ -348,9 +364,7 @@ int main(int argc, char **argv) {
     test_layout_cases(device, backend, "zero-domain-explicit-grid", make_uint3(1u), make_uint3(4u, 3u, 2u),
                       {make_uint3(0u, 7u, 5u), make_uint3(5u, 0u, 3u), make_uint3(5u, 3u, 0u), make_uint3(0u)});
     test_full_group_barriers(device);
-    test_warp_active_count(device, backend, 32u);
-    test_warp_active_count(device, backend, 64u);
-    test_warp_queries(device);
+    if (!named_case) test_warp32(device, backend);
     test_invoke_reuse(device);
     probe_zero_dispatch(device, backend);
     std::cout << "compute dispatch parity checks passed" << std::endl;

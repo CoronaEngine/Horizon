@@ -72,6 +72,25 @@ static_assert(std::is_trivially_copyable_v<PackedRecord>);
     return true;
 }
 
+[[nodiscard]] bool test_copy_preserves_adjacent_bytes() {
+    HostByteBuffer buffer(32u);
+    std::array<std::byte, 32u> src;
+    src.fill(std::byte{0x5a});
+
+    buffer.copy_from(src.data(), 3u, 5u);
+    for (size_t i = 0u; i < buffer.size(); ++i) {
+        CHECK(buffer.data()[i] == (i >= 5u && i < 8u ? std::byte{0x5a} : std::byte{0}));
+    }
+
+    std::array<std::byte, 32u> dst;
+    dst.fill(std::byte{0x7f});
+    buffer.copy_to(dst.data() + 5u, 3u, 5u);
+    for (size_t i = 0u; i < dst.size(); ++i) {
+        CHECK(dst[i] == (i >= 5u && i < 8u ? std::byte{0x5a} : std::byte{0x7f}));
+    }
+    return true;
+}
+
 [[nodiscard]] bool test_store_load_scalars() {
     HostByteBuffer buffer(sizeof(uint) + sizeof(float) + sizeof(float2));
 
@@ -135,6 +154,7 @@ int main() {
     bool passed = true;
     passed = test_default_state() && passed;
     passed = test_resize_reserve_reset() && passed;
+    passed = test_copy_preserves_adjacent_bytes() && passed;
     passed = test_copy_round_trip() && passed;
     passed = test_store_load_scalars() && passed;
     passed = test_store_load_struct() && passed;

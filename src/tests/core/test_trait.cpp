@@ -53,7 +53,9 @@ static_assert(to_underlying(TestEnum::Value) == 7u);
 static_assert(is_integral_v<int>);
 static_assert(is_integral_v<const uint &>);
 static_assert(is_integral_v<size_t>);
+static_assert(is_integral_v<const ocarina::ulong &>);
 static_assert(!is_integral_v<float>);
+static_assert(!is_integral_v<long long>);
 
 static_assert(is_boolean_v<bool>);
 static_assert(!is_boolean_v<int>);
@@ -77,6 +79,7 @@ static_assert(is_unsigned_v<ulong>);
 static_assert(!is_unsigned_v<int>);
 
 static_assert(is_scalar_v<int>);
+static_assert(is_scalar_v<ocarina::ulong>);
 static_assert(is_scalar_v<bool>);
 static_assert(is_scalar_v<float>);
 static_assert(is_scalar_v<real>);

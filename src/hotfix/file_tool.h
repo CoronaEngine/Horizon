@@ -10,8 +10,6 @@
 #include <stdexcept>
 
 namespace vision::inline hotfix {
-static constexpr const char *debug_dir = "hotfix_debug";
-
 namespace {
 using FileTime = fs::file_time_type;
 inline FileTime modification_time(const fs::path &file_path) {
@@ -35,34 +33,11 @@ public:
 class ModuleInterface;
 
 struct Target {
-private:
-    mutable uint build_count{0u};
-
-public:
     string name;
     fs::path module_path; // Versioned copy supplied by a build backend.
     vector<InspectedFile> files;
     vector<fs::path> modified_files;
-    [[nodiscard]] fs::path temp_directory() const noexcept;
-    [[nodiscard]] fs::path target_path(string extension) const noexcept;
-#if defined(HORIZON_HOTFIX_LEGACY_BUILD)
-    [[nodiscard]] const DynamicModule *obtain_cur_module() const noexcept;
-#endif
     [[nodiscard]] ModuleInterface *module_interface() const noexcept;
-    [[nodiscard]] fs::path target_stem() const noexcept {
-        return format("module_{}", build_count);
-    }
-    [[nodiscard]] fs::path dll_path() const noexcept {
-        return target_path(".dll");
-    }
-    [[nodiscard]] fs::path lib_path() const noexcept {
-        return target_path(".lib");
-    }
-    [[nodiscard]] fs::path pdb_path() const noexcept {
-        return target_path(".pdb");
-    }
-    void increase_count() const noexcept { ++build_count; }
-    void decrease_count() const noexcept { --build_count; }
 };
 
 class IObjectConstructor;
@@ -97,22 +72,6 @@ public:
     }
     [[nodiscard]] bool has_file(const string &fn) noexcept {
         return files_.contains(fn);
-    }
-    [[nodiscard]] static string files_string(const vector<string> &files) noexcept {
-        string ret;
-        for (const auto &item : files) {
-            ret += item + " ";
-        }
-        return ret;
-    }
-    [[nodiscard]] static fs::path project_path() noexcept {
-        return parent_path(__FILE__, 3);
-    }
-    [[nodiscard]] static fs::path project_src_path() noexcept {
-        return parent_path(__FILE__, 2);
-    }
-    [[nodiscard]] static fs::path intermediate_path() noexcept {
-        return fs::current_path() / debug_dir;
     }
 };
 }// namespace vision::inline hotfix

@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <cassert>
 
+#if defined(__linux__)
+#include <unistd.h>
+#endif
+
 DeviceManager::DeviceManager() = default;
 
 DeviceManager::~DeviceManager()
@@ -284,22 +288,35 @@ void DeviceManager::createDevices(const CreateCallback &initInfo, const VkInstan
 
 void DeviceManager::createQueueUtils()
 {
-    auto createTimelineSemaphoreForQueue = [&](QueueUtils &queue) 
-        {
-            VkExportSemaphoreCreateInfo exportInfo{};
-            exportInfo.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
-            exportInfo.pNext = nullptr;
-#if _WIN32 || _WIN64
-            exportInfo.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
-#elif __linux__
-            exportInfo.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
-#endif
-            VkSemaphoreTypeCreateInfo typeCreateInfo{};
-            typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-            typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-            typeCreateInfo.initialValue = 0;
-            typeCreateInfo.pNext = &exportInfo;
+    VkSemaphoreTypeCreateInfo typeCreateInfo{};
+    typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
 
+    VkExportSemaphoreCreateInfo exportInfo{};
+    exportInfo.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+#if _WIN32 || _WIN64
+    exportInfo.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#elif __linux__
+    exportInfo.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif
+    if (exportInfo.handleTypes != 0)
+    {
+        VkPhysicalDeviceExternalSemaphoreInfo externalInfo{};
+        externalInfo.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO;
+        externalInfo.pNext = &typeCreateInfo;
+        externalInfo.handleType = static_cast<VkExternalSemaphoreHandleTypeFlagBits>(exportInfo.handleTypes);
+
+        VkExternalSemaphoreProperties properties{};
+        properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES;
+        vkGetPhysicalDeviceExternalSemaphoreProperties(physicalDevice, &externalInfo, &properties);
+        if (properties.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT)
+        {
+            typeCreateInfo.pNext = &exportInfo;
+        }
+    }
+
+    auto createTimelineSemaphoreForQueue = [&](QueueUtils &queue)
+        {
             VkSemaphoreCreateInfo semaphoreInfo{};
             semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
             semaphoreInfo.pNext = &typeCreateInfo;
@@ -500,12 +517,14 @@ void DeviceManager::importForeignSemaphores(const std::vector<DeviceManager *> &
 
             VkSemaphore foreignSem = foreignQueue.timelineSemaphore;
             ExternalSemaphoreHandle handle = foreignDevice->exportSemaphore(foreignSem);
-            if(handle.handle == nullptr)
+#if _WIN32 || _WIN64
+            if (handle.handle == nullptr)
             {
                 CFW_LOG_ERROR("[DeviceManager] Failed to export timeline semaphore from foreign device {}. Skipping import.",
                               reinterpret_cast<uintptr_t>(foreignDevice->logicalDevice));
                 return;
             }
+#endif
 
             VkSemaphoreTypeCreateInfo typeInfo{};
             typeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;

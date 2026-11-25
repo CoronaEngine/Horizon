@@ -40,10 +40,6 @@ TARGET_FAMILY_OPTIONS: dict[str, tuple[str, ...]] = {
         "&:with_ocarina=True",
         "&:with_ocarina_tests=True",
     ),
-    "vision-hotfix": (
-        "&:with_ocarina=True",
-        "&:with_vision_hotfix=True",
-    ),
 }
 
 
@@ -56,15 +52,8 @@ def target_family_for_target(target: str) -> str:
         return "examples"
     if target.startswith("test-"):
         return "ocarina-tests"
-    if sys.platform != "win32" and target in {
-        "horizon-hotfix",
-        "horizon-hotfix-build-cmake",
-        "horizon-hotfix-process-posix",
-        "horizon-hotfix-runtime-fixture",
-    }:
-        return "core"
     if target.startswith("horizon-hotfix"):
-        return "vision-hotfix"
+        return "core"
     if target == "copy_slang_headers" or target.startswith("ocarina"):
         return "ocarina"
     return "core"
@@ -91,19 +80,20 @@ def target_family_for_targets(targets: list[str]) -> str:
     return families.pop()
 
 
-def conan_options(target_family: str) -> list[str]:
+def conan_options(target_family: str, *, extra_options: list[str] | None = None) -> list[str]:
     try:
-        return list(TARGET_FAMILY_OPTIONS[target_family])
+        options = TARGET_FAMILY_OPTIONS[target_family]
     except KeyError as error:
         raise ValueError(f"Unsupported target family: {target_family}") from error
+    return list(dict.fromkeys([*options, *(extra_options or [])]))
 
 
-def install(configuration: str, target_family: str, *, update: bool = False) -> None:
+def install(configuration: str, target_family: str, *, extra_options: list[str] | None = None, update: bool = False) -> None:
     conan_install(
         REPO_ROOT,
         configuration,
         target_family=target_family,
-        options=conan_options(target_family),
+        options=conan_options(target_family, extra_options=extra_options),
         recipes=LOCAL_RECIPES,
         recipe_toggle_env=RECIPE_TOGGLE_ENV,
         update=update,
@@ -124,23 +114,23 @@ def execute(args: argparse.Namespace) -> None:
         run_command(("conan", "--version"), cwd=REPO_ROOT)
         run_command(("cmake", "--list-presets"), cwd=REPO_ROOT)
     elif args.command in {"install", "_bootstrap"}:
-        install(configuration, target_family)
+        install(configuration, target_family, extra_options=args.extra_options)
     elif args.command == "configure":
-        install(configuration, target_family)
+        install(configuration, target_family, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "build":
-        install(configuration, target_family)
+        install(configuration, target_family, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "build-fast":
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "rebuild":
         safe_remove(REPO_ROOT, build_dir(REPO_ROOT, configuration, target_family))
-        install(configuration, target_family)
+        install(configuration, target_family, extra_options=args.extra_options)
         cmake_configure(REPO_ROOT, configuration, target_family)
         cmake_build(REPO_ROOT, configuration, targets, target_family)
     elif args.command == "update":
-        install(configuration, target_family, update=True)
+        install(configuration, target_family, extra_options=args.extra_options, update=True)
         cmake_configure(REPO_ROOT, configuration, target_family)
     elif args.command == "clean":
         clean_repo(REPO_ROOT)
@@ -167,6 +157,14 @@ def create_parser() -> argparse.ArgumentParser:
         choices=TARGET_FAMILIES,
         help="Configure a named target family instead of inferring it from the build target.",
     )
+    for feature in ("ocarina", "ocarina_tests", "tests"):
+        parser.add_argument(
+            f"--with-{feature.replace('_', '-')}",
+            action="append_const",
+            const=f"&:with_{feature}=True",
+            dest="extra_options",
+            help=f"Include {feature.replace('_', ' ')} alongside the selected target family.",
+        )
     return parser
 
 

@@ -1,4 +1,4 @@
-name: Function Corrector
+name: Ocarina Tests and Benchmarks
 
 on:
   push:
@@ -13,9 +13,22 @@ env:
 
 jobs:
   corrector:
-    name: Windows Corrector Tests and Vulkan Build
-    runs-on: windows-latest
-    timeout-minutes: 45
+    name: ${{ matrix.name }} Ocarina Tests and Benchmarks
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-26.04
+          - name: macOS
+            os: macos-latest
+            suite_args: --without-int64-atomics
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -23,10 +36,83 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Install Linux Vulkan build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libx11-xcb-dev libfontenc-dev libice-dev libsm-dev libxau-dev libxaw7-dev \
+            libxcomposite-dev libxcursor-dev libxdamage-dev libxdmcp-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbfile-dev libxmu-dev libxmuu-dev libxpm-dev libxrandr-dev \
+            libxrender-dev libxres-dev libxss-dev libxt-dev libxtst-dev libxv-dev libxxf86vm-dev \
+            libxcb-glx0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-xkb-dev \
+            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev \
+            libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxcb-dri3-dev libxcb-cursor-dev libxcb-dri2-0-dev libxcb-present-dev \
+            libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-util-dev uuid-dev libgl-dev \
+            mesa-vulkan-drivers
+
+      - name: Select Linux Lavapipe
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          test -f "${icds[0]}"
+          echo "VK_DRIVER_FILES=${icds[0]}" >> "$GITHUB_ENV"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Install Windows Lavapipe
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import urllib.request
+          import winreg
+
+          version = "26.2.5"
+          name = f"mesa-lavapipe-x64-{version}.7z"
+          root = Path(os.environ["RUNNER_TEMP"]) / "horizon-lavapipe"
+          root.mkdir(parents=True, exist_ok=True)
+          archive = root / name
+          url = f"https://github.com/mmozeiko/build-mesa/releases/download/{version}/{name}"
+          with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as output:
+              shutil.copyfileobj(response, output)
+          expected = "57ebaa70c16edf11edc9dbba1c5db40169dd86cb50cdd700eb2f4442bb410682"
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise RuntimeError("Lavapipe archive SHA-256 mismatch")
+          subprocess.run(["7z", "x", str(archive), f"-o{root}", "-y"], check=True)
+          icd = root / "lvp_icd.x86_64.json"
+          if not icd.is_file() or not (root / "vulkan_lvp.dll").is_file():
+              raise RuntimeError("Lavapipe archive is missing its ICD or driver")
+          # Elevated hosted runners ignore Vulkan's ICD environment overrides.
+          with winreg.CreateKeyEx(
+              winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Khronos\Vulkan\Drivers", 0,
+              winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+          ) as key:
+              winreg.SetValueEx(key, str(icd.resolve(strict=True)), 0, winreg.REG_DWORD, 0)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"VK_DRIVER_FILES={icd.as_posix()}\n")
+              output.write(f"VK_ICD_FILENAMES={icd.as_posix()}\n")
+
+      - name: Install macOS MoltenVK for compute tests
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install molten-vk
+          icd="$(find -H "$(brew --prefix molten-vk)" -name MoltenVK_icd.json -print -quit)"
+          test -f "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
 
       - name: Install build tools
         run: python -m pip install --upgrade "conan>=2.28,<3" "cmake>=4.0" ninja
@@ -40,18 +126,61 @@ jobs:
           with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
               output.write(sysconfig.get_path("scripts") + "\n")
 
-      - name: Build Corrector and Vulkan regression executables
+      - name: Build Ocarina CI and Horizon tests
+        id: build-suite
         run: >-
-          python build_tools/dev.py build
-          test-core-function-corrector test-runtime-outline-equivalence
-          test-runtime-codegen-capability-probe test-debug-printer
-          test-debug-printer-bytebuffer-debug test-debug-printer-bindless-buffer-debug
-          --configuration RelWithDebInfo --target-family ocarina-tests
+          python build_tools/dev.py build ocarina-tests horizon-tests
+          --configuration RelWithDebInfo --target-family ocarina-tests --with-tests
 
-      # The Vulkan tests require a device with compute ballot subgroups of at least
-      # 32 lanes. Hosted Windows runners compile these tests without executing them.
-      - name: Run Corrector AST and rejected-capture tests
+      - name: Collect remaining compiler diagnostics after a failed build
+        if: failure() && steps.build-suite.outcome == 'failure'
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+          build = Path("build/conan/ocarina-tests/relwithdebinfo")
+          if (build / "CMakeCache.txt").is_file():
+              result = subprocess.run([
+                  "cmake", "--build", str(build), "--config", "RelWithDebInfo",
+                  "--target", "ocarina-tests", "horizon-tests", "--", "-k", "0"])
+              print(f"Diagnostic build exited {result.returncode}; the original build failure is retained")
+
+      - name: Run Horizon checks that require Ocarina
         run: >-
-          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo
-          -C RelWithDebInfo -R '^ocarina\.test-core-function-corrector($|\.)'
-          --no-tests=error --output-on-failure
+          ctest --test-dir build/conan/ocarina-tests/relwithdebinfo -C RelWithDebInfo
+          -R '^horizon\.core\.(function_requirements|shader_options_api)$' --no-tests=error --output-on-failure
+
+      - name: Execute and verify the Ocarina CI cases
+        run: >-
+          python src/tests/run_ci_suite.py
+          --build-dir build/conan/ocarina-tests/relwithdebinfo
+          --configuration RelWithDebInfo
+          --output build/verification/ocarina-ci
+          ${{ matrix.suite_args }}
+
+      - name: Report local GPU checks
+        if: always()
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as output:
+              output.write("### Local GPU tests\n\n"
+                           "Run the `trace-mode-local` and `warp32-local` CTest labels on a supported GPU. "
+                           "Use the `ocarina-tests-local-release` preset and record any capability skips.\n")
+              if os.environ["RUNNER_OS"] == "macOS":
+                  output.write("\nThe int64 buffer atomics case runs on the Linux and Windows CI lanes.\n")
+
+      - name: Upload complete Ocarina execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocarina-execution-${{ matrix.os }}
+          path: |
+            build/verification/ocarina-ci
+            build/conan/ocarina-tests/relwithdebinfo/src/tests/ci/RelWithDebInfo/targets.json
+            build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTest.log
+            build/conan/ocarina-tests/relwithdebinfo/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: warn

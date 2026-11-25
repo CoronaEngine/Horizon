@@ -1,4 +1,5 @@
 #include "tests/backend_test.h"
+#include "tests/warp32_test.h"
 #include "core/util/logging.h"
 #include "dsl/dsl.h"
 
@@ -21,31 +22,42 @@ void require(bool condition, const char *message) {
 }
 
 int main(int argc, char **argv) {
-    const bool ray_query = argc == 3 && std::string_view(argv[1]) == "--case" &&
-                           std::string_view(argv[2]) == "ray-query";
-    require(argc == 1 || ray_query, "usage: test-slang-capabilities [--case ray-query]");
+    const auto selected = argc == 3 && std::string_view(argv[1]) == "--case"
+                              ? std::string_view(argv[2]) : std::string_view{};
+    const bool warp32 = selected == "warp32";
+    const bool ray_query = selected == "ray-query";
+    require(argc == 1 || selected == "compute" || warp32 || ray_query,
+            "usage: test-slang-capabilities [--case compute|warp32|ray-query]");
 
     // A fresh cache forces Slang to diagnose every kernel on every test run.
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto cache = ocarina::format(".cache-slang-capabilities-{}", stamp);
     const auto diagnostics_path = std::filesystem::path{cache} / "diagnostics.log";
     horizon::core::LoggingOptions logging;
-    logging.console = false;
+    // Keep fatal compiler diagnostics visible in CTest as well as the file
+    // inspected below, including failures before the final file read.
+    logging.console = true;
     logging.file_path = diagnostics_path;
     horizon::core::initialize_logging(logging);
     RHIContext::instance().init(argv[0], cache);
     auto device = create_test_device();
+    if (warp32 && skip_without_feature(test_device_supports_warp32(device), "DSL warp32")) return 77;
+    if (ray_query && skip_without_feature(device.trace_capabilities().ray_query, "ray queries")) return 77;
 
-    // Texture intrinsics carry Slang's standard-library SPIR-V requirements.
-    Kernel texture = [](Texture2DVar input, BufferVar<float4> output) {
-        output.write(0u, input.sample(4u, make_float2(0.5f)).as_vec4());
-    };
-    auto texture_shader = device.compile(texture, "slang-capabilities-texture");
+    if (argc == 1 || selected == "compute") {
+        // Texture intrinsics carry Slang's standard-library SPIR-V requirements.
+        Kernel texture = [](Texture2DVar input, BufferVar<float4> output) {
+            output.write(0u, input.sample(4u, make_float2(0.5f)).as_vec4());
+        };
+        auto texture_shader = device.compile(texture, "slang-capabilities-texture");
+    }
 
-    Kernel ballot = [](BufferVar<uint4> output) {
-        output.write(0u, warp_active_bit_mask(Bool(true)));
-    };
-    auto ballot_shader = device.compile(ballot, "slang-capabilities-ballot");
+    if (argc == 1 || warp32) {
+        Kernel ballot = [](BufferVar<uint4> output) {
+            output.write(0u, warp_active_bit_mask(Bool(true)));
+        };
+        auto ballot_shader = device.compile(ballot, "slang-capabilities-ballot");
+    }
 
     // Run this case on devices with Vulkan ray-query support.
     if (ray_query) {
@@ -55,7 +67,9 @@ int main(int argc, char **argv) {
             auto ray = make_ray(origin, direction);
             output.write(0u, accel.trace_closest(ray));
         };
-        auto trace_shader = device.compile(trace, "slang-capabilities-ray-query");
+        auto trace_shader = device.compile(trace, "slang-capabilities-ray-query", CS, {TraceMode::RayQuery});
+        require(trace_shader.execution_mode() == ShaderExecutionMode::ComputeRayQuery,
+                "trace shader did not use the ray query path");
     }
 
     log_flush();
@@ -64,7 +78,7 @@ int main(int argc, char **argv) {
     size_t compiles = 0;
     for (size_t offset = 0; (offset = output.find("shader SPIR-V cache miss:", offset)) != std::string::npos;
          ++offset) ++compiles;
-    require(compiles == (ray_query ? 3u : 2u), "kernels did not compile through a fresh Slang session");
+    require(compiles == (argc == 1 ? 2u : 1u), "kernels did not compile through a fresh Slang session");
     if (output.find("41012") != std::string::npos ||
         output.find("profile implicitly upgraded") != std::string::npos) {
         std::cerr << output;

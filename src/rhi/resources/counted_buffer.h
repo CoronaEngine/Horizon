@@ -23,12 +23,9 @@ private:
         using type = BufferStorage<TBuffer>;
     };
 
-    template<>
-    struct buffer_impl<ByteBuffer> {
-        using type = ByteBuffer;
-    };
     template<typename U>
-    using buffer_t = typename buffer_impl<U>::type;
+    using buffer_t = typename std::conditional_t<std::is_same_v<U, ByteBuffer>,
+                                                 std::type_identity<ByteBuffer>, buffer_impl<U>>::type;
 
 public:
     using element_type = T;

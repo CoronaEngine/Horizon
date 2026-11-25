@@ -17,14 +17,12 @@ class HorizonConan(ConanFile):
         "examples",
         "ocarina",
         "ocarina-tests",
-        "vision-hotfix",
     )
 
     options = {
         "shared": [True, False],
         "with_engine": [True, False],
         "with_ocarina": [True, False],
-        "with_vision_hotfix": [True, False],
         "with_tools": [True, False],
         "with_examples": [True, False],
         "with_tests": [True, False],
@@ -37,7 +35,6 @@ class HorizonConan(ConanFile):
         "shared": False,
         "with_engine": True,
         "with_ocarina": False,
-        "with_vision_hotfix": False,
         "with_tools": False,
         "with_examples": False,
         "with_tests": False,
@@ -76,33 +73,42 @@ class HorizonConan(ConanFile):
             self.requires("ktm/0.2.16", transitive_headers=True)
             self.requires("pfr/1.91.0", transitive_headers=True)
             self.requires("spirv-tools/1.4.350.0", transitive_headers=True, transitive_libs=True)
+            self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
+            self.requires("slang/2026.11", transitive_headers=True, transitive_libs=True)
+            if bool(self.options.with_tracy):
+                self.requires("tracy/0.13.1", options={"on_demand": True})
             self.requires("volk/1.4.350.0", transitive_headers=True, transitive_libs=True)
             self.requires("vulkan-headers/1.4.350.0", transitive_headers=True)
             self.requires("vulkan-loader/1.4.350.0", transitive_headers=True)
-            self.requires("vulkan-memory-allocator/3.4.0", transitive_headers=True)
-            self.requires("slang/2026.10", transitive_headers=True, transitive_libs=True)
 
         if bool(self.options.with_examples):
             self.requires("glfw/3.4")
-            self.requires("tinyobjloader/1.0.7")
             self.requires("glm/1.0.1")
-            if bool(self.options.with_tracy):
-                self.requires("tracy/0.13.1", options={"on_demand": True})
+            self.requires("tinyobjloader/1.0.7")
 
     def validate(self):
+        runtime = self.settings.get_safe("compiler.runtime")
+        if self.settings.os == "Windows" and runtime is not None:
+            if runtime != "dynamic":
+                raise ConanInvalidConfiguration(
+                    "Horizon requires compiler.runtime=dynamic to share the CRT across DLLs."
+                )
+            expected_type = "Debug" if self.settings.build_type == "Debug" else "Release"
+            if self.settings.get_safe("compiler.runtime_type") != expected_type:
+                raise ConanInvalidConfiguration(
+                    f"Horizon {self.settings.build_type} requires compiler.runtime_type={expected_type} "
+                    "so all DLLs use the same CRT."
+                )
         engine_features = {
             "with_tools": bool(self.options.with_tools),
             "with_examples": bool(self.options.with_examples),
             "with_ocarina": bool(self.options.with_ocarina),
-            "with_vision_hotfix": bool(self.options.with_vision_hotfix),
         }
         enabled_engine_features = [name for name, enabled in engine_features.items() if enabled]
         if enabled_engine_features and not bool(self.options.with_engine):
             raise ConanInvalidConfiguration(
                 "with_engine=False is incompatible with: " + ", ".join(enabled_engine_features)
             )
-        if bool(self.options.with_vision_hotfix) and not self._build_ocarina:
-            raise ConanInvalidConfiguration("with_vision_hotfix=True requires with_ocarina=True or with_examples=True")
         if bool(self.options.with_ocarina_tests) and not self._build_ocarina:
             raise ConanInvalidConfiguration("with_ocarina_tests=True requires with_ocarina=True or with_examples=True")
 
@@ -114,7 +120,6 @@ class HorizonConan(ConanFile):
         variables["BUILD_SHARED_LIBS"] = bool(self.options.shared)
         variables["HORIZON_BUILD_ENGINE"] = bool(self.options.with_engine)
         variables["HORIZON_BUILD_OCARINA"] = self._build_ocarina
-        variables["HORIZON_BUILD_VISION_HOTFIX"] = bool(self.options.with_vision_hotfix)
         variables["HORIZON_BUILD_TOOLS"] = bool(self.options.with_tools)
         variables["HORIZON_BUILD_EXAMPLES"] = bool(self.options.with_examples)
         variables["HORIZON_BUILD_TESTS"] = bool(self.options.with_tests)

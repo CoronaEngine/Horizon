@@ -20,7 +20,7 @@ template<typename T>
     namespace {                                                                   \
     struct FileRegistrar {                                                        \
         FileRegistrar() {                                                         \
-            auto key = ::vision::parent_path(path, level);                         \
+            auto key = ::vision::hotfix::hotfix_detail::parent_path(path, level);  \
             ::vision::HotfixSystem::instance().register_target(key, ##__VA_ARGS__); \
         }                                                                         \
     };                                                                            \
@@ -28,10 +28,6 @@ template<typename T>
     }
 
 #define VS_REGISTER_CURRENT_PATH(level, ...) VS_REGISTER_PATH(__FILE__, level, ##__VA_ARGS__)
-
-#define VS_REGISTER_CURRENT_FILE VS_REGISTER_CURRENT_PATH(0, "vision-" VISION_CATEGORY "-" VISION_PLUGIN_NAME ".dll")
-
-#define VS_REGISTER_DIRECTORY(level) VS_REGISTER_CURRENT_PATH(level, "vision-" VISION_CATEGORY "-" VISION_PLUGIN_NAME ".dll")
 
 #define VS_REGISTER_HOTFIX(NS, Class)                                                  \
     namespace {                                                                        \

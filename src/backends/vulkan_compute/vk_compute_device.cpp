@@ -1,11 +1,18 @@
 //
 //
 
+// The Vulkan SDK declares the KHR portability subset feature struct in its beta headers.
+#ifndef VK_ENABLE_BETA_EXTENSIONS
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #define VMA_IMPLEMENTATION
 #include "vk_compute_device.h"
 #include "vk_stream.h"
 #include "vk_texture.h"
 #include "vk_shader.h"
+#include "trace_requirements.h"
+#include "ast/function_requirements.h"
+#include "rhi/shader_compile_options.h"
 #include "vk_mesh.h"
 #include "vk_bindless_array.h"
 #include "vk_accel.h"
@@ -55,6 +62,10 @@ void VulkanComputeDevice::init_instance() noexcept {
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+#ifdef __APPLE__
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    ci.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
     ci.pApplicationInfo        = &app_info;
     ci.enabledExtensionCount   = (uint32_t)extensions.size();
     ci.ppEnabledExtensionNames = extensions.data();
@@ -85,24 +96,49 @@ void VulkanComputeDevice::init_physical_device() noexcept {
     VkPhysicalDeviceProperties2 subgroup_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     subgroup_properties.pNext = &subgroup;
     vkGetPhysicalDeviceProperties2(phys_device_, &subgroup_properties);
-    OC_ERROR_IF(subgroup.subgroupSize < 32u || subgroup.subgroupSize > 128u || subgroup.subgroupSize % 32u != 0u ||
-                !(subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) ||
-                !(subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT),
-        "Vulkan backend requires compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
+    if (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT)
+        compute_subgroup_operations_ = subgroup.supportedOperations;
+    // Ordinary compute kernels do not require the DSL's 32-lane warp contract.
+    // Validate that contract when a shader actually emits a warp operation.
+    supports_warp32_ = subgroup.subgroupSize >= 32u && subgroup.subgroupSize <= 128u &&
+                      subgroup.subgroupSize % 32u == 0u &&
+                      (compute_subgroup_operations_ & VK_SUBGROUP_FEATURE_BALLOT_BIT);
+    OC_INFO_FORMAT("Vulkan compute subgroup: {} lanes; DSL warp32 support: {}",
+                   subgroup.subgroupSize, supports_warp32_);
 
-    // RT support probe
+    // vkCmdTraceRaysKHR and acceleration-structure builds use a compute queue.
+    uint32_t qfc = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device_, &qfc, nullptr);
+    vector<VkQueueFamilyProperties> qfp(qfc);
+    vkGetPhysicalDeviceQueueFamilyProperties(phys_device_, &qfc, qfp.data());
+    compute_queue_family_ = UINT32_MAX;
+    for (uint32_t i = 0; i < qfc; ++i) {
+        if (!qfp[i].queueCount) continue;
+        shared_queue_families_.push_back(i);
+        if (compute_queue_family_ == UINT32_MAX && (qfp[i].queueFlags & VK_QUEUE_COMPUTE_BIT))
+            compute_queue_family_ = i;
+    }
+    OC_ERROR_IF(compute_queue_family_ == UINT32_MAX, "No compute queue family");
+}
+
+// ── init_logical_device ───────────────────────────────────────────────────────
+
+void VulkanComputeDevice::init_logical_device() noexcept {
     uint32_t ec = 0;
     vkEnumerateDeviceExtensionProperties(phys_device_, nullptr, &ec, nullptr);
-    vector<VkExtensionProperties> exts(ec);
-    vkEnumerateDeviceExtensionProperties(phys_device_, nullptr, &ec, exts.data());
+    vector<VkExtensionProperties> available_extensions(ec);
+    vkEnumerateDeviceExtensionProperties(phys_device_, nullptr, &ec, available_extensions.data());
     auto supports = [&](const char *name) {
-        return std::any_of(exts.begin(), exts.end(), [&](const auto &e) {
+        return std::any_of(available_extensions.begin(), available_extensions.end(), [&](const auto &e) {
             return strcmp(e.extensionName, name) == 0;
         });
     };
-    has_rt_ = supports(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
-              supports(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
-              supports(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    const VulkanTraceExtensions trace_extensions{
+        .acceleration_structure = supports(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+        .ray_query = supports(VK_KHR_RAY_QUERY_EXTENSION_NAME),
+        .ray_tracing_pipeline = supports(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+        .deferred_host_operations = supports(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME),
+    };
     if (const char *path = std::getenv("REBLUR_GPU_PIPELINE_STATS"); path && *path) {
         pipeline_statistics_path_ = path;
         has_pipeline_statistics_ = supports(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
@@ -122,51 +158,32 @@ void VulkanComputeDevice::init_physical_device() noexcept {
                                 VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0;
     }
 #endif
-    if (has_rt_) {
-        VkPhysicalDeviceAccelerationStructurePropertiesKHR as_props{
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
-        VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-        props.pNext = &as_props;
-        vkGetPhysicalDeviceProperties2(phys_device_, &props);
-        scratch_alignment_ = as_props.minAccelerationStructureScratchOffsetAlignment;
-    }
-
-    // Find compute queue
-    uint32_t qfc = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(phys_device_, &qfc, nullptr);
-    vector<VkQueueFamilyProperties> qfp(qfc);
-    vkGetPhysicalDeviceQueueFamilyProperties(phys_device_, &qfc, qfp.data());
-    for (uint32_t i = 0; i < qfc; ++i) {
-        if (qfp[i].queueCount) shared_queue_families_.push_back(i);
-    }
-    compute_queue_family_ = UINT32_MAX;
-    for (uint32_t i = 0; i < qfc; ++i)
-        if (qfp[i].queueFlags & VK_QUEUE_COMPUTE_BIT) { compute_queue_family_ = i; break; }
-    OC_ERROR_IF(compute_queue_family_ == UINT32_MAX, "No compute queue family");
-}
-
-// ── init_logical_device ───────────────────────────────────────────────────────
-
-void VulkanComputeDevice::init_logical_device() noexcept {
     float priority = 1.0f;
     VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     qci.queueFamilyIndex = compute_queue_family_;
     qci.queueCount       = 1u;
     qci.pQueuePriorities = &priority;
 
-    vector<const char *> exts;
-    if (has_rt_) {
-        exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-        exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-        exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-    }
-
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceVulkan11Features f11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     f11.pNext = &f12;
     VkPhysicalDeviceRayQueryFeaturesKHR query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
-    if (has_rt_) { f12.pNext = &accel; accel.pNext = &query; }
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_pipeline{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+    auto prepend_feature = [&](auto &feature) {
+        feature.pNext = f12.pNext;
+        f12.pNext = &feature;
+    };
+    const bool shader_fma_extension = supports(VK_KHR_SHADER_FMA_EXTENSION_NAME);
+    VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FMA_FEATURES_KHR};
+    if (shader_fma_extension) prepend_feature(shader_fma);
+    const bool portability_device = supports(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    VkPhysicalDevicePortabilitySubsetFeaturesKHR portability{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR};
+    if (portability_device) prepend_feature(portability);
+    if (trace_extensions.acceleration_structure) prepend_feature(accel);
+    if (trace_extensions.ray_query) prepend_feature(query);
+    if (trace_extensions.ray_tracing_pipeline) prepend_feature(rt_pipeline);
     VkPhysicalDeviceFeatures2 feats2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     feats2.pNext = &f11;
     VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipeline_features{
@@ -176,6 +193,24 @@ void VulkanComputeDevice::init_logical_device() noexcept {
         feats2.pNext = &pipeline_features;
     }
     vkGetPhysicalDeviceFeatures2(phys_device_, &feats2);
+    // BC7 is exposed only when both sampled formats can be filtered and copied.
+    has_bc7_ = feats2.features.textureCompressionBC != VK_FALSE;
+    for (VkFormat format : {VK_FORMAT_BC7_UNORM_BLOCK, VK_FORMAT_BC7_SRGB_BLOCK}) {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(phys_device_, format, &properties);
+        constexpr auto required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+            VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        has_bc7_ &= (properties.optimalTilingFeatures & required) == required;
+    }
+    if (shader_fma_extension && shader_fma.shaderFmaFloat32) {
+        VkPhysicalDeviceFloatControlsProperties float_controls{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
+        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        properties.pNext = &float_controls;
+        vkGetPhysicalDeviceProperties2(phys_device_, &properties);
+        native_float32_fma_enabled_ = float_controls.shaderRoundingModeRTEFloat32 != VK_FALSE;
+    }
+    has_int64_atomics_ = f12.shaderBufferInt64Atomics != 0u;
     if (has_pipeline_statistics_ && !pipeline_features.pipelineExecutableInfo) {
         has_pipeline_statistics_ = false;
         feats2.pNext = &f11;
@@ -186,19 +221,55 @@ void VulkanComputeDevice::init_logical_device() noexcept {
                     !f12.descriptorBindingStorageImageUpdateAfterBind ||
                     !f12.shaderSampledImageArrayNonUniformIndexing || !f12.shaderStorageImageArrayNonUniformIndexing,
         "Vulkan backend requires buffer device addresses, descriptor indexing and scalar block layout");
-    if (has_rt_ && (!accel.accelerationStructure || !query.rayQuery)) {
-        has_rt_ = false;
-        f12.pNext = nullptr;
-        exts.clear();
+    supported_trace_features_ = resolve_vulkan_trace_support(trace_extensions, {
+        .acceleration_structure = accel.accelerationStructure != VK_FALSE,
+        .ray_query = query.rayQuery != VK_FALSE,
+        .ray_tracing_pipeline = rt_pipeline.rayTracingPipeline != VK_FALSE,
+        .primitive_culling = rt_pipeline.rayTraversalPrimitiveCulling != VK_FALSE,
+    });
+    init_trace_properties();
+
+    // Rebuild the chain with the optional features this backend uses.
+    vector<const char *> exts;
+    f12.pNext = nullptr;
+    if (native_float32_fma_enabled_) {
+        exts.push_back(VK_KHR_SHADER_FMA_EXTENSION_NAME);
+        shader_fma = {.sType = shader_fma.sType, .shaderFmaFloat32 = VK_TRUE};
+        prepend_feature(shader_fma);
+    }
+    if (supported_trace_features_.acceleration_structure) {
+        exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+        exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        accel = {.sType = accel.sType, .accelerationStructure = VK_TRUE};
+        prepend_feature(accel);
+    }
+    if (supported_trace_features_.ray_query) {
+        exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        query = {.sType = query.sType, .rayQuery = VK_TRUE};
+        prepend_feature(query);
+    }
+    if (supported_trace_features_.ray_tracing_pipeline) {
+        exts.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+        rt_pipeline = {
+            .sType = rt_pipeline.sType,
+            .rayTracingPipeline = VK_TRUE,
+            .rayTraversalPrimitiveCulling = supported_trace_features_.primitive_culling ? VK_TRUE : VK_FALSE,
+        };
+        prepend_feature(rt_pipeline);
     }
 
-    VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    // Append after the RT feature fallback, which clears the RT extensions.
+    if (portability_device) {
+        exts.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+        has_image_view_swizzle_ = portability.imageViewFormatSwizzle != VK_FALSE;
+        portability = {.sType = portability.sType, .imageViewFormatSwizzle = portability.imageViewFormatSwizzle};
+        prepend_feature(portability);
+    }
     if (has_pipeline_statistics_)
         exts.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 #ifdef _WIN32
     if (has_external_memory_) exts.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
 #endif
+    VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.pNext                   = &feats2;
     dci.queueCreateInfoCount    = 1u;
     dci.pQueueCreateInfos       = &qci;
@@ -206,6 +277,7 @@ void VulkanComputeDevice::init_logical_device() noexcept {
     dci.ppEnabledExtensionNames = exts.data();
     OC_VK_CHECK(vkCreateDevice(phys_device_, &dci, nullptr, &device_));
     vkGetDeviceQueue(device_, compute_queue_family_, 0u, &compute_queue_);
+    init_trace_functions();
     if (has_pipeline_statistics_) {
         get_pipeline_executable_properties_ = reinterpret_cast<PFN_vkGetPipelineExecutablePropertiesKHR>(
             vkGetDeviceProcAddr(device_, "vkGetPipelineExecutablePropertiesKHR"));
@@ -216,6 +288,57 @@ void VulkanComputeDevice::init_logical_device() noexcept {
             OC_WARNING("REBLUR_GPU_PIPELINE_STATS: executable statistics entry points are unavailable");
         }
     }
+}
+
+void VulkanComputeDevice::init_trace_properties() noexcept {
+    if (!supported_trace_features_.acceleration_structure) return;
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR as_props{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+    VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props.pNext = &as_props;
+    if (supported_trace_features_.ray_tracing_pipeline) as_props.pNext = &ray_tracing_pipeline_properties_;
+    vkGetPhysicalDeviceProperties2(phys_device_, &props);
+    scratch_alignment_ = as_props.minAccelerationStructureScratchOffsetAlignment;
+}
+
+namespace {
+
+template<typename Function>
+Function load_device_function(VkDevice device, const char *name) noexcept {
+    return reinterpret_cast<Function>(vkGetDeviceProcAddr(device, name));
+}
+
+}// namespace
+
+void VulkanComputeDevice::init_trace_functions() noexcept {
+    if (supported_trace_features_.acceleration_structure) {
+        acceleration_structure_functions_ = {
+            .create = load_device_function<PFN_vkCreateAccelerationStructureKHR>(device_, "vkCreateAccelerationStructureKHR"),
+            .destroy = load_device_function<PFN_vkDestroyAccelerationStructureKHR>(device_, "vkDestroyAccelerationStructureKHR"),
+            .get_build_sizes = load_device_function<PFN_vkGetAccelerationStructureBuildSizesKHR>(device_, "vkGetAccelerationStructureBuildSizesKHR"),
+            .get_device_address = load_device_function<PFN_vkGetAccelerationStructureDeviceAddressKHR>(device_, "vkGetAccelerationStructureDeviceAddressKHR"),
+            .cmd_build = load_device_function<PFN_vkCmdBuildAccelerationStructuresKHR>(device_, "vkCmdBuildAccelerationStructuresKHR"),
+            .cmd_write_properties = load_device_function<PFN_vkCmdWriteAccelerationStructuresPropertiesKHR>(device_, "vkCmdWriteAccelerationStructuresPropertiesKHR"),
+            .cmd_copy = load_device_function<PFN_vkCmdCopyAccelerationStructureKHR>(device_, "vkCmdCopyAccelerationStructureKHR"),
+        };
+        if (!acceleration_structure_functions_.complete())
+            OC_WARNING("Vulkan acceleration structure entry points are unavailable");
+    }
+    if (supported_trace_features_.ray_tracing_pipeline) {
+        ray_tracing_pipeline_functions_ = {
+            .create_ray_tracing_pipelines = load_device_function<PFN_vkCreateRayTracingPipelinesKHR>(device_, "vkCreateRayTracingPipelinesKHR"),
+            .get_ray_tracing_shader_group_handles = load_device_function<PFN_vkGetRayTracingShaderGroupHandlesKHR>(device_, "vkGetRayTracingShaderGroupHandlesKHR"),
+            .cmd_trace_rays = load_device_function<PFN_vkCmdTraceRaysKHR>(device_, "vkCmdTraceRaysKHR"),
+        };
+        if (!ray_tracing_pipeline_functions_.complete())
+            OC_WARNING("Vulkan ray tracing pipeline entry points are unavailable");
+    }
+    enabled_trace_features_ = resolve_vulkan_trace_execution(supported_trace_features_, {
+        .acceleration_structure = acceleration_structure_functions_.complete(),
+        .ray_tracing_pipeline = ray_tracing_pipeline_functions_.complete(),
+    });
+    OC_INFO_FORMAT("Vulkan enabled tracing capabilities: acceleration structures={}, ray query={}, ray tracing pipeline={}, primitive culling={}",
+        has_acceleration_structure(), has_ray_query(), has_ray_tracing_pipeline(), has_primitive_culling());
 }
 
 void VulkanComputeDevice::report_pipeline_statistics(VkPipeline pipeline, const string &description) noexcept {
@@ -330,7 +453,8 @@ void VulkanComputeDevice::init_descriptor_pool() noexcept {
     parameter_binding.binding = 0u;
     parameter_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     parameter_binding.descriptorCount = 1u;
-    parameter_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    parameter_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT |
+                                   (has_ray_tracing_pipeline() ? VK_SHADER_STAGE_RAYGEN_BIT_KHR : 0u);
     VkDescriptorSetLayoutCreateInfo parameter_layout{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     parameter_layout.bindingCount = 1u;
     parameter_layout.pBindings = &parameter_binding;
@@ -482,7 +606,7 @@ VkBufferAllocation VulkanComputeDevice::allocate_buffer(size_t size,
     VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bci.size        = size > 0 ? size : 4;
     bci.usage       = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    if (has_rt_ && !exported) bci.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    if (has_acceleration_structure() && !exported) bci.usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     VkExternalMemoryBufferCreateInfo external{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
     VkExportMemoryAllocateInfo export_memory{VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO};
@@ -591,8 +715,10 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
     // DSL fills every absent sampled channel with zero, including alpha.
     // Apply this only to the sampled view: storage views require identity.
     if (fmt == VK_FORMAT_R8_UNORM || fmt == VK_FORMAT_R8G8_UNORM || fmt == VK_FORMAT_R16_SFLOAT ||
-        fmt == VK_FORMAT_R32_SFLOAT || fmt == VK_FORMAT_R32G32_SFLOAT)
+        fmt == VK_FORMAT_R32_SFLOAT || fmt == VK_FORMAT_R32G32_SFLOAT) {
+        OC_ERROR_IF(!has_image_view_swizzle_, "Sampled texture format requires imageViewFormatSwizzle on this portability device");
         vci.components.a = VK_COMPONENT_SWIZZLE_ZERO;
+    }
     vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
     OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.view));
     immediate_submit([&](VkCommandBuffer cb) {
@@ -606,10 +732,12 @@ VkImageAllocation VulkanComputeDevice::allocate_image(uint3 extent, VkFormat fmt
         vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
     });
-    // Storage image descriptors address only the base mip.
-    vci.components = {};
-    vci.subresourceRange.levelCount = 1;
-    OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.storage_view));
+    if (usage & VK_IMAGE_USAGE_STORAGE_BIT) {
+        // Storage image descriptors address only the base mip.
+        vci.components = {};
+        vci.subresourceRange.levelCount = 1;
+        OC_VK_CHECK(vkCreateImageView(device_, &vci, nullptr, &result.storage_view));
+    }
     {
         auto g = buffer_map_guard_.lock();
         image_map_[reinterpret_cast<handle_ty>(result.image)] = result;
@@ -652,15 +780,16 @@ void VulkanComputeDevice::immediate_submit(std::function<void(VkCommandBuffer)> 
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     OC_VK_CHECK(vkBeginCommandBuffer(cb, &bi));
     VkMemoryBarrier memory_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-    memory_barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    memory_barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT;
     memory_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-    auto barrier = [&] {
-        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-            0, 1, &memory_barrier, 0, nullptr, 0, nullptr);
-    };
-    barrier();
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memory_barrier, 0, nullptr, 0, nullptr);
     fn(cb);
-    barrier();
+    memory_barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    memory_barrier.dstAccessMask |= VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                         0, 1, &memory_barrier, 0, nullptr, 0, nullptr);
     OC_VK_CHECK(vkEndCommandBuffer(cb));
     VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkFence fence = VK_NULL_HANDLE;
@@ -782,10 +911,62 @@ uint3 VulkanComputeDevice::workgroup_size(const Function &function) const noexce
 }
 
 handle_ty VulkanComputeDevice::create_shader(const Function &function) noexcept {
-    uint3 wg = workgroup_size(function);
-    auto spirv = compiler_->compile(function, wg);
-    if (spirv.empty()) return InvalidUI64;
-    auto *shader = VkShaderFactory::create(this, spirv, function);
+    return create_shader(function, {}, function.description());
+}
+
+handle_ty VulkanComputeDevice::create_shader(const Function &function, ShaderCompileOptions options) noexcept {
+    return create_shader(function, options, function.description());
+}
+
+handle_ty VulkanComputeDevice::create_shader(const Function &function, ShaderCompileOptions options,
+                                            const string &description) noexcept {
+    switch (options.float32_fma_mode) {
+        case Float32FmaMode::Auto:
+        case Float32FmaMode::Software: break;
+        case Float32FmaMode::Native:
+            if (!supports_native_float32_fma())
+                OC_ERROR_FORMAT("Native FP32 FMA unavailable for Vulkan shader '{}'. "
+                                "It requires VK_KHR_shader_fma, shaderFmaFloat32, and FP32 round-to-nearest-even",
+                                description);
+            break;
+        default:
+            OC_ERROR_FORMAT("Invalid FP32 FMA mode for Vulkan shader '{}'", description);
+    }
+    const auto requirements = analyze_function_requirements(function);
+    if (requirements.uses_subgroup) {
+        VkSubgroupFeatureFlags required = VK_SUBGROUP_FEATURE_BASIC_BIT;
+        if (requirements.uses_subgroup_arithmetic) required |= VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+        if (requirements.uses_subgroup_ballot) required |= VK_SUBGROUP_FEATURE_BALLOT_BIT;
+        if ((compute_subgroup_operations_ & required) != required)
+            OC_ERROR_FORMAT("Vulkan shader '{}' requires compute subgroup features {:#x}, device supports {:#x}",
+                            description, required, compute_subgroup_operations_);
+    }
+    const auto selected = select_trace_mode(options.trace_mode, trace_capabilities(), requirements.uses_trace,
+                                            native_trace_compatible(requirements));
+    using Error = TraceModeSelectionError;
+    switch (selected.error) {
+        case Error::None: break;
+        case Error::InvalidMode: OC_ERROR_FORMAT("Invalid trace mode for Vulkan shader '{}'", description); break;
+        case Error::NoSupportedPath: OC_ERROR_FORMAT("No supported Vulkan trace path for shader '{}'", description); break;
+        case Error::RayQueryUnavailable: OC_ERROR_FORMAT("RayQuery unavailable for Vulkan shader '{}'", description); break;
+        case Error::PipelineUnavailable: OC_ERROR_FORMAT("RayTracingPipeline unavailable for Vulkan shader '{}'", description); break;
+        case Error::NativeIncompatible: {
+            string reasons;
+            for (const auto &source : requirements.diagnostic_sources) {
+                if (!reasons.empty()) reasons += ", ";
+                reasons += source;
+            }
+            OC_ERROR_FORMAT("RayTracingPipeline incompatible with Vulkan shader '{}': {}", description, reasons);
+            break;
+        }
+    }
+    if (selected.error != Error::None) return InvalidUI64;
+    const ShaderCompilationContext context{options, selected.execution_mode, description};
+    const uint3 wg = selected.execution_mode == ShaderExecutionMode::RayTracingPipeline ?
+                         make_uint3(1u) : workgroup_size(function);
+    const auto program = compiler_->compile_program(function, wg, context);
+    if (program.modules.empty()) return InvalidUI64;
+    auto *shader = VkShaderFactory::create(this, program, function, description, wg);
     return reinterpret_cast<handle_ty>(shader);
 }
 
@@ -795,7 +976,7 @@ void VulkanComputeDevice::destroy_shader(handle_ty handle) noexcept {
 }
 
 handle_ty VulkanComputeDevice::create_accel(AccelUsageTag usage_tag) noexcept {
-    OC_ERROR_IF(!has_rt_, "Vulkan device does not support ray queries");
+    OC_ERROR_IF(!has_acceleration_structure(), "Vulkan acceleration structures are unavailable");
     auto *accel = new VkAccel(this, usage_tag);
     return reinterpret_cast<handle_ty>(accel);
 }

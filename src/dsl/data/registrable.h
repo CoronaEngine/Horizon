@@ -360,7 +360,8 @@ public:
     requires is_integral_expr_v<Offset>
     OC_NODISCARD auto byte_read(Offset &&offset) const noexcept {
         OC_ASSERT(has_registered());
-        return bindless_array_->byte_buffer_var(index_var()).template read<Target>(OC_FORWARD(offset));
+        Var<expr_value_t<Offset>> byte_offset = OC_FORWARD(offset);
+        return bindless_array_->byte_buffer_var(index_var()).template load_as<Target>(byte_offset);
     }
 
     template<typename Elm, typename Offset>

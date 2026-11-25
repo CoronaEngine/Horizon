@@ -1,4 +1,5 @@
 #include "tests/backend_test.h"
+#include "tests/codegen/slang_diagnostic_source.h"
 #include "dsl/dsl.h"
 #include "rhi/context.h"
 
@@ -19,8 +20,9 @@ void require(bool condition, const char *message) {
 }// namespace
 
 int main() {
+    test::SlangDiagnosticSource diagnostic{"shared-array"};
     auto device = create_test_device();
-    constexpr uint width = 32u, height = 8u, lanes = 128u;
+    static constexpr uint width = 32u, height = 8u, lanes = 128u;
     auto values = device.create_buffer<float4>(width * height);
     auto identities = device.create_buffer<uint4>(width * height);
     Kernel kernel = [](BufferVar<float4> out_values, BufferVar<uint4> out_identities) {
@@ -42,7 +44,7 @@ int main() {
         require(var.tag() == Variable::Tag::SHARED, "allocation has per-thread storage class");
     }
     auto shader = device.compile(kernel, "shared-array-neighbor-exchange");
-    const auto source = RHIContext::instance().read_global_cache(kernel.function()->func_name() + ".slang");
+    const auto source = diagnostic.compute_main();
     const auto main = source.find("void main");
     require(main != string::npos, "generated entry point missing");
     for (const auto &var : kernel.function()->shared_vars()) {

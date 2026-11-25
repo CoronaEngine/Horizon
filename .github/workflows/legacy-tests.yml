@@ -1,0 +1,77 @@
+name: Legacy Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Linux Legacy CPU and Vulkan Tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      HORIZON_DEV_BOOTSTRAP_ACTIVE: "1"
+      HORIZON_CONAN_EXPORT_LOCAL_RECIPES: "true"
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libx11-xcb-dev libfontenc-dev libice-dev libsm-dev libxau-dev libxaw7-dev \
+            libxcomposite-dev libxcursor-dev libxdamage-dev libxdmcp-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbfile-dev libxmu-dev libxmuu-dev libxpm-dev libxrandr-dev \
+            libxrender-dev libxres-dev libxss-dev libxt-dev libxtst-dev libxv-dev libxxf86vm-dev \
+            libxcb-glx0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-xkb-dev \
+            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev \
+            libxcb-shape0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxcb-dri3-dev libxcb-cursor-dev libxcb-dri2-0-dev libxcb-present-dev \
+            libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-util-dev uuid-dev libgl-dev \
+            mesa-vulkan-drivers
+
+      - name: Install build tools
+        run: python -m pip install "conan>=2.28,<3" "cmake>=4.0" ninja
+
+      - name: Prefer pip build tools
+        shell: python
+        run: |
+          import os
+          import sysconfig
+
+          with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as output:
+              output.write(sysconfig.get_path("scripts") + "\n")
+
+      - name: Build Legacy tests
+        run: python build_tools/dev.py build horizon-test-legacy --configuration Release --target-family engine
+
+      - name: Run Legacy CPU and Vulkan tests with Lavapipe
+        shell: bash
+        run: |
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          test -f "${icds[0]}"
+          export VK_DRIVER_FILES="${icds[0]}"
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP"
+          ctest --test-dir build/conan/engine/release -C Release -L '^legacy$' \
+            --no-tests=error --verbose --output-junit "$RUNNER_TEMP/legacy-tests.xml"
+          python - "$RUNNER_TEMP/legacy-tests.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          cases = ET.parse(sys.argv[1]).findall(".//testcase")
+          passed = {case.attrib["name"] for case in cases if case.get("status") == "run"
+                    and case.find("failure") is None and case.find("skipped") is None}
+          missing = {"horizon-test-legacy", "horizon.legacy.gpu"} - passed
+          if missing:
+              raise SystemExit("Legacy checks did not pass: " + ", ".join(sorted(missing)))
+          PY

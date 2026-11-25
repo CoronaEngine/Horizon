@@ -27,10 +27,15 @@ constexpr uint arithmetic_steps = 64u;
 
 struct Options {
     bool quick{false};
+    bool ci{false};
     bool raytracing{true};
-    uint rounds() const { return quick ? 5u : 7u; }
-    uint warmups() const { return quick ? 8u : 32u; }
-    uint memory_elements() const { return quick ? 1u << 20u : 1u << 22u; }
+    uint rounds() const { return ci ? 2u : quick ? 5u : 7u; }
+    uint warmups() const { return ci ? 1u : quick ? 8u : 32u; }
+    uint memory_elements() const { return ci ? 1u << 10u : quick ? 1u << 20u : 1u << 22u; }
+    uint ray_elements() const { return ci ? 256u : quick ? 1u << 16u : 1u << 18u; }
+    uint iterations(uint quick_count, uint full_count) const {
+        return ci ? 1u : quick ? quick_count : full_count;
+    }
 };
 
 struct Samples {
@@ -185,7 +190,7 @@ void benchmark_launch(Device &device, Stream &stream, const Options &options,
     stream << output.view(0u, 1u).download(&first);
     finish(stream);
     require(first == 37u, "single dispatch output");
-    auto single_samples = measure(stream, options, options.quick ? 32u : 128u, 1u, 1u, single);
+    auto single_samples = measure(stream, options, options.iterations(32u, 128u), 1u, 1u, single);
     stream << output.view(0u, 1u).download(&first);
     finish(stream);
     require(first == 37u, "single dispatch output after measurement");
@@ -195,7 +200,7 @@ void benchmark_launch(Device &device, Stream &stream, const Options &options,
         for (uint i = 0; i < batch_size; ++i)
             stream << shader(output, i, 101u + i).dispatch(1u);
     };
-    auto batch_samples = measure(stream, options, options.quick ? 4u : 16u,
+    auto batch_samples = measure(stream, options, options.iterations(4u, 16u),
                                  batch_size, 1u, batched);
     std::vector<uint> host(batch_size);
     stream << output.download(host.data());
@@ -204,12 +209,12 @@ void benchmark_launch(Device &device, Stream &stream, const Options &options,
         require(host[i] == 101u + i, "batched dispatch argument lifetime or ordering");
     report(backend, codegen, "dispatch_batch64", "us_per_dispatch", batch_samples);
 
-    auto single_phases = measure_phases(stream, options, options.quick ? 32u : 128u, 1u, 1u, single);
+    auto single_phases = measure_phases(stream, options, options.iterations(32u, 128u), 1u, 1u, single);
     stream << output.view(0u, 1u).download(&first);
     finish(stream);
     require(first == 37u, "single phase-measurement dispatch output");
     report_phases(backend, codegen, "dispatch_single_phases", single_phases);
-    auto batch_phases = measure_phases(stream, options, options.quick ? 4u : 16u,
+    auto batch_phases = measure_phases(stream, options, options.iterations(4u, 16u),
                                        batch_size, 1u, batched);
     stream << output.download(host.data());
     finish(stream);
@@ -237,7 +242,7 @@ void benchmark_buffers(Device &device, Stream &stream, const Options &options,
     };
     configure(memory_kernel, count);
     auto memory_shader = device.compile(memory_kernel, "backend-performance-buffer-triad");
-    auto memory_samples = measure(stream, options, options.quick ? 4u : 16u, 1u, count, [&] {
+    auto memory_samples = measure(stream, options, options.iterations(4u, 16u), 1u, count, [&] {
         stream << memory_shader(a, b, output).dispatch(count);
     });
     stream << output.download(host.data());
@@ -249,7 +254,7 @@ void benchmark_buffers(Device &device, Stream &stream, const Options &options,
     // This is completed-work effective throughput, not a DRAM counter.
     report(backend, codegen, "buffer_triad", "GB_per_s", memory_samples, double(count) * 12.0 / 1000.0);
 
-    auto memory_batch = measure_phases(stream, options, options.quick ? 2u : 4u,
+    auto memory_batch = measure_phases(stream, options, options.iterations(2u, 4u),
                                        batch_size, count, [&] {
         for (uint i = 0; i < batch_size; ++i)
             stream << memory_shader(a, b, output).dispatch(count);
@@ -274,7 +279,7 @@ void benchmark_buffers(Device &device, Stream &stream, const Options &options,
     };
     configure(arithmetic_kernel, arithmetic_count);
     auto arithmetic_shader = device.compile(arithmetic_kernel, "backend-performance-arithmetic");
-    auto arithmetic_samples = measure(stream, options, options.quick ? 4u : 16u, 1u,
+    auto arithmetic_samples = measure(stream, options, options.iterations(4u, 16u), 1u,
                                       arithmetic_count, [&] {
         stream << arithmetic_shader(a, b, output).dispatch(arithmetic_count);
     });
@@ -295,7 +300,7 @@ void benchmark_buffers(Device &device, Stream &stream, const Options &options,
     report(backend, codegen, "arithmetic64", "nominal_GFLOP_per_s", arithmetic_samples,
            double(arithmetic_count) * double(arithmetic_steps * 2u) / 1000.0);
 
-    auto arithmetic_batch = measure_phases(stream, options, options.quick ? 2u : 4u,
+    auto arithmetic_batch = measure_phases(stream, options, options.iterations(2u, 4u),
                                            batch_size, arithmetic_count, [&] {
         for (uint i = 0; i < batch_size; ++i)
             stream << arithmetic_shader(a, b, output).dispatch(arithmetic_count);
@@ -312,7 +317,7 @@ void benchmark_buffers(Device &device, Stream &stream, const Options &options,
 
 void benchmark_rays(Device &device, Stream &stream, const Options &options,
                     const char *backend, const char *codegen) {
-    const uint count = options.quick ? 1u << 16u : 1u << 18u;
+    const uint count = options.ray_elements();
     array<float3, 3> vertices{make_float3(-1.f, -1.f, 0.f), make_float3(1.f, -1.f, 0.f),
                               make_float3(0.f, 1.f, 0.f)};
     array<Triangle, 1> triangles{Triangle(0u, 1u, 2u)};
@@ -338,7 +343,7 @@ void benchmark_rays(Device &device, Stream &stream, const Options &options,
     };
     kernel.function()->configure(make_uint3(count / block_size, 1u, 1u), make_uint3(block_size, 1u, 1u));
     auto shader = device.compile(kernel, "backend-performance-rays");
-    auto samples = measure(stream, options, options.quick ? 4u : 16u, 1u, count, [&] {
+    auto samples = measure(stream, options, options.iterations(4u, 16u), 1u, count, [&] {
         stream << shader(output).dispatch(count);
     });
     std::vector<uint> host(count);
@@ -349,7 +354,7 @@ void benchmark_rays(Device &device, Stream &stream, const Options &options,
     report(backend, codegen, "trace_closest_1triangle_half_hit", "us_per_dispatch", samples);
     report(backend, codegen, "trace_closest_1triangle_half_hit", "Mray_per_s", samples, double(count));
 
-    auto batch = measure_phases(stream, options, options.quick ? 2u : 4u,
+    auto batch = measure_phases(stream, options, options.iterations(2u, 4u),
                                 batch_size, count, [&] {
         for (uint i = 0; i < batch_size; ++i)
             stream << shader(output).dispatch(count);
@@ -366,19 +371,30 @@ void benchmark_rays(Device &device, Stream &stream, const Options &options,
 
 int main(int argc, char *argv[]) {
     Options options;
+    bool raytracing_only = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
         if (arg == "--quick") options.quick = true;
+        else if (arg == "--ci") options.ci = true;
         else if (arg == "--no-raytracing") options.raytracing = false;
+        else if (arg == "--raytracing-only") raytracing_only = true;
         else {
-            std::cerr << "Usage: test-runtime-backend-performance [--quick] [--no-raytracing]\n";
+            std::cerr << "Usage: test-runtime-backend-performance [--quick] [--ci] "
+                         "[--no-raytracing | --raytracing-only]\n";
             return EXIT_FAILURE;
         }
     }
+    require(!raytracing_only || options.raytracing, "--no-raytracing and --raytracing-only are mutually exclusive");
     const char *backend = test_backend_name();
     constexpr const char *codegen = "ast";
     auto &context = RHIContext::instance();
     auto device = context.create_device();
+    if (options.raytracing && !device.supports_raytracing()) {
+        require(!options.ci || raytracing_only, "--ci requires ray tracing unless --no-raytracing was explicitly selected");
+        std::cerr << "SKIPPED raytracing benchmark: device does not support ray tracing" << std::endl;
+        if (raytracing_only) return 77;
+        options.raytracing = false;
+    }
     if (options.raytracing) device.init_rtx();
     auto stream = device.create_stream();
     log_flush();
@@ -386,11 +402,14 @@ int main(int argc, char *argv[]) {
     metadata << "PERF_METADATA,timer=steady_clock,boundary=enqueue_submit_completion,compile_and_upload=excluded"
              << ",statistic=round_mean,percentile=linear_interpolation,block_size=" << block_size
              << ",phase_wait=host_completion_wait_not_gpu_timestamp,batch_reuses_resident_buffers=1"
-             << ",warmups=" << options.warmups() << ",quick=" << options.quick << '\n';
+             << ",warmups=" << options.warmups() << ",quick=" << options.quick << ",ci=" << options.ci
+             << ",raytracing=" << options.raytracing << '\n';
     write_record(metadata.str());
     write_record("PERF_HEADER,backend,codegen,workload,unit,median,p95,rounds,iterations,batch,elements\n");
-    benchmark_launch(device, stream, options, backend, codegen);
-    benchmark_buffers(device, stream, options, backend, codegen);
+    if (!raytracing_only) {
+        benchmark_launch(device, stream, options, backend, codegen);
+        benchmark_buffers(device, stream, options, backend, codegen);
+    }
     if (options.raytracing) benchmark_rays(device, stream, options, backend, codegen);
     std::ostringstream verified;
     verified << "PERF_VERIFIED," << backend << ',' << codegen << '\n';

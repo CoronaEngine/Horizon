@@ -6,6 +6,11 @@ include(horizon_options)
 include(horizon_compile_config)
 include(horizon_dependencies)
 
+# IDEs may discover the OS Python before the bootstrapped developer Python.
+if(HORIZON_DEV_PYTHON AND NOT DEFINED Python_EXECUTABLE)
+    set(Python_EXECUTABLE "${HORIZON_DEV_PYTHON}")
+endif()
+
 include(horizon_core_dependencies)
 include(horizon_image_dependencies)
 
@@ -19,6 +24,7 @@ if(HORIZON_BUILD_ENGINE)
 endif()
 
 add_subdirectory(src)
+add_subdirectory(src/hotfix)
 
 if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
     add_subdirectory(tools)
@@ -49,20 +55,3 @@ if (MSVC)
 endif()
 
 include(horizon_ocarina)
-
-if(HORIZON_BUILD_VISION_HOTFIX)
-    if(NOT WIN32)
-        message(FATAL_ERROR "Legacy Vision hotfix plugins require Windows. Use horizon-hotfix with a CMake build backend on POSIX.")
-    endif()
-    if(NOT TARGET ocarina OR NOT TARGET ocarina-include)
-        message(FATAL_ERROR "HORIZON_BUILD_VISION_HOTFIX requires HORIZON_BUILD_OCARINA=ON and available ocarina targets")
-    endif()
-    target_include_directories(ocarina-include INTERFACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src")
-endif()
-
-add_subdirectory(src/hotfix)
-
-if(HORIZON_BUILD_VISION_HOTFIX)
-    target_link_libraries(ocarina-include INTERFACE horizon-hotfix)
-endif()

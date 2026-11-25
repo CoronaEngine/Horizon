@@ -218,7 +218,7 @@ void test_matrix_algebra(Device &device) {
 void test_small_parameter_snapshot(Device &device) {
     ScopedParameterValidationDisabled validation_scope;
     constexpr uint dispatches = 3u;
-    constexpr uint rows = 5u;
+    static constexpr uint rows = 5u;
     auto output = device.create_buffer<uint4>(dispatches * rows);
     // The explicit arguments occupy 64 bytes, followed by the 24-byte captured
     // buffer descriptor. Narrow values share words; float3 retains host padding.
@@ -268,7 +268,7 @@ void test_small_parameter_snapshot(Device &device) {
 void test_parameter_inline_boundary(Device &device) {
     ScopedParameterValidationDisabled validation_scope;
     constexpr uint dispatches = 3u;
-    constexpr uint rows = 5u;
+    static constexpr uint rows = 5u;
     // Buffer: [0,24), matrix: [32,80), float3: [80,96), three
     // scalars: [96,108). The trailing dispatch slot is not an argument.
     static_assert(mem_offset(sizeof(BufferDesc<float4>), alignof(float3x3)) +
@@ -312,7 +312,7 @@ void test_parameter_inline_boundary(Device &device) {
 void test_large_parameter_snapshot(Device &device) {
     ScopedParameterValidationDisabled validation_scope;
     constexpr uint dispatches = 3u;
-    constexpr uint rows = 11u;
+    static constexpr uint rows = 11u;
     static_assert(sizeof(LargeParameterRecord) > 108u);
     auto output = device.create_buffer<float4>(dispatches * rows);
     Kernel kernel = [](Var<LargeParameterRecord> record, Uint row, BufferVar<float4> out) {

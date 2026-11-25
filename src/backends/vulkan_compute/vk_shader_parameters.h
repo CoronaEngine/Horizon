@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/function.h"
+#include "core/util/util.h"
 #include "vk_readonly_parameter_leaves.h"
 #include "vk_compute_device.h"
 
@@ -24,7 +25,10 @@ struct VkShaderParameterLayout {
     size_t extent{};
     uint32_t uniform_bytes{};
 
-    explicit VkShaderParameterLayout(const Function &function) noexcept {
+    explicit VkShaderParameterLayout(const Function &function) noexcept
+        : VkShaderParameterLayout(function, function.description()) {}
+
+    VkShaderParameterLayout(const Function &function, string_view name) noexcept {
         auto append = [&](const Variable &arg) {
             extent = mem_offset(extent, VulkanComputeDevice::alignment(arg.type()));
             extent += VulkanComputeDevice::size(arg.type());
@@ -33,7 +37,6 @@ struct VkShaderParameterLayout {
         function.for_each_captured_resource([&](const CapturedResource &resource) {
             append(resource.expression()->variable());
         });
-        const auto &name = function.description();
         const bool nrd = name.find("NRD-EDSL-REBLUR-") == 0u || name == "REBLUR-EDSL-HistoryFix";
         if (!is_inline() && nrd && !function.arguments().empty()) {
             const Variable &constants = function.arguments().front();

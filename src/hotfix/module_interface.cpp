@@ -51,10 +51,6 @@ vector<const IObjectConstructor *> ModuleInterface::constructors() const noexcep
     return ret;
 }
 
-string_view ModuleInterface::src_path() noexcept {
-    return __FILE__;
-}
-
 ModuleInterface::~ModuleInterface() {
     std::cout << "ModuleInterface  exit" << std::endl;
 }

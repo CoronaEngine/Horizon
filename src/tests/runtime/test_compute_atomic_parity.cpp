@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string_view>
 #include <type_traits>
 
 using namespace ocarina;
@@ -33,10 +34,10 @@ T initial_value(uint i) {
 // methods and the free functions taking a resource reference are exercised.
 template<typename T>
 void test_atomic_views(Device &device, const char *type_name) {
-    constexpr uint count = 37u;
+    static constexpr uint count = 37u;
     constexpr uint padding = 2u;
     constexpr bool integral = !std::is_floating_point_v<T>;
-    constexpr uint rows = integral ? 8u : 6u;
+    static constexpr uint rows = integral ? 8u : 6u;
     constexpr T sentinel = T(777);
     auto typed = device.create_buffer<T>(count + 2u * padding);
     auto bytes = device.create_byte_buffer((count + 2u * padding) * sizeof(T));
@@ -117,7 +118,7 @@ void test_atomic_views(Device &device, const char *type_name) {
 // Sorting old values checks atomicity without relying on invocation scheduling.
 template<typename T>
 void test_contended_add(Device &device, const char *type_name) {
-    constexpr uint count = 513u;
+    static constexpr uint count = 513u;
     T start = initial_value<T>(0u);
     T increment = std::is_floating_point_v<T> ? T(0.5f) : T(1);
     auto counter = device.create_buffer<T>(3u);
@@ -167,7 +168,7 @@ void test_contended_add(Device &device, const char *type_name) {
 
 template<typename T>
 void test_contended_cas(Device &device, const char *type_name) {
-    constexpr uint count = 257u;
+    static constexpr uint count = 257u;
     auto counter = device.create_buffer<T>(1u);
     auto returns = device.create_buffer<T>(count);
     Kernel kernel = [](BufferVar<T> counter, BufferVar<T> out, Var<T> compare) {
@@ -190,11 +191,11 @@ void test_contended_cas(Device &device, const char *type_name) {
 }
 
 void test_bindless_byte_atomics(Device &device) {
-    constexpr uint count = 19u;
+    static constexpr uint count = 19u;
     constexpr uint view_prefix = 3u;
-    constexpr uint element_prefix = 2u;
+    static constexpr uint element_prefix = 2u;
     constexpr uint suffix = 4u;
-    constexpr uint total = view_prefix + element_prefix + count + suffix;
+    static constexpr uint total = view_prefix + element_prefix + count + suffix;
     constexpr uint sentinel = 0x13579bdfu;
     constexpr uint dummy_sentinel = 0x2468ace0u;
     auto dummy = device.create_byte_buffer(total * sizeof(uint), "atomic-bindless-dummy");
@@ -280,25 +281,51 @@ void test_wide_literal_diagnostic(Device &device) {
     std::cout << "wide literal subtraction diagnostic passed" << std::endl;
 }
 
-}// namespace
-
-int main() {
-    auto device = create_test_device();
-    const char *wide_literal = std::getenv("OCARINA_TEST_ATOMIC_WIDE_LITERAL");
-    if (wide_literal && std::strcmp(wide_literal, "1") == 0) {
-        test_wide_literal_diagnostic(device);
-        return 0;
-    }
+void test_compute_atomics(Device &device) {
     test_atomic_views<int>(device, "int");
     test_atomic_views<uint>(device, "uint");
-    test_atomic_views<ulong>(device, "ulong");
     test_atomic_views<float>(device, "float");
     test_contended_add<uint>(device, "uint");
-    test_contended_add<ulong>(device, "ulong");
     test_contended_add<float>(device, "float");
     test_contended_cas<uint>(device, "uint");
-    test_contended_cas<ulong>(device, "ulong");
     test_bindless_byte_atomics(device);
+}
+
+void test_int64_atomics(Device &device) {
+    test_atomic_views<ulong>(device, "ulong");
+    test_contended_add<ulong>(device, "ulong");
+    test_contended_cas<ulong>(device, "ulong");
     test_wide_literal_diagnostic(device);
+}
+
+}// namespace
+
+int main(int argc, char **argv) {
+    const bool named_case = argc == 3 && std::string_view(argv[1]) == "--case";
+    const std::string_view test_case = named_case ? argv[2] : "";
+    if (argc != 1 && test_case != "compute" && test_case != "int64") {
+        std::cerr << "usage: test-compute-atomic-parity [--case compute|int64]" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    auto device = create_test_device();
+    if (test_case == "int64") {
+        if (skip_without_feature(device.supports_int64_atomics(), "64-bit buffer atomics")) return 77;
+        test_int64_atomics(device);
+        std::cout << "64-bit buffer atomic parity checks passed" << std::endl;
+        return EXIT_SUCCESS;
+    }
+
+    bool int64_atomics = false;
+    if (!named_case) {
+        int64_atomics = !skip_without_feature(device.supports_int64_atomics(), "64-bit buffer atomics");
+        const char *wide_literal = std::getenv("OCARINA_TEST_ATOMIC_WIDE_LITERAL");
+        if (wide_literal && std::strcmp(wide_literal, "1") == 0) {
+            if (int64_atomics) test_wide_literal_diagnostic(device);
+            return EXIT_SUCCESS;
+        }
+    }
+    test_compute_atomics(device);
+    if (int64_atomics) test_int64_atomics(device);
     std::cout << "compute atomic parity checks passed" << std::endl;
 }

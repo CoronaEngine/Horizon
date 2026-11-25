@@ -56,29 +56,6 @@ void HotfixSystem::execute_callback() {
     }
 }
 
-void HotfixSystem::load_module(vision::Target target) noexcept {
-    ModuleInterface *module_interface = target.module_interface();
-    if (!module_interface) {
-        CFW_LOG_WARNING("Hotfix module {} could not be loaded", target.name);
-        return;
-    }
-    const auto constructors = target.module_path.empty()
-                                  ? module_interface->constructors(target.modified_files)
-                                  : module_interface->constructors();
-    update_objects(constructors);
-}
-
-void HotfixSystem::on_build_finish(bool success, const Target &target) noexcept {
-
-    if (!success) {
-        CFW_LOG_INFO("module {} build failure!", target.name);
-        return;
-    }
-    CFW_LOG_INFO("module {} build success!", target.name);
-
-    load_module(target);
-}
-
 void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
     Version version;
     for (const auto &module : modules) {
@@ -87,10 +64,8 @@ void HotfixSystem::on_build_all_finish(const vector<Target> &modules) noexcept {
             CFW_LOG_WARNING("Hotfix module {} could not be loaded", module.name);
             return;
         }
-        const auto constructors = module.module_path.empty()
-                                      ? module_interface->constructors(module.modified_files)
-                                      : module_interface->constructors();
-        if (!module.module_path.empty() && constructors.empty()) {
+        const auto constructors = module_interface->constructors();
+        if (constructors.empty()) {
             CFW_LOG_WARNING("Hotfix module {} has no object constructors", module.name);
             return;
         }

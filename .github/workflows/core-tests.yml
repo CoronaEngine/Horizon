@@ -78,3 +78,13 @@ jobs:
       - name: Run the Horizon tests supported on hosted Windows
         if: runner.os == 'Windows'
         run: ctest --preset examples-relwithdebinfo -LE gpu
+
+      - name: Build Release allocator CRT regression
+        run: >-
+          python build_tools/dev.py build horizon-test-core-allocator-crt
+          --configuration Release --target-family core
+
+      - name: Run Release allocator CRT regression
+        run: >-
+          ctest --test-dir build/conan/core/release -C Release
+          -R '^horizon\.core\.allocator_crt$' --no-tests=error --output-on-failure

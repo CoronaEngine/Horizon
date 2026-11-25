@@ -7,7 +7,7 @@ from conan.tools.files import copy, get
 
 class SlangConan(ConanFile):
     name = "slang"
-    version = "2026.10"
+    version = "2026.11"
     package_type = "shared-library"
     license = "Apache-2.0 WITH LLVM-exception"
     homepage = "https://github.com/shader-slang/slang"
@@ -17,19 +17,27 @@ class SlangConan(ConanFile):
     _assets = {
         ("Windows", "x86_64"): (
             "windows-x86_64",
-            "4d681fd6c40a028939d4907d714fb633a16895bd7ae8b8ef288401b805c17aa4",
+            "e070e239290108dd7a83094cf72fb94ae753b2d5331adba76874bf17dd5c8b6a",
         ),
         ("Windows", "armv8"): (
             "windows-aarch64",
-            "54b88155e5d94ddf63ef5013a59a8a49f35a7b415048fc57078d9eecdf2ccc7d",
+            "8380746b38cff5c727f7ff6a73a9d9608eee7230a886540244b977af3596d8ec",
         ),
         ("Macos", "x86_64"): (
             "macos-x86_64",
-            "3195d5811f64ab0b95b9c27da36ac3f3f4f49429225ce5c4ffa14ab5962882ce",
+            "764ae0e20714930db2e319f7e6339b233d4a7d668dc9bfa2f37772838d6ecaaa",
         ),
         ("Macos", "armv8"): (
             "macos-aarch64",
-            "70c63b66448d1d4d3ae770f3cdacdb00674e0f81ee44b52bd0dde6f2f49273db",
+            "595f06cb9c1c306609cd61d9ced20dc75d56c0153d7c1bf1e509834edf133c75",
+        ),
+        ("Linux", "x86_64"): (
+            "linux-x86_64",
+            "d83ef21fc08d2c035ed15b5ce7541f27de8ec8d1db42b27c72bdc1567e5c4b37",
+        ),
+        ("Linux", "armv8"): (
+            "linux-aarch64",
+            "d59c474d0f63c670b2e4a8134d7a95c12a35ea62cbe74e2d00afa71f8134c7d0",
         ),
     }
 
@@ -39,7 +47,8 @@ class SlangConan(ConanFile):
     def validate(self):
         if not self._asset():
             raise ConanInvalidConfiguration(
-                f"slang/{self.version} binary SDK is only configured for Windows/Macos x86_64 and armv8"
+                f"slang/{self.version} binary SDK is not configured for "
+                f"{self.settings.os}/{self.settings.arch}"
             )
 
     def _repair_package(self):

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <type_traits>
 
 using namespace ocarina;
 
@@ -65,7 +66,7 @@ void test_float_special_values(Device &device) {
         make_float4(infinity, -2.f, 2.f, nan),
         make_float4(-infinity, 2.f, -2.f, nan),
         make_float4(-1.75f, 0.625f, 1.75f, -0.625f)};
-    constexpr uint rows = 8u;
+    static constexpr uint rows = 14u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     Kernel kernel = [](BufferVar<float4> in, BufferVar<float4> out) {
@@ -81,6 +82,19 @@ void test_float_special_values(Device &device) {
         out.write(i * rows + 5u, round(v));
         out.write(i * rows + 6u, select(ocarina::isnan(v), make_float4(42.f), v));
         out.write(i * rows + 7u, min(v, make_float4(0.25f)));
+        Float2x2 matrix = make_float2x2(v.x, v.y, v.z, v.w);
+        Float2x2 reference = make_float2x2(0.25f, 0.25f, 0.25f, 0.25f);
+        Float2x2 lower = make_float2x2(0.f, 0.f, 0.f, 0.f);
+        Float2x2 upper = make_float2x2(1.f, 1.f, 1.f, 1.f);
+        auto minimum = min(matrix, reference), maximum = max(matrix, reference);
+        auto clamped = clamp(matrix, lower, upper);
+        out.write(i * rows + 8u, make_float4(minimum[0u], minimum[1u]));
+        out.write(i * rows + 9u, make_float4(maximum[0u], maximum[1u]));
+        out.write(i * rows + 10u, make_float4(clamped[0u], clamped[1u]));
+        Half4 half_values = make_half4(v);
+        out.write(i * rows + 11u, make_float4(min(half_values, make_half4(0.25f))));
+        out.write(i * rows + 12u, make_float4(max(half_values, make_half4(0.25f))));
+        out.write(i * rows + 13u, make_float4(clamp(half_values, make_half4(0.f), make_half4(1.f))));
     };
     auto shader = device.compile(kernel, "compute-math-special-values");
     vector<float4> actual(input.size() * rows);
@@ -90,7 +104,6 @@ void test_float_special_values(Device &device) {
     for (uint i = 0u; i < input.size(); ++i) {
         const float4 v = input[i];
         float x = v.x, y = v.y;
-        // DSL fminf/fmaxf select the numeric operand if exactly one is NaN.
         // Either sign is accepted for a min/max tie between signed zero values.
         array<float4, rows> expected{
             make_float4(std::fmin(x, y), std::fmin(y, x), std::fmax(x, y), std::fmax(y, x)),
@@ -103,11 +116,25 @@ void test_float_special_values(Device &device) {
             expected[5u][c] = std::round(input[i][c]);
             expected[6u][c] = std::isnan(input[i][c]) ? 42.f : input[i][c];
             expected[7u][c] = std::fmin(input[i][c], 0.25f);
+            expected[8u][c] = std::fmin(input[i][c], 0.25f);
+            expected[9u][c] = std::fmax(input[i][c], 0.25f);
+            expected[10u][c] = std::fmin(1.f, std::fmax(0.f, input[i][c]));
+            const float half_value = half_roundtrip_reference(input[i][c]);
+            expected[11u][c] = std::fmin(half_value, 0.25f);
+            expected[12u][c] = std::fmax(half_value, 0.25f);
+            expected[13u][c] = std::fmin(1.f, std::fmax(0.f, half_value));
         }
-        for (uint row = 0u; row < rows; ++row)
-            for (uint c = 0u; c < 4u; ++c)
+        for (uint row = 0u; row < rows; ++row) {
+            for (uint c = 0u; c < 4u; ++c) {
+                // Native min/max and their derived clamps have backend-dependent NaN results.
+                const bool min_max_with_nan = (row == 0u && (std::isnan(x) || std::isnan(y))) ||
+                                              (row == 1u && c < 2u && std::isnan(x)) ||
+                                              (row >= 7u && std::isnan(v[c]));
+                if (min_max_with_nan) continue;
                 check_float(actual[i * rows + row][c], expected[row][c], "special float", i * rows + row, c,
                             row == 2u || row == 3u || row == 5u || row == 6u || (row == 1u && c == 2u));
+            }
+        }
     }
 }
 
@@ -119,7 +146,7 @@ void test_finite_math_and_conversions(Device &device) {
         make_float4(0.5f, 2.5f, 0.00006103515625f, 0.5f),
         make_float4(-0.f, 4.f, 0.000000059604644775390625f, 1.f),
         make_float4(0.f, 8.f, 65504.f, 0.5f)};
-    constexpr uint rows = 5u;
+    static constexpr uint rows = 5u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     auto integers = device.create_buffer<uint4>(input.size());
@@ -170,13 +197,54 @@ void test_finite_math_and_conversions(Device &device) {
     }
 }
 
+template<typename T>
+void test_integer_float_casts(Device &device, const char *name) {
+    // A negative fraction truncates to signed integer zero. Converting any
+    // integer zero back to float or half must produce +0 in every lane.
+    vector<float4> input{make_float4(-0.75f, -0.5f, -0.25f, -0.f),
+                         make_float4(0.f, 0.25f, 0.5f, 0.75f),
+                         make_float4(1.f, 2.f, 126.f, 127.f)};
+    if constexpr (!std::is_signed_v<T>) input[0] = make_float4(0.f, -0.f, 0.25f, 0.75f);
+    static constexpr bool scalar_half_cast = concepts::static_convertible<half, T>;
+    static constexpr uint rows = scalar_half_cast ? 4u : 3u;
+    auto source = device.create_buffer<float4>(input.size());
+    auto destination = device.create_buffer<uint4>(input.size() * rows);
+    Kernel kernel = [](BufferVar<float4> in, BufferVar<uint4> out) {
+        Uint i = dispatch_id();
+        Float4 value = in.read(i);
+        Float4 scalar = make_float4(cast<float>(cast<T>(value.x)), cast<float>(cast<T>(value.y)),
+                                    cast<float>(cast<T>(value.z)), cast<float>(cast<T>(value.w)));
+        auto vector_value = cast<float4>(cast<Vector<T, 4>>(value));
+        Float4 half_vector = make_float4(cast<half4>(cast<Vector<T, 4>>(value)));
+        out.write(i * rows, as<uint4>(scalar));
+        out.write(i * rows + 1u, as<uint4>(vector_value));
+        out.write(i * rows + 2u, as<uint4>(half_vector));
+        if constexpr (scalar_half_cast) {
+            Float4 half_scalar = make_float4(cast<half>(cast<T>(value.x)), cast<half>(cast<T>(value.y)),
+                                             cast<half>(cast<T>(value.z)), cast<half>(cast<T>(value.w)));
+            out.write(i * rows + 3u, as<uint4>(half_scalar));
+        }
+    };
+    auto shader = device.compile(kernel, string("integer-float-casts-") + name);
+    vector<uint4> actual(input.size() * rows);
+    auto stream = device.create_stream();
+    stream << source.upload(input.data()) << shader(source, destination).dispatch(uint(input.size()))
+           << destination.download(actual.data()) << synchronize() << commit();
+    for (uint i = 0u; i < input.size(); ++i)
+        for (uint row = 0u; row < rows; ++row)
+            for (uint component = 0u; component < 4u; ++component)
+                check_uint(actual[i * rows + row][component],
+                           std::bit_cast<uint>(float(static_cast<T>(input[i][component]))),
+                           name, i * rows + row, component);
+}
+
 void test_integer_bits(Device &device) {
     vector<uint4> input{
         make_uint4(0xffffffffu, 0x80000001u, 0u, std::bit_cast<uint>(-17)),
         make_uint4(0x80000000u, 0x7fffffffu, 1u, std::bit_cast<uint>(17)),
         make_uint4(0x12345678u, 0x9abcdef0u, 7u, std::bit_cast<uint>(-12345)),
         make_uint4(1u, 0xffffffffu, 31u, std::bit_cast<uint>(12345))};
-    constexpr uint rows = 10u;
+    static constexpr uint rows = 10u;
     auto source = device.create_buffer<uint4>(input.size());
     auto destination = device.create_buffer<uint4>(input.size() * rows);
     Kernel kernel = [](BufferVar<uint4> in, BufferVar<uint4> out) {
@@ -255,7 +323,7 @@ void test_half_conversion_boundaries(Device &device) {
         make_float4(nan, -nan, 65504.f, 65520.f),
         make_float4(0x1p-24f, -0x1p-24f, 0x1p-25f, -0x1p-25f),
         make_float4(0x1.8p-24f, -0x1.8p-24f, 0x1.ffcp-15f, -0x1.ffcp-15f)};
-    constexpr uint rows = 6u;
+    static constexpr uint rows = 6u;
     auto source = device.create_buffer<float4>(input.size());
     auto destination = device.create_buffer<float4>(input.size() * rows);
     Kernel kernel = [](BufferVar<float4> in, BufferVar<float4> out) {
@@ -298,7 +366,7 @@ void test_half_conversion_boundaries(Device &device) {
 }
 
 void test_half_conversion_exhaustive(Device &device) {
-    constexpr uint count = 65536u, rows = 4u;
+    static constexpr uint count = 65536u, rows = 4u;
     auto output = device.create_buffer<uint4>(count * rows);
     Kernel kernel = [](BufferVar<uint4> out) {
         Uint i = dispatch_id();
@@ -522,6 +590,9 @@ int main() {
     test_integer_bits(device);
     test_control_flow(device);
     test_finite_math_and_conversions(device);
+    test_integer_float_casts<int>(device, "int-float");
+    test_integer_float_casts<uint>(device, "uint-float");
+    test_integer_float_casts<ulong>(device, "ulong-float");
     test_half_conversion_boundaries(device);
     test_half_conversion_exhaustive(device);
     test_half_conversion_midpoints(device);

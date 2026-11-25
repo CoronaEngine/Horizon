@@ -25,6 +25,9 @@ VkFormat pixel_storage_to_vk_format(PixelStorage ps) noexcept {
         case PixelStorage::HALF4:   return VK_FORMAT_R16G16B16A16_SFLOAT;
         case PixelStorage::USHORT1: return VK_FORMAT_R16_UINT;
         case PixelStorage::RGB10A2: return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+        case PixelStorage::SNORM4:  return VK_FORMAT_R8G8B8A8_SNORM;
+        case PixelStorage::BC7_UNORM: return VK_FORMAT_BC7_UNORM_BLOCK;
+        case PixelStorage::BC7_SRGB:  return VK_FORMAT_BC7_SRGB_BLOCK;
         default:                    return VK_FORMAT_R8G8B8A8_UNORM;
     }
 }
@@ -46,6 +49,9 @@ uint32_t pixel_storage_bytes(PixelStorage ps) noexcept {
         case PixelStorage::HALF4: return 8;
         case PixelStorage::USHORT1: return 2;
         case PixelStorage::RGB10A2: return 4;
+        case PixelStorage::SNORM4: return 4;
+        case PixelStorage::BC7_UNORM:
+        case PixelStorage::BC7_SRGB: return 16; // One 4x4 texel block.
         default:                   return 4;
     }
 }
@@ -55,13 +61,15 @@ uint32_t pixel_storage_bytes(PixelStorage ps) noexcept {
 VkTexture::VkTexture(VulkanComputeDevice *device, uint3 res,
                      PixelStorage ps, uint level_num)
     : device_(device), res_(res), level_num_(level_num) {
+    OC_ERROR_IF(is_block_compressed(ps) && !device_->supports_bc7_textures(),
+                "This Vulkan device does not support sampled, filterable BC7 textures");
     descriptor_.pixel_storage = ps;
 }
 
 void VkTexture::register_descriptors(bool is_3d) noexcept {
     is_3d_ = is_3d;
     sample_slot_ = device_->allocate_texture_slot(is_3d);
-    storage_slot_ = sample_slot_;
+    storage_slot_ = is_block_compressed(descriptor_.pixel_storage) ? 0u : sample_slot_;
     descriptor_.texture = sample_slot_;
     descriptor_.surface = storage_slot_;
 
@@ -83,6 +91,10 @@ void VkTexture::register_descriptors(bool is_3d) noexcept {
     writes[0].descriptorCount = 1;
     writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     writes[0].pImageInfo      = &sample_info;
+    if (is_block_compressed(descriptor_.pixel_storage)) {
+        vkUpdateDescriptorSets(device_->logical_device(), 1u, writes, 0, nullptr);
+        return;
+    }
 
     writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[1].dstSet          = device_->global_desc_set();
@@ -141,8 +153,9 @@ VkTexture2D::VkTexture2D(VulkanComputeDevice *device, uint3 res,
     : VkTexture(device, res, ps, level_num) {
     VkFormat fmt = pixel_storage_to_vk_format(ps);
     VkImageUsageFlags usage =
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT |
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if (!is_block_compressed(ps)) usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     image_ = device_->allocate_image({res.x, res.y, 1u}, fmt, level_num, usage, "tex2d");
     register_descriptors(false);
 }
@@ -158,11 +171,14 @@ VkTexture3D::VkTexture3D(VulkanComputeDevice *device, uint3 res,
                          PixelStorage ps, uint level_num)
     : VkTexture(device, res, ps, level_num) {
     VkFormat fmt = pixel_storage_to_vk_format(ps);
+    const bool compressed = is_block_compressed(ps);
+    OC_ERROR_IF(compressed && res.z != 1u, "BC7 logical Texture3D requires depth one");
     VkImageUsageFlags usage =
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT |
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    image_ = device_->allocate_image(res, fmt, level_num, usage, "tex3d", true);
-    register_descriptors(true);
+    if (!compressed) usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+    image_ = device_->allocate_image(res, fmt, level_num, usage, "tex3d", !compressed);
+    register_descriptors(!compressed);
 }
 
 }// namespace ocarina

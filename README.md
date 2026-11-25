@@ -87,7 +87,6 @@ CMake Tools 会单独启动构建进程。项目已为 Ninja + MSVC 的 C/C++ �
 | HorizonExamples | `examples-debug` | `build/conan/examples/debug` |
 | Ocarina | `ocarina-debug` | `build/conan/ocarina/debug` |
 | Ocarina 的 `test-*` 测试 | `ocarina-tests-debug` | `build/conan/ocarina-tests/debug` |
-| Vision Hotfix | `vision-hotfix-debug` | `build/conan/vision-hotfix/debug` |
 
 使用完整的目标族 preset 名，例如 `examples-debug`。每个目标族使用独立目录，切换 preset 后请重新执行 Configure，不要把不同目标族混在同一个构建目录里。
 
@@ -109,7 +108,9 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build Hor
 conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fast all --configuration Debug --target-family examples
 ```
 
-把 `examples` 换成 `core`、`engine`、`tools`、`ocarina`、`ocarina-tests` 或 `vision-hotfix`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+把 `examples` 换成 `core`、`engine`、`tools`、`ocarina` 或 `ocarina-tests`，即可构建相应目标族。`Debug` 的大小写必须保持不变；还可使用 `Release`、`RelWithDebInfo` 和 `MinSizeRel`。
+
+热更新统一使用跨平台 CMake 后端，`horizon-hotfix` 及其基础测试属于 `core`，不依赖 Ocarina。
 
 #### 第一次阅读渲染示例
 
@@ -181,6 +182,61 @@ ocarina_add_test(test-my-check CATEGORY core SOURCES core/test_my_check.cpp)
 ```
 
 重新配置 `ocarina-tests-debug` 后，`test-core-my-check` 会出现在 target 列表中；不需要修改 Conan。
+
+### Ocarina 运行时光追模式
+
+每次创建 shader 时，`ShaderCompileOptions::trace_mode` 决定这次编译请求。已有的 `compile(kernel, name)` 和 `async_compile` 调用默认使用 `Auto`。没有实际 trace 调用的 kernel 始终生成普通 compute shader。对带有 `trace_closest` 或 `trace_occlusion` 的 kernel（包括 callable 中的调用），`Auto` 优先选择设备已启用的 ray query。只有设备缺少 query、具备原生光追管线且 kernel 语义兼容时，才选择 raygen 管线。
+
+```cpp
+using namespace ocarina;
+auto caps = device.trace_capabilities();
+auto shader = device.compile(kernel, "camera", CS, ShaderCompileOptions{TraceMode::Auto});
+auto requested = shader.requested_options().trace_mode;
+auto actual = shader.execution_mode();  // Compute, ComputeRayQuery, RayTracingPipeline
+if (caps.ray_tracing_pipeline) {
+    auto native = device.compile(kernel, "native-camera", CS,
+                                 ShaderCompileOptions{TraceMode::RayTracingPipeline});
+    stream << native(ray_buffer, hit_buffer).dispatch(width, height) << commit();
+}
+```
+
+同一 kernel 可以创建多个 shader，每个 shader 的模式固定。四参数重载也接受 `TraceMode::RayQuery`。强制模式不可用或 kernel 不兼容时，创建失败。普通编译或提交错误同样会直接报错。原生路径支持三角形 closest-hit、遮挡查询及完整的一至三维 dispatch。任一维为零时跳过提交，超出设备每维或总调用数上限时拒绝。依赖 shared memory、工作组 barrier、block/thread 内建值、warp 操作、自定义 Slang 代码或 header 的 trace kernel 需要 query 路径。可以用 `trace_capabilities().ray_query` 查询该能力。`supports_raytracing()` 表示至少一条路径可用。本次后端虚接口发生变化，更新后请统一重建应用和后端模块。
+
+修改 trace 选择、代码生成、缓存、AS 或提交逻辑时，提交前在实体 GPU 上运行本地对照。记录 GPU 型号、驱动及版本、启用的能力、请求和实际模式、命令、正确性和计时结果。只支持单一路径时，注明另一条路径未验证。测试开关默认关闭，独立目标使用 `trace-mode-local` 标签。
+
+```sh
+python build_tools/dev.py install --configuration Release --target-family ocarina-tests
+cmake --preset ocarina-tests-release -DHORIZON_BUILD_TRACE_MODE_TESTS=ON
+python build_tools/dev.py build-fast ocarina-trace-mode-tests --configuration Release --target-family ocarina-tests
+ctest --test-dir build/conan/ocarina-tests/release -C Release -L trace-mode-local --no-tests=error -V
+```
+
+`horizon.trace_mode.performance` 在同一设备、同一场景、同一批射线和输出上报告两条路径的 shader 创建耗时、Vulkan timestamp 平均每次 dispatch 耗时，以及批次从提交 16 次 dispatch 到读回完成的耗时。后两项均在预热后测量。保留 CTest 的详细日志，记录因缺少设备能力而跳过的用例。
+
+### 在 CLion 运行 All CTest
+
+选择 `ocarina-tests-local-release` CMake preset，构建后运行 **All CTest**。这个配置会注册新版 Core、Hotfix、Python、Ocarina，以及本地光追和 warp32 测试。已有个人 profile 可以设置 `HORIZON_BUILD_TRACE_MODE_TESTS=ON` 和 `HORIZON_BUILD_WARP32_TESTS=ON`。命令行可以使用同一套配置：
+
+```sh
+cmake --preset ocarina-tests-local-release
+cmake --build --preset ocarina-tests-local-release
+ctest --preset ocarina-tests-local-release
+```
+
+修改光追或 warp32 相关代码时，在支持对应能力的实体 GPU 上运行专项测试。保留运行记录，并标明因缺少能力而跳过的用例。
+
+```sh
+ctest --preset ocarina-tests-local-release -L '^(trace-mode-local|warp32-local)$' -V
+```
+
+CI 的 Ocarina 配置默认关闭这两个开关。普通计算、编译检查和 CPU 侧的 trace 分析仍在 CI 中运行。64 位 buffer atomics 在 Linux 和 Windows CI 运行，macOS 托管 runner 的驱动缺少此能力。使用相同的本地 CTest 用例和参数复现 CI：
+
+```sh
+python build_tools/dev.py build ocarina-tests horizon-tests --configuration RelWithDebInfo --target-family ocarina-tests --with-tests
+python src/tests/run_ci_suite.py --build-dir build/conan/ocarina-tests/relwithdebinfo --configuration RelWithDebInfo --output build/verification/ocarina-ci
+```
+
+复现 macOS CI 时，给第二条命令加上 `--without-int64-atomics`。
 
 ### 常见问题
 

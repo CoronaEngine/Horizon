@@ -96,3 +96,4 @@ __pycache__/
 bench_*.txt
 compare_dump.ps1
 dumps/
+imgui.ini

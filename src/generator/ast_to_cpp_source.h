@@ -51,6 +51,7 @@ protected:
     void add_generated(const Function *func) noexcept;
     [[nodiscard]] bool has_generated(const Type *type) const noexcept;
     void add_generated(const Type *type) noexcept;
+    void emit(const Function &func, const string &description) noexcept;
     virtual void _emit_types_define() noexcept;
     virtual void _emit_variable_define(const Variable &v) noexcept;
     virtual void _emit_type_name(const Type *type) noexcept;

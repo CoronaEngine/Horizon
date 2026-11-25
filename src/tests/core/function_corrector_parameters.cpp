@@ -167,6 +167,23 @@ const MemberExpr &require_member(const Expression *expression, const Function &o
     return member;
 }
 
+void test_argument_declaration_order() {
+    std::array<const Expression *, 3> reads{};
+    Kernel kernel = [&](Uint count, Float2 pair, Float4 quad) {
+        reads = {count.expression(), pair.expression(), quad.expression()};
+    };
+    const Function &function = *kernel.function();
+    const auto arguments = function.arguments();
+    const std::array expected_types{Type::of<uint>(), Type::of<float2>(), Type::of<float4>()};
+    require(arguments.size() == expected_types.size(), "all explicit arguments should be retained");
+    for (size_t index = 0; index < arguments.size(); ++index) {
+        require(arguments[index].type() == expected_types[index],
+                "DSL argument order must match the shader invocation argument order");
+        require_ref(reads[index], function, arguments[index],
+                    "each lambda parameter must reference its matching formal argument");
+    }
+}
+
 void test_nested_parameter_struct() {
     Kernel kernel = [](ParametersVar parameters) {
         [[maybe_unused]] Int mode = parameters.mode;
@@ -235,6 +252,7 @@ void test_capture_of_parameter_leaf() {
 }// namespace
 
 void test_function_corrector_parameters() {
+    test_argument_declaration_order();
     test_scalar_and_reference_usage();
     test_typed_buffer_usage<ocarina::Usage::READ>();
     test_typed_buffer_usage<ocarina::Usage::WRITE>();

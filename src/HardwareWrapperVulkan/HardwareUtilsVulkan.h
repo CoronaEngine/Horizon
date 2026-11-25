@@ -10,11 +10,9 @@
 #if defined(CFW_PLATFORM_WINDOWS)
 #include <Windows.h>
 #define VK_USE_PLATFORM_WIN32_KHR
-#elif defined(CFW_PLATFORM_LINUX) || defined(CFW_PLATFORM_UNIX)
-#define VK_USE_PLATFORM_XLIB_KHR
 #elif defined(CFW_PLATFORM_APPLE)
 #define VK_USE_PLATFORM_MACOS_MVK
-#else
+#elif !defined(CFW_PLATFORM_LINUX) && !defined(CFW_PLATFORM_UNIX)
 #error "Platform not supported by this example."
 #endif
 

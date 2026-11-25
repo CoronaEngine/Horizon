@@ -463,12 +463,18 @@ void test_repeated_lambda_output() {
 
 int main(int argc, char **argv) {
     std::string_view selected = argc == 2 ? argv[1] : "";
-    if (selected == "--probe-shared-capture") {
-        probe_function_corrector_shared_capture();
-        return 0;
-    }
-    if (selected == "--probe-forbidden-capture") {
-        probe_function_corrector_forbidden_capture();
+    const bool shared_capture_probe = selected == "--probe-shared-capture";
+    if (shared_capture_probe || selected == "--probe-forbidden-capture") {
+#if defined(_MSC_VER) && defined(_DEBUG)
+        // The expected assertion must terminate the probe without interactive CRT reporting.
+        _set_error_mode(_OUT_TO_STDERR);
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
+        if (shared_capture_probe) {
+            probe_function_corrector_shared_capture();
+        } else {
+            probe_function_corrector_forbidden_capture();
+        }
         return 0;
     }
     struct TestCase {

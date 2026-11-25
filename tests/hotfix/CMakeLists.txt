@@ -104,10 +104,15 @@ if(UNIX)
         TIMEOUT 40)
 endif()
 
-if(WIN32 AND CMAKE_GENERATOR MATCHES "^Ninja")
+if((WIN32 OR UNIX) AND CMAKE_GENERATOR MATCHES "^Ninja")
     add_executable(horizon-test-hotfix-cmake-build-backend test_cmake_build_backend.cpp)
     target_link_libraries(horizon-test-hotfix-cmake-build-backend PRIVATE
-        horizon-hotfix-build-cmake horizon-hotfix-process-windows)
+        horizon-hotfix-build-cmake ${CMAKE_DL_LIBS})
+    if(WIN32)
+        target_link_libraries(horizon-test-hotfix-cmake-build-backend PRIVATE horizon-hotfix-process-windows)
+    else()
+        target_link_libraries(horizon-test-hotfix-cmake-build-backend PRIVATE horizon-hotfix-process-posix)
+    endif()
     if(MINGW)
         target_link_options(horizon-test-hotfix-cmake-build-backend PRIVATE -municode)
     endif()
@@ -120,7 +125,7 @@ if(WIN32 AND CMAKE_GENERATOR MATCHES "^Ninja")
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake_build_fixture/CMakeLists.txt"
         "${CMAKE_CURRENT_BINARY_DIR}")
     set(build_environment "${CMAKE_BINARY_DIR}/CMakeFiles/horizon-build-environment.json")
-    if(HORIZON_DEV_PYTHON AND EXISTS "${build_environment}")
+    if(WIN32 AND HORIZON_DEV_PYTHON AND EXISTS "${build_environment}")
         add_test(NAME horizon.hotfix.cmake_build_backend
             COMMAND "${HORIZON_DEV_PYTHON}" "${HORIZON_BUILD_TOOLS_DIR}/scripts/run_build_tool.py"
                 "${build_environment}" "" ${cmake_backend_test_command})
@@ -128,6 +133,6 @@ if(WIN32 AND CMAKE_GENERATOR MATCHES "^Ninja")
         add_test(NAME horizon.hotfix.cmake_build_backend COMMAND ${cmake_backend_test_command})
     endif()
     set_tests_properties(horizon.hotfix.cmake_build_backend PROPERTIES
-        LABELS "hotfix;windows;integration"
+        LABELS "hotfix;integration"
         TIMEOUT 120)
 endif()

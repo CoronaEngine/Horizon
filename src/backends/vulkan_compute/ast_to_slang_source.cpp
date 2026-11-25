@@ -3,11 +3,13 @@
 
 #include "ast_to_slang_source.h"
 #include "ast/expression.h"
+#include "ast/function_requirements.h"
 #include "core/util/util.h"
 #include "core/type_system/precision_policy.h"
 #include "core/type_system/type_desc.h"
 #include "vk_compute_device.h"
 #include "vk_shader_parameters.h"
+#include "trace_requirements.h"
 #include <algorithm>
 #include <cmath>
 
@@ -129,6 +131,16 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
     return type->tag() == Type::Tag::HALF;
 }
 
+[[nodiscard]] bool is_floating_value(const Type *type) noexcept {
+    while (type->is_vector() || type->is_matrix() || type->is_array()) type = type->element();
+    return type->tag() == Type::Tag::FLOAT || type->tag() == Type::Tag::REAL || type->tag() == Type::Tag::HALF;
+}
+
+[[nodiscard]] bool is_integer_value(const Type *type) noexcept {
+    while (type->is_vector()) type = type->element();
+    return type->tag() == Type::Tag::INT || type->tag() == Type::Tag::UINT || type->tag() == Type::Tag::ULONG;
+}
+
 // Encode binary16 through integer bits: a final native float-to-half cast may
 // flush half subnormals even when the preceding float value was rounded.
 [[nodiscard]] string half_conversion_prefix(const Type *type) noexcept {
@@ -159,6 +171,7 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
         case Expression::Tag::CALL: {
             const auto op = static_cast<const CallExpr *>(value)->call_op();
             return !(is_half_constructor(op) || op == CallOp::FLOAT2HALF ||
+                     op == CallOp::FMA || op == CallOp::INVERSE ||
                      op == CallOp::CUSTOM || op == CallOp::SELECT ||
                      op == CallOp::BYTE_BUFFER_READ ||
                      op == CallOp::BINDLESS_ARRAY_BUFFER_READ || op == CallOp::BINDLESS_ARRAY_BYTE_BUFFER_READ);
@@ -205,7 +218,40 @@ constexpr std::array<SlangScalarName, 12> slang_scalar_names{{
 
 // ── visit(CallExpr) ──────────────────────────────────────────────────────────
 
+EmittedSlangSource AstToSlangSource::generate(const Function &function, const ShaderCompilationContext &context,
+                                              bool obfuscation, bool supports_warp32) noexcept {
+    // AST and type hashes are memoized lazily. Different compiler/device
+    // instances can share the same function graph and interned types.
+    static std::mutex emission_mutex;
+    std::lock_guard lock(emission_mutex);
+    AstToSlangSource emitter{context, obfuscation, supports_warp32};
+    auto requirements = analyze_function_requirements(function);
+    OC_ERROR_IF(requirements.uses_trace && context.execution_mode == ShaderExecutionMode::Compute,
+                "Slang compute program contains trace operations");
+    if (emitter.native_pipeline() && !native_trace_compatible(requirements)) {
+        OC_ERROR("Slang ray generation is incompatible with ", requirements.diagnostic_sources.front());
+    }
+    emitter.reachable_functions_ = std::move(requirements.reachable_functions);
+    emitter.emit(function);
+    return {string(emitter.scratch().view()), function.func_name(), emitter.requires_half_rte_};
+}
+
+void AstToSlangSource::emit(const Function &function) noexcept {
+    if (!reachable_functions_.contains(&function)) return;
+    if (!supports_warp32_) {
+        // Native source can hide subgroup operations from the AST checks.
+        function.for_each_header([](string_view) {
+            OC_ERROR("Vulkan device without warp32 support cannot validate custom shader headers");
+        });
+    }
+    AstToCppSource::emit(function, function.is_kernel() ? context_.description : function.description());
+}
+
 void AstToSlangSource::visit(const CallExpr *expr) noexcept {
+    const auto op = expr->call_op();
+    requires_half_rte_ |= (op == CallOp::FMA || op == CallOp::INVERSE) && is_half_value(expr->type());
+    OC_ERROR_IF(!supports_warp32_ && op >= CallOp::WARP_ACTIVE_COUNT_BITS && op <= CallOp::WARP_IS_FIRST_ACTIVE_LANE,
+                "Vulkan warp operations require compute ballot subgroups of 32, 64, 96 or 128 lanes to preserve DSL warp32 semantics");
     auto emit_args = [this](const CallExpr *e) {
         const auto op = e->call_op();
         const bool atomic = op == CallOp::ATOMIC_ADD || op == CallOp::ATOMIC_SUB ||
@@ -244,12 +290,13 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
 
     string_view func_name = expr->function_name();
     if (!func_name.empty()) {
+        OC_ERROR_IF(!supports_warp32_,
+                    "Vulkan device without warp32 support cannot validate native shader calls");
         current_scratch() << func_name;
         emit_args(expr);
         return;
     }
 
-    const auto op = expr->call_op();
     if (op == CallOp::CUSTOM) {
         _emit_custom_call(expr);
         return;
@@ -335,21 +382,30 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::ANY:              OC_SLANG_FUNC(any);             break;
         case CallOp::NONE:             OC_SLANG_WRAP(none);            break;
         case CallOp::SELECT:           OC_SLANG_FUNC(select);          break;
-        case CallOp::CLAMP:            OC_SLANG_FUNC(clamp);           break;
+        case CallOp::CLAMP:
+            if (is_floating_value(expr->type())) { OC_SLANG_WRAP(clamp); }
+            else { OC_SLANG_FUNC(clamp); }
+            break;
         // ocarina lerp is pbrt-style (t, a, b); Slang lerp is (a, b, t).
         case CallOp::LERP:             OC_SLANG_WRAP(lerp);            break;
         case CallOp::INVERSE_LERP:     OC_SLANG_WRAP(inverse_lerp);    break;
         case CallOp::ABS:              OC_SLANG_FUNC(abs);             break;
-        case CallOp::MIN:              OC_SLANG_FUNC(min);             break;
-        case CallOp::MAX:              OC_SLANG_FUNC(max);             break;
+        case CallOp::MIN:
+            if (is_floating_value(expr->type())) { OC_SLANG_WRAP(min); }
+            else { OC_SLANG_FUNC(min); }
+            break;
+        case CallOp::MAX:
+            if (is_floating_value(expr->type())) { OC_SLANG_WRAP(max); }
+            else { OC_SLANG_FUNC(max); }
+            break;
         case CallOp::IS_INF:           OC_SLANG_FUNC(isinf);           break;
         case CallOp::IS_NAN:           OC_SLANG_FUNC(isnan);           break;
         case CallOp::ACOS:             OC_SLANG_FUNC(acos);            break;
         case CallOp::ASIN:             OC_SLANG_FUNC(asin);            break;
         case CallOp::ATAN:             OC_SLANG_FUNC(atan);            break;
-        case CallOp::ACOSH:            OC_SLANG_FUNC(acosh);           break;
-        case CallOp::ASINH:            OC_SLANG_FUNC(asinh);           break;
-        case CallOp::ATANH:            OC_SLANG_FUNC(atanh);           break;
+        case CallOp::ACOSH:            OC_SLANG_WRAP(acosh);           break;
+        case CallOp::ASINH:            OC_SLANG_WRAP(asinh);           break;
+        case CallOp::ATANH:            OC_SLANG_WRAP(atanh);           break;
         case CallOp::ATAN2:            OC_SLANG_FUNC(atan2);           break;
         case CallOp::COPYSIGN:         OC_SLANG_WRAP(copysign);        break;
         case CallOp::COS:              OC_SLANG_FUNC(cos);             break;
@@ -357,7 +413,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::TAN:              OC_SLANG_FUNC(tan);             break;
         case CallOp::SINH:             OC_SLANG_FUNC(sinh);            break;
         case CallOp::COSH:             OC_SLANG_FUNC(cosh);            break;
-        case CallOp::TANH:             OC_SLANG_FUNC(tanh);            break;
+        case CallOp::TANH:             OC_SLANG_WRAP(tanh);            break;
         case CallOp::EXP:              OC_SLANG_FUNC(exp);             break;
         case CallOp::EXP2:             OC_SLANG_FUNC(exp2);            break;
         case CallOp::EXP10:            OC_SLANG_WRAP(exp10);           break;
@@ -372,7 +428,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::CEIL:             OC_SLANG_FUNC(ceil);            break;
         case CallOp::FLOOR:            OC_SLANG_FUNC(floor);           break;
         case CallOp::ROUND:            OC_SLANG_WRAP(round);           break;
-        case CallOp::FMA:              OC_SLANG_FUNC(fma);             break;
+        case CallOp::FMA:              OC_SLANG_WRAP(fma);             break;
         case CallOp::CROSS:            OC_SLANG_FUNC(cross);           break;
         case CallOp::DOT:              OC_SLANG_FUNC(dot);             break;
         case CallOp::LENGTH:           OC_SLANG_FUNC(length);          break;
@@ -393,7 +449,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::FRACT:            OC_SLANG_FUNC(frac);            break;
         case CallOp::DEGREES:          OC_SLANG_FUNC(degrees);         break;
         case CallOp::RADIANS:          OC_SLANG_FUNC(radians);         break;
-        case CallOp::SATURATE:         OC_SLANG_FUNC(saturate);        break;
+        case CallOp::SATURATE:         OC_SLANG_WRAP(saturate);        break;
 
         case CallOp::SYNCHRONIZE_BLOCK:         OC_SLANG_WRAP(synchronize_block);         break;
         case CallOp::WARP_ACTIVE_BIT_MASK:      OC_SLANG_WRAP(warp_active_bit_mask);      break;
@@ -403,6 +459,10 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::WARP_SIZE:                 OC_SLANG_WRAP(warp_size);                 break;
         case CallOp::WARP_FIRST_ACTIVE_LANE:    OC_SLANG_WRAP(warp_first_active_lane);    break;
         case CallOp::WARP_IS_FIRST_ACTIVE_LANE: OC_SLANG_WRAP(warp_is_first_active_lane); break;
+        case CallOp::SUBGROUP_ACTIVE_SUM:        OC_SLANG_FUNC(WaveActiveSum);             break;
+        case CallOp::SUBGROUP_LANE_COUNT:        OC_SLANG_FUNC(WaveGetLaneCount);          break;
+        case CallOp::SUBGROUP_IS_FIRST_LANE:     OC_SLANG_FUNC(WaveIsFirstLane);           break;
+        case CallOp::SUBGROUP_ACTIVE_COUNT_BITS: OC_SLANG_FUNC(WaveActiveCountBits);       break;
 
         case CallOp::MAKE_BOOL2:
         case CallOp::MAKE_BOOL3:
@@ -516,6 +576,7 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
         case CallOp::TRACE_OCCLUSION:   OC_SLANG_WRAP(trace_occlusion);   break;
         case CallOp::RAY_OFFSET_ORIGIN: OC_SLANG_WRAP(offset_ray_origin); break;
         case CallOp::TRACE_CLOSEST:     OC_SLANG_WRAP(trace_closest);     break;
+        case CallOp::TRACE_CLOSEST_WITH_DISTANCE: OC_SLANG_WRAP(trace_closest_with_distance); break;
         case CallOp::IS_NULL_BUFFER:    OC_SLANG_WRAP(is_null_buffer);    break;
         case CallOp::IS_NULL_TEXTURE:   OC_SLANG_WRAP(is_null_texture);   break;
         case CallOp::BUFFER_SIZE:       OC_SLANG_WRAP(buffer_size);       break;
@@ -554,6 +615,11 @@ void AstToSlangSource::visit(const CallExpr *expr) noexcept {
             break;
         }
         case CallOp::TEX2D_WRITE: OC_SLANG_WRAP(tex2d_write); break;
+        case CallOp::TEX2D_READ_NATIVE:
+            current_scratch() << "oc_tex2d_read_native_";
+            _emit_type_name(expr->type());
+            break;
+        case CallOp::TEX2D_WRITE_NATIVE: OC_SLANG_WRAP(tex2d_write_native); break;
         case CallOp::COUNT: break;
         default: OC_ASSERT(0); break;
     }
@@ -1230,7 +1296,9 @@ void AstToSlangSource::visit(const BinaryExpr *expr) noexcept {
 void AstToSlangSource::visit(const CastExpr *expr) noexcept {
     if (expr->cast_op() == CastOp::STATIC && is_half_value(expr->type()) && !is_half_value(expr->expression()->type())) {
         current_scratch() << half_conversion_prefix(expr->type());
+        if (is_integer_value(expr->expression()->type())) current_scratch() << "oc_integer_to_float(";
         expr->expression()->accept(*this);
+        if (is_integer_value(expr->expression()->type())) current_scratch() << ")";
         current_scratch() << ")))";
         return;
     }
@@ -1238,6 +1306,13 @@ void AstToSlangSource::visit(const CastExpr *expr) noexcept {
         case CastOp::STATIC:
             _emit_type_name(expr->type());
             current_scratch() << "(";
+            if (is_floating_value(expr->type()) && !is_half_value(expr->type()) &&
+                is_integer_value(expr->expression()->type())) {
+                current_scratch() << "oc_integer_to_float(";
+                expr->expression()->accept(*this);
+                current_scratch() << "))";
+                return;
+            }
             if (!is_half_value(expr->type()) && is_half_value(expr->expression()->type())) {
                 current_scratch() << "oc_half2float(";
                 expr->expression()->accept(*this);
@@ -1450,7 +1525,7 @@ void AstToSlangSource::_emit_struct_name(const Type *type) noexcept {
 // aggregate layout rules.
 
 void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
-    const VkShaderParameterLayout layout{f};
+    const VkShaderParameterLayout layout{f, context_.description};
     inline_parameters_ = layout.is_inline();
     uniform_parameter_bytes_ = layout.uniform_bytes;
     current_scratch() << "struct OCPushConstants {";
@@ -1511,6 +1586,7 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         current_scratch() << "uint oc_nrd_uniform_word(uint offset) { return oc_nrd_param_words[offset / 16u][(offset / 4u) % 4u]; }";
         _emit_newline();
     }
+    if (native_pipeline()) return;
     // DSL blockIdx/threadIdx are visible in callables too; mirror them as statics.
     current_scratch() << "static uint3 oc_group_id;";
     _emit_newline();
@@ -1530,7 +1606,8 @@ void AstToSlangSource::_emit_kernel_params(const Function &f) noexcept {
         _emit_newline();
         _emit_indent();
         auto grid = f.grid_dim();
-        if (grid.x && grid.y && grid.z)
+        if (context_.execution_mode == ShaderExecutionMode::Compute && !f.is_raytracing_kernel() &&
+            grid.x && grid.y && grid.z)
             current_scratch() << ocarina::format("uint3 grid = uint3({}u, {}u, {}u);", grid.x, grid.y, grid.z);
         else
             current_scratch() << "uint3 grid = d_dim / block + uint3(d_dim % block != uint3(0u));";
@@ -1583,13 +1660,12 @@ void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
                                   precision_policy_name(policy.policy),
                                   policy.allow_real_in_storage ? "true" : "false"));
     _emit_newline();
-    {
-        // SlangShaderCompiler::compile() patches this exact string with the real
-        // workgroup size.
-        current_scratch() << "[shader(\"compute\")] [numthreads(1, 1, 1)]";
+    if (native_pipeline()) {
+        current_scratch() << "[shader(\"raygeneration\")]";
+    } else {
+        current_scratch() << "[shader(\"compute\")] [numthreads(OC_WORKGROUP_X, OC_WORKGROUP_Y, OC_WORKGROUP_Z)]";
     }
     _emit_newline();
-    // SlangShaderCompiler looks the entry point up as "main".
     current_scratch() << "void main";
     _emit_arguments(f);
     _emit_body(f);
@@ -1599,7 +1675,7 @@ void AstToSlangSource::_emit_function_body(const Function &f) noexcept {
 
 void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
     current_scratch() << "(";
-    if (f.is_kernel()) {
+    if (f.is_kernel() && !native_pipeline()) {
         // Kernel arguments come from the push-constant blob, not entry parameters.
         current_scratch() << "uint3 oc_dispatch_thread_id : SV_DispatchThreadID, "
                              "uint3 oc_group_id_in : SV_GroupID, "
@@ -1608,16 +1684,15 @@ void AstToSlangSource::_emit_arguments(const Function &f) noexcept {
         for (const auto &v : f.all_arguments()) {
             _emit_argument(v);
         }
-        Variable dispatch_dim = const_cast<Function &>(f).create_variable(Type::of<uint3>(), Variable::Tag::LOCAL, "d_dim");
-        _emit_argument(dispatch_dim);
-        Variable dispatch_idx = const_cast<Function &>(f).create_variable(Type::of<uint3>(), Variable::Tag::LOCAL, "d_idx");
-        _emit_variable_define(dispatch_idx);
+        current_scratch() << "uint3 d_dim,";
+        _emit_newline();
+        current_scratch() << "uint3 d_idx";
     }
     current_scratch() << ")";
 }
 
 void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
-    if (f.is_kernel()) {
+    if (f.is_kernel() && !native_pipeline()) {
         _emit_indent();
         current_scratch() << "uint3 oc_group_base = uint3(oc_push.group_base_x, oc_push.group_base_y, oc_push.group_base_z);";
         _emit_newline();
@@ -1637,7 +1712,7 @@ void AstToSlangSource::_emit_builtin_vars_define(const Function &f) noexcept {
         current_scratch() << "if (any(d_idx >= d_dim)) { return; }";
         _emit_newline();
         _emit_kernel_argument_loads(f);
-    } else if (f.is_raytracing_kernel()) {
+    } else if (f.is_kernel()) {
         _emit_indent();
         current_scratch() << "uint3 d_idx = DispatchRaysIndex();";
         _emit_newline();
@@ -1787,11 +1862,7 @@ void AstToSlangSource::_emit_kernel_argument_loads(const Function &f) noexcept {
 void AstToSlangSource::_emit_builtin_var(Variable v) noexcept {
     using Tag = Variable::Tag;
     bool group_scoped = v.tag() == Tag::BLOCK_IDX || v.tag() == Tag::THREAD_IDX || v.tag() == Tag::THREAD_ID;
-    // This backend emits GLCompute plus inline ray queries for both logical
-    // kernel kinds. Only an explicit compute-workgroup requirement relaxes the
-    // generic logical-raygen guard; raytracing/argument/grid flags stay intact.
-    if (group_scoped && current_function().is_raytracing_kernel() &&
-        !current_function().requires_ray_query_compute_workgroups()) {
+    if (group_scoped && native_pipeline()) {
         OC_ERROR("Slang raygen shaders have no workgroup: block_idx/thread_idx/thread_id are unavailable");
     }
     _emit_type_name(v.type());

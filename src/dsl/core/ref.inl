@@ -22,4 +22,13 @@ Var<TriangleHit> Ref<Accel>::trace_closest(const Var<Ray> &ray) const noexcept {
     return eval<TriangleHit>(expr);
 }
 
+Var<TriangleHit> Ref<Accel>::trace_closest(const Var<Ray> &ray, Var<float> &distance) const noexcept {
+    const Expression *output = OC_EXPR(distance);
+    output->mark(Usage::READ_WRITE);
+    const CallExpr *expr = Function::current()->call_builtin(Type::of<TriangleHit>(),
+                                                             CallOp::TRACE_CLOSEST_WITH_DISTANCE,
+                                                             {expression(), OC_EXPR(ray), output});
+    return eval<TriangleHit>(expr);
+}
+
 }// namespace ocarina::detail

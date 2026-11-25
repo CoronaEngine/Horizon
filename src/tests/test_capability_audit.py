@@ -62,6 +62,27 @@ class CapabilityAuditTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(report["incomplete_observations"], 0)
 
+    def test_unavailable_ray_case_is_reported_as_skipped(self):
+        status, report = self.run_audit("empty-accel", returncode=77)
+        self.assertEqual(status, 77)
+        self.assertEqual(report["skipped_processes"], 1)
+        self.assertEqual(report["failed_or_validation_processes"], 0)
+
+    def test_default_audit_runs_only_compute_probes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for target in audit.CASES:
+                (root / (target + (".exe" if audit.os.name == "nt" else ""))).touch()
+            argv = ["audit", "--runtime", str(root), "--output", str(root / "output")]
+            with mock.patch.object(audit.sys, "argv", argv), \
+                 mock.patch.object(audit.subprocess, "run", return_value=mock.Mock(returncode=0)) as process, \
+                 mock.patch("builtins.print"):
+                audit.main()
+            targets = {Path(call.args[0][0]).stem for call in process.call_args_list}
+            self.assertEqual(targets, {"test-runtime-codegen-capability-probe",
+                                       "test-resources-resource-capability-probe",
+                                       "test-runtime-float32-policy-probe"})
+
     def test_missing_expected_observations_fail(self):
         status, report = self.run_audit("half-intermediate")
         self.assertEqual(status, 1)
@@ -72,6 +93,16 @@ class CapabilityAuditTests(unittest.TestCase):
         status, report = self.run_audit("half-intermediate", rows)
         self.assertEqual(status, 0)
         self.assertEqual(report["observations"][0]["rows"], 9)
+
+    def test_hyperbolic_observations_include_scalar_vector_and_matrix_results(self):
+        # 22 inputs, each producing four scalar, sixteen vector and sixteen
+        # matrix observations. Both a truncated and a duplicated log must fail.
+        for count in (791, 792, 793):
+            with self.subTest(count=count):
+                rows = [f"FLOAT_MATH op=asinh input={i} actual=1" for i in range(count)]
+                status, report = self.run_audit("hyperbolic-stability", rows)
+                self.assertEqual(status, 0 if count == 792 else 1)
+                self.assertEqual(report["observations"][0]["expected_rows"], 792)
 
     def test_probe_or_validation_failure_fails_audit(self):
         for lines, returncode in (((), 1), (("Validation Error: VUID-test",), 0)):

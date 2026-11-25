@@ -4,6 +4,62 @@ target_compile_features(horizon-test-core-tuple PRIVATE cxx_std_20)
 add_dependencies(horizon-tests horizon-test-core-tuple)
 add_test(NAME horizon.core.tuple COMMAND horizon-test-core-tuple)
 
+add_executable(horizon-test-core-trace-mode-selection test_trace_mode_selection.cpp)
+target_include_directories(horizon-test-core-trace-mode-selection PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-test-core-trace-mode-selection PRIVATE cxx_std_20)
+add_dependencies(horizon-tests horizon-test-core-trace-mode-selection)
+add_test(NAME horizon.core.trace_mode_selection COMMAND horizon-test-core-trace-mode-selection)
+set_tests_properties(horizon.core.trace_mode_selection PROPERTIES LABELS "horizon;cpu")
+
+add_executable(horizon-test-core-trace-capabilities test_trace_capabilities.cpp)
+target_include_directories(horizon-test-core-trace-capabilities PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-test-core-trace-capabilities PRIVATE cxx_std_20)
+add_dependencies(horizon-tests horizon-test-core-trace-capabilities)
+add_test(NAME horizon.core.trace_capabilities COMMAND horizon-test-core-trace-capabilities)
+set_tests_properties(horizon.core.trace_capabilities PROPERTIES LABELS "horizon;cpu")
+
+add_executable(horizon-test-core-trace-dispatch-limits test_trace_dispatch_limits.cpp)
+target_include_directories(horizon-test-core-trace-dispatch-limits PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-test-core-trace-dispatch-limits PRIVATE cxx_std_20)
+add_dependencies(horizon-tests horizon-test-core-trace-dispatch-limits)
+add_test(NAME horizon.core.trace_dispatch_limits COMMAND horizon-test-core-trace-dispatch-limits)
+set_tests_properties(horizon.core.trace_dispatch_limits PROPERTIES LABELS "horizon;cpu")
+
+if(HORIZON_BUILD_OCARINA)
+    add_executable(horizon-test-core-function-requirements test_function_requirements.cpp)
+    target_include_directories(horizon-test-core-function-requirements PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_compile_features(horizon-test-core-function-requirements PRIVATE cxx_std_20)
+    target_link_libraries(horizon-test-core-function-requirements PRIVATE ocarina-ast)
+    add_dependencies(horizon-tests horizon-test-core-function-requirements)
+    add_test(NAME horizon.core.function_requirements COMMAND horizon-test-core-function-requirements)
+    set_tests_properties(horizon.core.function_requirements PROPERTIES LABELS "horizon;cpu")
+
+    add_library(horizon-test-core-shader-options-api OBJECT test_shader_compile_options_api.cpp)
+    target_link_libraries(horizon-test-core-shader-options-api PRIVATE ocarina-include ocarina-rhi)
+    add_dependencies(horizon-tests horizon-test-core-shader-options-api)
+    add_test(NAME horizon.core.shader_options_api
+        COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --config "$<CONFIG>"
+                --target horizon-test-core-shader-options-api)
+    set_tests_properties(horizon.core.shader_options_api PROPERTIES
+        LABELS "horizon;cpu;compile" RUN_SERIAL TRUE TIMEOUT 300)
+endif()
+
+# Exercise the real allocator across a DLL boundary without engine dependencies.
+add_library(horizon-allocator-crt-fixture SHARED
+    allocator_crt_fixture.cpp "${PROJECT_SOURCE_DIR}/src/core/stl.cpp")
+target_include_directories(horizon-allocator-crt-fixture PUBLIC "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(horizon-allocator-crt-fixture PUBLIC cxx_std_20)
+target_compile_definitions(horizon-allocator-crt-fixture PRIVATE OC_CORE_EXPORT_DLL=1)
+
+add_executable(horizon-test-core-allocator-crt test_allocator_crt.cpp)
+target_link_libraries(horizon-test-core-allocator-crt PRIVATE horizon-allocator-crt-fixture)
+set_target_properties(horizon-allocator-crt-fixture horizon-test-core-allocator-crt PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/allocator-crt"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/allocator-crt")
+add_dependencies(horizon-tests horizon-test-core-allocator-crt)
+add_test(NAME horizon.core.allocator_crt COMMAND horizon-test-core-allocator-crt)
+set_tests_properties(horizon.core.allocator_crt PROPERTIES LABELS "horizon;cpu" TIMEOUT 30)
+
 add_executable(horizon-test-logging-configuration test_logging_configuration.cpp)
 target_link_libraries(horizon-test-logging-configuration PRIVATE horizon-logging)
 add_dependencies(horizon-tests horizon-test-logging-configuration)

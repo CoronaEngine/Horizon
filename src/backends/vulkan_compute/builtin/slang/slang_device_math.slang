@@ -164,6 +164,15 @@ float oc_half_mul(float a, float b) { return oc_half_value(a * b); }
 // exact half midpoint before rounding, avoiding float32 -> binary16 double
 // rounding while retaining DSL HFMA's single binary16 rounding.
 float oc_half_fma(float a, float b, float c) {
+    uint a_bits = asuint(a), b_bits = asuint(b), c_bits = asuint(c);
+    uint a_magnitude = a_bits & 0x7fffffffu, b_magnitude = b_bits & 0x7fffffffu;
+    // For a finite zero product plus zero, RNE retains -0 only if both
+    // addends are negative zero. Materialize that sign as bits rather than
+    // relying on floating-point zero-product simplifications.
+    if ((c_bits & 0x7fffffffu) == 0u &&
+        (a_magnitude == 0u || b_magnitude == 0u) &&
+        a_magnitude < 0x7f800000u && b_magnitude < 0x7f800000u)
+        return asfloat((a_bits ^ b_bits) & c_bits & 0x80000000u);
     // Slang 2026.10 ignores local precise on SPIR-V. Explicit decorations
     // preserve TwoSum's operation order without changing other shader math.
     float2 sum_residual = spirv_asm {
@@ -206,6 +215,122 @@ vector<float, N> oc_half_fma<uint N>(vector<float, N> a, vector<float, N> b, vec
 // subtraction with one final binary16 rounding.
 float oc_half_minor(float a, float b, float c, float d) {
     return oc_half_fma(a, b, -oc_half_mul(c, d));
+}
+
+#if defined(OC_NATIVE_FLOAT32_FMA)
+float oc_fma(float a, float b, float c) {
+    return spirv_asm {
+        OpExtension "SPV_KHR_fma";
+        OpCapability FMAKHR;
+        result : $$float = OpFmaKHR $a $b $c;
+    };
+}
+#else
+// Binary32 round-to-nearest-even FMA. GLSL.std.450 Fma is not guaranteed to be
+// fused by Vulkan, even with NoContraction. Integer significands retain the
+// exact 48-bit product and enough low bits to round the sum only once.
+uint oc_fma32_msb(uint64_t value) {
+    uint high = uint(value >> 32u);
+    return high != 0u ? 32u + uint(firstbithigh(high)) : uint(firstbithigh(uint(value)));
+}
+uint64_t oc_fma32_shift_jam(uint64_t value, uint distance) {
+    if (distance == 0u) return value;
+    if (distance < 64u)
+        return (value >> distance) | uint64_t((value & ((uint64_t(1) << distance) - 1u)) != 0u);
+    return uint64_t(value != 0u);
+}
+uint64_t oc_fma32_round_shift(uint64_t value, uint distance) {
+    if (distance == 0u) return value;
+    if (distance > 64u) return 0u;
+    // Keep the guard bit so a distance of 64 never shifts by the type width.
+    // Round up when the guard is set and either the discarded tail is nonzero
+    // or the retained integer is odd (an exact tie rounds to even).
+    uint tail_shift = distance - 1u;
+    uint64_t guarded = value >> tail_shift;
+    uint64_t whole = guarded >> 1u;
+    uint64_t sticky = uint64_t((guarded << tail_shift) != value);
+    return whole + (guarded & (whole | sticky) & 1u);
+}
+uint oc_fma32_bits(uint a, uint b, uint c) {
+    uint magnitude_a = a & 0x7fffffffu, magnitude_b = b & 0x7fffffffu, magnitude_c = c & 0x7fffffffu;
+    uint product_sign = (a ^ b) & 0x80000000u, c_sign = c & 0x80000000u;
+    if (magnitude_a > 0x7f800000u || magnitude_b > 0x7f800000u || magnitude_c > 0x7f800000u)
+        return 0x7fc00000u;
+    if (magnitude_a == 0x7f800000u || magnitude_b == 0x7f800000u) {
+        if (magnitude_a == 0u || magnitude_b == 0u ||
+            (magnitude_c == 0x7f800000u && product_sign != c_sign)) return 0x7fc00000u;
+        return product_sign | 0x7f800000u;
+    }
+    if (magnitude_c == 0x7f800000u) return c;
+    uint exponent_a = magnitude_a >> 23u, exponent_b = magnitude_b >> 23u, exponent_c = magnitude_c >> 23u;
+    uint sig_a = (magnitude_a & 0x7fffffu) | (exponent_a != 0u ? 0x800000u : 0u);
+    uint sig_b = (magnitude_b & 0x7fffffu) | (exponent_b != 0u ? 0x800000u : 0u);
+    uint sig_c = (magnitude_c & 0x7fffffu) | (exponent_c != 0u ? 0x800000u : 0u);
+    if (sig_a == 0u || sig_b == 0u) return magnitude_c == 0u ? (product_sign & c_sign) : c;
+    int power_a = exponent_a != 0u ? int(exponent_a) - 150 : -149;
+    int power_b = exponent_b != 0u ? int(exponent_b) - 150 : -149;
+    uint64_t product = uint64_t(sig_a) * uint64_t(sig_b);
+    uint product_msb = oc_fma32_msb(product);
+    uint64_t large = product << (62u - product_msb), small = 0u;
+    int top_exponent = power_a + power_b + int(product_msb);
+    uint sign = product_sign;
+    if (sig_c != 0u) {
+        uint c_msb = oc_fma32_msb(uint64_t(sig_c));
+        uint64_t c_value = uint64_t(sig_c) << (62u - c_msb);
+        int c_exponent = (exponent_c != 0u ? int(exponent_c) - 150 : -149) + int(c_msb);
+        if (c_exponent > top_exponent || (c_exponent == top_exponent && c_value > large)) {
+            small = oc_fma32_shift_jam(large, uint(c_exponent - top_exponent));
+            large = c_value;
+            top_exponent = c_exponent;
+            sign = c_sign;
+        } else small = oc_fma32_shift_jam(c_value, uint(top_exponent - c_exponent));
+    }
+    // Normalized product/C have at least 15/39 trailing zeros. Alignment is
+    // exact whenever cancellation can be deep; otherwise the jammed odd low
+    // bit preserves which side of any binary32 rounding midpoint the sum lies.
+    // The same-sign sum may use bit 63, so keep it unsigned throughout.
+    uint64_t sum = product_sign == c_sign ? large + small : large - small;
+    if (sum == 0u) return 0u;
+    uint sum_msb = oc_fma32_msb(sum);
+    int result_exponent = top_exponent + int(sum_msb) - 62;
+    if (result_exponent > 127) return sign | 0x7f800000u;
+    if (result_exponent < -126) {
+        int distance = -top_exponent - 87;
+        uint64_t subnormal = distance > 0 ? oc_fma32_round_shift(sum, uint(distance)) : sum << uint(-distance);
+        return sign | uint(subnormal);
+    }
+    uint64_t significand = sum_msb > 23u ? oc_fma32_round_shift(sum, sum_msb - 23u) : sum << (23u - sum_msb);
+    if (significand == 0x1000000u) { significand >>= 1u; ++result_exponent; }
+    if (result_exponent > 127) return sign | 0x7f800000u;
+    return sign | (uint(result_exponent + 127) << 23u) | (uint(significand) & 0x7fffffu);
+}
+float oc_fma(float a, float b, float c) { return asfloat(oc_fma32_bits(asuint(a), asuint(b), asuint(c))); }
+#endif
+
+// A binary16 product is exact in float32. The existing Half helper retains the
+// sum's residual and corrects Half midpoints before its single Half rounding.
+// Kernels using this path declare RTE32 (and other widths where required by
+// the device's rounding independence), including Half matrix inverse kernels.
+float16_t oc_fma(float16_t a, float16_t b, float16_t c) {
+    return oc_float2half(oc_half_fma(oc_half2float(a), oc_half2float(b), oc_half2float(c)));
+}
+vector<float,N> oc_fma<uint N>(vector<float,N> a, vector<float,N> b, vector<float,N> c) {
+    vector<float,N> result;
+    for (uint i=0u;i<N;++i) result[i] = oc_fma(a[i],b[i],c[i]);
+    return result;
+}
+matrix<float,R,C> oc_fma<uint R,uint C>(matrix<float,R,C> a, matrix<float,R,C> b, matrix<float,R,C> c) {
+    matrix<float,R,C> result;
+    for (uint i=0u;i<R;++i) result[i] = oc_fma(a[i],b[i],c[i]);
+    return result;
+}
+vector<float16_t,N> oc_fma<uint N>(vector<float16_t,N> a, vector<float16_t,N> b, vector<float16_t,N> c) {
+    return oc_float2half(oc_half_fma(oc_half2float(a), oc_half2float(b), oc_half2float(c)));
+}
+matrix<float16_t,R,C> oc_fma<uint R,uint C>(matrix<float16_t,R,C> a, matrix<float16_t,R,C> b, matrix<float16_t,R,C> c) {
+    matrix<float16_t,R,C> result;
+    for (uint i=0u;i<R;++i) result[i] = oc_fma(a[i],b[i],c[i]);
+    return result;
 }
 
 float oc_fmod(float a, float b) { return fmod(a, b); }
@@ -393,6 +518,110 @@ vector<uint, 2> oc_sqr(vector<uint, 2> x) { return x*x; }
 vector<uint, 3> oc_sqr(vector<uint, 3> x) { return x*x; }
 vector<uint, 4> oc_sqr(vector<uint, 4> x) { return x*x; }
 uint[N] oc_sqr<uint N>(uint x[N]) { uint result[N]; for(uint i=0;i<N;++i) result[i]=oc_sqr(x[i]); return result; }
+
+T oc_min<T : __BuiltinFloatingPointType>(T a, T b) { return min(a,b); }
+T oc_max<T : __BuiltinFloatingPointType>(T a, T b) { return max(a,b); }
+vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, vector<T, N> b) { vector<T, N> result; for (uint i=0;i<N;++i) result[i]=oc_min(a[i],b[i]); return result; }
+vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, vector<T, N> b) { vector<T, N> result; for (uint i=0;i<N;++i) result[i]=oc_max(a[i],b[i]); return result; }
+vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, T b) { return oc_min(a,vector<T,N>(b)); }
+vector<T, N> oc_min<T : __BuiltinFloatingPointType, uint N>(T a, vector<T, N> b) { return oc_min(vector<T,N>(a),b); }
+vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(vector<T, N> a, T b) { return oc_max(a,vector<T,N>(b)); }
+vector<T, N> oc_max<T : __BuiltinFloatingPointType, uint N>(T a, vector<T, N> b) { return oc_max(vector<T,N>(a),b); }
+T oc_clamp<T : __BuiltinFloatingPointType>(T x, T a, T b) { return oc_min(b,oc_max(a,x)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, vector<T,N> a, vector<T,N> b) { return oc_min(b,oc_max(a,x)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, T a, T b) { return oc_clamp(x,vector<T,N>(a),vector<T,N>(b)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, vector<T,N> a, T b) { return oc_clamp(x,a,vector<T,N>(b)); }
+vector<T, N> oc_clamp<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x, T a, vector<T,N> b) { return oc_clamp(x,vector<T,N>(a),b); }
+matrix<T,R,C> oc_min<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> a, matrix<T,R,C> b) { matrix<T,R,C> result; for(uint i=0;i<R;++i) result[i]=oc_min(a[i],b[i]); return result; }
+matrix<T,R,C> oc_max<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> a, matrix<T,R,C> b) { matrix<T,R,C> result; for(uint i=0;i<R;++i) result[i]=oc_max(a[i],b[i]); return result; }
+matrix<T,R,C> oc_clamp<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> x, matrix<T,R,C> a, matrix<T,R,C> b) { return oc_min(b,oc_max(a,x)); }
+float oc_saturate(float x) { return oc_clamp(x,0.f,1.f); }
+float16_t oc_saturate(float16_t x) { return oc_clamp(x,float16_t(0),float16_t(1)); }
+vector<T,N> oc_saturate<T : __BuiltinFloatingPointType, uint N>(vector<T,N> x) { return oc_clamp(x,T(0),T(1)); }
+matrix<T,R,C> oc_saturate<T : __BuiltinFloatingPointType, uint R, uint C>(matrix<T,R,C> x) { matrix<T,R,C> result; for(uint i=0;i<R;++i) result[i]=oc_saturate(x[i]); return result; }
+
+// Only small arguments need a log1p series. Ordinary hyperbolic inputs retain
+// the native intrinsics; large inverse inputs avoid overflowing their square.
+float oc_log1p_positive(float x) {
+    float y = x / (2.f + x);
+    if (y < 0.25f) {
+        float y2 = y * y;
+        return 2.f * y * (1.f + y2 * (1.f/3.f + y2 * (1.f/5.f +
+            y2 * (1.f/7.f + y2 * (1.f/9.f + y2 * (1.f/11.f))))));
+    }
+    return log(1.f + x);
+}
+float oc_asinh(float x) {
+    float ax = abs(x), value;
+    if (ax < 0.5f) {
+        float square = ax * ax;
+        value = oc_log1p_positive(ax + square / (1.f + sqrt(1.f + square)));
+    } else if (ax > 1e19f) value = log(ax) + 0.6931471805599453f;
+    else value = asinh(ax);
+    return oc_copysign(value,x);
+}
+float oc_acosh(float x) {
+    if (x < 1.f) return asfloat(0x7fc00000u);
+    if (x > 1e19f) return log(x) + 0.6931471805599453f;
+    if (x < 1.5f) {
+        // Keep the caller's float-rounded argument. Slang otherwise cancels a
+        // caller's (v + 1) with this subtraction even in precise FP mode.
+        float one = 1.f;
+        float offset = spirv_asm {
+            %difference : $$float = OpFSub $x $one;
+            OpDecorate %difference NoContraction;
+            result : $$float = OpCopyObject %difference
+        };
+        return oc_log1p_positive(offset + sqrt(offset * (x + 1.f)));
+    }
+    return acosh(x);
+}
+float oc_atanh(float x) {
+    float ax = abs(x);
+    if (ax > 1.f) return asfloat(0x7fc00000u);
+    if (ax == 1.f) return oc_copysign(asfloat(0x7f800000u),x);
+    float value = ax < 0.5f ? 0.5f * oc_log1p_positive(2.f * ax / (1.f - ax)) : atanh(ax);
+    return oc_copysign(value,x);
+}
+float oc_tanh(float x) {
+    if (abs(x) < 0.125f) {
+        float square = x * x;
+        return x * (1.f + square * (-1.f/3.f + square * (2.f/15.f - square * (17.f/315.f))));
+    }
+    return tanh(x);
+}
+#define OC_HYPERBOLIC_OVERLOADS(name) \
+float16_t name(float16_t x) { return float16_t(name(float(x))); } \
+vector<float,N> name<uint N>(vector<float,N> x) { vector<float,N> result; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; } \
+vector<float16_t,N> name<uint N>(vector<float16_t,N> x) { vector<float16_t,N> result; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; } \
+matrix<float,R,C> name<uint R, uint C>(matrix<float,R,C> x) { matrix<float,R,C> result; for(uint i=0;i<R;++i) result[i]=name(x[i]); return result; } \
+matrix<float16_t,R,C> name<uint R, uint C>(matrix<float16_t,R,C> x) { matrix<float16_t,R,C> result; for(uint i=0;i<R;++i) result[i]=name(x[i]); return result; } \
+float[N] name<uint N>(float x[N]) { float result[N]; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; } \
+float16_t[N] name<uint N>(float16_t x[N]) { float16_t result[N]; for(uint i=0;i<N;++i) result[i]=name(x[i]); return result; }
+OC_HYPERBOLIC_OVERLOADS(oc_asinh)
+OC_HYPERBOLIC_OVERLOADS(oc_acosh)
+OC_HYPERBOLIC_OVERLOADS(oc_atanh)
+OC_HYPERBOLIC_OVERLOADS(oc_tanh)
+#undef OC_HYPERBOLIC_OVERLOADS
+
+// An integer zero converts to +0. Keep its bit pattern explicit, including
+// after a float-to-integer conversion that a driver may combine with this one.
+#define OC_INTEGER_TO_FLOAT(type) \
+float oc_integer_to_float(type value) { \
+    uint bits = asuint(float(value)); \
+    uint mask = value == type(0) ? 0u : 0xffffffffu; \
+    uint canonical = spirv_asm { result : $$uint = OpBitwiseAnd $bits $mask }; \
+    return asfloat(canonical); \
+} \
+vector<float,N> oc_integer_to_float<uint N>(vector<type,N> value) { \
+    vector<float,N> result; \
+    for(uint i=0;i<N;++i) result[i]=oc_integer_to_float(value[i]); \
+    return result; \
+}
+OC_INTEGER_TO_FLOAT(int)
+OC_INTEGER_TO_FLOAT(uint)
+OC_INTEGER_TO_FLOAT(uint64_t)
+#undef OC_INTEGER_TO_FLOAT
 
 // DSL sign returns +1 for both signed zero values. DSL round rounds ties away
 // from zero, whereas the Slang native round operation uses ties-to-even.
@@ -587,10 +816,16 @@ float4x4 oc_inverse(float4x4 m) {
 [[vk::binding(0, 0)]] Texture2D<float4>      g_bindless_tex2d[];
 [allow("parameterBindingsOverlap")]
 [[vk::binding(0, 0)]] Texture2D<uint4>       g_nrd_uint_tex2d[];
+[allow("parameterBindingsOverlap")]
+[[vk::binding(0, 0)]] [vk::image_format("unknown")] Texture2D<uint4> g_native_uint_tex2d[];
 [[vk::binding(1, 0)]] RWTexture2D<float4>    g_bindless_surf2d[];
 [[vk::binding(2, 0)]] Texture3D<float4>      g_bindless_tex3d[];
 [[vk::binding(3, 0)]] RWTexture3D<float4>    g_bindless_surf3d[];
+[allow("parameterBindingsOverlap")]
 [[vk::binding(5, 0)]] globallycoherent RWTexture2D<uint4> g_bindless_uint_surf2d[];
+// The Vulkan view selects R32UI, RG32UI or RGBA32UI for each whole-texel access.
+[allow("parameterBindingsOverlap")]
+[[vk::binding(5, 0)]] [vk::image_format("unknown")] RWTexture2D<uint4> g_native_uint_surf2d[];
 [[vk::binding(6, 0)]] globallycoherent RWTexture3D<uint4> g_bindless_uint_surf3d[];
 [[vk::binding(4, 0)]] SamplerState           g_samplers[16];
 [[vk::binding(7, 0)]] globallycoherent RWStructuredBuffer<uint> g_texture_write_locks;
@@ -657,6 +892,46 @@ void oc_nrd_tex2d_write(uint64_t image_index, int2 p, float4 value) {
 void oc_nrd_tex2d_write_uint(uint64_t image_index, int2 p, uint4 value) {
     g_bindless_uint_surf2d[uint(image_index)][p] = value;
 }
+
+// Captured and dispatch texture descriptors are uniform. Native access uses
+// typed texels; the legacy checked surfaces interpret x as a byte offset.
+float4 oc_tex2d_read_native_float4(OCTextureDesc desc, int2 p) {
+    return oc_nrd_tex2d_read(desc.tex_index, p);
+}
+float2 oc_tex2d_read_native_float2(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_float4(desc, p).xy;
+}
+float oc_tex2d_read_native_float(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_float4(desc, p).x;
+}
+uint4 oc_tex2d_read_native_uint4(OCTextureDesc desc, int2 p) {
+    return g_native_uint_tex2d[uint(desc.tex_index)].Load(int3(p, 0));
+}
+uint2 oc_tex2d_read_native_uint2(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_uint4(desc, p).xy;
+}
+uint oc_tex2d_read_native_uint(OCTextureDesc desc, int2 p) {
+    return oc_tex2d_read_native_uint4(desc, p).x;
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, float4 value) {
+    oc_nrd_tex2d_write(desc.surf_index, p, value);
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, float2 value) {
+    oc_tex2d_write_native(desc, p, float4(value, 0.f, 0.f));
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, float value) {
+    oc_tex2d_write_native(desc, p, float4(value, 0.f, 0.f, 0.f));
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, uint4 value) {
+    g_native_uint_surf2d[uint(desc.surf_index)][p] = value;
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, uint2 value) {
+    oc_tex2d_write_native(desc, p, uint4(value, 0u, 0u));
+}
+void oc_tex2d_write_native(OCTextureDesc desc, int2 p, uint value) {
+    oc_tex2d_write_native(desc, p, uint4(value, 0u, 0u, 0u));
+}
+
 float4 oc_nrd_tex2d_sample(uint64_t image_index, float2 uv) {
     return g_bindless_tex2d[uint(image_index)].SampleLevel(g_samplers[1], uv, 0.f);
 }
@@ -795,13 +1070,17 @@ void oc_tex2d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y
 
 
 float[N] oc_tex3d_sample_float<uint N>(OCTextureDesc desc, float u, float v, float w = 0.0f) {
+    // BC7_UNORM=17 and BC7_SRGB=18 are sampled-only 2D images at depth one.
+    if (desc.pixel_storage == 17u || desc.pixel_storage == 18u)
+        return oc_tex2d_sample_float<N>(desc, u, v);
     float4 value=g_bindless_tex3d[NonUniformResourceIndex(uint(desc.tex_index))].SampleLevel(g_samplers[0], float3(u,v,w), 0);
     float result[N]; for(uint i=0;i<N;++i) result[i]=value[i]; return result;
 }
 
 float[N] oc_bindless_array_tex3d_sample<uint N>(OCBindlessArrayDesc arr, uint slot, float u, float v, float w = 0.0f) {
-    uint index=*((uint*)(arr.tex3d_slot + slot*4u));
-    OCTextureDesc desc={uint64_t(index),uint64_t(index),0,0};
+    uint tagged=*((uint*)(arr.tex3d_slot + slot*4u));
+    uint index=tagged & 0x7fffffffu;
+    OCTextureDesc desc={uint64_t(index),uint64_t(index),(tagged & 0x80000000u) != 0u ? 17u : 0u,0};
     return oc_tex3d_sample_float<N>(desc, u,v,w);
 }
 
@@ -889,7 +1168,17 @@ void oc_tex3d_write(OCTextureDesc desc, vector<uint8_t, 4> value, uint x, uint y
 
 // ── Ray tracing helpers ───────────────────────────────────────────────────────
 
-struct OcHitInfo { uint inst_id; uint prim_id; float2 bary; float t; };
+#if OC_RAY_QUERY || OC_RAY_PIPELINE
+TriangleHit oc_trace_miss() {
+    TriangleHit hit;
+    hit.inst_id = 0xffffffffu;
+    hit.prim_id = 0xffffffffu;
+    hit.bary = float2(0.f);
+    return hit;
+}
+#endif
+
+#if OC_RAY_QUERY
 
 bool oc_trace_occlusion(uint64_t handle, Ray ray) {
     if (handle == 0) return false;
@@ -900,14 +1189,9 @@ bool oc_trace_occlusion(uint64_t handle, Ray ray) {
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
-TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
-    if (handle == 0) {
-        TriangleHit miss;
-        miss.inst_id = 0xffffffffu;
-        miss.prim_id = 0xffffffffu;
-        miss.bary = float2(0, 0);
-        return miss;
-    }
+TriangleHit oc_trace_closest_with_distance(uint64_t handle, Ray ray, out float distance) {
+    distance = 0.f;
+    if (handle == 0) return oc_trace_miss();
     RaytracingAccelerationStructure accel = RaytracingAccelerationStructure(handle);
     RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;
     q.TraceRayInline(accel, RAY_FLAG_NONE, 1u, oc_native_ray(ray));
@@ -918,13 +1202,68 @@ TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
         h.prim_id = q.CommittedPrimitiveIndex();
         float2 uv = q.CommittedTriangleBarycentrics();
         h.bary = float2(1.0f - uv.x - uv.y, uv.x);
+        distance = q.CommittedRayT();
     } else {
-        h.inst_id = 0xFFFFFFFFu;
-        h.prim_id = 0xFFFFFFFFu;
-        h.bary    = float2(0, 0);
+        h = oc_trace_miss();
     }
     return h;
 }
+
+TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
+    float distance;
+    return oc_trace_closest_with_distance(handle, ray, distance);
+}
+
+#elif OC_RAY_PIPELINE
+struct OCTrianglePayload {
+    TriangleHit hit;
+    float distance;
+};
+
+// Only triangle hit groups exist. Devices enabling primitive culling may
+// explicitly skip AABBs, too. The mask and hit-group/miss indexes are shared
+// by closest and occlusion traces.
+OCTrianglePayload oc_trace_triangle(uint64_t handle, Ray ray, uint flags) {
+    OCTrianglePayload payload = {oc_trace_miss(), 0.f};
+    if (handle != 0) {
+#if OC_PRIMITIVE_CULLING
+        flags |= RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
+#endif
+        TraceRay(RaytracingAccelerationStructure(handle), flags | RAY_FLAG_FORCE_OPAQUE,
+                 1u, 0u, 0u, 0u, oc_native_ray(ray), payload);
+    }
+    return payload;
+}
+
+TriangleHit oc_trace_closest(uint64_t handle, Ray ray) {
+    return oc_trace_triangle(handle, ray, RAY_FLAG_NONE).hit;
+}
+
+TriangleHit oc_trace_closest_with_distance(uint64_t handle, Ray ray, out float distance) {
+    OCTrianglePayload payload = oc_trace_triangle(handle, ray, RAY_FLAG_NONE);
+    distance = payload.distance;
+    return payload.hit;
+}
+
+bool oc_trace_occlusion(uint64_t handle, Ray ray) {
+    return oc_trace_triangle(handle, ray, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH).hit.inst_id != 0xffffffffu;
+}
+
+[shader("closesthit")]
+void ocClosestHit(inout OCTrianglePayload payload, BuiltInTriangleIntersectionAttributes attrib) {
+    payload.hit.inst_id = InstanceID();
+    payload.hit.prim_id = PrimitiveIndex();
+    float2 uv = attrib.barycentrics;
+    payload.hit.bary = float2(1.f - uv.x - uv.y, uv.x);
+    payload.distance = RayTCurrent();
+}
+
+[shader("miss")]
+void ocMiss(inout OCTrianglePayload payload) {
+    payload.hit = oc_trace_miss();
+    payload.distance = 0.f;
+}
+#endif
 
 // GEMM markers are placeholders; gemm_commands emits the arithmetic.
 void oc_tensor_gemm<uint Id>() {}

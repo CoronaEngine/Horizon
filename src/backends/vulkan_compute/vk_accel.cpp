@@ -31,13 +31,11 @@ VkAccel::~VkAccel() noexcept {
 
 void VkAccel::clear() noexcept {
     // Accel::clear calls the implementation directly, bypassing the device's
-    // destroy_accel wait. Submitted ray queries must finish before TLAS/BLAS
+    // destroy_accel wait. Submitted trace operations must finish before TLAS/BLAS
     // storage is released, just as when the public resource is destroyed.
     device_->synchronize_streams();
     if (tlas_ != VK_NULL_HANDLE) {
-        auto fn = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(
-            device_->logical_device(), "vkDestroyAccelerationStructureKHR");
-        if (fn) fn(device_->logical_device(), tlas_, nullptr);
+        device_->acceleration_structure_functions().destroy(device_->logical_device(), tlas_, nullptr);
         tlas_ = VK_NULL_HANDLE;
     }
     device_->free_buffer(tlas_buf_);
@@ -49,12 +47,7 @@ void VkAccel::clear() noexcept {
 }
 
 void VkAccel::reallocate_tlas(uint32_t instance_count) noexcept {
-    auto vkGetAS = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkGetAccelerationStructureBuildSizesKHR");
-    auto vkCreateAS = (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkCreateAccelerationStructureKHR");
-    auto vkGetAddr = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkGetAccelerationStructureDeviceAddressKHR");
+    const auto &functions = device_->acceleration_structure_functions();
 
     tlas_geom_ = {};
     tlas_geom_.sType                                 = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
@@ -72,14 +65,12 @@ void VkAccel::reallocate_tlas(uint32_t instance_count) noexcept {
 
     VkAccelerationStructureBuildSizesInfoKHR size_info{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    vkGetAS(device_->logical_device(),
+    functions.get_build_sizes(device_->logical_device(),
             VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
             &build_info_, &instance_count, &size_info);
 
     if (tlas_ != VK_NULL_HANDLE) {
-        auto fn = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(
-            device_->logical_device(), "vkDestroyAccelerationStructureKHR");
-        if (fn) fn(device_->logical_device(), tlas_, nullptr);
+        functions.destroy(device_->logical_device(), tlas_, nullptr);
     }
     device_->free_buffer(tlas_buf_);
 
@@ -94,19 +85,18 @@ void VkAccel::reallocate_tlas(uint32_t instance_count) noexcept {
     ci.buffer = tlas_buf_.buffer;
     ci.size   = size_info.accelerationStructureSize;
     ci.type   = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    OC_VK_CHECK(vkCreateAS(device_->logical_device(), &ci, nullptr, &tlas_));
+    OC_VK_CHECK(functions.create(device_->logical_device(), &ci, nullptr, &tlas_));
 
     VkAccelerationStructureDeviceAddressInfoKHR addr{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
     addr.accelerationStructure = tlas_;
-    tlas_address_ = vkGetAddr(device_->logical_device(), &addr);
+    tlas_address_ = functions.get_device_address(device_->logical_device(), &addr);
 }
 
 // ── build_tlas ────────────────────────────────────────────────────────────────
 
 void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
-    auto vkCmdBuildAS = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkCmdBuildAccelerationStructuresKHR");
+    const auto &functions = device_->acceleration_structure_functions();
 
     uint32_t instance_count = static_cast<uint32_t>(mesh_num());
     if (instance_count == 0) { clear(); return; }
@@ -150,9 +140,7 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     // Scratch buffer
     VkAccelerationStructureBuildSizesInfoKHR size_info{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    auto vkGetAS = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkGetAccelerationStructureBuildSizesKHR");
-    vkGetAS(device_->logical_device(),
+    functions.get_build_sizes(device_->logical_device(),
             VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
             &build_info_, &instance_count, &size_info);
 
@@ -169,7 +157,7 @@ void VkAccel::build_tlas(VkComputeCommandVisitor *visitor) noexcept {
     const VkAccelerationStructureBuildRangeInfoKHR *p_range = &range;
 
     device_->immediate_submit([&](VkCommandBuffer cb) {
-        vkCmdBuildAS(cb, 1u, &build_info_, &p_range);
+        functions.cmd_build(cb, 1u, &build_info_, &p_range);
     });
 
     device_->free_buffer(scratch);
@@ -198,8 +186,7 @@ void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
         return;
     }
 
-    auto vkCmdBuildAS = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkCmdBuildAccelerationStructuresKHR");
+    const auto &functions = device_->acceleration_structure_functions();
 
     uint32_t instance_count = static_cast<uint32_t>(mesh_num());
 
@@ -218,9 +205,7 @@ void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
 
     VkAccelerationStructureBuildSizesInfoKHR size_info{
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    auto vkGetAS = (PFN_vkGetAccelerationStructureBuildSizesKHR)vkGetDeviceProcAddr(
-        device_->logical_device(), "vkGetAccelerationStructureBuildSizesKHR");
-    vkGetAS(device_->logical_device(),
+    functions.get_build_sizes(device_->logical_device(),
             VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
             &build_info_, &instance_count, &size_info);
 
@@ -238,7 +223,7 @@ void VkAccel::update_tlas(VkComputeCommandVisitor *visitor) noexcept {
     const VkAccelerationStructureBuildRangeInfoKHR *p_range = &range;
 
     device_->immediate_submit([&](VkCommandBuffer cb) {
-        vkCmdBuildAS(cb, 1u, &build_info_, &p_range);
+        functions.cmd_build(cb, 1u, &build_info_, &p_range);
     });
 
     device_->free_buffer(scratch);
