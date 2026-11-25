@@ -31,10 +31,10 @@ int main(int argc, char** argv)
 {
     const std::string_view mode = argc > 1 ? argv[1] : "baseline_slang";
 
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
     if (glfwInit()) {
+#if defined(__linux__)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
