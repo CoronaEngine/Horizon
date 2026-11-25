@@ -4,29 +4,20 @@
 #include "rhi/context.h"
 #include "math/transform.h"
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
-#include <windows.h>
-static constexpr auto native_window_handle = glfwGetWin32Window;
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#include <GLFW/glfw3native.h>
 #include <mach-o/dyld.h>
-static constexpr auto native_window_handle = glfwGetCocoaView;
-#else
-static void* native_window_handle(GLFWwindow*) {
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-}
 #endif
+#include <GLFW/glfw3native.h>
 
-#include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <string>
 
@@ -42,62 +33,51 @@ void run_example_drawstress_ocarina() {
     using ocarina::H;
 
     constexpr auto mode = "drawstress_ocarina";
-    const auto env_int = [](const char* name, int fallback = 0) {
-        const char* value = std::getenv(name);
-        if (!value || !*value) return fallback;
-        char* end{};
-        const long parsed = std::strtol(value, &end, 10);
-        if (end == value || *end || parsed < 0 || parsed > 10000000)
-            throw std::invalid_argument(std::string("Invalid ") + name);
-        return static_cast<int>(parsed);
-    };
-    constexpr int dim_max = 40;
-    const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", dim_max), 2, dim_max);
-    const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0.0f)
-            throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
+    constexpr int dim = 40;
+    constexpr bool hidden = false;
+    constexpr float fixed_dt = 0.0f;
+    constexpr char capture_path[] = "";
 
     // Slang builtins and the dynamically loaded backend live next to the executable.
 #ifdef _WIN32
     std::wstring filename(32768, L'\0');
-    const auto length = GetModuleFileNameW(nullptr, filename.data(), static_cast<DWORD>(filename.size()));
-    if (!length || length >= filename.size())
-        throw std::runtime_error("Cannot locate HorizonExamples");
-    filename.resize(length);
+    filename.resize(GetModuleFileNameW(nullptr, filename.data(), static_cast<DWORD>(filename.size())));
     const auto executable = std::filesystem::path(filename);
 #elif defined(__APPLE__)
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
     std::string filename(size, '\0');
-    if (_NSGetExecutablePath(filename.data(), &size))
-        throw std::runtime_error("Cannot locate HorizonExamples");
+    _NSGetExecutablePath(filename.data(), &size);
     const auto executable = std::filesystem::canonical(filename.c_str());
 #else
     const auto executable = std::filesystem::read_symlink("/proc/self/exe");
 #endif
     auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
-    if (!device.supports_ray_queries())
-        throw std::runtime_error("Ocarina ray queries unsupported on this device");
     device.init_rtx();
     auto stream = device.create_stream();
 
-    if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+#if defined(__linux__)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+    glfwInit();
     struct GlfwSession {
         ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
     } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-    if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, mode, nullptr, nullptr);
-    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE, !hidden);
+    constexpr int width = 800, height = 600;
+    GLFWwindow* window = glfwCreateWindow(width, height, mode, nullptr, nullptr);
 
-    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
+#if defined(_WIN32)
+    void* native_window = glfwGetWin32Window(window);
+#elif defined(__linux__)
+    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
+#elif defined(__APPLE__)
+    void* native_window = glfwGetCocoaView(window);
+#endif
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const std::array<ocarina::uint3, 12> triangles = {{
         {0, 1, 2}, {1, 3, 2},
@@ -114,7 +94,7 @@ void run_example_drawstress_ocarina() {
     auto indices = device.create_buffer<ocarina::uint3>(triangles.size());
     stream << vertices.upload(corners.data()) << indices.upload(triangles.data()) << synchronize() << commit();
 
-    auto cube = device.create_mesh(vertices.view(), indices.view(), ocarina::FAST_TRACE, ocarina::DISABLE_ANYHIT);
+    auto cube = device.create_mesh(vertices, indices);
     stream << cube.build_bvh() << synchronize() << commit();
     auto grid = device.create_accel(ocarina::FAST_UPDATE);
     grid.add_instance(ocarina::move(cube), ocarina::make_float4x4(1.f));
@@ -124,7 +104,6 @@ void run_example_drawstress_ocarina() {
     ocarina::Kernel trace = [&](Float3 eye, ocarina::BufferVar<uint32_t> output) {
         ocarina::Uint2 xy = ocarina::dispatch_idx().xy();
         ocarina::Uint2 extent = ocarina::dispatch_dim().xy();
-        $if (xy.x >= extent.x || xy.y >= extent.y) { $return(); };
         auto pixel = xy.y * extent.x + xy.x;
         ocarina::Float screen_x = (cast<float>(xy.x) + .5f) / ocarina::cast<float>(extent.x) * 2.f - 1.f;
         ocarina::Float screen_y = 1.f - (cast<float>(xy.y) + .5f) / ocarina::cast<float>(extent.y) * 2.f;
@@ -144,25 +123,17 @@ void run_example_drawstress_ocarina() {
                             (cast<uint32_t>(bytes.z) << 16u) | 0xff000000u);
     };
     auto shader = device.compile(trace, mode);
-    int width = 0, height = 0;
-    ocarina::vector<uint32_t> pixels;
-    ocarina::Buffer<uint32_t> output;
+    ocarina::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
+    auto output = device.create_buffer<uint32_t>(pixels.size());
     const auto eye = make_float3(0.f, 0.f, -35.f);
     double start = 0.0;
     uint64_t frame = 0;
-    while (!glfwWindowShouldClose(window)) {
+    for (;;) {
         glfwPollEvents();
-        int w, h;
-        glfwGetFramebufferSize(window, &w, &h);
-        if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
+        if (glfwWindowShouldClose(window)) break;
+        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+            glfwWaitEvents();
             continue;
-        }
-        if (w != width || h != height) {
-            width = w;
-            height = h;
-            pixels.resize(static_cast<size_t>(width) * height);
-            output = device.create_buffer<uint32_t>(pixels.size());
         }
         if (frame == 0) start = glfwGetTime();
         const float time = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
@@ -178,22 +149,15 @@ void run_example_drawstress_ocarina() {
                 }
             }
         }
-        if (frame == 0) {
-            stream << grid.build_bvh();
-        } else {
-            stream << grid.update_bvh();
-        }
-        stream << shader(eye, output).dispatch(width, height) << output.download(pixels.data()) << synchronize()
-               << commit();
-        const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
+        stream << grid.update_bvh();
+        stream << shader(eye, output).dispatch(width, height) << output.download_sync(pixels.data()) << commit();
+        display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
         ++frame;
-        if (shown && remaining_frames > 0 && --remaining_frames == 0) break;
     }
 
-    if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && !pixels.empty()) {
-        const auto parent = std::filesystem::path(filename).parent_path();
+    if (capture_path[0] != '\0' && frame > 0) {
+        const auto parent = std::filesystem::path(capture_path).parent_path();
         if (!parent.empty()) std::filesystem::create_directories(parent);
-        if (!stbi_write_png(filename, width, height, 4, pixels.data(), width * 4))
-            throw std::runtime_error("Could not write ray-traced PNG");
+        stbi_write_png(capture_path, width, height, 4, pixels.data(), width * 4);
     }
 }

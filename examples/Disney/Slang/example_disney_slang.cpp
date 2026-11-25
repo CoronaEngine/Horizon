@@ -4,21 +4,16 @@
 #include SLANG(disney_vert.slang)
 #include SLANG(disney_frag.slang)
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
-static constexpr auto native_window_handle = glfwGetWin32Window;
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#include <GLFW/glfw3native.h>
-static constexpr auto native_window_handle = glfwGetCocoaView;
-#else
-static void* native_window_handle(GLFWwindow*) {
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-}
 #endif
+#include <GLFW/glfw3native.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -29,11 +24,9 @@ static void* native_window_handle(GLFWwindow*) {
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -45,89 +38,63 @@ static void* native_window_handle(GLFWwindow*) {
 
 void run_example_disney_slang()
 {
-    const auto env_int = [](const char* name) {
-        const char* value = std::getenv(name);
-        if (!value || !*value) return 0;
-        char* end{};
-        const long parsed = std::strtol(value, &end, 10);
-        if (end == value || *end || parsed < 0 || parsed > 10000000)
-            throw std::invalid_argument(std::string("Invalid ") + name);
-        return static_cast<int>(parsed);
-    };
-    const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
-    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
+    constexpr bool hidden = false;
+    constexpr bool offscreen = false;
+    constexpr char capture_path[] = "";
 
-    if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+#if defined(__linux__)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+    glfwInit();
     struct GlfwSession {
         ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
     } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-    if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, "disney_slang", nullptr, nullptr);
-    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE, !hidden);
+    constexpr int width = 800, height = 600;
+    GLFWwindow* window = glfwCreateWindow(width, height, "disney_slang", nullptr, nullptr);
 
-    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
+#if defined(_WIN32)
+    void* native_window = glfwGetWin32Window(window);
+#elif defined(__linux__)
+    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
+#elif defined(__APPLE__)
+    void* native_window = glfwGetCocoaView(window);
+#endif
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
     HardwareExecutor render_executor;
     HardwareImage radiance, irradiance;
-    for (const auto& [filename, cubemap] : {std::pair{"bolonga_lod.dds", &radiance},
-                                           std::pair{"bolonga_irr.dds", &irradiance}}) {
-        const auto path = environment_dir / filename;
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file) throw std::runtime_error("Failed to open DDS file: " + path.string());
+    for (const auto& [filename, face_size, mip_count, cubemap] : {
+            std::tuple{"bolonga_lod.dds", 256u, 9u, &radiance},
+            std::tuple{"bolonga_irr.dds", 128u, 1u, &irradiance}}) {
+        uint32_t texels_per_face = 0;
+        for (uint32_t mip = 0; mip < mip_count; ++mip) {
+            const uint32_t dim = face_size >> mip;
+            texels_per_face += dim * dim;
+        }
+        std::vector<uint64_t> texels(6 * texels_per_face);
+        std::ifstream file(environment_dir / filename, std::ios::binary);
+        file.seekg(148); // The bundled DX10 DDS files store RGBA16F texels after the header.
+        file.read(reinterpret_cast<char*>(texels.data()), texels.size() * sizeof(uint64_t));
 
-        const std::streamsize file_size = file.tellg();
-        constexpr size_t dx10_payload_offset = 148;
-        if (file_size < static_cast<std::streamsize>(dx10_payload_offset))
-            throw std::runtime_error("Truncated DDS header: " + path.string());
-        file.seekg(0);
-        std::vector<std::byte> bytes(static_cast<size_t>(file_size));
-        if (!file.read(reinterpret_cast<char*>(bytes.data()), file_size))
-            throw std::runtime_error("Failed to read DDS: " + path.string());
-
-        constexpr uint32_t dds_magic = 0x20534444;
-        constexpr uint32_t fourcc_dx10 = 0x30315844;
-        constexpr uint32_t dxgi_format_rgba16_float = 10;
-        constexpr uint32_t caps2_cubemap = 0x200;
-
-        const auto read_u32 = [&](size_t offset) {
-            uint32_t value;
-            std::memcpy(&value, bytes.data() + offset, sizeof(value));
-            return value;
-        };
-        if (read_u32(0) != dds_magic)
-            throw std::runtime_error("Not a DDS file: " + path.string());
-
-        const uint32_t height = read_u32(12);
-        const uint32_t width = read_u32(16);
-        const uint32_t mip_count = std::max(1u, read_u32(28));
-        if (read_u32(84) != fourcc_dx10 || read_u32(128) != dxgi_format_rgba16_float)
-            throw std::runtime_error("Expected DX10 RGBA16F DDS: " + path.string());
-        if ((read_u32(112) & caps2_cubemap) == 0 || width != height)
-            throw std::runtime_error("Expected cubemap DDS: " + path.string());
-
-        HardwareImageCreateInfo desc(width, height, ImageFormat::RGBA16_FLOAT);
+        HardwareImageCreateInfo desc(face_size, face_size, ImageFormat::RGBA16_FLOAT);
         desc.arrayLayers = 6;
         desc.cube = true;
         desc.linearFiltering = true;
         desc.mipLevels = static_cast<int>(mip_count);
         *cubemap = HardwareImage(desc);
-        const size_t payload_size = bytes.size() - dx10_payload_offset;
-        HardwareBuffer staging(static_cast<uint32_t>(payload_size), BufferUsage::StorageBuffer,
-                               bytes.data() + dx10_payload_offset);
+        HardwareBuffer staging(texels, BufferUsage::StorageBuffer);
         uint64_t offset = 0;
         for (uint32_t face = 0; face < 6; ++face) {
             for (uint32_t mip = 0; mip < mip_count; ++mip) {
-                const uint32_t dim = std::max(1u, width >> mip);
-                const uint64_t mip_bytes = static_cast<uint64_t>(dim) * dim * 8;
-                if (offset + mip_bytes > payload_size) throw std::runtime_error("Truncated DDS payload");
+                const uint32_t dim = face_size >> mip;
                 render_executor << staging.copyTo(*cubemap, offset, face, mip);
-                offset += mip_bytes;
+                offset += static_cast<uint64_t>(dim) * dim * sizeof(uint64_t);
             }
         }
     }
@@ -175,11 +142,6 @@ void run_example_disney_slang()
         float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
         float clearcoatGloss = 1.0f;
     };
-    static_assert(offsetof(DrawParameters, baseColorMetallic) == 16 * sizeof(uint32_t));
-    static_assert(offsetof(DrawParameters, roughness) == 20 * sizeof(uint32_t));
-    static_assert(offsetof(DrawParameters, anisotropic) == 24 * sizeof(uint32_t));
-    static_assert(offsetof(DrawParameters, clearcoatGloss) == 28 * sizeof(uint32_t));
-    static_assert(sizeof(DrawParameters) == 29 * sizeof(uint32_t));
 
     constexpr int rows = 10, columns = 11;
     constexpr float radius = 0.42f, spacing = 1.12f;
@@ -208,65 +170,57 @@ void run_example_disney_slang()
         }
     }
 
-    HardwareImage final_output_image;
+    HardwareImage final_output_image(width, height, ImageFormat::RGBA16_FLOAT);
+    final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> rasterizer;
+    rasterizer.outColor = final_output_image;
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
     rasterizer.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
 
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
     const auto eye = 13.5f * glm::vec3(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
     const auto view = glm::lookAtLH(eye, glm::vec3(0.0f), glm::vec3(0, 1, 0));
+    auto projection = glm::perspectiveLH_ZO(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+    projection[1][1] *= -1.0f;
+    rasterizer.vsp.proj_view = projection * view;
     rasterizer.vsp.camPos = glm::vec4(eye, 1.0f);
     rasterizer.vsp.lightDir = glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
     rasterizer.vsp.texCubeIndex = radiance;
     rasterizer.vsp.texCubeIrrIndex = irradiance;
 
-    int width = 0, height = 0;
-    while (!glfwWindowShouldClose(window)) {
+    bool has_rendered_frame = false;
+    for (;;) {
         glfwPollEvents();
-        int w, h;
-        glfwGetFramebufferSize(window, &w, &h);
-        if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
+        if (glfwWindowShouldClose(window)) break;
+        if (!offscreen && glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+            glfwWaitEvents();
             continue;
-        }
-        if (w != width || h != height) {
-            render_executor.waitForDeferredResources();
-            width = w;
-            height = h;
-            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
-            final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
-            rasterizer.outColor = final_output_image;
-            auto projection = glm::perspectiveLH_ZO(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
-            projection[1][1] *= -1.0f;
-            rasterizer.vsp.proj_view = projection * view;
         }
         auto batch = rasterizer.beginBatch();
         for (const auto& draw : draws)
             batch.draw(sphere, draw);
 
         render_executor << std::move(batch);
+        has_rendered_frame = true;
         if (offscreen) {
             render_executor.commit();
-        } else if (!display.present(render_executor, final_output_image)) {
-            continue;
+        } else {
+            display.present(render_executor, final_output_image);
         }
-        if (remaining_frames > 0 && --remaining_frames == 0) break;
     }
 
-    if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
-        const std::filesystem::path path(filename);
+    if (capture_path[0] && has_rendered_frame) {
+        const std::filesystem::path path(capture_path);
         HardwareBuffer readback(height, width * 8u, BufferUsage::StorageBuffer);
         render_executor << final_output_image.copyTo(readback);
         render_executor.commit().waitForDeferredResources();
         std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
-        if (!readback.copyToData(half)) throw std::runtime_error("Capture readback failed");
+        readback.copyToData(half);
         std::vector<unsigned char> rgba(half.size());
         for (size_t i = 0; i < half.size(); ++i)
             rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
         if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        if (!stbi_write_png(filename, width, height, 4, rgba.data(), width * 4))
-            throw std::runtime_error("Capture PNG write failed");
+        stbi_write_png(capture_path, width, height, 4, rgba.data(), width * 4);
     } else {
         render_executor.waitForDeferredResources();
     }

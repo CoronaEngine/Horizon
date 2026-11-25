@@ -18,23 +18,10 @@ struct HorizonRasterRoot {
 };
 [[vk::push_constant]] ConstantBuffer<HorizonRasterRoot> drawRoot;
 
-uint hzVertexIndex(HorizonGeometry geometry, HorizonDrawPacket packet, uint corner) {
-    uint element = packet.firstIndex + corner;
-    uint index;
-    if (geometry.indexBytes == 2) {
-        uint pair = geometry.indices[element >> 1];
-        index = (pair >> (16 * (element & 1))) & 0xffff;
-    } else {
-        index = geometry.indices[element];
-    }
-    uint vertex = index + uint(packet.baseVertex);
-    if (vertex >= geometry.vertexCount) vertex = 0;
-    return vertex;
-}
-
 uint* hzPullVertex(HorizonDrawPacket packet, uint corner) {
     HorizonGeometry geometry = drawRoot.geometries[packet.geometryIndex];
-    return geometry.vertices + hzVertexIndex(geometry, packet, corner) * geometry.strideWords;
+    uint vertex = geometry.indices[packet.firstIndex + corner] + uint(packet.baseVertex);
+    return geometry.vertices + vertex * geometry.strideWords;
 }
 
 // Matches the GLM matrix and texture index uploaded for each draw.

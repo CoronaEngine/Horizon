@@ -4,33 +4,23 @@
 #include "rhi/context.h"
 #include "math/transform.h"
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
-#include <windows.h>
-static constexpr auto native_window_handle = glfwGetWin32Window;
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#include <GLFW/glfw3native.h>
 #include <mach-o/dyld.h>
-static constexpr auto native_window_handle = glfwGetCocoaView;
-#else
-static void* native_window_handle(GLFWwindow*) {
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-}
 #endif
+#include <GLFW/glfw3native.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
-#include <algorithm>
-#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <utility>
@@ -47,103 +37,76 @@ void run_example_disney_ocarina() {
     using ocarina::Float, ocarina::Float2, ocarina::Float3, ocarina::Float4;
     using ocarina::make_float2, ocarina::make_float3, ocarina::make_float4;
     constexpr auto mode = "disney_ocarina";
+    constexpr bool hidden = false;
+    constexpr char capture_path[] = "";
 
     // Slang builtins and the dynamically loaded backend live next to the executable.
 #ifdef _WIN32
     std::wstring filename(32768, L'\0');
     const auto length = GetModuleFileNameW(nullptr, filename.data(), static_cast<DWORD>(filename.size()));
-    if (!length || length >= filename.size())
-        throw std::runtime_error("Cannot locate HorizonExamples");
     filename.resize(length);
     const auto executable = std::filesystem::path(filename);
 #elif defined(__APPLE__)
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
     std::string filename(size, '\0');
-    if (_NSGetExecutablePath(filename.data(), &size))
-        throw std::runtime_error("Cannot locate HorizonExamples");
+    _NSGetExecutablePath(filename.data(), &size);
     const auto executable = std::filesystem::canonical(filename.c_str());
 #else
     const auto executable = std::filesystem::read_symlink("/proc/self/exe");
 #endif
     auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
-    if (!device.supports_ray_queries())
-        throw std::runtime_error("Ocarina ray queries unsupported on this device");
     device.init_rtx();
     auto stream = device.create_stream();
 
-    auto env_int = [](const char* name) {
-        const char* value = std::getenv(name);
-        if (!value || !*value) return 0;
-        char* end{};
-        const long parsed = std::strtol(value, &end, 10);
-        if (end == value || *end || parsed < 0 || parsed > 10000000)
-            throw std::invalid_argument(std::string("Invalid ") + name);
-        return static_cast<int>(parsed);
-    };
-    const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
-
-    if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+#if defined(__linux__)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+    glfwInit();
     struct GlfwSession {
         ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
     } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-    if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, mode, nullptr, nullptr);
-    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE, !hidden);
+    constexpr int width = 800, height = 600;
+    GLFWwindow* window = glfwCreateWindow(width, height, mode, nullptr, nullptr);
 
-    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
+#if defined(_WIN32)
+    void* native_window = glfwGetWin32Window(window);
+#elif defined(__linux__)
+    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
+#elif defined(__APPLE__)
+    void* native_window = glfwGetCocoaView(window);
+#endif
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     // Pack the six faces of each DDS mip into a row of a 2D texture.
     struct Environment {
         ocarina::Texture2D atlas;
         unsigned face_size, levels;
     };
-    Environment radiance{}, irradiance{};
+    Environment radiance{.face_size = 256, .levels = 9}, irradiance{.face_size = 128, .levels = 1};
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
     for (auto [filename, env] : {std::pair{"bolonga_lod.dds", &radiance}, std::pair{"bolonga_irr.dds", &irradiance}}) {
-        const auto path = assets / filename;
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file) throw std::runtime_error("Failed to open DDS file: " + path.string());
-        constexpr size_t header_size = 148;
-        const std::streamsize size = file.tellg();
-        if (size < static_cast<std::streamsize>(header_size)) throw std::runtime_error("Truncated DDS header: " + path.string());
-        std::vector<std::byte> bytes(static_cast<size_t>(size));
-        file.seekg(0);
-        if (!file.read(reinterpret_cast<char*>(bytes.data()), size)) throw std::runtime_error("Failed to read DDS: " + path.string());
-        auto field = [&](size_t offset) {
-            uint32_t value;
-            std::memcpy(&value, bytes.data() + offset, sizeof(value));
-            return value;
-        };
-        constexpr uint32_t dds_magic = 0x20534444, fourcc_dx10 = 0x30315844, dxgi_rgba16_float = 10;
-        if (field(0) != dds_magic || field(84) != fourcc_dx10 || field(128) != dxgi_rgba16_float)
-            throw std::runtime_error("Expected DX10 RGBA16F DDS: " + path.string());
-        const unsigned side = field(16), levels = std::max(1u, field(28));
-        if ((field(112) & 0x200u) == 0 || field(12) != side || !std::has_single_bit(side) || levels > std::bit_width(side))
-            throw std::runtime_error("Expected a power-of-two environment cubemap: " + path.string());
-
-        const unsigned width = 6 * side, height = 2 * side;
-        ocarina::vector<uint64_t> texels(size_t(width) * height);
-        size_t offset = header_size;
+        std::ifstream file(assets / filename, std::ios::binary);
+        file.seekg(148); // Skip the DX10 DDS header to the first RGBA16F face.
+        const unsigned side = env->face_size;
+        const unsigned atlas_width = 6 * side, atlas_height = 2 * side;
+        ocarina::vector<uint64_t> texels(size_t(atlas_width) * atlas_height);
         for (unsigned face = 0; face < 6; ++face) {
-            for (unsigned mip = 0; mip < levels; ++mip) {
+            for (unsigned mip = 0; mip < env->levels; ++mip) {
                 const unsigned mip_side = side >> mip;
                 const unsigned top = 2 * (side - mip_side);
                 const size_t row_bytes = size_t(mip_side) * sizeof(uint64_t);
                 for (unsigned y = 0; y < mip_side; ++y) {
-                    if (row_bytes > bytes.size() - offset) throw std::runtime_error("Truncated environment cubemap");
-                    std::memcpy(&texels[size_t(top + y) * width + face * mip_side], bytes.data() + offset, row_bytes);
-                    offset += row_bytes;
+                    auto* row = texels.data() + size_t(top + y) * atlas_width + face * mip_side;
+                    file.read(reinterpret_cast<char*>(row), row_bytes);
                 }
             }
         }
-        env->face_size = side;
-        env->levels = levels;
-        env->atlas = device.create_texture2d(ocarina::make_uint2(width, height), ocarina::PixelStorage::HALF4);
+        env->atlas = device.create_texture2d(ocarina::make_uint2(atlas_width, atlas_height), ocarina::PixelStorage::HALF4);
         env->atlas.upload_immediately(texels.data());
     }
 
@@ -178,9 +141,9 @@ void run_example_disney_ocarina() {
     auto vertices = device.create_buffer<ocarina::float3>(positions.size());
     auto indices = device.create_buffer<ocarina::uint3>(triangles.size());
     stream << vertices.upload(positions.data()) << indices.upload(triangles.data()) << ocarina::synchronize() << ocarina::commit();
-    auto mesh = device.create_mesh(vertices.view(), indices.view(), ocarina::FAST_TRACE, ocarina::DISABLE_ANYHIT);
+    auto mesh = device.create_mesh(vertices, indices);
     stream << mesh.build_bvh() << ocarina::synchronize() << ocarina::commit();
-    auto chart = device.create_accel(ocarina::FAST_TRACE);
+    auto chart = device.create_accel();
 
     struct Material {
         glm::vec4 baseColorMetallic;
@@ -231,7 +194,6 @@ void run_example_disney_ocarina() {
     ocarina::Kernel trace = [&](Float3 eye, Float3 light, ocarina::BufferVar<unsigned> output) {
         ocarina::Uint2 xy = ocarina::dispatch_idx().xy();
         ocarina::Uint2 extent = ocarina::dispatch_dim().xy();
-        $if (xy.x >= extent.x || xy.y >= extent.y) { $return(); };
         auto pixel = xy.y * extent.x + xy.x;
         Float3 forward = normalize(-eye);
         Float3 right = normalize(cross(make_float3(0.f, 1.f, 0.f), forward));
@@ -248,19 +210,20 @@ void run_example_disney_ocarina() {
             Float3 local = hit->triangle_lerp(vertices.read(tri.x), vertices.read(tri.y), vertices.read(tri.z));
             ocarina::Uint start = 4u * hit->inst_id;
             Float4 m0 = materials.read(start), m1 = materials.read(start + 1u), m2 = materials.read(start + 2u);
-            Float4 placement = materials.read(start + 3u);
+            Float clearcoatGloss = materials.read(start + 3u).w;
             Float3 n = normalize(local), v = -ray->direction();
             Float3 base = pow(m0.xyz(), make_float3(2.2f));
             Float3 tint = base / max(dot(base, make_float3(.3f, .6f, .1f)), .0001f);
             Float3 spec = lerp(m0.w, m1.y * .08f * lerp(m1.z, make_float3(1.f), tint), base);
             Float3 direct = make_float3(0.f);
-            $if ((dot(n, light) > 0.f) && (dot(n, v) > 0.f)) {
+            Float nl = dot(n, light), nv = dot(n, v);
+            $if ((nl > 0.f) && (nv > 0.f)) {
                 // Disney diffuse, anisotropic reflection and clearcoat under the directional light.
                 Float metallic = m0.w, roughness = max(.001f, m1.x), subsurface = m1.w;
                 Float anisotropy = m2.x, sheen_strength = m2.y, sheen_tint = m2.z, clearcoat = m2.w;
                 constexpr float pi = 3.14159265f;
                 Float3 h = normalize(v + light);
-                Float nl = max(dot(n, light), 0.f), nv = max(dot(n, v), 0.f), nh = max(dot(n, h), 0.f);
+                Float nh = max(dot(n, h), 0.f);
                 Float lh = clamp(dot(light, h), 0.f, 1.f);
                 Float fl = pow(1.f - nl, 5.f), fv = pow(1.f - nv, 5.f), fh = pow(1.f - lh, 5.f);
                 Float fd90 = .5f + 2.f * lh * lh * roughness;
@@ -286,11 +249,11 @@ void run_example_disney_ocarina() {
                 };
                 Float3 reflection = lerp(fh, spec, make_float3(1.f)) * distribution * smith(v, nv) * smith(light, nl);
 
-                Float a2 = sqr(lerp(placement.w, .1f, .001f));
+                Float a2 = sqr(lerp(clearcoatGloss, .1f, .001f));
                 Float coat_d = (a2 - 1.f) / (pi * log(a2) * (1.f + (a2 - 1.f) * nh * nh));
                 auto coat_g = [](Float nw) { return 1.f / (nw + sqrt(.0625f + .9375f * nw * nw)); };
                 Float coat = .25f * clearcoat * coat_d * lerp(fh, .04f, 1.f) * coat_g(nl) * coat_g(nv);
-                direct = 2.f * (diffuse + reflection + coat) * dot(n, light);
+                direct = 2.f * (diffuse + reflection + coat) * nl;
             };
             // Select a cube face and blend the two neighboring levels of its atlas.
             auto sample_environment = [](const Environment& env, Float3 d, Float mip) -> Float3 {
@@ -326,13 +289,13 @@ void run_example_disney_ocarina() {
                 return pow(abs(lerp(level - lo, first, second)), make_float3(2.2f));
             };
             Float mip = m1.x * 5.f;
-            Float3 reflected = normalize(2.f * dot(n, v) * n - v);
+            Float3 reflected = normalize(2.f * nv * n - v);
             Float3 axis = abs(reflected);
             Float major = max(axis.x, max(axis.y, axis.z));
-            Float scale = 1.f - exp2(mip) / 256.f;
+            Float scale = 1.f - exp2(mip) / float(radiance.face_size);
             Float3 lookup = reflected * make_float3(select(axis.x == major, 1.f, scale),
                 select(axis.y == major, 1.f, scale), select(axis.z == major, 1.f, scale));
-            Float fresnel = pow(1.f - clamp(dot(n, v), 0.f, 1.f), 5.f);
+            Float fresnel = pow(1.f - clamp(nv, 0.f, 1.f), 5.f);
             Float3 indirect = base * (1.f - m0.w) * sample_environment(irradiance, n, 0.f) +
                               spec * lerp(fresnel, spec.x, 1.f) * sample_environment(radiance, lookup, mip);
             Float3 lit = direct + indirect;
@@ -344,40 +307,32 @@ void run_example_disney_ocarina() {
                             (ocarina::cast<unsigned>(bytes.z) << 16u) | 0xff000000u);
     };
     auto shader = device.compile(trace, mode);
-    int width = 0, height = 0;
-    ocarina::vector<unsigned> pixels;
-    ocarina::Buffer<unsigned> output;
+    ocarina::vector<unsigned> pixels(static_cast<size_t>(width) * height);
+    auto output = device.create_buffer<uint32_t>(pixels.size());
 
     const auto direction = glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f));
     const auto light = make_float3(direction.x, direction.y, direction.z);
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
     const auto eye = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch),
                                          std::sin(pitch) * std::cos(yaw));
-    while (!glfwWindowShouldClose(window)) {
+    bool has_rendered_frame = false;
+    for (;;) {
         glfwPollEvents();
-        int w, h;
-        glfwGetFramebufferSize(window, &w, &h);
-        if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
+        if (glfwWindowShouldClose(window)) break;
+        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+            glfwWaitEvents();
             continue;
         }
-        if (w != width || h != height) {
-            width = w;
-            height = h;
-            pixels.resize(static_cast<size_t>(width) * height);
-            output = device.create_buffer<uint32_t>(pixels.size());
-        }
         stream << shader(eye, light, output).dispatch(width, height)
-               << output.download(pixels.data()) << ocarina::synchronize() << ocarina::commit();
+               << output.download_sync(pixels.data()) << ocarina::commit();
+        has_rendered_frame = true;
 
-        const bool shown = display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
-        if (shown && remaining_frames > 0 && --remaining_frames == 0) break;
+        display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
     }
 
-    if (const char* path = std::getenv("HORIZON_CAPTURE_PATH"); path && *path && !pixels.empty()) {
-        const auto parent = std::filesystem::path(path).parent_path();
+    if (capture_path[0] && has_rendered_frame) {
+        const auto parent = std::filesystem::path(capture_path).parent_path();
         if (!parent.empty()) std::filesystem::create_directories(parent);
-        if (!stbi_write_png(path, width, height, 4, pixels.data(), width * 4))
-            throw std::runtime_error("Could not write ray-traced PNG");
+        stbi_write_png(capture_path, width, height, 4, pixels.data(), width * 4);
     }
 }

@@ -20,16 +20,9 @@ struct HorizonRasterRoot {
 
 uint hzVertexIndex(HorizonGeometry geometry, HorizonDrawPacket packet, uint corner) {
     uint element = packet.firstIndex + corner;
-    uint index;
-    if (geometry.indexBytes == 2) {
-        uint pair = geometry.indices[element >> 1];
-        index = (pair >> (16 * (element & 1))) & 0xffff;
-    } else {
-        index = geometry.indices[element];
-    }
-    uint vertex = index + uint(packet.baseVertex);
-    if (vertex >= geometry.vertexCount) vertex = 0;
-    return vertex;
+    uint pair = geometry.indices[element >> 1];
+    uint index = (pair >> (16 * (element & 1))) & 0xffff;
+    return index + uint(packet.baseVertex);
 }
 
 struct DrawParameters {

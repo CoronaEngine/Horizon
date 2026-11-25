@@ -4,33 +4,25 @@
 #include SLANG(drawstress_vert.slang)
 #include SLANG(drawstress_frag.slang)
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <stdexcept>
 #if defined(_WIN32)
 #define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
-static constexpr auto native_window_handle = glfwGetWin32Window;
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#include <GLFW/glfw3native.h>
-static constexpr auto native_window_handle = glfwGetCocoaView;
-#else
-static void* native_window_handle(GLFWwindow*) {
-    throw std::runtime_error("Native Horizon window handles are unavailable on this platform");
-}
 #endif
+#include <GLFW/glfw3native.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/packing.hpp>
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <span>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -43,39 +35,34 @@ static void* native_window_handle(GLFWwindow*) {
 // Based on the single-threaded bgfx examples/17-drawstress workload.
 void run_example_drawstress_slang()
 {
-    const auto env_int = [](const char* name, int fallback = 0) {
-        const char* value = std::getenv(name);
-        if (!value || !*value) return fallback;
-        char* end{};
-        const long parsed = std::strtol(value, &end, 10);
-        if (end == value || *end || parsed < 0 || parsed > 10000000)
-            throw std::invalid_argument(std::string("Invalid ") + name);
-        return static_cast<int>(parsed);
-    };
-    constexpr int dim_max = 40;
-    const int dim = std::clamp(env_int("HORIZON_DRAWSTRESS_DIM", dim_max), 2, dim_max);
-    const bool hidden = env_int("HORIZON_BENCH_HIDDEN") != 0;
-    const bool offscreen = env_int("HORIZON_BENCH_OFFSCREEN") != 0;
-    int remaining_frames = env_int("HORIZON_PRESENT_FRAMES");
-    float fixed_dt = 0.0f;
-    if (const char* value = std::getenv("HORIZON_FIXED_DT"); value && *value) {
-        fixed_dt = std::stof(value);
-        if (!std::isfinite(fixed_dt) || fixed_dt < 0.0f)
-            throw std::invalid_argument("Invalid HORIZON_FIXED_DT");
-    }
+    constexpr int dim = 40;
+    constexpr bool hidden = false;
+    constexpr bool offscreen = false;
+    constexpr float fixed_dt = 0.0f;
+    constexpr char capture_path[] = "";
 
-    if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+#if defined(__linux__)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+    glfwInit();
     struct GlfwSession {
         ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
     } glfw;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-    if (hidden) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, "drawstress_slang", nullptr, nullptr);
-    if (!window) throw std::runtime_error("glfwCreateWindow failed");
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE, !hidden);
+    constexpr int width = 800, height = 600;
+    GLFWwindow* window = glfwCreateWindow(width, height, "drawstress_slang", nullptr, nullptr);
 
-    HardwareDisplayer display(native_window_handle(window), PresentDevicePreference::RenderDevice);
+#if defined(_WIN32)
+    void* native_window = glfwGetWin32Window(window);
+#elif defined(__linux__)
+    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
+#elif defined(__APPLE__)
+    void* native_window = glfwGetCocoaView(window);
+#endif
+    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     // The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
     constexpr std::array<uint32_t, 8> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -105,40 +92,31 @@ void run_example_drawstress_slang()
     // Match the left-handed camera in the bgfx drawstress example.
     const glm::mat4 view = glm::lookAtLH(glm::vec3(0.0f, 0.0f, -35.0f), glm::vec3(0.0f),
                                          glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::vec4 axis_projection{};
-    std::array<glm::vec4, dim_max> translations;
+    glm::mat4 projection = glm::perspectiveLH_ZO(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+    projection[1][1] *= -1.0f; // Vulkan clip-space Y.
+    const glm::mat4 view_projection = projection * view;
+    const glm::vec4 axis_projection{view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w};
+    constexpr float step = 0.6f;
+    const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
+    std::array<glm::vec4, dim> translations;
+    for (int i = 0; i < dim; ++i)
+        translations[i] = view_projection * glm::vec4(base + glm::vec3(i * step), 1.0f);
 
     RasterizerPipeline<drawstress_vert_slang_t, drawstress_frag_slang_t> rasterizer;
 
-    HardwareImage final_output_image;
+    HardwareImage final_output_image(width, height, ImageFormat::RGBA16_FLOAT);
+    final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
+    rasterizer.outColor = final_output_image;
     HardwareExecutor render_executor;
-    int width = 0, height = 0;
 
     double start = 0.0;
     uint64_t frame = 0;
-    while (!glfwWindowShouldClose(window)) {
+    for (;;) {
         glfwPollEvents();
-        int w, h;
-        glfwGetFramebufferSize(window, &w, &h);
-        if (w == 0 || h == 0) {
-            if (!glfwWindowShouldClose(window)) glfwWaitEvents();
+        if (glfwWindowShouldClose(window)) break;
+        if (!offscreen && glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+            glfwWaitEvents();
             continue;
-        }
-        if (w != width || h != height) {
-            render_executor.waitForDeferredResources();
-            width = w;
-            height = h;
-            final_output_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
-            final_output_image.setClearColor(0.19f, 0.19f, 0.19f, 1.0f);
-            rasterizer.outColor = final_output_image;
-            glm::mat4 projection = glm::perspectiveLH_ZO(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
-            projection[1][1] *= -1.0f; // Vulkan clip-space Y.
-            const glm::mat4 view_projection = projection * view;
-            axis_projection = {view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w};
-            constexpr float step = 0.6f;
-            const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
-            for (int i = 0; i < dim; ++i)
-                translations[i] = view_projection * glm::vec4(base + glm::vec3(i * step), 1.0f);
         }
         if (frame == 0) start = glfwGetTime();
         const float elapsed_seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
@@ -152,7 +130,7 @@ void run_example_drawstress_slang()
                 };
 
                 // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
-                std::array<glm::vec3, dim_max> sine, cosine;
+                std::array<glm::vec3, dim> sine, cosine;
                 for (int i = 0; i < dim; ++i) {
                     const glm::vec3 angles = elapsed_seconds + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
                     sine[i] = glm::sin(angles);
@@ -183,25 +161,23 @@ void run_example_drawstress_slang()
         render_executor << std::move(batch);
         if (offscreen) {
             render_executor.commit();
-        } else if (!display.present(render_executor, final_output_image)) {
-            continue;
+        } else {
+            display.present(render_executor, final_output_image);
         }
-        if (remaining_frames > 0 && --remaining_frames == 0) break;
     }
 
-    if (const char* filename = std::getenv("HORIZON_CAPTURE_PATH"); filename && *filename && final_output_image) {
+    if (capture_path[0] != '\0' && frame > 0) {
         HardwareBuffer readback(height, width * 8u, BufferUsage::StorageBuffer);
         render_executor << final_output_image.copyTo(readback);
         render_executor.commit().waitForDeferredResources();
         std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
-        if (!readback.copyToData(half)) throw std::runtime_error("Capture readback failed");
+        readback.copyToData(half);
         std::vector<unsigned char> rgba(half.size());
         for (size_t i = 0; i < half.size(); ++i)
             rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
-        const std::filesystem::path path(filename);
+        const std::filesystem::path path(capture_path);
         if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        if (!stbi_write_png(filename, width, height, 4, rgba.data(), width * 4))
-            throw std::runtime_error("Capture PNG write failed");
+        stbi_write_png(capture_path, width, height, 4, rgba.data(), width * 4);
     } else {
         render_executor.waitForDeferredResources();
     }

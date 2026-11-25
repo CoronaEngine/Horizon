@@ -35,8 +35,8 @@
 #include <set>
 #include <unordered_map>
 
-const uint32_t WIDTH = 1920;
-const uint32_t HEIGHT = 1080;
+const uint32_t WIDTH = 800;
+const uint32_t HEIGHT = 600;
 
 const std::string MODEL_PATH = TUTORIAL_ASSET_DIR "/models/viking_room.obj";
 const std::string TEXTURE_PATH = TUTORIAL_ASSET_DIR "/textures/viking_room.png";
@@ -211,19 +211,11 @@ private:
     bool framebufferResized = false;
 
     void initWindow() {
-        if (!glfwInit()) throw std::runtime_error("glfwInit failed");
+        glfwInit();
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
-        if (!window) {
-            glfwTerminate();
-            throw std::runtime_error("glfwCreateWindow failed");
-        }
-        // Restore the requested client size, then allow normal window resizing.
-        glfwSetWindowSizeLimits(window, WIDTH, HEIGHT, GLFW_DONT_CARE, GLFW_DONT_CARE);
-        glfwSetWindowSizeLimits(window, GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
@@ -262,17 +254,9 @@ private:
     }
 
     void mainLoop() {
-        int remaining = 0;
-        if (const char* limit = std::getenv("HORIZON_PRESENT_FRAMES"); limit && *limit) {
-            char* end;
-            const long count = std::strtol(limit, &end, 10);
-            if (*end || count < 0 || count > 10000000) throw std::invalid_argument("Invalid HORIZON_PRESENT_FRAMES");
-            remaining = static_cast<int>(count);
-        }
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
             drawFrame();
-            if (remaining > 0 && --remaining == 0) break;
         }
 
         vkDeviceWaitIdle(device);
@@ -348,9 +332,8 @@ private:
         int width = 0, height = 0;
         glfwGetFramebufferSize(window, &width, &height);
         while (width == 0 || height == 0) {
-            if (glfwWindowShouldClose(window)) return;
-            glfwWaitEvents();
             glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
         }
 
         vkDeviceWaitIdle(device);

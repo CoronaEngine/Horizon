@@ -70,7 +70,6 @@ float SchlickFresnel(float u)
 
 float GTR1(float NdotH, float a)
 {
-    if (a >= 1.0) return 1.0 / PI;
     float a2 = a * a;
     float t = 1.0 + (a2 - 1.0) * NdotH * NdotH;
     return (a2 - 1.0) / (PI * log(a2) * t);
@@ -95,68 +94,11 @@ float smithG_GGX_aniso(float NdotV, float VdotX, float VdotY, float ax, float ay
 
 void buildAnisoFrame(float3 N, out float3 X, out float3 Y)
 {
-    X = normalize(cross(N, float3(0.0, 1.0, 0.0)));
+    X = cross(N, float3(0.0, 1.0, 0.0));
     if (dot(X, X) < 1e-4)
-        X = normalize(cross(N, float3(1.0, 0.0, 0.0)));
+        X = cross(N, float3(1.0, 0.0, 0.0));
+    X = normalize(X);
     Y = normalize(cross(N, X));
-}
-
-float3 evalDisneyDirect(DisneyDraw* draw, float3 L, float3 V, float3 N, float3 X, float3 Y)
-{
-    float NdotL = dot(N, L);
-    float NdotV = dot(N, V);
-    if (NdotL < 0.0 || NdotV < 0.0)
-        return float3(0.0);
-
-    float3 H = normalize(L + V);
-    float NdotH = dot(N, H);
-    float LdotH = dot(L, H);
-
-    float3 baseColor = draw->mat0.rgb;
-    float metallic = draw->mat0.a;
-    float roughness = clamp(draw->mat1.x, 0.001, 1.0);
-    float specular = draw->mat1.y;
-    float specularTint = draw->mat1.z;
-    float subsurface = draw->mat1.w;
-    float anisotropic = draw->mat2.x;
-    float sheen = draw->mat2.y;
-    float sheenTint = draw->mat2.z;
-    float clearcoat = draw->mat2.w;
-    float clearcoatGloss = draw->clearcoatGloss;
-
-    float3 Cdlin = toLinear(baseColor);
-    float Cdlum = dot(Cdlin, float3(0.3, 0.6, 0.1));
-    float3 Ctint = Cdlum > 0.0 ? Cdlin / Cdlum : float3(1.0);
-    float3 Cspec0 = lerp(specular * 0.08 * lerp(float3(1.0), Ctint, specularTint), Cdlin, metallic);
-    float3 Csheen = lerp(float3(1.0), Ctint, sheenTint);
-
-    float FL = SchlickFresnel(NdotL);
-    float FV = SchlickFresnel(NdotV);
-    float Fd90 = 0.5 + 2.0 * LdotH * LdotH * roughness;
-    float Fd = lerp(1.0, Fd90, FL) * lerp(1.0, Fd90, FV);
-
-    float Fss90 = LdotH * LdotH * roughness;
-    float Fss = lerp(1.0, Fss90, FL) * lerp(1.0, Fss90, FV);
-    float ss = 1.25 * (Fss * (1.0 / (NdotL + NdotV) - 0.5) + 0.5);
-
-    float aspect = sqrt(1.0 - anisotropic * 0.9);
-    float ax = max(0.001, sqr(roughness) / aspect);
-    float ay = max(0.001, sqr(roughness) * aspect);
-    float Ds = GTR2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
-    float FH = SchlickFresnel(LdotH);
-    float3 Fs = lerp(Cspec0, float3(1.0), FH);
-    float Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay);
-    Gs *= smithG_GGX_aniso(NdotV, dot(V, X), dot(V, Y), ax, ay);
-
-    float3 Fsheen = FH * sheen * Csheen;
-
-    float Dr = GTR1(NdotH, lerp(0.1, 0.001, clearcoatGloss));
-    float Fr = lerp(0.04, 1.0, FH);
-    float Gr = smithG_GGX(NdotL, 0.25) * smithG_GGX(NdotV, 0.25);
-
-    float3 diffusePart = ((1.0 / PI) * lerp(Fd, ss, subsurface) * Cdlin + Fsheen) * (1.0 - metallic);
-    float3 specPart = Gs * Fs * Ds + 0.25 * clearcoat * Gr * Fr * Dr;
-    return diffusePart + specPart;
 }
 
 [shader("fragment")]
@@ -166,28 +108,67 @@ void main(DisneyVaryings input, out float4 outColor : SV_Target0)
     float3 N = normalize(input.normal);
     float3 V = normalize(input.view);
     float3 L = normalize(fsp.lightDir.xyz);
-    float3 X;
-    float3 Y;
-    buildAnisoFrame(N, X, Y);
 
-    float3 baseColor = draw->mat0.rgb;
     float metallic = draw->mat0.a;
     float roughness = clamp(draw->mat1.x, 0.001, 1.0);
     float specular = draw->mat1.y;
     float specularTint = draw->mat1.z;
 
-    float3 Cdlin = toLinear(baseColor);
+    float3 Cdlin = toLinear(draw->mat0.rgb);
     float Cdlum = dot(Cdlin, float3(0.3, 0.6, 0.1));
     float3 Ctint = Cdlum > 0.0 ? Cdlin / Cdlum : float3(1.0);
     float3 Cspec0 = lerp(specular * 0.08 * lerp(float3(1.0), Ctint, specularTint), Cdlin, metallic);
 
-    float NdotV = clamp(dot(N, V), 0.0, 1.0);
+    float NdotL = dot(N, L);
+    float NdotV = dot(N, V);
+    float3 brdf = float3(0.0);
+    if (!(NdotL < 0.0 || NdotV < 0.0)) {
+        float3 X, Y;
+        buildAnisoFrame(N, X, Y);
+        float3 H = normalize(L + V);
+        float NdotH = dot(N, H);
+        float LdotH = dot(L, H);
+
+        float subsurface = draw->mat1.w;
+        float anisotropic = draw->mat2.x;
+        float sheen = draw->mat2.y;
+        float sheenTint = draw->mat2.z;
+        float clearcoat = draw->mat2.w;
+        float clearcoatGloss = draw->clearcoatGloss;
+
+        float3 Csheen = lerp(float3(1.0), Ctint, sheenTint);
+
+        float FL = SchlickFresnel(NdotL);
+        float FV = SchlickFresnel(NdotV);
+        float Fd90 = 0.5 + 2.0 * LdotH * LdotH * roughness;
+        float Fd = lerp(1.0, Fd90, FL) * lerp(1.0, Fd90, FV);
+
+        float Fss90 = LdotH * LdotH * roughness;
+        float Fss = lerp(1.0, Fss90, FL) * lerp(1.0, Fss90, FV);
+        float ss = 1.25 * (Fss * (1.0 / (NdotL + NdotV) - 0.5) + 0.5);
+
+        float aspect = sqrt(1.0 - anisotropic * 0.9);
+        float ax = max(0.001, sqr(roughness) / aspect);
+        float ay = max(0.001, sqr(roughness) * aspect);
+        float Ds = GTR2_aniso(NdotH, dot(H, X), dot(H, Y), ax, ay);
+        float FH = SchlickFresnel(LdotH);
+        float3 Fs = lerp(Cspec0, float3(1.0), FH);
+        float Gs = smithG_GGX_aniso(NdotL, dot(L, X), dot(L, Y), ax, ay);
+        Gs *= smithG_GGX_aniso(NdotV, dot(V, X), dot(V, Y), ax, ay);
+
+        float3 Fsheen = FH * sheen * Csheen;
+
+        float Dr = GTR1(NdotH, lerp(0.1, 0.001, clearcoatGloss));
+        float Fr = lerp(0.04, 1.0, FH);
+        float Gr = smithG_GGX(NdotL, 0.25) * smithG_GGX(NdotV, 0.25);
+
+        float3 diffusePart = ((1.0 / PI) * lerp(Fd, ss, subsurface) * Cdlin + Fsheen) * (1.0 - metallic);
+        float3 specPart = Gs * Fs * Ds + 0.25 * clearcoat * Gr * Fr * Dr;
+        brdf = diffusePart + specPart;
+    }
+    float3 direct = brdf * clamp(NdotL, 0.0, 1.0) * 2.0;
+
     float envFresnel = lerp(Cspec0.r, 1.0, SchlickFresnel(NdotV)); // scalar approx for mip env
-
-    float3 brdf = evalDisneyDirect(draw, L, V, N, X, Y);
-    float NdotL = clamp(dot(N, L), 0.0, 1.0);
-    float3 direct = brdf * NdotL * 2.0;
-
     float mip = roughness * 5.0;
     float3 vr = normalize(reflect(-V, N));
     float3 cubeR = fixCubeLookup(normalize(vr), mip, 256.0);

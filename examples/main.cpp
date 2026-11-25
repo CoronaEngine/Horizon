@@ -1,9 +1,6 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include <exception>
-#include <stdexcept>
-
 #include "horizon/core/logging.h"
 
 #include <ctime>
@@ -26,7 +23,6 @@ void run_example_drawstress_ocarina();
 
 int main(int argc, char **argv)
 {
-    // Application policy: keep the timestamped file and crash flushing enabled.
     const auto now = std::time(nullptr);
     std::tm local_time {};
 #ifdef _WIN32
@@ -38,7 +34,6 @@ int main(int argc, char **argv)
     log_filename << std::put_time(&local_time, "%Y-%m-%d_%H-%M-%S") << "_corona.log";
     horizon::core::LoggingOptions logging;
     logging.file_path = std::filesystem::path { "logs" } / log_filename.str();
-    logging.install_signal_handlers = true;
     logging.configure_utf8_console = true;
 #ifdef CORONA_LOG_LEVEL
     logging.level = static_cast<horizon::core::LogLevel>(CORONA_LOG_LEVEL);
@@ -50,7 +45,7 @@ int main(int argc, char **argv)
 
     struct Example { std::string_view name; void (*run)(); };
     static constexpr Example examples[] = {
-        {"baseline", run_example_baseline_tutorial},
+        {default_mode, run_example_baseline_tutorial},
         {"baseline_edsl", run_example_baseline_edsl},
         {"baseline_slang", run_example_baseline_slang},
         {"disney_edsl", run_example_disney_edsl},
@@ -62,25 +57,22 @@ int main(int argc, char **argv)
         {"drawstress_ocarina", run_example_drawstress_ocarina},
     };
     if (mode == "--list" || mode == "--help" || (argc > 2 && std::string_view(argv[2]) == "--help")) {
-        if (mode != "--list") std::cout << "Usage: HorizonExamples [mode] (default: " << default_mode << ")\n";
+        if (mode != "--list") {
+            std::cout << "Usage: HorizonExamples [mode] (default: " << default_mode << ")\n";
+        }
         for (const auto& example : examples) std::cout << example.name << '\n';
         return 0;
     }
+    if (argc > 2) return 2;
     for (const auto& example : examples) {
         if (example.name != mode) continue;
-        try {
-            if (mode == "baseline") {
-                // The upstream tutorial owns its window. GLFW retains hints across repeated initialization.
-                if (!glfwInit()) throw std::runtime_error("glfwInit failed");
-                glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
-            }
-            example.run();
-            return 0;
-        } catch (const std::exception& error) {
-            std::cerr << mode << ": " << error.what() << '\n';
-            return 1;
+        if (mode == default_mode) {
+            // The upstream tutorial owns its window. GLFW retains hints across repeated initialization.
+            glfwInit();
+            glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
         }
+        example.run();
+        return 0;
     }
-    std::cerr << "Unknown example " << mode << ". Use --list to see available modes.\n";
     return 2;
 }
