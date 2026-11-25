@@ -96,13 +96,13 @@ RasterBatch RasterizerPipeline<>::capture(std::optional<ktm::uvec2> extent, Rast
 }
 
 void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                               const HardwareBuffer& packets, uint32_t count, size_t bytes,
-                               const ParameterWriter& writeParameters, IndirectFirstInstance firstInstance,
+                               const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
+                               IndirectFirstInstance firstInstance,
                                std::optional<ScissorRect> scissor)
 {
     if (!record_) throw std::logic_error("Raster batch already submitted");
     static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(vertices, indices, packets, count,
-                                                                          bytes, writeParameters, firstInstance, scissor);
+                                                                          parameters, firstInstance, scissor);
 }
 
 void RasterizerPipeline<>::refreshShaderVariant()

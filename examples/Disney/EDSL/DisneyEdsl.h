@@ -5,7 +5,6 @@
 #include "Codegen/TypeAlias.h"
 
 #include <ktm/ktm.h>
-#include <array>
 
 class DisneyEdsl final : public ExampleBase {
 public:
@@ -30,8 +29,7 @@ private:
     static constexpr int rows = 10, columns = 11;
     HardwareDisplayer display;
     EmbeddedShader::TextureCube<ktm::fvec4> radiance_map, irradiance_map;
-    HardwareBuffer vertex_buffer, index_buffer, commands;
-    std::array<DrawParameters, rows * columns> parameters;
+    HardwareBuffer vertex_buffer, index_buffer, commands, parameter_buffer;
     EmbeddedShader::Float4x4 proj_view;
     EmbeddedShader::Float4 camPos, lightDir;
     EmbeddedShader::Texture2D<ktm::fvec4> final_output;

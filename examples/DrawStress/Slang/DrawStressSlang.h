@@ -4,6 +4,7 @@
 #include "Horizon.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <ktm/ktm.h>
 
@@ -20,6 +21,8 @@ private:
     HardwareDisplayer display;
     HardwareBuffer vertex_buffer, index_buffer;
     HardwareBuffer commands;
+    std::array<HardwareBuffer, 2> parameter_buffers;
+    std::size_t next_parameter_buffer{};
     ktm::fvec4 axis_projection;
     std::array<ktm::fvec4, dim> translations;
     HardwareImage final_output_image;

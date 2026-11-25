@@ -2,10 +2,8 @@
 
 #include <atomic>
 #include <concepts>
-#include <functional>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <initializer_list>
 #include <ranges>
 #include <source_location>
@@ -204,6 +202,8 @@ public:
     }
 
     [[nodiscard]] void* getMappedData() const;
+    // Make CPU writes through getMappedData() visible to subsequent GPU work.
+    void flushMapped() const;
     [[nodiscard]] uint64_t getElementSize() const;
     [[nodiscard]] uint64_t getElementCount() const;
 
@@ -343,27 +343,17 @@ class RasterBatch {
 public:
     RasterBatch(RasterBatch&&) noexcept = default;
     RasterBatch& operator=(RasterBatch&&) noexcept = default;
-    using ParameterWriter = std::function<void(std::span<std::byte>)>;
     // Append the first count packets in order, with one geometry pair and scissor for this call.
-    // Each packet uses geometryIndex = firstVertex = 0. parameterWord addresses this call's payload in 4-byte words.
+    // Each packet uses geometryIndex = firstVertex = 0. parameterWord is an offset into parameters in 4-byte words.
+    // The batch retains its buffers until GPU completion. Omit parameters when the shader does not read them.
     // AlwaysZero is a promise about every packet, including GPU-written packets.
     void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
                       uint32_t count, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
                       std::optional<ScissorRect> scissor = {}) {
-        drawIndirect(vertices, indices, packets, count, 0, {}, firstInstance, scissor);
+        drawIndirect(vertices, indices, packets, count, {}, firstInstance, scissor);
     }
-    template<class T, size_t Extent> requires (std::is_trivially_copyable_v<T> && !std::is_volatile_v<T>)
     void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, std::span<T, Extent> parameters,
-                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
-                      std::optional<ScissorRect> scissor = {}) {
-        drawIndirect(vertices, indices, packets, count, parameters.size_bytes(), [parameters](std::span<std::byte> bytes) {
-            std::memcpy(bytes.data(), parameters.data(), bytes.size());
-        }, firstInstance, scissor);
-    }
-    // Keep the batch idle while the writer fills this call's parameter memory. Its span expires on return.
-    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, size_t parameterBytes, const ParameterWriter& writer,
+                      uint32_t count, const HardwareBuffer& parameters,
                       IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
                       std::optional<ScissorRect> scissor = {});
 private:

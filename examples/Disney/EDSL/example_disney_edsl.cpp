@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -94,8 +93,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
         commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
-    render_executor.commit().waitForDeferredResources();
-
+    std::array<DrawParameters, rows * columns> parameters;
     constexpr float radius = 0.42f, spacing = 1.12f;
     for (int col = 0; col < columns; ++col) {
         const float x = (col - (columns - 1) * 0.5f) * spacing;
@@ -119,6 +117,9 @@ DisneyEdsl::DisneyEdsl(void* native_window)
             draw.model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
         }
     }
+    parameter_buffer.createDeviceLocal(render_executor, BufferUsage::StorageBuffer,
+        parameters.data(), parameters.size(), sizeof(DrawParameters));
+    render_executor.commit().waitForDeferredResources();
 
     using EmbeddedShader::Float, EmbeddedShader::Float3, EmbeddedShader::Float4;
     using EmbeddedShader::GPU_IF, EmbeddedShader::GPU_IF_BRANCH;
@@ -298,7 +299,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
 void DisneyEdsl::run(float)
 {
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, std::span(parameters),
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer,
                        IndirectFirstInstance::AlwaysZero);
 
     render_executor << std::move(batch);

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstring>
 #include <span>
 
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
@@ -565,8 +564,7 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 
 void RasterizerPipelineVulkan::Batch::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                                     const HardwareBuffer& packets, uint32_t count, size_t parameterBytes,
-                                                     const RasterBatch::ParameterWriter& writeParameters,
+                                                     const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                                                      IndirectFirstInstance firstInstance, std::optional<ScissorRect> scissor)
 {
     if (!count) return;
@@ -588,35 +586,27 @@ void RasterizerPipelineVulkan::Batch::appendIndirect(const HardwareBuffer& verti
         clip = {{x, y}, {uint32_t(right - x), uint32_t(bottom - y)}};
     }
     if (count > UINT32_MAX - drawCount) throw std::length_error("Raster batch exceeds the draw index range");
-    if (parameterBytes > UINT32_MAX - sizeof(GeometryEntry))
-        throw std::length_error("Raster upload exceeds 4 GiB");
 
-    // Geometry 0 and its parameters share an upload. The command table stays in the caller's buffer.
-    const auto bytes = uint32_t(sizeof(GeometryEntry) + std::max<size_t>(parameterBytes, 4));
-    IndirectGroup group{vertices, indices, packets, {}, clip, count, {}};
+    IndirectGroup group{vertices, indices, packets, parameters, {}, clip, count, {}};
     auto& pool = pipeline->uploadPool;
     {
         std::lock_guard lock(pipeline->uploadMutex);
         auto free = std::find_if(pool.begin(), pool.end(), [](const auto& buffer) { return buffer.use_count() == 1; });
         if (free == pool.end()) {
-            group.upload = pool.emplace_back(std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(bytes)));
+            group.geometryUpload = pool.emplace_back(std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(sizeof(GeometryEntry))));
         } else {
-            if ((*free)->getElementSize() < bytes)
-                *free = std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(bytes));
-            group.upload = *free;
+            group.geometryUpload = *free;
         }
     }
 
-    auto* mapped = static_cast<std::byte*>(group.upload->getMappedData());
-    if (!mapped) throw std::runtime_error("Raster upload requires host-visible memory");
-    const auto base = addressOf(*group.upload);
-    group.root = {addressOf(packets), base, base + sizeof(GeometryEntry), 0, drawCount};
     const GeometryEntry geometry{addressOf(vertices), addressOf(indices), uint32_t(vertices.getElementSize() / 4),
                                  uint32_t(indices.getElementSize()), uint32_t(vertices.getElementCount())};
-    std::memcpy(mapped, &geometry, sizeof(geometry));
-    if (parameterBytes) writeParameters({mapped + sizeof(geometry), parameterBytes});
-    auto* native = legacyBufferFromId(group.upload->getBufferID());
-    native->resourceManager->flushMapped(*native, bytes);
+    if (!group.geometryUpload->copyFromData(&geometry, sizeof(geometry)))
+        throw std::runtime_error("Raster geometry upload requires host-visible memory");
+    const auto geometryAddress = addressOf(*group.geometryUpload);
+    // Use the reserved zero word as a valid base for shaders with no per-draw parameters.
+    const auto parameterAddress = parameters ? addressOf(parameters) : geometryAddress + offsetof(GeometryEntry, reserved);
+    group.root = {addressOf(packets), geometryAddress, parameterAddress, 0, drawCount};
     groups.push_back(std::move(group));
     drawCount += count;
 }
@@ -633,7 +623,9 @@ void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const Resour
     for (const auto& group : groups) {
         result.buffer(*legacyBufferFromId(group.packets.getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-        result.buffer(*legacyBufferFromId(group.upload->getBufferID()), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        result.buffer(*legacyBufferFromId(group.geometryUpload->getBufferID()), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        if (group.parameters)
+            result.buffer(*legacyBufferFromId(group.parameters.getBufferID()), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
         for (const auto* buffer : {&group.vertices, &group.indices})
             result.buffer(*legacyBufferFromId(buffer->getBufferID()), VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_READ_BIT);

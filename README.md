@@ -124,7 +124,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-Disney 光栅示例在初始化时生成球体几何、110 份材质球参数和对应的间接命令，每帧提交一次命令表。DrawStress 光栅示例复用命令表，在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时上传球体几何、110 份材质球参数和间接命令，每帧复用这些缓冲。DrawStress 光栅示例每帧将立方体的变换矩阵写入映射的参数缓冲，调用 `flushMapped()` 后将缓冲传给 `drawIndirect`。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
 最后可以阅读 Tutorial 的原生 Vulkan 实现，对照 Vulkan 初始化、Viking Room 绘制和资源释放的顺序。Tutorial 的源码作为独立参考保留。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
@@ -355,7 +355,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 
 - **定位 draw**。每次 `drawIndirect` 从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一 batch 内跨调用连续编号。零条命令和完全落在目标外的裁剪区域不占编号。
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
-- **读取 draw 参数**。每次调用的命令共用几何表项 0；`parameterWord` 从这次调用的参数区起点算起，以 4 字节为单位。写入者负责索引范围、参数偏移和类型对齐。可传入现成的参数数组，也可指定字节数，通过回调直接填写上传内存。
+- **读取 draw 参数**。有逐 draw 参数时，使用 `batch.drawIndirect(vertexBuffer, indexBuffer, commands, count, parameterBuffer)`。调用方先将参数上传到 `BufferUsage::StorageBuffer`，也可以让 compute shader 写入该缓冲。每个 packet 的 `parameterWord` 是从该缓冲起点计算的偏移，以 4 字节为单位。调用方负责范围和类型对齐。batch 持有缓冲引用，CPU 再次覆盖同一区域前应等 GPU 读完。每次调用的命令共用几何表项 0。
 - **首实例**。缺少 `drawIndirectFirstInstance` 的设备只支持 `firstInstance = 0`。如果外部命令的生产者保证每个 packet 的该字段都为零，可在 `drawIndirect()` 末尾传入 `IndirectFirstInstance::AlwaysZero`，包括带参数区的重载。
 - **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。

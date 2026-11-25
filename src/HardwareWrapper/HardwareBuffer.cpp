@@ -23,7 +23,7 @@ VkBufferUsageFlags convertBufferUsage(BufferUsage const usage)
         vkUsage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
         break;
     case BufferUsage::StorageBuffer:
-        vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         break;
     default:
         break;
@@ -218,6 +218,14 @@ bool HardwareBuffer::copyToData(void *outputData, const uint64_t size) const
 void *HardwareBuffer::getMappedData() const
 {
     return legacyBufferFromId(bufferID)->bufferAllocInfo.pMappedData;
+}
+
+void HardwareBuffer::flushMapped() const
+{
+    auto* buffer = legacyBufferFromId(bufferID);
+    if (!buffer->bufferAllocInfo.pMappedData)
+        throw std::logic_error("Cannot flush an unmapped buffer");
+    buffer->resourceManager->flushMapped(*buffer, size_t(buffer->elementCount) * buffer->elementSize);
 }
 
 uint64_t HardwareBuffer::getElementCount() const

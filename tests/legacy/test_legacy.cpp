@@ -145,8 +145,7 @@ bool has_vulkan_14_device()
     return supported;
 }
 
-// Capture both variants before enqueue, then read back after all pipeline,
-// geometry and output proxy handles have gone out of scope.
+// Submit after the pipeline, geometry, draw parameters and output proxies go out of scope.
 void test_raster_batch(bool forceSingleDraw)
 {
     using namespace EmbeddedShader;
@@ -187,14 +186,15 @@ void test_raster_batch(bool forceSingleDraw)
             RasterIndirectPacket{.vertexCount=3, .instanceCount=2, .firstIndex=1, .baseVertex=-1},
             RasterIndirectPacket{.vertexCount=3, .instanceCount=1, .firstIndex=4, .baseVertex=-1, .parameterWord=4}
         }, BufferUsage::RasterIndirect);
-        const std::array<float,4> red{1,0,0,1};
-        const std::array<std::array<float,4>,2> greens{{{0,1,0,1}, {0,2,0,1}}};
-        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, std::span(red),
+        HardwareBuffer red(std::array<float,4>{1,0,0,1}, BufferUsage::StorageBuffer);
+        HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
+                              BufferUsage::StorageBuffer);
+        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red,
                            IndirectFirstInstance::AlwaysZero, ScissorRect{0,0,2,2});
         batch.drawIndirect({}, {}, {}, 0);
-        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, std::span(red),
+        batch.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red,
                            IndirectFirstInstance::AlwaysZero, ScissorRect{-3,0,2,2});
-        batch.drawIndirect(rightVertices, rightIndices, rightCommands, 2, std::span(greens),
+        batch.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens,
                            IndirectFirstInstance::AlwaysZero, ScissorRect{2,0,2,2});
         useDrawColor = false;
         auto switched = pipeline.beginBatch({.loadColor = true});
@@ -257,8 +257,7 @@ void test_raster_sampled_storage_image()
            "an empty indirect pass still clears its attachment");
 }
 
-// A compute-written packet draws the right half at the depth left by pass one.
-// Clearing either attachment or losing the packet between stages changes a pixel.
+// Compute supplies the indirect command, color and depth for the second pass.
 void test_generated_packet_and_attachment_load(bool explicitDepth)
 {
     using namespace EmbeddedShader;
@@ -269,7 +268,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareImage depth(4, 2, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
     Texture2D<ktm::fvec4> output = target;
     auto vs = [] {
-        position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), Float(0.5), Float(1));
+        position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), rasterDrawParameter<float>(4), Float(1));
     };
     auto fs = [&] { output << rasterDrawParameter<ktm::fvec4>(0); };
     RasterizerPipeline pipeline(vs, fs);
@@ -318,15 +317,17 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     auto first = pipeline.beginBatch(4, 2);
     HardwareBuffer firstCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
                                  BufferUsage::RasterIndirect);
-    const std::array<float,4> red{1,0,0,1};
-    first.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, std::span(red), IndirectFirstInstance::AlwaysZero);
+    HardwareBuffer redAndDepth(std::array<float,5>{1,0,0,1,0.5f}, BufferUsage::StorageBuffer);
+    first.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, IndirectFirstInstance::AlwaysZero);
     HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
     bool rejected = false;
-    try { restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1); }
+    try { restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1, redAndDepth); }
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "GPU packets must declare zero firstInstance on a restricted device");
-    restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1, IndirectFirstInstance::AlwaysZero);
+    restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1, redAndDepth, IndirectFirstInstance::AlwaysZero);
+    HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), BufferUsage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
+    EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
     HardwareExecutor executor;
     executor << std::move(first);
     {
@@ -335,14 +336,16 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
             words[1] = Uint(1);
             words[5] = Uint(3);
             words[7] = Uint(4);
+            parameters[0] = Float4(0, 0, 1, 0);
+            parameters[1] = Float4(0, 1, 0, 0);
+            parameters[2] = Float4(0.5f, 0, 0, 0);
         });
-        generate.uses({{packets, ResourceAccess::Write}});
+        generate.uses({{packets, ResourceAccess::Write}, {generatedParameters, ResourceAccess::Write}});
         executor << generate(1,1,1);
     }
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
     auto second = pipeline.beginBatch(4, 2, {true, true});
-    const std::array<float,8> colors{0,0,1,0, 0,1,0,0};
-    second.drawIndirect(vertexBuffer, indexBuffer, packets, 1, std::span(colors), IndirectFirstInstance::AlwaysZero);
+    second.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters, IndirectFirstInstance::AlwaysZero);
 
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
@@ -351,7 +354,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
     for (size_t i = 0; i < pixels.size(); ++i) {
         expect(pixels[i] == std::array<float,4>{1, float(i % 4 >= 2), 0, 1},
-               "GPU-generated range, attachment load, equal depth or additive blend failed");
+               "GPU-generated command, color, depth or attachment load failed");
     }
 }
 

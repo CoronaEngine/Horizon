@@ -3,7 +3,6 @@
 #include "../../ExampleBase.h"
 #include "Horizon.h"
 
-#include <array>
 #include <cstddef>
 #include <ktm/ktm.h>
 
@@ -31,8 +30,7 @@ private:
 
     HardwareDisplayer display;
     HardwareImage radiance, irradiance;
-    HardwareBuffer vertex_buffer, index_buffer, commands;
-    std::array<DrawParameters, rows * columns> parameters;
+    HardwareBuffer vertex_buffer, index_buffer, commands, parameter_buffer;
     HardwareImage final_output_image;
     RasterizerPipeline<> rasterizer;
     HardwareExecutor render_executor;

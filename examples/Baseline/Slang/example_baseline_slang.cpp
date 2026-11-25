@@ -18,7 +18,6 @@
 #include <filesystem>
 #include <map>
 #include <memory>
-#include <span>
 #include <utility>
 #include <vector>
 
@@ -79,6 +78,8 @@ BaselineSlang::BaselineSlang(void* native_window)
     pipeline.outColor = color;
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
     parameters.texIndex = texture_image.storeDescriptor();
+    for (auto& buffer : parameter_buffers)
+        buffer = HardwareBuffer(sizeof(DrawParameters), BufferUsage::StorageBuffer);
 
     pipeline.vp.view = ktm::look_at_rh<float>({2, 2, 2}, {0, 0, 0}, {0, 0, 1});
     // KTM 0.2.16's frustum_rh gives positive clip W along the camera's -Z axis.
@@ -94,9 +95,15 @@ BaselineSlang::BaselineSlang(void* native_window)
 void BaselineSlang::run(float seconds)
 {
     parameters.model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
+    if (next_parameter_buffer == parameter_buffers.size()) {
+        render_executor.waitForDeferredResources();
+        next_parameter_buffer = 0;
+    }
+    auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
+    parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, std::span(&parameters, 1),
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer,
                        IndirectFirstInstance::AlwaysZero);
     render_executor << std::move(batch);
     display.present(render_executor, color);

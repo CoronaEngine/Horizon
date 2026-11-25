@@ -3,6 +3,7 @@
 #include "../../ExampleBase.h"
 #include "Horizon.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <ktm/ktm.h>
@@ -24,5 +25,7 @@ private:
         uint32_t texIndex{};
     } parameters{};
     static_assert(offsetof(DrawParameters, texIndex) == 64);
+    std::array<HardwareBuffer, 2> parameter_buffers;
+    std::size_t next_parameter_buffer{};
     HardwareExecutor render_executor;
 };

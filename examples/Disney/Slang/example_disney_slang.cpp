@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -95,8 +94,7 @@ DisneySlang::DisneySlang(void* native_window)
         commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
-    render_executor.commit().waitForDeferredResources();
-
+    std::array<DrawParameters, rows * columns> parameters;
     constexpr float radius = 0.42f, spacing = 1.12f;
     for (int col = 0; col < columns; ++col) {
         const float x = (col - (columns - 1) * 0.5f) * spacing;
@@ -120,6 +118,9 @@ DisneySlang::DisneySlang(void* native_window)
             draw.model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
         }
     }
+    parameter_buffer.createDeviceLocal(render_executor, BufferUsage::StorageBuffer,
+        parameters.data(), parameters.size(), sizeof(DrawParameters));
+    render_executor.commit().waitForDeferredResources();
 
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> pipeline;
@@ -143,7 +144,7 @@ DisneySlang::DisneySlang(void* native_window)
 void DisneySlang::run(float)
 {
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, std::span(parameters),
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer,
                        IndirectFirstInstance::AlwaysZero);
 
     render_executor << std::move(batch);

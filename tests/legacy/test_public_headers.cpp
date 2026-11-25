@@ -29,6 +29,14 @@ static_assert(!CanReadBackInto<std::span<const uint16_t>> && !CanReadBackInto<st
               !CanReadBackInto<std::vector<std::string>&> && !CanReadBackInto<std::vector<bool>&> &&
               !CanReadBackInto<std::vector<uint16_t>>);
 
+template<class... Args>
+concept CanDrawIndirect = requires(RasterBatch& batch, const HardwareBuffer& buffer, Args&&... args) {
+    batch.drawIndirect(buffer, buffer, buffer, 1, std::forward<Args>(args)...);
+};
+static_assert(CanDrawIndirect<> && CanDrawIndirect<const HardwareBuffer&>);
+static_assert(!CanDrawIndirect<std::span<const float>>);
+static_assert(!CanDrawIndirect<std::size_t, void (*)(std::span<std::byte>)>);
+
 using EmbeddedShader::ShaderLanguage;
 static_assert(!std::is_constructible_v<ComputePipeline<>, std::string, ShaderLanguage>);
 static_assert(!std::is_constructible_v<ComputePipeline<>, std::string, ShaderLanguage, std::source_location>);

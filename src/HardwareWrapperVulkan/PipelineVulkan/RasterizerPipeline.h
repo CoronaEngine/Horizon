@@ -71,8 +71,8 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
     static_assert(offsetof(RasterIndirectPacket, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
     static_assert(sizeof(GeometryEntry) == 32 && sizeof(Root) == 32 && offsetof(Root, drawBase) == 28);
     struct IndirectGroup {
-        HardwareBuffer vertices, indices, packets;
-        std::shared_ptr<HardwareBuffer> upload;
+        HardwareBuffer vertices, indices, packets, parameters;
+        std::shared_ptr<HardwareBuffer> geometryUpload;
         VkRect2D scissor;
         uint32_t count;
         Root root;
@@ -114,8 +114,8 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
         std::vector<IndirectGroup> groups;
         uint32_t drawCount{};
         void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                            const HardwareBuffer& packets, uint32_t count, size_t parameterBytes,
-                            const RasterBatch::ParameterWriter& writeParameters, IndirectFirstInstance firstInstance,
+                            const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
+                            IndirectFirstInstance firstInstance,
                             std::optional<ScissorRect> scissor);
         std::vector<uint8_t> uniformBytes;
         std::shared_ptr<BindingSnapshot> bindings;
