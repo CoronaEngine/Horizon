@@ -18,7 +18,7 @@ private:
     std::chrono::steady_clock::time_point start;
     std::uint64_t frame = 0;
     HardwareDisplayer display;
-    HardwareBuffer vertex_buffer, index_buffer;
+    HardwareBuffer vertex_buffer, index_buffer, commands;
     HardwareImage texture_image;
     HardwareImage color;
     RasterizerPipeline<> rasterizer;

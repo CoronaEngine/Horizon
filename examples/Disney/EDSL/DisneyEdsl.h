@@ -19,7 +19,7 @@ private:
         EmbeddedShader::Float3 v_normal;
     };
 
-    struct DrawParameters {
+    struct alignas(16) DrawParameters {
         ktm::fmat4x4 model = ktm::fmat4x4::from_eye();
         ktm::fvec4 baseColorMetallic;
         float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
@@ -30,8 +30,8 @@ private:
     static constexpr int rows = 10, columns = 11;
     HardwareDisplayer display;
     EmbeddedShader::TextureCube<ktm::fvec4> radiance_map, irradiance_map;
-    HardwareBuffer vertex_buffer, index_buffer;
-    std::array<DrawParameters, rows * columns> draws;
+    HardwareBuffer vertex_buffer, index_buffer, commands;
+    std::array<DrawParameters, rows * columns> parameters;
     EmbeddedShader::Float4x4 proj_view;
     EmbeddedShader::Float4 camPos, lightDir;
     EmbeddedShader::Texture2D<ktm::fvec4> final_output;

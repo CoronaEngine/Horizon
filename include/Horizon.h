@@ -5,6 +5,7 @@
 #include <functional>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <ranges>
 #include <source_location>
@@ -336,53 +337,40 @@ struct RasterIndirectPacket {
     int32_t baseVertex{};
     uint32_t parameterWord{};
 };
-struct RasterDraw {
-    uint32_t indexCount{}; // Zero consumes the remainder after firstIndex.
-    uint32_t firstIndex{};
-    int32_t vertexOffset{};
-    uint32_t instanceCount{1};
-    std::optional<ScissorRect> scissor;
-    uint32_t firstInstance{};
-};
 
 enum class IndirectFirstInstance { MayBeNonzero, AlwaysZero };
 class RasterBatch {
 public:
     RasterBatch(RasterBatch&&) noexcept = default;
     RasterBatch& operator=(RasterBatch&&) noexcept = default;
-    template<class T> requires (std::is_trivially_copyable_v<T> && !std::same_as<T, RasterDraw>)
-    void draw(const HardwareBuffer& vertices, const HardwareBuffer& indices, const T& parameters, const RasterDraw& range = {}) {
-        append(vertices, indices, range, &parameters, sizeof(T));
-    }
-    void draw(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range = {}) {
-        append(vertices, indices, range, nullptr, 0);
-    }
     using ParameterWriter = std::function<void(std::span<std::byte>)>;
-    // Fill the span synchronously, keeping the batch idle until the writer returns.
-    // The span expires when the writer returns.
-    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, size_t parameterBytes, const ParameterWriter&,
-                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
-    // Packets share geometry 0. firstVertex is zero for index pulling.
-    // parameterWord indexes the shared parameter payload in four-byte words.
+    // Append the first count packets in order, with one geometry pair and scissor for this call.
+    // Each packet uses geometryIndex = firstVertex = 0. parameterWord addresses this call's payload in 4-byte words.
     // AlwaysZero is a promise about every packet, including GPU-written packets.
     void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                      uint32_t count, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
+                      uint32_t count, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
+                      std::optional<ScissorRect> scissor = {}) {
+        drawIndirect(vertices, indices, packets, count, 0, {}, firstInstance, scissor);
+    }
     template<class T, size_t Extent> requires (std::is_trivially_copyable_v<T> && !std::is_volatile_v<T>)
     void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
                       uint32_t count, std::span<T, Extent> parameters,
-                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
-        appendIndirect(vertices, indices, packets, count, parameters.data(), parameters.size_bytes(), firstInstance);
+                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
+                      std::optional<ScissorRect> scissor = {}) {
+        drawIndirect(vertices, indices, packets, count, parameters.size_bytes(), [parameters](std::span<std::byte> bytes) {
+            std::memcpy(bytes.data(), parameters.data(), bytes.size());
+        }, firstInstance, scissor);
     }
+    // Keep the batch idle while the writer fills this call's parameter memory. Its span expires on return.
+    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
+                      uint32_t count, size_t parameterBytes, const ParameterWriter& writer,
+                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero,
+                      std::optional<ScissorRect> scissor = {});
 private:
-    void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
-                        uint32_t count, const void* data, size_t size, IndirectFirstInstance firstInstance);
     friend struct HardwareExecutor;
     friend struct RasterizerPipeline<>;
     RasterBatch(std::shared_ptr<horizon::detail::CommandRecordVulkan> record, const std::vector<ResourceUse>& uses)
         : record_(std::move(record)), uses_(uses) {}
-    void append(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range,
-                const void* data, size_t size);
     std::shared_ptr<horizon::detail::CommandRecordVulkan> record_;
     std::vector<ResourceUse> uses_;
 };

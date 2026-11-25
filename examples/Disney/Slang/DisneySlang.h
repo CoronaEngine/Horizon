@@ -14,7 +14,7 @@ public:
     void run() override;
 
 private:
-    struct DrawParameters {
+    struct alignas(16) DrawParameters {
         ktm::fmat4x4 model = ktm::fmat4x4::from_eye();
         ktm::fvec4 baseColorMetallic;
         float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
@@ -31,8 +31,8 @@ private:
 
     HardwareDisplayer display;
     HardwareImage radiance, irradiance;
-    HardwareBuffer vertex_buffer, index_buffer;
-    std::array<DrawParameters, rows * columns> draws;
+    HardwareBuffer vertex_buffer, index_buffer, commands;
+    std::array<DrawParameters, rows * columns> parameters;
     HardwareImage final_output_image;
     RasterizerPipeline<> rasterizer;
     HardwareExecutor render_executor;

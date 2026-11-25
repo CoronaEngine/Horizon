@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -56,6 +57,8 @@ BaselineSlang::BaselineSlang(void* native_window)
             vertices.data(), vertices.size(), sizeof(vertices[0]));
         index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
+        const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+        commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect, &command, 1, sizeof(command));
     }
 
     {
@@ -98,7 +101,8 @@ void BaselineSlang::run()
     parameters.model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
     auto batch = rasterizer.beginBatch();
-    batch.draw(vertex_buffer, index_buffer, parameters);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, 1, std::span(&parameters, 1),
+                       IndirectFirstInstance::AlwaysZero);
     render_executor << std::move(batch);
     display.present(render_executor, color);
 }

@@ -564,112 +564,61 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 }
 
-void RasterizerPipelineVulkan::Batch::append(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                             const RasterDraw& range, const void* data, size_t size)
-{
-    if (externalPackets) throw std::logic_error("GPU packets already bound to this batch");
-    if (!vertices || !indices) throw std::invalid_argument("Missing raster geometry");
-    const auto indexBytes = indices.getElementSize();
-    if ((indexBytes != 2 && indexBytes != 4) || vertices.getElementSize() % 4)
-        throw std::invalid_argument("Raster geometry requires uint16/uint32 indices and a word-aligned vertex stride");
-    const auto available = indices.getElementCount();
-    if (range.firstIndex > available || range.indexCount > available - range.firstIndex)
-        throw std::out_of_range("Raster draw exceeds index buffer");
-    const auto count = range.indexCount ? range.indexCount : uint32_t(available - range.firstIndex);
-    if (!count || !range.instanceCount) return;
-    if (range.firstInstance && !supportsIndirectFirstInstance)
-        throw std::invalid_argument("Nonzero firstInstance requires drawIndirectFirstInstance");
-    VkRect2D clip{{0, 0}, {imageSize.x, imageSize.y}};
-    if (range.scissor) {
-        const auto& rect = *range.scissor;
-        auto x = std::max(0, rect.x), y = std::max(0, rect.y);
-        auto right = std::min<int64_t>(imageSize.x, int64_t(rect.x) + rect.width);
-        auto bottom = std::min<int64_t>(imageSize.y, int64_t(rect.y) + rect.height);
-        if (right <= x || bottom <= y) return;
-        clip = {{x, y}, {uint32_t(right - x), uint32_t(bottom - y)}};
-    }
-    const auto key = std::pair{vertices.getBufferID(), indices.getBufferID()};
-    auto found = geometryIndices.find(key);
-    if (found == geometryIndices.end()) {
-        if (vertices.getElementCount() * (vertices.getElementSize() / 4) > UINT32_MAX)
-            throw std::length_error("Raster geometry exceeds the addressable word range");
-        auto inserted = geometryIndices.emplace(key, static_cast<uint32_t>(geometries.size())).first;
-        try { geometries.emplace_back(vertices, indices); }
-        catch (...) { geometryIndices.erase(inserted); throw; }
-        found = inserted;
-    }
-    const uint32_t geom = found->second;
-    const size_t offset = (parameters.size() + 15) & ~size_t(15);
-    if (size > UINT32_MAX || offset > UINT32_MAX - size || packets.size() >= UINT32_MAX / sizeof(Packet))
-        throw std::length_error("Raster batch exceeds the supported upload size");
-    if (size) {
-        parameters.resize(offset + size);
-        std::memcpy(parameters.data() + offset, data, size);
-    }
-    const auto first = static_cast<uint32_t>(packets.size());
-    const bool newRun = runs.empty() || std::memcmp(&runs.back().scissor, &clip, sizeof(clip)) != 0;
-    if (newRun) runs.push_back({clip, first, 0});
-    try { packets.push_back({count, range.instanceCount, 0, range.firstInstance, geom, range.firstIndex, range.vertexOffset, uint32_t(offset / 4)}); }
-    catch (...) { if (newRun) runs.pop_back(); throw; }
-    ++runs.back().count;
-}
-
 void RasterizerPipelineVulkan::Batch::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                                     const HardwareBuffer& packetBuffer, uint32_t count, size_t size,
+                                                     const HardwareBuffer& packets, uint32_t count, size_t parameterBytes,
                                                      const RasterBatch::ParameterWriter& writeParameters,
-                                                     IndirectFirstInstance firstInstance)
+                                                     IndirectFirstInstance firstInstance, std::optional<ScissorRect> scissor)
 {
     if (!count) return;
     if (!supportsIndirectFirstInstance && firstInstance != IndirectFirstInstance::AlwaysZero)
         throw std::invalid_argument("This device requires indirect packets with firstInstance always zero");
-    if (!packets.empty() || externalPackets) throw std::logic_error("GPU packets require an empty batch");
-    if (!packetBuffer || packetBuffer.getElementSize() != sizeof(Packet) || count > packetBuffer.getElementCount() ||
-        !(legacyBufferFromId(packetBuffer.getBufferID())->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
+    if (!packets || packets.getElementSize() != sizeof(RasterIndirectPacket) || count > packets.getElementCount() ||
+        !(legacyBufferFromId(packets.getBufferID())->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
         throw std::invalid_argument("Invalid indirect packet buffer or draw count");
     if (!vertices || !indices || vertices.getElementSize() % 4 ||
         (indices.getElementSize() != 2 && indices.getElementSize() != 4))
         throw std::invalid_argument("Invalid GPU raster geometry");
-    if (size > UINT32_MAX) throw std::length_error("Draw parameters exceed 4 GiB");
-    geometries.reserve(1);
-    runs.reserve(1);
-    geometries.emplace_back(vertices, indices);
-    runs.push_back({{{0, 0}, {imageSize.x, imageSize.y}}, 0, count});
-    externalPackets = packetBuffer;
-    try { prepareUpload(size, writeParameters); }
-    catch (...) { externalPackets = {}; geometries.clear(); runs.clear(); throw; }
-}
-
-template<class Writer>
-void RasterizerPipelineVulkan::Batch::prepareUpload(size_t parameterBytes, const Writer& writeParameters)
-{
-    if ((packets.empty() && !externalPackets) || upload) return;
-    const size_t geometryOffset = packets.size() * sizeof(Packet);
-    const size_t parameterOffset = (geometryOffset + geometries.size() * sizeof(GeometryEntry) + 15) & ~size_t(15);
-    const size_t bytes = parameterOffset + std::max<size_t>(parameterBytes, 4);
-    if (bytes > UINT32_MAX) throw std::length_error("Raster batch exceeds 4 GiB");
-    auto& pool = pipeline->uploadPool;
-    std::unique_lock lock(pipeline->uploadMutex);
-    auto free = std::find_if(pool.begin(), pool.end(), [](const auto& buffer) { return buffer.use_count() == 1; });
-    if (free == pool.end() || (*free)->getElementSize() < bytes) {
-        auto buffer = std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(uint32_t(bytes)));
-        if (free == pool.end()) free = pool.insert(free, buffer);
-        else *free = std::move(buffer);
+    VkRect2D clip{{0, 0}, {imageSize.x, imageSize.y}};
+    if (scissor) {
+        const auto x = std::max(0, scissor->x);
+        const auto y = std::max(0, scissor->y);
+        const auto right = std::min<int64_t>(imageSize.x, int64_t(scissor->x) + scissor->width);
+        const auto bottom = std::min<int64_t>(imageSize.y, int64_t(scissor->y) + scissor->height);
+        if (right <= x || bottom <= y) return;
+        clip = {{x, y}, {uint32_t(right - x), uint32_t(bottom - y)}};
     }
-    auto buffer = *free;
-    lock.unlock();
-    auto* mapped = static_cast<uint8_t*>(buffer->getMappedData());
+    if (count > UINT32_MAX - drawCount) throw std::length_error("Raster batch exceeds the draw index range");
+    if (parameterBytes > UINT32_MAX - sizeof(GeometryEntry))
+        throw std::length_error("Raster upload exceeds 4 GiB");
+
+    // Geometry 0 and its parameters share an upload. The command table stays in the caller's buffer.
+    const auto bytes = uint32_t(sizeof(GeometryEntry) + std::max<size_t>(parameterBytes, 4));
+    IndirectGroup group{vertices, indices, packets, {}, clip, count, {}};
+    auto& pool = pipeline->uploadPool;
+    {
+        std::lock_guard lock(pipeline->uploadMutex);
+        auto free = std::find_if(pool.begin(), pool.end(), [](const auto& buffer) { return buffer.use_count() == 1; });
+        if (free == pool.end()) {
+            group.upload = pool.emplace_back(std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(bytes)));
+        } else {
+            if ((*free)->getElementSize() < bytes)
+                *free = std::make_shared<HardwareBuffer>(HardwareBuffer::rasterUpload(bytes));
+            group.upload = *free;
+        }
+    }
+
+    auto* mapped = static_cast<std::byte*>(group.upload->getMappedData());
     if (!mapped) throw std::runtime_error("Raster upload requires host-visible memory");
-    if (geometryOffset) std::memcpy(mapped, packets.data(), geometryOffset);
-    auto* entries = reinterpret_cast<GeometryEntry*>(mapped + geometryOffset);
-    for (const auto& [vertices, indices] : geometries)
-        *entries++ = {addressOf(vertices), addressOf(indices), uint32_t(vertices.getElementSize() / 4),
-                      uint32_t(indices.getElementSize()), uint32_t(vertices.getElementCount())};
-    if (parameterBytes) writeParameters({reinterpret_cast<std::byte*>(mapped + parameterOffset), parameterBytes});
-    auto* native = legacyBufferFromId(buffer->getBufferID());
+    const auto base = addressOf(*group.upload);
+    group.root = {addressOf(packets), base, base + sizeof(GeometryEntry), 0, drawCount};
+    const GeometryEntry geometry{addressOf(vertices), addressOf(indices), uint32_t(vertices.getElementSize() / 4),
+                                 uint32_t(indices.getElementSize()), uint32_t(vertices.getElementCount())};
+    std::memcpy(mapped, &geometry, sizeof(geometry));
+    if (parameterBytes) writeParameters({mapped + sizeof(geometry), parameterBytes});
+    auto* native = legacyBufferFromId(group.upload->getBufferID());
     native->resourceManager->flushMapped(*native, bytes);
-    const auto base = addressOf(*buffer);
-    root = {externalPackets ? addressOf(externalPackets) : base, base + geometryOffset, base + parameterOffset, 0};
-    upload = std::move(buffer);
+    groups.push_back(std::move(group));
+    drawCount += count;
 }
 
 void RasterizerPipelineVulkan::Batch::commitCommand(HardwareExecutorVulkan& executor)
@@ -681,18 +630,11 @@ void RasterizerPipelineVulkan::Batch::resolveResourceUses(std::span<const Resour
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
-    prepareUpload(parameters.size(), [this](std::span<std::byte> bytes) {
-        std::memcpy(bytes.data(), parameters.data(), bytes.size());
-    });
-    if (upload)
-        result.buffer(*legacyBufferFromId(upload->getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
+    for (const auto& group : groups) {
+        result.buffer(*legacyBufferFromId(group.packets.getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-    if (externalPackets)
-        result.buffer(*legacyBufferFromId(externalPackets.getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
-                      VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-    for (const auto& [vertices, indices] : geometries)
-    {
-        for (const auto* buffer : {&vertices, &indices})
+        result.buffer(*legacyBufferFromId(group.upload->getBufferID()), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        for (const auto* buffer : {&group.vertices, &group.indices})
             result.buffer(*legacyBufferFromId(buffer->getBufferID()), VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     }
@@ -739,8 +681,6 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan& hardwareExe
     vkCmdBeginRenderPass(commandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
     VkViewport viewport{0, 0, static_cast<float>(imageSize.x), static_cast<float>(imageSize.y), 0, 1};
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    VkRect2D fullScissor{{0, 0}, {imageSize.x, imageSize.y}};
-    vkCmdSetScissor(commandBuffer, 0, 1, &fullScissor);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics.pipeline);
     std::array<VkDescriptorSet, 4> sets{};
     const auto& tables = getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors;
@@ -752,17 +692,18 @@ void RasterizerPipelineVulkan::commitCommand(HardwareExecutorVulkan& hardwareExe
     auto& caps = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils();
     const uint32_t limit = caps.featuresChain.getChainHead()->features.multiDrawIndirect
         ? caps.supportedProperties.properties.limits.maxDrawIndirectCount : 1;
-    for (const auto& run : batch.runs) {
-        vkCmdSetScissor(commandBuffer, 0, 1, &run.scissor);
-        for (uint32_t i = 0; i < run.count;) {
-            batch.root.groupBase = run.first + i;
-            const auto count = std::min(run.count - i, limit);
+    for (const auto& group : batch.groups) {
+        vkCmdSetScissor(commandBuffer, 0, 1, &group.scissor);
+        const VkBuffer commands = legacyBufferFromId(group.packets.getBufferID())->bufferHandle;
+        Root root = group.root;
+        for (uint32_t first = 0; first < group.count;) {
+            const auto count = std::min(group.count - first, limit);
+            root.groupBase = first;
             vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(Root), &batch.root);
-            const auto& commands = batch.externalPackets ? batch.externalPackets : *batch.upload;
-            vkCmdDrawIndirect(commandBuffer, legacyBufferFromId(commands.getBufferID())->bufferHandle,
-                              VkDeviceSize(batch.root.groupBase) * sizeof(Packet), count, sizeof(Packet));
-            i += count;
+                               0, sizeof(root), &root);
+            vkCmdDrawIndirect(commandBuffer, commands, VkDeviceSize(first) * sizeof(RasterIndirectPacket),
+                              count, sizeof(RasterIndirectPacket));
+            first += count;
         }
     }
 

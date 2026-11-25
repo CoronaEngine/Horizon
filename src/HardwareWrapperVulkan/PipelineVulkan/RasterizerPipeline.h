@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <map>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -59,19 +58,25 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType, uint32_t location = 0);
 
-    using Packet = RasterIndirectPacket;
     struct GeometryEntry {
         VkDeviceAddress vertices, indices;
         uint32_t strideWords, indexBytes, vertexCount, reserved{};
     };
     struct Root {
         VkDeviceAddress packets, geometries, parameters;
-        uint32_t groupBase, padding{};
+        uint32_t groupBase, drawBase;
     };
-    static_assert(sizeof(Packet) == 32 && offsetof(Packet, geometryIndex) == sizeof(VkDrawIndirectCommand));
-    static_assert(offsetof(Packet, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
-    static_assert(sizeof(GeometryEntry) == 32 && sizeof(Root) == 32);
-    struct Run { VkRect2D scissor; uint32_t first, count; };
+    static_assert(sizeof(RasterIndirectPacket) == 32);
+    static_assert(offsetof(RasterIndirectPacket, geometryIndex) == sizeof(VkDrawIndirectCommand));
+    static_assert(offsetof(RasterIndirectPacket, firstInstance) == offsetof(VkDrawIndirectCommand, firstInstance));
+    static_assert(sizeof(GeometryEntry) == 32 && sizeof(Root) == 32 && offsetof(Root, drawBase) == 28);
+    struct IndirectGroup {
+        HardwareBuffer vertices, indices, packets;
+        std::shared_ptr<HardwareBuffer> upload;
+        VkRect2D scissor;
+        uint32_t count;
+        Root root;
+    };
 
     struct GraphicsState
     {
@@ -106,20 +111,12 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
         bool supportsIndirectFirstInstance{};
         std::vector<HardwareImage> renderTargets;
         std::vector<VkClearValue> clearValues;
-        std::vector<Packet> packets;
-        std::vector<std::pair<HardwareBuffer, HardwareBuffer>> geometries;
-        std::map<std::pair<uintptr_t, uintptr_t>, uint32_t> geometryIndices;
-        std::vector<uint8_t> parameters;
-        std::vector<Run> runs;
-        std::shared_ptr<HardwareBuffer> upload;
-        HardwareBuffer externalPackets;
+        std::vector<IndirectGroup> groups;
+        uint32_t drawCount{};
         void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                            const HardwareBuffer& packetBuffer, uint32_t count, size_t size,
-                            const RasterBatch::ParameterWriter& writeParameters, IndirectFirstInstance firstInstance);
-        Root root{};
-        void append(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range,
-                    const void* data, size_t size);
-        template<class Writer> void prepareUpload(size_t parameterBytes, const Writer& writeParameters);
+                            const HardwareBuffer& packets, uint32_t count, size_t parameterBytes,
+                            const RasterBatch::ParameterWriter& writeParameters, IndirectFirstInstance firstInstance,
+                            std::optional<ScissorRect> scissor);
         std::vector<uint8_t> uniformBytes;
         std::shared_ptr<BindingSnapshot> bindings;
         std::shared_ptr<UniformSnapshot> uniform;

@@ -56,8 +56,9 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
 {
     HardwareBuffer buffer;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    constexpr auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     buffer.bufferID = reinterpret_cast<uintptr_t>(new ResourceManager::BufferHardwareWrap(
-        manager.createBuffer(1, bytes, convertBufferUsage(BufferUsage::RasterIndirect), true, true, true)));
+        manager.createBuffer(1, bytes, usage, true, true, true)));
     return buffer;
 }
 

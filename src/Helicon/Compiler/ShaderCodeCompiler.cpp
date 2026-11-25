@@ -309,8 +309,8 @@ namespace EmbeddedShader
     {
         std::string reflectionStr = reflection ? "_Reflection" : "";
         auto languageStr = enumToString(language);
-        // Old bindless raster shaders could still use fixed-function vertex inputs.
-        auto prefixStr = languageStr + reflectionStr + "_BindlessV2";
+        // Raster V3 keeps the batch-wide draw index separate from the packet table index.
+        auto prefixStr = languageStr + reflectionStr + (stage == "ComputeShader" ? "_BindlessV2" : "_BindlessV3");
         for (size_t i = 0; i < conditionInfo.size(); ++i)
         {
             auto conditionStr = conditionInfo[i] ? "_True" : "_False";

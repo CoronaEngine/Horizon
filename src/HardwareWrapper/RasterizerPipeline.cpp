@@ -1,4 +1,3 @@
-#include <cstring>
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 
 #include "Horizon.h"
@@ -96,35 +95,14 @@ RasterBatch RasterizerPipeline<>::capture(std::optional<ktm::uvec2> extent, Rast
     return RasterBatch(std::move(batch), resourceUses_);
 }
 
-void RasterBatch::append(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range,
-                         const void* data, size_t size)
-{
-    if (!record_) throw std::logic_error("Raster batch already submitted");
-    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).append(vertices, indices, range, data, size);
-}
-
-void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                               const HardwareBuffer& packets, uint32_t count, IndirectFirstInstance firstInstance)
-{
-    appendIndirect(vertices, indices, packets, count, nullptr, 0, firstInstance);
-}
-
-void RasterBatch::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                 const HardwareBuffer& packets, uint32_t count, const void* data,
-                                 size_t size, IndirectFirstInstance firstInstance)
-{
-    drawIndirect(vertices, indices, packets, count, size, [data](std::span<std::byte> bytes) {
-        std::memcpy(bytes.data(), data, bytes.size());
-    }, firstInstance);
-}
-
 void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                                const HardwareBuffer& packets, uint32_t count, size_t bytes,
-                               const ParameterWriter& writeParameters, IndirectFirstInstance firstInstance)
+                               const ParameterWriter& writeParameters, IndirectFirstInstance firstInstance,
+                               std::optional<ScissorRect> scissor)
 {
     if (!record_) throw std::logic_error("Raster batch already submitted");
     static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(vertices, indices, packets, count,
-                                                                          bytes, writeParameters, firstInstance);
+                                                                          bytes, writeParameters, firstInstance, scissor);
 }
 
 void RasterizerPipeline<>::refreshShaderVariant()

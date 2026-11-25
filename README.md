@@ -124,7 +124,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run()`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，每帧在固定光照下按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时生成球体几何、110 份材质球参数和对应的间接命令，每帧提交一次命令表。DrawStress 光栅示例复用命令表，在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
 最后可以阅读 Tutorial 的原生 Vulkan 实现，对照 Vulkan 初始化、Viking Room 绘制和资源释放的顺序。Tutorial 的源码作为独立参考保留。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
@@ -269,16 +269,22 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 需要接收任意计算或光栅管线的函数可以分别使用 `ComputePipeline<>&` 和 `RasterizerPipeline<>&`。这两个默认特化也直接支持 EDSL、Slang 源码和已编译模块。
 
-`batch.draw(vertexBuffer, indexBuffer)` 直接接收顶点缓冲和索引缓冲。间接绘制使用 `batch.drawIndirect(vertexBuffer, indexBuffer, packets, count)`。从 CPU 数据创建缓冲时，可以将顶点和索引加入同一个 executor，一次提交完成上传。
+`batch.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 执行命令缓冲中的前 `count` 条记录。同一个 batch 可以多次调用，按录入顺序在同一 render pass 中绘制。每次调用独立选择几何缓冲、参数和裁剪矩形。CPU 预先生成的命令可以与顶点和索引一起上传，并在后续帧中复用。
 
 ```cpp
 HardwareExecutor upload;
-HardwareBuffer vertexBuffer, indexBuffer;
+HardwareBuffer vertexBuffer, indexBuffer, commands;
 vertexBuffer.createDeviceLocal(upload, BufferUsage::VertexBuffer,
                                vertices.data(), vertices.size(), sizeof(vertices[0]));
 indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer,
                               indices.data(), indices.size(), sizeof(indices[0]));
+const RasterIndirectPacket packet{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
+commands.createDeviceLocal(upload, BufferUsage::RasterIndirect, &packet, 1, sizeof(packet));
 upload.commit().waitForDeferredResources();
+
+auto batch = pipeline.beginBatch();
+batch.drawIndirect(vertexBuffer, indexBuffer, commands, 1, IndirectFirstInstance::AlwaysZero);
+executor << std::move(batch);
 ```
 
 `createDeviceLocal` 在返回前将源数据复制到暂存缓冲，再次调用会替换当前句柄指向的分配。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
@@ -343,13 +349,13 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 
 | 数据 | 字节偏移与字段 | 大小 |
 | --- | --- | --- |
-| 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 `groupBase`（`uint32`），28 填充 | 32 字节 |
+| 光栅 push constant | 0 命令表地址、8 几何表地址、16 参数区地址（均为 64 位设备地址），24 表内起点 `groupBase`、28 批次内起点 `drawBase`（均为 `uint32`） | 32 字节 |
 | 命令表元素（`RasterIndirectPacket`） | 0 `vertexCount`、4 `instanceCount`、8 `firstVertex`、12 `firstInstance`、16 `geometryIndex`、20 `firstIndex`、24 `baseVertex`、28 `parameterWord`。各字段为 32 位，`baseVertex` 有符号 | 32 字节 |
 | 几何表元素 | 0 顶点地址、8 索引地址（均为 64 位设备地址），16 `strideWords`、20 `indexBytes`、24 `vertexCount`、28 保留（均为 `uint32`） | 32 字节 |
 
-- **定位 draw**。命令表下标为 `groupBase + gl_DrawID`（Slang 使用 `SV_DrawIndex`）。后端按裁剪区域或设备的单次绘制数量上限拆批，每次 Vulkan 调用的 draw ID 都从零开始。
+- **定位 draw**。每次 `drawIndirect` 从所传命令表的第 0 条开始读取。后端按设备的单次绘制数量上限分段，shader 使用 `groupBase + SV_DrawIndex` 定位当前表中的 packet。再加上 `drawBase` 就得到 EDSL 的 `drawIndex()`，它在同一 batch 内跨调用连续编号。零条命令和完全落在目标外的裁剪区域不占编号。
 - **读取顶点**。对 `firstVertex = 0` 的索引拉取，读取第 `firstIndex + gl_VertexIndex` 个索引（Slang 使用 `SV_VertexID`）。`indexBytes` 为 2 或 4。将解码后的索引加上 `baseVertex`，有效范围为 `[0, geometry.vertexCount)`。顶点字节地址为 `vertices + 4 × strideWords × 顶点下标`。属性类型和字节偏移由应用的顶点数据格式决定。Vulkan 实例下标已包含 `firstInstance`。
-- **读取 draw 参数**。参数块字节地址为 `parameters + 4 × parameterWord`，内容和对齐由写入者与 shader 约定。`batch.draw()` 把每块起点对齐到 16 字节。使用外部命令缓冲的 `drawIndirect()` 时，命令使用几何表下标 0，写入者负责索引范围和参数偏移。
+- **读取 draw 参数**。每次调用的命令共用几何表项 0；`parameterWord` 从这次调用的参数区起点算起，以 4 字节为单位。写入者负责索引范围、参数偏移和类型对齐。可传入现成的参数数组，也可指定字节数，通过回调直接填写上传内存。
 - **首实例**。缺少 `drawIndirectFirstInstance` 的设备只支持 `firstInstance = 0`。如果外部命令的生产者保证每个 packet 的该字段都为零，可在 `drawIndirect()` 末尾传入 `IndirectFirstInstance::AlwaysZero`，包括带参数区的重载。
 - **片元接口**。如果片元需要本次 draw 的参数，可以从顶点传递一个 `flat uint` 字偏移，双方选用同一个空闲 location。`baseline_slang` 使用 2，`disney_slang` 和 EDSL 的自动取数使用 15。手写 shader 也可以直接传递计算得到的值。只在顶点取数时可省略这个接口。
 - **绑定**。光栅 push constant 由后端按上表写入。每个 pass 的共享数据可以使用下面的 UBO 绑定。计算管线可自行定义 push constant 布局。
@@ -358,7 +364,7 @@ Helicon 的光栅 EDSL 统一生成使用这套间接绘制布局的 SPIR-V，�
 
 Helicon 的光栅和计算 EDSL 都通过 bindless 描述符表访问纹理和 `Array<T>` 资源。每个阶段只生成一份绑定布局，使用 `getShaderCode(language)` 取得编译结果。计算 shader 的资源句柄写入 push constant，光栅 shader 的共享资源句柄写入 set 3 的 UBO。间接绘制的顶点、索引和逐 draw 参数通过上节的设备地址读取。
 
-需要生成离线 shader 缓存时，启用 `HORIZON_ENABLE_HARDCODE_SHADERS` 并运行带 `CABBAGE_ENGINE_DEBUG` 的构建。使用旧版顶点输入布局生成的缓存需要重新生成。
+需要生成离线 shader 缓存时，启用 `HORIZON_ENABLE_HARDCODE_SHADERS` 并运行带 `CABBAGE_ENGINE_DEBUG` 的构建。已有的 EDSL 光栅 shader 缓存需重新生成，才能使用跨调用的批次绘制编号。
 
 | Set | 用途 |
 | --- | --- |

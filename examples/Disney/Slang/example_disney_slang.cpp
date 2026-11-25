@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -84,6 +85,15 @@ DisneySlang::DisneySlang(void* native_window)
             vertices.data(), vertices.size(), sizeof(vertices[0]));
         index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
+
+        constexpr uint32_t parameter_words = sizeof(DrawParameters) / sizeof(uint32_t);
+        std::array<RasterIndirectPacket, rows * columns> packets;
+        for (uint32_t i = 0; i < packets.size(); ++i) {
+            packets[i] = {.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1,
+                          .parameterWord = i * parameter_words};
+        }
+        commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect,
+            packets.data(), packets.size(), sizeof(packets[0]));
     }
     render_executor.commit().waitForDeferredResources();
 
@@ -105,7 +115,7 @@ DisneySlang::DisneySlang(void* native_window)
         };
         for (int row = 0; row < rows; ++row) {
             const float y = ((rows - 1) * 0.5f - row) * spacing;
-            auto& draw = draws[row * columns + col];
+            auto& draw = parameters[row * columns + col];
             draw = column[row];
             draw.model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
         }
@@ -133,8 +143,8 @@ DisneySlang::DisneySlang(void* native_window)
 void DisneySlang::run()
 {
     auto batch = rasterizer.beginBatch();
-    for (const auto& draw : draws)
-        batch.draw(vertex_buffer, index_buffer, draw);
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, std::span(parameters),
+                       IndirectFirstInstance::AlwaysZero);
 
     render_executor << std::move(batch);
     display.present(render_executor, final_output_image);

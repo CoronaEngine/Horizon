@@ -146,6 +146,7 @@ struct HorizonRasterRoot {
     HorizonGeometry* geometries;
     uint* parameters;
     uint groupBase;
+    uint drawBase;
 };
 [[vk::push_constant]] ConstantBuffer<HorizonRasterRoot> hzRaster;
 static uint* hzParameterData;
@@ -179,8 +180,9 @@ T hzVertexAttribute<T>(uint word) { return *(T*)(hzVertexData + word); }
 	if (!structure.outputStatements.empty())
 		entrypoint += "\t" + outputStructName + " output;\n";
     if (pulling) entrypoint += R"(
-    hzBatchDraw = hzRaster.groupBase + hzDraw;
-    HorizonDrawPacket packet = hzRaster.packets[hzBatchDraw];
+    uint packetIndex = hzRaster.groupBase + hzDraw;
+    hzBatchDraw = hzRaster.drawBase + packetIndex;
+    HorizonDrawPacket packet = hzRaster.packets[packetIndex];
     HorizonGeometry geometry = hzRaster.geometries[packet.geometryIndex];
     uint element = packet.firstIndex + hzCorner;
     uint index;
