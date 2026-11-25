@@ -1,4 +1,4 @@
-#include "Horizon.h"
+#include "BaselineEdsl.h"
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -9,19 +9,7 @@
 #undef STB_IMAGE_STATIC
 #include <tiny_obj_loader.h>
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#endif
-#include <GLFW/glfw3native.h>
-
 #include "Codegen/BuiltinVariate.h"
-#include "Codegen/TypeAlias.h"
 
 #include <array>
 #include <bit>
@@ -33,41 +21,11 @@
 #include <utility>
 #include <vector>
 
-struct BaselineEdslVertexProxy {
-    EmbeddedShader::Float3 pos;
-    EmbeddedShader::Float2 tex_coord;
-};
-
-void run_example_baseline_edsl()
+BaselineEdsl::BaselineEdsl(void* native_window)
+    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
 {
-    constexpr bool hidden = false;
-    constexpr float fixed_dt = 0.0f;
-
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-    glfwInit();
-    struct GlfwSession {
-        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
-    } glfw;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE, !hidden);
     constexpr int width = 800, height = 600;
-    GLFWwindow* window = glfwCreateWindow(width, height, "Horizon Baseline [EDSL]", nullptr, nullptr);
-
-#if defined(_WIN32)
-    void* native_window = glfwGetWin32Window(window);
-#elif defined(__linux__)
-    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
-#elif defined(__APPLE__)
-    void* native_window = glfwGetCocoaView(window);
-#endif
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
-    RasterGeometry geometry;
     {
         const auto filename = (assets / "models/viking_room.obj").string();
         const auto material_dir = (assets / "models/").string();
@@ -97,8 +55,6 @@ void run_example_baseline_edsl()
         geometry = RasterGeometry::upload(vertices, indices);
     }
 
-    HardwareExecutor render_executor;
-    EmbeddedShader::Texture2D<ktm::fvec4> albedo;
     {
         const auto filename = (assets / "textures/viking_room.png").string();
         int texture_width = 0, texture_height = 0;
@@ -115,10 +71,9 @@ void run_example_baseline_edsl()
     using EmbeddedShader::Float2, EmbeddedShader::Float4;
     using EmbeddedShader::mul;
 
-    EmbeddedShader::Texture2D<ktm::fvec4> color = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
-    EmbeddedShader::Float4x4 model, view, proj;
+    color.createResource(HardwareImageCreateInfo(width, height, ImageFormat::RGBA16_FLOAT));
 
-    auto vertex_shader = [&](EmbeddedShader::Aggregate<BaselineEdslVertexProxy> vertex) -> Float2 {
+    auto vertex_shader = [&](EmbeddedShader::Aggregate<VertexInput> vertex) -> Float2 {
         EmbeddedShader::position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));
         return vertex->tex_coord;
     };
@@ -127,33 +82,28 @@ void run_example_baseline_edsl()
         color << EmbeddedShader::texture(albedo, uv);
     };
 
-    RasterizerPipeline rasterizer(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
+    rasterizer = RasterizerPipeline(vertex_shader, fragment_shader, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.compare = RasterCompare::LessEqual});
 
     view = std::bit_cast<ktm::fmat4x4>(glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1)));
-    auto projection = glm::perspectiveRH_ZO(glm::radians(45.0f), float(width) / height, 0.1f, 10.0f);
+    auto projection = glm::perspectiveRH_ZO(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 10.0f);
     projection[1][1] *= -1.0f; // Vulkan clip-space Y.
     proj = std::bit_cast<ktm::fmat4x4>(projection);
+}
 
-    double start = 0.0;
-    uint64_t frame = 0;
-    for (;;) {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(window)) break;
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            continue;
-        }
-        if (frame == 0) start = glfwGetTime();
-        const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
-        model = std::bit_cast<ktm::fmat4x4>(
-            glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1)));
+void BaselineEdsl::run()
+{
+    constexpr float fixed_dt = 0.0f;
+    const auto now = std::chrono::steady_clock::now();
+    if (frame == 0) start = now;
+    const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
+    ++frame;
 
-        auto batch = rasterizer.beginBatch();
-        batch.draw(geometry);
-        render_executor << std::move(batch);
-        display.present(render_executor, color.image());
-        ++frame;
-    }
-    render_executor.waitForDeferredResources();
+    model = std::bit_cast<ktm::fmat4x4>(
+        glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1)));
+
+    auto batch = rasterizer.beginBatch();
+    batch.draw(geometry);
+    render_executor << std::move(batch);
+    display.present(render_executor, color.image());
 }

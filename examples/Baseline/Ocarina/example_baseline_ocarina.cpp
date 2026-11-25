@@ -1,13 +1,7 @@
-#include "Horizon.h"
-#include "dsl/dsl.h"
-#include "rhi/common.h"
-#include "rhi/context.h"
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-#undef STB_IMAGE_WRITE_IMPLEMENTATION
-#undef STB_IMAGE_WRITE_STATIC
+#include "BaselineOcarina.h"
 
+#include "dsl/dsl.h"
+#include "rhi/context.h"
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -17,18 +11,6 @@
 #undef STB_IMAGE_STATIC
 #include <tiny_obj_loader.h>
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#include <mach-o/dyld.h>
-#endif
-#include <GLFW/glfw3native.h>
-
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -36,58 +18,16 @@
 #include <map>
 #include <memory>
 #include <numbers>
-#include <string>
 #include <vector>
 
-void run_example_baseline_ocarina() {
+BaselineOcarina::BaselineOcarina(void* native_window)
+    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
+      device(ocarina::RHIContext::instance().create_device()), stream(device.create_stream())
+{
+    device.init_rtx();
+
     using ocarina::Float, ocarina::Float3, ocarina::cast, ocarina::make_float3;
     using ocarina::commit, ocarina::synchronize;
-    constexpr auto mode = "baseline_ocarina";
-    constexpr bool hidden = false;
-    constexpr float fixed_dt = 0.0f;
-    constexpr char capture_path[] = "";
-
-    // Slang builtins and the dynamically loaded backend live next to the executable.
-#ifdef _WIN32
-    std::wstring executable_name(32768, L'\0');
-    const auto length = GetModuleFileNameW(nullptr, executable_name.data(), static_cast<DWORD>(executable_name.size()));
-    executable_name.resize(length);
-    const auto executable = std::filesystem::path(executable_name);
-#elif defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string executable_name(size, '\0');
-    _NSGetExecutablePath(executable_name.data(), &size);
-    const auto executable = std::filesystem::canonical(executable_name.c_str());
-#else
-    const auto executable = std::filesystem::read_symlink("/proc/self/exe");
-#endif
-    auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
-    device.init_rtx();
-    auto stream = device.create_stream();
-
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-    glfwInit();
-    struct GlfwSession {
-        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
-    } glfw;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE, !hidden);
-    constexpr int width = 800, height = 600;
-    GLFWwindow* window = glfwCreateWindow(width, height, mode, nullptr, nullptr);
-
-#if defined(_WIN32)
-    void* native_window = glfwGetWin32Window(window);
-#elif defined(__linux__)
-    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
-#elif defined(__APPLE__)
-    void* native_window = glfwGetCocoaView(window);
-#endif
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     ocarina::vector<ocarina::float3> positions;
@@ -128,22 +68,22 @@ void run_example_baseline_ocarina() {
         }
     }
 
-    auto vertices = device.create_buffer<ocarina::float3>(positions.size());
-    auto indices = device.create_buffer<ocarina::uint3>(triangles.size());
-    auto texcoords = device.create_buffer<ocarina::float2>(uvs.size());
+    vertices = device.create_buffer<ocarina::float3>(positions.size());
+    indices = device.create_buffer<ocarina::uint3>(triangles.size());
+    texcoords = device.create_buffer<ocarina::float2>(uvs.size());
 
     const auto filename = (assets / "textures/viking_room.png").string();
     int texture_width = 0, texture_height = 0;
     std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> texels(
         stbi_load(filename.c_str(), &texture_width, &texture_height, nullptr, STBI_rgb_alpha), stbi_image_free);
-    auto texture = device.create_texture2d(ocarina::make_uint2(texture_width, texture_height), ocarina::PixelStorage::BYTE4);
+    texture = device.create_texture2d(ocarina::make_uint2(texture_width, texture_height), ocarina::PixelStorage::BYTE4);
     stream << vertices.upload(positions.data()) << indices.upload(triangles.data())
            << texcoords.upload(uvs.data()) << texture.upload(texels.get()) << synchronize() << commit();
     texels.reset();
 
     auto mesh = device.create_mesh(vertices, indices);
     stream << mesh.build_bvh() << synchronize() << commit();
-    auto scene = device.create_accel();
+    scene = device.create_accel();
     scene.add_instance(ocarina::move(mesh), ocarina::make_float4x4(1.f));
     stream << scene.build_bvh() << synchronize() << commit();
 
@@ -171,33 +111,25 @@ void run_example_baseline_ocarina() {
         output.write(pixel, cast<uint32_t>(bytes.x) | (cast<uint32_t>(bytes.y) << 8u) |
                             (cast<uint32_t>(bytes.z) << 16u) | 0xff000000u);
     };
-    auto shader = device.compile(trace, mode);
-    ocarina::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
-    auto output = device.create_buffer<uint32_t>(pixels.size());
-    double start = 0.0;
-    uint64_t frame = 0;
-    for (;;) {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(window)) break;
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            continue;
-        }
-        if (frame == 0) start = glfwGetTime();
-        const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
-        constexpr float pi = std::numbers::pi_v<float>;
-        const float angle = pi / 4.f - seconds * pi / 2.f;
-        const float radius = std::sqrt(8.f); // Start at (2, 2, 2), as in the raster example.
-        auto eye = make_float3(radius * std::cos(angle), radius * std::sin(angle), 2.f);
-        stream << shader(eye, output).dispatch(width, height) << output.download_sync(pixels.data()) << commit();
+    shader = device.compile(trace, "baseline_ocarina");
+    pixels.resize(width * height);
+    output_buffer = device.create_buffer<uint32_t>(pixels.size());
+}
 
-        display.present(pixels, width, height, ImageFormat::RGBA8_SRGB);
-        ++frame;
-    }
+void BaselineOcarina::run()
+{
+    constexpr float fixed_dt = 0.0f;
+    const auto now = std::chrono::steady_clock::now();
+    if (frame == 0) start = now;
+    const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
+    ++frame;
 
-    if (capture_path[0] && frame > 0) {
-        const auto parent = std::filesystem::path(capture_path).parent_path();
-        if (!parent.empty()) std::filesystem::create_directories(parent);
-        stbi_write_png(capture_path, width, height, 4, pixels.data(), width * 4);
-    }
+    constexpr float pi = std::numbers::pi_v<float>;
+    const float angle = pi / 4.f - seconds * pi / 2.f;
+    const float radius = std::sqrt(8.f); // Start at (2, 2, 2), as in the raster example.
+    auto eye = ocarina::make_float3(radius * std::cos(angle), radius * std::sin(angle), 2.f);
+    stream << shader(eye, output_buffer).dispatch(width, height)
+           << output_buffer.download_sync(pixels.data()) << ocarina::commit();
+
+    display.present(pixels, width, height, ImageFormat::RGBA8_SRGB);
 }

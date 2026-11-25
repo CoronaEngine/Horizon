@@ -113,7 +113,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 #### 第一次阅读渲染示例
 
-先运行 `HorizonExamples baseline_slang`。打开下表第一行的 Slang 入口，从 `run_example_baseline_slang` 往下读，可以依次看到 Viking Room 的模型和纹理加载、相机和渲染目标设置，以及窗口循环里的矩阵更新、绘制和呈现。接着并排打开 EDSL 入口，对照同一张纹理在两种 shader 中怎样绑定和采样。四个 Baseline 模式从 [Baseline/assets](examples/Baseline/assets) 读取同一份模型、材质和纹理。
+运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。打开下表第一行的 Slang 实现，从 `BaselineSlang` 的构造函数往下读，可以依次看到 Viking Room 的模型和纹理加载、相机和渲染目标设置，以及 `run()` 中单帧的矩阵更新、绘制和呈现。接着并排打开 EDSL 实现，对照同一张纹理在两种 shader 中怎样绑定和采样。三个 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
 
 | 场景和阅读重点 | EDSL 实现 | Slang 实现 |
 | --- | --- | --- |
@@ -121,11 +121,11 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 | Disney · 复用球体几何，逐球传入材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
 | DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
 
-每个运行模式只有一个 C++ 源文件，从 `run_example_*` 可以看到窗口创建、场景准备和逐帧渲染。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
+每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run()`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
-Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，每帧在固定光照下按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。这四个光栅模式都支持离屏渲染和截图。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制与截图](examples/DrawStress/Slang/example_drawstress_slang.cpp)
+Disney 光栅示例在初始化时生成球体几何和 110 份材质球绘制参数，每帧在固定光照下按顺序绘制。DrawStress 光栅示例在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。这四个光栅模式都支持离屏渲染。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
-最后可以对照原生 Vulkan 实现。无参数运行 `HorizonExamples` 默认启动 `baseline`。教程入口直接初始化 Vulkan、绘制 Viking Room 并释放资源。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
+最后可以阅读 Tutorial 的原生 Vulkan 实现，对照 Vulkan 初始化、Viking Room 绘制和资源释放的顺序。Tutorial 的源码作为独立参考保留。[原生入口](examples/Baseline/Tutorial/28_model_loading.cpp) · [Loading models](https://vulkan-tutorial.com/Loading_models)
 
 #### 用 Ocarina 追踪同一组场景
 
@@ -142,11 +142,11 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 | --- | --- |
 | `baseline_ocarina` | 载入 Viking Room，建立三角形加速结构，为每个像素发出相机射线。命中后插值 UV、采样模型纹理，与 Tutorial 显示相同的无光照材质。[源码](examples/Baseline/Ocarina/example_baseline_ocarina.cpp) |
 | `disney_ocarina` | 110 个实例共用一个球体，用命中的实例编号选择 Disney 材质。三个 Disney 模式都使用同一束方向光，并从两张 DDS 环境贴图采样漫反射和镜面光照。相机固定在材质球阵列前。[源码](examples/Disney/Ocarina/example_disney_ocarina.cpp) |
-| `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。三个 DrawStress 入口都可以通过 `dim` 常量调整网格边长，取值为 2 到 40。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
+| `drawstress_ocarina` | 默认 40³ 个立方体共用一份底层加速结构（BLAS）。每帧更新变换并更新顶层加速结构（TLAS）。三个 DrawStress 示例各自的类头文件中都有 `dim` 常量，可将网格边长设为 2 到 40。[源码](examples/DrawStress/Ocarina/example_drawstress_ocarina.cpp) |
 
-九个非 Tutorial 示例使用固定 800 × 600 的带边框窗口，禁止手动调整大小。每个入口用同一组宽高创建窗口、分配渲染目标和计算投影，导出的 PNG 也为 800 × 600。三个光追入口将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
+九个模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
-运行设置直接写在各示例的 C++ 入口开头，修改后重新构建即可。`hidden` 控制窗口可见性，Disney 和 DrawStress 的光栅示例另有 `offscreen` 开关。Baseline 和 DrawStress 的动画默认使用实际经过的时间，将 `fixed_dt` 设为正数即可指定每帧推进的秒数。支持截图的七个示例默认将 `capture_path` 留空，填入路径即可在退出时保存最后一帧。
+`main()` 中的 `hidden` 控制窗口可见性，`offscreen` 为 Disney 和 DrawStress 的光栅示例启用离屏渲染。Baseline 和 DrawStress 的动画默认从首帧开始计时。在对应示例的 `run()` 中将 `fixed_dt` 设为正数，即可指定每帧推进的秒数。
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。
@@ -202,9 +202,7 @@ ctest --preset examples-relwithdebinfo
 ```
 
 `engine` 和 `examples` 预设均启用 Horizon 测试。`examples` 的 `horizon-tests` 目标也构建
-`HorizonExamples`，CTest 会运行 `HorizonExamples --list`，列出全部十个模式。要查看画面，用 `HorizonExamples <mode>` 启动示例，关闭窗口即可退出。
-
-例如，要保存 DrawStress Slang 的最后一帧，在 `run_example_drawstress_slang` 开头将 `capture_path` 改为 `"drawstress.png"`，保持窗口可见（`hidden = false`）。从仓库根目录重新构建并运行，关闭窗口后即可在当前目录找到图片。
+`HorizonExamples`，CTest 会运行 `HorizonExamples --list`，列出全部九个模式。要查看画面，用 `HorizonExamples <mode>` 启动示例，关闭窗口即可退出。
 
 ```powershell
 cmake --build --preset examples-relwithdebinfo --target HorizonExamples

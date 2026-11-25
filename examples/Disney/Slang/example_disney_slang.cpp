@@ -1,25 +1,12 @@
-#include "Horizon.h"
+#include "DisneySlang.h"
 #include "Codegen/ControlFlows.h"
 
 #include SLANG(disney_vert.slang)
 #include SLANG(disney_frag.slang)
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#endif
-#include <GLFW/glfw3native.h>
-#include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/packing.hpp>
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -30,45 +17,12 @@
 #include <utility>
 #include <vector>
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-#undef STB_IMAGE_WRITE_IMPLEMENTATION
-#undef STB_IMAGE_WRITE_STATIC
-
-void run_example_disney_slang()
+DisneySlang::DisneySlang(void* native_window)
+    : ExampleBase(native_window),
+      display(native_window, PresentDevicePreference::RenderDevice), final_output_image(800, 600, ImageFormat::RGBA16_FLOAT)
 {
-    constexpr bool hidden = false;
-    constexpr bool offscreen = false;
-    constexpr char capture_path[] = "";
-
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-    glfwInit();
-    struct GlfwSession {
-        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
-    } glfw;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE, !hidden);
-    constexpr int width = 800, height = 600;
-    GLFWwindow* window = glfwCreateWindow(width, height, "disney_slang", nullptr, nullptr);
-
-#if defined(_WIN32)
-    void* native_window = glfwGetWin32Window(window);
-#elif defined(__linux__)
-    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
-#elif defined(__APPLE__)
-    void* native_window = glfwGetCocoaView(window);
-#endif
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
-    HardwareExecutor render_executor;
-    HardwareImage radiance, irradiance;
     for (const auto& [filename, face_size, mip_count, cubemap] : {
             std::tuple{"bolonga_lod.dds", 256u, 9u, &radiance},
             std::tuple{"bolonga_irr.dds", 128u, 1u, &irradiance}}) {
@@ -101,7 +55,6 @@ void run_example_disney_slang()
     render_executor.commit().waitForDeferredResources();
 
     // Each triangle-strip vertex also supplies the sphere's object-space normal.
-    RasterGeometry sphere;
     {
         constexpr int slices = 48, stacks = 24;
         std::vector<std::array<float, 3>> vertices;
@@ -135,17 +88,7 @@ void run_example_disney_slang()
         sphere = RasterGeometry::upload(vertices, indices);
     }
 
-    struct DrawParameters {
-        glm::mat4 model{1.0f};
-        glm::vec4 baseColorMetallic;
-        float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
-        float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
-        float clearcoatGloss = 1.0f;
-    };
-
-    constexpr int rows = 10, columns = 11;
     constexpr float radius = 0.42f, spacing = 1.12f;
-    std::array<DrawParameters, rows * columns> draws;
     for (int col = 0; col < columns; ++col) {
         const float x = (col - (columns - 1) * 0.5f) * spacing;
         const float t = static_cast<float>(col) / (columns - 1);
@@ -170,58 +113,31 @@ void run_example_disney_slang()
         }
     }
 
-    HardwareImage final_output_image(width, height, ImageFormat::RGBA16_FLOAT);
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
-    RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> rasterizer;
-    rasterizer.outColor = final_output_image;
-    rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
-    rasterizer.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
+    RasterizerPipeline<disney_vert_slang_t, disney_frag_slang_t> pipeline;
+    pipeline.outColor = final_output_image;
+    pipeline.setRasterState({.topology = RasterTopology::TriangleStrip});
+    pipeline.uses({{radiance, ResourceAccess::Read}, {irradiance, ResourceAccess::Read}});
 
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
     const auto eye = 13.5f * glm::vec3(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
     const auto view = glm::lookAtLH(eye, glm::vec3(0.0f), glm::vec3(0, 1, 0));
-    auto projection = glm::perspectiveLH_ZO(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+    auto projection = glm::perspectiveLH_ZO(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
     projection[1][1] *= -1.0f;
-    rasterizer.vsp.proj_view = projection * view;
-    rasterizer.vsp.camPos = glm::vec4(eye, 1.0f);
-    rasterizer.vsp.lightDir = glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
-    rasterizer.vsp.texCubeIndex = radiance;
-    rasterizer.vsp.texCubeIrrIndex = irradiance;
+    pipeline.vsp.proj_view = projection * view;
+    pipeline.vsp.camPos = glm::vec4(eye, 1.0f);
+    pipeline.vsp.lightDir = glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f);
+    pipeline.vsp.texCubeIndex = radiance;
+    pipeline.vsp.texCubeIrrIndex = irradiance;
+    rasterizer = std::move(pipeline);
+}
 
-    bool has_rendered_frame = false;
-    for (;;) {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(window)) break;
-        if (!offscreen && glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            continue;
-        }
-        auto batch = rasterizer.beginBatch();
-        for (const auto& draw : draws)
-            batch.draw(sphere, draw);
+void DisneySlang::run()
+{
+    auto batch = rasterizer.beginBatch();
+    for (const auto& draw : draws)
+        batch.draw(sphere, draw);
 
-        render_executor << std::move(batch);
-        has_rendered_frame = true;
-        if (offscreen) {
-            render_executor.commit();
-        } else {
-            display.present(render_executor, final_output_image);
-        }
-    }
-
-    if (capture_path[0] && has_rendered_frame) {
-        const std::filesystem::path path(capture_path);
-        HardwareBuffer readback(height, width * 8u, BufferUsage::StorageBuffer);
-        render_executor << final_output_image.copyTo(readback);
-        render_executor.commit().waitForDeferredResources();
-        std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
-        readback.copyToData(half);
-        std::vector<unsigned char> rgba(half.size());
-        for (size_t i = 0; i < half.size(); ++i)
-            rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
-        if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        stbi_write_png(capture_path, width, height, 4, rgba.data(), width * 4);
-    } else {
-        render_executor.waitForDeferredResources();
-    }
+    render_executor << std::move(batch);
+    display.present(render_executor, final_output_image);
 }

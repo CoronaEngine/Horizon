@@ -1,20 +1,9 @@
 #include "dsl/dsl.h"
-#include "rhi/common.h"
-#include "Horizon.h"
+#include "DisneyOcarina.h"
+
 #include "rhi/context.h"
 #include "math/transform.h"
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#include <mach-o/dyld.h>
-#endif
-#include <GLFW/glfw3native.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
@@ -24,70 +13,24 @@
 #include <filesystem>
 #include <fstream>
 #include <utility>
-#include <string>
 #include <vector>
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-#undef STB_IMAGE_WRITE_IMPLEMENTATION
-#undef STB_IMAGE_WRITE_STATIC
+DisneyOcarina::DisneyOcarina(void* native_window)
+    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
+      device(ocarina::RHIContext::instance().create_device()), stream(device.create_stream())
+{
+    device.init_rtx();
 
-void run_example_disney_ocarina() {
     using ocarina::Float, ocarina::Float2, ocarina::Float3, ocarina::Float4;
     using ocarina::make_float2, ocarina::make_float3, ocarina::make_float4;
-    constexpr auto mode = "disney_ocarina";
-    constexpr bool hidden = false;
-    constexpr char capture_path[] = "";
 
-    // Slang builtins and the dynamically loaded backend live next to the executable.
-#ifdef _WIN32
-    std::wstring filename(32768, L'\0');
-    const auto length = GetModuleFileNameW(nullptr, filename.data(), static_cast<DWORD>(filename.size()));
-    filename.resize(length);
-    const auto executable = std::filesystem::path(filename);
-#elif defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string filename(size, '\0');
-    _NSGetExecutablePath(filename.data(), &size);
-    const auto executable = std::filesystem::canonical(filename.c_str());
-#else
-    const auto executable = std::filesystem::read_symlink("/proc/self/exe");
-#endif
-    auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
-    device.init_rtx();
-    auto stream = device.create_stream();
-
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-    glfwInit();
-    struct GlfwSession {
-        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
-    } glfw;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE, !hidden);
-    constexpr int width = 800, height = 600;
-    GLFWwindow* window = glfwCreateWindow(width, height, mode, nullptr, nullptr);
-
-#if defined(_WIN32)
-    void* native_window = glfwGetWin32Window(window);
-#elif defined(__linux__)
-    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
-#elif defined(__APPLE__)
-    void* native_window = glfwGetCocoaView(window);
-#endif
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-
-    // Pack the six faces of each DDS mip into a row of a 2D texture.
     struct Environment {
-        ocarina::Texture2D atlas;
+        ocarina::Texture2D& atlas;
         unsigned face_size, levels;
     };
-    Environment radiance{.face_size = 256, .levels = 9}, irradiance{.face_size = 128, .levels = 1};
+    const Environment radiance{radiance_atlas, 256, 9}, irradiance{irradiance_atlas, 128, 1};
+
+    // Pack the six faces of each DDS mip into a row of a 2D texture.
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
     for (auto [filename, env] : {std::pair{"bolonga_lod.dds", &radiance}, std::pair{"bolonga_irr.dds", &irradiance}}) {
         std::ifstream file(assets / filename, std::ios::binary);
@@ -138,12 +81,12 @@ void run_example_disney_ocarina() {
             triangles.push_back(ocarina::make_uint3(top + 1, bottom, bottom + 1));
         }
     }
-    auto vertices = device.create_buffer<ocarina::float3>(positions.size());
-    auto indices = device.create_buffer<ocarina::uint3>(triangles.size());
+    vertices = device.create_buffer<ocarina::float3>(positions.size());
+    indices = device.create_buffer<ocarina::uint3>(triangles.size());
     stream << vertices.upload(positions.data()) << indices.upload(triangles.data()) << ocarina::synchronize() << ocarina::commit();
     auto mesh = device.create_mesh(vertices, indices);
     stream << mesh.build_bvh() << ocarina::synchronize() << ocarina::commit();
-    auto chart = device.create_accel();
+    chart = device.create_accel();
 
     struct Material {
         glm::vec4 baseColorMetallic;
@@ -187,7 +130,7 @@ void run_example_disney_ocarina() {
         }
     }
 
-    auto materials = device.create_buffer<ocarina::float4>(material_data.size());
+    materials = device.create_buffer<ocarina::float4>(material_data.size());
     stream << materials.upload(material_data.data()) << chart.build_bvh() << ocarina::synchronize() << ocarina::commit();
 
     // Each invocation traces one camera ray and shades the surface it hits.
@@ -306,33 +249,20 @@ void run_example_disney_ocarina() {
         output.write(pixel, ocarina::cast<unsigned>(bytes.x) | (ocarina::cast<unsigned>(bytes.y) << 8u) |
                             (ocarina::cast<unsigned>(bytes.z) << 16u) | 0xff000000u);
     };
-    auto shader = device.compile(trace, mode);
-    ocarina::vector<unsigned> pixels(static_cast<size_t>(width) * height);
-    auto output = device.create_buffer<uint32_t>(pixels.size());
+    shader = device.compile(trace, "disney_ocarina");
+    pixels.resize(width * height);
+    output_buffer = device.create_buffer<uint32_t>(pixels.size());
 
     const auto direction = glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f));
-    const auto light = make_float3(direction.x, direction.y, direction.z);
+    light_direction = make_float3(direction.x, direction.y, direction.z);
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
-    const auto eye = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch),
-                                         std::sin(pitch) * std::cos(yaw));
-    bool has_rendered_frame = false;
-    for (;;) {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(window)) break;
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            continue;
-        }
-        stream << shader(eye, light, output).dispatch(width, height)
-               << output.download_sync(pixels.data()) << ocarina::commit();
-        has_rendered_frame = true;
+    camera_position = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
+}
 
-        display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
-    }
+void DisneyOcarina::run()
+{
+    stream << shader(camera_position, light_direction, output_buffer).dispatch(width, height)
+           << output_buffer.download_sync(pixels.data()) << ocarina::commit();
 
-    if (capture_path[0] && has_rendered_frame) {
-        const auto parent = std::filesystem::path(capture_path).parent_path();
-        if (!parent.empty()) std::filesystem::create_directories(parent);
-        stbi_write_png(capture_path, width, height, 4, pixels.data(), width * 4);
-    }
+    display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
 }

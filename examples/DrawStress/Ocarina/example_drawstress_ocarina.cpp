@@ -1,83 +1,20 @@
-#include "Horizon.h"
+#include "DrawStressOcarina.h"
+
 #include "dsl/dsl.h"
-#include "rhi/common.h"
 #include "rhi/context.h"
 #include "math/transform.h"
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#include <mach-o/dyld.h>
-#endif
-#include <GLFW/glfw3native.h>
-
 #include <array>
 #include <cstdint>
-#include <filesystem>
-#include <string>
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-#undef STB_IMAGE_WRITE_IMPLEMENTATION
-#undef STB_IMAGE_WRITE_STATIC
+DrawStressOcarina::DrawStressOcarina(void* native_window)
+    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
+      device(ocarina::RHIContext::instance().create_device()), stream(device.create_stream())
+{
+    device.init_rtx();
 
-void run_example_drawstress_ocarina() {
     using ocarina::Float3, ocarina::make_float3;
     using ocarina::cast, ocarina::commit, ocarina::synchronize;
-    using ocarina::H;
-
-    constexpr auto mode = "drawstress_ocarina";
-    constexpr int dim = 40;
-    constexpr bool hidden = false;
-    constexpr float fixed_dt = 0.0f;
-    constexpr char capture_path[] = "";
-
-    // Slang builtins and the dynamically loaded backend live next to the executable.
-#ifdef _WIN32
-    std::wstring filename(32768, L'\0');
-    filename.resize(GetModuleFileNameW(nullptr, filename.data(), static_cast<DWORD>(filename.size())));
-    const auto executable = std::filesystem::path(filename);
-#elif defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::string filename(size, '\0');
-    _NSGetExecutablePath(filename.data(), &size);
-    const auto executable = std::filesystem::canonical(filename.c_str());
-#else
-    const auto executable = std::filesystem::read_symlink("/proc/self/exe");
-#endif
-    auto device = ocarina::RHIContext::instance(executable.parent_path()).create_device();
-    device.init_rtx();
-    auto stream = device.create_stream();
-
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-    glfwInit();
-    struct GlfwSession {
-        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
-    } glfw;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE, !hidden);
-    constexpr int width = 800, height = 600;
-    GLFWwindow* window = glfwCreateWindow(width, height, mode, nullptr, nullptr);
-
-#if defined(_WIN32)
-    void* native_window = glfwGetWin32Window(window);
-#elif defined(__linux__)
-    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
-#elif defined(__APPLE__)
-    void* native_window = glfwGetCocoaView(window);
-#endif
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
 
     const std::array<ocarina::uint3, 12> triangles = {{
         {0, 1, 2}, {1, 3, 2},
@@ -90,13 +27,13 @@ void run_example_drawstress_ocarina() {
     std::array<ocarina::float3, 8> corners;
     for (uint32_t i = 0; i < corners.size(); ++i)
         corners[i] = make_float3((i & 1) ? 1.f : -1.f, (i & 2) ? -1.f : 1.f, (i & 4) ? -1.f : 1.f);
-    auto vertices = device.create_buffer<ocarina::float3>(corners.size());
-    auto indices = device.create_buffer<ocarina::uint3>(triangles.size());
+    vertices = device.create_buffer<ocarina::float3>(corners.size());
+    indices = device.create_buffer<ocarina::uint3>(triangles.size());
     stream << vertices.upload(corners.data()) << indices.upload(triangles.data()) << synchronize() << commit();
 
     auto cube = device.create_mesh(vertices, indices);
     stream << cube.build_bvh() << synchronize() << commit();
-    auto grid = device.create_accel(ocarina::FAST_UPDATE);
+    grid = device.create_accel(ocarina::FAST_UPDATE);
     grid.add_instance(ocarina::move(cube), ocarina::make_float4x4(1.f));
     for (int i = 1; i < dim * dim * dim; ++i)
         grid.add_instance(0u, ocarina::make_float4x4(1.f));
@@ -122,42 +59,35 @@ void run_example_drawstress_ocarina() {
         output.write(pixel, cast<uint32_t>(bytes.x) | (cast<uint32_t>(bytes.y) << 8u) |
                             (cast<uint32_t>(bytes.z) << 16u) | 0xff000000u);
     };
-    auto shader = device.compile(trace, mode);
-    ocarina::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
-    auto output = device.create_buffer<uint32_t>(pixels.size());
-    const auto eye = make_float3(0.f, 0.f, -35.f);
-    double start = 0.0;
-    uint64_t frame = 0;
-    for (;;) {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(window)) break;
-        if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            continue;
-        }
-        if (frame == 0) start = glfwGetTime();
-        const float time = fixed_dt ? static_cast<float>(frame) * fixed_dt : static_cast<float>(glfwGetTime() - start);
-        for (int z = 0; z < dim; ++z) {
-            for (int y = 0; y < dim; ++y) {
-                for (int x = 0; x < dim; ++x) {
-                    const uint32_t instance = (z * dim + y) * dim + x;
-                    const auto centre = make_float3(.6f * (x - .5f * dim), .6f * (y - .5f * dim), -15.f + .6f * z);
-                    const auto transform = ocarina::translation<H>(centre)
-                        * ocarina::rotation_z<H>(time + z * .13f, true) * ocarina::rotation_y<H>(time + y * .37f, true)
-                        * ocarina::rotation_x<H>(time + x * .21f, true) * ocarina::scale<H>(.25f);
-                    grid.set_transform(instance, transform);
-                }
+    shader = device.compile(trace, "drawstress_ocarina");
+    pixels.resize(width * height);
+    output_buffer = device.create_buffer<uint32_t>(pixels.size());
+}
+
+void DrawStressOcarina::run()
+{
+    constexpr float fixed_dt = 0.0f;
+    const auto now = std::chrono::steady_clock::now();
+    if (frame == 0) start = now;
+    const float time = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
+    ++frame;
+
+    using ocarina::H;
+    for (int z = 0; z < dim; ++z) {
+        for (int y = 0; y < dim; ++y) {
+            for (int x = 0; x < dim; ++x) {
+                const uint32_t instance = (z * dim + y) * dim + x;
+                const auto centre = ocarina::make_float3(.6f * (x - .5f * dim), .6f * (y - .5f * dim), -15.f + .6f * z);
+                const auto transform = ocarina::translation<H>(centre)
+                    * ocarina::rotation_z<H>(time + z * .13f, true) * ocarina::rotation_y<H>(time + y * .37f, true)
+                    * ocarina::rotation_x<H>(time + x * .21f, true) * ocarina::scale<H>(.25f);
+                grid.set_transform(instance, transform);
             }
         }
-        stream << grid.update_bvh();
-        stream << shader(eye, output).dispatch(width, height) << output.download_sync(pixels.data()) << commit();
-        display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
-        ++frame;
     }
-
-    if (capture_path[0] != '\0' && frame > 0) {
-        const auto parent = std::filesystem::path(capture_path).parent_path();
-        if (!parent.empty()) std::filesystem::create_directories(parent);
-        stbi_write_png(capture_path, width, height, 4, pixels.data(), width * 4);
-    }
+    stream << grid.update_bvh();
+    const auto eye = ocarina::make_float3(0.f, 0.f, -35.f);
+    stream << shader(eye, output_buffer).dispatch(width, height)
+           << output_buffer.download_sync(pixels.data()) << ocarina::commit();
+    display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
 }

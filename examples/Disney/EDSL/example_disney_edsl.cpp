@@ -1,24 +1,12 @@
-#include "Horizon.h"
+#include "DisneyEdsl.h"
+
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
-#include "Codegen/TypeAlias.h"
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(__linux__)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(__APPLE__)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#endif
-#include <GLFW/glfw3native.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/packing.hpp>
 
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -30,51 +18,12 @@
 #include <utility>
 #include <vector>
 
-#define STB_IMAGE_WRITE_STATIC
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-#undef STB_IMAGE_WRITE_IMPLEMENTATION
-#undef STB_IMAGE_WRITE_STATIC
-
-struct DisneyEdslVaryings
+DisneyEdsl::DisneyEdsl(void* native_window)
+    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
 {
-    EmbeddedShader::Float3 v_view;
-    EmbeddedShader::Float3 v_normal;
-};
-
-void run_example_disney_edsl()
-{
-    constexpr bool hidden = false;
-    constexpr bool offscreen = false;
-    constexpr char capture_path[] = "";
-
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-    glfwInit();
-    struct GlfwSession {
-        ~GlfwSession() { glfwTerminate(); } // Also destroys the window.
-    } glfw;
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE, !hidden);
     constexpr int width = 800, height = 600;
-    GLFWwindow* window = glfwCreateWindow(width, height, "disney_edsl", nullptr, nullptr);
-
-#if defined(_WIN32)
-    void* native_window = glfwGetWin32Window(window);
-#elif defined(__linux__)
-    void* native_window = reinterpret_cast<void*>(glfwGetX11Window(window));
-#elif defined(__APPLE__)
-    void* native_window = glfwGetCocoaView(window);
-#endif
-    HardwareDisplayer display(native_window, PresentDevicePreference::RenderDevice);
-
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
-    HardwareExecutor render_executor;
-    EmbeddedShader::TextureCube<ktm::fvec4> radiance_map, irradiance_map;
     for (const auto& [filename, face_size, mip_count, cubemap] : {
             std::tuple{"bolonga_lod.dds", 256u, 9u, &radiance_map},
             std::tuple{"bolonga_irr.dds", 128u, 1u, &irradiance_map}}) {
@@ -107,7 +56,6 @@ void run_example_disney_edsl()
     render_executor.commit().waitForDeferredResources();
 
     // Each triangle-strip vertex also supplies the sphere's object-space normal.
-    RasterGeometry sphere;
     {
         constexpr int slices = 48, stacks = 24;
         std::vector<std::array<float, 3>> vertices;
@@ -141,17 +89,7 @@ void run_example_disney_edsl()
         sphere = RasterGeometry::upload(vertices, indices);
     }
 
-    struct DrawParameters {
-        glm::mat4 model{1.0f};
-        glm::vec4 baseColorMetallic;
-        float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
-        float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
-        float clearcoatGloss = 1.0f;
-    };
-
-    constexpr int rows = 10, columns = 11;
     constexpr float radius = 0.42f, spacing = 1.12f;
-    std::array<DrawParameters, rows * columns> draws;
     for (int col = 0; col < columns; ++col) {
         const float x = (col - (columns - 1) * 0.5f) * spacing;
         const float t = static_cast<float>(col) / (columns - 1);
@@ -191,15 +129,13 @@ void run_example_disney_edsl()
     using EmbeddedShader::rasterDrawParameter;
     using EmbeddedShader::sqrt;
 
-    EmbeddedShader::Float4x4 proj_view;
-    Float4 camPos, lightDir;
-    EmbeddedShader::Texture2D<ktm::fvec4> final_output = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
+    final_output.createResource(HardwareImageCreateInfo(width, height, ImageFormat::RGBA16_FLOAT));
     final_output.image().setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
     auto edsl_vertex = [&](Float3 pos) {
         auto per_model = rasterDrawParameter<ktm::fmat4x4>(offsetof(DrawParameters, model) / sizeof(uint32_t));
 
-        EmbeddedShader::Aggregate<DisneyEdslVaryings> out;
+        EmbeddedShader::Aggregate<Varyings> out;
 
         Float4 local_pos = Float4(pos, Float(1.0));
         Float4 world_pos = mul(per_model, local_pos);
@@ -209,7 +145,7 @@ void run_example_disney_edsl()
         return out;
     };
 
-    auto edsl_fragment = [&](EmbeddedShader::Aggregate<DisneyEdslVaryings> in) {
+    auto edsl_fragment = [&](EmbeddedShader::Aggregate<Varyings> in) {
         Float4 per_mat0;
         per_mat0 = rasterDrawParameter<ktm::fvec4>(offsetof(DrawParameters, baseColorMetallic) / sizeof(uint32_t));
         Float4 per_mat1;
@@ -340,7 +276,7 @@ void run_example_disney_edsl()
                         (mapped * (Float(6.2) * mapped + Float3(1.7f)) + Float3(0.06f));
         final_output << Float4(filmic, Float(1.0));
     };
-    RasterizerPipeline rasterizer(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
+    rasterizer = RasterizerPipeline(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
     constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
@@ -351,41 +287,14 @@ void run_example_disney_edsl()
     proj_view = std::bit_cast<ktm::fmat4x4>(glm::mat4(projection * view));
     camPos = std::bit_cast<ktm::fvec4>(glm::vec4(eye, 1.0f));
     lightDir = std::bit_cast<ktm::fvec4>(glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f));
+}
 
-    bool has_rendered_frame = false;
-    for (;;) {
-        glfwPollEvents();
-        if (glfwWindowShouldClose(window)) break;
-        if (!offscreen && glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            continue;
-        }
-        auto batch = rasterizer.beginBatch();
-        for (const auto& draw : draws)
-            batch.draw(sphere, draw);
+void DisneyEdsl::run()
+{
+    auto batch = rasterizer.beginBatch();
+    for (const auto& draw : draws)
+        batch.draw(sphere, draw);
 
-        render_executor << std::move(batch);
-        has_rendered_frame = true;
-        if (offscreen) {
-            render_executor.commit();
-        } else {
-            display.present(render_executor, final_output.image());
-        }
-    }
-
-    if (capture_path[0] && has_rendered_frame) {
-        const std::filesystem::path path(capture_path);
-        HardwareBuffer readback(height, width * 8u, BufferUsage::StorageBuffer);
-        render_executor << final_output.image().copyTo(readback);
-        render_executor.commit().waitForDeferredResources();
-        std::vector<uint16_t> half(static_cast<size_t>(width) * height * 4);
-        readback.copyToData(half);
-        std::vector<unsigned char> rgba(half.size());
-        for (size_t i = 0; i < half.size(); ++i)
-            rgba[i] = static_cast<unsigned char>(std::clamp(glm::unpackHalf1x16(half[i]), 0.0f, 1.0f) * 255.0f + 0.5f);
-        if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-        stbi_write_png(capture_path, width, height, 4, rgba.data(), width * 4);
-    } else {
-        render_executor.waitForDeferredResources();
-    }
+    render_executor << std::move(batch);
+    display.present(render_executor, final_output.image());
 }
