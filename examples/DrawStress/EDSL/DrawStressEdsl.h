@@ -6,21 +6,18 @@
 
 #include <ktm/ktm.h>
 #include <array>
-#include <chrono>
 #include <cstdint>
 
 class DrawStressEdsl final : public ExampleBase {
 public:
     explicit DrawStressEdsl(void* native_window);
     ~DrawStressEdsl() override = default;
-    void run() override;
+    void run(float seconds) override;
 
 private:
     static constexpr int dim = 40;
     static constexpr uint32_t draw_count = dim * dim * dim;
     HardwareDisplayer display;
-    std::chrono::steady_clock::time_point start;
-    std::uint64_t frame = 0;
     HardwareBuffer vertex_buffer, index_buffer;
     HardwareBuffer commands;
     ktm::fvec4 axis_projection;

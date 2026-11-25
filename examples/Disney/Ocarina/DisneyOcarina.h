@@ -12,7 +12,7 @@ class DisneyOcarina final : public ExampleBase {
 public:
     explicit DisneyOcarina(void* native_window);
     ~DisneyOcarina() override = default;
-    void run() override;
+    void run(float) override;
 
 private:
     static constexpr int width = 800, height = 600;

@@ -9,6 +9,8 @@
 #include "DrawStress/Ocarina/DrawStressOcarina.h"
 #include "DrawStress/Slang/DrawStressSlang.h"
 
+#include <cstdint>
+#include <format>
 #include <memory>
 #include <string_view>
 
@@ -58,9 +60,18 @@ int main(int argc, char** argv)
             else if (mode == "drawstress_ocarina") example = std::make_unique<DrawStressOcarina>(native_window);
             else example = std::make_unique<BaselineEdsl>(native_window);
 
+            constexpr double fixed_dt = 0.0;
+            const double start = glfwGetTime();
+            double frame_start = start;
+            std::uint64_t frame = 0;
             while (!glfwWindowShouldClose(window)) {
-                example->run();
+                const double seconds = fixed_dt > 0.0 ? static_cast<double>(frame) * fixed_dt : frame_start - start;
+                example->run(static_cast<float>(seconds));
                 glfwPollEvents();
+                const double now = glfwGetTime();
+                const auto title = std::format("{} | Frame {} | {:.2f} ms", mode, ++frame, (now - frame_start) * 1000.0);
+                glfwSetWindowTitle(window, title.c_str());
+                frame_start = now;
             }
         }
 

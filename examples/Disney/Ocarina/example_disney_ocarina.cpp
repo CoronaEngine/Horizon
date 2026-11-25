@@ -257,7 +257,7 @@ DisneyOcarina::DisneyOcarina(void* native_window)
     camera_position = ocarina::bridge::from_ktm(eye);
 }
 
-void DisneyOcarina::run()
+void DisneyOcarina::run(float)
 {
     stream << shader(camera_position, light_direction, output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();

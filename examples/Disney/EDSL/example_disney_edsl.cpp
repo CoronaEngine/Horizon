@@ -295,7 +295,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
     lightDir = ktm::fvec4(ktm::normalize(ktm::fvec3(-0.35f, 0.55f, -0.75f)), 0.0f);
 }
 
-void DisneyEdsl::run()
+void DisneyEdsl::run(float)
 {
     auto batch = rasterizer.beginBatch();
     batch.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, std::span(parameters),

@@ -65,24 +65,18 @@ DrawStressOcarina::DrawStressOcarina(void* native_window)
     output_buffer = device.create_buffer<uint32_t>(pixels.size());
 }
 
-void DrawStressOcarina::run()
+void DrawStressOcarina::run(float seconds)
 {
-    constexpr float fixed_dt = 0.0f;
-    const auto now = std::chrono::steady_clock::now();
-    if (frame == 0) start = now;
-    const float time = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
-    ++frame;
-
     const auto scale = ktm::scale3d(ktm::fvec3(0.25f));
     for (int z = 0; z < dim; ++z) {
-        const auto rotate_z = ktm::rotate3d_z(time + z * .13f);
+        const auto rotate_z = ktm::rotate3d_z(seconds + z * .13f);
         for (int y = 0; y < dim; ++y) {
-            const auto rotate_y = ktm::rotate3d_y(time + y * .37f);
+            const auto rotate_y = ktm::rotate3d_y(seconds + y * .37f);
             for (int x = 0; x < dim; ++x) {
                 const uint32_t instance = (z * dim + y) * dim + x;
                 const ktm::fvec3 centre{.6f * (x - .5f * dim), .6f * (y - .5f * dim), -15.f + .6f * z};
                 const auto transform = ktm::translate3d(centre) * rotate_z * rotate_y
-                                     * ktm::rotate3d_x(time + x * .21f) * scale;
+                                     * ktm::rotate3d_x(seconds + x * .21f) * scale;
                 grid.set_transform(instance, ocarina::bridge::from_ktm(transform));
             }
         }

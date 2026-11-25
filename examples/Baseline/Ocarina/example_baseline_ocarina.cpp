@@ -117,14 +117,8 @@ BaselineOcarina::BaselineOcarina(void* native_window)
     output_buffer = device.create_buffer<uint32_t>(pixels.size());
 }
 
-void BaselineOcarina::run()
+void BaselineOcarina::run(float seconds)
 {
-    constexpr float fixed_dt = 0.0f;
-    const auto now = std::chrono::steady_clock::now();
-    if (frame == 0) start = now;
-    const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
-    ++frame;
-
     const float angle = ktm::radians(45.f) - seconds * ktm::half_pi<float>;
     const float radius = ktm::sqrt(8.f); // Start at (2, 2, 2), as in the raster example.
     const ktm::fvec3 eye{radius * ktm::cos(angle), radius * ktm::sin(angle), 2.f};

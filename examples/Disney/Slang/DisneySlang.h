@@ -11,7 +11,7 @@ class DisneySlang final : public ExampleBase {
 public:
     explicit DisneySlang(void* native_window);
     ~DisneySlang() override = default;
-    void run() override;
+    void run(float) override;
 
 private:
     struct alignas(16) DrawParameters {

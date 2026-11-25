@@ -61,14 +61,8 @@ DrawStressSlang::DrawStressSlang(void* native_window)
     rasterizer = std::move(pipeline);
 }
 
-void DrawStressSlang::run()
+void DrawStressSlang::run(float seconds)
 {
-    constexpr float fixed_dt = 0.0f;
-    const auto now = std::chrono::steady_clock::now();
-    if (frame == 0) start = now;
-    const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
-    ++frame;
-
     auto batch = rasterizer.beginBatch();
     batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, draw_count * sizeof(ktm::fmat4x4),
         [&](std::span<std::byte> destination) {

@@ -99,14 +99,8 @@ BaselineEdsl::BaselineEdsl(void* native_window)
     proj = projection;
 }
 
-void BaselineEdsl::run()
+void BaselineEdsl::run(float seconds)
 {
-    constexpr float fixed_dt = 0.0f;
-    const auto now = std::chrono::steady_clock::now();
-    if (frame == 0) start = now;
-    const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
-    ++frame;
-
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
     auto batch = rasterizer.beginBatch();

@@ -11,7 +11,7 @@ class DisneyEdsl final : public ExampleBase {
 public:
     explicit DisneyEdsl(void* native_window);
     ~DisneyEdsl() override = default;
-    void run() override;
+    void run(float) override;
 
 private:
     struct Varyings {

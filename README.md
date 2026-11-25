@@ -114,7 +114,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 
 #### 第一次阅读渲染示例
 
-运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。打开下表第一行的 Slang 实现，从 `BaselineSlang` 的构造函数往下读，可以依次看到 Viking Room 的模型和纹理加载、相机和渲染目标设置，以及 `run()` 中单帧的矩阵更新、绘制和呈现。接着并排打开 EDSL 实现，对照同一张纹理在两种 shader 中怎样绑定和采样。三个 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
+运行 `HorizonExamples` 或 `HorizonExamples baseline_slang` 均会打开 Baseline Slang。打开下表第一行的 Slang 实现，从 `BaselineSlang` 的构造函数往下读，可以依次看到 Viking Room 的模型和纹理加载、相机和渲染目标设置，以及 `run(seconds)` 中单帧的矩阵更新、绘制和呈现。接着并排打开 EDSL 实现，对照同一张纹理在两种 shader 中怎样绑定和采样。三个 Baseline 示例和 Tutorial 共用 [Baseline/assets](examples/Baseline/assets) 中的模型、材质和纹理。
 
 | 场景和阅读重点 | EDSL 实现 | Slang 实现 |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ conda run -n horizon-dev --no-capture-output python build_tools/dev.py build-fas
 | Disney · 复用球体几何，逐球传入材质 | [example_disney_edsl.cpp](examples/Disney/EDSL/example_disney_edsl.cpp) | [example_disney_slang.cpp](examples/Disney/Slang/example_disney_slang.cpp) |
 | DrawStress · 用一张间接命令表绘制立方体网格 | [example_drawstress_edsl.cpp](examples/DrawStress/EDSL/example_drawstress_edsl.cpp) | [example_drawstress_slang.cpp](examples/DrawStress/Slang/example_drawstress_slang.cpp) |
 
-每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run()`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
+每个模式的派生类都声明在示例目录下的头文件中。[main.cpp](examples/main.cpp) 根据参数创建窗口，把原生句柄传给所选示例的构造函数，在主循环中每帧调用一次 `run(seconds)`。派生类自己持有渲染资源，并在析构时释放。三个 Disney 模式共用 [Disney/assets/env](examples/Disney/assets/env) 中的两张环境贴图。手写 Slang 的每个阶段单独编译。调整 Vulkan 绘制布局时需要核对各阶段的推送常量偏移，以及顶点与片元之间传递的参数位置。[Baseline 顶点](examples/Baseline/Slang/baseline_vert.slang) · [Disney 片元](examples/Disney/Slang/disney_frag.slang) · [DrawStress 顶点](examples/DrawStress/Slang/drawstress_vert.slang)
 
 Disney 光栅示例在初始化时生成球体几何、110 份材质球参数和对应的间接命令，每帧提交一次命令表。DrawStress 光栅示例复用命令表，在 `drawIndirect` 的回调中直接写入每个立方体的变换矩阵。[Disney 场景](examples/Disney/Slang/example_disney_slang.cpp) · [DrawStress 绘制](examples/DrawStress/Slang/example_drawstress_slang.cpp)
 
@@ -147,7 +147,7 @@ $examples = Resolve-Path build/conan/examples/release/bin/Release/HorizonExample
 
 九个模式使用固定 800 × 600 的带边框窗口和渲染目标。三个光追模式将 RGBA 像素读回并交给 Horizon 窗口呈现。[Disney 光追](examples/Disney/Ocarina/example_disney_ocarina.cpp)
 
-Baseline 和 DrawStress 的动画默认从首帧开始计时。在对应示例的 `run()` 中将 `fixed_dt` 设为正数，即可指定每帧推进的秒数。
+窗口标题每帧显示模式、累计帧数和本帧实际耗时，例如 `baseline_slang | Frame 42 | 12.34 ms`。Baseline 和 DrawStress 的动画从首帧零秒开始。将主循环中的 `fixed_dt` 设为正数可指定动画每帧推进的秒数。[主循环](examples/main.cpp)
 
 构建实现位于 `build_tools/`：Python 入口、CMake 模块、Conan 配方/profile 和构建工具测试均在这里。
 根目录 `CMakeLists.txt`、`CMakePresets.json` 保留薄入口；构建输出仍写入根目录的 `build/`。

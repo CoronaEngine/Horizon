@@ -4,7 +4,6 @@
 #include "Horizon.h"
 
 #include <array>
-#include <chrono>
 #include <cstdint>
 #include <ktm/ktm.h>
 
@@ -12,14 +11,12 @@ class DrawStressSlang final : public ExampleBase {
 public:
     explicit DrawStressSlang(void* native_window);
     ~DrawStressSlang() override = default;
-    void run() override;
+    void run(float seconds) override;
 
 private:
     static constexpr int dim = 40;
     static constexpr uint32_t draw_count = dim * dim * dim;
 
-    std::chrono::steady_clock::time_point start;
-    std::uint64_t frame = 0;
     HardwareDisplayer display;
     HardwareBuffer vertex_buffer, index_buffer;
     HardwareBuffer commands;

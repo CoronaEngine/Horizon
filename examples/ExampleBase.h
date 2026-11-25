@@ -3,5 +3,5 @@
 struct ExampleBase {
     explicit ExampleBase(void*) {}
     virtual ~ExampleBase() = default;
-    virtual void run() = 0;
+    virtual void run(float seconds) = 0;
 };

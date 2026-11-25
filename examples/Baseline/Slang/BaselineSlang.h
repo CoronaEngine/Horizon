@@ -3,7 +3,6 @@
 #include "../../ExampleBase.h"
 #include "Horizon.h"
 
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ktm/ktm.h>
@@ -12,11 +11,9 @@ class BaselineSlang final : public ExampleBase {
 public:
     explicit BaselineSlang(void* native_window);
     ~BaselineSlang() override = default;
-    void run() override;
+    void run(float seconds) override;
 
 private:
-    std::chrono::steady_clock::time_point start;
-    std::uint64_t frame = 0;
     HardwareDisplayer display;
     HardwareBuffer vertex_buffer, index_buffer, commands;
     HardwareImage texture_image;
