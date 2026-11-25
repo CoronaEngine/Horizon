@@ -8,19 +8,46 @@
 #include "rhi/device.h"
 #include "core/runtime/platform.h"
 
+#include <mutex>
+
+#if defined(_WIN32)
+#include "core/runtime/oc_windows.h"
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 namespace ocarina {
 
 static constexpr string_view backend_prefix = "ocarina-backend-";
 
-namespace detail {
-[[nodiscard]] fs::path create_runtime_directory(fs::path path) noexcept {
-    path = fs::canonical(path);
-    if (fs::is_directory(path)) {
-        return path;
-    }
-    return fs::canonical(path.parent_path());
-}
+namespace {
+std::mutex context_mutex;
 
+fs::path executable_directory() {
+    std::error_code error;
+#if defined(_WIN32)
+    std::wstring path(32768, L'\0');
+    const DWORD size = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    OC_ERROR_IF(size == 0 || size == path.size(), "GetModuleFileNameW failed to return the executable path");
+    path.resize(size);
+    const auto directory = fs::canonical(fs::path{path}.parent_path(), error);
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string path(size, '\0');
+    OC_ERROR_IF(_NSGetExecutablePath(path.data(), &size) != 0, "Failed to get the executable path");
+    const auto directory = fs::canonical(path.c_str(), error).parent_path();
+#elif defined(__linux__)
+    const auto directory = fs::read_symlink("/proc/self/exe", error).parent_path();
+#else
+#error Unsupported platform for executable directory lookup
+#endif
+    OC_ERROR_IF(error.value() != 0, "Failed to locate the executable directory: ", error.message());
+    return directory;
+}
+}// namespace
+
+namespace detail {
 bool create_directory_if_necessary(const fs::path &path) {
     if (fs::exists(path)) {
         return false;
@@ -39,30 +66,29 @@ bool create_directory_if_necessary(const fs::path &path) {
 }
 }// namespace detail
 
-RHIContext &RHIContext::init(const fs::path &path, std::string_view cache_dir) {
-    impl_ = std::move(ocarina::make_unique<Impl>());
-    impl_->runtime_directory = detail::create_runtime_directory(path);
-    impl_->cache_directory = runtime_directory() / cache_dir;
+RHIContext::RHIContext() : impl_(ocarina::make_unique<Impl>()) {
+    impl_->runtime_directory = executable_directory();
     DynamicModule::add_search_path(runtime_directory());
+    set_cache_directory(".cache");
+}
+
+void RHIContext::set_cache_directory(const fs::path &directory) {
+    impl_->cache_directory = runtime_directory() / directory;
     detail::create_directory_if_necessary(cache_directory());
-    return *this;
 }
 
 RHIContext *RHIContext::s_context = nullptr;
 
 RHIContext &RHIContext::instance() noexcept {
-    return s_context ? *s_context : instance(fs::current_path());
-}
-
-RHIContext &RHIContext::instance(const fs::path &runtime_path) {
+    std::lock_guard lock{context_mutex};
     if (s_context == nullptr) {
         s_context = new RHIContext();
-        s_context->init(runtime_path);
     }
     return *s_context;
 }
 
 void RHIContext::destroy_instance() {
+    std::lock_guard lock{context_mutex};
     if (s_context) {
         delete s_context;
         s_context = nullptr;

@@ -8,11 +8,8 @@
 #include "DrawStress/EDSL/DrawStressEdsl.h"
 #include "DrawStress/Ocarina/DrawStressOcarina.h"
 #include "DrawStress/Slang/DrawStressSlang.h"
-#include "rhi/context.h"
 
-#include <filesystem>
 #include <memory>
-#include <string>
 #include <string_view>
 
 #define GLFW_INCLUDE_NONE
@@ -23,7 +20,6 @@
 #define GLFW_EXPOSE_NATIVE_X11
 #elif defined(__APPLE__)
 #define GLFW_EXPOSE_NATIVE_COCOA
-#include <mach-o/dyld.h>
 #endif
 #include <GLFW/glfw3native.h>
 
@@ -48,23 +44,6 @@ int main(int argc, char** argv)
 #elif defined(__APPLE__)
         void* native_window = glfwGetCocoaView(window);
 #endif
-
-        if (mode.ends_with("_ocarina")) {
-            // Ocarina loads its backend and Slang builtins from beside the executable.
-#if defined(_WIN32)
-            std::wstring executable(32768, L'\0');
-            executable.resize(GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size())));
-#elif defined(__APPLE__)
-            uint32_t size = 0;
-            _NSGetExecutablePath(nullptr, &size);
-            std::string path(size, '\0');
-            _NSGetExecutablePath(path.data(), &size);
-            const auto executable = std::filesystem::canonical(path.c_str());
-#elif defined(__linux__)
-            const auto executable = std::filesystem::read_symlink("/proc/self/exe");
-#endif
-            static_cast<void>(ocarina::RHIContext::instance(std::filesystem::path(executable).parent_path()));
-        }
 
         {
             std::unique_ptr<ExampleBase> example;
