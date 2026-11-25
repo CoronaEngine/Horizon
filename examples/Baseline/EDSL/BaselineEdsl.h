@@ -22,7 +22,7 @@ private:
     HardwareDisplayer display;
     std::chrono::steady_clock::time_point start;
     std::uint64_t frame = 0;
-    RasterGeometry geometry;
+    HardwareBuffer vertex_buffer, index_buffer;
     EmbeddedShader::Texture2D<ktm::fvec4> albedo, color;
     EmbeddedShader::Float4x4 model, view, proj;
     RasterizerPipeline<> rasterizer;

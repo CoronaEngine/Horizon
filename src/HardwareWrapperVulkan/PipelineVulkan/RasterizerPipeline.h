@@ -3,6 +3,7 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "Horizon.h"
@@ -106,15 +107,18 @@ struct horizon::detail::RasterizerPipelineVulkan : std::enable_shared_from_this<
         std::vector<HardwareImage> renderTargets;
         std::vector<VkClearValue> clearValues;
         std::vector<Packet> packets;
-        std::vector<RasterGeometry> geometries;
+        std::vector<std::pair<HardwareBuffer, HardwareBuffer>> geometries;
         std::map<std::pair<uintptr_t, uintptr_t>, uint32_t> geometryIndices;
         std::vector<uint8_t> parameters;
         std::vector<Run> runs;
         std::shared_ptr<HardwareBuffer> upload;
         HardwareBuffer externalPackets;
-        void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, size_t, const RasterBatch::ParameterWriter&, IndirectFirstInstance);
+        void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                            const HardwareBuffer& packetBuffer, uint32_t count, size_t size,
+                            const RasterBatch::ParameterWriter& writeParameters, IndirectFirstInstance firstInstance);
         Root root{};
-        void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
+        void append(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range,
+                    const void* data, size_t size);
         template<class Writer> void prepareUpload(size_t parameterBytes, const Writer& writeParameters);
         std::vector<uint8_t> uniformBytes;
         std::shared_ptr<BindingSnapshot> bindings;

@@ -27,7 +27,6 @@ DrawStressSlang::DrawStressSlang(void* native_window)
         0, 4, 1, 4, 5, 1,
         2, 3, 6, 6, 3, 7,
     };
-    cube = RasterGeometry::upload(cube_vertices, cube_indices);
     {
         // Each packet points to its cube's mat4 in the per-frame payload, in 32-bit words.
         std::vector<RasterIndirectPacket> packets(draw_count);
@@ -36,8 +35,14 @@ DrawStressSlang::DrawStressSlang(void* native_window)
             packets[i].instanceCount = 1;
             packets[i].parameterWord = i * (sizeof(ktm::fmat4x4) / sizeof(uint32_t));
         }
-        commands = HardwareBuffer::uploadDeviceLocal(packets, BufferUsage::RasterIndirect);
+        vertex_buffer.createDeviceLocal(render_executor, BufferUsage::VertexBuffer,
+            cube_vertices.data(), cube_vertices.size(), sizeof(cube_vertices[0]));
+        index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
+            cube_indices.data(), cube_indices.size(), sizeof(cube_indices[0]));
+        commands.createDeviceLocal(render_executor, BufferUsage::RasterIndirect,
+            packets.data(), packets.size(), sizeof(packets[0]));
     }
+    render_executor.commit().waitForDeferredResources();
 
     // Match the left-handed camera in the bgfx drawstress example.
     const auto view = ktm::look_at_lh(ktm::fvec3(0.0f, 0.0f, -35.0f), ktm::fvec3(0.0f), ktm::fvec3(0.0f, 1.0f, 0.0f));
@@ -65,7 +70,7 @@ void DrawStressSlang::run()
     ++frame;
 
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(ktm::fmat4x4),
+    batch.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, draw_count * sizeof(ktm::fmat4x4),
         [&](std::span<std::byte> destination) {
             // The fixed view faces +Z. Clip X and Y scale independently, and Z supplies both clip Z and W.
             const auto projectAxis = [&](float x, float y, float z) {

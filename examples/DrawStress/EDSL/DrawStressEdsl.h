@@ -21,7 +21,7 @@ private:
     HardwareDisplayer display;
     std::chrono::steady_clock::time_point start;
     std::uint64_t frame = 0;
-    RasterGeometry cube;
+    HardwareBuffer vertex_buffer, index_buffer;
     HardwareBuffer commands;
     ktm::fvec4 axis_projection;
     std::array<ktm::fvec4, dim> translations;

@@ -96,31 +96,35 @@ RasterBatch RasterizerPipeline<>::capture(std::optional<ktm::uvec2> extent, Rast
     return RasterBatch(std::move(batch), resourceUses_);
 }
 
-void RasterBatch::append(const RasterGeometry& geometry, const RasterDraw& range, const void* data, size_t size)
+void RasterBatch::append(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range,
+                         const void* data, size_t size)
 {
     if (!record_) throw std::logic_error("Raster batch already submitted");
-    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).append(geometry, range, data, size);
+    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).append(vertices, indices, range, data, size);
 }
 
-void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
-                               IndirectFirstInstance firstInstance)
+void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                               const HardwareBuffer& packets, uint32_t count, IndirectFirstInstance firstInstance)
 {
-    appendIndirect(geometry, packets, count, nullptr, 0, firstInstance);
+    appendIndirect(vertices, indices, packets, count, nullptr, 0, firstInstance);
 }
 
-void RasterBatch::appendIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
-                                 const void* data, size_t size, IndirectFirstInstance firstInstance)
+void RasterBatch::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                 const HardwareBuffer& packets, uint32_t count, const void* data,
+                                 size_t size, IndirectFirstInstance firstInstance)
 {
-    drawIndirect(geometry, packets, count, size, [data](std::span<std::byte> bytes) {
+    drawIndirect(vertices, indices, packets, count, size, [data](std::span<std::byte> bytes) {
         std::memcpy(bytes.data(), data, bytes.size());
     }, firstInstance);
 }
 
-void RasterBatch::drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
-                               size_t bytes, const ParameterWriter& writeParameters, IndirectFirstInstance firstInstance)
+void RasterBatch::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                               const HardwareBuffer& packets, uint32_t count, size_t bytes,
+                               const ParameterWriter& writeParameters, IndirectFirstInstance firstInstance)
 {
     if (!record_) throw std::logic_error("Raster batch already submitted");
-    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(geometry, packets, count, bytes, writeParameters, firstInstance);
+    static_cast<RasterizerPipelineVulkan::Batch&>(*record_).appendIndirect(vertices, indices, packets, count,
+                                                                          bytes, writeParameters, firstInstance);
 }
 
 void RasterizerPipeline<>::refreshShaderVariant()

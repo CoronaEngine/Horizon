@@ -51,7 +51,10 @@ BaselineEdsl::BaselineEdsl(void* native_window)
                 indices.push_back(found->second);
             }
         }
-        geometry = RasterGeometry::upload(vertices, indices);
+        vertex_buffer.createDeviceLocal(render_executor, BufferUsage::VertexBuffer,
+            vertices.data(), vertices.size(), sizeof(vertices[0]));
+        index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
+            indices.data(), indices.size(), sizeof(indices[0]));
     }
 
     {
@@ -105,7 +108,7 @@ void BaselineEdsl::run()
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
     auto batch = rasterizer.beginBatch();
-    batch.draw(geometry);
+    batch.draw(vertex_buffer, index_buffer);
     render_executor << std::move(batch);
     display.present(render_executor, color.image());
 }

@@ -269,7 +269,19 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 需要接收任意计算或光栅管线的函数可以分别使用 `ComputePipeline<>&` 和 `RasterizerPipeline<>&`。这两个默认特化也直接支持 EDSL、Slang 源码和已编译模块。
 
-`RasterGeometry::upload(vertices, indices)` 在一次提交中上传顶点和索引，返回时上传已完成。有现成缓冲时可直接使用 `RasterGeometry{vertexBuffer, indexBuffer}`。
+`batch.draw(vertexBuffer, indexBuffer)` 直接接收顶点缓冲和索引缓冲。间接绘制使用 `batch.drawIndirect(vertexBuffer, indexBuffer, packets, count)`。从 CPU 数据创建缓冲时，可以将顶点和索引加入同一个 executor，一次提交完成上传。
+
+```cpp
+HardwareExecutor upload;
+HardwareBuffer vertexBuffer, indexBuffer;
+vertexBuffer.createDeviceLocal(upload, BufferUsage::VertexBuffer,
+                               vertices.data(), vertices.size(), sizeof(vertices[0]));
+indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer,
+                              indices.data(), indices.size(), sizeof(indices[0]));
+upload.commit().waitForDeferredResources();
+```
+
+`createDeviceLocal` 在返回前将源数据复制到暂存缓冲，再次调用会替换当前句柄指向的分配。元素数以记录为单位，元素大小以字节为单位。调用方应传入可平凡复制的顶点以及 `uint16_t` 或 `uint32_t` 索引。接口会检查顶点步长为 4 字节的倍数、索引宽度为 2 或 4 字节。
 
 `beginBatch()` 根据绑定的颜色附件或显式深度附件推导尺寸，按需复用同尺寸的默认深度图，并捕获当前 EDSL 条件和绑定。需要渲染较小区域时传入宽高，需要共享深度图时使用 `setDepthImage()`。
 

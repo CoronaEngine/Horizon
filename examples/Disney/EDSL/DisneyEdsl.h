@@ -30,7 +30,7 @@ private:
     static constexpr int rows = 10, columns = 11;
     HardwareDisplayer display;
     EmbeddedShader::TextureCube<ktm::fvec4> radiance_map, irradiance_map;
-    RasterGeometry sphere;
+    HardwareBuffer vertex_buffer, index_buffer;
     std::array<DrawParameters, rows * columns> draws;
     EmbeddedShader::Float4x4 proj_view;
     EmbeddedShader::Float4 camPos, lightDir;

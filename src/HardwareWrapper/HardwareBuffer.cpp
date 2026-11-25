@@ -4,6 +4,8 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 
+#include <stdexcept>
+
 VkBufferUsageFlags convertBufferUsage(BufferUsage const usage)
 {
     VkBufferUsageFlags vkUsage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -65,6 +67,23 @@ HardwareBuffer HardwareBuffer::uploadDeviceLocal(size_t count, size_t stride, Bu
     auto destination = stageDeviceLocal(upload, count, stride, usage, data);
     upload.commit().waitForDeferredResources();
     return destination;
+}
+
+void HardwareBuffer::createDeviceLocal(HardwareExecutor& executor, BufferUsage usage, const void* data,
+                                       size_t elementCount, size_t elementSize)
+{
+    if (elementSize == 0)
+        throw std::invalid_argument("Device-local buffer element size must be nonzero");
+    if (usage == BufferUsage::VertexBuffer && elementSize % 4 != 0)
+        throw std::invalid_argument("Raster vertex stride must be divisible by four");
+    if (usage == BufferUsage::IndexBuffer && elementSize != 2 && elementSize != 4)
+        throw std::invalid_argument("Raster indices must be 2 or 4 bytes wide");
+    if (elementCount && !data)
+        throw std::invalid_argument("A nonempty device-local buffer requires initial data");
+    if (elementCount && !executor.getExecutorID())
+        throw std::invalid_argument("Buffer upload requires a valid executor");
+
+    *this = stageDeviceLocal(executor, elementCount, elementSize, usage, data);
 }
 
 HardwareBuffer HardwareBuffer::stageDeviceLocal(HardwareExecutor& upload, size_t count, size_t stride,

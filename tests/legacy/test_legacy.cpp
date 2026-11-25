@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <utility>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
 #include <spirv-tools/libspirv.hpp>
@@ -172,15 +173,15 @@ void test_raster_batch()
         pipeline.setDepthEnabled(false);
         auto batch = pipeline.beginBatch(4, 2);
         const std::array<std::array<float, 3>, 3> vertices{{{-1,-1,1}, {3,-1,1}, {-1,3,1}}};
-        HardwareBuffer vb(vertices, BufferUsage::VertexBuffer);
-        RasterGeometry left{vb, HardwareBuffer(std::array<uint16_t,3>{0,1,2}, BufferUsage::IndexBuffer)};
-        RasterGeometry right{vb, HardwareBuffer(std::array<uint32_t,4>{99,1,2,3}, BufferUsage::IndexBuffer)};
-        batch.draw(left, std::array<float,4>{1,0,0,1}, {.scissor = ScissorRect{0,0,2,2}});
-        batch.draw(right, std::array<float,4>{0,1,0,1}, {.indexCount=3, .firstIndex=1, .vertexOffset=-1,
+        HardwareBuffer vertexBuffer(vertices, BufferUsage::VertexBuffer);
+        HardwareBuffer leftIndices(std::array<uint16_t,3>{0,1,2}, BufferUsage::IndexBuffer);
+        HardwareBuffer rightIndices(std::array<uint32_t,4>{99,1,2,3}, BufferUsage::IndexBuffer);
+        batch.draw(vertexBuffer, leftIndices, std::array<float,4>{1,0,0,1}, {.scissor = ScissorRect{0,0,2,2}});
+        batch.draw(vertexBuffer, rightIndices, std::array<float,4>{0,1,0,1}, {.indexCount=3, .firstIndex=1, .vertexOffset=-1,
                            .instanceCount=2, .scissor = ScissorRect{2,0,2,2}});
         useDrawColor = false;
         auto switched = pipeline.beginBatch({.loadColor = true});
-        switched.draw(left, {.scissor = ScissorRect{3,0,1,2}});
+        switched.draw(vertexBuffer, leftIndices, {.scissor = ScissorRect{3,0,1,2}});
         executor << std::move(batch) << std::move(switched);
     }
     std::array<std::array<float,4>,8> pixels{};
@@ -210,10 +211,10 @@ void test_raster_sampled_storage_image()
     RasterizerPipeline pipeline(vs, fs);
     pipeline.setDepthEnabled(false);
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
-    RasterGeometry mesh{HardwareBuffer(vertices, BufferUsage::VertexBuffer),
-                        HardwareBuffer(std::array<uint16_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer)};
+    HardwareBuffer vertexBuffer(vertices, BufferUsage::VertexBuffer);
+    HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);
     auto batch = pipeline.beginBatch(1, 1);
-    batch.draw(mesh);
+    batch.draw(vertexBuffer, indexBuffer);
     HardwareExecutor executor;
     executor << upload.copyTo(input) << std::move(batch) << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
@@ -241,14 +242,38 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     if (explicitDepth) pipeline.setDepthImage(depth);
     pipeline.setRasterState({true, true, RasterCompare::Less, RasterBlend::Opaque});
 
-    const std::array<std::array<float,2>,7> vertices{{{-1,-1},{3,-1},{-1,3},
-                                                       {0,-1},{1,-1},{1,1},{0,1}}};
+    const std::array<float,2> vertices[]{{-1,-1},{3,-1},{-1,3},{0,-1},{1,-1},{1,1},{0,1}};
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
-    const auto mesh = explicitDepth ? RasterGeometry::upload(vertices, indices)
-                                    : RasterGeometry::upload(vertices, std::vector<uint32_t>(indices.begin(), indices.end()));
-    expect(mesh.vertices.getElementSize() == sizeof(vertices[0]) &&
-           mesh.indices.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
-           "geometry upload preserves vertex stride and index width");
+    HardwareExecutor upload;
+    HardwareBuffer vertexBuffer;
+    vertexBuffer.createDeviceLocal(upload, BufferUsage::VertexBuffer, vertices, std::size(vertices), sizeof(vertices[0]));
+    const auto vertexID = vertexBuffer.getBufferID();
+    HardwareBuffer indexBuffer = vertexBuffer;
+    auto expectInvalidUpload = [&](BufferUsage usage, const void* data, size_t elementSize) {
+        try { indexBuffer.createDeviceLocal(upload, usage, data, 1, elementSize); }
+        catch (const std::invalid_argument&) {
+            expect(indexBuffer.getBufferID() == vertexID, "invalid upload preserves the original buffer");
+            return;
+        }
+        throw std::runtime_error("invalid upload was accepted");
+    };
+    expectInvalidUpload(BufferUsage::IndexBuffer, nullptr, sizeof(uint16_t));
+    expectInvalidUpload(BufferUsage::IndexBuffer, indices.data(), 1);
+    expectInvalidUpload(BufferUsage::VertexBuffer, vertices, 2);
+    if (explicitDepth) {
+        indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
+    } else {
+        const std::vector<uint32_t> wideIndices(indices.begin(), indices.end());
+        indexBuffer.createDeviceLocal(upload, BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
+    }
+    upload.commit().waitForDeferredResources();
+    expect(vertexBuffer.getBufferID() == vertexID && indexBuffer.getBufferID() != vertexID,
+           "recreating one buffer handle preserves the allocation held by its copy");
+    expect(vertexBuffer.getElementCount() == std::size(vertices) &&
+           vertexBuffer.getElementSize() == sizeof(vertices[0]) &&
+           indexBuffer.getElementCount() == indices.size() &&
+           indexBuffer.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
+           "staged raster buffers preserve element counts, vertex stride and index width");
     // Exercise the public API on the restricted capability path even on a full-featured GPU.
     auto& feature = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                         .featuresChain.getChainHead()->features.drawIndirectFirstInstance;
@@ -257,17 +282,17 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     auto restricted = pipeline.beginBatch(4, 2);
     feature = supported;
     bool rejected = false;
-    try { restricted.draw(mesh, {.indexCount = 3, .firstInstance = 1}); }
+    try { restricted.draw(vertexBuffer, indexBuffer, {.indexCount = 3, .firstInstance = 1}); }
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "unsupported nonzero firstInstance rejected");
     auto first = pipeline.beginBatch(4, 2);
-    first.draw(mesh, std::array<float,4>{1,0,0,1}, {.indexCount=3});
+    first.draw(vertexBuffer, indexBuffer, std::array<float,4>{1,0,0,1}, {.indexCount=3});
     HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
     rejected = false;
-    try { restricted.drawIndirect(mesh, packets, 1); }
+    try { restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1); }
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "GPU packets must declare zero firstInstance on a restricted device");
-    restricted.drawIndirect(mesh, packets, 1, IndirectFirstInstance::AlwaysZero);
+    restricted.drawIndirect(vertexBuffer, indexBuffer, packets, 1, IndirectFirstInstance::AlwaysZero);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     HardwareExecutor executor;
     executor << std::move(first);
@@ -284,7 +309,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
     auto second = pipeline.beginBatch(4, 2, {true, true});
     const std::array<float,8> colors{0,0,1,0, 0,1,0,0};
-    second.drawIndirect(mesh, packets, 1, std::span(colors), IndirectFirstInstance::AlwaysZero);
+    second.drawIndirect(vertexBuffer, indexBuffer, packets, 1, std::span(colors), IndirectFirstInstance::AlwaysZero);
 
     std::array<std::array<float,4>,8> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);

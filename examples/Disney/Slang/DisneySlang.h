@@ -31,7 +31,7 @@ private:
 
     HardwareDisplayer display;
     HardwareImage radiance, irradiance;
-    RasterGeometry sphere;
+    HardwareBuffer vertex_buffer, index_buffer;
     std::array<DrawParameters, rows * columns> draws;
     HardwareImage final_output_image;
     RasterizerPipeline<> rasterizer;

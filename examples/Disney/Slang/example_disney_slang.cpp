@@ -48,7 +48,6 @@ DisneySlang::DisneySlang(void* native_window)
             }
         }
     }
-    render_executor.commit().waitForDeferredResources();
 
     // Each triangle-strip vertex also supplies the sphere's object-space normal.
     {
@@ -81,8 +80,12 @@ DisneySlang::DisneySlang(void* native_window)
             }
         }
 
-        sphere = RasterGeometry::upload(vertices, indices);
+        vertex_buffer.createDeviceLocal(render_executor, BufferUsage::VertexBuffer,
+            vertices.data(), vertices.size(), sizeof(vertices[0]));
+        index_buffer.createDeviceLocal(render_executor, BufferUsage::IndexBuffer,
+            indices.data(), indices.size(), sizeof(indices[0]));
     }
+    render_executor.commit().waitForDeferredResources();
 
     constexpr float radius = 0.42f, spacing = 1.12f;
     for (int col = 0; col < columns; ++col) {
@@ -131,7 +134,7 @@ void DisneySlang::run()
 {
     auto batch = rasterizer.beginBatch();
     for (const auto& draw : draws)
-        batch.draw(sphere, draw);
+        batch.draw(vertex_buffer, index_buffer, draw);
 
     render_executor << std::move(batch);
     display.present(render_executor, final_output_image);

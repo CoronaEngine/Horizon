@@ -163,6 +163,11 @@ public:
         return uploadDeviceLocal(input.size(), sizeof(input[0]), usage, input.data());
     }
 
+    // Replace this handle with a new device-local allocation and queue its initial upload.
+    // The executor owns the staged bytes, so the caller may release data on return.
+    void createDeviceLocal(HardwareExecutor& executor, BufferUsage usage, const void* data,
+                           size_t elementCount, size_t elementSize);
+
     HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, BufferUsage usage);
 
     ~HardwareBuffer();
@@ -214,7 +219,6 @@ private:
     std::uintptr_t bufferID{0};
 
     friend class HardwareImage;
-    friend struct RasterGeometry;
     friend struct horizon::detail::RasterizerPipelineVulkan;
 };
 
@@ -310,15 +314,6 @@ struct ScissorRect
     uint32_t height { 0 };
 };
 
-struct RasterGeometry {
-    HardwareBuffer vertices;
-    HardwareBuffer indices; // Elements must be uint16_t or uint32_t.
-
-    // Upload both streams in one submission and return them ready for drawing.
-    template<class Vertices, class Indices>
-    [[nodiscard]] static RasterGeometry upload(const Vertices& vertices, const Indices& indices);
-};
-
 enum class RasterCompare { Less, LessEqual, Equal, Always };
 enum class RasterBlend { Alpha, Opaque, Additive };
 enum class RasterTopology { TriangleList, TriangleStrip };
@@ -356,34 +351,38 @@ public:
     RasterBatch(RasterBatch&&) noexcept = default;
     RasterBatch& operator=(RasterBatch&&) noexcept = default;
     template<class T> requires (std::is_trivially_copyable_v<T> && !std::same_as<T, RasterDraw>)
-    void draw(const RasterGeometry& geometry, const T& parameters, const RasterDraw& range = {}) {
-        append(geometry, range, &parameters, sizeof(T));
+    void draw(const HardwareBuffer& vertices, const HardwareBuffer& indices, const T& parameters, const RasterDraw& range = {}) {
+        append(vertices, indices, range, &parameters, sizeof(T));
     }
-    void draw(const RasterGeometry& geometry, const RasterDraw& range = {}) {
-        append(geometry, range, nullptr, 0);
+    void draw(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range = {}) {
+        append(vertices, indices, range, nullptr, 0);
     }
     using ParameterWriter = std::function<void(std::span<std::byte>)>;
     // Fill the span synchronously, keeping the batch idle until the writer returns.
     // The span expires when the writer returns.
-    void drawIndirect(const RasterGeometry&, const HardwareBuffer& packets, uint32_t count, size_t parameterBytes,
-                      const ParameterWriter&, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
+    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
+                      uint32_t count, size_t parameterBytes, const ParameterWriter&,
+                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
     // Packets share geometry 0. firstVertex is zero for index pulling.
     // parameterWord indexes the shared parameter payload in four-byte words.
     // AlwaysZero is a promise about every packet, including GPU-written packets.
-    void drawIndirect(const RasterGeometry&, const HardwareBuffer& packets, uint32_t count,
-                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
+    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
+                      uint32_t count, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero);
     template<class T, size_t Extent> requires (std::is_trivially_copyable_v<T> && !std::is_volatile_v<T>)
-    void drawIndirect(const RasterGeometry& geometry, const HardwareBuffer& packets, uint32_t count,
-                      std::span<T, Extent> parameters, IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
-        appendIndirect(geometry, packets, count, parameters.data(), parameters.size_bytes(), firstInstance);
+    void drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
+                      uint32_t count, std::span<T, Extent> parameters,
+                      IndirectFirstInstance firstInstance = IndirectFirstInstance::MayBeNonzero) {
+        appendIndirect(vertices, indices, packets, count, parameters.data(), parameters.size_bytes(), firstInstance);
     }
 private:
-    void appendIndirect(const RasterGeometry&, const HardwareBuffer&, uint32_t, const void*, size_t, IndirectFirstInstance);
+    void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices, const HardwareBuffer& packets,
+                        uint32_t count, const void* data, size_t size, IndirectFirstInstance firstInstance);
     friend struct HardwareExecutor;
     friend struct RasterizerPipeline<>;
     RasterBatch(std::shared_ptr<horizon::detail::CommandRecordVulkan> record, const std::vector<ResourceUse>& uses)
         : record_(std::move(record)), uses_(uses) {}
-    void append(const RasterGeometry&, const RasterDraw&, const void*, size_t);
+    void append(const HardwareBuffer& vertices, const HardwareBuffer& indices, const RasterDraw& range,
+                const void* data, size_t size);
     std::shared_ptr<horizon::detail::CommandRecordVulkan> record_;
     std::vector<ResourceUse> uses_;
 };
@@ -607,25 +606,6 @@ public:
 private:
     std::uintptr_t executorID{0};
 };
-
-template<class Vertices, class Indices>
-RasterGeometry RasterGeometry::upload(const Vertices& vertices, const Indices& indices) {
-    const std::span vertexData(vertices);
-    const std::span indexData(indices);
-    using Vertex = typename decltype(vertexData)::value_type;
-    using Index = typename decltype(indexData)::value_type;
-    static_assert(std::is_trivially_copyable_v<Vertex> && sizeof(Vertex) % 4 == 0,
-                  "Raster vertices must be trivially copyable with a stride divisible by four");
-    static_assert(std::same_as<Index, uint16_t> || std::same_as<Index, uint32_t>,
-                  "Raster indices must be uint16_t or uint32_t");
-
-    HardwareExecutor executor;
-    RasterGeometry geometry{
-        HardwareBuffer::stageDeviceLocal(executor, vertexData.size(), sizeof(Vertex), BufferUsage::VertexBuffer, vertexData.data()),
-        HardwareBuffer::stageDeviceLocal(executor, indexData.size(), sizeof(Index), BufferUsage::IndexBuffer, indexData.data())};
-    executor.commit().waitForDeferredResources();
-    return geometry;
-}
 
 namespace horizon::detail {
 template<class VS, class FS>
