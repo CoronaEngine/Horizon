@@ -2,7 +2,6 @@
 
 #include "Codegen/BuiltinVariate.h"
 
-#include <glm/gtc/matrix_transform.hpp>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -33,22 +32,21 @@ DrawStressEdsl::DrawStressEdsl(void* native_window)
         for (uint32_t i = 0; i < draw_count; ++i) {
             packets[i].vertexCount = static_cast<uint32_t>(cube_indices.size());
             packets[i].instanceCount = 1;
-            packets[i].parameterWord = i * (sizeof(glm::mat4) / sizeof(uint32_t));
+            packets[i].parameterWord = i * (sizeof(ktm::fmat4x4) / sizeof(uint32_t));
         }
         commands = HardwareBuffer::uploadDeviceLocal(packets, BufferUsage::RasterIndirect);
     }
 
     // Match the left-handed camera in the bgfx drawstress example.
-    const glm::mat4 view = glm::lookAtLH(glm::vec3(0.0f, 0.0f, -35.0f), glm::vec3(0.0f),
-                                         glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 projection = glm::perspectiveLH_ZO(glm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+    const auto view = ktm::look_at_lh(ktm::fvec3(0.0f, 0.0f, -35.0f), ktm::fvec3(0.0f), ktm::fvec3(0.0f, 1.0f, 0.0f));
+    auto projection = ktm::perspective_lh(ktm::radians(60.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
     projection[1][1] *= -1.0f; // Vulkan clip-space Y.
-    const glm::mat4 view_projection = projection * view;
+    const auto view_projection = projection * view;
     axis_projection = {view_projection[0].x, view_projection[1].y, view_projection[2].z, view_projection[2].w};
     constexpr float step = 0.6f;
-    const glm::vec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
+    const ktm::fvec3 base(-step * dim / 2.0f, -step * dim / 2.0f, -15.0f);
     for (int i = 0; i < dim; ++i)
-        translations[i] = view_projection * glm::vec4(base + glm::vec3(i * step), 1.0f);
+        translations[i] = view_projection * ktm::fvec4(base + i * step, 1.0f);
 
     using EmbeddedShader::Float, EmbeddedShader::Float3, EmbeddedShader::Float4, EmbeddedShader::Uint;
     output.createResource(HardwareImageCreateInfo(width, height, ImageFormat::RGBA16_FLOAT));
@@ -74,32 +72,32 @@ void DrawStressEdsl::run()
     ++frame;
 
     auto batch = rasterizer.beginBatch();
-    batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(glm::mat4),
+    batch.drawIndirect(cube, commands, draw_count, draw_count * sizeof(ktm::fmat4x4),
         [&](std::span<std::byte> destination) {
             // The fixed view faces +Z. Clip X and Y scale independently, and Z supplies both clip Z and W.
             const auto projectAxis = [&](float x, float y, float z) {
-                return axis_projection * (0.25f * glm::vec4(x, y, z, z));
+                return axis_projection * (0.25f * ktm::fvec4(x, y, z, z));
             };
 
-            // Each axis has only dim distinct angles. Keep GLM's eulerAngleZYX product order.
-            std::array<glm::vec3, dim> sine, cosine;
+            // Each axis has only dim distinct angles. The columns below encode Rz * Ry * Rx.
+            std::array<ktm::fvec3, dim> sine, cosine;
             for (int i = 0; i < dim; ++i) {
-                const glm::vec3 angles = seconds + float(i) * glm::vec3(0.21f, 0.37f, 0.13f);
-                sine[i] = glm::sin(angles);
-                cosine[i] = glm::cos(angles);
+                const auto angles = seconds + float(i) * ktm::fvec3(0.21f, 0.37f, 0.13f);
+                sine[i] = ktm::sin(angles);
+                cosine[i] = ktm::cos(angles);
             }
             auto* matrix_bytes = destination.data();
             for (int z = 0; z < dim; ++z) {
                 const float sz = sine[z].z, cz = cosine[z].z;
                 for (int y = 0; y < dim; ++y) {
                     const float sy = sine[y].y, cy = cosine[y].y;
-                    const glm::vec4 axisX = projectAxis(cz * cy, cy * sz, -sy);
-                    glm::vec4 translation = translations[z];
+                    const auto axisX = projectAxis(cz * cy, cy * sz, -sy);
+                    ktm::fvec4 translation = translations[z];
                     translation.y = translations[y].y;
                     for (int x = 0; x < dim; ++x) {
                         const float sx = sine[x].x, cx = cosine[x].x;
                         translation.x = translations[x].x;
-                        const glm::mat4 matrix(axisX,
+                        const ktm::fmat4x4 matrix(axisX,
                             projectAxis(cz * sy * sx - cx * sz, cz * cx + sz * sy * sx, cy * sx),
                             projectAxis(sz * sx + cz * cx * sy, cx * sz * sy - cz * sx, cy * cx),
                             translation);

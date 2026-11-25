@@ -4,7 +4,7 @@
 #include "Horizon.h"
 #include "Codegen/TypeAlias.h"
 
-#include <glm/glm.hpp>
+#include <ktm/ktm.h>
 #include <array>
 
 class DisneyEdsl final : public ExampleBase {
@@ -20,8 +20,8 @@ private:
     };
 
     struct DrawParameters {
-        glm::mat4 model{1.0f};
-        glm::vec4 baseColorMetallic;
+        ktm::fmat4x4 model = ktm::fmat4x4::from_eye();
+        ktm::fvec4 baseColorMetallic;
         float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
         float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
         float clearcoatGloss = 1.0f;

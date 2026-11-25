@@ -6,7 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
-#include <glm/glm.hpp>
+#include <ktm/ktm.h>
 
 class DrawStressSlang final : public ExampleBase {
 public:
@@ -23,8 +23,8 @@ private:
     HardwareDisplayer display;
     RasterGeometry cube;
     HardwareBuffer commands;
-    glm::vec4 axis_projection;
-    std::array<glm::vec4, dim> translations;
+    ktm::fvec4 axis_projection;
+    std::array<ktm::fvec4, dim> translations;
     HardwareImage final_output_image;
     RasterizerPipeline<> rasterizer;
     HardwareExecutor render_executor;

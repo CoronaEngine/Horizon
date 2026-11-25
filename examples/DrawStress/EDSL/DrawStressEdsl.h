@@ -4,7 +4,7 @@
 #include "Horizon.h"
 #include "Codegen/TypeAlias.h"
 
-#include <glm/vec4.hpp>
+#include <ktm/ktm.h>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -23,8 +23,8 @@ private:
     std::uint64_t frame = 0;
     RasterGeometry cube;
     HardwareBuffer commands;
-    glm::vec4 axis_projection;
-    std::array<glm::vec4, dim> translations;
+    ktm::fvec4 axis_projection;
+    std::array<ktm::fvec4, dim> translations;
     EmbeddedShader::Texture2D<ktm::fvec4> output;
     RasterizerPipeline<> rasterizer;
     HardwareExecutor render_executor;

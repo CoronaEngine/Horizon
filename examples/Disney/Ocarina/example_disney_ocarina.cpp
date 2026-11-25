@@ -2,12 +2,10 @@
 #include "DisneyOcarina.h"
 
 #include "rhi/context.h"
-#include "math/transform.h"
+#include "math/ktm_bridge.h"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/constants.hpp>
+#include <ktm/ktm.h>
 
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -61,14 +59,14 @@ DisneyOcarina::DisneyOcarina(void* native_window)
     triangles.reserve(2 * slices * stacks);
     for (int y = 0; y <= stacks; ++y)
     {
-        const float phi = (static_cast<float>(y) / stacks) * glm::pi<float>();
-        const float sin_phi = std::sin(phi);
-        const float cos_phi = std::cos(phi);
+        const float phi = (static_cast<float>(y) / stacks) * ktm::pi<float>;
+        const float sin_phi = ktm::sin(phi);
+        const float cos_phi = ktm::cos(phi);
 
         for (int x = 0; x <= slices; ++x)
         {
-            const float theta = (static_cast<float>(x) / slices) * glm::two_pi<float>();
-            positions.push_back(ocarina::make_float3(sin_phi * std::cos(theta), cos_phi, sin_phi * std::sin(theta)));
+            const float theta = (static_cast<float>(x) / slices) * ktm::two_pi<float>;
+            positions.push_back(ocarina::make_float3(sin_phi * ktm::cos(theta), cos_phi, sin_phi * ktm::sin(theta)));
         }
     }
 
@@ -89,7 +87,7 @@ DisneyOcarina::DisneyOcarina(void* native_window)
     chart = device.create_accel();
 
     struct Material {
-        glm::vec4 baseColorMetallic;
+        ocarina::float4 baseColorMetallic;
         float roughness = 0.5f, specular = 0.5f, specularTint = 0.0f, subsurface = 0.0f;
         float anisotropic = 0.0f, sheen = 0.0f, sheenTint = 0.5f, clearcoat = 0.0f;
         float clearcoatGloss = 1.0f;
@@ -114,7 +112,8 @@ DisneyOcarina::DisneyOcarina(void* native_window)
         };
         for (int row = 0; row < rows; ++row) {
             const float y = ((rows - 1) * 0.5f - row) * spacing;
-            const auto transform = ocarina::translation<ocarina::H>(x, y, 0.f) * ocarina::scale<ocarina::H>(radius);
+            const auto model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
+            const auto transform = ocarina::bridge::from_ktm(model);
             if (col == 0 && row == 0)
                 chart.add_instance(ocarina::move(mesh), transform);
             else
@@ -122,8 +121,7 @@ DisneyOcarina::DisneyOcarina(void* native_window)
 
             // The hit instance indexes four float4s in this same insertion order.
             const auto& material = column[row];
-            const auto& color = material.baseColorMetallic;
-            material_data.push_back(make_float4(color.x, color.y, color.z, color.w));
+            material_data.push_back(material.baseColorMetallic);
             material_data.push_back(make_float4(material.roughness, material.specular, material.specularTint, material.subsurface));
             material_data.push_back(make_float4(material.anisotropic, material.sheen, material.sheenTint, material.clearcoat));
             material_data.push_back(make_float4(x, y, radius, material.clearcoatGloss));
@@ -253,10 +251,10 @@ DisneyOcarina::DisneyOcarina(void* native_window)
     pixels.resize(width * height);
     output_buffer = device.create_buffer<uint32_t>(pixels.size());
 
-    const auto direction = glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f));
-    light_direction = make_float3(direction.x, direction.y, direction.z);
-    constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
-    camera_position = 13.5f * make_float3(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
+    light_direction = ocarina::bridge::from_ktm(ktm::normalize(ktm::fvec3(-0.35f, 0.55f, -0.75f)));
+    constexpr float yaw = ktm::pi<float>, pitch = 0.42f * ktm::pi<float>;
+    const auto eye = 13.5f * ktm::fvec3(ktm::sin(pitch) * ktm::sin(yaw), ktm::cos(pitch), ktm::sin(pitch) * ktm::cos(yaw));
+    camera_position = ocarina::bridge::from_ktm(eye);
 }
 
 void DisneyOcarina::run()

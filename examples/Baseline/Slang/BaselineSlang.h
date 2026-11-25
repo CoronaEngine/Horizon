@@ -4,8 +4,9 @@
 #include "Horizon.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
-#include <glm/glm.hpp>
+#include <ktm/ktm.h>
 
 class BaselineSlang final : public ExampleBase {
 public:
@@ -22,8 +23,9 @@ private:
     HardwareImage color;
     RasterizerPipeline<> rasterizer;
     struct DrawParameters {
-        glm::mat4 model{};
+        ktm::fmat4x4 model{};
         uint32_t texIndex{};
     } parameters{};
+    static_assert(offsetof(DrawParameters, texIndex) == 64);
     HardwareExecutor render_executor;
 };

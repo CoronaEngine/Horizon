@@ -1,7 +1,10 @@
 #include "BaselineOcarina.h"
 
 #include "dsl/dsl.h"
+#include "math/ktm_bridge.h"
 #include "rhi/context.h"
+
+#include <ktm/ktm.h>
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -12,12 +15,10 @@
 #include <tiny_obj_loader.h>
 
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
-#include <numbers>
 #include <vector>
 
 BaselineOcarina::BaselineOcarina(void* native_window)
@@ -124,11 +125,10 @@ void BaselineOcarina::run()
     const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
     ++frame;
 
-    constexpr float pi = std::numbers::pi_v<float>;
-    const float angle = pi / 4.f - seconds * pi / 2.f;
-    const float radius = std::sqrt(8.f); // Start at (2, 2, 2), as in the raster example.
-    auto eye = ocarina::make_float3(radius * std::cos(angle), radius * std::sin(angle), 2.f);
-    stream << shader(eye, output_buffer).dispatch(width, height)
+    const float angle = ktm::radians(45.f) - seconds * ktm::half_pi<float>;
+    const float radius = ktm::sqrt(8.f); // Start at (2, 2, 2), as in the raster example.
+    const ktm::fvec3 eye{radius * ktm::cos(angle), radius * ktm::sin(angle), 2.f};
+    stream << shader(ocarina::bridge::from_ktm(eye), output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();
 
     display.present(pixels, width, height, ImageFormat::RGBA8_SRGB);

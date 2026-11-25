@@ -24,7 +24,6 @@ uint* hzPullVertex(HorizonDrawPacket packet, uint corner) {
     return geometry.vertices + vertex * geometry.strideWords;
 }
 
-// Matches the GLM matrix and texture index uploaded for each draw.
 struct DrawParameters {
     column_major float4x4 model;
     uint texIndex;

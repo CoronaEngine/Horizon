@@ -16,7 +16,6 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
-#include <glm/gtc/matrix_transform.hpp>
 #include <map>
 #include <memory>
 #include <utility>
@@ -75,8 +74,12 @@ BaselineSlang::BaselineSlang(void* native_window)
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
     parameters.texIndex = texture_image.storeDescriptor();
 
-    pipeline.vp.view = glm::lookAt(glm::vec3(2.0f), glm::vec3(0.0f), glm::vec3(0, 0, 1));
-    auto projection = glm::perspectiveRH_ZO(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 10.0f);
+    pipeline.vp.view = ktm::look_at_rh<float>({2, 2, 2}, {0, 0, 0}, {0, 0, 1});
+    // KTM 0.2.16's frustum_rh gives positive clip W along the camera's -Z axis.
+    constexpr float near_plane = 0.1f, far_plane = 10.0f;
+    const float top = near_plane * ktm::tan(ktm::radians(45.0f) * 0.5f);
+    const float right = top * (800.0f / 600.0f);
+    auto projection = ktm::frustum_rh(-right, right, top, -top, near_plane, far_plane);
     projection[1][1] *= -1.0f; // Vulkan clip-space Y.
     pipeline.vp.proj = projection;
     rasterizer = std::move(pipeline);
@@ -89,7 +92,7 @@ void BaselineSlang::run()
     if (frame == 0) start = now;
     const float seconds = fixed_dt ? static_cast<float>(frame) * fixed_dt : std::chrono::duration<float>(now - start).count();
     ++frame;
-    parameters.model = glm::rotate(glm::mat4(1.0f), seconds * glm::radians(90.0f), glm::vec3(0, 0, 1));
+    parameters.model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
     auto batch = rasterizer.beginBatch();
     batch.draw(geometry, parameters);

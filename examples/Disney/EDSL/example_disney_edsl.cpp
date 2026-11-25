@@ -3,13 +3,7 @@
 #include "Codegen/BuiltinVariate.h"
 #include "Codegen/ControlFlows.h"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
 #include <array>
-#include <bit>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -64,13 +58,13 @@ DisneyEdsl::DisneyEdsl(void* native_window)
         indices.reserve(static_cast<size_t>(stacks * (slices + 1) * 2 + (stacks - 1) * 2));
 
         for (int y = 0; y <= stacks; ++y) {
-            const float phi = (static_cast<float>(y) / stacks) * glm::pi<float>();
-            const float sin_phi = std::sin(phi);
-            const float cos_phi = std::cos(phi);
+            const float phi = (static_cast<float>(y) / stacks) * ktm::pi<float>;
+            const float sin_phi = ktm::sin(phi);
+            const float cos_phi = ktm::cos(phi);
 
             for (int x = 0; x <= slices; ++x) {
-                const float theta = (static_cast<float>(x) / slices) * glm::two_pi<float>();
-                vertices.push_back({ sin_phi * std::cos(theta), cos_phi, sin_phi * std::sin(theta) });
+                const float theta = (static_cast<float>(x) / slices) * ktm::two_pi<float>;
+                vertices.push_back({ sin_phi * ktm::cos(theta), cos_phi, sin_phi * ktm::sin(theta) });
             }
         }
 
@@ -109,8 +103,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
             const float y = ((rows - 1) * 0.5f - row) * spacing;
             auto& draw = draws[row * columns + col];
             draw = column[row];
-            draw.model = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f))
-                       * glm::scale(glm::mat4(1.0f), glm::vec3(radius));
+            draw.model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
         }
     }
 
@@ -279,14 +272,14 @@ DisneyEdsl::DisneyEdsl(void* native_window)
     rasterizer = RasterizerPipeline(edsl_vertex, edsl_fragment, {.enableMatrixColumnMajor = true});
     rasterizer.setRasterState({.topology = RasterTopology::TriangleStrip});
 
-    constexpr float yaw = glm::pi<float>(), pitch = 0.42f * glm::pi<float>();
-    const auto eye = 13.5f * glm::vec3(std::sin(pitch) * std::sin(yaw), std::cos(pitch), std::sin(pitch) * std::cos(yaw));
-    const auto view = glm::lookAtLH(eye, glm::vec3(0.0f), glm::vec3(0, 1, 0));
-    auto projection = glm::perspectiveLH_ZO(glm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
+    constexpr float yaw = ktm::pi<float>, pitch = 0.42f * ktm::pi<float>;
+    const auto eye = 13.5f * ktm::fvec3(ktm::sin(pitch) * ktm::sin(yaw), ktm::cos(pitch), ktm::sin(pitch) * ktm::cos(yaw));
+    const auto view = ktm::look_at_lh(eye, ktm::fvec3(0.0f), ktm::fvec3(0, 1, 0));
+    auto projection = ktm::perspective_lh(ktm::radians(45.0f), static_cast<float>(width) / height, 0.1f, 100.0f);
     projection[1][1] *= -1.0f;
-    proj_view = std::bit_cast<ktm::fmat4x4>(glm::mat4(projection * view));
-    camPos = std::bit_cast<ktm::fvec4>(glm::vec4(eye, 1.0f));
-    lightDir = std::bit_cast<ktm::fvec4>(glm::vec4(glm::normalize(glm::vec3(-0.35f, 0.55f, -0.75f)), 0.0f));
+    proj_view = projection * view;
+    camPos = ktm::fvec4(eye, 1.0f);
+    lightDir = ktm::fvec4(ktm::normalize(ktm::fvec3(-0.35f, 0.55f, -0.75f)), 0.0f);
 }
 
 void DisneyEdsl::run()
