@@ -270,12 +270,15 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 手写着色器通过 `#include SLANG(...)`、`HLSL(...)` 或 `GLSL(...)` 引入。构建时生成的阶段对象自带 SPIR-V 和反射。计算管线写作 `ComputePipeline pipeline(compute_write_slang)`，光栅管线传入顶点和片元两个阶段对象。EDSL 在相同的构造位置传入 lambda。
 
-拷贝、绘制和计算都返回 `HardwareExecutor::Command`，可以直接用 `executor <<` 入队，也可以先保存，再按需要的顺序入队。同一条命令可以多次入队。调用计算管线时，命令会保存本次 dispatch 的工作组数量、着色器变体、参数、资源绑定和 `uses()` 声明。
+拷贝、绘制、计算和呈现都返回 `HardwareExecutor::Command`，可以直接用 `executor <<` 入队，也可以先保存，再按需要的顺序入队。同一条命令可以多次入队。调用计算管线时，命令会保存本次 dispatch 的工作组数量、着色器变体、参数、资源绑定和 `uses()` 声明。
 
 ```cpp
 const auto dispatch = pipeline(groupsX, groupsY, groupsZ);
-executor << dispatch;
+executor << dispatch << display(image);
+executor.commit();
 ```
+
+呈现命令保存图像和显示器，重放时读取图像当时的内容。原生窗口由调用方保持有效。窗口最小化时跳过该帧的呈现，前后的 GPU 命令仍按入队顺序执行。
 
 在目标中登记实际使用的顶点和片元着色器配对，即可通过具名字段绑定资源和输出。每组三个参数依次为生成头、顶点着色器、片元着色器。
 
@@ -317,7 +320,7 @@ executor.commit();
 
 `drawIndirect()` 在调用时捕获当前管线、EDSL 变体、绑定和附件。渲染尺寸默认从颜色附件或显式深度附件推导，也可以通过最后一个参数 `extent` 指定。需要共享深度图时使用 `setDepthImage()`。
 
-首次绘制默认清除颜色和深度。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 scissor 之后显式传入 `RasterPass{}`。可分别设置 `loadColor` 和 `loadDepth`，例如 `RasterPass{.loadColor = true}` 保留颜色并清除深度。只清屏时写 `executor << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})`。拷贝、计算和提交都会结束当前逻辑 pass。
+首次绘制默认清除颜色和深度。面向相同附件和范围的连续绘制会延续同一逻辑 pass。要主动开始新的逻辑 pass，在 scissor 之后显式传入 `RasterPass{}`。可分别设置 `loadColor` 和 `loadDepth`，例如 `RasterPass{.loadColor = true}` 保留颜色并清除深度。只清屏时写 `executor << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})`。拷贝、计算、呈现和提交都会结束当前逻辑 pass。
 
 执行器可以把管线状态和绑定相同的相邻绘制录入一个物理 pass。对于通过描述符索引采样的纹理，可用 `pipeline.uses({{texture, ResourceAccess::Read}})` 声明实际读取的资源。存在存储写入或无法确认资源访问时，执行器会拆分物理 pass，保留附件内容并继续累计 `drawIndex()`。
 

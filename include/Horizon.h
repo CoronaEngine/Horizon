@@ -31,6 +31,7 @@ public:
         friend struct HardwareExecutor;
         friend struct HardwareBuffer;
         friend struct HardwareImage;
+        friend struct HardwareDisplayer;
         template<class> friend struct ComputePipeline;
         template<class, class> friend struct RasterPipeline;
 
@@ -53,7 +54,6 @@ public:
     HardwareExecutor& wait(HardwareExecutor* other = nullptr);
 
 private:
-    friend struct HardwareDisplayer;
     friend struct HardwareBackendAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -212,6 +212,24 @@ private:
     Impl* impl_{};
 };
 
+struct HardwareDisplayer
+{
+public:
+    // Prefer the render device when it can present to the surface.
+    explicit HardwareDisplayer(void* surface = nullptr);
+    HardwareDisplayer(HardwareDisplayer&& other) noexcept;
+    ~HardwareDisplayer();
+
+    HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept;
+    // Each execution presents the current contents of the captured image. The native window must remain valid.
+    [[nodiscard]] HardwareExecutor::Command operator()(const HardwareImage& image) const;
+
+private:
+    friend class HardwareExecutor::Command;
+    struct Impl;
+    std::shared_ptr<Impl> impl_;
+};
+
 enum class ResourceAccess : uint8_t
 {
     Read,
@@ -254,32 +272,6 @@ struct RasterIndirectPacket {
     uint32_t geometryIndex{}, firstIndex{};
     int32_t baseVertex{};
     uint32_t parameterWord{};
-};
-
-
-
-enum class PresentDevicePreference { RenderDevice, AlternateDevice };
-
-struct HardwareDisplayer
-{
-public:
-    explicit HardwareDisplayer(void* surface = nullptr,
-                               PresentDevicePreference preference = PresentDevicePreference::AlternateDevice);
-    HardwareDisplayer(HardwareDisplayer&& other) noexcept;
-    ~HardwareDisplayer();
-
-    HardwareDisplayer& operator=(HardwareDisplayer&& other) noexcept;
-    HardwareDisplayer& operator<<(const HardwareImage& image);
-    // Commit pending work and present its output. A skipped presentation still commits the work.
-    bool present(HardwareExecutor& pending, const HardwareImage& image);
-    // Present tightly packed RGBA8 pixels (UNORM or SRGB). The span may be reused on return.
-    bool present(std::span<const uint32_t> pixels, uint32_t width, uint32_t height, HardwareImage::Format format);
-
-    HardwareDisplayer& wait(const HardwareExecutor& executor);
-
-private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
 };
 
 template<class CS = void>

@@ -106,17 +106,6 @@ void test_cpu()
 
     HardwareBuffer empty;
     HardwareImage image;
-    HardwareDisplayer displayer;
-    expect(!displayer.present({}, 0, 0, HardwareImage::Format::RGBA8_UNORM), "an empty pixel frame is skipped");
-    const std::array<uint32_t, 1> pixel{0xff00ff00u};
-    bool rejected = false;
-    try { displayer.present(pixel, 2, 1, HardwareImage::Format::RGBA8_UNORM); }
-    catch (const std::invalid_argument&) { rejected = true; }
-    expect(rejected, "pixel count must match the extent");
-    rejected = false;
-    try { displayer.present(pixel, 1, 1, HardwareImage::Format::RGBA16_FLOAT); }
-    catch (const std::invalid_argument&) { rejected = true; }
-    expect(rejected, "pixel presentation rejects a format incompatible with RGBA8 data");
     expect(!empty && !image, "default resources must be empty");
 }
 
@@ -658,15 +647,27 @@ void test_gpu()
     {
         HardwareDisplayer display;
         HardwareImage target(4, 2, HardwareImage::Format::RGBA8_UNORM);
-        executor << source.copyTo(target);
-        expect(!display.present(executor, target) && backend.commandList.empty() && backend.getSubmissionPoint(),
-               "headless presentation commits pending work even when the frame is skipped");
-        expect(!display.present(input, 4, 2, HardwareImage::Format::RGBA8_UNORM), "headless pixel presentation skips the frame");
-        HardwareDisplayer moved(std::move(display));
-        expect(!display.present(input, 4, 2, HardwareImage::Format::RGBA8_UNORM), "the moved-from displayer skips presentation");
-        expect(!moved.present(input, 4, 2, HardwareImage::Format::RGBA8_SRGB), "a moved displayer accepts a new pixel format");
-        display = std::move(moved);
-        expect(!display.present(input, 2, 4, HardwareImage::Format::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
+        HardwareBuffer first(zeros, HardwareBuffer::Usage::StorageBuffer);
+        HardwareBuffer second(input, HardwareBuffer::Usage::StorageBuffer);
+        HardwareExecutor producer, consumer;
+        const auto frame = display(target);
+        {
+            HardwareDisplayer moved(std::move(display));
+            producer << source.copyTo(target) << frame << target.copyTo(first)
+                     << moved(emptyImage) << display(target) << target.copyFrom(zeros.data())
+                     << frame << target.copyTo(second);
+        }
+        expect(!HardwareBackendAccess::executor(producer).getSubmissionPoint(),
+               "enqueueing saved and immediate display commands does not submit");
+        producer.commit();
+        consumer.wait(&producer) << frame;
+        consumer.commit();
+        expect(HardwareBackendAccess::executor(consumer).getSubmissionPoint().value != 0,
+               "a display-only commit publishes its dependency even when the frame is skipped");
+        executor.wait(&consumer) << first.copyTo(destination);
+        executor.commit().wait();
+        expect(destination.copyToData(output) && output == input && second.copyToData(output) && output == zeros,
+               "copies around skipped frames execute in order across replay and a display-only consumer commit");
     }
     std::cerr << "GPU: buffer copy/readback\n";
     {
@@ -742,6 +743,25 @@ void test_gpu()
     retry.fail = false;
     executor.commit().wait();
     expect(backend.commandList.empty(), "retry consumes the recorded command");
+
+    HardwareBuffer prefix(zeros, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer suffix(zeros, HardwareBuffer::Usage::StorageBuffer);
+    HardwareImage frame(4, 2, HardwareImage::Format::RGBA8_UNORM);
+    executor << source.copyTo(prefix) << HardwareDisplayer{}(frame);
+    retry.fail = true;
+    backend.record(&retry);
+    executor << source.copyTo(suffix);
+    bool failed = false;
+    try { executor.commit(); } catch (const std::runtime_error&) { failed = true; }
+    executor.wait();
+    expect(failed && prefix.copyToData(output) && output == input && suffix.copyToData(output) && output == zeros,
+           "a skipped frame submits its prefix even if recording the suffix fails");
+    expect(prefix.copyFromData(zeros.data(), sizeof(zeros)), "reset the completed prefix before retry");
+    retry.fail = false;
+    executor.commit().wait();
+    expect(prefix.copyToData(output) && output == zeros && suffix.copyToData(output) && output == input,
+           "retry submits the suffix exactly once and leaves the completed prefix alone");
+
     HardwareImage::CreateInfo imageInfo(4, 4, HardwareImage::Format::RGBA8_UINT);
     imageInfo.arrayLayers = 2;
     imageInfo.mipLevels = 2;

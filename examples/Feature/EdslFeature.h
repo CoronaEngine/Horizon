@@ -24,6 +24,6 @@ private:
     EmbeddedShader::Float4x4 view_projection;
     RasterPipeline<> geometry;
     ComputePipeline<> lighting;
-    HardwareExecutor executor;
     HardwareDisplayer display;
+    HardwareExecutor executor;
 };

@@ -1,9 +1,5 @@
 ﻿#pragma once
 
-#include <chrono>
-#include <numeric>
-#include <unordered_map>
-
 #include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
@@ -11,7 +7,7 @@
 class DisplayManager
 {
   public:
-    explicit DisplayManager(PresentDevicePreference preference);
+    DisplayManager() = default;
     ~DisplayManager();
 
     // 禁止拷贝和移动
@@ -20,22 +16,9 @@ class DisplayManager
     DisplayManager(DisplayManager &&) = delete;
     DisplayManager &operator=(DisplayManager &&) = delete;
 
-    bool initDisplayManager(void *surface);
-    bool waitExecutor(const HardwareExecutorVulkan &executor);
-    bool displayFrame(void *surface, const HardwareImage& displayImage, HardwareExecutorVulkan* producer = nullptr);
+    void displayFrame(void *surface, const HardwareImage& source, HardwareExecutorVulkan& producer);
 
   private:
-    friend struct HardwareDisplayer;
-    struct PixelUpload
-    {
-        uint32_t width{}, height{};
-        HardwareImage::Format format{};
-        HardwareBuffer staging;
-        HardwareImage image;
-        HardwareExecutor executor;
-    };
-    std::optional<PixelUpload> pixelUpload;
-
     // Vulkan 核心资源
     VkSurfaceKHR vkSurface{VK_NULL_HANDLE};
     VkSwapchainKHR swapChain{VK_NULL_HANDLE};
@@ -44,7 +27,6 @@ class DisplayManager
     // 显示参数
     ktm::uvec2 displaySize{0, 0};
     void *displaySurface{nullptr};
-    PresentDevicePreference devicePreference;
     uint32_t currentFrame{0};
 
     // 交换链资源
@@ -68,11 +50,11 @@ class DisplayManager
     ResourceManager::BufferHardwareWrap dstStaging{};
 
     // 执行器
-    SubmissionPoint waitedSubmission;
-    std::unique_ptr<HardwareExecutorVulkan> mainDeviceExecutor;
+    SubmissionPoint sourceCopy;
     std::unique_ptr<HardwareExecutorVulkan> displayDeviceExecutor;
 
     // 内部方法
+    bool initDisplayManager(void *surface);
     void cleanUpDisplayManager();
     void createVkSurface(void *surface);
     void choosePresentDevice();
@@ -81,8 +63,6 @@ class DisplayManager
     void recreateSwapChain();
 
     void cleanupSyncObjects();
-    void cleanupStagingBuffers();
-    void cleanupDisplayImage();
-
+    void cleanupCrossDeviceTransfer();
     void setupCrossDeviceTransfer(const ResourceManager::ImageHardwareWrap &sourceImage);
 };

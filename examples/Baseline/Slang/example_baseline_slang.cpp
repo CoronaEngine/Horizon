@@ -17,7 +17,7 @@
 #include <vector>
 
 BaselineSlang::BaselineSlang(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
+    : ExampleBase(native_window), display(native_window),
       color(800, 600, HardwareImage::Format::RGBA16_FLOAT)
 {
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
@@ -95,6 +95,7 @@ void BaselineSlang::run(float seconds)
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];
     parameter_buffer.copyFromData(&parameters, sizeof(parameters));
 
-    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer);
-    display.present(render_executor, color);
+    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, 1, parameter_buffer)
+                    << display(color);
+    render_executor.commit();
 }

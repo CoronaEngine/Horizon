@@ -22,7 +22,7 @@
 #include <vector>
 
 BaselineOcarina::BaselineOcarina(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
+    : ExampleBase(native_window), display(native_window),
       device(ocarina::RHIContext::instance().create_device()), stream(device.create_stream())
 {
     device.init_rtx();
@@ -125,5 +125,6 @@ void BaselineOcarina::run(float seconds)
     stream << shader(ocarina::bridge::from_ktm(eye), output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();
 
-    display.present(pixels, width, height, HardwareImage::Format::RGBA8_SRGB);
+    executor << frame.copyFrom(pixels.data()) << display(frame);
+    executor.commit();
 }

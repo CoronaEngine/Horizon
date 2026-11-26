@@ -4,12 +4,13 @@
 
 #include <type_traits>
 
-static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image) {
+static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image, const HardwareDisplayer& display) {
     { buffer.copyTo(buffer) } -> std::same_as<HardwareExecutor::Command>;
     { buffer.copyTo(image) } -> std::same_as<HardwareExecutor::Command>;
     { image.copyTo(image) } -> std::same_as<HardwareExecutor::Command>;
     { image.copyTo(buffer) } -> std::same_as<HardwareExecutor::Command>;
     { image.copyFrom(nullptr) } -> std::same_as<HardwareExecutor::Command>;
+    { display(image) } -> std::same_as<HardwareExecutor::Command>;
 });
 
 template<class T>

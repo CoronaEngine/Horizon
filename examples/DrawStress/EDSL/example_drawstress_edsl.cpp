@@ -9,7 +9,7 @@
 
 // Based on the single-threaded bgfx examples/17-drawstress workload.
 DrawStressEdsl::DrawStressEdsl(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
+    : ExampleBase(native_window), display(native_window)
 {
     constexpr int width = 800, height = 600;
     // The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
@@ -110,6 +110,7 @@ void DrawStressEdsl::run(float seconds)
     }
     parameters.flushMapped();
 
-    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters);
-    display.present(render_executor, output_image);
+    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, draw_count, parameters)
+                    << display(output_image);
+    render_executor.commit();
 }

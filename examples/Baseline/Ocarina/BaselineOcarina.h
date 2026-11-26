@@ -17,6 +17,8 @@ public:
 private:
     static constexpr int width = 800, height = 600;
     HardwareDisplayer display;
+    HardwareImage frame{width, height, HardwareImage::Format::RGBA8_SRGB};
+    HardwareExecutor executor;
     ocarina::Device device;
     ocarina::Stream stream;
     ocarina::Buffer<ocarina::float3> vertices;

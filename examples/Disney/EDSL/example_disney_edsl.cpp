@@ -12,7 +12,7 @@
 #include <vector>
 
 DisneyEdsl::DisneyEdsl(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
+    : ExampleBase(native_window), display(native_window)
 {
     constexpr int width = 800, height = 600;
     // Upload the six faces and all prefiltered mips of each environment map.
@@ -297,6 +297,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
 
 void DisneyEdsl::run(float)
 {
-    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
-    display.present(render_executor, final_output_image);
+    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
+                    << display(final_output_image);
+    render_executor.commit();
 }

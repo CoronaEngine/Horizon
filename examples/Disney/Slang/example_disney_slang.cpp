@@ -9,7 +9,7 @@
 
 DisneySlang::DisneySlang(void* native_window)
     : ExampleBase(native_window),
-      display(native_window, PresentDevicePreference::RenderDevice), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT)
+      display(native_window), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT)
 {
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
@@ -135,6 +135,7 @@ DisneySlang::DisneySlang(void* native_window)
 
 void DisneySlang::run(float)
 {
-    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer);
-    display.present(render_executor, final_output_image);
+    render_executor << pipeline.drawIndirect(vertex_buffer, index_buffer, commands, rows * columns, parameter_buffer)
+                    << display(final_output_image);
+    render_executor.commit();
 }

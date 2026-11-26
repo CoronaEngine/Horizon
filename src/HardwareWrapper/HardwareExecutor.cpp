@@ -17,6 +17,13 @@ HardwareExecutor& HardwareExecutor::operator<<(Command command)
     if (!command.impl_) return *this;
     auto& executor = HardwareBackendAccess::executor(*this);
     auto* record = command.impl_->getCommandRecord();
+    if (!record) {
+        if (auto display = std::dynamic_pointer_cast<Command::Impl::Display>(std::move(command.impl_))) {
+            auto& pending = impl_->displays.emplace_back(std::move(display));
+            pending.preceding.swap(executor.commandList);
+        }
+        return *this;
+    }
     using Draw = Command::Impl::Draw;
     auto* draw = dynamic_cast<Draw*>(record);
     if (!draw) {
@@ -57,7 +64,21 @@ HardwareExecutor& HardwareExecutor::operator<<(Command command)
 
 HardwareExecutor& HardwareExecutor::commit()
 {
-    HardwareBackendAccess::executor(*this).commit();
+    auto& executor = HardwareBackendAccess::executor(*this);
+    while (!impl_->displays.empty()) {
+        auto& pending = impl_->displays.front();
+        pending.preceding.swap(executor.commandList);
+        try {
+            pending.display->submit(executor);
+            executor.commit(true); // A skipped display still submits its work and dependencies.
+        } catch (...) {
+            pending.preceding.swap(executor.commandList);
+            throw;
+        }
+        pending.preceding.swap(executor.commandList);
+        impl_->displays.pop_front();
+    }
+    executor.commit();
     return *this;
 }
 

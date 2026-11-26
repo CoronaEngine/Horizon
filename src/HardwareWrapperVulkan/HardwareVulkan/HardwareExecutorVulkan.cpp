@@ -111,9 +111,9 @@ HardwareExecutorVulkan::DeferredReleaseStats HardwareExecutorVulkan::getDeferred
     return stats;
 }
 
-HardwareExecutorVulkan &HardwareExecutorVulkan::commit()
+HardwareExecutorVulkan &HardwareExecutorVulkan::commit(bool submitPendingWaits)
 {
-    if (commandList.empty()) return *this;
+    if (commandList.empty() && !(submitPendingWaits && !pendingWaits.empty())) return *this;
     auto& device = hardwareContext->deviceManager;
     cleanupCompletedResources();
     // Reserve before submission so every submitted command retains its resources on success.

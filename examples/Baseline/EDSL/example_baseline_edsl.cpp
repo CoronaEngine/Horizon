@@ -20,7 +20,7 @@
 #include <vector>
 
 BaselineEdsl::BaselineEdsl(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
+    : ExampleBase(native_window), display(native_window)
 {
     constexpr int width = 800, height = 600;
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
@@ -102,6 +102,7 @@ void BaselineEdsl::run(float seconds)
 {
     model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
 
-    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, 1);
-    display.present(render_executor, color_image);
+    render_executor << raster.drawIndirect(vertex_buffer, index_buffer, commands, 1)
+                    << display(color_image);
+    render_executor.commit();
 }

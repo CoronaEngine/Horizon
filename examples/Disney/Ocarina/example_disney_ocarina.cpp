@@ -14,7 +14,7 @@
 #include <vector>
 
 DisneyOcarina::DisneyOcarina(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
+    : ExampleBase(native_window), display(native_window),
       device(ocarina::RHIContext::instance().create_device()), stream(device.create_stream())
 {
     device.init_rtx();
@@ -262,5 +262,6 @@ void DisneyOcarina::run(float)
     stream << shader(camera_position, light_direction, output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();
 
-    display.present(pixels, width, height, HardwareImage::Format::RGBA8_UNORM);
+    executor << frame.copyFrom(pixels.data()) << display(frame);
+    executor.commit();
 }

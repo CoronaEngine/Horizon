@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -39,6 +40,7 @@ struct HardwareExecutor::Command::Impl
 {
     struct Draw;
     struct Dispatch;
+    struct Display;
     struct BufferToBuffer;
     struct BufferToImage;
     struct ImageToImage;
@@ -46,6 +48,18 @@ struct HardwareExecutor::Command::Impl
 
     virtual ~Impl() = default;
     virtual CommandRecordVulkan* getCommandRecord() = 0;
+};
+
+struct HardwareExecutor::Command::Impl::Display final : HardwareExecutor::Command::Impl
+{
+    Display(std::shared_ptr<HardwareDisplayer::Impl> target, const HardwareImage& image)
+        : target(std::move(target)), image(image) {}
+
+    CommandRecordVulkan* getCommandRecord() override { return nullptr; }
+    void submit(HardwareExecutorVulkan& executor) const;
+
+    std::shared_ptr<HardwareDisplayer::Impl> target;
+    HardwareImage image;
 };
 
 // One enqueue's dependency metadata. Owned pipeline commands freeze execution
@@ -153,8 +167,7 @@ struct HardwareExecutorVulkan
         return static_cast<bool>(lastSubmission);
     }
 
-    HardwareExecutorVulkan &commit();
-    //HardwareExecutorVulkan &commitTest();
+    HardwareExecutorVulkan &commit(bool submitPendingWaits = false);
 
     void waitForAllDeferredResources();
 
@@ -194,6 +207,13 @@ struct HardwareExecutorVulkan
 struct HardwareExecutor::Impl
 {
     HardwareExecutorVulkan backend;
+
+    struct PendingDisplay {
+        std::shared_ptr<Command::Impl::Display> display;
+        std::vector<RecordedCommand> preceding;
+    };
+    // Each display ends a segment. The backend holds the commands after the last display.
+    std::deque<PendingDisplay> displays;
 };
 
 struct HardwareBackendAccess

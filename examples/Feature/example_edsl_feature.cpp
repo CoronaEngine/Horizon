@@ -9,7 +9,7 @@
 #include <cstdint>
 
 EdslFeature::EdslFeature(void* native_window)
-    : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice)
+    : ExampleBase(native_window), display(native_window)
 {
     const std::array<ktm::fvec3, 6> face_normals{{
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
@@ -73,6 +73,7 @@ EdslFeature::EdslFeature(void* native_window)
 void EdslFeature::run(float)
 {
     executor << geometry.drawIndirect(vertex_buffer, index_buffer, commands, 1)
-             << lighting(width / group_size, height / group_size);
-    display.present(executor, shaded_image);
+             << lighting(width / group_size, height / group_size)
+             << display(shaded_image);
+    executor.commit();
 }
