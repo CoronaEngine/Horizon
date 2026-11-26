@@ -130,8 +130,7 @@ static void generateComputePipeline(std::ostream& out, const ShaderResources& re
 
 public:
 )"
-        << "    ComputePipeline() : pipeline_(" << shaderType << "::shaderModule) {}\n"
-        << "    ComputePipeline(const " << shaderType << "&) : ComputePipeline() {}\n"
+        << "    ComputePipeline(const " << shaderType << "& = {}) : pipeline_(" << shaderType << "::shaderModule) {}\n"
         << R"(
     ComputePipeline(ComputePipeline&& other) noexcept : pipeline_(std::move(other.pipeline_)) {}
 

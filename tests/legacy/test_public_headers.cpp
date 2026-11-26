@@ -174,6 +174,7 @@ concept HasOutColor = requires(T& value) { value.outColor; };
 static_assert(!HasOutColor<disney_frag_slang_t> && HasOutColor<DisneyRaster>);
 static_assert(requires(DisneyRaster& pipeline, HardwareExecutor& executor, const HardwareBuffer& buffer) {
     { DisneyRaster{} } -> std::same_as<DisneyRaster>;
+    { DisneyRaster(2) } -> std::same_as<DisneyRaster>;
     { RasterPipeline(disney_vert_slang, disney_frag_slang, 2) } -> std::same_as<DisneyRaster>;
     pipeline.vsp.proj_view;
     { pipeline(buffer, buffer, buffer, 1) } -> std::same_as<HardwareExecutor::Command>;

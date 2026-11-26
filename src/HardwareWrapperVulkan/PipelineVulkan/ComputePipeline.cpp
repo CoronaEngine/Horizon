@@ -5,8 +5,6 @@
 #include <span>
 #include <array>
 
-ComputePipelineVulkan::ComputePipelineVulkan() = default;
-
 ComputePipelineVulkan::ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &module)
     : shaderCode(module)
 {

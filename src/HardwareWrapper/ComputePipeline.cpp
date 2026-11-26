@@ -19,8 +19,7 @@ struct ComputePipeline<CS>::Impl
 };
 
 template<class CS>
-ComputePipeline<CS>::ComputePipeline()
-    : impl_(std::make_unique<Impl>(std::make_shared<ComputePipelineVulkan>())) {}
+ComputePipeline<CS>::ComputePipeline() = default;
 
 template<class CS>
 ComputePipeline<CS>::ComputePipeline(const EmbeddedShader::ShaderCodeModule& module)

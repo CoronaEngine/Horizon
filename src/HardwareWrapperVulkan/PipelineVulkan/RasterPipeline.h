@@ -16,16 +16,9 @@ namespace horizon::detail {
 struct RasterPipelineVulkan
 {
   public:
-    RasterPipelineVulkan();
+    RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
+                         EmbeddedShader::ShaderCodeModule fragmentSpirV, uint32_t viewCount);
     ~RasterPipelineVulkan();
-
-    RasterPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
-                         EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                         uint32_t multiviewCount);
-
-    RasterPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
-                         const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
-                         uint32_t multiviewCount);
 
     void setDepthImage(HardwareImage &depthImage)
     {
@@ -83,7 +76,6 @@ struct RasterPipelineVulkan
     friend class ::HardwareExecutor::Command;
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
     std::mutex uploadMutex;
-    void initializeStageBindings(uint32_t viewCount);
     void createRenderPass(GraphicsState& state);
     void createGraphicsPipeline(GraphicsState& state);
 

@@ -1,5 +1,6 @@
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterPipeline.h"
 
+#include "Compiler/ShaderUtils.h"
 #include "Horizon.h"
 #include <stdexcept>
 
@@ -23,8 +24,7 @@ struct RasterPipeline<VS, FS>::Impl
 };
 
 template<class VS, class FS>
-RasterPipeline<VS, FS>::RasterPipeline()
-    : impl_(std::make_unique<Impl>(std::make_shared<RasterPipelineVulkan>())) {}
+RasterPipeline<VS, FS>::RasterPipeline() = default;
 
 template<class VS, class FS>
 RasterPipeline<VS, FS>::RasterPipeline(const EmbeddedShader::ShaderCodeModule& vertex,
@@ -34,10 +34,14 @@ RasterPipeline<VS, FS>::RasterPipeline(const EmbeddedShader::ShaderCodeModule& v
 
 template<class VS, class FS>
 RasterPipeline<VS, FS>::RasterPipeline(EmbeddedShader::RasterPipelineObject shaders, uint32_t views)
-    : impl_(std::make_unique<Impl>(std::make_shared<RasterPipelineVulkan>(*shaders.vertex, *shaders.fragment, views)))
+    : impl_(std::make_unique<Impl>())
 {
     impl_->vertexConditions = shaders.vertex->getCurrentConditionInfo();
     impl_->fragmentConditions = shaders.fragment->getCurrentConditionInfo();
+    auto vertex = shaders.vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, impl_->vertexConditions);
+    auto fragment = shaders.fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, impl_->fragmentConditions);
+    EmbeddedShader::linkRasterDrawParameter(vertex, fragment);
+    impl_->backend = std::make_shared<RasterPipelineVulkan>(std::move(vertex), std::move(fragment), views);
     impl_->autoBindEntries = std::move(shaders.autoBindEntries);
     if (!impl_->vertexConditions.empty() || !impl_->fragmentConditions.empty())
         impl_->variants = std::make_unique<EmbeddedShader::RasterPipelineObject>(std::move(shaders));
@@ -126,8 +130,10 @@ void RasterPipeline<VS, FS>::Impl::refreshShaderVariant()
     auto vertex = variants->vertex->getCurrentConditionInfo();
     auto fragment = variants->fragment->getCurrentConditionInfo();
     if (vertex == vertexConditions && fragment == fragmentConditions) return;
-    auto next = backend->variant(variants->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertex),
-                                 variants->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragment));
+    auto vertexModule = variants->vertex->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, vertex);
+    auto fragmentModule = variants->fragment->getShaderCode(EmbeddedShader::ShaderLanguage::SpirV, fragment);
+    EmbeddedShader::linkRasterDrawParameter(vertexModule, fragmentModule);
+    auto next = backend->variant(std::move(vertexModule), std::move(fragmentModule));
     variants->updateAutoBind(vertex, fragment);
     auto& bindings = variants->autoBindEntries;
     bindings.insert(bindings.end(), autoBindEntries.end() - explicitTargetCount, autoBindEntries.end());

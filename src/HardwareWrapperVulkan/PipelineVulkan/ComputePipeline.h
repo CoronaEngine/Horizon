@@ -13,7 +13,6 @@
 namespace horizon::detail {
 struct ComputePipelineVulkan
 {
-    ComputePipelineVulkan();
     ~ComputePipelineVulkan();
 
     explicit ComputePipelineVulkan(const EmbeddedShader::ShaderCodeModule &module);

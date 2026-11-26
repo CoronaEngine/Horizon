@@ -32,6 +32,14 @@ void expect(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
+template<class Error>
+bool throws(auto operation)
+{
+    try { operation(); }
+    catch (const Error&) { return true; }
+    return false;
+}
+
 void test_cpu()
 {
     DeviceFeaturesChain original;
@@ -107,6 +115,25 @@ void test_cpu()
     HardwareBuffer empty;
     HardwareImage image;
     expect(!empty && !image, "default resources must be empty");
+
+    ComputePipeline<> pendingCompute;
+    pendingCompute.uses({});
+    expect(throws<std::runtime_error>([&] { (void)pendingCompute(1); }),
+           "a compute placeholder rejects dispatch before a shader is assigned");
+
+    RasterPipeline<> pendingRaster;
+    pendingRaster.uses({}).bindRenderTarget(0, target);
+    (void)pendingRaster({}, {}, {}, 0);
+    expect(throws<std::logic_error>([&] { (void)pendingRaster({}, {}, {}, 1); }),
+           "a raster placeholder rejects a draw before shaders are assigned");
+    expect(throws<std::logic_error>([&] { pendingRaster.setRasterState({}); }) &&
+           throws<std::logic_error>([&] { pendingRaster.setDepthImage(image); }) &&
+           throws<std::logic_error>([&] { (void)pendingRaster.getDepthImage(); }),
+           "a raster placeholder rejects state access before shaders are assigned");
+    expect(throws<std::invalid_argument>([&] { (void)RasterPipeline(vertex, fragment, {}, 0); }),
+           "EDSL raster construction rejects zero views");
+    expect(throws<std::invalid_argument>([] { (void)RasterPipeline(baseline_vert_slang, baseline_frag_slang, 33); }),
+           "Slang raster construction rejects more than 32 views");
 }
 
 bool has_vulkan_14_device()
@@ -164,7 +191,8 @@ void test_indirect_draws(bool forceSingleDraw)
             $IF(useDrawColor) { value = rasterDrawParameter<ktm::fvec4>(0); };
             color << value + drawColorOffset;
         };
-        RasterPipeline pipeline(vs, fs);
+        RasterPipeline<> pipeline;
+        pipeline = RasterPipeline(vs, fs);
         pipeline.bindRenderTarget(0, overrideColor);
         overrideColor = target;
         pipeline.setRasterState({.depthTest = false, .depthWrite = false});
@@ -496,7 +524,7 @@ void test_compute_dispatch_snapshots()
            "saved Slang dispatches retain their Y group counts and execute in enqueue order");
 
     HardwareImage image(1, 1, HardwareImage::Format::RGBA8_UNORM, HardwareImage::Usage::StorageImage);
-    ComputePipeline write(compute_write_slang);
+    ComputePipeline<compute_write_slang_t> write;
     write.params.outputIndex = firstOutput;
     write.params.value = UINT32_MAX;
     write.params.value = image;
@@ -864,7 +892,8 @@ void test_gpu()
     options.compileGLSL = false;
     options.compileHLSL = false;
     EmbeddedShader::ArrayProxy<uint32_t> importedInput(source), importedOutput(destination);
-    ComputePipeline edsl([&] {
+    ComputePipeline<> edsl;
+    edsl = ComputePipeline([&] {
         EmbeddedShader::Uint index = EmbeddedShader::dispatchThreadID()->x;
         importedOutput[index] = compute_write_slang.addIndex(importedInput[index], index);
     }, ktm::uvec3(1), options);

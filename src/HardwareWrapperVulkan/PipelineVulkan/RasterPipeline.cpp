@@ -49,31 +49,9 @@ void extractStageBindings(const EmbeddedShader::ShaderCodeModule::ShaderResource
     }
 }
 
-RasterPipelineVulkan::RasterPipelineVulkan() = default;
-
-RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeCompiler &vertexCompiler,
-                                           EmbeddedShader::ShaderCodeCompiler &fragmentCompiler,
-                                           uint32_t multiviewCount)
-    : RasterPipelineVulkan()
-{
-    // 直接从已编译的 ShaderCodeCompiler 获取 SPIR-V 代码
-    vertShaderCode = vertexCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-    fragShaderCode = fragmentCompiler.getShaderCode(EmbeddedShader::ShaderLanguage::SpirV);
-    EmbeddedShader::linkRasterDrawParameter(vertShaderCode, fragShaderCode);
-    initializeStageBindings(multiviewCount);
-}
-
-RasterPipelineVulkan::RasterPipelineVulkan(const EmbeddedShader::ShaderCodeModule &vertexSpirV,
-                                           const EmbeddedShader::ShaderCodeModule &fragmentSpirV,
-                                           uint32_t multiviewCount)
-    : RasterPipelineVulkan()
-{
-    vertShaderCode = vertexSpirV;
-    fragShaderCode = fragmentSpirV;
-    initializeStageBindings(multiviewCount);
-}
-
-void RasterPipelineVulkan::initializeStageBindings(uint32_t viewCount)
+RasterPipelineVulkan::RasterPipelineVulkan(EmbeddedShader::ShaderCodeModule vertexSpirV,
+                                           EmbeddedShader::ShaderCodeModule fragmentSpirV, uint32_t viewCount)
+    : vertShaderCode(std::move(vertexSpirV)), fragShaderCode(std::move(fragmentSpirV))
 {
     if (viewCount == 0 || viewCount > 32) throw std::invalid_argument("Invalid multiview count");
     const auto& vertex = vertShaderCode.shaderResources;
@@ -737,8 +715,7 @@ void HardwareExecutor::Command::Impl::Draw::commitCommand(HardwareExecutorVulkan
 std::shared_ptr<RasterPipelineVulkan> RasterPipelineVulkan::variant(
     EmbeddedShader::ShaderCodeModule vertex, EmbeddedShader::ShaderCodeModule fragment) const
 {
-    EmbeddedShader::linkRasterDrawParameter(vertex, fragment);
-    auto next = std::make_shared<RasterPipelineVulkan>(vertex, fragment, multiviewCount);
+    auto next = std::make_shared<RasterPipelineVulkan>(std::move(vertex), std::move(fragment), multiviewCount);
     if (next->renderTargets.size() == renderTargets.size()) next->renderTargets = renderTargets;
     next->rasterState = rasterState;
     next->depthImage = depthImage;

@@ -290,6 +290,7 @@ private:
     std::unique_ptr<Impl> impl_;
 
 public:
+    // Creates an empty handle for later assignment. Assign a pipeline before dispatching.
     ComputePipeline();
 
     template<class F>
@@ -330,6 +331,7 @@ private:
     std::unique_ptr<Impl> impl_;
 
 public:
+    // Creates an empty handle for later assignment. Assign a pipeline before setting raster state or drawing.
     RasterPipeline();
 
     template<class V, class F>
