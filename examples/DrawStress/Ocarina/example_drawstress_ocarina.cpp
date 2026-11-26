@@ -85,5 +85,5 @@ void DrawStressOcarina::run(float seconds)
     const auto eye = ocarina::make_float3(0.f, 0.f, -35.f);
     stream << shader(eye, output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();
-    display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
+    display.present(pixels, width, height, HardwareImage::Format::RGBA8_UNORM);
 }

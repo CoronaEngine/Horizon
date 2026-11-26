@@ -29,7 +29,7 @@ class DisplayManager
     struct PixelUpload
     {
         uint32_t width{}, height{};
-        ImageFormat format{};
+        HardwareImage::Format format{};
         HardwareBuffer staging;
         HardwareImage image;
         HardwareExecutor executor;

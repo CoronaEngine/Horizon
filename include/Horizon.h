@@ -60,77 +60,28 @@ private:
 };
 
 
-enum class ImageFormat : uint32_t
-{
-    RGBA8_UINT,
-    RGBA8_SINT,
-    RGBA8_SRGB,
-
-    RGBA16_UINT,
-    RGBA16_SINT,
-    RGBA16_FLOAT,
-
-    RGBA32_UINT,
-    RGBA32_SINT,
-    RGBA32_FLOAT,
-
-    RG32_FLOAT,
-
-    D16_UNORM,
-    D32_FLOAT,
-
-    BC1_RGB_UNORM,
-    BC1_RGB_SRGB,
-    BC2_RGBA_UNORM,
-    BC2_RGBA_SRGB,
-    BC3_RGBA_UNORM,
-    BC3_RGBA_SRGB,
-    BC4_R_UNORM,
-    BC4_R_SNORM,
-    BC5_RG_UNORM,
-    BC5_RG_SNORM,
-
-    ASTC_4x4_UNORM,
-    ASTC_4x4_SRGB,
-    RGBA8_UNORM, R32_FLOAT, BC7_UNORM, BC7_SRGB
-};
-
-enum class ImageUsage : uint32_t
-{
-    SampledImage = 1,
-    StorageImage = 2,
-    DepthImage = 3,
-    SampledStorageImage = 4,
-};
-
-enum class BufferUsage : uint32_t
-{
-    VertexBuffer = 1,
-    IndexBuffer = 2,
-    UniformBuffer = 4,
-    StorageBuffer = 8,
-    RasterIndirect = 16,
-};
-
-struct ExternalHandle
-{
-#if defined(_WIN32)
-    void* handle = nullptr;
-#else
-    int fd = -1;
-#endif
-};
-
 // ================= 对外封装：HardwareBuffer =================
 struct HardwareBuffer
 {
 public:
+    enum class Usage : uint32_t {
+        VertexBuffer = 1, IndexBuffer = 2, UniformBuffer = 4, StorageBuffer = 8, RasterIndirect = 16,
+    };
+
+    struct ExternalHandle {
+#if defined(_WIN32)
+        void* handle = nullptr;
+#else
+        int fd = -1;
+#endif
+    };
+
     HardwareBuffer();
     HardwareBuffer(const HardwareBuffer& other);
     HardwareBuffer(HardwareBuffer&& other) noexcept;
-    HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, BufferUsage usage, const void* data = nullptr, bool useDedicated = true);
+    HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, Usage usage, const void* data = nullptr, bool useDedicated = true);
 
-    HardwareBuffer(uint32_t size, BufferUsage usage, const void* data = nullptr, bool useDedicated = true)
+    HardwareBuffer(uint32_t size, Usage usage, const void* data = nullptr, bool useDedicated = true)
         : HardwareBuffer(1, size, usage, data, useDedicated)
     {
     }
@@ -138,17 +89,17 @@ public:
     template <class R>
         requires std::ranges::contiguous_range<const R> && std::ranges::sized_range<const R> &&
                  std::is_trivially_copyable_v<std::ranges::range_value_t<const R>>
-    HardwareBuffer(const R& input, BufferUsage usage, bool useDedicated = true)
+    HardwareBuffer(const R& input, Usage usage, bool useDedicated = true)
         : HardwareBuffer(std::ranges::size(input), sizeof(std::ranges::range_value_t<const R>),
                          usage, std::ranges::data(input), useDedicated)
     {
     }
 
     // Replace this buffer and return its upload command. The command retains the staged data and destination.
-    [[nodiscard]] HardwareExecutor::Command createDeviceLocal(BufferUsage usage, const void* data,
+    [[nodiscard]] HardwareExecutor::Command createDeviceLocal(Usage usage, const void* data,
                                                               size_t elementCount, size_t elementSize);
 
-    HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, BufferUsage usage);
+    HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, Usage usage);
 
     ~HardwareBuffer();
 
@@ -195,28 +146,42 @@ private:
     friend class HardwareExecutor::Command;
 };
 
-// ================= HardwareImage 参数结构体 =================
-struct HardwareImageCreateInfo
-{
-    uint32_t width { 0 };
-    uint32_t height { 0 };
-    ImageFormat format = ImageFormat::RGBA8_SRGB;
-    ImageUsage usage = ImageUsage::SampledImage;
-    int arrayLayers { 1 };
-    int mipLevels { 1 };
-    bool cube{};
-    bool linearFiltering{}; // Linear min/mag/mip filtering with supported anisotropy.
-};
-
 // ================= 对外封装：HardwareImage =================
 struct HardwareImage
 {
 public:
+    enum class Format : uint32_t {
+        RGBA8_UINT, RGBA8_SINT, RGBA8_SRGB,
+        RGBA16_UINT, RGBA16_SINT, RGBA16_FLOAT,
+        RGBA32_UINT, RGBA32_SINT, RGBA32_FLOAT, RG32_FLOAT,
+        D16_UNORM, D32_FLOAT,
+        BC1_RGB_UNORM, BC1_RGB_SRGB,
+        BC2_RGBA_UNORM, BC2_RGBA_SRGB,
+        BC3_RGBA_UNORM, BC3_RGBA_SRGB,
+        BC4_R_UNORM, BC4_R_SNORM,
+        BC5_RG_UNORM, BC5_RG_SNORM,
+        ASTC_4x4_UNORM, ASTC_4x4_SRGB,
+        RGBA8_UNORM, R32_FLOAT,
+        BC7_UNORM, BC7_SRGB,
+    };
+
+    enum class Usage : uint32_t {
+        SampledImage = 1, StorageImage = 2, DepthImage = 3, SampledStorageImage = 4,
+    };
+
+    struct CreateInfo {
+        uint32_t width{}, height{};
+        Format format = Format::RGBA8_SRGB;
+        Usage usage = Usage::SampledImage;
+        int arrayLayers{1}, mipLevels{1};
+        bool cube{}, linearFiltering{}; // Linear filtering covers min/mag/mip with supported anisotropy.
+    };
+
     HardwareImage();
     HardwareImage(const HardwareImage& other);
     HardwareImage(HardwareImage&& other) noexcept;
-    HardwareImage(uint32_t width, uint32_t height, ImageFormat imageFormat, ImageUsage imageUsage = ImageUsage::SampledImage, int arrayLayers = 1);
-    HardwareImage(const HardwareImageCreateInfo& createInfo);
+    HardwareImage(uint32_t width, uint32_t height, Format format, Usage usage = Usage::SampledImage, int arrayLayers = 1);
+    HardwareImage(const CreateInfo& createInfo);
 
     ~HardwareImage();
 
@@ -308,7 +273,7 @@ public:
     // Commit pending work and present its output. A skipped presentation still commits the work.
     bool present(HardwareExecutor& pending, const HardwareImage& image);
     // Present tightly packed RGBA8 pixels (UNORM or SRGB). The span may be reused on return.
-    bool present(std::span<const uint32_t> pixels, uint32_t width, uint32_t height, ImageFormat format);
+    bool present(std::span<const uint32_t> pixels, uint32_t width, uint32_t height, HardwareImage::Format format);
 
     HardwareDisplayer& wait(const HardwareExecutor& executor);
 

@@ -238,7 +238,7 @@ UniformSnapshot::~UniformSnapshot()
 void UniformSnapshot::prepare(std::span<const uint8_t> bytes, VkDescriptorSetLayout layout)
 {
     if (bytes.empty()) return;
-    if (!buffer) buffer = HardwareBuffer(static_cast<uint32_t>(bytes.size()), BufferUsage::UniformBuffer);
+    if (!buffer) buffer = HardwareBuffer(static_cast<uint32_t>(bytes.size()), HardwareBuffer::Usage::UniformBuffer);
     if (uploadedBytes.size() != bytes.size() || !std::equal(bytes.begin(), bytes.end(), uploadedBytes.begin()))
     {
         if (!buffer.copyFromData(bytes.data(), bytes.size()))

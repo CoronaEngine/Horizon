@@ -50,12 +50,12 @@ BaselineEdsl::BaselineEdsl(void* native_window)
                 indices.push_back(found->second);
             }
         }
-        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer,
             vertices.data(), vertices.size(), sizeof(vertices[0]));
-        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
         const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
-        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &command, 1, sizeof(command));
+        render_executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &command, 1, sizeof(command));
     }
 
     {
@@ -64,7 +64,7 @@ BaselineEdsl::BaselineEdsl(void* native_window)
         std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(
             stbi_load(filename.c_str(), &texture_width, &texture_height, nullptr, STBI_rgb_alpha), stbi_image_free);
 
-        HardwareImageCreateInfo texture_info(texture_width, texture_height, ImageFormat::RGBA8_SRGB);
+        HardwareImage::CreateInfo texture_info(texture_width, texture_height, HardwareImage::Format::RGBA8_SRGB);
         texture_info.linearFiltering = true;
         albedo_image = HardwareImage(texture_info);
         render_executor << albedo_image.copyFrom(pixels.get());
@@ -74,7 +74,7 @@ BaselineEdsl::BaselineEdsl(void* native_window)
     using EmbeddedShader::Float2, EmbeddedShader::Float4;
     using EmbeddedShader::mul;
 
-    color_image = HardwareImage(width, height, ImageFormat::RGBA16_FLOAT);
+    color_image = HardwareImage(width, height, HardwareImage::Format::RGBA16_FLOAT);
 
     auto vertex_shader = [&](EmbeddedShader::Aggregate<VertexInput> vertex) -> Float2 {
         EmbeddedShader::position() = mul(proj, mul(view, mul(model, Float4(vertex->pos, 1.0f))));

@@ -262,5 +262,5 @@ void DisneyOcarina::run(float)
     stream << shader(camera_position, light_direction, output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();
 
-    display.present(pixels, width, height, ImageFormat::RGBA8_UNORM);
+    display.present(pixels, width, height, HardwareImage::Format::RGBA8_UNORM);
 }

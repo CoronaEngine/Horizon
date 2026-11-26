@@ -9,7 +9,7 @@
 
 DisneySlang::DisneySlang(void* native_window)
     : ExampleBase(native_window),
-      display(native_window, PresentDevicePreference::RenderDevice), final_output_image(800, 600, ImageFormat::RGBA16_FLOAT)
+      display(native_window, PresentDevicePreference::RenderDevice), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT)
 {
     // Upload the six faces and all prefiltered mips of each environment map.
     const auto environment_dir = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets" / "env";
@@ -26,13 +26,13 @@ DisneySlang::DisneySlang(void* native_window)
         file.seekg(148); // The bundled DX10 DDS files store RGBA16F texels after the header.
         file.read(reinterpret_cast<char*>(texels.data()), texels.size() * sizeof(uint64_t));
 
-        HardwareImageCreateInfo desc(face_size, face_size, ImageFormat::RGBA16_FLOAT);
+        HardwareImage::CreateInfo desc(face_size, face_size, HardwareImage::Format::RGBA16_FLOAT);
         desc.arrayLayers = 6;
         desc.cube = true;
         desc.linearFiltering = true;
         desc.mipLevels = static_cast<int>(mip_count);
         *cubemap = HardwareImage(desc);
-        HardwareBuffer staging(texels, BufferUsage::StorageBuffer);
+        HardwareBuffer staging(texels, HardwareBuffer::Usage::StorageBuffer);
         uint64_t offset = 0;
         for (uint32_t face = 0; face < 6; ++face) {
             for (uint32_t mip = 0; mip < mip_count; ++mip) {
@@ -74,9 +74,9 @@ DisneySlang::DisneySlang(void* native_window)
             }
         }
 
-        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer,
             vertices.data(), vertices.size(), sizeof(vertices[0]));
-        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
 
         constexpr uint32_t parameter_words = sizeof(DrawParameters) / sizeof(uint32_t);
@@ -85,7 +85,7 @@ DisneySlang::DisneySlang(void* native_window)
             packets[i] = {.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1,
                           .parameterWord = i * parameter_words};
         }
-        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect,
+        render_executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
     std::array<DrawParameters, rows * columns> parameters;
@@ -112,7 +112,7 @@ DisneySlang::DisneySlang(void* native_window)
             draw.model = ktm::translate3d(ktm::fvec3(x, y, 0.0f)) * ktm::scale3d(ktm::fvec3(radius));
         }
     }
-    render_executor << parameter_buffer.createDeviceLocal(BufferUsage::StorageBuffer,
+    render_executor << parameter_buffer.createDeviceLocal(HardwareBuffer::Usage::StorageBuffer,
         parameters.data(), parameters.size(), sizeof(DrawParameters));
     render_executor.commit().wait();
 

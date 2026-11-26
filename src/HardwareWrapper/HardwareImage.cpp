@@ -10,66 +10,67 @@ struct ImageFormatInfo
     bool isCompressed;
 };
 
-ImageFormatInfo convertImageFormat(ImageFormat format)
+ImageFormatInfo convertImageFormat(HardwareImage::Format format)
 {
+    using enum HardwareImage::Format;
     switch (format)
     {
     // Uncompressed formats
-    case ImageFormat::RGBA8_UNORM: return {VK_FORMAT_R8G8B8A8_UNORM, 4, false};
-    case ImageFormat::R32_FLOAT: return {VK_FORMAT_R32_SFLOAT, 4, false};
-    case ImageFormat::BC7_UNORM: return {VK_FORMAT_BC7_UNORM_BLOCK, 1, true};
-    case ImageFormat::BC7_SRGB: return {VK_FORMAT_BC7_SRGB_BLOCK, 1, true};
-    case ImageFormat::RGBA8_UINT:
+    case RGBA8_UNORM: return {VK_FORMAT_R8G8B8A8_UNORM, 4, false};
+    case R32_FLOAT: return {VK_FORMAT_R32_SFLOAT, 4, false};
+    case BC7_UNORM: return {VK_FORMAT_BC7_UNORM_BLOCK, 1, true};
+    case BC7_SRGB: return {VK_FORMAT_BC7_SRGB_BLOCK, 1, true};
+    case RGBA8_UINT:
         return {VK_FORMAT_R8G8B8A8_UINT, 4, false};
-    case ImageFormat::RGBA8_SINT:
+    case RGBA8_SINT:
         return {VK_FORMAT_R8G8B8A8_SINT, 4, false};
-    case ImageFormat::RGBA8_SRGB:
+    case RGBA8_SRGB:
         return {VK_FORMAT_R8G8B8A8_SRGB, 4, false};
-    case ImageFormat::RGBA16_UINT:
+    case RGBA16_UINT:
         return {VK_FORMAT_R16G16B16A16_UINT, 8, false};
-    case ImageFormat::RGBA16_SINT:
+    case RGBA16_SINT:
         return {VK_FORMAT_R16G16B16A16_SINT, 8, false};
-    case ImageFormat::RGBA16_FLOAT:
+    case RGBA16_FLOAT:
         return {VK_FORMAT_R16G16B16A16_SFLOAT, 8, false};
-    case ImageFormat::RGBA32_UINT:
+    case RGBA32_UINT:
         return {VK_FORMAT_R32G32B32A32_UINT, 16, false};
-    case ImageFormat::RGBA32_SINT:
+    case RGBA32_SINT:
         return {VK_FORMAT_R32G32B32A32_SINT, 16, false};
-    case ImageFormat::RGBA32_FLOAT:
+    case RGBA32_FLOAT:
         return {VK_FORMAT_R32G32B32A32_SFLOAT, 16, false};
-    case ImageFormat::RG32_FLOAT:
+    case RG32_FLOAT:
         return {VK_FORMAT_R32G32_SFLOAT, 8, false};
-    case ImageFormat::D16_UNORM:
+    case D16_UNORM:
         return {VK_FORMAT_D16_UNORM, 2, false};
-    case ImageFormat::D32_FLOAT:
+    case D32_FLOAT:
         return {VK_FORMAT_D32_SFLOAT, 4, false};
 
     // BC compressed formats - Desktop
-    case ImageFormat::BC1_RGB_UNORM:
+    case BC1_RGB_UNORM:
         return {VK_FORMAT_BC1_RGB_UNORM_BLOCK, 0.5f, true};
-    case ImageFormat::BC1_RGB_SRGB:
+    case BC1_RGB_SRGB:
         return {VK_FORMAT_BC1_RGB_SRGB_BLOCK, 0.5f, true};
-    case ImageFormat::BC2_RGBA_UNORM:
+    case BC2_RGBA_UNORM:
         return {VK_FORMAT_BC2_UNORM_BLOCK, 1.0f, true};
-    case ImageFormat::BC2_RGBA_SRGB:
+    case BC2_RGBA_SRGB:
         return {VK_FORMAT_BC2_SRGB_BLOCK, 1.0f, true};
-    case ImageFormat::BC3_RGBA_UNORM:
+    case BC3_RGBA_UNORM:
         return {VK_FORMAT_BC3_UNORM_BLOCK, 1.0f, true};
-    case ImageFormat::BC3_RGBA_SRGB:
+    case BC3_RGBA_SRGB:
         return {VK_FORMAT_BC3_SRGB_BLOCK, 1.0f, true};
-    case ImageFormat::BC4_R_UNORM:
+    case BC4_R_UNORM:
         return {VK_FORMAT_BC4_UNORM_BLOCK, 0.5f, true};
-    case ImageFormat::BC4_R_SNORM:
+    case BC4_R_SNORM:
         return {VK_FORMAT_BC4_SNORM_BLOCK, 0.5f, true};
-    case ImageFormat::BC5_RG_UNORM:
+    case BC5_RG_UNORM:
         return {VK_FORMAT_BC5_UNORM_BLOCK, 1.0f, true};
-    case ImageFormat::BC5_RG_SNORM:
+    case BC5_RG_SNORM:
         return {VK_FORMAT_BC5_SNORM_BLOCK, 1.0f, true};
 
     // ASTC compressed formats - Mobile
-    case ImageFormat::ASTC_4x4_UNORM:
+    case ASTC_4x4_UNORM:
         return {VK_FORMAT_ASTC_4x4_UNORM_BLOCK, 1.0f, true};
-    case ImageFormat::ASTC_4x4_SRGB:
+    case ASTC_4x4_SRGB:
         return {VK_FORMAT_ASTC_4x4_SRGB_BLOCK, 1.0f, true};
 
     default:
@@ -77,14 +78,15 @@ ImageFormatInfo convertImageFormat(ImageFormat format)
     }
 }
 
-VkImageUsageFlags convertImageUsage(ImageUsage usage, bool isCompressed)
+VkImageUsageFlags convertImageUsage(HardwareImage::Usage usage, bool isCompressed)
 {
+    using enum HardwareImage::Usage;
     // 所有图像默认支持传输
     VkImageUsageFlags vkUsage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
     switch (usage)
     {
-    case ImageUsage::SampledImage:
+    case SampledImage:
         vkUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
         // 压缩纹理不支持作为 Render Target
         if (!isCompressed)
@@ -93,10 +95,10 @@ VkImageUsageFlags convertImageUsage(ImageUsage usage, bool isCompressed)
         }
         break;
 
-    case ImageUsage::SampledStorageImage:
+    case SampledStorageImage:
         vkUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
         [[fallthrough]];
-    case ImageUsage::StorageImage:
+    case StorageImage:
         // 修正：压缩纹理不支持 STORAGE_BIT (imageLoad/Store)
         // 如果强行请求 Storage 且是压缩格式，为了安全降级为 Sampled
         if (!isCompressed)
@@ -111,7 +113,7 @@ VkImageUsageFlags convertImageUsage(ImageUsage usage, bool isCompressed)
         }
         break;
 
-    case ImageUsage::DepthImage:
+    case DepthImage:
         vkUsage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         break;
     default:
@@ -147,7 +149,7 @@ void releaseImage(ResourceManager::ImageHardwareWrap* image)
 
 HardwareImage::HardwareImage() = default;
 
-HardwareImage::HardwareImage(const HardwareImageCreateInfo& createInfo)
+HardwareImage::HardwareImage(const CreateInfo& createInfo)
 {
     if (!createInfo.width || !createInfo.height)
         throw std::invalid_argument("Image extent must be nonzero");
@@ -164,8 +166,8 @@ HardwareImage::HardwareImage(const HardwareImageCreateInfo& createInfo)
     impl_->linearFiltering = createInfo.linearFiltering;
 }
 
-HardwareImage::HardwareImage(uint32_t width, uint32_t height, ImageFormat format, ImageUsage usage, int arrayLayers)
-    : HardwareImage(HardwareImageCreateInfo{width, height, format, usage, arrayLayers}) {}
+HardwareImage::HardwareImage(uint32_t width, uint32_t height, Format format, Usage usage, int arrayLayers)
+    : HardwareImage(CreateInfo{width, height, format, usage, arrayLayers}) {}
 
 HardwareImage::HardwareImage(const HardwareImage& other) : impl_(other.impl_)
 {
@@ -265,6 +267,6 @@ HardwareExecutor::Command HardwareImage::copyFrom(const void *inputData, uint32_
 {
     if (!inputData || !*this) return HardwareExecutor::Command(nullptr);
     if (imageMip >= impl_->mipLevels) return HardwareExecutor::Command(nullptr);
-    HardwareBuffer stagingBuffer(uploadByteCount(*impl_, imageMip), BufferUsage::StorageBuffer, inputData);
+    HardwareBuffer stagingBuffer(uploadByteCount(*impl_, imageMip), HardwareBuffer::Usage::StorageBuffer, inputData);
     return stagingBuffer.copyTo(*this, 0, imageLayer, imageMip);
 }

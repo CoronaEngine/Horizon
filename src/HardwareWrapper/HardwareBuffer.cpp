@@ -4,23 +4,24 @@
 
 #include <stdexcept>
 
-VkBufferUsageFlags convertBufferUsage(BufferUsage const usage)
+VkBufferUsageFlags convertBufferUsage(HardwareBuffer::Usage const usage)
 {
+    using enum HardwareBuffer::Usage;
     VkBufferUsageFlags vkUsage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
     switch (usage)
     {
-    case BufferUsage::VertexBuffer:
-    case BufferUsage::IndexBuffer:
+    case VertexBuffer:
+    case IndexBuffer:
         vkUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         break;
-    case BufferUsage::RasterIndirect:
+    case RasterIndirect:
         vkUsage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         break;
-    case BufferUsage::UniformBuffer:
+    case UniformBuffer:
         vkUsage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
         break;
-    case BufferUsage::StorageBuffer:
+    case StorageBuffer:
         vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         break;
     default:
@@ -58,14 +59,14 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
     return buffer;
 }
 
-HardwareExecutor::Command HardwareBuffer::createDeviceLocal(BufferUsage usage, const void* data,
+HardwareExecutor::Command HardwareBuffer::createDeviceLocal(Usage usage, const void* data,
                                                             size_t elementCount, size_t elementSize)
 {
     if (elementSize == 0)
         throw std::invalid_argument("Device-local buffer element size must be nonzero");
-    if (usage == BufferUsage::VertexBuffer && elementSize % 4 != 0)
+    if (usage == Usage::VertexBuffer && elementSize % 4 != 0)
         throw std::invalid_argument("Raster vertex stride must be divisible by four");
-    if (usage == BufferUsage::IndexBuffer && elementSize != 2 && elementSize != 4)
+    if (usage == Usage::IndexBuffer && elementSize != 2 && elementSize != 4)
         throw std::invalid_argument("Raster indices must be 2 or 4 bytes wide");
     if (elementCount && !data)
         throw std::invalid_argument("A nonempty device-local buffer requires initial data");
@@ -80,14 +81,14 @@ HardwareExecutor::Command HardwareBuffer::createDeviceLocal(BufferUsage usage, c
     destination.impl_ = new Impl(manager.createBuffer(count, stride, convertBufferUsage(usage), false, true));
     HardwareExecutor::Command upload(nullptr);
     if (count) {
-        HardwareBuffer staging(count, stride, BufferUsage::StorageBuffer, data);
+        HardwareBuffer staging(count, stride, Usage::StorageBuffer, data);
         upload = staging.copyTo(destination);
     }
     *this = std::move(destination);
     return upload;
 }
 
-HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, BufferUsage usage, const void* data, bool useDedicated)
+HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, Usage usage, const void* data, bool useDedicated)
 {
     HardwareBuffer buffer;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
@@ -97,7 +98,7 @@ HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, Buffer
     *this = std::move(buffer);
 }
 
-HardwareBuffer::HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, BufferUsage usage)
+HardwareBuffer::HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, Usage usage)
 {
     ResourceManager::ExternalMemoryHandle memoryHandle;
 #if _WIN32 || _WIN64
@@ -204,7 +205,7 @@ uint64_t HardwareBuffer::getElementSize() const
     return requireBuffer(impl_).elementSize;
 }
 
-ExternalHandle HardwareBuffer::exportBufferMemory()
+HardwareBuffer::ExternalHandle HardwareBuffer::exportBufferMemory()
 {
     ExternalHandle winHandle{};
     auto& buffer = requireBuffer(impl_);

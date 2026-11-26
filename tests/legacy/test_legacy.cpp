@@ -107,14 +107,14 @@ void test_cpu()
     HardwareBuffer empty;
     HardwareImage image;
     HardwareDisplayer displayer;
-    expect(!displayer.present({}, 0, 0, ImageFormat::RGBA8_UNORM), "an empty pixel frame is skipped");
+    expect(!displayer.present({}, 0, 0, HardwareImage::Format::RGBA8_UNORM), "an empty pixel frame is skipped");
     const std::array<uint32_t, 1> pixel{0xff00ff00u};
     bool rejected = false;
-    try { displayer.present(pixel, 2, 1, ImageFormat::RGBA8_UNORM); }
+    try { displayer.present(pixel, 2, 1, HardwareImage::Format::RGBA8_UNORM); }
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "pixel count must match the extent");
     rejected = false;
-    try { displayer.present(pixel, 1, 1, ImageFormat::RGBA16_FLOAT); }
+    try { displayer.present(pixel, 1, 1, HardwareImage::Format::RGBA16_FLOAT); }
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "pixel presentation rejects a format incompatible with RGBA8 data");
     expect(!empty && !image, "default resources must be empty");
@@ -152,13 +152,13 @@ void test_indirect_draws(bool forceSingleDraw)
     using namespace EmbeddedShader;
     HardwareExecutor executor;
     HardwareExecutor replay;
-    HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareImage target(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     target.setClearColor(0, 0, 0, 0);
     std::array<std::array<float,4>,8> pixels{};
-    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
-    HardwareBuffer splitReadback(sizeof(pixels), BufferUsage::StorageBuffer);
+    HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer splitReadback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
     {
-        HardwareImage reflectedTarget(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+        HardwareImage reflectedTarget(4, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
         Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = reflectedTarget;
         bool useDrawColor = true;
         auto vs = [&](Float2 pos, Float scale) {
@@ -182,19 +182,19 @@ void test_indirect_draws(bool forceSingleDraw)
         const std::array<std::array<float, 3>, 6> vertices{{
             {-1,-1,1}, {3,-1,1}, {-1,3,1}, {-1,0,1}, {3,0,1}, {-1,2,1}
         }};
-        HardwareBuffer leftVertices(std::span(vertices).first<3>(), BufferUsage::VertexBuffer);
-        HardwareBuffer rightVertices(vertices, BufferUsage::VertexBuffer);
-        HardwareBuffer leftIndices(std::array<uint16_t,3>{0,1,2}, BufferUsage::IndexBuffer);
-        HardwareBuffer rightIndices(std::array<uint32_t,7>{99,1,2,3,4,5,6}, BufferUsage::IndexBuffer);
+        HardwareBuffer leftVertices(std::span(vertices).first<3>(), HardwareBuffer::Usage::VertexBuffer);
+        HardwareBuffer rightVertices(vertices, HardwareBuffer::Usage::VertexBuffer);
+        HardwareBuffer leftIndices(std::array<uint16_t,3>{0,1,2}, HardwareBuffer::Usage::IndexBuffer);
+        HardwareBuffer rightIndices(std::array<uint32_t,7>{99,1,2,3,4,5,6}, HardwareBuffer::Usage::IndexBuffer);
         HardwareBuffer leftCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
-                                    BufferUsage::RasterIndirect);
+                                    HardwareBuffer::Usage::RasterIndirect);
         HardwareBuffer rightCommands(std::array{
             RasterIndirectPacket{.vertexCount=3, .instanceCount=2, .firstIndex=1, .baseVertex=-1},
             RasterIndirectPacket{.vertexCount=3, .instanceCount=1, .firstIndex=4, .baseVertex=-1, .parameterWord=4}
-        }, BufferUsage::RasterIndirect);
-        HardwareBuffer red(std::array<float,4>{1,0,0,1}, BufferUsage::StorageBuffer);
+        }, HardwareBuffer::Usage::RasterIndirect);
+        HardwareBuffer red(std::array<float,4>{1,0,0,1}, HardwareBuffer::Usage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
-                              BufferUsage::StorageBuffer);
+                              HardwareBuffer::Usage::StorageBuffer);
         const auto drawLeft = pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
         executor << drawLeft << drawLeft
                  << pipeline.drawIndirect({}, {}, {}, 0)
@@ -245,20 +245,20 @@ void test_raster_sampled_storage_image()
     using namespace EmbeddedShader;
     using Pixel = std::array<float, 4>;
     const std::array<Pixel, 1> source{{{0.25f, 0.5f, 0.75f, 1.0f}}};
-    HardwareImage input(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::SampledStorageImage);
-    HardwareImage target(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
-    HardwareBuffer upload(source, BufferUsage::StorageBuffer);
-    HardwareBuffer readback(sizeof(source), BufferUsage::StorageBuffer);
+    HardwareImage input(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::SampledStorageImage);
+    HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+    HardwareBuffer upload(source, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer readback(sizeof(source), HardwareBuffer::Usage::StorageBuffer);
     Texture2D<ktm::fvec4> texture = input, output = target;
     auto vs = [](Float2 pos) { position() = Float4(pos, Float(0), Float(1)); };
     auto fs = [&] { output << texture.sample(Float2(0.5f)); };
     RasterizerPipeline pipeline(vs, fs);
     pipeline.setRasterState({.depthTest = false, .depthWrite = false});
     const std::array<std::array<float, 2>, 3> vertices{{{-1, -1}, {3, -1}, {-1, 3}}};
-    HardwareBuffer vertexBuffer(vertices, BufferUsage::VertexBuffer);
-    HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);
+    HardwareBuffer vertexBuffer(vertices, HardwareBuffer::Usage::VertexBuffer);
+    HardwareBuffer indexBuffer(std::array<uint16_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
     HardwareBuffer commands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
-                            BufferUsage::RasterIndirect);
+                            HardwareBuffer::Usage::RasterIndirect);
     HardwareExecutor executor;
     pipeline.uses({{input, ResourceAccess::Read}});
     executor << upload.copyTo(input)
@@ -284,7 +284,7 @@ void test_raster_sampled_storage_image()
     const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                                .featuresChain.getChainHead()->features;
     if (features.fragmentStoresAndAtomics) {
-        HardwareBuffer counter(std::array{0.f}, BufferUsage::StorageBuffer);
+        HardwareBuffer counter(std::array{0.f}, HardwareBuffer::Usage::StorageBuffer);
         ArrayProxy<float> values(counter);
         RasterizerPipeline increment(vs, [&] {
             Float next;
@@ -306,8 +306,8 @@ void test_raster_sampled_storage_image()
         }
     }
 
-    HardwareImage layers(HardwareImageCreateInfo{.width = 2, .height = 2, .format = ImageFormat::RGBA32_FLOAT,
-        .usage = ImageUsage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
+    HardwareImage layers(HardwareImage::CreateInfo{.width = 2, .height = 2, .format = HardwareImage::Format::RGBA32_FLOAT,
+        .usage = HardwareImage::Usage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
     std::array attachments{layers[0][1], layers[0][1], layers[1][1]};
     pipeline.setRasterState({.depthTest = false, .depthWrite = false, .blend = RasterBlend::Additive});
     for (auto& attachment : attachments) {
@@ -316,7 +316,7 @@ void test_raster_sampled_storage_image()
         executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
     }
     std::array<Pixel, 2> layerPixels{};
-    HardwareBuffer layerReadback(sizeof(layerPixels), BufferUsage::StorageBuffer);
+    HardwareBuffer layerReadback(sizeof(layerPixels), HardwareBuffer::Usage::StorageBuffer);
     executor << layers.copyTo(layerReadback, 0, 1) << layers.copyTo(layerReadback, 1, 1, sizeof(Pixel));
     executor.commit().wait();
     expect(backend.recordedRasterPassCount == 2, "independent views of the same layer and mip share a pass");
@@ -327,21 +327,21 @@ void test_raster_sampled_storage_image()
 void test_shared_vertex_stage()
 {
     const float positions[][3] = {{-1, -1, 0}, {3, -1, 0}, {-1, 3, 0}};
-    HardwareBuffer vertices(positions, BufferUsage::VertexBuffer);
+    HardwareBuffer vertices(positions, HardwareBuffer::Usage::VertexBuffer);
     // The Disney VS fetches two packed 16-bit indices per word.
-    HardwareBuffer indices(std::array<uint16_t, 4>{0, 1, 2, 0}, BufferUsage::IndexBuffer);
+    HardwareBuffer indices(std::array<uint16_t, 4>{0, 1, 2, 0}, HardwareBuffer::Usage::IndexBuffer);
     HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}},
-                           BufferUsage::RasterIndirect);
+                           HardwareBuffer::Usage::RasterIndirect);
     const auto model = ktm::fmat4x4::from_eye();
-    HardwareBuffer parameters(sizeof(model), BufferUsage::StorageBuffer, &model);
+    HardwareBuffer parameters(sizeof(model), HardwareBuffer::Usage::StorageBuffer, &model);
 
-    HardwareImage target(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareImage target(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     RasterizerPipeline raster(disney_vert_slang, drawstress_frag_slang);
     raster.outColor = target;
     raster.vsp.proj_view = ktm::fmat4x4::from_eye();
     raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
     std::array<float, 4> pixel{};
-    HardwareBuffer readback(sizeof(pixel), BufferUsage::StorageBuffer);
+    HardwareBuffer readback(sizeof(pixel), HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
     executor << raster.drawIndirect(vertices, indices, packets, 1, parameters) << target.copyTo(readback);
     executor.commit().wait();
@@ -354,11 +354,11 @@ void test_shared_vertex_stage()
 void test_generated_packet_and_attachment_load(bool explicitDepth)
 {
     using namespace EmbeddedShader;
-    HardwareImageCreateInfo targetInfo(4, 2, ImageFormat::RGBA32_FLOAT);
-    targetInfo.usage = ImageUsage::StorageImage;
+    HardwareImage::CreateInfo targetInfo(4, 2, HardwareImage::Format::RGBA32_FLOAT);
+    targetInfo.usage = HardwareImage::Usage::StorageImage;
     targetInfo.mipLevels = 2;
     HardwareImage target(targetInfo);
-    HardwareImage depth(4, 2, ImageFormat::D32_FLOAT, ImageUsage::DepthImage);
+    HardwareImage depth(4, 2, HardwareImage::Format::D32_FLOAT, HardwareImage::Usage::DepthImage);
     Texture2D<ktm::fvec4> output = target;
     auto vs = [] {
         position() = Float4(rasterVertexAttribute<ktm::fvec2>(0), rasterDrawParameter<float>(4), Float(1));
@@ -373,25 +373,25 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     const std::array<uint16_t,9> indices{0,1,2,3,4,5,3,5,6};
     HardwareExecutor executor;
     HardwareBuffer vertexBuffer;
-    executor << vertexBuffer.createDeviceLocal(BufferUsage::VertexBuffer, vertices, std::size(vertices), sizeof(vertices[0]));
+    executor << vertexBuffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer, vertices, std::size(vertices), sizeof(vertices[0]));
     HardwareBuffer indexBuffer = vertexBuffer;
-    auto expectInvalidUpload = [&](BufferUsage usage, const void* data, size_t elementSize) {
+    auto expectInvalidUpload = [&](HardwareBuffer::Usage usage, const void* data, size_t elementSize) {
         try { executor << indexBuffer.createDeviceLocal(usage, data, 1, elementSize); }
         catch (const std::invalid_argument&) {
             return;
         }
         throw std::runtime_error("invalid upload was accepted");
     };
-    expectInvalidUpload(BufferUsage::IndexBuffer, nullptr, sizeof(uint16_t));
-    expectInvalidUpload(BufferUsage::IndexBuffer, indices.data(), 1);
-    expectInvalidUpload(BufferUsage::VertexBuffer, vertices, 2);
-    HardwareBuffer originalVertices(sizeof(vertices), BufferUsage::StorageBuffer);
+    expectInvalidUpload(HardwareBuffer::Usage::IndexBuffer, nullptr, sizeof(uint16_t));
+    expectInvalidUpload(HardwareBuffer::Usage::IndexBuffer, indices.data(), 1);
+    expectInvalidUpload(HardwareBuffer::Usage::VertexBuffer, vertices, 2);
+    HardwareBuffer originalVertices(sizeof(vertices), HardwareBuffer::Usage::StorageBuffer);
     executor << indexBuffer.copyTo(originalVertices);
     if (explicitDepth) {
-        executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
+        executor << indexBuffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     } else {
         const std::vector<uint32_t> wideIndices(indices.begin(), indices.end());
-        executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
+        executor << indexBuffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
     }
     expect(vertexBuffer.getElementCount() == std::size(vertices) &&
            vertexBuffer.getElementSize() == sizeof(vertices[0]) &&
@@ -399,13 +399,13 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
            indexBuffer.getElementSize() == (explicitDepth ? sizeof(uint16_t) : sizeof(uint32_t)),
            "staged raster buffers preserve element counts, vertex stride and index width");
     HardwareBuffer firstCommands(std::array{RasterIndirectPacket{.vertexCount=3, .instanceCount=1}},
-                                 BufferUsage::RasterIndirect);
-    HardwareBuffer redAndDepth(std::array<float,5>{1,0,0,1,0.5f}, BufferUsage::StorageBuffer);
-    HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, BufferUsage::RasterIndirect);
+                                 HardwareBuffer::Usage::RasterIndirect);
+    HardwareBuffer redAndDepth(std::array<float,5>{1,0,0,1,0.5f}, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer packets(std::array<RasterIndirectPacket,1>{}, HardwareBuffer::Usage::RasterIndirect);
     const auto& features = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                                .featuresChain.getChainHead()->features;
     const uint32_t firstInstance = features.drawIndirectFirstInstance ? 7u : 0u;
-    HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), BufferUsage::StorageBuffer);
+    HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), HardwareBuffer::Usage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
     executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, {}, {}, ktm::uvec2(4, 2));
@@ -426,7 +426,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
 
     std::array<std::array<float,4>,8> pixels{};
-    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
+    HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
     executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, packets, 1, generatedParameters, {},
                                       RasterPass{.loadColor = true, .loadDepth = true})
              << target.copyTo(readback);
@@ -447,8 +447,8 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
 void test_compute_dispatch_snapshots()
 {
     std::array<uint32_t, 8> words{};
-    HardwareBuffer firstOutput(words, BufferUsage::StorageBuffer);
-    HardwareBuffer secondOutput(words, BufferUsage::StorageBuffer);
+    HardwareBuffer firstOutput(words, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer secondOutput(words, HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
     {
         ComputePipeline original(compute_write_slang);
@@ -492,8 +492,8 @@ void test_compute_shader_variants()
 {
     using namespace EmbeddedShader;
     std::array<uint32_t, 3> words{};
-    HardwareBuffer outputBuffer(words, BufferUsage::StorageBuffer);
-    HardwareBuffer inputBuffer(std::array{42u}, BufferUsage::StorageBuffer);
+    HardwareBuffer outputBuffer(words, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer inputBuffer(std::array{42u}, HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
     {
         ArrayProxy<uint32_t> input(inputBuffer), output(outputBuffer);
@@ -529,15 +529,15 @@ void test_compute_sampling()
     using namespace EmbeddedShader;
     using Pixel = std::array<float, 4>;
     const std::array<Pixel, 4> source{{{1,0,0,1}, {0,1,0,1}, {0,0,1,1}, {1,1,0,1}}};
-    HardwareBuffer upload(source, BufferUsage::StorageBuffer);
+    HardwareBuffer upload(source, HardwareBuffer::Usage::StorageBuffer);
     std::array<Pixel, 16> base{};
-    HardwareBuffer uploadBase(base, BufferUsage::StorageBuffer);
-    HardwareImageCreateInfo info(4, 4, ImageFormat::RGBA32_FLOAT);
+    HardwareBuffer uploadBase(base, HardwareBuffer::Usage::StorageBuffer);
+    HardwareImage::CreateInfo info(4, 4, HardwareImage::Format::RGBA32_FLOAT);
     info.mipLevels = 2;
-    info.usage = ImageUsage::SampledStorageImage;
+    info.usage = HardwareImage::Usage::SampledStorageImage;
     HardwareImage input(info);
-    HardwareImage result(2, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
-    HardwareBuffer readback(sizeof(source), BufferUsage::StorageBuffer);
+    HardwareImage result(2, 2, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+    HardwareBuffer readback(sizeof(source), HardwareBuffer::Usage::StorageBuffer);
     Texture2D<ktm::fvec4> tex = input, dst = result;
     Sampler sampler;
     auto shader = [&] {
@@ -580,7 +580,7 @@ void test_compute_sampling()
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == source,
            "the next dispatch reads the rebound EDSL texture");
 
-    HardwareImageCreateInfo cubeInfo(2, 2, ImageFormat::RGBA32_FLOAT);
+    HardwareImage::CreateInfo cubeInfo(2, 2, HardwareImage::Format::RGBA32_FLOAT);
     cubeInfo.cube = true;
     cubeInfo.arrayLayers = 6;
     cubeInfo.mipLevels = 2;
@@ -609,8 +609,8 @@ void test_gpu()
     std::cerr << "GPU: initializing buffers\n";
     const std::array<uint32_t, 8> input{10, 20, 30, 40, 50, 60, 70, 80};
     const std::array<uint32_t, 8> zeros{};
-    HardwareBuffer source(input, BufferUsage::StorageBuffer);
-    HardwareBuffer destination(zeros, BufferUsage::StorageBuffer);
+    HardwareBuffer source(input, HardwareBuffer::Usage::StorageBuffer);
+    HardwareBuffer destination(zeros, HardwareBuffer::Usage::StorageBuffer);
     HardwareExecutor executor;
     auto& backend = HardwareBackendAccess::executor(executor);
     HardwareBuffer emptyBuffer;
@@ -618,14 +618,14 @@ void test_gpu()
     executor << emptyBuffer.copyTo(emptyBuffer) << emptyBuffer.copyTo(emptyImage)
              << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer) << emptyImage.copyFrom(nullptr);
     expect(backend.commandList.empty(), "empty resources and a null image upload record no GPU work");
-    const auto emptyUpload = emptyBuffer.createDeviceLocal(BufferUsage::StorageBuffer, nullptr, 0, sizeof(uint32_t));
+    const auto emptyUpload = emptyBuffer.createDeviceLocal(HardwareBuffer::Usage::StorageBuffer, nullptr, 0, sizeof(uint32_t));
     executor << emptyUpload;
     expect(!emptyBuffer && emptyBuffer.getElementCount() == 0 &&
            emptyBuffer.getElementSize() == sizeof(uint32_t) && backend.commandList.empty(),
            "a zero-element device-local buffer preserves its dimensions without recording an upload");
     std::array<uint32_t, 8> output{};
     {
-        HardwareBuffer intermediate(zeros, BufferUsage::StorageBuffer);
+        HardwareBuffer intermediate(zeros, HardwareBuffer::Usage::StorageBuffer);
         executor << source.copyTo(intermediate);
         executor.wait().wait(nullptr).wait(&executor);
         expect(!backend.getSubmissionPoint() && backend.commandList.size() == 1,
@@ -648,7 +648,7 @@ void test_gpu()
 
         executor.commit();
         HardwareExecutor consumer;
-        HardwareBuffer readback(input, BufferUsage::StorageBuffer);
+        HardwareBuffer readback(input, HardwareBuffer::Usage::StorageBuffer);
         consumer.wait(&executor) << intermediate.copyTo(readback);
         expect(!backend.deferredReleaseQueue.empty() && !HardwareBackendAccess::executor(consumer).getSubmissionPoint(),
                "waiting on another executor leaves its submitted work retained and the consumer unsubmitted");
@@ -657,20 +657,20 @@ void test_gpu()
     }
     {
         HardwareDisplayer display;
-        HardwareImage target(4, 2, ImageFormat::RGBA8_UNORM);
+        HardwareImage target(4, 2, HardwareImage::Format::RGBA8_UNORM);
         executor << source.copyTo(target);
         expect(!display.present(executor, target) && backend.commandList.empty() && backend.getSubmissionPoint(),
                "headless presentation commits pending work even when the frame is skipped");
-        expect(!display.present(input, 4, 2, ImageFormat::RGBA8_UNORM), "headless pixel presentation skips the frame");
+        expect(!display.present(input, 4, 2, HardwareImage::Format::RGBA8_UNORM), "headless pixel presentation skips the frame");
         HardwareDisplayer moved(std::move(display));
-        expect(!display.present(input, 4, 2, ImageFormat::RGBA8_UNORM), "the moved-from displayer skips presentation");
-        expect(!moved.present(input, 4, 2, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel format");
+        expect(!display.present(input, 4, 2, HardwareImage::Format::RGBA8_UNORM), "the moved-from displayer skips presentation");
+        expect(!moved.present(input, 4, 2, HardwareImage::Format::RGBA8_SRGB), "a moved displayer accepts a new pixel format");
         display = std::move(moved);
-        expect(!display.present(input, 2, 4, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
+        expect(!display.present(input, 2, 4, HardwareImage::Format::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
     }
     std::cerr << "GPU: buffer copy/readback\n";
     {
-        const auto copy = HardwareBuffer(input, BufferUsage::StorageBuffer).copyTo(destination);
+        const auto copy = HardwareBuffer(input, HardwareBuffer::Usage::StorageBuffer).copyTo(destination);
         executor << copy;
         HardwareExecutor moved(std::move(executor));
         moved.commit();
@@ -704,7 +704,7 @@ void test_gpu()
 
     std::cerr << "GPU: image mip/layer round trip\n";
     const std::array<uint32_t, 2> layers{0x11223344, 0x55667788};
-    HardwareImage layered(1, 1, ImageFormat::RGBA8_UINT, ImageUsage::SampledImage, 2);
+    HardwareImage layered(1, 1, HardwareImage::Format::RGBA8_UINT, HardwareImage::Usage::SampledImage, 2);
     executor << layered.copyFrom(&layers[0], 0) << layered.copyFrom(&layers[1], 1);
     executor << layered.copyTo(destination, 0) << layered.copyTo(destination, 1, 0, sizeof(uint32_t));
     executor.commit().wait();
@@ -717,7 +717,7 @@ void test_gpu()
     if (bc1.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
         std::cerr << "GPU: BC1 upload/readback\n";
         const std::array<uint32_t, 4> blocks{1, 2, 3, 4};
-        HardwareImage compressed(5, 3, ImageFormat::BC1_RGB_UNORM);
+        HardwareImage compressed(5, 3, HardwareImage::Format::BC1_RGB_UNORM);
         executor << compressed.copyFrom(blocks.data()) << compressed.copyTo(destination);
         executor.commit().wait();
         std::array<uint32_t, 4> copiedBlocks{};
@@ -742,7 +742,7 @@ void test_gpu()
     retry.fail = false;
     executor.commit().wait();
     expect(backend.commandList.empty(), "retry consumes the recorded command");
-    HardwareImageCreateInfo imageInfo(4, 4, ImageFormat::RGBA8_UINT);
+    HardwareImage::CreateInfo imageInfo(4, 4, HardwareImage::Format::RGBA8_UINT);
     imageInfo.arrayLayers = 2;
     imageInfo.mipLevels = 2;
     HardwareImage image(imageInfo);
@@ -791,19 +791,19 @@ void test_gpu()
     static_assert(std::same_as<decltype(&Raster::vp), decltype(raster.vp) Raster::*>);
     static_assert(std::same_as<decltype(&Raster::outColor), decltype(raster.outColor) Raster::*>);
     static_assert(!std::is_base_of_v<RasterizerPipeline<>, Raster>);
-    HardwareImage first(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
-    HardwareImage second(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    HardwareImage first(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
+    HardwareImage second(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::StorageImage);
     second.setClearColor(0.75f, 0.f, 0.f, 1.f);
-    HardwareImage texture(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::SampledImage);
+    HardwareImage texture(1, 1, HardwareImage::Format::RGBA32_FLOAT, HardwareImage::Usage::SampledImage);
     const std::array texel{0.25f, 0.f, 0.f, 1.f};
     executor << texture.copyFrom(texel.data());
     using Vertex = std::array<float, 5>; // xyz, uv in the Baseline shader.
     const std::array triangle{Vertex{-1, -1, 0, 0, 0}, Vertex{3, -1, 0, 0, 0}, Vertex{-1, 3, 0, 0, 0}};
-    HardwareBuffer vertices(triangle, BufferUsage::VertexBuffer);
-    HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);
-    HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}}, BufferUsage::RasterIndirect);
+    HardwareBuffer vertices(triangle, HardwareBuffer::Usage::VertexBuffer);
+    HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, HardwareBuffer::Usage::IndexBuffer);
+    HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}}, HardwareBuffer::Usage::RasterIndirect);
     const struct { ktm::fmat4x4 model; uint32_t textureIndex; } draw{ktm::fmat4x4::from_eye(), texture.storeDescriptor()};
-    HardwareBuffer drawParameters(sizeof(draw), BufferUsage::StorageBuffer, &draw);
+    HardwareBuffer drawParameters(sizeof(draw), HardwareBuffer::Usage::StorageBuffer, &draw);
 
     auto movedRaster = std::move(raster);
     movedRaster.uses({{texture, ResourceAccess::Read}});
@@ -815,7 +815,7 @@ void test_gpu()
     raster.outColor = second;
     raster.vp.view = ktm::translate3d(ktm::fvec3(8.f, 0.f, 0.f));
     std::array<std::array<float, 4>, 2> pixels{};
-    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
+    HardwareBuffer readback(sizeof(pixels), HardwareBuffer::Usage::StorageBuffer);
     executor << firstDraw << raster.drawIndirect(vertices, indices, packets, 1, drawParameters)
              << first.copyTo(readback) << second.copyTo(readback, 0, 0, sizeof(pixels[0]));
     executor.commit().wait();

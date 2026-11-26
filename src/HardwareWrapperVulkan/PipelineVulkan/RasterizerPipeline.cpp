@@ -415,8 +415,8 @@ HardwareExecutor::Command::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVu
     if (!pipeline->explicitDepthImage) {
         const auto* depth = ResourceManager::get(pipeline->depthImage);
         if (!depth || depth->imageSize != imageSize) {
-            HardwareImageCreateInfo info(imageSize.x, imageSize.y, ImageFormat::D32_FLOAT);
-            info.usage = ImageUsage::DepthImage;
+            HardwareImage::CreateInfo info(imageSize.x, imageSize.y, HardwareImage::Format::D32_FLOAT);
+            info.usage = HardwareImage::Usage::DepthImage;
             info.arrayLayers = pipeline->multiviewCount;
             pipeline->depthImage = HardwareImage(info);
         }

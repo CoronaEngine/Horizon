@@ -125,5 +125,5 @@ void BaselineOcarina::run(float seconds)
     stream << shader(ocarina::bridge::from_ktm(eye), output_buffer).dispatch(width, height)
            << output_buffer.download_sync(pixels.data()) << ocarina::commit();
 
-    display.present(pixels, width, height, ImageFormat::RGBA8_SRGB);
+    display.present(pixels, width, height, HardwareImage::Format::RGBA8_SRGB);
 }

@@ -7,7 +7,7 @@
 // Based on the single-threaded bgfx examples/17-drawstress workload.
 DrawStressSlang::DrawStressSlang(void* native_window)
     : ExampleBase(native_window),
-      display(native_window, PresentDevicePreference::RenderDevice), final_output_image(800, 600, ImageFormat::RGBA16_FLOAT)
+      display(native_window, PresentDevicePreference::RenderDevice), final_output_image(800, 600, HardwareImage::Format::RGBA16_FLOAT)
 {
     // The buffer supplies the vertex count. Both shaders decode the indexed corner directly.
     constexpr std::array<uint32_t, 8> cube_vertices = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -28,16 +28,16 @@ DrawStressSlang::DrawStressSlang(void* native_window)
             packets[i].instanceCount = 1;
             packets[i].parameterWord = i * (sizeof(ktm::fmat4x4) / sizeof(uint32_t));
         }
-        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer,
             cube_vertices.data(), cube_vertices.size(), sizeof(cube_vertices[0]));
-        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
             cube_indices.data(), cube_indices.size(), sizeof(cube_indices[0]));
-        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect,
+        render_executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
     render_executor.commit().wait();
     for (auto& parameters : parameter_buffers)
-        parameters = HardwareBuffer(draw_count, sizeof(ktm::fmat4x4), BufferUsage::StorageBuffer);
+        parameters = HardwareBuffer(draw_count, sizeof(ktm::fmat4x4), HardwareBuffer::Usage::StorageBuffer);
 
     // Match the left-handed camera in the bgfx drawstress example.
     const auto view = ktm::look_at_lh(ktm::fvec3(0.0f, 0.0f, -35.0f), ktm::fvec3(0.0f), ktm::fvec3(0.0f, 1.0f, 0.0f));

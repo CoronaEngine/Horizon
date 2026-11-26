@@ -18,7 +18,7 @@
 
 BaselineSlang::BaselineSlang(void* native_window)
     : ExampleBase(native_window), display(native_window, PresentDevicePreference::RenderDevice),
-      color(800, 600, ImageFormat::RGBA16_FLOAT)
+      color(800, 600, HardwareImage::Format::RGBA16_FLOAT)
 {
     const auto assets = std::filesystem::path(__FILE__).parent_path().parent_path() / "assets";
     {
@@ -47,12 +47,12 @@ BaselineSlang::BaselineSlang(void* native_window)
                 indices.push_back(found->second);
             }
         }
-        render_executor << vertex_buffer.createDeviceLocal(BufferUsage::VertexBuffer,
+        render_executor << vertex_buffer.createDeviceLocal(HardwareBuffer::Usage::VertexBuffer,
             vertices.data(), vertices.size(), sizeof(vertices[0]));
-        render_executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer,
+        render_executor << index_buffer.createDeviceLocal(HardwareBuffer::Usage::IndexBuffer,
             indices.data(), indices.size(), sizeof(indices[0]));
         const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
-        render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &command, 1, sizeof(command));
+        render_executor << commands.createDeviceLocal(HardwareBuffer::Usage::RasterIndirect, &command, 1, sizeof(command));
     }
 
     {
@@ -61,7 +61,7 @@ BaselineSlang::BaselineSlang(void* native_window)
         std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> texels(
             stbi_load(filename.c_str(), &texture_width, &texture_height, nullptr, STBI_rgb_alpha), stbi_image_free);
 
-        HardwareImageCreateInfo texture_info(texture_width, texture_height, ImageFormat::RGBA8_SRGB);
+        HardwareImage::CreateInfo texture_info(texture_width, texture_height, HardwareImage::Format::RGBA8_SRGB);
         texture_info.linearFiltering = true;
         texture_image = HardwareImage(texture_info);
         render_executor << texture_image.copyFrom(texels.get());
@@ -73,7 +73,7 @@ BaselineSlang::BaselineSlang(void* native_window)
     // 纹理存入 bindless combined-texture 表（set 0），拿到索引后经逐 draw 参数传入 shader。
     parameters.texIndex = texture_image.storeDescriptor();
     for (auto& buffer : parameter_buffers)
-        buffer = HardwareBuffer(sizeof(DrawParameters), BufferUsage::StorageBuffer);
+        buffer = HardwareBuffer(sizeof(DrawParameters), HardwareBuffer::Usage::StorageBuffer);
 
     pipeline.vp.view = ktm::look_at_rh<float>({2, 2, 2}, {0, 0, 0}, {0, 0, 1});
     // KTM 0.2.16's frustum_rh gives positive clip W along the camera's -Z axis.

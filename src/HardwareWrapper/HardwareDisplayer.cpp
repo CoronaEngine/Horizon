@@ -43,9 +43,9 @@ bool HardwareDisplayer::present(HardwareExecutor& executor, const HardwareImage&
     return shown;
 }
 
-bool HardwareDisplayer::present(std::span<const uint32_t> pixels, uint32_t width, uint32_t height, ImageFormat format)
+bool HardwareDisplayer::present(std::span<const uint32_t> pixels, uint32_t width, uint32_t height, HardwareImage::Format format)
 {
-    if (format != ImageFormat::RGBA8_UNORM && format != ImageFormat::RGBA8_SRGB)
+    if (format != HardwareImage::Format::RGBA8_UNORM && format != HardwareImage::Format::RGBA8_SRGB)
         throw std::invalid_argument("Pixel presentation requires RGBA8_UNORM or RGBA8_SRGB");
     const uint64_t count = uint64_t(width) * height;
     if (count != pixels.size())
@@ -62,7 +62,7 @@ bool HardwareDisplayer::present(std::span<const uint32_t> pixels, uint32_t width
     upload.executor.wait();
     if (width != upload.width || height != upload.height || format != upload.format)
     {
-        HardwareBuffer staging(static_cast<uint32_t>(pixels.size_bytes()), BufferUsage::StorageBuffer);
+        HardwareBuffer staging(static_cast<uint32_t>(pixels.size_bytes()), HardwareBuffer::Usage::StorageBuffer);
         HardwareImage image(width, height, format);
         upload.staging = std::move(staging);
         upload.image = std::move(image);

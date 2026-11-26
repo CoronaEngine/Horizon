@@ -20,11 +20,19 @@ concept ExposesResourceID = requires(const T& value) { value.getBufferID(); } ||
 static_assert(!ExposesResourceID<HardwareBuffer> && !ExposesResourceID<HardwareImage> &&
               !ExposesResourceID<HardwareExecutor> && !ExposesResourceID<HardwareDisplayer>);
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);
-static_assert(std::is_constructible_v<HardwareBuffer, const uint16_t(&)[3], BufferUsage>);
-static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<bool>, BufferUsage>);
-static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<std::string>, BufferUsage>);
+static_assert(requires(HardwareBuffer& buffer) {
+    { buffer.exportBufferMemory() } -> std::same_as<HardwareBuffer::ExternalHandle>;
+    HardwareBuffer(buffer.exportBufferMemory(), 1, 4, 4, HardwareBuffer::Usage::StorageBuffer);
+});
+static_assert(std::is_constructible_v<HardwareBuffer, const uint16_t(&)[3], HardwareBuffer::Usage>);
+static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<bool>, HardwareBuffer::Usage>);
+static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<std::string>, HardwareBuffer::Usage>);
 static_assert(std::is_nothrow_move_constructible_v<HardwareImage>);
-static_assert(std::is_aggregate_v<HardwareImageCreateInfo>);
+static_assert(std::is_aggregate_v<HardwareImage::CreateInfo>);
+constexpr HardwareImage::CreateInfo imageDefaults{};
+static_assert(imageDefaults.width == 0 && imageDefaults.height == 0 &&
+              imageDefaults.format == HardwareImage::Format::RGBA8_SRGB && imageDefaults.usage == HardwareImage::Usage::SampledImage &&
+              imageDefaults.arrayLayers == 1 && imageDefaults.mipLevels == 1 && !imageDefaults.cube && !imageDefaults.linearFiltering);
 static_assert(!std::is_constructible_v<EmbeddedShader::Texture2DProxy<ktm::fvec4>, HardwareImage&&>);
 static_assert(!std::is_constructible_v<EmbeddedShader::TextureCubeProxy<ktm::fvec4>, HardwareImage&&>);
 
