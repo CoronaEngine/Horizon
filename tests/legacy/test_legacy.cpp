@@ -5,6 +5,7 @@
 #include "Codegen/TypeAlias.h"
 #include "Compiler/ShaderUtils.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
+#include "HardwareWrapperVulkan/HardwareVulkan/ResourceAccess.h"
 #include SLANG(examples/Baseline/Slang/baseline_vert.slang)
 #include SLANG(examples/Baseline/Slang/baseline_frag.slang)
 #include SLANG(examples/Disney/Slang/disney_vert.slang)
@@ -395,7 +396,8 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
             parameters[2] = Float4(0.5f, 0, 0, 0);
         });
         generate.uses({{packets, ResourceAccess::Write}, {generatedParameters, ResourceAccess::Write}});
-        executor << generate(1,1,1);
+        const auto generatePackets = generate(1);
+        executor << generatePackets;
     }
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
 
@@ -417,7 +419,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
 
 void test_compute_dispatch_snapshots()
 {
-    std::array<uint32_t, 4> words{};
+    std::array<uint32_t, 8> words{};
     HardwareBuffer firstOutput(words, BufferUsage::StorageBuffer);
     HardwareBuffer secondOutput(words, BufferUsage::StorageBuffer);
     HardwareExecutor executor;
@@ -429,21 +431,34 @@ void test_compute_dispatch_snapshots()
         auto moved = std::move(original);
         moved.params.outputIndex = firstOutput;
         moved.params.value = 10u;
+        const auto writeFirst = moved.uses({{firstOutput, ResourceAccess::Write}})(2, 1, 2);
+
         other.params.outputIndex = secondOutput;
-        other.uses({{secondOutput, ResourceAccess::Write}})(2);
-        other.params.value = 20u; // Named bindings are captured when the pipeline is enqueued.
-        executor << moved.uses({{firstOutput, ResourceAccess::Write}})(3) << other;
+        other.params.value = 30u;
+        const auto overwrite = other.uses({{secondOutput, ResourceAccess::Write}})(1);
 
         other = std::move(moved);
         other.params.outputIndex = secondOutput;
-        other.params.value = 30u;
-        executor << other.uses({{secondOutput, ResourceAccess::Write}})(1);
+        other.params.value = 20u;
+        const auto writeSecond = other.uses({{secondOutput, ResourceAccess::Write}})(1, 2, 1);
+        other.params.value = 99u;
+        other.uses({});
+
+        executor << writeFirst << writeSecond << overwrite;
+    }
+    const auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
+    for (const auto& entry : backend->commandList) {
+        ResourceAccessList accesses;
+        entry.command->resolveResourceUses(entry.resourceUses, accesses);
+        expect(!accesses.conservative && accesses.uses.size() == 1 &&
+               accesses.uses.front().declaredAccess == VK_ACCESS_2_SHADER_WRITE_BIT,
+               "each saved dispatch retains its explicit write declaration for its bound buffer");
     }
     executor.commit().waitForDeferredResources();
-    expect(firstOutput.copyToData(words) && words == std::array{10u, 11u, 12u, 0u},
-           "first dispatch retains its buffer, scalar and group count after move and destruction");
-    expect(secondOutput.copyToData(words) && words == std::array{30u, 21u, 0u, 0u},
-           "second pipeline dispatch survives move assignment and only its first word is overwritten");
+    expect(firstOutput.copyToData(words) && words == std::array{10u, 11u, 0u, 0u, 14u, 15u, 0u, 0u},
+           "saved Slang dispatch retains its buffer, scalar and X/Z group counts after a pipeline move");
+    expect(secondOutput.copyToData(words) && words == std::array{30u, 0u, 22u, 0u, 0u, 0u, 0u, 0u},
+           "saved Slang dispatches retain their Y group counts and execute in enqueue order");
 }
 
 void test_compute_shader_variants()
@@ -468,14 +483,14 @@ void test_compute_shader_variants()
         auto useInput = capturedFlag.lock();
         expect(useInput != nullptr, "the EDSL condition retains its shader capture");
         slot = 0u;
-        pipeline(1);
+        const auto first = pipeline(1);
         *useInput = true;
-        executor << pipeline; // The first dispatch was prepared with useInput false.
         slot = 1u;
-        executor << pipeline(1);
+        const auto withInput = pipeline(1);
         *useInput = false;
         slot = 2u;
-        executor << pipeline(1);
+        const auto last = pipeline(1);
+        executor << first << withInput << last;
     }
     executor.commit().waitForDeferredResources();
     expect(outputBuffer.copyToData(words) && words == std::array{10u, 53u, 12u},
@@ -511,7 +526,8 @@ void test_compute_sampling()
     if (getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils().computeDerivativeGroupQuads) {
         // A 2x2 quad over a 4x4 image selects the colored mip.
         ComputePipeline pipeline(shader, ktm::uvec3(2, 2, 1), options);
-        executor << pipeline(1, 1, 1) << result.copyTo(readback);
+        const auto sample = pipeline(1);
+        executor << sample << result.copyTo(readback);
         executor.commit().waitForDeferredResources();
         expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == source, "explicit compute sampler mip readback");
     } else {
@@ -524,14 +540,15 @@ void test_compute_sampling()
         auto xy = dispatchThreadID()->xy();
         dst[xy] = tex[xy];
     }, ktm::uvec3(2, 2, 1), options);
-    load(1);
+    const auto loadBaseMip = load(1);
     auto mipOne = input[1];
     tex = mipOne;
-    executor << load << result.copyTo(readback);
+    const auto loadNextMip = load(1);
+    executor << loadBaseMip << result.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == std::array<Pixel, 4>{},
-           "compute reads the EDSL texture proxy when workgroups are set");
-    executor << load(1) << result.copyTo(readback);
+           "saved compute dispatch reads the original EDSL texture mip");
+    executor << loadNextMip << result.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == source,
            "the next dispatch reads the rebound EDSL texture");
@@ -545,14 +562,16 @@ void test_compute_sampling()
     ComputePipeline sampleCube([&] {
         dst[dispatchThreadID()->xy()] = cube.sampleLevel(sampler, Float3(1, 0, 0), Float(1));
     }, ktm::uvec3(2, 2, 1), options);
-    executor << upload.copyTo(cubeImage, 0, 0, 1) << sampleCube(1, 1, 1) << result.copyTo(readback);
+    const auto sampleFirst = sampleCube(1);
+    executor << upload.copyTo(cubeImage, 0, 0, 1) << sampleFirst << result.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && std::ranges::all_of(pixels, [&](Pixel p) { return p == source[0]; }),
            "explicit compute cube sampler reads the requested mip");
 
     HardwareImage nextCube(cubeInfo);
     cube = nextCube;
-    executor << upload.copyTo(nextCube, sizeof(Pixel), 0, 1) << sampleCube(1) << result.copyTo(readback);
+    const auto sampleNext = sampleCube(1);
+    executor << upload.copyTo(nextCube, sizeof(Pixel), 0, 1) << sampleNext << result.copyTo(readback);
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) && std::ranges::all_of(pixels, [&](Pixel p) { return p == source[1]; }),
            "the next dispatch samples the rebound cubemap");
@@ -700,7 +719,8 @@ void test_gpu()
         EmbeddedShader::Uint index = EmbeddedShader::dispatchThreadID()->x;
         importedOutput[index] = compute_write_slang.addIndex(importedInput[index], index);
     }, ktm::uvec3(1), options);
-    executor << edsl.uses({{source, ResourceAccess::Read}, {destination, ResourceAccess::Write}})(8);
+    const auto dispatch = edsl.uses({{source, ResourceAccess::Read}, {destination, ResourceAccess::Write}})(8);
+    executor << dispatch;
     executor.commit().waitForDeferredResources();
     expect(destination.copyToData(output) && output == std::array{10u, 21u, 32u, 43u, 54u, 65u, 76u, 87u},
            "an EDSL resource read only by an imported helper is bound at dispatch");

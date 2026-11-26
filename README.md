@@ -270,6 +270,13 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 手写着色器通过 `#include SLANG(...)`、`HLSL(...)` 或 `GLSL(...)` 引入。构建时生成的阶段对象自带 SPIR-V 和反射。计算管线写作 `ComputePipeline pipeline(compute_write_slang)`，光栅管线传入顶点和片元两个阶段对象。EDSL 在相同的构造位置传入 lambda。
 
+调用计算管线时，返回的 `ComputeCommand` 会保存本次 dispatch 的工作组数量、着色器变体、参数、资源绑定和 `uses()` 声明。先将命令存入变量，再按需要的执行顺序入队。
+
+```cpp
+const auto dispatch = pipeline(groupsX, groupsY, groupsZ);
+executor << dispatch;
+```
+
 在目标中登记实际使用的顶点和片元着色器配对，即可通过具名字段绑定资源和输出。每组三个参数依次为生成头、顶点着色器、片元着色器。
 
 ```cmake

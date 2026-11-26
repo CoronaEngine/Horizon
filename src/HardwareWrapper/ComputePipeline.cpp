@@ -65,7 +65,7 @@ ComputePipeline<CS>& ComputePipeline<CS>::uses(std::span<const ResourceUse> reso
 }
 
 template<class CS>
-ComputePipeline<CS>& ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
+ComputeCommand ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uint16_t z)
 {
     auto& impl = state();
     if (auto& variants = impl.variants)
@@ -96,8 +96,7 @@ ComputePipeline<CS>& ComputePipeline<CS>::operator()(uint16_t x, uint16_t y, uin
                 backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType);
         }
     }
-    backend(x, y, z);
-    return *this;
+    return ComputeCommand(std::make_shared<ComputeCommand::Impl>(impl.backend, ktm::uvec3{x, y, z}, impl.resourceUses));
 }
 
 template struct ComputePipeline<void>;

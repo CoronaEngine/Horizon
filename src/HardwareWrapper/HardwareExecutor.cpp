@@ -38,11 +38,9 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::enqueue(const ComputePipeline<>& pipeline)
+HardwareExecutor& HardwareExecutor::operator<<(const ComputeCommand& dispatch)
 {
-    auto* executor = execFromId(executorID);
-    if (const auto& impl = pipeline.impl_; impl && impl->backend)
-        executor->recordOwned(impl->backend->capture(), impl->resourceUses);
+    execFromId(executorID)->recordOwned(dispatch.impl_);
     return *this;
 }
 

@@ -327,6 +327,17 @@ private:
     void* displaySurface{nullptr};
 };
 
+// One dispatch with the workgroup counts, shader variant and bindings captured at the call site.
+class ComputeCommand
+{
+    template<class> friend struct ComputePipeline;
+    friend struct HardwareExecutor;
+
+    struct Impl;
+    explicit ComputeCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    std::shared_ptr<Impl> impl_;
+};
+
 template<class CS = void>
 struct ComputePipeline
 {
@@ -334,7 +345,6 @@ struct ComputePipeline
 
 private:
     template<class> friend struct ComputePipeline;
-    friend struct HardwareExecutor;
     friend struct EmbeddedShader::BoundField<ComputePipeline>;
 
     explicit ComputePipeline(const EmbeddedShader::ShaderCodeModule& module);
@@ -360,8 +370,7 @@ public:
     ComputePipeline(ComputePipeline&&) noexcept;
     ComputePipeline& operator=(ComputePipeline&&) noexcept;
 
-    // Select the EDSL variant, read its proxy bindings and set the workgroup counts for enqueue.
-    ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
+    [[nodiscard]] ComputeCommand operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
 
     ComputePipeline& uses(std::span<const ResourceUse> resources);
     ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
@@ -441,12 +450,8 @@ public:
 
     HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
 
-    template<class CS>
-    HardwareExecutor& operator<<(ComputePipeline<CS>& pipeline)
-    {
-        if constexpr (std::is_void_v<CS>) return enqueue(pipeline);
-        else return enqueue(pipeline.pipeline_);
-    }
+    HardwareExecutor& operator<<(const ComputeCommand& dispatch);
+    HardwareExecutor& operator<<(const ComputeCommand&&) = delete;
     HardwareExecutor& operator<<(RasterCommand&& draw);
     HardwareExecutor& operator<<(const CopyCommand& cmd);
 
@@ -467,6 +472,5 @@ public:
     }
 
 private:
-    HardwareExecutor& enqueue(const ComputePipeline<>& pipeline);
     std::uintptr_t executorID{0};
 };

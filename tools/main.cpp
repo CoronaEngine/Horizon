@@ -126,7 +126,6 @@ static void generateComputePipeline(std::ostream& out, const ShaderResources& re
 {
     out << "\ntemplate<> struct ComputePipeline<" << shaderType << "> {\n"
         << R"(private:
-    friend struct HardwareExecutor;
     ::ComputePipeline<> pipeline_;
 
 public:
@@ -142,10 +141,9 @@ public:
         return *this;
     }
 
-    ComputePipeline& operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
+    [[nodiscard]] ComputeCommand operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
     {
-        pipeline_(x, y, z);
-        return *this;
+        return pipeline_(x, y, z);
     }
 
     ComputePipeline& uses(std::span<const ResourceUse> resources)

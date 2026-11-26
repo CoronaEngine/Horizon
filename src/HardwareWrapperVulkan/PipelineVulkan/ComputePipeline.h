@@ -11,9 +11,8 @@
 #include "PipelineSnapshot.h"
 
 namespace horizon::detail {
-struct ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulkan>
+struct ComputePipelineVulkan
 {
-  public:
     ComputePipelineVulkan();
     ~ComputePipelineVulkan();
 
@@ -24,23 +23,8 @@ struct ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulka
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareBuffer &buffer, int32_t bindType);
     void setResourceDirect(uint64_t byteOffset, uint32_t typeSize, const HardwareImage &image, int32_t bindType);
 
-    ComputePipelineVulkan *operator()(uint16_t x, uint16_t y, uint16_t z);
-
-    struct Dispatch : CommandRecordVulkan
-    {
-        std::shared_ptr<ComputePipelineVulkan> pipeline;
-        ktm::uvec3 groupCount{};
-        std::vector<uint8_t> pushConstant;
-        std::vector<uint8_t> uniformBytes;
-        std::shared_ptr<BindingSnapshot> bindings;
-        std::shared_ptr<UniformSnapshot> uniform;
-        ExecutorType getExecutorType() override { return ExecutorType::Compute; }
-        void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
-        void commitCommand(HardwareExecutorVulkan& executor) override;
-    };
-    std::shared_ptr<Dispatch> capture();
-
-  private:
+private:
+    friend class ::ComputeCommand;
     void createComputePipeline();
 
     VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
@@ -55,13 +39,27 @@ struct ComputePipelineVulkan : std::enable_shared_from_this<ComputePipelineVulka
     VkDescriptorSetLayout uboDescriptorSetLayout{VK_NULL_HANDLE};
     PipelineBindings bindings;
     UniformSnapshotPool uniformPool;
-    void commitCommand(HardwareExecutorVulkan& executor, Dispatch& dispatch);
-
-    ktm::uvec3 groupCount = {0, 0, 0};
 };
 } // namespace horizon::detail
 
 using horizon::detail::ComputePipelineVulkan;
+
+struct ComputeCommand::Impl final : CommandRecordVulkan
+{
+    Impl(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
+         const std::vector<ResourceUse>& resources);
+    ExecutorType getExecutorType() override { return ExecutorType::Compute; }
+    void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
+    void commitCommand(HardwareExecutorVulkan& executor) override;
+
+    std::shared_ptr<ComputePipelineVulkan> backend;
+    ktm::uvec3 groupCount;
+    std::vector<uint8_t> pushConstant;
+    std::vector<uint8_t> uniformBytes;
+    std::shared_ptr<BindingSnapshot> bindings;
+    std::vector<ResourceUse> resourceUses;
+    std::shared_ptr<UniformSnapshot> uniform;
+};
 
 template<class CS>
 struct ComputePipeline<CS>::Impl

@@ -75,12 +75,6 @@ void ComputePipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t type
                            bindType, byteOffset, typeSize, image);
 }
 
-ComputePipelineVulkan *ComputePipelineVulkan::operator()(uint16_t x, uint16_t y, uint16_t z)
-{
-    groupCount = {x, y, z};
-    return this;
-}
-
 void ComputePipelineVulkan::createComputePipeline()
 {
     const auto mainDevice = getHardwareContext().getMainDevice();
@@ -148,44 +142,36 @@ void ComputePipelineVulkan::createComputePipeline()
     vkDestroyShaderModule(device, shaderModule, nullptr);
 }
 
-std::shared_ptr<ComputePipelineVulkan::Dispatch> ComputePipelineVulkan::capture()
-{
-    auto dispatch = std::make_shared<Dispatch>();
-    dispatch->pipeline = shared_from_this();
-    dispatch->groupCount = groupCount;
-    dispatch->pushConstant = copyParameterBytes(pushConstant.get(), shaderCode.shaderResources.pushConstantSize);
-    dispatch->uniformBytes = copyParameterBytes(tempUBO.get(), uboSize);
-    dispatch->bindings = bindings.snapshot();
-    return dispatch;
-}
+ComputeCommand::Impl::Impl(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
+                           const std::vector<ResourceUse>& resources)
+    : backend(std::move(pipeline)), groupCount(groups),
+      pushConstant(copyParameterBytes(backend->pushConstant.get(), backend->shaderCode.shaderResources.pushConstantSize)),
+      uniformBytes(copyParameterBytes(backend->tempUBO.get(), backend->uboSize)),
+      bindings(backend->bindings.snapshot()), resourceUses(resources) {}
 
-void ComputePipelineVulkan::Dispatch::commitCommand(HardwareExecutorVulkan& executor)
-{
-    pipeline->commitCommand(executor, *this);
-}
-
-void ComputePipelineVulkan::Dispatch::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
+void ComputeCommand::Impl::resolveResourceUses(std::span<const ResourceUse>, ResourceAccessList& result)
 {
     resolveShaderBindings(result, bindings->values, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-    resolveDeclaredUses(result, declarations, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    resolveDeclaredUses(result, resourceUses, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }
 
-void ComputePipelineVulkan::commitCommand(HardwareExecutorVulkan& executor, Dispatch& dispatch)
+void ComputeCommand::Impl::commitCommand(HardwareExecutorVulkan& executor)
 {
-    if (!pipelineLayout || !pipeline) createComputePipeline();
+    if (!backend->pipelineLayout || !backend->pipeline) backend->createComputePipeline();
     const auto commandBuffer = executor.currentRecordQueue->commandBuffer;
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-    dispatch.bindings->prepareDescriptors();
-    dispatch.bindings->writeParameters(dispatch.pushConstant, dispatch.uniformBytes);
-    if (!dispatch.uniform) dispatch.uniform = uniformPool.acquire(dispatch.uniformBytes, uboDescriptorSetLayout);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, backend->pipeline);
+    bindings->prepareDescriptors();
+    bindings->writeParameters(pushConstant, uniformBytes);
+    if (!uniform) uniform = backend->uniformPool.acquire(uniformBytes, backend->uboDescriptorSetLayout);
     std::array<VkDescriptorSet, 4> sets{};
+    const auto& tables = getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors;
     for (size_t i = 0; i < 3; ++i)
-        sets[i] = dispatch.bindings->sets[i] ? dispatch.bindings->sets[i] : getHardwareContext().getMainDevice()->resourceManager.bindlessDescriptors[i].descriptorSet;
-    sets[3] = (dispatch.uniform ? dispatch.uniform->set : VK_NULL_HANDLE);
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout,
+        sets[i] = bindings->sets[i] ? bindings->sets[i] : tables[i].descriptorSet;
+    sets[3] = uniform ? uniform->set : VK_NULL_HANDLE;
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, backend->pipelineLayout,
                             0, sets[3] ? 4 : 3, sets.data(), 0, nullptr);
-    if (!dispatch.pushConstant.empty())
-        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
-                           0, static_cast<uint32_t>(dispatch.pushConstant.size()), dispatch.pushConstant.data());
-    vkCmdDispatch(commandBuffer, dispatch.groupCount.x, dispatch.groupCount.y, dispatch.groupCount.z);
+    if (!pushConstant.empty())
+        vkCmdPushConstants(commandBuffer, backend->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, static_cast<uint32_t>(pushConstant.size()), pushConstant.data());
+    vkCmdDispatch(commandBuffer, groupCount.x, groupCount.y, groupCount.z);
 }

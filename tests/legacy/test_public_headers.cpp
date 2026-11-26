@@ -92,10 +92,14 @@ static_assert(requires(decltype([](ShaderVector v) { return v; }) vertex,
 });
 
 template<class T>
-concept CanEnqueue = requires(HardwareExecutor& executor, T& value) { executor << value; };
-static_assert(!CanEnqueue<HardwareExecutor>);
-static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const CopyCommand& copy) {
-    { b.wait(a) << copy } -> std::same_as<HardwareExecutor&>;
+concept CanEnqueue = requires(HardwareExecutor& executor, T&& value) { executor << std::forward<T>(value); };
+static_assert(!CanEnqueue<HardwareExecutor&> && !CanEnqueue<ComputePipeline<>&>);
+static_assert(CanEnqueue<ComputeCommand&> && CanEnqueue<const ComputeCommand&>);
+static_assert(!CanEnqueue<ComputeCommand> && !CanEnqueue<const ComputeCommand>);
+static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const CopyCommand& copy,
+                       const ComputeCommand& dispatch, ComputePipeline<>& pipeline) {
+    { pipeline(1) } -> std::same_as<ComputeCommand>;
+    { b.wait(a) << copy << dispatch } -> std::same_as<HardwareExecutor&>;
 });
 
 void check_legacy_public_headers() {}
@@ -115,13 +119,13 @@ static_assert(!DeducesPipeline<ComputeStageAdapter>);
 static_assert(std::same_as<decltype(&NamedCompute::params), decltype(NamedCompute::params) NamedCompute::*>);
 static_assert(std::same_as<decltype(&NamedCompute::outputs), decltype(NamedCompute::outputs) NamedCompute::*>);
 static_assert(MoveOnlyHandle<NamedCompute>);
-static_assert(requires(NamedCompute& pipeline, HardwareExecutor& executor, HardwareBuffer& buffer,
-                       std::span<const ResourceUse> resources) {
+static_assert(!CanEnqueue<NamedCompute&>);
+static_assert(requires(NamedCompute& pipeline, HardwareBuffer& buffer, std::span<const ResourceUse> resources) {
     { NamedCompute{} } -> std::same_as<NamedCompute>;
     { ComputePipeline(compute_write_slang) } -> std::same_as<NamedCompute>;
     pipeline.outputs = buffer;
-    { pipeline.uses(resources)(1, 2, 3) } -> std::same_as<NamedCompute&>;
-    { executor << pipeline.uses({{buffer, ResourceAccess::Write}})(1) } -> std::same_as<HardwareExecutor&>;
+    { pipeline.uses(resources)(1, 2, 3) } -> std::same_as<ComputeCommand>;
+    { pipeline.uses({{buffer, ResourceAccess::Write}})(1) } -> std::same_as<ComputeCommand>;
 });
 
 #include SLANG(examples/Disney/Slang/disney_frag.slang)

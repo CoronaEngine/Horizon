@@ -13,5 +13,6 @@ public uint addIndex(uint value, uint index) {
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
-    outputs[params.outputIndex][id.x] = addIndex(params.value, id.x);
+    uint index = id.x + 2 * id.y + 4 * id.z;
+    outputs[params.outputIndex][index] = addIndex(params.value, index);
 }

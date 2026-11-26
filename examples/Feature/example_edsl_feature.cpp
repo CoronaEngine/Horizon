@@ -72,7 +72,8 @@ EdslFeature::EdslFeature(void* native_window)
 
 void EdslFeature::run(float)
 {
-    executor << geometry.drawIndirect(vertex_buffer, index_buffer, commands, 1)
-             << lighting(width / group_size, height / group_size);
+    executor << geometry.drawIndirect(vertex_buffer, index_buffer, commands, 1);
+    const auto dispatch = lighting(width / group_size, height / group_size);
+    executor << dispatch;
     display.present(executor, shaded_image);
 }
