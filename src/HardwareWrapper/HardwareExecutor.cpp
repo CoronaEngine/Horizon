@@ -15,25 +15,24 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&&) noexcept = def
 HardwareExecutor& HardwareExecutor::operator<<(Command command)
 {
     if (!command.impl_) return *this;
-    auto& executor = HardwareBackendAccess::executor(*this);
-    auto* record = command.impl_->getCommandRecord();
-    if (!record) {
-        if (auto display = std::dynamic_pointer_cast<Command::Impl::Display>(std::move(command.impl_))) {
-            auto& pending = impl_->displays.emplace_back(std::move(display));
-            pending.preceding.swap(executor.commandList);
-        }
+    auto& pending = HardwareBackendAccess::state(*this).pending;
+    auto entry = command.impl_->queueEntry(std::move(command.impl_));
+    auto* gpu = std::get_if<RecordedCommand>(&entry);
+    if (gpu && gpu->type == CommandRecordVulkan::ExecutorType::Invalid)
         return *this;
-    }
+
     using Draw = Command::Impl::Draw;
-    auto* draw = dynamic_cast<Draw*>(record);
+    auto* draw = gpu ? dynamic_cast<Draw*>(gpu->command) : nullptr;
     if (!draw) {
-        executor.record(record, {}, std::move(command.impl_));
+        pending.push_back(std::move(entry));
         return *this;
     }
 
     Draw* previous = nullptr;
-    if (!draw->startsPass && !executor.commandList.empty())
-        previous = dynamic_cast<Draw*>(executor.commandList.back().command);
+    if (!draw->startsPass && !pending.empty()) {
+        if (const auto* last = std::get_if<RecordedCommand>(&pending.back()))
+            previous = dynamic_cast<Draw*>(last->command);
+    }
 
     const bool continuesPass = previous && previous->sameAttachments(*draw);
     if (continuesPass) {
@@ -48,12 +47,13 @@ HardwareExecutor& HardwareExecutor::operator<<(Command command)
     }
 
     // A queued pass may acquire more draws. Keep any saved command independent.
-    if (command.impl_.use_count() > 1) {
+    if (gpu->owner.use_count() > 1) {
         auto queued = std::make_shared<Draw>(*draw);
         draw = queued.get();
-        command.impl_ = std::move(queued);
+        gpu->command = draw;
+        gpu->owner = std::move(queued);
     }
-    executor.record(draw, {}, std::move(command.impl_));
+    pending.push_back(std::move(entry));
     if (continuesPass) {
         draw->pass = {.loadColor = true, .loadDepth = true};
         draw->groups.front().root.drawBase = previous->drawCount;
@@ -64,21 +64,35 @@ HardwareExecutor& HardwareExecutor::operator<<(Command command)
 
 HardwareExecutor& HardwareExecutor::commit()
 {
-    auto& executor = HardwareBackendAccess::executor(*this);
-    while (!impl_->displays.empty()) {
-        auto& pending = impl_->displays.front();
-        pending.preceding.swap(executor.commandList);
+    auto& state = HardwareBackendAccess::state(*this);
+    auto& pending = state.pending;
+    auto& executor = state.backend;
+    while (!pending.empty()) {
+        size_t count = 0;
+        while (count < pending.size() && std::holds_alternative<RecordedCommand>(pending[count]))
+            ++count;
+        const bool hasDisplay = count < pending.size();
+        auto& batch = executor.commandList;
+        batch.reserve(count);
+        for (size_t i = 0; i < count; ++i)
+            batch.push_back(std::move(std::get<RecordedCommand>(pending[i])));
+
         try {
-            pending.display->submit(executor);
-            executor.commit(true); // A skipped display still submits its work and dependencies.
+            if (hasDisplay)
+                std::get<std::shared_ptr<const Command::Impl::Display>>(pending[count])->submit(executor);
+            executor.commit(hasDisplay); // A skipped display still submits its work and dependencies.
         } catch (...) {
-            pending.preceding.swap(executor.commandList);
+            // Successful submissions have already taken ownership of their records.
+            // Restore only unsent work and leave the display and its suffix queued for retry.
+            const size_t submitted = count - batch.size();
+            for (size_t i = 0; i < batch.size(); ++i)
+                std::get<RecordedCommand>(pending[submitted + i]) = std::move(batch[i]);
+            batch.clear();
+            pending.erase(pending.begin(), pending.begin() + submitted);
             throw;
         }
-        pending.preceding.swap(executor.commandList);
-        impl_->displays.pop_front();
+        pending.erase(pending.begin(), pending.begin() + count + hasDisplay);
     }
-    executor.commit();
     return *this;
 }
 

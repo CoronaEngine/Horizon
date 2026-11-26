@@ -36,6 +36,20 @@ struct CommandRecordVulkan
 
 using horizon::detail::CommandRecordVulkan;
 
+// The owner retains captured GPU resources through recording and submission.
+struct RecordedCommand
+{
+    CommandRecordVulkan* command{};
+    std::vector<ResourceUse> resourceUses;
+    std::shared_ptr<void> owner;
+    CommandRecordVulkan::ExecutorType type{CommandRecordVulkan::ExecutorType::Invalid};
+
+    RecordedCommand() = default;
+    explicit RecordedCommand(CommandRecordVulkan& record, std::shared_ptr<void> owner = {},
+                             std::vector<ResourceUse> resources = {})
+        : command(&record), resourceUses(std::move(resources)), owner(std::move(owner)), type(record.getExecutorType()) {}
+};
+
 struct HardwareExecutor::Command::Impl
 {
     struct Draw;
@@ -46,30 +60,25 @@ struct HardwareExecutor::Command::Impl
     struct ImageToImage;
     struct ImageToBuffer;
 
+    using Entry = std::variant<RecordedCommand, std::shared_ptr<const Display>>;
+
     virtual ~Impl() = default;
-    virtual CommandRecordVulkan* getCommandRecord() = 0;
+    virtual Entry queueEntry(std::shared_ptr<Impl> owner) = 0;
 };
 
-struct HardwareExecutor::Command::Impl::Display final : HardwareExecutor::Command::Impl
+struct HardwareExecutor::Command::Impl::Display : HardwareExecutor::Command::Impl
 {
     Display(std::shared_ptr<HardwareDisplayer::Impl> target, const HardwareImage& image)
         : target(std::move(target)), image(image) {}
 
-    CommandRecordVulkan* getCommandRecord() override { return nullptr; }
-    void submit(HardwareExecutorVulkan& executor) const;
+    Entry queueEntry(std::shared_ptr<Impl> owner) final
+    {
+        return std::shared_ptr<const Display>(std::move(owner), this);
+    }
+    virtual void submit(HardwareExecutorVulkan& executor) const;
 
     std::shared_ptr<HardwareDisplayer::Impl> target;
     HardwareImage image;
-};
-
-// One enqueue's dependency metadata. Owned pipeline commands freeze execution
-// state; legacy borrowed commands retain their existing lifetime contract.
-struct RecordedCommand
-{
-    CommandRecordVulkan* command;
-    std::vector<ResourceUse> resourceUses;
-    std::shared_ptr<void> owner;
-    CommandRecordVulkan::ExecutorType type;
 };
 
 // A borrowed completion point. Queue storage and its device must outlive use;
@@ -126,9 +135,11 @@ struct HardwareExecutorVulkan
                                   const std::vector<ResourceUse>& resources = {},
                                   std::shared_ptr<void> owner = {})
     {
-        const auto type = commandRecord ? commandRecord->getExecutorType() : CommandRecordVulkan::ExecutorType::Invalid;
-        if (type != CommandRecordVulkan::ExecutorType::Invalid)
-            commandList.push_back({commandRecord, resources, std::move(owner), type});
+        if (commandRecord) {
+            RecordedCommand entry(*commandRecord, std::move(owner), resources);
+            if (entry.type != CommandRecordVulkan::ExecutorType::Invalid)
+                commandList.push_back(std::move(entry));
+        }
         return *this;
     }
 
@@ -180,7 +191,7 @@ struct HardwareExecutorVulkan
     // Number of vkCmdBeginRenderPass calls recorded by the most recent nonempty commit.
     uint32_t recordedRasterPassCount{};
     std::shared_ptr<HardwareContext::HardwareUtils> hardwareContext;
-    std::vector<RecordedCommand> commandList;
+    std::vector<RecordedCommand> commandList; // GPU batch currently being submitted.
     std::vector<VkSemaphoreSubmitInfo> waitSemaphores;
     std::vector<VkSemaphoreSubmitInfo> signalSemaphores;
 
@@ -198,20 +209,15 @@ struct HardwareExecutor::Impl
 {
     HardwareExecutorVulkan backend;
 
-    struct PendingDisplay {
-        std::shared_ptr<Command::Impl::Display> display;
-        std::vector<RecordedCommand> preceding;
-    };
-    // Each display ends a segment. The backend holds the commands after the last display.
-    std::deque<PendingDisplay> displays;
+    std::deque<Command::Impl::Entry> pending;
 };
 
 struct HardwareBackendAccess
 {
-    static HardwareExecutorVulkan& executor(HardwareExecutor& executor)
+    static HardwareExecutor::Impl& state(HardwareExecutor& executor)
     {
         if (!executor.impl_)
             throw std::runtime_error("Empty HardwareExecutor handle");
-        return executor.impl_->backend;
+        return *executor.impl_;
     }
 };

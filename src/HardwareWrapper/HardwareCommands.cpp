@@ -20,15 +20,15 @@ struct HardwareExecutor::Command::Impl::BufferToBuffer final : HardwareExecutor:
     {
     }
 
-    CommandRecordVulkan *getCommandRecord() override
+    Entry queueEntry(std::shared_ptr<Impl> owner) override
     {
-        if (command) return &*command;
-        auto* src = ResourceManager::get(srcBuffer);
-        auto* dst = ResourceManager::get(dstBuffer);
-        if (!src || !dst) return nullptr;
-        command.emplace(*src, *dst, srcOffset, dstOffset, size);
-
-        return &*command;
+        if (!command) {
+            auto* src = ResourceManager::get(srcBuffer);
+            auto* dst = ResourceManager::get(dstBuffer);
+            if (!src || !dst) return RecordedCommand{};
+            command.emplace(*src, *dst, srcOffset, dstOffset, size);
+        }
+        return RecordedCommand(*command, std::move(owner));
     }
 };
 
@@ -48,15 +48,15 @@ struct HardwareExecutor::Command::Impl::BufferToImage final : HardwareExecutor::
     {
     }
 
-    CommandRecordVulkan *getCommandRecord() override
+    Entry queueEntry(std::shared_ptr<Impl> owner) override
     {
-        if (command) return &*command;
-        auto* src = ResourceManager::get(srcBuffer);
-        auto* dst = ResourceManager::get(dstImage);
-        if (!src || !dst) return nullptr;
-        command.emplace(*src, *dst, imageMip, imageLayer, bufferOffset, 1);
-
-        return &*command;
+        if (!command) {
+            auto* src = ResourceManager::get(srcBuffer);
+            auto* dst = ResourceManager::get(dstImage);
+            if (!src || !dst) return RecordedCommand{};
+            command.emplace(*src, *dst, imageMip, imageLayer, bufferOffset, 1);
+        }
+        return RecordedCommand(*command, std::move(owner));
     }
 };
 
@@ -97,18 +97,17 @@ struct HardwareExecutor::Command::Impl::ImageToImage final : HardwareExecutor::C
     {
     }
 
-    CommandRecordVulkan *getCommandRecord() override
+    Entry queueEntry(std::shared_ptr<Impl> owner) override
     {
-        if (command) return &*command;
-        auto* src = ResourceManager::get(srcImage);
-        auto* dst = ResourceManager::get(dstImage);
-        if (!src || !dst) return nullptr;
-        if (src == dst)
-            throw std::invalid_argument("A legacy image copy requires distinct images");
-
-        command.emplace(*src, *dst, srcLayer, dstLayer, srcMip, dstMip);
-
-        return &*command;
+        if (!command) {
+            auto* src = ResourceManager::get(srcImage);
+            auto* dst = ResourceManager::get(dstImage);
+            if (!src || !dst) return RecordedCommand{};
+            if (src == dst)
+                throw std::invalid_argument("A legacy image copy requires distinct images");
+            command.emplace(*src, *dst, srcLayer, dstLayer, srcMip, dstMip);
+        }
+        return RecordedCommand(*command, std::move(owner));
     }
 };
 
@@ -139,15 +138,15 @@ struct HardwareExecutor::Command::Impl::ImageToBuffer final : HardwareExecutor::
     {
     }
 
-    CommandRecordVulkan *getCommandRecord() override
+    Entry queueEntry(std::shared_ptr<Impl> owner) override
     {
-        if (command) return &*command;
-        auto* src = ResourceManager::get(srcImage);
-        auto* dst = ResourceManager::get(dstBuffer);
-        if (!src || !dst) return nullptr;
-        command.emplace(*src, *dst, imageMip, imageLayer, bufferOffset, 1);
-
-        return &*command;
+        if (!command) {
+            auto* src = ResourceManager::get(srcImage);
+            auto* dst = ResourceManager::get(dstBuffer);
+            if (!src || !dst) return RecordedCommand{};
+            command.emplace(*src, *dst, imageMip, imageLayer, bufferOffset, 1);
+        }
+        return RecordedCommand(*command, std::move(owner));
     }
 };
 

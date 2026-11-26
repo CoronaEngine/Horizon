@@ -157,7 +157,7 @@ struct HardwareExecutor::Command::Impl::Draw final : HardwareExecutor::Command::
                         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                         std::optional<ScissorRect> scissor);
     void prepareFramebuffer();
-    CommandRecordVulkan* getCommandRecord() override { return this; }
+    Entry queueEntry(std::shared_ptr<Impl> owner) override { return RecordedCommand(*this, std::move(owner)); }
     ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
     void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
     void commitCommand(HardwareExecutorVulkan& executor) override;

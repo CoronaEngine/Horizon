@@ -48,7 +48,7 @@ struct HardwareExecutor::Command::Impl::Dispatch final : HardwareExecutor::Comma
 {
     Dispatch(std::shared_ptr<ComputePipelineVulkan> pipeline, ktm::uvec3 groups,
              const std::vector<ResourceUse>& resources);
-    CommandRecordVulkan* getCommandRecord() override { return this; }
+    Entry queueEntry(std::shared_ptr<Impl> owner) override { return RecordedCommand(*this, std::move(owner)); }
     ExecutorType getExecutorType() override { return ExecutorType::Compute; }
     void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
     void commitCommand(HardwareExecutorVulkan& executor) override;
