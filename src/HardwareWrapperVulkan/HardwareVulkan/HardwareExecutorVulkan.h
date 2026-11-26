@@ -34,8 +34,10 @@ struct CommandRecordVulkan
 
 using horizon::detail::CommandRecordVulkan;
 
-struct CopyCommand::Impl
+struct HardwareCommand::Impl
 {
+    struct Draw;
+    struct Dispatch;
     struct BufferToBuffer;
     struct BufferToImage;
     struct ImageToImage;
@@ -104,7 +106,7 @@ struct HardwareExecutorVulkan
     }
 
     // Borrowed commands must outlive recording; their GPU resources must outlive execution.
-    // Supply an owner (or use recordOwned) when the queue should retain the command.
+    // Supply an owner when the queue should retain the command.
     HardwareExecutorVulkan &record(CommandRecordVulkan *commandRecord,
                                   const std::vector<ResourceUse>& resources = {},
                                   std::shared_ptr<void> owner = {})
@@ -118,13 +120,6 @@ struct HardwareExecutorVulkan
     HardwareExecutorVulkan &operator<<(CommandRecordVulkan *commandRecord)
     {
         return record(commandRecord);
-    }
-
-    HardwareExecutorVulkan& recordOwned(std::shared_ptr<CommandRecordVulkan> command,
-                                       const std::vector<ResourceUse>& resources = {})
-    {
-        auto* record = command.get();
-        return this->record(record, resources, std::move(command));
     }
 
     HardwareExecutorVulkan &operator<<(HardwareExecutorVulkan &other)

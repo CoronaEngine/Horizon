@@ -125,7 +125,6 @@ void test_cpu()
     catch (const std::invalid_argument&) { rejected = true; }
     expect(rejected, "pixel presentation rejects a format incompatible with RGBA8 data");
     expect(!empty && !image, "default resources must be empty");
-    expect(!CopyCommand{} && !image.copyFrom(nullptr), "default command and null upload must be empty");
 }
 
 bool has_vulkan_14_device()
@@ -159,7 +158,12 @@ void test_indirect_draws(bool forceSingleDraw)
 {
     using namespace EmbeddedShader;
     HardwareExecutor executor;
+    HardwareExecutor replay;
     HardwareImage target(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    target.setClearColor(0, 0, 0, 0);
+    std::array<std::array<float,4>,8> pixels{};
+    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
+    HardwareBuffer splitReadback(sizeof(pixels), BufferUsage::StorageBuffer);
     {
         HardwareImage reflectedTarget(4, 2, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
         Texture2D<ktm::fvec4> color = reflectedTarget, overrideColor = reflectedTarget;
@@ -198,18 +202,20 @@ void test_indirect_draws(bool forceSingleDraw)
         HardwareBuffer red(std::array<float,4>{1,0,0,1}, BufferUsage::StorageBuffer);
         HardwareBuffer greens(std::array<std::array<float,4>,2>{{{0,1,0,1}, {0,2,0,1}}},
                               BufferUsage::StorageBuffer);
-        executor << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2})
+        const auto drawLeft = pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{0,0,2,2});
+        executor << drawLeft << drawLeft
                  << pipeline.drawIndirect({}, {}, {}, 0)
                  << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, red, ScissorRect{-3,0,2,2})
                  << pipeline.drawIndirect(rightVertices, rightIndices, rightCommands, 2, greens, ScissorRect{2,0,2,2});
+        replay << drawLeft << target.copyTo(readback);
         useDrawColor = false;
         // The new shader variant requires a physical split within the same logical pass.
-        executor << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1})
+        const auto drawBlue = pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{2,0,1,1});
+        executor << drawBlue
                  << pipeline.drawIndirect(leftVertices, leftIndices, leftCommands, 1, {}, ScissorRect{3,0,1,2},
                                           RasterPass{.loadColor = true}, ktm::uvec2(4, 1));
+        replay << drawBlue << target.copyTo(splitReadback);
     }
-    std::array<std::array<float,4>,8> pixels{};
-    HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
     executor << target.copyTo(readback);
     auto& multiDraw = getHardwareContext().getMainDevice()->deviceManager.getFeaturesUtils()
                           .featuresChain.getChainHead()->features.multiDrawIndirect;
@@ -221,11 +227,24 @@ void test_indirect_draws(bool forceSingleDraw)
            "adjacent geometry groups share a pass; switching variants and explicitly loading each start a pass");
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "raster readback");
     const std::array<std::array<float,4>,8> expected{{
-        {1,0,0,1}, {1,0,0,1}, {0,0,4,1}, {0,0,1,1},
-        {1,0,0,1}, {1,0,0,1}, {0,2,2,1}, {0,2,2,1}
+        {1,0,1,1}, {1,0,1,1}, {0,0,5,1}, {0,0,1,1},
+        {1,0,1,1}, {1,0,1,1}, {0,2,3,1}, {0,2,3,1}
     }};
-    expect(pixels == expected, "indirect groups must honor scissor, local packet and parameter offsets, "
-           "logical draw indices across a physical split and their reset at an explicit load");
+    expect(pixels == expected, "repeated and merged draws retain their scissor, packet offsets and draw indices "
+           "across a physical split and reset their index at an explicit load");
+
+    replay.commit().waitForDeferredResources();
+    const std::array<std::array<float,4>,8> expectedReplay{{
+        {1,0,0,1}, {1,0,0,1}, {}, {},
+        {1,0,0,1}, {1,0,0,1}, {}, {}
+    }};
+    expect(reinterpret_cast<HardwareExecutorVulkan*>(replay.getExecutorID())->recordedRasterPassCount == 2 &&
+           readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == expectedReplay,
+           "replaying a saved draw clears the target and draws only its original geometry at index zero");
+    std::array<std::array<float,4>,8> expectedBlue{};
+    expectedBlue[2] = {0,0,1,1};
+    expect(splitReadback.copyToData(pixels.data(), sizeof(pixels)) && pixels == expectedBlue,
+           "replaying a draw that previously split a pass retains its original clear and draw index");
 }
 
 void test_raster_sampled_storage_image()
@@ -358,12 +377,11 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expectInvalidUpload(BufferUsage::IndexBuffer, nullptr, sizeof(uint16_t));
     expectInvalidUpload(BufferUsage::IndexBuffer, indices.data(), 1);
     expectInvalidUpload(BufferUsage::VertexBuffer, vertices, 2);
-    CopyCommand indexUpload;
     if (explicitDepth) {
-        indexUpload = indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
+        executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     } else {
         const std::vector<uint32_t> wideIndices(indices.begin(), indices.end());
-        indexUpload = indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
+        executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
     }
     expect(vertexBuffer.getBufferID() == vertexID && indexBuffer.getBufferID() != vertexID,
            "recreating one buffer handle preserves the allocation held by its copy");
@@ -382,8 +400,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareBuffer generatedParameters(3, sizeof(ktm::fvec4), BufferUsage::StorageBuffer);
     EmbeddedShader::ArrayProxy<uint32_t> words(packets);
     EmbeddedShader::ArrayProxy<ktm::fvec4> parameters(generatedParameters);
-    executor << indexUpload << pipeline.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth,
-                                                     {}, {}, ktm::uvec2(4, 2));
+    executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, firstCommands, 1, redAndDepth, {}, {}, ktm::uvec2(4, 2));
     {
         ComputePipeline generate([&] {
             words[0] = Uint(6);
@@ -396,8 +413,7 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
             parameters[2] = Float4(0.5f, 0, 0, 0);
         });
         generate.uses({{packets, ResourceAccess::Write}, {generatedParameters, ResourceAccess::Write}});
-        const auto generatePackets = generate(1);
-        executor << generatePackets;
+        executor << generate(1);
     }
     pipeline.setRasterState({true, false, RasterCompare::Equal, RasterBlend::Additive});
 
@@ -589,11 +605,11 @@ void test_gpu()
     HardwareBuffer emptyBuffer;
     HardwareImage emptyImage;
     executor << emptyBuffer.copyTo(emptyBuffer) << emptyBuffer.copyTo(emptyImage)
-             << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer);
-    expect(backend->commandList.empty(), "copies between empty resources must not record GPU work");
+             << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer) << emptyImage.copyFrom(nullptr);
+    expect(backend->commandList.empty(), "empty resources and a null image upload record no GPU work");
     const auto emptyUpload = emptyBuffer.createDeviceLocal(BufferUsage::StorageBuffer, nullptr, 0, sizeof(uint32_t));
     executor << emptyUpload;
-    expect(!emptyUpload && emptyBuffer.getBufferID() && emptyBuffer.getElementCount() == 0 &&
+    expect(emptyBuffer.getBufferID() && emptyBuffer.getElementCount() == 0 &&
            emptyBuffer.getElementSize() == sizeof(uint32_t) && backend->commandList.empty(),
            "a zero-element device-local buffer preserves its dimensions without recording an upload");
     {
@@ -609,21 +625,18 @@ void test_gpu()
         expect(!display.present(input, 2, 4, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
     }
     std::cerr << "GPU: buffer copy/readback\n";
-    CopyCommand savedCopy;
+    std::array<uint32_t, 8> output{};
     {
-        auto copy = HardwareBuffer(input, BufferUsage::StorageBuffer).copyTo(destination);
-        savedCopy = copy;
+        const auto copy = HardwareBuffer(input, BufferUsage::StorageBuffer).copyTo(destination);
+        executor << copy;
+        executor.commit().waitForDeferredResources();
+        expect(destination.copyToData(output.data(), sizeof(output)), "buffer readback");
+        expect(output == input, "GPU buffer round trip");
+
+        std::cerr << "GPU: deferred resource lifetime\n";
+        expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear destination before reusing copy");
         executor << copy;
     }
-    executor.commit().waitForDeferredResources();
-    std::array<uint32_t, 8> output{};
-    expect(destination.copyToData(output.data(), sizeof(output)), "buffer readback");
-    expect(output == input, "GPU buffer round trip");
-
-    std::cerr << "GPU: deferred resource lifetime\n";
-    expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear destination before reusing copy");
-    executor << savedCopy;
-    savedCopy = {};
     executor.commit().waitForDeferredResources();
     expect(destination.copyToData(output.data(), sizeof(output)) && output == input,
            "a reused copy retains its temporary source after all command handles are released");
@@ -751,13 +764,13 @@ void test_gpu()
     movedRaster.outColor = first;
     movedRaster.vp.proj = ktm::fmat4x4::from_eye();
     movedRaster.vp.view = ktm::fmat4x4::from_eye();
-    auto firstDraw = movedRaster.drawIndirect(vertices, indices, packets, 1, drawParameters);
+    const auto firstDraw = movedRaster.drawIndirect(vertices, indices, packets, 1, drawParameters);
     raster = std::move(movedRaster);
     raster.outColor = second;
     raster.vp.view = ktm::translate3d(ktm::fvec3(8.f, 0.f, 0.f));
     std::array<std::array<float, 4>, 2> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
-    executor << std::move(firstDraw) << raster.drawIndirect(vertices, indices, packets, 1, drawParameters)
+    executor << firstDraw << raster.drawIndirect(vertices, indices, packets, 1, drawParameters)
              << first.copyTo(readback) << second.copyTo(readback, 0, 0, sizeof(pixels[0]));
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) &&

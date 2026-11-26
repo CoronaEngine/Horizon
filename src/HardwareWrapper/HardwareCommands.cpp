@@ -5,7 +5,7 @@
 #include <optional>
 
 // ================= Buffer 到 Buffer 拷贝命令实现 =================
-struct CopyCommand::Impl::BufferToBuffer final : CopyCommand::Impl
+struct HardwareCommand::Impl::BufferToBuffer final : HardwareCommand::Impl
 {
     HardwareBuffer srcBuffer;
     HardwareBuffer dstBuffer;
@@ -39,7 +39,7 @@ struct CopyCommand::Impl::BufferToBuffer final : CopyCommand::Impl
 };
 
 // ================= Buffer 到 Image 拷贝命令实现 =================
-struct CopyCommand::Impl::BufferToImage final : CopyCommand::Impl
+struct HardwareCommand::Impl::BufferToImage final : HardwareCommand::Impl
 {
     HardwareBuffer srcBuffer;
     HardwareImage dstImage;
@@ -70,26 +70,26 @@ struct CopyCommand::Impl::BufferToImage final : CopyCommand::Impl
     }
 };
 
-CopyCommand HardwareBuffer::copyTo(const HardwareBuffer& dst, uint64_t srcOffset, uint64_t dstOffset, uint64_t size) const
+HardwareCommand HardwareBuffer::copyTo(const HardwareBuffer& dst, uint64_t srcOffset, uint64_t dstOffset, uint64_t size) const
 {
-    auto copy = std::make_shared<CopyCommand::Impl::BufferToBuffer>(*this, dst);
+    auto copy = std::make_shared<HardwareCommand::Impl::BufferToBuffer>(*this, dst);
     copy->srcOffset = srcOffset;
     copy->dstOffset = dstOffset;
     copy->size = size;
-    return CopyCommand(std::move(copy));
+    return HardwareCommand(std::move(copy));
 }
 
-CopyCommand HardwareBuffer::copyTo(const HardwareImage& dst, uint64_t bufferOffset, uint32_t imageLayer, uint32_t imageMip) const
+HardwareCommand HardwareBuffer::copyTo(const HardwareImage& dst, uint64_t bufferOffset, uint32_t imageLayer, uint32_t imageMip) const
 {
-    auto copy = std::make_shared<CopyCommand::Impl::BufferToImage>(*this, dst);
+    auto copy = std::make_shared<HardwareCommand::Impl::BufferToImage>(*this, dst);
     copy->bufferOffset = bufferOffset;
     copy->imageLayer = imageLayer;
     copy->imageMip = imageMip;
-    return CopyCommand(std::move(copy));
+    return HardwareCommand(std::move(copy));
 }
 
 // ================= Image 到 Image 拷贝命令实现 =================
-struct CopyCommand::Impl::ImageToImage final : CopyCommand::Impl
+struct HardwareCommand::Impl::ImageToImage final : HardwareCommand::Impl
 {
     HardwareImage srcImage;
     HardwareImage dstImage;
@@ -126,19 +126,19 @@ struct CopyCommand::Impl::ImageToImage final : CopyCommand::Impl
     }
 };
 
-CopyCommand HardwareImage::copyTo(const HardwareImage& dst, uint32_t srcLayer, uint32_t dstLayer,
-                                  uint32_t srcMip, uint32_t dstMip) const
+HardwareCommand HardwareImage::copyTo(const HardwareImage& dst, uint32_t srcLayer, uint32_t dstLayer,
+                                      uint32_t srcMip, uint32_t dstMip) const
 {
-    auto copy = std::make_shared<CopyCommand::Impl::ImageToImage>(*this, dst);
+    auto copy = std::make_shared<HardwareCommand::Impl::ImageToImage>(*this, dst);
     copy->srcLayer = srcLayer;
     copy->dstLayer = dstLayer;
     copy->srcMip = srcMip;
     copy->dstMip = dstMip;
-    return CopyCommand(std::move(copy));
+    return HardwareCommand(std::move(copy));
 }
 
 // ================= Image 到 Buffer 拷贝命令实现 =================
-struct CopyCommand::Impl::ImageToBuffer final : CopyCommand::Impl
+struct HardwareCommand::Impl::ImageToBuffer final : HardwareCommand::Impl
 {
     HardwareImage srcImage;
     HardwareBuffer dstBuffer;
@@ -169,11 +169,11 @@ struct CopyCommand::Impl::ImageToBuffer final : CopyCommand::Impl
     }
 };
 
-CopyCommand HardwareImage::copyTo(const HardwareBuffer& dst, uint32_t imageLayer, uint32_t imageMip, uint64_t bufferOffset) const
+HardwareCommand HardwareImage::copyTo(const HardwareBuffer& dst, uint32_t imageLayer, uint32_t imageMip, uint64_t bufferOffset) const
 {
-    auto copy = std::make_shared<CopyCommand::Impl::ImageToBuffer>(*this, dst);
+    auto copy = std::make_shared<HardwareCommand::Impl::ImageToBuffer>(*this, dst);
     copy->imageLayer = imageLayer;
     copy->imageMip = imageMip;
     copy->bufferOffset = bufferOffset;
-    return CopyCommand(std::move(copy));
+    return HardwareCommand(std::move(copy));
 }

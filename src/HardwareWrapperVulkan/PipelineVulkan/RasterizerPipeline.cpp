@@ -405,8 +405,8 @@ void RasterizerPipelineVulkan::createGraphicsPipeline(GraphicsState& state)
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
-RasterCommand::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
-                          std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
+HardwareCommand::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent,
+                                  std::optional<RasterPass> requestedPass, const std::vector<ResourceUse>& uses)
     : pipeline(std::move(backend)), state(pipeline->rasterState), pass(requestedPass.value_or(RasterPass{})),
       startsPass(requestedPass.has_value()),
       renderTargets(pipeline->renderTargets), resourceUses(uses)
@@ -438,7 +438,7 @@ RasterCommand::Impl::Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std
     bindings = pipeline->bindings.snapshot();
 }
 
-bool RasterCommand::Impl::canMerge(const Impl& next) const
+bool HardwareCommand::Impl::Draw::canMerge(const Draw& next) const
 {
     if (pipeline != next.pipeline || state != next.state || uniformBytes != next.uniformBytes)
         return false;
@@ -479,14 +479,14 @@ bool RasterCommand::Impl::canMerge(const Impl& next) const
     return true;
 }
 
-bool RasterCommand::Impl::sameAttachments(const Impl& next) const
+bool HardwareCommand::Impl::Draw::sameAttachments(const Draw& next) const
 {
     return imageSize == next.imageSize && pipeline->multiviewCount == next.pipeline->multiviewCount &&
            sameAttachment(depthImage, next.depthImage) &&
            std::ranges::equal(renderTargets, next.renderTargets, sameAttachment);
 }
 
-void RasterCommand::Impl::prepareFramebuffer()
+void HardwareCommand::Impl::Draw::prepareFramebuffer()
 {
     if (framebuffer) return;
     auto& lastFramebuffer = pipeline->lastFramebuffer;
@@ -598,9 +598,9 @@ VkDeviceAddress addressOf(const HardwareBuffer& handle)
 }
 }
 
-void RasterCommand::Impl::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                       const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
-                                       std::optional<ScissorRect> scissor)
+void HardwareCommand::Impl::Draw::appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                                const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
+                                                std::optional<ScissorRect> scissor)
 {
     if (!count) return;
     if (!packets || packets.getElementSize() != sizeof(RasterIndirectPacket) || count > packets.getElementCount() ||
@@ -642,7 +642,7 @@ void RasterCommand::Impl::appendIndirect(const HardwareBuffer& vertices, const H
     drawCount = count;
 }
 
-void RasterCommand::Impl::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
+void HardwareCommand::Impl::Draw::resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result)
 {
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
@@ -686,7 +686,7 @@ void RasterCommand::Impl::resolveResourceUses(std::span<const ResourceUse> decla
     }
 }
 
-void RasterCommand::Impl::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
+void HardwareCommand::Impl::Draw::commitCommand(HardwareExecutorVulkan& hardwareExecutor)
 {
     prepareFramebuffer();
     const auto& graphics = *framebuffer->graphics;

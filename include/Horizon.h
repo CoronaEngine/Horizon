@@ -22,48 +22,19 @@
 #include "Compiler/ShaderCodeCompiler.h"
 #include <ktm/ktm.h>
 
-
-class CopyCommand
+// Copying a command retains its captured resources and parameters for later enqueue.
+class HardwareCommand
 {
-public:
-    CopyCommand() = default;
-    explicit operator bool() const { return impl_ != nullptr; }
-
-private:
     friend struct HardwareBuffer;
     friend struct HardwareImage;
-    friend struct HardwareExecutor;
-
-    struct Impl;
-    explicit CopyCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
-    std::shared_ptr<Impl> impl_;
-};
-
-
-class ComputeCommand
-{
     template<class> friend struct ComputePipeline;
-    friend struct HardwareExecutor;
-
-    struct Impl;
-    explicit ComputeCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
-    std::shared_ptr<Impl> impl_;
-};
-
-
-class RasterCommand
-{
-public:
-    RasterCommand(RasterCommand&&) noexcept = default;
-    RasterCommand& operator=(RasterCommand&&) noexcept = default;
-private:
     template<class, class> friend struct RasterizerPipeline;
     friend struct HardwareExecutor;
+
     struct Impl;
-    explicit RasterCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    explicit HardwareCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
     std::shared_ptr<Impl> impl_;
 };
-
 
 struct HardwareExecutor
 {
@@ -74,10 +45,7 @@ public:
 
     HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
 
-    HardwareExecutor& operator<<(const ComputeCommand& dispatch);
-    HardwareExecutor& operator<<(const ComputeCommand&&) = delete;
-    HardwareExecutor& operator<<(RasterCommand&& draw);
-    HardwareExecutor& operator<<(const CopyCommand& cmd);
+    HardwareExecutor& operator<<(HardwareCommand command);
 
     // Depend on the most recent successful submission of other at the time of this call.
     HardwareExecutor& wait(HardwareExecutor& other);
@@ -185,8 +153,8 @@ public:
     }
 
     // Replace this buffer and return its upload command. The command retains the staged data and destination.
-    [[nodiscard]] CopyCommand createDeviceLocal(BufferUsage usage, const void* data,
-                                                size_t elementCount, size_t elementSize);
+    [[nodiscard]] HardwareCommand createDeviceLocal(BufferUsage usage, const void* data,
+                                                    size_t elementCount, size_t elementSize);
 
     HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, BufferUsage usage);
 
@@ -202,10 +170,10 @@ public:
     [[nodiscard]] uint32_t storeDescriptor() const;
 
     // 流式拷贝命令（用于 HardwareExecutor << ）
-    [[nodiscard]] CopyCommand copyTo(const HardwareBuffer& dst, uint64_t srcOffset = 0,
-                                     uint64_t dstOffset = 0, uint64_t size = 0) const;
-    [[nodiscard]] CopyCommand copyTo(const HardwareImage& dst, uint64_t bufferOffset = 0,
-                                     uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
+    [[nodiscard]] HardwareCommand copyTo(const HardwareBuffer& dst, uint64_t srcOffset = 0,
+                                         uint64_t dstOffset = 0, uint64_t size = 0) const;
+    [[nodiscard]] HardwareCommand copyTo(const HardwareImage& dst, uint64_t bufferOffset = 0,
+                                         uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
 
     // CPU 映射内存操作（非 GPU 命令）
     bool copyFromData(const void* inputData, uint64_t size) const;
@@ -236,7 +204,7 @@ private:
     static HardwareBuffer rasterUpload(uint32_t bytes);
     std::uintptr_t bufferID{0};
 
-    friend class RasterCommand;
+    friend class HardwareCommand;
 };
 
 // ================= HardwareImage 参数结构体 =================
@@ -282,11 +250,11 @@ public:
     void setClearColor(float r, float g, float b, float a);
 
     // 流式拷贝命令（用于 HardwareExecutor << ）
-    [[nodiscard]] CopyCommand copyTo(const HardwareImage& dst, uint32_t srcLayer = 0, uint32_t dstLayer = 0,
-                                     uint32_t srcMip = 0, uint32_t dstMip = 0) const;
-    [[nodiscard]] CopyCommand copyTo(const HardwareBuffer& dst, uint32_t imageLayer = 0,
-                                     uint32_t imageMip = 0, uint64_t bufferOffset = 0) const;
-    [[nodiscard]] CopyCommand copyFrom(const void* inputData, uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
+    [[nodiscard]] HardwareCommand copyTo(const HardwareImage& dst, uint32_t srcLayer = 0, uint32_t dstLayer = 0,
+                                         uint32_t srcMip = 0, uint32_t dstMip = 0) const;
+    [[nodiscard]] HardwareCommand copyTo(const HardwareBuffer& dst, uint32_t imageLayer = 0,
+                                         uint32_t imageMip = 0, uint64_t bufferOffset = 0) const;
+    [[nodiscard]] HardwareCommand copyFrom(const void* inputData, uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
 
 private:
     std::uintptr_t imageID{0};
@@ -399,7 +367,7 @@ public:
     ComputePipeline(ComputePipeline&&) noexcept;
     ComputePipeline& operator=(ComputePipeline&&) noexcept;
 
-    [[nodiscard]] ComputeCommand operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
+    [[nodiscard]] HardwareCommand operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1);
 
     ComputePipeline& uses(std::span<const ResourceUse> resources);
     ComputePipeline& uses(std::initializer_list<ResourceUse> resources) { return uses(std::span(resources)); }
@@ -450,10 +418,10 @@ public:
     // Capture the current bindings and draw the first count packets in order when enqueued.
     // An explicit pass starts a new drawIndex sequence and applies its attachment load/clear operations,
     // even with zero draws. Adjacent draws on the same attachments and extent otherwise continue the pass.
-    [[nodiscard]] RasterCommand drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                             const HardwareBuffer& packets, uint32_t count,
-                                             const HardwareBuffer& parameters = {}, std::optional<ScissorRect> scissor = {},
-                                             std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});
+    [[nodiscard]] HardwareCommand drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                               const HardwareBuffer& packets, uint32_t count,
+                                               const HardwareBuffer& parameters = {}, std::optional<ScissorRect> scissor = {},
+                                               std::optional<RasterPass> pass = {}, std::optional<ktm::uvec2> extent = {});
 
     RasterizerPipeline& uses(std::initializer_list<ResourceUse> resources);
 

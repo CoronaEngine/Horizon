@@ -274,16 +274,11 @@ void HardwareImage::setClearColor(float r, float g, float b, float a)
     handle->clearValue.color = {{r, g, b, a}};
 }
 
-CopyCommand HardwareImage::copyFrom(const void *inputData, uint32_t imageLayer, uint32_t imageMip) const
+HardwareCommand HardwareImage::copyFrom(const void *inputData, uint32_t imageLayer, uint32_t imageMip) const
 {
-    if (inputData == nullptr)
-    {
-        return {};
-    }
-
-    if (!*this) return {};
+    if (!inputData || !*this) return HardwareCommand(nullptr);
     const auto* image = legacyImageFromId(imageID);
-    if (imageMip >= image->mipLevels) return {};
+    if (imageMip >= image->mipLevels) return HardwareCommand(nullptr);
     HardwareBuffer stagingBuffer(uploadByteCount(*image, imageMip), BufferUsage::StorageBuffer, inputData);
     return stagingBuffer.copyTo(*this, 0, imageLayer, imageMip);
 }

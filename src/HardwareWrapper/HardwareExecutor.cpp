@@ -1,6 +1,5 @@
 #include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "HardwareWrapperVulkan/PipelineVulkan/ComputePipeline.h"
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 #include <stdexcept>
 
@@ -38,51 +37,45 @@ HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::operator<<(const ComputeCommand& dispatch)
+HardwareExecutor& HardwareExecutor::operator<<(HardwareCommand command)
 {
-    execFromId(executorID)->recordOwned(dispatch.impl_);
-    return *this;
-}
-
-HardwareExecutor& HardwareExecutor::operator<<(RasterCommand&& draw)
-{
-    if (!draw.impl_) return *this;
+    if (!command.impl_) return *this;
     auto& executor = *execFromId(executorID);
-    auto& current = *draw.impl_;
-    RasterCommand::Impl* previous = nullptr;
-    if (!current.startsPass && !executor.commandList.empty())
-        previous = dynamic_cast<RasterCommand::Impl*>(executor.commandList.back().command);
-
-    if (previous && previous->sameAttachments(current)) {
-        const uint32_t base = previous->drawCount;
-        if (current.drawCount > UINT32_MAX - base) throw std::length_error("Raster pass exceeds the draw index range");
-        if (previous->canMerge(current)) {
-            previous->groups.push_back(std::move(current.groups.front()));
-            previous->groups.back().root.drawBase = base;
-            previous->drawCount += current.drawCount;
-        } else {
-            // A physical split preserves the attachments and the shader-visible draw index.
-            executor.recordOwned(draw.impl_);
-            current.pass = {.loadColor = true, .loadDepth = true};
-            current.groups.front().root.drawBase = base;
-            current.drawCount += base;
-        }
-    } else {
-        executor.recordOwned(draw.impl_);
-    }
-    draw.impl_.reset();
-    return *this;
-}
-
-HardwareExecutor& HardwareExecutor::operator<<(const CopyCommand& cmd)
-{
-    if (!cmd.impl_ || !executorID)
+    auto* record = command.impl_->getCommandRecord();
+    using Draw = HardwareCommand::Impl::Draw;
+    auto* draw = dynamic_cast<Draw*>(record);
+    if (!draw) {
+        executor.record(record, {}, std::move(command.impl_));
         return *this;
+    }
 
-    auto* executor = execFromId(executorID);
-    if (CommandRecordVulkan* record = cmd.impl_->getCommandRecord())
-    {
-        executor->record(record, {}, cmd.impl_);
+    Draw* previous = nullptr;
+    if (!draw->startsPass && !executor.commandList.empty())
+        previous = dynamic_cast<Draw*>(executor.commandList.back().command);
+
+    const bool continuesPass = previous && previous->sameAttachments(*draw);
+    if (continuesPass) {
+        if (draw->drawCount > UINT32_MAX - previous->drawCount)
+            throw std::length_error("Raster pass exceeds the draw index range");
+        if (previous->canMerge(*draw)) {
+            previous->groups.push_back(draw->groups.front());
+            previous->groups.back().root.drawBase = previous->drawCount;
+            previous->drawCount += draw->drawCount;
+            return *this;
+        }
+    }
+
+    // A queued pass may acquire more draws. Keep any saved command independent.
+    if (command.impl_.use_count() > 1) {
+        auto queued = std::make_shared<Draw>(*draw);
+        draw = queued.get();
+        command.impl_ = std::move(queued);
+    }
+    executor.record(draw, {}, std::move(command.impl_));
+    if (continuesPass) {
+        draw->pass = {.loadColor = true, .loadDepth = true};
+        draw->groups.front().root.drawBase = previous->drawCount;
+        draw->drawCount += previous->drawCount;
     }
     return *this;
 }

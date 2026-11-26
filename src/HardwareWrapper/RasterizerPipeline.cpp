@@ -110,12 +110,12 @@ void RasterizerPipeline<VS, FS>::setResourceDirect(uint64_t byteOffset, uint32_t
 }
 
 template<class VS, class FS>
-RasterCommand RasterizerPipeline<VS, FS>::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                                       const HardwareBuffer& packets, uint32_t count,
-                                                       const HardwareBuffer& parameters, std::optional<ScissorRect> scissor,
-                                                       std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
+HardwareCommand RasterizerPipeline<VS, FS>::drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                                         const HardwareBuffer& packets, uint32_t count,
+                                                         const HardwareBuffer& parameters, std::optional<ScissorRect> scissor,
+                                                         std::optional<RasterPass> pass, std::optional<ktm::uvec2> extent)
 {
-    if (!count && !pass) return RasterCommand(nullptr);
+    if (!count && !pass) return HardwareCommand(nullptr);
     auto& pipeline = state();
     if (pipeline.variants) pipeline.refreshShaderVariant();
     auto& backend = *pipeline.backend;
@@ -135,10 +135,10 @@ RasterCommand RasterizerPipeline<VS, FS>::drawIndirect(const HardwareBuffer& ver
                 backend.setResourceDirect(entry.byteOffset, entry.typeSize, *static_cast<HardwareImage*>(res), entry.bindType, entry.location);
         }
     }
-    auto draw = std::make_shared<RasterCommand::Impl>(pipeline.backend, extent, pass, pipeline.resourceUses);
+    auto draw = std::make_shared<HardwareCommand::Impl::Draw>(pipeline.backend, extent, pass, pipeline.resourceUses);
     draw->appendIndirect(vertices, indices, packets, count, parameters, scissor);
-    if (!draw->drawCount && !pass) return RasterCommand(nullptr);
-    return RasterCommand(std::move(draw));
+    if (!draw->drawCount && !pass) return HardwareCommand(nullptr);
+    return HardwareCommand(std::move(draw));
 }
 
 template<class VS, class FS>

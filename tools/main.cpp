@@ -141,7 +141,7 @@ public:
         return *this;
     }
 
-    [[nodiscard]] ComputeCommand operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
+    [[nodiscard]] HardwareCommand operator()(uint16_t x, uint16_t y = 1, uint16_t z = 1)
     {
         return pipeline_(x, y, z);
     }
@@ -499,10 +499,10 @@ public:
     void setDepthImage(HardwareImage& image) { pipeline_.setDepthImage(image); }
     [[nodiscard]] HardwareImage getDepthImage() { return pipeline_.getDepthImage(); }
 
-    [[nodiscard]] RasterCommand drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
-                                             const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters = {},
-                                             std::optional<ScissorRect> scissor = {}, std::optional<RasterPass> pass = {},
-                                             std::optional<ktm::uvec2> extent = {})
+    [[nodiscard]] HardwareCommand drawIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
+                                               const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters = {},
+                                               std::optional<ScissorRect> scissor = {}, std::optional<RasterPass> pass = {},
+                                               std::optional<ktm::uvec2> extent = {})
     {
         return pipeline_.drawIndirect(vertices, indices, packets, count, parameters, scissor, pass, extent);
     }

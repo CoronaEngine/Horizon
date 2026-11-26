@@ -80,7 +80,7 @@ struct RasterizerPipelineVulkan
         ~FramebufferState();
     };
   private:
-    friend class ::RasterCommand;
+    friend class ::HardwareCommand;
     std::vector<std::shared_ptr<HardwareBuffer>> uploadPool;
     std::mutex uploadMutex;
     void initializeStageBindings(uint32_t viewCount);
@@ -118,7 +118,7 @@ struct RasterizerPipelineVulkan
 
 using horizon::detail::RasterizerPipelineVulkan;
 
-struct RasterCommand::Impl final : CommandRecordVulkan
+struct HardwareCommand::Impl::Draw final : HardwareCommand::Impl, CommandRecordVulkan
 {
     struct GeometryEntry {
         VkDeviceAddress vertices, indices;
@@ -149,14 +149,15 @@ struct RasterCommand::Impl final : CommandRecordVulkan
     std::shared_ptr<UniformSnapshot> uniform;
     std::shared_ptr<RasterizerPipelineVulkan::FramebufferState> framebuffer;
 
-    Impl(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent, std::optional<RasterPass> pass,
+    Draw(std::shared_ptr<RasterizerPipelineVulkan> backend, std::optional<ktm::uvec2> extent, std::optional<RasterPass> pass,
          const std::vector<ResourceUse>& uses);
-    bool sameAttachments(const Impl& next) const;
-    bool canMerge(const Impl& next) const;
+    bool sameAttachments(const Draw& next) const;
+    bool canMerge(const Draw& next) const;
     void appendIndirect(const HardwareBuffer& vertices, const HardwareBuffer& indices,
                         const HardwareBuffer& packets, uint32_t count, const HardwareBuffer& parameters,
                         std::optional<ScissorRect> scissor);
     void prepareFramebuffer();
+    CommandRecordVulkan* getCommandRecord() override { return this; }
     ExecutorType getExecutorType() override { return ExecutorType::Graphics; }
     void resolveResourceUses(std::span<const ResourceUse> declarations, ResourceAccessList& result) override;
     void commitCommand(HardwareExecutorVulkan& executor) override;
