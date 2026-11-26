@@ -55,27 +55,18 @@ HardwareExecutor& HardwareExecutor::operator<<(HardwareCommand command)
     return *this;
 }
 
-HardwareExecutor& HardwareExecutor::wait(HardwareExecutor& other)
-{
-    if (impl_ && other.impl_ && this != &other)
-        impl_->backend.wait(other.impl_->backend);
-    return *this;
-}
-
 HardwareExecutor& HardwareExecutor::commit()
 {
     HardwareBackendAccess::executor(*this).commit();
     return *this;
 }
 
-void HardwareExecutor::waitForDeferredResources()
+HardwareExecutor& HardwareExecutor::wait(HardwareExecutor* other)
 {
-    if (impl_)
+    if (!impl_) return *this;
+    if (!other || other == this)
         impl_->backend.waitForAllDeferredResources();
-}
-
-void HardwareExecutor::cleanupDeferredResources()
-{
-    if (impl_)
-        impl_->backend.cleanupCompletedResources();
+    else if (other->impl_)
+        impl_->backend.wait(other->impl_->backend);
+    return *this;
 }

@@ -114,7 +114,7 @@ DisneySlang::DisneySlang(void* native_window)
     }
     render_executor << parameter_buffer.createDeviceLocal(BufferUsage::StorageBuffer,
         parameters.data(), parameters.size(), sizeof(DrawParameters));
-    render_executor.commit().waitForDeferredResources();
+    render_executor.commit().wait();
 
     final_output_image.setClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     pipeline.outColor = final_output_image;

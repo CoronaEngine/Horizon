@@ -33,7 +33,7 @@ EdslFeature::EdslFeature(void* native_window)
     executor << index_buffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     const RasterIndirectPacket command{.vertexCount = static_cast<uint32_t>(indices.size()), .instanceCount = 1};
     executor << commands.createDeviceLocal(BufferUsage::RasterIndirect, &command, 1, sizeof(command));
-    executor.commit().waitForDeferredResources();
+    executor.commit().wait();
 
     using namespace EmbeddedShader;
     auto vertex_shader = [&](Aggregate<VertexInput> vertex) -> Float3 {

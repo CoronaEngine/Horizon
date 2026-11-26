@@ -68,7 +68,7 @@ BaselineEdsl::BaselineEdsl(void* native_window)
         texture_info.linearFiltering = true;
         albedo_image = HardwareImage(texture_info);
         render_executor << albedo_image.copyFrom(pixels.get());
-        render_executor.commit().waitForDeferredResources();
+        render_executor.commit().wait();
     }
 
     using EmbeddedShader::Float2, EmbeddedShader::Float4;

@@ -35,7 +35,7 @@ DrawStressSlang::DrawStressSlang(void* native_window)
         render_executor << commands.createDeviceLocal(BufferUsage::RasterIndirect,
             packets.data(), packets.size(), sizeof(packets[0]));
     }
-    render_executor.commit().waitForDeferredResources();
+    render_executor.commit().wait();
     for (auto& parameters : parameter_buffers)
         parameters = HardwareBuffer(draw_count, sizeof(ktm::fmat4x4), BufferUsage::StorageBuffer);
 
@@ -70,7 +70,7 @@ void DrawStressSlang::run(float seconds)
     }
     // Finish the previous pair of submissions before reusing their matrix buffers.
     if (next_parameter_buffer == parameter_buffers.size()) {
-        render_executor.waitForDeferredResources();
+        render_executor.wait();
         next_parameter_buffer = 0;
     }
     auto& parameters = parameter_buffers[next_parameter_buffer++];

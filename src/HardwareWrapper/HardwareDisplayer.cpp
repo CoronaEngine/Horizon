@@ -59,7 +59,7 @@ bool HardwareDisplayer::present(std::span<const uint32_t> pixels, uint32_t width
     auto& upload = *cache;
     // The CPU can overwrite staging after the producer has finished reading it.
     // The same producer carries the display's dependency on the previous image read.
-    upload.executor.waitForDeferredResources();
+    upload.executor.wait();
     if (width != upload.width || height != upload.height || format != upload.format)
     {
         HardwareBuffer staging(static_cast<uint32_t>(pixels.size_bytes()), BufferUsage::StorageBuffer);

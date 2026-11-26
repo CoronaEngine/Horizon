@@ -118,7 +118,7 @@ DisneyEdsl::DisneyEdsl(void* native_window)
     }
     render_executor << parameter_buffer.createDeviceLocal(BufferUsage::StorageBuffer,
         parameters.data(), parameters.size(), sizeof(DrawParameters));
-    render_executor.commit().waitForDeferredResources();
+    render_executor.commit().wait();
 
     using EmbeddedShader::Float, EmbeddedShader::Float3, EmbeddedShader::Float4;
     using EmbeddedShader::GPU_IF, EmbeddedShader::GPU_IF_BRANCH;

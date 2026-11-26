@@ -65,7 +65,7 @@ BaselineSlang::BaselineSlang(void* native_window)
         texture_info.linearFiltering = true;
         texture_image = HardwareImage(texture_info);
         render_executor << texture_image.copyFrom(texels.get());
-        render_executor.commit().waitForDeferredResources();
+        render_executor.commit().wait();
     }
 
     pipeline.setRasterState({.compare = RasterCompare::LessEqual});
@@ -89,7 +89,7 @@ void BaselineSlang::run(float seconds)
 {
     parameters.model = ktm::rotate3d_z(seconds * ktm::radians(90.0f));
     if (next_parameter_buffer == parameter_buffers.size()) {
-        render_executor.waitForDeferredResources();
+        render_executor.wait();
         next_parameter_buffer = 0;
     }
     auto& parameter_buffer = parameter_buffers[next_parameter_buffer++];

@@ -156,8 +156,6 @@ struct HardwareExecutorVulkan
     HardwareExecutorVulkan &commit();
     //HardwareExecutorVulkan &commitTest();
 
-    // ========== 延迟释放相关接口 ==========
-    void cleanupCompletedResources();
     void waitForAllDeferredResources();
 
     // 调试：获取统计信息
@@ -187,6 +185,7 @@ struct HardwareExecutorVulkan
     std::vector<DeferredRelease> deferredReleaseQueue;
 
   private:
+    void cleanupCompletedResources();
     std::vector<SubmissionPoint> pendingWaits; // Freeze the exact submissions at wait() time.
     SubmissionPoint lastSubmission; // Published only after a successful queue submission.
     SubmissionPoint lastCompleted;  // Observed from the device or a successful host wait.

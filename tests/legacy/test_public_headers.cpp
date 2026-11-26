@@ -102,9 +102,11 @@ template<class T>
 concept CanEnqueue = requires(HardwareExecutor& executor, T&& value) { executor << std::forward<T>(value); };
 static_assert(!CanEnqueue<HardwareExecutor&> && !CanEnqueue<ComputePipeline<>&>);
 static_assert(std::same_as<decltype(&HardwareExecutor::operator<<), HardwareExecutor& (HardwareExecutor::*)(HardwareCommand)>);
+static_assert(std::same_as<decltype(&HardwareExecutor::wait), HardwareExecutor& (HardwareExecutor::*)(HardwareExecutor*)>);
 static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const HardwareCommand& saved, ComputePipeline<>& pipeline) {
     { pipeline(1) } -> std::same_as<HardwareCommand>;
-    { b.wait(a) << saved << pipeline(1) } -> std::same_as<HardwareExecutor&>;
+    { a.commit().wait() } -> std::same_as<HardwareExecutor&>;
+    { b.wait(&a) << saved << pipeline(1) } -> std::same_as<HardwareExecutor&>;
 });
 
 void check_legacy_public_headers() {}

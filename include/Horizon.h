@@ -46,17 +46,11 @@ public:
     HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
 
     HardwareExecutor& operator<<(HardwareCommand command);
-
-    // Depend on the most recent successful submission of other at the time of this call.
-    HardwareExecutor& wait(HardwareExecutor& other);
     HardwareExecutor& commit();
 
-    // ========== 延迟释放相关接口 ==========
-    /// @brief 等待所有延迟释放的资源完成（阻塞）
-    void waitForDeferredResources();
-
-    /// @brief 手动触发一次清理（非阻塞）
-    void cleanupDeferredResources();
+    // Null or self waits for this executor's submitted work. Queued commands stay queued.
+    // Another executor's latest successful submission becomes a dependency of the next commit.
+    HardwareExecutor& wait(HardwareExecutor* other = nullptr);
 
 private:
     friend struct HardwareDisplayer;
