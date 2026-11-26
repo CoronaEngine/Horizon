@@ -107,13 +107,6 @@ void test_cpu()
     HardwareBuffer empty;
     HardwareImage image;
     HardwareDisplayer displayer;
-    const auto displayerID = displayer.getDisplayerID();
-    HardwareDisplayer movedDisplayer(std::move(displayer));
-    expect(displayer.getDisplayerID() == 0 && movedDisplayer.getDisplayerID() == displayerID,
-           "displayer move construction transfers ownership");
-    displayer = std::move(movedDisplayer);
-    expect(movedDisplayer.getDisplayerID() == 0 && displayer.getDisplayerID() == displayerID,
-           "displayer move assignment transfers ownership");
     expect(!displayer.present({}, 0, 0, ImageFormat::RGBA8_UNORM), "an empty pixel frame is skipped");
     const std::array<uint32_t, 1> pixel{0xff00ff00u};
     bool rejected = false;
@@ -223,7 +216,7 @@ void test_indirect_draws(bool forceSingleDraw)
     if (forceSingleDraw) multiDraw = VK_FALSE;
     executor.commit().waitForDeferredResources();
     multiDraw = supported;
-    expect(reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID())->recordedRasterPassCount == 3,
+    expect(HardwareBackendAccess::executor(executor).recordedRasterPassCount == 3,
            "adjacent geometry groups share a pass; switching variants and explicitly loading each start a pass");
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "raster readback");
     const std::array<std::array<float,4>,8> expected{{
@@ -238,7 +231,7 @@ void test_indirect_draws(bool forceSingleDraw)
         {1,0,0,1}, {1,0,0,1}, {}, {},
         {1,0,0,1}, {1,0,0,1}, {}, {}
     }};
-    expect(reinterpret_cast<HardwareExecutorVulkan*>(replay.getExecutorID())->recordedRasterPassCount == 2 &&
+    expect(HardwareBackendAccess::executor(replay).recordedRasterPassCount == 2 &&
            readback.copyToData(pixels.data(), sizeof(pixels)) && pixels == expectedReplay,
            "replaying a saved draw clears the target and draws only its original geometry at index zero");
     std::array<std::array<float,4>,8> expectedBlue{};
@@ -273,8 +266,8 @@ void test_raster_sampled_storage_image()
              << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1)
              << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
-    auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
-    expect(backend->recordedRasterPassCount == 1, "two draws sampling the same texture share one render pass");
+    auto& backend = HardwareBackendAccess::executor(executor);
+    expect(backend.recordedRasterPassCount == 1, "two draws sampling the same texture share one render pass");
     std::array<Pixel, 1> pixel{};
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == source,
            "fragment UBO handle samples a sampled/storage image from set 0");
@@ -284,7 +277,7 @@ void test_raster_sampled_storage_image()
              << pipeline.drawIndirect({}, {}, {}, 0, {}, {}, RasterPass{})
              << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
-    expect(backend->recordedRasterPassCount == 2 &&
+    expect(backend.recordedRasterPassCount == 2 &&
            readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == Pixel{0,1,0,1},
            "an empty indirect pass still clears its attachment");
 
@@ -307,11 +300,28 @@ void test_raster_sampled_storage_image()
                      << target.copyTo(readback);
             executor.commit().waitForDeferredResources();
             const Pixel expected{declareAccess ? 4.f : 2.f, 0, 0, 1};
-            expect(backend->recordedRasterPassCount == 2 &&
+            expect(backend.recordedRasterPassCount == 2 &&
                    readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == expected,
                    "successive fragment storage writes require a pass boundary even without declared accesses");
         }
     }
+
+    HardwareImage layers(HardwareImageCreateInfo{.width = 2, .height = 2, .format = ImageFormat::RGBA32_FLOAT,
+        .usage = ImageUsage::StorageImage, .arrayLayers = 2, .mipLevels = 2});
+    std::array attachments{layers[0][1], layers[0][1], layers[1][1]};
+    pipeline.setRasterState({.depthTest = false, .depthWrite = false, .blend = RasterBlend::Additive});
+    for (auto& attachment : attachments) {
+        attachment.setClearColor(0, 0, 0, 0);
+        output = attachment;
+        executor << pipeline.drawIndirect(vertexBuffer, indexBuffer, commands, 1);
+    }
+    std::array<Pixel, 2> layerPixels{};
+    HardwareBuffer layerReadback(sizeof(layerPixels), BufferUsage::StorageBuffer);
+    executor << layers.copyTo(layerReadback, 0, 1) << layers.copyTo(layerReadback, 1, 1, sizeof(Pixel));
+    executor.commit().waitForDeferredResources();
+    expect(backend.recordedRasterPassCount == 2, "independent views of the same layer and mip share a pass");
+    expect(layerReadback.copyToData(layerPixels) && layerPixels[0] == Pixel{0.5f, 1.f, 1.5f, 2.f} &&
+           layerPixels[1] == source[0], "the first layer receives two draws and the second layer receives one");
 }
 
 void test_shared_vertex_stage()
@@ -364,12 +374,10 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     HardwareExecutor executor;
     HardwareBuffer vertexBuffer;
     executor << vertexBuffer.createDeviceLocal(BufferUsage::VertexBuffer, vertices, std::size(vertices), sizeof(vertices[0]));
-    const auto vertexID = vertexBuffer.getBufferID();
     HardwareBuffer indexBuffer = vertexBuffer;
     auto expectInvalidUpload = [&](BufferUsage usage, const void* data, size_t elementSize) {
         try { executor << indexBuffer.createDeviceLocal(usage, data, 1, elementSize); }
         catch (const std::invalid_argument&) {
-            expect(indexBuffer.getBufferID() == vertexID, "invalid upload preserves the original buffer");
             return;
         }
         throw std::runtime_error("invalid upload was accepted");
@@ -377,14 +385,14 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
     expectInvalidUpload(BufferUsage::IndexBuffer, nullptr, sizeof(uint16_t));
     expectInvalidUpload(BufferUsage::IndexBuffer, indices.data(), 1);
     expectInvalidUpload(BufferUsage::VertexBuffer, vertices, 2);
+    HardwareBuffer originalVertices(sizeof(vertices), BufferUsage::StorageBuffer);
+    executor << indexBuffer.copyTo(originalVertices);
     if (explicitDepth) {
         executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, indices.data(), indices.size(), sizeof(indices[0]));
     } else {
         const std::vector<uint32_t> wideIndices(indices.begin(), indices.end());
         executor << indexBuffer.createDeviceLocal(BufferUsage::IndexBuffer, wideIndices.data(), wideIndices.size(), sizeof(wideIndices[0]));
     }
-    expect(vertexBuffer.getBufferID() == vertexID && indexBuffer.getBufferID() != vertexID,
-           "recreating one buffer handle preserves the allocation held by its copy");
     expect(vertexBuffer.getElementCount() == std::size(vertices) &&
            vertexBuffer.getElementSize() == sizeof(vertices[0]) &&
            indexBuffer.getElementCount() == indices.size() &&
@@ -423,6 +431,9 @@ void test_generated_packet_and_attachment_load(bool explicitDepth)
                                       RasterPass{.loadColor = true, .loadDepth = true})
              << target.copyTo(readback);
     executor.commit().waitForDeferredResources();
+    std::array<std::array<float,2>, std::size(vertices)> copiedVertices{};
+    expect(originalVertices.copyToData(copiedVertices) && std::ranges::equal(copiedVertices, vertices),
+           "invalid uploads preserve the vertex data shared by the copied buffer");
     expect(readback.copyToData(pixels.data(), sizeof(pixels)), "multi-pass readback");
     // Both instances contribute green and their absolute instance indices to blue.
     const float instanceSum = static_cast<float>(firstInstance + (firstInstance + 1));
@@ -462,8 +473,8 @@ void test_compute_dispatch_snapshots()
 
         executor << writeFirst << writeSecond << overwrite;
     }
-    const auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
-    for (const auto& entry : backend->commandList) {
+    const auto& backend = HardwareBackendAccess::executor(executor);
+    for (const auto& entry : backend.commandList) {
         ResourceAccessList accesses;
         entry.command->resolveResourceUses(entry.resourceUses, accesses);
         expect(!accesses.conservative && accesses.uses.size() == 1 &&
@@ -601,25 +612,26 @@ void test_gpu()
     HardwareBuffer source(input, BufferUsage::StorageBuffer);
     HardwareBuffer destination(zeros, BufferUsage::StorageBuffer);
     HardwareExecutor executor;
-    auto* backend = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
+    auto& backend = HardwareBackendAccess::executor(executor);
     HardwareBuffer emptyBuffer;
     HardwareImage emptyImage;
     executor << emptyBuffer.copyTo(emptyBuffer) << emptyBuffer.copyTo(emptyImage)
              << emptyImage.copyTo(emptyImage) << emptyImage.copyTo(emptyBuffer) << emptyImage.copyFrom(nullptr);
-    expect(backend->commandList.empty(), "empty resources and a null image upload record no GPU work");
+    expect(backend.commandList.empty(), "empty resources and a null image upload record no GPU work");
     const auto emptyUpload = emptyBuffer.createDeviceLocal(BufferUsage::StorageBuffer, nullptr, 0, sizeof(uint32_t));
     executor << emptyUpload;
-    expect(emptyBuffer.getBufferID() && emptyBuffer.getElementCount() == 0 &&
-           emptyBuffer.getElementSize() == sizeof(uint32_t) && backend->commandList.empty(),
+    expect(!emptyBuffer && emptyBuffer.getElementCount() == 0 &&
+           emptyBuffer.getElementSize() == sizeof(uint32_t) && backend.commandList.empty(),
            "a zero-element device-local buffer preserves its dimensions without recording an upload");
     {
         HardwareDisplayer display;
         HardwareImage target(4, 2, ImageFormat::RGBA8_UNORM);
         executor << source.copyTo(target);
-        expect(!display.present(executor, target) && backend->commandList.empty() && backend->getSubmissionPoint(),
+        expect(!display.present(executor, target) && backend.commandList.empty() && backend.getSubmissionPoint(),
                "headless presentation commits pending work even when the frame is skipped");
         expect(!display.present(input, 4, 2, ImageFormat::RGBA8_UNORM), "headless pixel presentation skips the frame");
         HardwareDisplayer moved(std::move(display));
+        expect(!display.present(input, 4, 2, ImageFormat::RGBA8_UNORM), "the moved-from displayer skips presentation");
         expect(!moved.present(input, 4, 2, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel format");
         display = std::move(moved);
         expect(!display.present(input, 2, 4, ImageFormat::RGBA8_SRGB), "a moved displayer accepts a new pixel extent");
@@ -629,9 +641,12 @@ void test_gpu()
     {
         const auto copy = HardwareBuffer(input, BufferUsage::StorageBuffer).copyTo(destination);
         executor << copy;
-        executor.commit().waitForDeferredResources();
+        HardwareExecutor moved(std::move(executor));
+        moved.commit();
+        executor = std::move(moved);
+        executor.waitForDeferredResources();
         expect(destination.copyToData(output.data(), sizeof(output)), "buffer readback");
-        expect(output == input, "GPU buffer round trip");
+        expect(output == input, "executor moves preserve queued copies and their submission");
 
         std::cerr << "GPU: deferred resource lifetime\n";
         expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear destination before reusing copy");
@@ -686,37 +701,37 @@ void test_gpu()
             if (fail) throw std::runtime_error("injected recording failure");
         }
     } retry;
-    const auto previous = backend->getSubmissionPoint();
-    const auto waitCount = backend->waitSemaphores.size();
-    backend->wait(previous).record(&retry);
-    try { backend->commit(); } catch (const std::runtime_error&) {}
-    expect(backend->commandList.size() == 1 && backend->getSubmissionPoint().queue == previous.queue &&
-           backend->getSubmissionPoint().value == previous.value && backend->waitSemaphores.size() == waitCount,
+    const auto previous = backend.getSubmissionPoint();
+    const auto waitCount = backend.waitSemaphores.size();
+    backend.wait(previous).record(&retry);
+    try { backend.commit(); } catch (const std::runtime_error&) {}
+    expect(backend.commandList.size() == 1 && backend.getSubmissionPoint().queue == previous.queue &&
+           backend.getSubmissionPoint().value == previous.value && backend.waitSemaphores.size() == waitCount,
            "failed recording preserves the previous completion point and does not duplicate waits");
     retry.fail = false;
-    backend->commit().waitForAllDeferredResources();
-    expect(backend->commandList.empty(), "retry consumes the recorded command");
+    backend.commit().waitForAllDeferredResources();
+    expect(backend.commandList.empty(), "retry consumes the recorded command");
     HardwareImageCreateInfo imageInfo(4, 4, ImageFormat::RGBA8_UINT);
     imageInfo.arrayLayers = 2;
     imageInfo.mipLevels = 2;
     HardwareImage image(imageInfo);
-    HardwareImage imageCopy(imageInfo);
+    HardwareImage view;
     {
-        HardwareImage owner(imageInfo);
-        auto view = owner[1];
-        owner = HardwareImage{};
-        expect(static_cast<bool>(view), "image view retains its allocation after owner destruction");
+        HardwareImage imageCopy(imageInfo);
+        executor << source.copyTo(image, sizeof(uint32_t), 0, 1);
+        executor << image.copyTo(imageCopy, 0, 1, 1, 1);
+        executor.commit().waitForDeferredResources();
+        view = imageCopy[1][1];
     }
     expect(destination.copyFromData(zeros.data(), sizeof(zeros)), "clear image destination");
-    executor << source.copyTo(image, sizeof(uint32_t), 1, 1);
-    executor << image.copyTo(imageCopy, 1, 0, 1, 1);
-    executor << imageCopy.copyTo(destination, 0, 1, 2 * sizeof(uint32_t));
+    executor << view.copyTo(destination, 0, 0, 2 * sizeof(uint32_t));
+    view = HardwareImage{};
     executor.commit().waitForDeferredResources();
     expect(destination.copyToData(output.data(), sizeof(output)), "image readback");
     expect(output == std::array<uint32_t, 8>{0, 0, 20, 30, 40, 50, 0, 0},
-           "image copies preserve layers, mips and buffer offsets");
+           "a queued copy retains the original layer and mip after its parent and view are released");
 
-    executor << imageCopy.copyFrom(input.data(), 0, 1) << imageCopy.copyTo(destination, 0, 1);
+    executor << image.copyFrom(input.data(), 0, 1) << image.copyTo(destination, 0, 1);
     executor.commit().waitForDeferredResources();
     std::array<uint32_t, 4> mipPixels{};
     expect(destination.copyToData(mipPixels.data(), sizeof(mipPixels)) &&

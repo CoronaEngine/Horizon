@@ -3,6 +3,14 @@
 #include <cstring>
 #include <stdexcept>
 
+bool sameResource(const PipelineResource& a, const PipelineResource& b)
+{
+    if (a.index() != b.index()) return false;
+    if (const auto* buffer = std::get_if<HardwareBuffer>(&a))
+        return ResourceManager::get(*buffer) == ResourceManager::get(std::get<HardwareBuffer>(b));
+    return ResourceManager::get(std::get<HardwareImage>(a)) == ResourceManager::get(std::get<HardwareImage>(b));
+}
+
 void PipelineBindings::erase(uint64_t offset, size_t size, bool uniform)
 {
     const auto count = std::erase_if(values, [&](const PipelineBinding& binding) {
@@ -23,21 +31,14 @@ inline bool writeBytes(std::span<uint8_t> target, uint64_t offset, const void* d
     return true;
 }
 
-uintptr_t resourceId(const PipelineResource& resource)
-{
-    return std::visit([](const auto& value) -> uintptr_t {
-        if constexpr (std::is_same_v<std::decay_t<decltype(value)>, HardwareBuffer>)
-            return value.getBufferID();
-        else return value.getImageID();
-    }, resource);
-}
-
 uint32_t descriptorTable(const PipelineBinding& binding)
 {
     if (binding.sampled) return 0;
     const auto& resource = binding.resource;
     if (std::holds_alternative<HardwareBuffer>(resource)) return 1;
-    return (legacyImageFromId(std::get<HardwareImage>(resource).getImageID())->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? 2 : 0;
+    const auto* image = ResourceManager::get(std::get<HardwareImage>(resource));
+    if (!image) throw std::runtime_error("Empty HardwareImage handle");
+    return (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT) ? 2 : 0;
 }
 
 int32_t descriptorIndex(const PipelineBinding& binding)
@@ -45,9 +46,9 @@ int32_t descriptorIndex(const PipelineBinding& binding)
     return std::visit([&](const auto& value) -> int32_t {
         if (!value) throw std::invalid_argument("A pipeline binding has no resource");
         if constexpr (std::is_same_v<std::decay_t<decltype(value)>, HardwareBuffer>)
-            return legacyBufferFromId(value.getBufferID())->bindlessIndex;
+            return ResourceManager::get(value)->bindlessIndex;
         else {
-            const auto* image = legacyImageFromId(value.getImageID());
+            const auto* image = ResourceManager::get(value);
             return binding.sampled && (image->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)
                        ? image->sampledIndex : image->bindlessIndex;
         }
@@ -60,7 +61,7 @@ void PipelineBindings::set(PipelineBinding next)
     for (const auto& binding : values)
         if (binding.offset == next.offset && binding.size == next.size && binding.uniform == next.uniform &&
             binding.fixedSlot == next.fixedSlot && binding.sampled == next.sampled &&
-            binding.resource.index() == next.resource.index() && resourceId(binding.resource) == resourceId(next.resource)) return;
+            sameResource(binding.resource, next.resource)) return;
     if (next.fixedSlot == UINT32_MAX)
         erase(next.offset, next.size, next.uniform);
     else
@@ -257,7 +258,7 @@ void UniformSnapshot::prepare(std::span<const uint8_t> bytes, VkDescriptorSetLay
     allocation.descriptorSetCount = 1;
     allocation.pSetLayouts = &layout;
     coronaHardwareCheck(vkAllocateDescriptorSets(device, &allocation, &set));
-    VkDescriptorBufferInfo info{legacyBufferFromId(buffer.getBufferID())->bufferHandle, 0, bytes.size()};
+    VkDescriptorBufferInfo info{ResourceManager::get(buffer)->bufferHandle, 0, bytes.size()};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = set;
     write.descriptorCount = 1;
@@ -305,11 +306,11 @@ bool addShaderUse(ResourceAccessList& result, const PipelineResource& resource,
     if (const auto* buffer = std::get_if<HardwareBuffer>(&resource))
     {
         if (!*buffer) return false;
-        use = &result.buffer(*legacyBufferFromId(buffer->getBufferID()), declaration ? 0 : stages, declaration ? 0 : access);
+        use = &result.buffer(*ResourceManager::get(*buffer), declaration ? 0 : stages, declaration ? 0 : access);
     }
     else if (const auto& image = std::get<HardwareImage>(resource); image)
     {
-        auto* native = legacyImageFromId(image.getImageID());
+        auto* native = ResourceManager::get(image);
         if (!(native->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) access = VK_ACCESS_2_SHADER_READ_BIT;
         use = &result.image(*native, declaration ? 0 : stages, declaration ? 0 : access,
                             declaration ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL, imageViewRange(*native));

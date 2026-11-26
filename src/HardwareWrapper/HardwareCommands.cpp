@@ -23,16 +23,10 @@ struct HardwareCommand::Impl::BufferToBuffer final : HardwareCommand::Impl
     CommandRecordVulkan *getCommandRecord() override
     {
         if (command) return &*command;
-        uint64_t srcBufferID = srcBuffer.getBufferID();
-        uint64_t dstBufferID = dstBuffer.getBufferID();
-
-        if (srcBufferID == 0 || dstBufferID == 0)
-        {
-            return nullptr;
-        }
-
-        command.emplace(*legacyBufferFromId(srcBufferID),
-            *legacyBufferFromId(dstBufferID), srcOffset, dstOffset, size);
+        auto* src = ResourceManager::get(srcBuffer);
+        auto* dst = ResourceManager::get(dstBuffer);
+        if (!src || !dst) return nullptr;
+        command.emplace(*src, *dst, srcOffset, dstOffset, size);
 
         return &*command;
     }
@@ -57,14 +51,10 @@ struct HardwareCommand::Impl::BufferToImage final : HardwareCommand::Impl
     CommandRecordVulkan *getCommandRecord() override
     {
         if (command) return &*command;
-        if (srcBuffer.getBufferID() == 0 || dstImage.getImageID() == 0)
-        {
-            return nullptr;
-        }
-
-        auto srcHandle = legacyBufferFromId(srcBuffer.getBufferID());
-        auto dstHandle = legacyImageFromId(dstImage.getImageID());
-        command.emplace(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
+        auto* src = ResourceManager::get(srcBuffer);
+        auto* dst = ResourceManager::get(dstImage);
+        if (!src || !dst) return nullptr;
+        command.emplace(*src, *dst, imageMip, imageLayer, bufferOffset, 1);
 
         return &*command;
     }
@@ -108,19 +98,13 @@ struct HardwareCommand::Impl::ImageToImage final : HardwareCommand::Impl
     CommandRecordVulkan *getCommandRecord() override
     {
         if (command) return &*command;
-        uint64_t srcImageID = srcImage.getImageID();
-        uint64_t dstImageID = dstImage.getImageID();
-
-        if (srcImageID == 0 || dstImageID == 0)
-        {
-            return nullptr;
-        }
-
-        if (srcImageID == dstImageID)
+        auto* src = ResourceManager::get(srcImage);
+        auto* dst = ResourceManager::get(dstImage);
+        if (!src || !dst) return nullptr;
+        if (src == dst)
             throw std::invalid_argument("A legacy image copy requires distinct images");
 
-        command.emplace(*legacyImageFromId(srcImageID),
-            *legacyImageFromId(dstImageID), srcLayer, dstLayer, srcMip, dstMip);
+        command.emplace(*src, *dst, srcLayer, dstLayer, srcMip, dstMip);
 
         return &*command;
     }
@@ -156,14 +140,10 @@ struct HardwareCommand::Impl::ImageToBuffer final : HardwareCommand::Impl
     CommandRecordVulkan *getCommandRecord() override
     {
         if (command) return &*command;
-        if (srcImage.getImageID() == 0 || dstBuffer.getBufferID() == 0)
-        {
-            return nullptr;
-        }
-
-        auto srcHandle = legacyImageFromId(srcImage.getImageID());
-        auto dstHandle = legacyBufferFromId(dstBuffer.getBufferID());
-        command.emplace(*srcHandle, *dstHandle, imageMip, imageLayer, bufferOffset, 1);
+        auto* src = ResourceManager::get(srcImage);
+        auto* dst = ResourceManager::get(dstBuffer);
+        if (!src || !dst) return nullptr;
+        command.emplace(*src, *dst, imageMip, imageLayer, bufferOffset, 1);
 
         return &*command;
     }

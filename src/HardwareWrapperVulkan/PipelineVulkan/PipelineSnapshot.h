@@ -8,6 +8,7 @@
 #include <array>
 
 using PipelineResource = std::variant<HardwareBuffer, HardwareImage>;
+bool sameResource(const PipelineResource& a, const PipelineResource& b);
 
 // Parameter snapshots carry this marker until commit resolves the binding.
 // A cleared draw parameter remains zero and must not be patched on replay.

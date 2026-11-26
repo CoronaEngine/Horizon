@@ -58,13 +58,11 @@ public:
     /// @brief 手动触发一次清理（非阻塞）
     void cleanupDeferredResources();
 
-    [[nodiscard]] uintptr_t getExecutorID() const
-    {
-        return executorID;
-    }
-
 private:
-    std::uintptr_t executorID{0};
+    friend struct HardwareDisplayer;
+    friend struct HardwareBackendAccess;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 
@@ -195,15 +193,11 @@ public:
     [[nodiscard]] uint64_t getElementSize() const;
     [[nodiscard]] uint64_t getElementCount() const;
 
-    [[nodiscard]] uintptr_t getBufferID() const
-    {
-        return bufferID;
-    }
-
 private:
     static HardwareBuffer rasterUpload(uint32_t bytes);
-    std::uintptr_t bufferID{0};
-
+    struct Impl;
+    Impl* impl_{};
+    friend struct ResourceManager;
     friend class HardwareCommand;
 };
 
@@ -240,10 +234,6 @@ public:
 
     [[nodiscard]] uint32_t storeDescriptor() const;
     [[nodiscard]] uint32_t storeSampledDescriptor() const;
-    [[nodiscard]] uintptr_t getImageID() const
-    {
-        return imageID;
-    }
 
     /// Set the clear color used by the RasterizerPipeline render pass (LOAD_OP_CLEAR).
     /// Default is (0, 0, 0, 1).  For transparent render targets, use (0, 0, 0, 0).
@@ -257,7 +247,9 @@ public:
     [[nodiscard]] HardwareCommand copyFrom(const void* inputData, uint32_t imageLayer = 0, uint32_t imageMip = 0) const;
 
 private:
-    std::uintptr_t imageID{0};
+    friend struct ResourceManager;
+    struct Impl;
+    Impl* impl_{};
 };
 
 enum class ResourceAccess : uint8_t
@@ -325,14 +317,9 @@ public:
 
     HardwareDisplayer& wait(const HardwareExecutor& executor);
 
-    [[nodiscard]] uintptr_t getDisplayerID() const
-    {
-        return displaySurfaceID;
-    }
-
 private:
-    std::uintptr_t displaySurfaceID{0};
-    void* displaySurface{nullptr};
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 template<class CS = void>

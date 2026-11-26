@@ -31,19 +31,18 @@ VkBufferUsageFlags convertBufferUsage(BufferUsage const usage)
 }
 
 namespace {
-void retainBuffer(uintptr_t id)
+ResourceManager::BufferHardwareWrap& requireBuffer(ResourceManager::BufferHardwareWrap* buffer)
 {
-    if (id) ++legacyBufferFromId(id)->refCount;
+    if (!buffer) throw std::runtime_error("Empty HardwareBuffer handle");
+    return *buffer;
 }
 
-void releaseBuffer(uintptr_t id)
+void releaseBuffer(ResourceManager::BufferHardwareWrap* buffer)
 {
-    if (!id) return;
-    auto* resource = legacyBufferFromId(id);
-    if (--resource->refCount == 0)
+    if (buffer && --buffer->refCount == 0)
     {
-        resource->resourceManager->destroyBuffer(*resource);
-        delete resource;
+        buffer->resourceManager->destroyBuffer(*buffer);
+        delete buffer;
     }
 }
 }
@@ -55,8 +54,7 @@ HardwareBuffer HardwareBuffer::rasterUpload(uint32_t bytes)
     HardwareBuffer buffer;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
     constexpr auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    buffer.bufferID = reinterpret_cast<uintptr_t>(new ResourceManager::BufferHardwareWrap(
-        manager.createBuffer(1, bytes, usage, true, true, true)));
+    buffer.impl_ = new Impl(manager.createBuffer(1, bytes, usage, true, true, true));
     return buffer;
 }
 
@@ -79,8 +77,7 @@ HardwareCommand HardwareBuffer::createDeviceLocal(BufferUsage usage, const void*
     const auto stride = static_cast<uint32_t>(elementSize);
     HardwareBuffer destination;
     auto& manager = getHardwareContext().getMainDevice()->resourceManager;
-    destination.bufferID = reinterpret_cast<uintptr_t>(new ResourceManager::BufferHardwareWrap(
-        manager.createBuffer(count, stride, convertBufferUsage(usage), false, true)));
+    destination.impl_ = new Impl(manager.createBuffer(count, stride, convertBufferUsage(usage), false, true));
     HardwareCommand upload(nullptr);
     if (count) {
         HardwareBuffer staging(count, stride, BufferUsage::StorageBuffer, data);
@@ -92,12 +89,12 @@ HardwareCommand HardwareBuffer::createDeviceLocal(BufferUsage usage, const void*
 
 HardwareBuffer::HardwareBuffer(uint32_t bufferSize, uint32_t elementSize, BufferUsage usage, const void* data, bool useDedicated)
 {
-    auto resource = std::make_unique<ResourceManager::BufferHardwareWrap>();
-    *resource = getHardwareContext().getMainDevice()->resourceManager.createBuffer(
-        bufferSize, elementSize, convertBufferUsage(usage), true, useDedicated);
-    if (data && resource->bufferAllocInfo.pMappedData)
-        resource->resourceManager->writeMapped(*resource, data, static_cast<size_t>(bufferSize) * elementSize);
-    bufferID = reinterpret_cast<uintptr_t>(resource.release());
+    HardwareBuffer buffer;
+    auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    buffer.impl_ = new Impl(manager.createBuffer(bufferSize, elementSize, convertBufferUsage(usage), true, useDedicated));
+    if (data && buffer.impl_->bufferAllocInfo.pMappedData)
+        manager.writeMapped(*buffer.impl_, data, static_cast<size_t>(bufferSize) * elementSize);
+    *this = std::move(buffer);
 }
 
 HardwareBuffer::HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferSize, uint32_t elementSize, uint32_t allocSize, BufferUsage usage)
@@ -108,51 +105,48 @@ HardwareBuffer::HardwareBuffer(const ExternalHandle& memHandle, uint32_t bufferS
 #else
     memoryHandle.fd = memHandle.fd;
 #endif
-    auto resource = std::make_unique<ResourceManager::BufferHardwareWrap>();
-    *resource = getHardwareContext().getMainDevice()->resourceManager.importBufferMemory(
-        memoryHandle, bufferSize, elementSize, allocSize, convertBufferUsage(usage));
-    bufferID = reinterpret_cast<uintptr_t>(resource.release());
+    auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    impl_ = new Impl(manager.importBufferMemory(memoryHandle, bufferSize, elementSize, allocSize, convertBufferUsage(usage)));
 }
 
-HardwareBuffer::HardwareBuffer(const HardwareBuffer& other) : bufferID(other.bufferID)
+HardwareBuffer::HardwareBuffer(const HardwareBuffer& other) : impl_(other.impl_)
 {
-    retainBuffer(bufferID);
+    if (impl_) ++impl_->refCount;
 }
 
-HardwareBuffer::HardwareBuffer(HardwareBuffer&& other) noexcept : bufferID(std::exchange(other.bufferID, 0)) {}
+HardwareBuffer::HardwareBuffer(HardwareBuffer&& other) noexcept : impl_(std::exchange(other.impl_, nullptr)) {}
 
 HardwareBuffer::~HardwareBuffer()
 {
-    releaseBuffer(bufferID);
+    releaseBuffer(impl_);
 }
 
 HardwareBuffer& HardwareBuffer::operator=(const HardwareBuffer& other)
 {
-    if (bufferID == other.bufferID) return *this;
-    retainBuffer(other.bufferID);
-    releaseBuffer(bufferID);
-    bufferID = other.bufferID;
+    if (impl_ == other.impl_) return *this;
+    if (other.impl_) ++other.impl_->refCount;
+    releaseBuffer(impl_);
+    impl_ = other.impl_;
     return *this;
 }
 
 HardwareBuffer& HardwareBuffer::operator=(HardwareBuffer&& other) noexcept
 {
     if (this == &other) return *this;
-    releaseBuffer(bufferID);
-    bufferID = std::exchange(other.bufferID, 0);
+    releaseBuffer(impl_);
+    impl_ = std::exchange(other.impl_, nullptr);
     return *this;
 }
 
 HardwareBuffer::operator bool() const
 {
-    return bufferID && legacyBufferFromId(bufferID)->bufferHandle != VK_NULL_HANDLE;
+    return impl_ && impl_->bufferHandle != VK_NULL_HANDLE;
 }
 
 uint32_t HardwareBuffer::storeDescriptor() const
 {
     if (!*this) throw std::invalid_argument("Cannot bind an empty buffer");
-    auto bufferHandle = legacyBufferFromId(bufferID);
-    return bufferHandle->resourceManager->storeDescriptor(*bufferHandle);
+    return impl_->resourceManager->storeDescriptor(*impl_);
 }
 
 bool HardwareBuffer::copyFromData(const void *inputData, const uint64_t size) const
@@ -161,20 +155,14 @@ bool HardwareBuffer::copyFromData(const void *inputData, const uint64_t size) co
     {
         return false;
     }
-    auto const self_buffer_id = bufferID;
-    if (self_buffer_id == 0)
+    if (!impl_)
     {
         CFW_LOG_WARNING("Cannot copy data to an uninitialized HardwareBuffer.");
         return false;
     }
-    if (const auto handle = legacyBufferFromId(self_buffer_id);
-        handle->bufferAllocInfo.pMappedData != nullptr)
-    {
-        if (size > uint64_t(handle->elementCount) * handle->elementSize) return false;
-        handle->resourceManager->writeMapped(*handle, inputData, size);
-        return true;
-    }
-    return false;
+    if (!impl_->bufferAllocInfo.pMappedData || size > uint64_t(impl_->elementCount) * impl_->elementSize) return false;
+    impl_->resourceManager->writeMapped(*impl_, inputData, size);
+    return true;
 }
 
 bool HardwareBuffer::copyToData(void *outputData, const uint64_t size) const
@@ -183,51 +171,44 @@ bool HardwareBuffer::copyToData(void *outputData, const uint64_t size) const
     {
         return false;
     }
-    auto const self_buffer_id = bufferID;
-    if (self_buffer_id == 0)
+    if (!impl_)
     {
         CFW_LOG_WARNING("Cannot copy uninitialized HardwareBuffer to out data.");
         return false;
     }
-    if (const auto handle = legacyBufferFromId(self_buffer_id);
-        handle->bufferAllocInfo.pMappedData != nullptr)
-    {
-        if (size > uint64_t(handle->elementCount) * handle->elementSize) return false;
-        handle->resourceManager->copyBufferToHost(*handle, outputData, size);
-        return true;
-    }
-    return false;
+    if (!impl_->bufferAllocInfo.pMappedData || size > uint64_t(impl_->elementCount) * impl_->elementSize) return false;
+    impl_->resourceManager->copyBufferToHost(*impl_, outputData, size);
+    return true;
 }
 
 void *HardwareBuffer::getMappedData() const
 {
-    return legacyBufferFromId(bufferID)->bufferAllocInfo.pMappedData;
+    return requireBuffer(impl_).bufferAllocInfo.pMappedData;
 }
 
 void HardwareBuffer::flushMapped() const
 {
-    auto* buffer = legacyBufferFromId(bufferID);
-    if (!buffer->bufferAllocInfo.pMappedData)
+    auto& buffer = requireBuffer(impl_);
+    if (!buffer.bufferAllocInfo.pMappedData)
         throw std::logic_error("Cannot flush an unmapped buffer");
-    buffer->resourceManager->flushMapped(*buffer, size_t(buffer->elementCount) * buffer->elementSize);
+    buffer.resourceManager->flushMapped(buffer, size_t(buffer.elementCount) * buffer.elementSize);
 }
 
 uint64_t HardwareBuffer::getElementCount() const
 {
-    return legacyBufferFromId(bufferID)->elementCount;
+    return requireBuffer(impl_).elementCount;
 }
 
 uint64_t HardwareBuffer::getElementSize() const
 {
-    return legacyBufferFromId(bufferID)->elementSize;
+    return requireBuffer(impl_).elementSize;
 }
 
 ExternalHandle HardwareBuffer::exportBufferMemory()
 {
     ExternalHandle winHandle{};
-    const auto bufferHandle = legacyBufferFromId(bufferID);
-
-    ResourceManager::ExternalMemoryHandle memory_handle = bufferHandle->resourceManager->exportBufferMemory(*bufferHandle);
+    auto& buffer = requireBuffer(impl_);
+    ResourceManager::ExternalMemoryHandle memory_handle = buffer.resourceManager->exportBufferMemory(buffer);
 #if _WIN32 || _WIN64
     winHandle.handle = memory_handle.handle;
 #else

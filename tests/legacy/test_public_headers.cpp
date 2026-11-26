@@ -12,7 +12,13 @@ static_assert(requires(const HardwareBuffer& buffer, const HardwareImage& image)
     { image.copyFrom(nullptr) } -> std::same_as<HardwareCommand>;
 });
 
-static_assert(std::is_same_v<decltype(HardwareBuffer{}.getBufferID()), std::uintptr_t>);
+template<class T>
+concept ExposesResourceID = requires(const T& value) { value.getBufferID(); } ||
+                           requires(const T& value) { value.getImageID(); } ||
+                           requires(const T& value) { value.getExecutorID(); } ||
+                           requires(const T& value) { value.getDisplayerID(); };
+static_assert(!ExposesResourceID<HardwareBuffer> && !ExposesResourceID<HardwareImage> &&
+              !ExposesResourceID<HardwareExecutor> && !ExposesResourceID<HardwareDisplayer>);
 static_assert(std::is_copy_constructible_v<HardwareBuffer>);
 static_assert(std::is_constructible_v<HardwareBuffer, const uint16_t(&)[3], BufferUsage>);
 static_assert(!std::is_constructible_v<HardwareBuffer, std::vector<bool>, BufferUsage>);

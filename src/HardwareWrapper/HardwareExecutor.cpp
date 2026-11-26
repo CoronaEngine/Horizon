@@ -3,44 +3,19 @@
 #include "HardwareWrapperVulkan/PipelineVulkan/RasterizerPipeline.h"
 #include <stdexcept>
 
-namespace {
-HardwareExecutorVulkan* execFromId(uintptr_t id)
-{
-    if (!id)
-        throw std::runtime_error("Empty HardwareExecutor handle");
-    return reinterpret_cast<HardwareExecutorVulkan*>(id);
-}
-} // namespace
-
 HardwareExecutor::HardwareExecutor()
-    : executorID(reinterpret_cast<uintptr_t>(new HardwareExecutorVulkan()))
+    : impl_(std::make_unique<Impl>())
 {
 }
 
-HardwareExecutor::HardwareExecutor(HardwareExecutor&& other) noexcept
-    : executorID(std::exchange(other.executorID, 0))
-{
-}
-
-HardwareExecutor::~HardwareExecutor()
-{
-    delete reinterpret_cast<HardwareExecutorVulkan*>(executorID);
-}
-
-HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&& other) noexcept
-{
-    if (this == &other)
-        return *this;
-
-    delete reinterpret_cast<HardwareExecutorVulkan*>(executorID);
-    executorID = std::exchange(other.executorID, 0);
-    return *this;
-}
+HardwareExecutor::HardwareExecutor(HardwareExecutor&&) noexcept = default;
+HardwareExecutor::~HardwareExecutor() = default;
+HardwareExecutor& HardwareExecutor::operator=(HardwareExecutor&&) noexcept = default;
 
 HardwareExecutor& HardwareExecutor::operator<<(HardwareCommand command)
 {
     if (!command.impl_) return *this;
-    auto& executor = *execFromId(executorID);
+    auto& executor = HardwareBackendAccess::executor(*this);
     auto* record = command.impl_->getCommandRecord();
     using Draw = HardwareCommand::Impl::Draw;
     auto* draw = dynamic_cast<Draw*>(record);
@@ -82,25 +57,25 @@ HardwareExecutor& HardwareExecutor::operator<<(HardwareCommand command)
 
 HardwareExecutor& HardwareExecutor::wait(HardwareExecutor& other)
 {
-    if (executorID && other.executorID && executorID != other.executorID)
-        execFromId(executorID)->wait(*execFromId(other.executorID));
+    if (impl_ && other.impl_ && this != &other)
+        impl_->backend.wait(other.impl_->backend);
     return *this;
 }
 
 HardwareExecutor& HardwareExecutor::commit()
 {
-    execFromId(executorID)->commit();
+    HardwareBackendAccess::executor(*this).commit();
     return *this;
 }
 
 void HardwareExecutor::waitForDeferredResources()
 {
-    if (executorID)
-        execFromId(executorID)->waitForAllDeferredResources();
+    if (impl_)
+        impl_->backend.waitForAllDeferredResources();
 }
 
 void HardwareExecutor::cleanupDeferredResources()
 {
-    if (executorID)
-        execFromId(executorID)->cleanupCompletedResources();
+    if (impl_)
+        impl_->backend.cleanupCompletedResources();
 }

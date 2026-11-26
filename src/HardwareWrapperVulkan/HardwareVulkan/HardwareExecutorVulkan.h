@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -189,4 +190,19 @@ struct HardwareExecutorVulkan
     std::vector<SubmissionPoint> pendingWaits; // Freeze the exact submissions at wait() time.
     SubmissionPoint lastSubmission; // Published only after a successful queue submission.
     SubmissionPoint lastCompleted;  // Observed from the device or a successful host wait.
+};
+
+struct HardwareExecutor::Impl
+{
+    HardwareExecutorVulkan backend;
+};
+
+struct HardwareBackendAccess
+{
+    static HardwareExecutorVulkan& executor(HardwareExecutor& executor)
+    {
+        if (!executor.impl_)
+            throw std::runtime_error("Empty HardwareExecutor handle");
+        return executor.impl_->backend;
+    }
 };

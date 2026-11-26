@@ -3,58 +3,43 @@
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
 #include <stdexcept>
 
+struct HardwareDisplayer::Impl
+{
+    Impl(void* surface, PresentDevicePreference preference) : manager(preference), surface(surface) {}
+
+    DisplayManager manager;
+    void* surface;
+};
+
 HardwareDisplayer::HardwareDisplayer(void* surface, PresentDevicePreference preference)
-    : displaySurfaceID(reinterpret_cast<uintptr_t>(new DisplayManager(preference))), displaySurface(surface)
+    : impl_(std::make_unique<Impl>(surface, preference))
 {
 }
 
-HardwareDisplayer::HardwareDisplayer(HardwareDisplayer&& other) noexcept
-    : displaySurfaceID(std::exchange(other.displaySurfaceID, 0)),
-      displaySurface(std::exchange(other.displaySurface, nullptr))
-{
-}
-
-HardwareDisplayer::~HardwareDisplayer()
-{
-    delete reinterpret_cast<DisplayManager*>(displaySurfaceID);
-}
-
-HardwareDisplayer& HardwareDisplayer::operator=(HardwareDisplayer&& other) noexcept
-{
-    if (this == &other)
-        return *this;
-
-    delete reinterpret_cast<DisplayManager*>(displaySurfaceID);
-    displaySurfaceID = std::exchange(other.displaySurfaceID, 0);
-    displaySurface = std::exchange(other.displaySurface, nullptr);
-    return *this;
-}
+HardwareDisplayer::HardwareDisplayer(HardwareDisplayer&&) noexcept = default;
+HardwareDisplayer::~HardwareDisplayer() = default;
+HardwareDisplayer& HardwareDisplayer::operator=(HardwareDisplayer&&) noexcept = default;
 
 HardwareDisplayer &HardwareDisplayer::wait(const HardwareExecutor &executor)
 {
-    const auto executorId = executor.getExecutorID();
-    if (executorId && displaySurfaceID)
-    {
-        auto* display = reinterpret_cast<DisplayManager*>(displaySurfaceID);
-        display->waitExecutor(*reinterpret_cast<HardwareExecutorVulkan*>(executorId));
-    }
+    if (impl_ && executor.impl_)
+        impl_->manager.waitExecutor(executor.impl_->backend);
     return *this;
 }
 
 HardwareDisplayer &HardwareDisplayer::operator<<(const HardwareImage &image)
 {
-    if (displaySurfaceID && displaySurface)
-        reinterpret_cast<DisplayManager*>(displaySurfaceID)->displayFrame(displaySurface, image);
+    if (impl_ && impl_->surface)
+        impl_->manager.displayFrame(impl_->surface, image);
     return *this;
 }
 
 bool HardwareDisplayer::present(HardwareExecutor& executor, const HardwareImage& image)
 {
-    auto* pending = reinterpret_cast<HardwareExecutorVulkan*>(executor.getExecutorID());
-    if (!pending) return false;
-    const bool shown = displaySurfaceID && displaySurface &&
-        reinterpret_cast<DisplayManager*>(displaySurfaceID)->displayFrame(displaySurface, image, pending);
-    if (!pending->commandList.empty()) pending->commit(); // Minimized, out of date or no surface.
+    if (!executor.impl_) return false;
+    auto& pending = executor.impl_->backend;
+    const bool shown = impl_ && impl_->surface && impl_->manager.displayFrame(impl_->surface, image, &pending);
+    if (!pending.commandList.empty()) pending.commit(); // Minimized, out of date or no surface.
     return shown;
 }
 
@@ -67,9 +52,9 @@ bool HardwareDisplayer::present(std::span<const uint32_t> pixels, uint32_t width
         throw std::invalid_argument("Pixel count does not match the presentation extent");
     if (count > UINT32_MAX / sizeof(uint32_t))
         throw std::length_error("Pixel presentation exceeds the supported upload size");
-    if (!count || !displaySurfaceID) return false;
+    if (!count || !impl_) return false;
 
-    auto& cache = reinterpret_cast<DisplayManager*>(displaySurfaceID)->pixelUpload;
+    auto& cache = impl_->manager.pixelUpload;
     if (!cache) cache.emplace();
     auto& upload = *cache;
     // The CPU can overwrite staging after the producer has finished reading it.

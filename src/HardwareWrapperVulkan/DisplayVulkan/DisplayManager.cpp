@@ -477,7 +477,7 @@ bool DisplayManager::displayFrame(void *surface, const HardwareImage& displayIma
             client.right == client.left || client.bottom == client.top) return false;
 #endif
         // 检查是否需要重新初始化
-        auto* handle = legacyImageFromId(displayImage.getImageID());
+        auto* handle = ResourceManager::get(displayImage);
         if (this->displaySurface != surface)
         {
             if (vkSurface != VK_NULL_HANDLE || swapChain != VK_NULL_HANDLE)

@@ -1,12 +1,10 @@
 #pragma once
 
 #include <ktm/ktm.h>
-#include <stdexcept>
 
+#include "Horizon.h"
 #include "DeviceManager.h"
 #include "HardwareWrapperVulkan/HardwareUtilsVulkan.h"
-
-class HardwareExecutor;
 
 struct ResourceManager
 {
@@ -31,61 +29,11 @@ struct ResourceManager
 #endif
     };
 
-    struct BufferHardwareWrap
-    {
-        uint32_t elementCount{0};
-        uint32_t elementSize{0};
-        uint64_t refCount{1};
+    using BufferHardwareWrap = HardwareBuffer::Impl;
+    using ImageHardwareWrap = HardwareImage::Impl;
 
-        VkBuffer bufferHandle{VK_NULL_HANDLE};
-        VkDeviceAddress deviceAddress{};
-        VkBufferUsageFlags bufferUsage{VK_BUFFER_USAGE_FLAG_BITS_MAX_ENUM};
-
-        VmaAllocation bufferAlloc{VK_NULL_HANDLE};
-        VmaAllocationInfo bufferAllocInfo{};
-        bool hostImportedManualBind{false};
-
-        int32_t bindlessIndex{-1};
-
-        DeviceManager *device{nullptr};
-        ResourceManager *resourceManager{nullptr};
-    };
-
-    struct ImageHardwareWrap
-    {
-        std::shared_ptr<ImageAllocation> allocationOwner;
-        VkImageLayout imageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
-        float pixelSize{0};
-        ktm::uvec2 imageSize{0, 0};
-        uint64_t refCount{1};
-
-        VkFormat imageFormat{VK_FORMAT_MAX_ENUM};
-        VkImageUsageFlags imageUsage{VK_IMAGE_USAGE_FLAG_BITS_MAX_ENUM};
-        VkImageAspectFlags aspectMask{VK_IMAGE_ASPECT_NONE};
-
-        uint32_t arrayLayers{1};
-        uint32_t mipLevels{1};
-        uint32_t baseMipLevel{0};
-        uint32_t baseArrayLayer{0};
-
-        VkClearValue clearValue{};
-
-        VkImage imageHandle{VK_NULL_HANDLE};
-
-        VkImageView imageView{VK_NULL_HANDLE};
-        std::unordered_map<uint64_t, VkImageView> allSubViews{};
-
-        VmaAllocation imageAlloc{VK_NULL_HANDLE};
-        VmaAllocationInfo imageAllocInfo{};
-
-        int32_t bindlessIndex{-1};
-        int32_t sampledIndex{-1};
-        bool cube{};
-        bool linearFiltering{};
-
-        DeviceManager *device{nullptr};
-        ResourceManager *resourceManager{nullptr};
-    };
+    static BufferHardwareWrap* get(const HardwareBuffer& buffer) { return buffer.impl_; }
+    static ImageHardwareWrap* get(const HardwareImage& image) { return image.impl_; }
 
     struct BindlessDescriptorSet
     {
@@ -224,15 +172,58 @@ struct ResourceManager
     VkPhysicalDeviceDescriptorIndexingProperties cachedIndexingProperties{};
 };
 
-// IDs remain opaque addresses for API compatibility; resources are heap-owned.
-inline ResourceManager::BufferHardwareWrap *legacyBufferFromId(uintptr_t id)
+struct HardwareBuffer::Impl
 {
-    if (!id) throw std::runtime_error("Empty HardwareBuffer handle");
-    return reinterpret_cast<ResourceManager::BufferHardwareWrap *>(id);
-}
+    uint32_t elementCount{0};
+    uint32_t elementSize{0};
+    uint64_t refCount{1};
 
-inline ResourceManager::ImageHardwareWrap *legacyImageFromId(uintptr_t id)
+    VkBuffer bufferHandle{VK_NULL_HANDLE};
+    VkDeviceAddress deviceAddress{};
+    VkBufferUsageFlags bufferUsage{VK_BUFFER_USAGE_FLAG_BITS_MAX_ENUM};
+
+    VmaAllocation bufferAlloc{VK_NULL_HANDLE};
+    VmaAllocationInfo bufferAllocInfo{};
+    bool hostImportedManualBind{false};
+
+    int32_t bindlessIndex{-1};
+
+    DeviceManager *device{nullptr};
+    ResourceManager *resourceManager{nullptr};
+};
+
+struct HardwareImage::Impl
 {
-    if (!id) throw std::runtime_error("Empty HardwareImage handle");
-    return reinterpret_cast<ResourceManager::ImageHardwareWrap *>(id);
-}
+    std::shared_ptr<ResourceManager::ImageAllocation> allocationOwner;
+    VkImageLayout imageLayout{VK_IMAGE_LAYOUT_UNDEFINED};
+    float pixelSize{0};
+    ktm::uvec2 imageSize{0, 0};
+    uint64_t refCount{1};
+
+    VkFormat imageFormat{VK_FORMAT_MAX_ENUM};
+    VkImageUsageFlags imageUsage{VK_IMAGE_USAGE_FLAG_BITS_MAX_ENUM};
+    VkImageAspectFlags aspectMask{VK_IMAGE_ASPECT_NONE};
+
+    uint32_t arrayLayers{1};
+    uint32_t mipLevels{1};
+    uint32_t baseMipLevel{0};
+    uint32_t baseArrayLayer{0};
+
+    VkClearValue clearValue{};
+
+    VkImage imageHandle{VK_NULL_HANDLE};
+
+    VkImageView imageView{VK_NULL_HANDLE};
+    std::unordered_map<uint64_t, VkImageView> allSubViews{};
+
+    VmaAllocation imageAlloc{VK_NULL_HANDLE};
+    VmaAllocationInfo imageAllocInfo{};
+
+    int32_t bindlessIndex{-1};
+    int32_t sampledIndex{-1};
+    bool cube{};
+    bool linearFiltering{};
+
+    DeviceManager *device{nullptr};
+    ResourceManager *resourceManager{nullptr};
+};

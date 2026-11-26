@@ -135,19 +135,12 @@ uint32_t uploadByteCount(const ResourceManager::ImageHardwareWrap& image, uint32
     return static_cast<uint32_t>(columns * rows * blockBytes);
 }
 
-void retainImage(uintptr_t id)
+void releaseImage(ResourceManager::ImageHardwareWrap* image)
 {
-    if (id) ++legacyImageFromId(id)->refCount;
-}
-
-void releaseImage(uintptr_t id)
-{
-    if (!id) return;
-    auto* resource = legacyImageFromId(id);
-    if (--resource->refCount == 0)
+    if (image && --image->refCount == 0)
     {
-        resource->resourceManager->destroyImage(*resource);
-        delete resource;
+        image->resourceManager->destroyImage(*image);
+        delete image;
     }
 }
 }
@@ -164,52 +157,51 @@ HardwareImage::HardwareImage(const HardwareImageCreateInfo& createInfo)
     if (createInfo.cube && (createInfo.width != createInfo.height || createInfo.arrayLayers != 6))
         throw std::invalid_argument("A cubemap requires six square faces");
     const auto [vkFormat, pixelSize, isCompressed] = convertImageFormat(createInfo.format);
-    auto resource = std::make_unique<ResourceManager::ImageHardwareWrap>();
-    *resource = getHardwareContext().getMainDevice()->resourceManager.createImage(
+    auto& manager = getHardwareContext().getMainDevice()->resourceManager;
+    impl_ = new Impl(manager.createImage(
         ktm::uvec2(createInfo.width, createInfo.height), vkFormat, pixelSize,
-        convertImageUsage(createInfo.usage, isCompressed), createInfo.arrayLayers, createInfo.mipLevels, VK_IMAGE_TILING_OPTIMAL, createInfo.cube);
-    resource->linearFiltering = createInfo.linearFiltering;
-    imageID = reinterpret_cast<uintptr_t>(resource.release());
+        convertImageUsage(createInfo.usage, isCompressed), createInfo.arrayLayers, createInfo.mipLevels, VK_IMAGE_TILING_OPTIMAL, createInfo.cube));
+    impl_->linearFiltering = createInfo.linearFiltering;
 }
 
 HardwareImage::HardwareImage(uint32_t width, uint32_t height, ImageFormat format, ImageUsage usage, int arrayLayers)
     : HardwareImage(HardwareImageCreateInfo{width, height, format, usage, arrayLayers}) {}
 
-HardwareImage::HardwareImage(const HardwareImage& other) : imageID(other.imageID)
+HardwareImage::HardwareImage(const HardwareImage& other) : impl_(other.impl_)
 {
-    retainImage(imageID);
+    if (impl_) ++impl_->refCount;
 }
 
-HardwareImage::HardwareImage(HardwareImage&& other) noexcept : imageID(std::exchange(other.imageID, 0)) {}
+HardwareImage::HardwareImage(HardwareImage&& other) noexcept : impl_(std::exchange(other.impl_, nullptr)) {}
 
 HardwareImage::~HardwareImage()
 {
-    releaseImage(imageID);
+    releaseImage(impl_);
 }
 
 HardwareImage& HardwareImage::operator=(const HardwareImage& other)
 {
-    if (imageID == other.imageID) return *this;
-    retainImage(other.imageID);
-    releaseImage(imageID);
-    imageID = other.imageID;
+    if (impl_ == other.impl_) return *this;
+    if (other.impl_) ++other.impl_->refCount;
+    releaseImage(impl_);
+    impl_ = other.impl_;
     return *this;
 }
 
 HardwareImage& HardwareImage::operator=(HardwareImage&& other) noexcept
 {
     if (this == &other) return *this;
-    releaseImage(imageID);
-    imageID = std::exchange(other.imageID, 0);
+    releaseImage(impl_);
+    impl_ = std::exchange(other.impl_, nullptr);
     return *this;
 }
 
 HardwareImage HardwareImage::operator[](uint32_t index)
 {
     HardwareImage result;
-    if (!imageID) return result;
-    auto* parent = legacyImageFromId(imageID);
-    auto view = std::make_unique<ResourceManager::ImageHardwareWrap>();
+    if (!impl_) return result;
+    auto* parent = impl_;
+    auto view = std::make_unique<Impl>();
     view->device = parent->device;
     view->resourceManager = parent->resourceManager;
     view->imageFormat = parent->imageFormat;
@@ -243,42 +235,36 @@ HardwareImage HardwareImage::operator[](uint32_t index)
         view->arrayLayers = 1;
         view->mipLevels = parent->mipLevels;
     }
-    result.imageID = reinterpret_cast<uintptr_t>(view.release());
+    result.impl_ = view.release();
     return result;
 }
 
 HardwareImage::operator bool() const
 {
-    return imageID && legacyImageFromId(imageID)->imageHandle != VK_NULL_HANDLE;
+    return impl_ && impl_->imageHandle != VK_NULL_HANDLE;
 }
 
 uint32_t HardwareImage::storeSampledDescriptor() const
 {
     if (!*this) throw std::invalid_argument("Cannot bind an empty image");
-    auto* image = legacyImageFromId(imageID);
-    return image->resourceManager->storeSampledDescriptor(*image);
+    return impl_->resourceManager->storeSampledDescriptor(*impl_);
 }
 
 uint32_t HardwareImage::storeDescriptor() const
 {
     if (!*this) throw std::invalid_argument("Cannot bind an empty image");
-    auto imageHandle = legacyImageFromId(imageID);
-    return imageHandle->resourceManager->storeDescriptor(*imageHandle);
+    return impl_->resourceManager->storeDescriptor(*impl_);
 }
 
 void HardwareImage::setClearColor(float r, float g, float b, float a)
 {
-    auto const self_image_id = imageID;
-    if (self_image_id == 0) return;
-    auto handle = legacyImageFromId(self_image_id);
-    handle->clearValue.color = {{r, g, b, a}};
+    if (impl_) impl_->clearValue.color = {{r, g, b, a}};
 }
 
 HardwareCommand HardwareImage::copyFrom(const void *inputData, uint32_t imageLayer, uint32_t imageMip) const
 {
     if (!inputData || !*this) return HardwareCommand(nullptr);
-    const auto* image = legacyImageFromId(imageID);
-    if (imageMip >= image->mipLevels) return HardwareCommand(nullptr);
-    HardwareBuffer stagingBuffer(uploadByteCount(*image, imageMip), BufferUsage::StorageBuffer, inputData);
+    if (imageMip >= impl_->mipLevels) return HardwareCommand(nullptr);
+    HardwareBuffer stagingBuffer(uploadByteCount(*impl_, imageMip), BufferUsage::StorageBuffer, inputData);
     return stagingBuffer.copyTo(*this, 0, imageLayer, imageMip);
 }

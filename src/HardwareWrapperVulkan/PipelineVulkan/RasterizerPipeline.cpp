@@ -19,22 +19,14 @@ VkImageLayout colorAttachmentLayout(const ResourceManager::ImageHardwareWrap& im
 
 bool sameAttachment(const HardwareImage& a, const HardwareImage& b)
 {
-    if (a.getImageID() == b.getImageID()) return true;
-    if (!a || !b) return false;
-    const auto& left = *legacyImageFromId(a.getImageID());
-    const auto& right = *legacyImageFromId(b.getImageID());
+    const auto* left = ResourceManager::get(a);
+    const auto* right = ResourceManager::get(b);
+    if (left == right) return true;
+    if (!left || !right) return false;
     // Framebuffers use only the first mip of each view.
-    return left.imageHandle == right.imageHandle && left.imageFormat == right.imageFormat &&
-           left.aspectMask == right.aspectMask && left.baseMipLevel == right.baseMipLevel &&
-           left.baseArrayLayer == right.baseArrayLayer && left.arrayLayers == right.arrayLayers;
-}
-
-bool sameResource(const PipelineResource& a, const PipelineResource& b)
-{
-    if (a.index() != b.index()) return false;
-    if (const auto* buffer = std::get_if<HardwareBuffer>(&a))
-        return buffer->getBufferID() == std::get<HardwareBuffer>(b).getBufferID();
-    return std::get<HardwareImage>(a).getImageID() == std::get<HardwareImage>(b).getImageID();
+    return left->imageHandle == right->imageHandle && left->imageFormat == right->imageFormat &&
+           left->aspectMask == right->aspectMask && left->baseMipLevel == right->baseMipLevel &&
+           left->baseArrayLayer == right->baseArrayLayer && left->arrayLayers == right->arrayLayers;
 }
 }
 
@@ -416,12 +408,12 @@ HardwareCommand::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> back
         const HardwareImage& target = color != renderTargets.end() ? *color : pipeline->depthImage;
         if (!target || (color == renderTargets.end() && !pipeline->explicitDepthImage))
             throw std::invalid_argument("An inferred raster extent requires a bound color or depth image");
-        extent = legacyImageFromId(target.getImageID())->imageSize;
+        extent = ResourceManager::get(target)->imageSize;
     }
     imageSize = *extent;
     if (!imageSize.x || !imageSize.y) throw std::invalid_argument("Raster draw requires a nonzero extent");
     if (!pipeline->explicitDepthImage) {
-        const auto* depth = pipeline->depthImage ? legacyImageFromId(pipeline->depthImage.getImageID()) : nullptr;
+        const auto* depth = ResourceManager::get(pipeline->depthImage);
         if (!depth || depth->imageSize != imageSize) {
             HardwareImageCreateInfo info(imageSize.x, imageSize.y, ImageFormat::D32_FLOAT);
             info.usage = ImageUsage::DepthImage;
@@ -432,8 +424,8 @@ HardwareCommand::Impl::Draw::Draw(std::shared_ptr<RasterizerPipelineVulkan> back
     depthImage = pipeline->depthImage;
     clearValues.reserve(renderTargets.size() + 1);
     for (const auto& target : renderTargets)
-        clearValues.push_back(target ? legacyImageFromId(target.getImageID())->clearValue : VkClearValue{});
-    clearValues.push_back(legacyImageFromId(depthImage.getImageID())->clearValue);
+        clearValues.push_back(target ? ResourceManager::get(target)->clearValue : VkClearValue{});
+    clearValues.push_back(ResourceManager::get(depthImage)->clearValue);
     uniformBytes = copyParameterBytes(pipeline->tempUBO.get(), pipeline->uboSize);
     bindings = pipeline->bindings.snapshot();
 }
@@ -458,9 +450,9 @@ bool HardwareCommand::Impl::Draw::canMerge(const Draw& next) const
     const auto readsAttachment = [&](const PipelineResource& resource) {
         const auto* image = std::get_if<HardwareImage>(&resource);
         if (!image || !*image) return false;
-        const auto handle = legacyImageFromId(image->getImageID())->imageHandle;
+        const auto handle = ResourceManager::get(*image)->imageHandle;
         const auto aliases = [handle](const HardwareImage& attachment) {
-            return attachment && legacyImageFromId(attachment.getImageID())->imageHandle == handle;
+            return attachment && ResourceManager::get(attachment)->imageHandle == handle;
         };
         return aliases(depthImage) || std::ranges::any_of(renderTargets, aliases);
     };
@@ -471,7 +463,7 @@ bool HardwareCommand::Impl::Draw::canMerge(const Draw& next) const
         if (readsAttachment(binding.resource)) return false;
         if (pipeline->mergeWithoutUses || binding.sampled) continue;
         if (const auto* image = std::get_if<HardwareImage>(&binding.resource);
-            image && *image && !(legacyImageFromId(image->getImageID())->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) continue;
+            image && *image && !(ResourceManager::get(*image)->imageUsage & VK_IMAGE_USAGE_STORAGE_BIT)) continue;
         if (!std::ranges::any_of(resourceUses, [&](const ResourceUse& use) {
                 return sameResource(binding.resource, use.resource);
             })) return false;
@@ -499,7 +491,7 @@ void HardwareCommand::Impl::Draw::prepareFramebuffer()
         framebuffer = lastFramebuffer;
         return;
     }
-    auto* depth = legacyImageFromId(depthImage.getImageID());
+    auto* depth = ResourceManager::get(depthImage);
     std::vector<VkFormat> formats;
     std::vector<VkImageLayout> finalLayouts;
     std::vector<VkImageView> views;
@@ -515,7 +507,7 @@ void HardwareCommand::Impl::Draw::prepareFramebuffer()
     for (const auto& target : renderTargets)
     {
         if (!target) throw std::runtime_error("Rasterizer invocation has an unbound color attachment");
-        auto* image = legacyImageFromId(target.getImageID());
+        auto* image = ResourceManager::get(target);
         checkExtent(image);
         formats.push_back(image->imageFormat);
         finalLayouts.push_back(colorAttachmentLayout(*image));
@@ -585,7 +577,7 @@ void RasterizerPipelineVulkan::setResourceDirect(uint64_t byteOffset, uint32_t t
 namespace {
 VkDeviceAddress addressOf(const HardwareBuffer& handle)
 {
-    auto* buffer = legacyBufferFromId(handle.getBufferID());
+    auto* buffer = ResourceManager::get(handle);
     std::atomic_ref cached(buffer->deviceAddress);
     if (auto address = cached.load(std::memory_order_relaxed)) return address;
     if (!(buffer->bufferUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT))
@@ -604,7 +596,7 @@ void HardwareCommand::Impl::Draw::appendIndirect(const HardwareBuffer& vertices,
 {
     if (!count) return;
     if (!packets || packets.getElementSize() != sizeof(RasterIndirectPacket) || count > packets.getElementCount() ||
-        !(legacyBufferFromId(packets.getBufferID())->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
+        !(ResourceManager::get(packets)->bufferUsage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT))
         throw std::invalid_argument("Invalid indirect packet buffer or draw count");
     if (!vertices || !indices || vertices.getElementSize() % 4 ||
         (indices.getElementSize() != 2 && indices.getElementSize() != 4))
@@ -647,19 +639,19 @@ void HardwareCommand::Impl::Draw::resolveResourceUses(std::span<const ResourceUs
     constexpr auto shaderStages = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
     resolveShaderBindings(result, bindings->values, shaderStages);
     for (const auto& group : groups) {
-        result.buffer(*legacyBufferFromId(group.packets.getBufferID()), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
+        result.buffer(*ResourceManager::get(group.packets), VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | shaderStages,
                       VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-        result.buffer(*legacyBufferFromId(group.geometryUpload->getBufferID()), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        result.buffer(*ResourceManager::get(*group.geometryUpload), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
         if (group.parameters)
-            result.buffer(*legacyBufferFromId(group.parameters.getBufferID()), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+            result.buffer(*ResourceManager::get(group.parameters), shaderStages, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
         for (const auto* buffer : {&group.vertices, &group.indices})
-            result.buffer(*legacyBufferFromId(buffer->getBufferID()), VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+            result.buffer(*ResourceManager::get(*buffer), VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                           VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     }
     for (const auto& target : renderTargets)
         if (target)
         {
-            auto* image = legacyImageFromId(target.getImageID());
+            auto* image = ResourceManager::get(target);
             auto range = imageViewRange(*image);
             range.levelCount = 1;
             range.layerCount = pipeline->multiviewCount;
@@ -669,7 +661,7 @@ void HardwareCommand::Impl::Draw::resolveResourceUses(std::span<const ResourceUs
         }
     if (depthImage)
     {
-        auto* image = legacyImageFromId(depthImage.getImageID());
+        auto* image = ResourceManager::get(depthImage);
         auto range = imageViewRange(*image);
         range.levelCount = 1;
         range.layerCount = pipeline->multiviewCount;
@@ -718,7 +710,7 @@ void HardwareCommand::Impl::Draw::commitCommand(HardwareExecutorVulkan& hardware
         ? caps.supportedProperties.properties.limits.maxDrawIndirectCount : 1;
     for (const auto& group : groups) {
         vkCmdSetScissor(commandBuffer, 0, 1, &group.scissor);
-        const VkBuffer commands = legacyBufferFromId(group.packets.getBufferID())->bufferHandle;
+        const VkBuffer commands = ResourceManager::get(group.packets)->bufferHandle;
         auto root = group.root;
         for (uint32_t first = 0; first < group.count;) {
             const auto count = std::min(group.count - first, limit);
@@ -734,7 +726,7 @@ void HardwareCommand::Impl::Draw::commitCommand(HardwareExecutorVulkan& hardware
     vkCmdEndRenderPass(commandBuffer);
     for (size_t i = 0; i < renderTargets.size(); ++i)
     {
-        auto* image = legacyImageFromId(renderTargets[i].getImageID());
+        auto* image = ResourceManager::get(renderTargets[i]);
         auto range = imageViewRange(*image);
         range.levelCount = 1;
         range.layerCount = pipeline->multiviewCount;
