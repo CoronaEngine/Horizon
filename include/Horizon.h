@@ -22,10 +22,7 @@
 #include "Compiler/ShaderCodeCompiler.h"
 #include <ktm/ktm.h>
 
-struct HardwareExecutor;
-struct HardwareImage;
 
-// Transfers retain both resources. A zero buffer copy size uses the source remainder.
 class CopyCommand
 {
 public:
@@ -42,9 +39,66 @@ private:
     std::shared_ptr<Impl> impl_;
 };
 
-// Legacy resources and control objects are owner-thread objects.
-// Copying/releasing shared handles and modifying resource state require external serialization.
-// Pipeline, executor and displayer handles are move-only. Queued work retains its pipeline.
+
+class ComputeCommand
+{
+    template<class> friend struct ComputePipeline;
+    friend struct HardwareExecutor;
+
+    struct Impl;
+    explicit ComputeCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    std::shared_ptr<Impl> impl_;
+};
+
+
+class RasterCommand
+{
+public:
+    RasterCommand(RasterCommand&&) noexcept = default;
+    RasterCommand& operator=(RasterCommand&&) noexcept = default;
+private:
+    friend struct HardwareExecutor;
+    friend struct RasterizerPipeline<>;
+    struct Impl;
+    explicit RasterCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+    std::shared_ptr<Impl> impl_;
+};
+
+
+struct HardwareExecutor
+{
+public:
+    HardwareExecutor();
+    HardwareExecutor(HardwareExecutor&& other) noexcept;
+    ~HardwareExecutor();
+
+    HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
+
+    HardwareExecutor& operator<<(const ComputeCommand& dispatch);
+    HardwareExecutor& operator<<(const ComputeCommand&&) = delete;
+    HardwareExecutor& operator<<(RasterCommand&& draw);
+    HardwareExecutor& operator<<(const CopyCommand& cmd);
+
+    // Depend on the most recent successful submission of other at the time of this call.
+    HardwareExecutor& wait(HardwareExecutor& other);
+    HardwareExecutor& commit();
+
+    // ========== 延迟释放相关接口 ==========
+    /// @brief 等待所有延迟释放的资源完成（阻塞）
+    void waitForDeferredResources();
+
+    /// @brief 手动触发一次清理（非阻塞）
+    void cleanupDeferredResources();
+
+    [[nodiscard]] uintptr_t getExecutorID() const
+    {
+        return executorID;
+    }
+
+private:
+    std::uintptr_t executorID{0};
+};
+
 
 enum class ImageFormat : uint32_t
 {
@@ -285,19 +339,8 @@ struct RasterIndirectPacket {
     uint32_t parameterWord{};
 };
 
-class RasterCommand {
-public:
-    RasterCommand(RasterCommand&&) noexcept = default;
-    RasterCommand& operator=(RasterCommand&&) noexcept = default;
-private:
-    friend struct HardwareExecutor;
-    friend struct RasterizerPipeline<>;
-    struct Impl;
-    explicit RasterCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
-    std::shared_ptr<Impl> impl_;
-};
 
-// ================= 对外封装：HardwareDisplayer =================
+
 enum class PresentDevicePreference { RenderDevice, AlternateDevice };
 
 struct HardwareDisplayer
@@ -325,17 +368,6 @@ public:
 private:
     std::uintptr_t displaySurfaceID{0};
     void* displaySurface{nullptr};
-};
-
-// One dispatch with the workgroup counts, shader variant and bindings captured at the call site.
-class ComputeCommand
-{
-    template<class> friend struct ComputePipeline;
-    friend struct HardwareExecutor;
-
-    struct Impl;
-    explicit ComputeCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
-    std::shared_ptr<Impl> impl_;
 };
 
 template<class CS = void>
@@ -439,38 +471,3 @@ extern template struct RasterizerPipeline<void, void>;
 
 template<class VS, class FS> requires requires { VS::shaderModule; FS::shaderModule; }
 RasterizerPipeline(const VS&, const FS&, uint32_t = 1) -> RasterizerPipeline<VS, FS>;
-
-// ================= 对外封装：HardwareExecutor =================
-struct HardwareExecutor
-{
-public:
-    HardwareExecutor();
-    HardwareExecutor(HardwareExecutor&& other) noexcept;
-    ~HardwareExecutor();
-
-    HardwareExecutor& operator=(HardwareExecutor&& other) noexcept;
-
-    HardwareExecutor& operator<<(const ComputeCommand& dispatch);
-    HardwareExecutor& operator<<(const ComputeCommand&&) = delete;
-    HardwareExecutor& operator<<(RasterCommand&& draw);
-    HardwareExecutor& operator<<(const CopyCommand& cmd);
-
-    // Depend on the most recent successful submission of other at the time of this call.
-    HardwareExecutor& wait(HardwareExecutor& other);
-    HardwareExecutor& commit();
-
-    // ========== 延迟释放相关接口 ==========
-    /// @brief 等待所有延迟释放的资源完成（阻塞）
-    void waitForDeferredResources();
-
-    /// @brief 手动触发一次清理（非阻塞）
-    void cleanupDeferredResources();
-
-    [[nodiscard]] uintptr_t getExecutorID() const
-    {
-        return executorID;
-    }
-
-private:
-    std::uintptr_t executorID{0};
-};
