@@ -593,21 +593,25 @@ void test_gpu()
     expect(rejected, "out of bounds copy must be rejected before recording");
 
     std::cerr << "GPU: image mip/layer round trip\n";
-    std::array<uint32_t, 2> layers{0x11223344, 0x55667788};
-    HardwareImage initialized(1, 1, ImageFormat::RGBA8_UINT, ImageUsage::SampledImage, 2, layers.data());
-    executor << initialized.copyTo(destination, 1);
+    const std::array<uint32_t, 2> layers{0x11223344, 0x55667788};
+    HardwareImage layered(1, 1, ImageFormat::RGBA8_UINT, ImageUsage::SampledImage, 2);
+    executor << layered.copyFrom(&layers[0], 0) << layered.copyFrom(&layers[1], 1);
+    executor << layered.copyTo(destination, 0) << layered.copyTo(destination, 1, 0, sizeof(uint32_t));
     executor.commit().waitForDeferredResources();
-    expect(destination.copyToData(output.data(), sizeof(output)) && output[0] == layers[1],
-           "initial image upload retains staging and copies the second array layer");
+    std::array<uint32_t, 2> copiedLayers{};
+    expect(destination.copyToData(copiedLayers.data(), sizeof(copiedLayers)) && copiedLayers == layers,
+           "explicit uploads preserve both array layers in one submission");
     VkFormatProperties bc1{};
     vkGetPhysicalDeviceFormatProperties(getHardwareContext().getMainDevice()->deviceManager.getPhysicalDevice(),
                                         VK_FORMAT_BC1_RGB_UNORM_BLOCK, &bc1);
     if (bc1.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
-        auto blocks = std::array<uint32_t,4>{1,2,3,4};
-        HardwareImage compressed(5, 3, ImageFormat::BC1_RGB_UNORM, ImageUsage::SampledImage, 1, blocks.data());
-        executor << compressed.copyTo(destination);
+        std::cerr << "GPU: BC1 upload/readback\n";
+        const std::array<uint32_t, 4> blocks{1, 2, 3, 4};
+        HardwareImage compressed(5, 3, ImageFormat::BC1_RGB_UNORM);
+        executor << compressed.copyFrom(blocks.data()) << compressed.copyTo(destination);
         executor.commit().waitForDeferredResources();
-        expect(destination.copyToData(output.data(), sizeof(output)) && std::ranges::equal(blocks, std::span(output).first(4)),
+        std::array<uint32_t, 4> copiedBlocks{};
+        expect(destination.copyToData(copiedBlocks.data(), sizeof(copiedBlocks)) && copiedBlocks == blocks,
                "odd-sized BC1 upload rounds up to two whole blocks");
     }
     struct RetryCommand : CommandRecordVulkan {

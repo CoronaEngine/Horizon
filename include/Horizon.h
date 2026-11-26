@@ -212,7 +212,7 @@ public:
     HardwareImage();
     HardwareImage(const HardwareImage& other);
     HardwareImage(HardwareImage&& other) noexcept;
-    HardwareImage(uint32_t width, uint32_t height, ImageFormat imageFormat, ImageUsage imageUsage = ImageUsage::SampledImage, int arrayLayers = 1, void* imageData = nullptr);
+    HardwareImage(uint32_t width, uint32_t height, ImageFormat imageFormat, ImageUsage imageUsage = ImageUsage::SampledImage, int arrayLayers = 1);
     HardwareImage(const HardwareImageCreateInfo& createInfo);
 
     ~HardwareImage();

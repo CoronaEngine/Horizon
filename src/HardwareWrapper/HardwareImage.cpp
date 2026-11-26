@@ -1,7 +1,5 @@
 ﻿#include "Horizon.h"
 #include "HardwareWrapperVulkan/HardwareContext.h"
-#include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
-#include "HardwareWrapperVulkan/HardwareVulkan/ResourceCommand.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/ResourceManager.h"
 #include <bit>
 
@@ -124,7 +122,7 @@ VkImageUsageFlags convertImageUsage(ImageUsage usage, bool isCompressed)
 }
 
 namespace {
-uint32_t uploadByteCount(const ResourceManager::ImageHardwareWrap& image, uint32_t mip, uint32_t layers)
+uint32_t uploadByteCount(const ResourceManager::ImageHardwareWrap& image, uint32_t mip)
 {
     const uint64_t width = std::max(1u, image.imageSize.x >> mip);
     const uint64_t height = std::max(1u, image.imageSize.y >> mip);
@@ -132,9 +130,9 @@ uint32_t uploadByteCount(const ResourceManager::ImageHardwareWrap& image, uint32
     const uint64_t columns = compressed ? (width + 3) / 4 : width;
     const uint64_t rows = compressed ? (height + 3) / 4 : height;
     const auto blockBytes = static_cast<uint32_t>(image.pixelSize * (compressed ? 16 : 1));
-    if (!layers || !blockBytes || columns * rows > UINT32_MAX / blockBytes / layers)
+    if (!blockBytes || columns * rows > UINT32_MAX / blockBytes)
         throw std::length_error("Image upload exceeds the supported staging buffer size");
-    return static_cast<uint32_t>(columns * rows * blockBytes * layers);
+    return static_cast<uint32_t>(columns * rows * blockBytes);
 }
 
 void retainImage(uintptr_t id)
@@ -174,26 +172,8 @@ HardwareImage::HardwareImage(const HardwareImageCreateInfo& createInfo)
     imageID = reinterpret_cast<uintptr_t>(resource.release());
 }
 
-HardwareImage::HardwareImage(uint32_t width, uint32_t height, ImageFormat format, ImageUsage usage, int arrayLayers, void* imageData)
-    : HardwareImage([&] {
-        HardwareImageCreateInfo info(width, height, format);
-        info.usage = usage;
-        info.arrayLayers = arrayLayers;
-        return info;
-    }())
-{
-    if (imageData)
-    {
-        auto* image = legacyImageFromId(imageID);
-        HardwareBuffer staging(uploadByteCount(*image, 0, image->arrayLayers),
-                               BufferUsage::StorageBuffer, imageData);
-        CopyBufferToImageCommand command(*legacyBufferFromId(staging.getBufferID()), *image, 0);
-        // The executor must finish before the borrowed command and staging buffer are destroyed.
-        HardwareExecutorVulkan executor;
-        executor << &command;
-        executor.commit();
-    }
-}
+HardwareImage::HardwareImage(uint32_t width, uint32_t height, ImageFormat format, ImageUsage usage, int arrayLayers)
+    : HardwareImage(HardwareImageCreateInfo{width, height, format, usage, arrayLayers}) {}
 
 HardwareImage::HardwareImage(const HardwareImage& other) : imageID(other.imageID)
 {
@@ -304,6 +284,6 @@ CopyCommand HardwareImage::copyFrom(const void *inputData, uint32_t imageLayer, 
     if (!*this) return {};
     const auto* image = legacyImageFromId(imageID);
     if (imageMip >= image->mipLevels) return {};
-    HardwareBuffer stagingBuffer(uploadByteCount(*image, imageMip, 1), BufferUsage::StorageBuffer, inputData);
+    HardwareBuffer stagingBuffer(uploadByteCount(*image, imageMip), BufferUsage::StorageBuffer, inputData);
     return stagingBuffer.copyTo(*this, 0, imageLayer, imageMip);
 }
