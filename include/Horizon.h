@@ -57,8 +57,8 @@ public:
     RasterCommand(RasterCommand&&) noexcept = default;
     RasterCommand& operator=(RasterCommand&&) noexcept = default;
 private:
+    template<class, class> friend struct RasterizerPipeline;
     friend struct HardwareExecutor;
-    friend struct RasterizerPipeline<>;
     struct Impl;
     explicit RasterCommand(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
     std::shared_ptr<Impl> impl_;
@@ -305,9 +305,6 @@ struct ResourceUse
     ResourceAccess access;
 };
 
-template<class VS = void, class FS = void>
-struct RasterizerPipeline;
-
 struct ScissorRect
 {
     int32_t x { 0 };
@@ -410,7 +407,7 @@ public:
 
 extern template struct ComputePipeline<void>;
 
-template<class VS, class FS>
+template<class VS = void, class FS = void>
 struct RasterizerPipeline
 {
     static_assert(std::same_as<VS, void> && std::same_as<FS, void>,
