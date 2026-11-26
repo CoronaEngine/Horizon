@@ -38,7 +38,10 @@ target_include_directories(HorizonExamples PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(HorizonExamples PRIVATE
     Horizon ocarina-native horizon::ktm horizon::glm horizon::glfw horizon::stb horizon::tinyobjloader)
 helicon_install_runtime_deps(HorizonExamples)
-helicon_compile_shaders(HorizonExamples)
+helicon_compile_shaders(HorizonExamples RASTER_PAIRS
+    Baseline/Slang/baseline.pipeline.hpp Baseline/Slang/baseline_vert.slang Baseline/Slang/baseline_frag.slang
+    Disney/Slang/disney.pipeline.hpp Disney/Slang/disney_vert.slang Disney/Slang/disney_frag.slang
+    DrawStress/Slang/drawstress.pipeline.hpp DrawStress/Slang/drawstress_vert.slang DrawStress/Slang/drawstress_frag.slang)
 
 if(HORIZON_BUILD_TESTS)
     add_dependencies(horizon-tests HorizonExamples)

@@ -267,7 +267,25 @@ cmake --build --preset examples-relwithdebinfo --target HorizonExamples
 
 源码字符串由 Helicon 的 Slang 编译器处理。构造管线时使用 `ComputePipeline(source)` 或 `RasterizerPipeline(vertexSource, fragmentSource, multiviewCount)`，迁移旧调用时删去 `ShaderLanguage` 实参。
 
-EDSL、Slang 源码和已编译模块共用 `ComputePipeline` 或 `RasterizerPipeline` 主模板。传入生成的 shader 对象时，管线会保留具名字段，例如 `RasterizerPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 支持 `pipeline.outColor` 和 `pipeline.vp.view`。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterizerPipeline<VS, FS>&`，由函数模板推导阶段类型。
+EDSL、Slang 源码和已编译模块可直接传给 `ComputePipeline` 或 `RasterizerPipeline`。要使用 Slang 光栅着色器的具名字段，在目标中登记实际使用的顶点和片元着色器配对。每组三个参数依次为生成头、顶点着色器、片元着色器。
+
+```cmake
+helicon_compile_shaders(HorizonExamples RASTER_PAIRS
+    Baseline/Slang/baseline.pipeline.hpp
+    Baseline/Slang/baseline_vert.slang
+    Baseline/Slang/baseline_frag.slang)
+```
+
+在使用处分别引入两个阶段，顺序可以互换。
+
+```cpp
+#include "Horizon.h"
+#include "Codegen/ControlFlows.h"
+#include SLANG(Baseline/Slang/baseline_vert.slang)
+#include SLANG(Baseline/Slang/baseline_frag.slang)
+```
+
+两个阶段都可见时，即可用 `RasterizerPipeline pipeline(baseline_vert_slang, baseline_frag_slang)` 构造管线，并直接赋值给 `pipeline.outColor` 和 `pipeline.vp.view`。共用同一 VS 的多个 FS 可以分别引入，每个已登记的配对都有自己的具名字段。也可以直接包含对应的配对头。接收任意实例的函数可将参数声明为 `ComputePipeline<CS>&` 或 `RasterizerPipeline<VS, FS>&`，由函数模板推导阶段类型。
 
 `batch.drawIndirect(vertexBuffer, indexBuffer, commands, count)` 执行命令缓冲中的前 `count` 条记录。同一个 batch 可以多次调用，按录入顺序在同一 render pass 中绘制。每次调用独立选择几何缓冲、参数和裁剪矩形。CPU 预先生成的命令可以与顶点和索引一起上传，并在后续帧中复用。
 

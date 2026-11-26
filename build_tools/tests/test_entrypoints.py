@@ -16,6 +16,42 @@ from build_tools.paths import REPO_ROOT, conanfile_path
 
 
 class EntryPointTests(unittest.TestCase):
+    def test_raster_pairs_share_stage_outputs_and_track_only_their_inputs(self):
+        cmake, ninja = shutil.which("cmake"), shutil.which("ninja")
+        if not cmake or not ninja:
+            self.skipTest("CMake and Ninja required")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("shared.vert", "first.frag", "second.hlsl", "compute.slang"):
+                (root / name).touch()
+            (root / "consumer.h").write_text('#include SLANG(shared.vert)\n#include SLANG(compute.slang)\n')
+            module = (REPO_ROOT / "build_tools/cmake/HeliconShaderCompile.cmake").as_posix()
+            (root / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 4.0)\nproject(PairedShaders NONE)\n'
+                'set(HORIZON_SHADER_COMPILE_SCRIPTS_EXECUTABLE "${CMAKE_COMMAND}")\n'
+                f'include("{module}")\n'
+                'add_library(consumer OBJECT consumer.h)\nset_target_properties(consumer PROPERTIES LINKER_LANGUAGE C)\n'
+                'helicon_compile_shaders(consumer OUTPUT_DIR generated RASTER_PAIRS\n'
+                '    first.hpp shared.vert first.frag\n    second.hpp shared.vert second.hlsl)\n')
+            build = root / "build"
+            subprocess.run([cmake, "-S", str(root), "-B", str(build), "-G", "Ninja",
+                            f"-DCMAKE_MAKE_PROGRAM={ninja}"], check=True, capture_output=True, timeout=30)
+
+            for target, expected_stages, expected_pairs, expected_standalone in (
+                    ("consumer_shaders", 3, 2, 1), ("generated/first.hpp", 2, 1, 0),
+                    ("generated/second.hpp", 2, 1, 0)):
+                with self.subTest(target=target):
+                    result = subprocess.run([ninja, "-C", str(build), "-t", "commands", target],
+                                            check=True, capture_output=True, text=True, timeout=30)
+                    commands = result.stdout.splitlines()
+                    self.assertEqual(sum(" -module-output " in line for line in commands), expected_stages)
+                    self.assertEqual(sum(" -raster-pair " in line for line in commands), expected_pairs)
+                    self.assertEqual(sum(" -l slang " in line and " -module-output " not in line
+                                         for line in commands), expected_standalone)
+                    self.assertTrue(any(" -l slang " in line and " -t vert " in line for line in commands))
+                    self.assertEqual(any(" -l glsl " in line for line in commands), target != "generated/second.hpp")
+                    self.assertEqual(any(" -l hlsl " in line for line in commands), target != "generated/first.hpp")
+
     def test_scripts_work_outside_the_repository(self):
         with tempfile.TemporaryDirectory() as temporary:
             for script in ("dev.py", "conan_cache.py"):

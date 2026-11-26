@@ -360,8 +360,8 @@ Helicon 里有两条不同的“包含”路径，理解 AST 行为时要区分�
 5. 把生成的 `.hpp` 设为 `GENERATED`，挂到目标的 `OBJECT_DEPENDS` 和
    `target_sources` 上，并把输出根目录以 `BEFORE PUBLIC` 加进 include path。
 
-当前仓库里只有 `HorizonExamples` 调用了 `helicon_compile_shaders`；新 target
-需要自己显式调用，不能只在源码里写 `#include GLSL(...)`。
+使用生成头的目标需要调用 `helicon_compile_shaders`。具名光栅管线通过该函数的
+`RASTER_PAIRS` 参数登记生成头路径和对应的 VS、FS 源文件。
 
 `ShaderCompileScripts`（`tools/main.cpp`）的离线流程：
 
@@ -378,7 +378,7 @@ Helicon 里有两条不同的“包含”路径，理解 AST 行为时要区分�
    - `static inline ::EmbeddedShader::SlangModule slang_module_<name>`；
    - `static inline auto& slangModule` 别名；
    - 非入口函数的 `FunctionProxy<...>`；
-   - `BindingKey`、`ResourceBindings<P>`、`OutputBindings<P>`、`Bindings<P>`；
+   - 资源的 `BindingKey`，以及计算着色器的 `Bindings<P>`；
 5. 输出 C++ 头，外层结构名由 `sanitizePath()` / `sanitizeFilename()` 清理。
 
 生成的头通常这样使用：
@@ -398,22 +398,13 @@ auto fs = [&](Aggregate<Varyings> in) {
 
 #### 2.2 生成头里的模块和绑定代理
 
-生成的 shader 头同时承担两件事：
-
-- 把 `SlangModule`（模块名、路径、序列化 IR）暴露给管线；
-- 把反射得到的绑定信息生成为 `BindingKey` 和 `Bindings<P>`，供
-  `pipeline.<UniformBlock>.<member> = value` 之类的直接成员访问使用。
-
-旧版 `Horizon_old.h` 的 `RasterizerPipeline<VS, FS>` 会静态检查：
-
-```cpp
-static_assert(VS::pushConstantBlockSize == FS::pushConstantBlockSize);
-static_assert(VS::uniformBufferBlockSize == FS::uniformBufferBlockSize);
-```
-
-当前 `horizon.h` 的 typed pipeline 不再重复这两条 `static_assert`，但同样要求
-VS/FS 的反射契约一致；如果只改了一侧 shader，需要重新生成另一侧或确认布局仍然
-一致。
+单阶段头提供 `SlangModule`（模块名、路径、序列化 IR）和反射得到的绑定信息。
+已登记配对的阶段头在声明阶段对象后标记自身可见，并逐一检查配对的另一阶段是否已经可见。
+因此按任意顺序包含 VS 和 FS，第二个阶段都会引入对应的配对头。配对头也可以直接包含，
+它会引入两个阶段头并定义对应的 `RasterizerPipeline<VS, FS>` 特化。
+颜色输出字段来自片元着色器。资源字段默认来自顶点着色器，只有片元着色器有 UBO
+而顶点着色器没有时才改取片元阶段。两阶段都有 UBO 时，生成器检查两者的总字节数一致。
+这些具名字段都是特化的直接成员，每个实例将它们绑定到自己的管线状态。
 
 #### 2.3 Slang 模块导入
 

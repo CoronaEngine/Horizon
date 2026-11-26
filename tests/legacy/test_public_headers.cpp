@@ -87,3 +87,26 @@ static_assert(requires(HardwareExecutor& a, HardwareExecutor& b, const CopyComma
 });
 
 void check_legacy_public_headers() {}
+
+#include "Codegen/ControlFlows.h"
+#include SLANG(examples/Disney/Slang/disney_frag.slang)
+
+template<class Stage>
+concept CompleteStage = requires { sizeof(Stage); };
+struct drawstress_frag_slang_t;
+static_assert(!CompleteStage<drawstress_frag_slang_t>);
+
+#include SLANG(examples/DrawStress/Slang/drawstress_frag.slang)
+
+struct disney_vert_slang_t;
+static_assert(!CompleteStage<disney_vert_slang_t>);
+
+#include SLANG(examples/Disney/Slang/disney_vert.slang)
+
+using DisneyRaster = decltype(RasterizerPipeline(disney_vert_slang, disney_frag_slang));
+using SharedVertexRaster = decltype(RasterizerPipeline(disney_vert_slang, drawstress_frag_slang));
+static_assert(requires(DisneyRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
+static_assert(requires(SharedVertexRaster& pipeline) { pipeline.vsp.proj_view; pipeline.outColor; });
+static_assert(!std::same_as<DisneyRaster, SharedVertexRaster>);
+
+#include "Disney/Slang/disney.pipeline.hpp"

@@ -4,6 +4,10 @@
 #include "Codegen/TypeAlias.h"
 #include "Compiler/ShaderUtils.h"
 #include "HardwareWrapperVulkan/HardwareVulkan/HardwareExecutorVulkan.h"
+#include SLANG(examples/Baseline/Slang/baseline_vert.slang)
+#include SLANG(examples/Baseline/Slang/baseline_frag.slang)
+#include SLANG(examples/Disney/Slang/disney_vert.slang)
+#include SLANG(examples/DrawStress/Slang/drawstress_frag.slang)
 
 #include <array>
 #include <cstdlib>
@@ -25,11 +29,9 @@ void expect(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
-template<EmbeddedShader::ShaderStage stage>
-struct GeneratedStage
+struct GeneratedComputeStage
 {
     static inline EmbeddedShader::SlangModule slangModule;
-    static constexpr size_t uniformBufferBlockSize = stage == EmbeddedShader::ShaderStage::FragmentShader ? sizeof(float) : 0;
 
     template<class Pipeline>
     struct Bindings
@@ -37,22 +39,6 @@ struct GeneratedStage
         explicit Bindings(Pipeline* pipeline)
             : output(pipeline, 0, sizeof(uint32_t), EmbeddedShader::ShaderCodeModule::ShaderResources::pushConstantMembers, 0) {}
         EmbeddedShader::BoundField<Pipeline> output;
-    };
-
-    template<class Pipeline>
-    struct ResourceBindings
-    {
-        struct { EmbeddedShader::BoundField<Pipeline> view; } vp;
-        explicit ResourceBindings(Pipeline* pipeline)
-            : vp{{pipeline, 0, sizeof(float), EmbeddedShader::ShaderCodeModule::ShaderResources::uniformBufferMembers, 0}} {}
-    };
-
-    template<class Pipeline>
-    struct OutputBindings
-    {
-        EmbeddedShader::BoundField<Pipeline> outColor;
-        explicit OutputBindings(Pipeline* pipeline)
-            : outColor(pipeline, 0, 0, EmbeddedShader::ShaderCodeModule::ShaderResources::stageOutputs, 0) {}
     };
 };
 
@@ -269,6 +255,35 @@ void test_raster_sampled_storage_image()
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel[0] == Pixel{0,1,0,1},
            "an empty indirect pass still clears its attachment");
+}
+
+void test_shared_vertex_stage()
+{
+    const std::array<std::array<float, 3>, 3> positions{{{-1, -1, 0}, {3, -1, 0}, {-1, 3, 0}}};
+    HardwareBuffer vertices(positions, BufferUsage::VertexBuffer);
+    // The Disney VS fetches two packed 16-bit indices per word.
+    HardwareBuffer indices(std::array<uint16_t, 4>{0, 1, 2, 0}, BufferUsage::IndexBuffer);
+    HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}},
+                           BufferUsage::RasterIndirect);
+    const auto model = ktm::fmat4x4::from_eye();
+    HardwareBuffer parameters(sizeof(model), BufferUsage::StorageBuffer, &model);
+
+    HardwareImage target(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
+    RasterizerPipeline raster(disney_vert_slang, drawstress_frag_slang);
+    raster.outColor = target;
+    raster.vsp.proj_view = ktm::fmat4x4::from_eye();
+    raster.vsp.camPos = ktm::fvec4(0.25f, 0.5f, 0.75f, 1.f);
+    auto batch = raster.beginBatch();
+    batch.drawIndirect(vertices, indices, packets, 1, parameters);
+
+    std::array<float, 4> pixel{};
+    HardwareBuffer readback(sizeof(pixel), BufferUsage::StorageBuffer);
+    HardwareExecutor executor;
+    executor << std::move(batch) << target.copyTo(readback);
+    executor.commit().waitForDeferredResources();
+    // At the center of the render target, the Disney view vector equals camPos.xyz.
+    expect(readback.copyToData(pixel.data(), sizeof(pixel)) && pixel == std::array{0.25f, 0.5f, 0.75f, 1.f},
+           "DrawStress fragment reads the Disney vertex output at location zero");
 }
 
 // Compute supplies the indirect command, color and depth for the second pass.
@@ -586,7 +601,7 @@ void test_gpu()
         [shader("compute")] [numthreads(1,1,1)]
         void main() { outputs[params.outputIndex][0] = 47; }
     )";
-    using Compute = GeneratedStage<EmbeddedShader::ShaderStage::ComputeShader>;
+    using Compute = GeneratedComputeStage;
     Compute::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
     ComputePipeline generated(Compute{});
     static_assert(std::same_as<decltype(generated), ComputePipeline<Compute>>);
@@ -604,50 +619,45 @@ void test_gpu()
            "generated fields bind independent outputs after move construction and assignment");
 
     std::cerr << "GPU: generated raster fields after move\n";
-    using Vertex = GeneratedStage<EmbeddedShader::ShaderStage::VertexShader>;
-    using Fragment = GeneratedStage<EmbeddedShader::ShaderStage::FragmentShader>;
-    moduleArgs.moduleName = "legacy_vertex";
-    moduleArgs.shaderCode = R"(
-        [shader("vertex")] float4 main(uint id : SV_VertexID) : SV_Position {
-            return float4(float2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0, 1);
-        }
-    )";
-    Vertex::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
-    moduleArgs.moduleName = "legacy_fragment";
-    moduleArgs.shaderCode = R"(
-        struct Parameters { float view; };
-        [[vk::binding(0, 3)]] ConstantBuffer<Parameters> vp;
-        [shader("fragment")] void main(out float4 outColor : SV_Target0) {
-            outColor = float4(vp.view, 0, 0, 1);
-        }
-    )";
-    Fragment::slangModule = EmbeddedShader::ShaderLanguageConverter::slangModuleCompiler(moduleArgs);
-    RasterizerPipeline raster(Vertex{}, Fragment{});
-    static_assert(std::same_as<decltype(raster), RasterizerPipeline<Vertex, Fragment>>);
-    static_assert(!std::is_base_of_v<RasterizerPipeline<>, decltype(raster)>);
+    RasterizerPipeline raster(baseline_vert_slang, baseline_frag_slang);
+    using Raster = RasterizerPipeline<baseline_vert_slang_t, baseline_frag_slang_t>;
+    static_assert(std::same_as<decltype(raster), Raster>);
+    static_assert(std::same_as<decltype(&Raster::vp), decltype(raster.vp) Raster::*>);
+    static_assert(std::same_as<decltype(&Raster::outColor), decltype(raster.outColor) Raster::*>);
+    static_assert(!std::is_base_of_v<RasterizerPipeline<>, Raster>);
     HardwareImage first(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
     HardwareImage second(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::StorageImage);
-    HardwareBuffer vertices(std::array<float, 3>{}, BufferUsage::VertexBuffer);
+    second.setClearColor(0.75f, 0.f, 0.f, 1.f);
+    HardwareImage texture(1, 1, ImageFormat::RGBA32_FLOAT, ImageUsage::SampledImage);
+    const std::array texel{0.25f, 0.f, 0.f, 1.f};
+    executor << texture.copyFrom(texel.data());
+    using Vertex = std::array<float, 5>; // xyz, uv in the Baseline shader.
+    const std::array triangle{Vertex{-1, -1, 0, 0, 0}, Vertex{3, -1, 0, 0, 0}, Vertex{-1, 3, 0, 0, 0}};
+    HardwareBuffer vertices(triangle, BufferUsage::VertexBuffer);
     HardwareBuffer indices(std::array<uint32_t, 3>{0, 1, 2}, BufferUsage::IndexBuffer);
     HardwareBuffer packets(std::array{RasterIndirectPacket{.vertexCount = 3, .instanceCount = 1}}, BufferUsage::RasterIndirect);
+    const struct { ktm::fmat4x4 model; uint32_t textureIndex; } draw{ktm::fmat4x4::from_eye(), texture.storeDescriptor()};
+    HardwareBuffer drawParameters(sizeof(draw), BufferUsage::StorageBuffer, &draw);
 
     auto movedRaster = std::move(raster);
+    movedRaster.uses({{texture, ResourceAccess::Read}});
     movedRaster.outColor = first;
-    movedRaster.vp.view = 0.25f;
+    movedRaster.vp.proj = ktm::fmat4x4::from_eye();
+    movedRaster.vp.view = ktm::fmat4x4::from_eye();
     auto firstBatch = movedRaster.beginBatch();
-    firstBatch.drawIndirect(vertices, indices, packets, 1);
+    firstBatch.drawIndirect(vertices, indices, packets, 1, drawParameters);
     raster = std::move(movedRaster);
     raster.outColor = second;
-    raster.vp.view = 0.75f;
+    raster.vp.view = ktm::translate3d(ktm::fvec3(8.f, 0.f, 0.f));
     auto secondBatch = raster.beginBatch();
-    secondBatch.drawIndirect(vertices, indices, packets, 1);
+    secondBatch.drawIndirect(vertices, indices, packets, 1, drawParameters);
     std::array<std::array<float, 4>, 2> pixels{};
     HardwareBuffer readback(sizeof(pixels), BufferUsage::StorageBuffer);
     executor << std::move(firstBatch) << std::move(secondBatch)
              << first.copyTo(readback) << second.copyTo(readback, 0, 0, sizeof(pixels[0]));
     executor.commit().waitForDeferredResources();
     expect(readback.copyToData(pixels.data(), sizeof(pixels)) &&
-           pixels[0] == std::array{0.25f, 0.f, 0.f, 1.f} && pixels[1] == std::array{0.75f, 0.f, 0.f, 1.f},
+           pixels[0] == texel && pixels[1] == std::array{0.75f, 0.f, 0.f, 1.f},
            "moved raster fields bind each attachment and snapshot its uniform value");
 }
 }
@@ -673,6 +683,7 @@ int main(int argc, char** argv)
             test_raster_batch(false);
             test_raster_batch(true);
             test_raster_sampled_storage_image();
+            test_shared_vertex_stage();
             test_generated_packet_and_attachment_load(true);
             test_generated_packet_and_attachment_load(false);
             test_compute_sampling();

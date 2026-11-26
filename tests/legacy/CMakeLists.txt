@@ -11,6 +11,16 @@ endif()
 add_test(NAME horizon-test-legacy COMMAND horizon-test-legacy)
 add_dependencies(horizon-tests horizon-test-legacy)
 helicon_install_runtime_deps(horizon-test-legacy)
+helicon_compile_shaders(horizon-test-legacy RASTER_PAIRS
+    Baseline/Slang/baseline.pipeline.hpp
+    "${PROJECT_SOURCE_DIR}/examples/Baseline/Slang/baseline_vert.slang"
+    "${PROJECT_SOURCE_DIR}/examples/Baseline/Slang/baseline_frag.slang"
+    Disney/Slang/disney.pipeline.hpp
+    "${PROJECT_SOURCE_DIR}/examples/Disney/Slang/disney_vert.slang"
+    "${PROJECT_SOURCE_DIR}/examples/Disney/Slang/disney_frag.slang"
+    Disney/Slang/disney_drawstress.pipeline.hpp
+    "${PROJECT_SOURCE_DIR}/examples/Disney/Slang/disney_vert.slang"
+    "${PROJECT_SOURCE_DIR}/examples/DrawStress/Slang/drawstress_frag.slang")
 set_tests_properties(horizon-test-legacy PROPERTIES LABELS "legacy;cpu" TIMEOUT 30)
 add_test(NAME horizon.legacy.gpu COMMAND horizon-test-legacy --gpu)
 set_tests_properties(horizon.legacy.gpu PROPERTIES

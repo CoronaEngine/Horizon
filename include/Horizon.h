@@ -311,10 +311,7 @@ struct RasterizerPipeline;
 
 namespace horizon::detail {
 struct EmptyShaderStage {
-    static constexpr size_t uniformBufferBlockSize = 0;
-    template<class P> struct ResourceBindings { explicit ResourceBindings(P*) {} };
-    template<class P> struct OutputBindings { explicit OutputBindings(P*) {} };
-    template<class P> using Bindings = ResourceBindings<P>;
+    template<class P> struct Bindings { explicit Bindings(P*) {} };
 };
 
 template<class S>
@@ -534,77 +531,49 @@ private:
     std::vector<ResourceUse> resourceUses_;
 };
 
-template<class VS, class FS>
-using RasterResourceStage = std::conditional_t<
-    PipelineStage<VS>::uniformBufferBlockSize == 0 && PipelineStage<FS>::uniformBufferBlockSize != 0,
-    PipelineStage<FS>, PipelineStage<VS>>;
 }
 
-// Only the shader's generated field names are inherited. All pipeline state belongs to this instance.
 template<class VS, class FS>
 struct RasterizerPipeline
-    : horizon::detail::RasterResourceStage<VS, FS>::template ResourceBindings<horizon::detail::RasterPipelineState>,
-      horizon::detail::PipelineStage<FS>::template OutputBindings<horizon::detail::RasterPipelineState>
 {
+    static_assert(std::is_void_v<VS> && std::is_void_v<FS>,
+                  "Register this VS/FS pair in RASTER_PAIRS and include both stage headers or the generated pipeline header");
+
 private:
-    using State = horizon::detail::RasterPipelineState;
-    using VertexStage = horizon::detail::PipelineStage<VS>;
-    using FragmentStage = horizon::detail::PipelineStage<FS>;
-    using Resources = typename horizon::detail::RasterResourceStage<VS, FS>::template ResourceBindings<State>;
-    using Outputs = typename FragmentStage::template OutputBindings<State>;
-    static_assert(std::is_void_v<VS> == std::is_void_v<FS>, "Supply both raster shader stages");
-    static_assert(!VertexStage::uniformBufferBlockSize || !FragmentStage::uniformBufferBlockSize ||
-                  VertexStage::uniformBufferBlockSize == FragmentStage::uniformBufferBlockSize,
-                  "VS and FS uniform buffer block sizes must match");
-    State state_;
+    template<class, class> friend struct RasterizerPipeline;
+    horizon::detail::RasterPipelineState state_;
+
+    RasterizerPipeline(const EmbeddedShader::SlangModule& vertex, const EmbeddedShader::SlangModule& fragment,
+                       uint32_t views, const std::source_location& location)
+        : RasterizerPipeline(horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, vertex),
+                             horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, fragment),
+                             views, location) {}
 
 public:
-    RasterizerPipeline() requires std::is_void_v<VS>
-        : Resources(&state_), Outputs(&state_) {}
+    RasterizerPipeline() = default;
 
     RasterizerPipeline(std::string vertex, std::string fragment, uint32_t views = 1,
                        const std::source_location& location = std::source_location::current())
-        requires std::is_void_v<VS>
-        : Resources(&state_), Outputs(&state_), state_(std::move(vertex), std::move(fragment), views, location) {}
+        : state_(std::move(vertex), std::move(fragment), views, location) {}
 
     RasterizerPipeline(const EmbeddedShader::ShaderCodeModule& vertex, const EmbeddedShader::ShaderCodeModule& fragment,
                        uint32_t views = 1, const std::source_location& location = std::source_location::current())
-        requires std::is_void_v<VS>
-        : Resources(&state_), Outputs(&state_), state_(vertex, fragment, views, location) {}
+        : state_(vertex, fragment, views, location) {}
 
     // Raw binaries lack the reflection needed to bind their resources.
     RasterizerPipeline(const std::vector<uint32_t>&, const std::vector<uint32_t>&, uint32_t = 1,
                        const std::source_location& = std::source_location::current()) = delete;
 
     template<class V, class F>
-        requires std::is_void_v<VS> && (!std::is_convertible_v<V, std::string> && !std::is_convertible_v<F, std::string>) &&
+        requires (!std::is_convertible_v<V, std::string> && !std::is_convertible_v<F, std::string>) &&
                  requires(V& vertex, F& fragment) { std::function{vertex}; std::function{fragment}; }
     RasterizerPipeline(V&& vertex, F&& fragment, EmbeddedShader::CompilerOption options = {}, uint32_t views = 1,
                        std::source_location location = std::source_location::current())
-        : Resources(&state_), Outputs(&state_),
-          state_(EmbeddedShader::RasterizedPipelineObject::compile(std::forward<V>(vertex), std::forward<F>(fragment),
+        : state_(EmbeddedShader::RasterizedPipelineObject::compile(std::forward<V>(vertex), std::forward<F>(fragment),
                                                                    options, location), views, location) {}
 
-    RasterizerPipeline(uint32_t views = 1, const std::source_location& location = std::source_location::current())
-        requires (!std::is_void_v<VS>)
-        : Resources(&state_), Outputs(&state_),
-          state_(horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::VertexShader, VS::slangModule),
-                 horizon::detail::compileLegacyShaderModule(EmbeddedShader::ShaderStage::FragmentShader, FS::slangModule),
-                 views, location) {}
-
-    RasterizerPipeline(const VertexStage&, const FragmentStage&, uint32_t views = 1,
-                       const std::source_location& location = std::source_location::current())
-        requires (!std::is_void_v<VS>)
-        : RasterizerPipeline(views, location) {}
-
-    RasterizerPipeline(RasterizerPipeline&& other) noexcept
-        : Resources(&state_), Outputs(&state_), state_(std::move(other.state_)) {}
-
-    RasterizerPipeline& operator=(RasterizerPipeline&& other) noexcept
-    {
-        state_ = std::move(other.state_);
-        return *this;
-    }
+    RasterizerPipeline(RasterizerPipeline&&) noexcept = default;
+    RasterizerPipeline& operator=(RasterizerPipeline&&) noexcept = default;
 
     void setDepthEnabled(bool enabled) { state_.setDepthEnabled(enabled); }
     void setRasterState(RasterState state) { state_.setRasterState(state); }

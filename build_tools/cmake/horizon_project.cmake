@@ -26,7 +26,8 @@ endif()
 add_subdirectory(src)
 add_subdirectory(src/hotfix)
 
-if(HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES)
+if(NOT TARGET ShaderCompileScripts AND
+   (HORIZON_BUILD_TOOLS OR HORIZON_BUILD_EXAMPLES OR (HORIZON_BUILD_ENGINE AND HORIZON_BUILD_TESTS)))
     add_subdirectory(tools)
 endif()
 
